@@ -289,6 +289,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const root = buildLayout({ banner, body: editor, footer: footer.view });
 	tui.addChild(root);
+	tui.setFocus(editor);
 	tui.start();
 
 	let resolveRun: (code: number) => void = () => {};
