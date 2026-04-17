@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--rc1-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--dev-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -51,7 +51,7 @@
 
 Clio Coder is the coding specialization of the [CLIO Agent](https://iowarp.ai) framework, the autonomous-agent layer of the [IOWarp](https://iowarp.ai) platform. It is a terminal-first coding agent that researchers, scientists, and developers can install and drive directly, and a composable coding primitive that larger CLIO-based multi-agent systems can embed.
 
-Status: **v0.1.0-rc1**. Pre-release. Expect sharp edges. See [CHANGELOG.md](CHANGELOG.md) for rc1 notes and [docs/guides/overview.md](docs/guides/overview.md) for the phase roll-up.
+Status: **v0.1.0-dev**. Pre-release. Expect sharp edges. See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/guides/overview.md](docs/guides/overview.md) for the phase roll-up.
 
 ---
 

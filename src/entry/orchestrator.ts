@@ -14,6 +14,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
@@ -33,10 +34,13 @@ export interface BootResult {
 	bootTimeMs: number;
 }
 
-const BANNER = `
+function buildBanner(): string {
+	const { clio } = getVersionInfo();
+	return `
   ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
-  ${chalk.dim("v0.1 dev · pi-mono 0.67.4 · ready")}
+  ${chalk.dim(`v${clio} · pi-mono 0.67.4 · ready`)}
 `;
+}
 
 export async function bootOrchestrator(): Promise<BootResult> {
 	const timer = new StartupTimer();
@@ -83,7 +87,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
 
-	process.stdout.write(BANNER);
+	process.stdout.write(buildBanner());
 	if (process.env.CLIO_TIMING === "1") {
 		process.stdout.write(`${timer.report()}\n`);
 	}
