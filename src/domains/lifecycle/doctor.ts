@@ -1,5 +1,6 @@
-import { constants, accessSync, existsSync, statSync } from "node:fs";
+import { constants, accessSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { settingsPath } from "../../core/config.js";
 import { clioConfigDir, clioDataDir } from "../../core/xdg.js";
 import { readInstallInfo } from "./install.js";
@@ -28,15 +29,28 @@ export function runDoctor(): DoctorFinding[] {
 	findings.push({ ok: existsSync(data), name: "data dir", detail: data });
 
 	const settings = settingsPath();
-	const settingsOk = existsSync(settings);
-	findings.push({
-		ok: settingsOk,
-		name: "settings.yaml",
-		detail: settingsOk ? settings : "missing (run `clio install`)",
-	});
+	if (!existsSync(settings)) {
+		findings.push({
+			ok: false,
+			name: "settings.yaml",
+			detail: "missing (run `clio install`)",
+		});
+	} else {
+		try {
+			accessSync(settings, constants.R_OK);
+			const raw = readFileSync(settings, "utf8");
+			parseYaml(raw);
+			findings.push({ ok: true, name: "settings.yaml", detail: settings });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			findings.push({ ok: false, name: "settings.yaml", detail: `unreadable or invalid: ${msg}` });
+		}
+	}
 
 	const creds = join(clioConfigDir(), "credentials.yaml");
-	if (existsSync(creds)) {
+	if (!existsSync(creds)) {
+		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio install`)" });
+	} else {
 		try {
 			accessSync(creds, constants.R_OK);
 			const st = statSync(creds);
