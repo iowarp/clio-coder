@@ -1,6 +1,6 @@
 import type { Model } from "@mariozechner/pi-ai";
 import { BusChannels } from "../core/bus-events.js";
-import { type ClioSettings, settingsPath } from "../core/config.js";
+import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
@@ -19,7 +19,24 @@ import { buildLayout, defaultBanner } from "./layout.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
+import { type RunIo, type SlashCommandContext, dispatchSlashCommand, parseSlashCommand } from "./slash-commands.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
+
+// Re-exports preserve the public surface for diag scripts that import these
+// names from "interactive/index.js". Slice 2.6 relocated the implementations
+// into slash-commands.ts.
+export {
+	BUILTIN_SLASH_COMMANDS,
+	type BuiltinSlashCommand,
+	type HandleRunDeps,
+	type RunIo,
+	type SlashCommand,
+	type SlashCommandContext,
+	type SlashCommandKind,
+	dispatchSlashCommand,
+	handleRun,
+	parseSlashCommand,
+} from "./slash-commands.js";
 
 export interface InteractiveDeps {
 	bus: SafeEventBus;
@@ -248,105 +265,6 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	return true;
 }
 
-export type SlashCommand =
-	| { kind: "quit" }
-	| { kind: "help" }
-	| { kind: "run"; agentId: string; task: string }
-	| { kind: "run-usage" }
-	| { kind: "providers" }
-	| { kind: "cost" }
-	| { kind: "receipts" }
-	| { kind: "receipt-verify"; runId: string }
-	| { kind: "receipt-usage" }
-	| { kind: "thinking" }
-	| { kind: "unknown"; text: string }
-	| { kind: "empty" };
-
-/** Pure slash-command parser: no I/O, no side effects. */
-export function parseSlashCommand(input: string): SlashCommand {
-	const trimmed = input.trim();
-	if (trimmed.length === 0) return { kind: "empty" };
-	if (trimmed === "/quit" || trimmed === "/exit") return { kind: "quit" };
-	if (trimmed === "/help" || trimmed.startsWith("/help ")) return { kind: "help" };
-	if (trimmed === "/providers") return { kind: "providers" };
-	if (trimmed === "/cost") return { kind: "cost" };
-	if (trimmed === "/receipts") return { kind: "receipts" };
-	if (trimmed === "/thinking") return { kind: "thinking" };
-	if (trimmed === "/receipt" || trimmed === "/receipt ") return { kind: "receipt-usage" };
-	if (trimmed.startsWith("/receipt ")) {
-		const parts = trimmed.slice("/receipt ".length).trim().split(/\s+/);
-		if (parts[0] === "verify" && parts[1] && parts.length === 2) {
-			return { kind: "receipt-verify", runId: parts[1] };
-		}
-		return { kind: "receipt-usage" };
-	}
-	if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
-	if (trimmed.startsWith("/run ")) {
-		const rest = trimmed.slice(5).trim();
-		const [agentId, ...taskParts] = rest.split(/\s+/);
-		const task = taskParts.join(" ").trim();
-		if (!agentId || !task) return { kind: "run-usage" };
-		return { kind: "run", agentId, task };
-	}
-	return { kind: "unknown", text: trimmed };
-}
-
-export interface RunIo {
-	stdout: (s: string) => void;
-	stderr: (s: string) => void;
-}
-
-export interface HandleRunDeps {
-	dispatch: DispatchContract;
-	io: RunIo;
-	workerDefault?: { provider?: string; model?: string; endpoint?: string } | undefined;
-	/**
-	 * Optional bus for forwarding per-event worker output. When supplied,
-	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
-	 * so UI surfaces (dispatch-board overlay) can update their row as the
-	 * stream arrives instead of waiting for the terminal receipt.
-	 */
-	bus?: SafeEventBus;
-}
-
-/**
- * Dispatches /run through the dispatch contract and streams events to stdout.
- * Provider + model are resolved from `settings.workers.default`; when that
- * block is empty, we refuse to dispatch and print an actionable error instead.
- */
-export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
-	const { dispatch, io, workerDefault, bus } = deps;
-	if (!workerDefault?.provider) {
-		io.stderr(
-			`[run] no provider configured. Edit ${settingsPath()} (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
-		);
-		return;
-	}
-	try {
-		const handle = await dispatch.dispatch({
-			agentId,
-			task,
-			runtime: "native",
-		});
-		io.stdout(`\n[run] runId=${handle.runId}\n`);
-		for await (const event of handle.events) {
-			const e = event as { type?: string };
-			if (!e.type || e.type === "heartbeat") continue;
-			io.stdout(`[run] ${e.type}\n`);
-			bus?.emit(BusChannels.DispatchProgress, {
-				runId: handle.runId,
-				agentId,
-				event,
-			});
-		}
-		const receipt = await handle.finalPromise;
-		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}\n`);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		io.stderr(`[run] failed: ${msg}\n`);
-	}
-}
-
 const IDENTITY = (s: string): string => s;
 
 export async function startInteractive(deps: InteractiveDeps): Promise<number> {
@@ -390,70 +308,39 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	});
 
-	editor.onSubmit = (text: string): void => {
-		const command = parseSlashCommand(text);
-		switch (command.kind) {
-			case "empty":
-				return;
-			case "quit":
-				void shutdown();
-				return;
-			case "help":
-				io.stdout("\ncommands: /run <agent> <task>, /providers, /cost, /receipts, /receipt verify <id>, /help, /quit\n");
-				return;
-			case "run-usage":
-				io.stdout("\nusage: /run <agent> <task>\n");
-				return;
-			case "run":
-				void (async () => {
-					await handleRun(command.agentId, command.task, {
-						dispatch: deps.dispatch,
-						io,
-						workerDefault: deps.getWorkerDefault?.(),
-						bus: deps.bus,
-					});
+	const slashCtx: SlashCommandContext = {
+		io,
+		dispatch: deps.dispatch,
+		bus: deps.bus,
+		dataDir: deps.dataDir,
+		workerDefault: () => deps.getWorkerDefault?.(),
+		shutdown: () => {
+			void shutdown();
+		},
+		openProviders: () => openProvidersOverlayState(),
+		openCost: () => openCostOverlayState(),
+		openReceipts: () => openReceiptsOverlayState(),
+		openThinking: () => openThinkingOverlayState(),
+		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
+		submitChat: (text) => {
+			chatPanel.appendUser(text);
+			tui.requestRender();
+			void (async () => {
+				try {
+					await deps.chat.submit(text);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[interactive] chat failed: ${msg}\n`);
+				} finally {
 					tui.requestRender();
-				})();
-				return;
-			case "providers":
-				openProvidersOverlayState();
-				return;
-			case "cost":
-				openCostOverlayState();
-				return;
-			case "receipts":
-				openReceiptsOverlayState();
-				return;
-			case "receipt-usage":
-				io.stdout("\nusage: /receipt verify <runId>\n");
-				return;
-			case "receipt-verify": {
-				const result = verifyReceiptFile(deps.dataDir, command.runId);
-				if (result.ok) {
-					io.stdout(`[/receipt verify] ok ${command.runId}\n`);
-				} else {
-					io.stdout(`[/receipt verify] fail ${command.runId} ${result.reason}\n`);
 				}
-				return;
-			}
-			case "thinking":
-				openThinkingOverlayState();
-				return;
-			case "unknown":
-				chatPanel.appendUser(command.text);
-				tui.requestRender();
-				void (async () => {
-					try {
-						await deps.chat.submit(command.text);
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						io.stderr(`[interactive] chat failed: ${msg}\n`);
-					} finally {
-						tui.requestRender();
-					}
-				})();
-				return;
-		}
+			})();
+		},
+		render: () => tui.requestRender(),
+	};
+
+	editor.onSubmit = (text: string): void => {
+		dispatchSlashCommand(parseSlashCommand(text), slashCtx);
 	};
 
 	const root = buildLayout({ banner, chat: chatPanel, editor, footer: footer.view });

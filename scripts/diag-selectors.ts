@@ -13,7 +13,13 @@ import {
 	resolveModelPattern,
 	resolveModelScope,
 } from "../src/domains/providers/resolver.js";
-import { ALT_M, SHIFT_TAB, parseSlashCommand, routeInteractiveKey } from "../src/interactive/index.js";
+import {
+	ALT_M,
+	BUILTIN_SLASH_COMMANDS,
+	SHIFT_TAB,
+	parseSlashCommand,
+	routeInteractiveKey,
+} from "../src/interactive/index.js";
 import { buildThinkingItems } from "../src/interactive/overlays/thinking-selector.js";
 
 function ok(name: string): void {
@@ -139,6 +145,34 @@ run("routeInteractiveKey Alt+M triggers cycleMode", () => {
 	assert.equal(consumed, true);
 	assert.equal(mode, 1);
 	assert.equal(thinking, 0);
+});
+
+// Slice 2.6: BUILTIN_SLASH_COMMANDS registry owns every dispatchable SlashCommand kind.
+run("BUILTIN_SLASH_COMMANDS covers every dispatchable kind exactly once", () => {
+	const expected = new Set([
+		"quit",
+		"help",
+		"run",
+		"run-usage",
+		"providers",
+		"cost",
+		"receipts",
+		"receipt-verify",
+		"receipt-usage",
+		"thinking",
+	]);
+	const owned = new Map<string, string>();
+	for (const entry of BUILTIN_SLASH_COMMANDS) {
+		for (const kind of entry.kinds) {
+			const prior = owned.get(kind);
+			assert.equal(prior, undefined, `kind ${kind} owned by ${prior} and ${entry.name}`);
+			owned.set(kind, entry.name);
+		}
+	}
+	for (const kind of expected) {
+		assert.ok(owned.has(kind), `kind ${kind} missing from registry`);
+	}
+	assert.equal(owned.size, expected.size, `unexpected registry kinds: ${[...owned.keys()].join(",")}`);
 });
 
 // Slice 2.5: thinking-level clamping by model reasoning capability.
