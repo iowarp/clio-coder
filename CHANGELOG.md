@@ -6,6 +6,69 @@ Format follows the spirit of Keep a Changelog (https://keepachangelog.com).
 Versioning: semver after 0.1.0 ships; pre-release versions use `0.1.0-dev`
 with phase tags (`phase-N-complete`, `phase-N-partial`).
 
+## 0.1.0-rc1 (2026-04-17)
+
+Sprint range: `50ff10e..HEAD`. Real local-provider wiring against the
+homelab, TUI overlays for providers, cost, and receipts, the
+dispatch-board streaming overlay, and a stub-removal sweep.
+
+### Added
+
+- Real local-provider dispatch against `llamacpp`, `lmstudio`,
+  `ollama`, and `openai-compat` endpoints with per-endpoint model
+  discovery and registration into the pi-ai runtime catalog.
+- `EndpointSpec` threaded through the worker subprocess boundary so
+  workers inherit the active local endpoint from dispatch.
+- First-install `settings.yaml` seeded with commented `llamacpp@mini`
+  and `lmstudio@dynamo` endpoint examples plus matching
+  `orchestrator` and `workers.default` override blocks.
+- `pi-ai` `stream` re-exported through `src/engine/ai.ts` so every
+  consumer crosses the engine boundary through one module.
+- `/providers` interactive overlay with live endpoint health, covered
+  by `diag-interactive-tui`.
+- `/cost` interactive overlay showing session token totals and USD
+  cost from completed runs.
+- `/receipts` interactive overlay and `/receipt verify <runId>` slash
+  command backed by a verify-receipt reader.
+- Dispatch-board overlay streams worker events live via `Ctrl+B`,
+  covered by `diag-interactive-tui`.
+- `diag:inference:live` real-inference diag against `llamacpp@mini`
+  and `lmstudio@dynamo`, with a matching npm alias.
+- `diag:vision:live` end-to-end vision-inference diag against
+  Qwen3-VL on `mini`.
+- Opt-in real-provider mode for the stress harness against the same
+  two endpoints.
+
+### Changed
+
+- Providers domain diag split into separate config-only and
+  live-probe variants; config errors preserved through the live path.
+- Local-model registry extracted into its own module under
+  `src/engine/local-model-registry.ts`; Qwen preset detection
+  tightened so thinking-format pass-through only fires for
+  Qwen-family models.
+- Local-endpoint bootstrap now clears stale discovery entries before
+  registering new ones.
+- Dispatch rejects `sdk` and `cli` runtimes in v0.1; only the native
+  tier is admitted.
+- Intelligence domain fails fast when its detector is missing;
+  scheduling now reports the local cluster node.
+- Dispatch-board terminal state derives from `agent_end`, caps rows
+  at fifty, and includes cache tokens in live totals.
+- Providers overlay stays aligned on narrow terminals, stops updates
+  after close, and yields Ctrl+C to active overlays.
+- Interactive focus restored for slash-run streams so their output
+  keeps rendering under an open overlay.
+- Vision diag sends the prompt before the image payload, caps its
+  request timeout, and surfaces provider errors verbatim.
+
+### Removed
+
+- `web_search`, `dispatch_agent`, `batch_dispatch`, and
+  `chain_dispatch` tool stubs. Real backends land in v0.2.
+- Unused worker provider-bridge placeholder and engine tool-identity
+  helper.
+
 ## Unreleased
 
 Post-`phase-10-partial` commits on `main` (in landing order):
