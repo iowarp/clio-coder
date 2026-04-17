@@ -89,8 +89,8 @@ Phases 7 and 8 can run in parallel after Phase 6.
 - `npm run typecheck` green
 - `npm run build` produces a working `dist/cli/index.js`
 - `clio --version` prints package version
-- `clio doctor` prints Node version, Clio version, pi-mono version, `~/.clio` state
-- `clio install` bootstraps `~/.clio` tree (`sessions/`, `audit/`, `state/`, `cache/`, `agents/`, `prompts/`, `receipts/`, `install.json`, `settings.yaml` from defaults)
+- `clio doctor` prints Node version, Clio version, pi-mono version, and the resolved XDG/Clio paths
+- `clio install` bootstraps the resolved config/data/cache tree (`sessions/`, `audit/`, `state/`, `cache/`, `agents/`, `prompts/`, `receipts/`, `install.json`, `settings.yaml` from defaults)
 - `clio` (no args) boots orchestrator, shows banner, exits cleanly (interactive loop stub)
 - `npm run check:boundaries` passes (no pi-mono imports outside `src/engine/`; no `src/worker/` imports from `src/domains/`)
 - `npm run verify` runs the three commands above and exits 0
@@ -115,7 +115,7 @@ Phases 7 and 8 can run in parallel after Phase 6.
 
 **Exit criteria:**
 - `ActionClassifier.classify(call)` returns deterministic `ActionClass` for fixture inputs (verified via `scripts/diag-safety.ts`)
-- Audit trail writes NDJSON to `~/.clio/audit/YYYY-MM-DD.jsonl` on every classified call
+- Audit trail writes NDJSON to `<dataDir>/audit/YYYY-MM-DD.jsonl` on every classified call
 - Mode matrix enforces `advise` tool set when mode is advise (dispatch-agent readonly only)
 - `super` mode entry raises a confirmation event
 - Hard blocks (`system_modify`, `git_destructive`) reject regardless of mode
@@ -143,7 +143,7 @@ Phases 7 and 8 can run in parallel after Phase 6.
   - `renderedPromptHash` — SHA-256 over the fully rendered prompt text for this turn. Varies per turn when `providers/dynamic.md` or `session/dynamic.md` change.
   - `dynamicInputs` — canonical JSON of the inputs fed into the dynamic fragments on this turn (provider/model context, session notes snapshot). Persisted to the session JSONL and the receipt so a replay can reconstruct the rendered prompt.
 - Session JSONL round-trips: write turns → close → reopen via `SessionManager.resume(id)` rehydrates identical state including the dynamic inputs per turn
-- `~/.clio/sessions/<cwd-hash>/current.jsonl` and `tree.json` written atomically (tmp + fsync + rename)
+- `<dataDir>/sessions/<cwd-hash>/current.jsonl` and `tree.json` written atomically (tmp + fsync + rename)
 - `check-prompts.ts` catches duplicate fragment IDs, unknown template variables, and budget overruns
 - `/checkpoint` and `/resume` primitive callable via diag script
 
@@ -160,13 +160,13 @@ Phases 7 and 8 can run in parallel after Phase 6.
 **Produces:**
 - `src/domains/providers/` — discovery, health, catalog, matcher, credentials, runtimes/{anthropic,openai,google,groq,mistral,openrouter,bedrock,local}.ts, manifest, extension, index
 - `src/domains/agents/` — recipe, registry, teams, skills, frontmatter, fleet-parser, manifest, extension, index
-- `~/.clio/credentials.yaml` writer (mode 0600) + OS keychain fallback
+- `<configDir>/credentials.yaml` writer (mode 0600) + OS keychain fallback
 - Builtin agent fleet files in `src/domains/agents/builtins/`: scout, planner, worker, reviewer, context-builder, researcher, delegate
 
 **Exit criteria:**
 - `ProviderRegistry.list()` returns configured providers with health status
 - Credentials file created with 0600 mode, never referenced in `settings.yaml`
-- `AgentRegistry.load()` discovers both `~/.clio/agents/*.md` and `.clio/agents/*.md`, parses YAML frontmatter per pi-subagents convention
+- `AgentRegistry.load()` discovers both `<dataDir>/agents/*.md` and `.clio/agents/*.md`, parses YAML frontmatter per pi-subagents convention
 - Fleet parser handles `-> ` separator and `[key=value]` inline config
 - `/providers` and `/agents` overlay stubs render list data (real overlays land in Phase 6)
 
@@ -211,7 +211,7 @@ Phases 7 and 8 can run in parallel after Phase 6.
 - `src/worker/provider-bridge.ts`, `src/worker/heartbeat.ts`
 - `src/cli/run.ts` — headless `clio run <agent> <task>` surface: spawns worker, streams NDJSON to stdout, prints receipt, exits with worker's status
 - `scripts/diag-bootstrap.ts`, `diag-orchestrator.ts`, `diag-prompt.ts`, `diag-single-dispatch.ts`, `diag-worker-tools.ts`, `stress.ts`
-- `~/.clio/state/runs.json` atomic writer
+- `<dataDir>/state/runs.json` atomic writer
 
 **Exit criteria:**
 - `clio run <agent> '<task>'` spawns a native worker subprocess, streams NDJSON events to stdout, produces a receipt on exit, updates the run ledger, returns the worker's exit code

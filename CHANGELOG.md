@@ -242,7 +242,7 @@ domain (TypeBox schema, manifest, watcher with hot-reload classifier,
 extension), lifecycle domain (install metadata, doctor diagnostics,
 manifest, extension), engine boundary wrappers around pi-mono 0.67.4
 and pi-agent-core, CLI dispatcher with `version` + `install` + `doctor`
-subcommands, orchestrator composition root, `~/.clio` idempotent
+subcommands, orchestrator composition root, XDG-aware idempotent
 bootstrap, event bus with synchronous delivery, bus tracer, XDG path
 handling, and the Phase 1 inline verify script.
 

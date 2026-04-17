@@ -51,7 +51,7 @@ const REAL_TARGETS: ReadonlyArray<RealTarget> = [
 		providerId: "llamacpp",
 		endpoint: "mini",
 		url: "http://192.168.86.141:8080",
-		model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+		model: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
 	},
 	{
 		providerId: "lmstudio",
@@ -117,7 +117,7 @@ function buildRealSettingsYaml(): string {
 	lines.push("  default:");
 	lines.push(`    provider: ${q("llamacpp")}`);
 	lines.push(`    endpoint: ${q("mini")}`);
-	lines.push(`    model: ${q("Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL")}`);
+	lines.push(`    model: ${q("Qwen3.6-35B-A3B-UD-Q4_K_XL")}`);
 	lines.push("budget:");
 	lines.push("  sessionCeilingUsd: 5");
 	lines.push("  concurrency: auto");

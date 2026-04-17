@@ -1,6 +1,7 @@
 /**
- * Default settings shipped with Clio. Written to ~/.clio/settings.yaml on first install
- * if the file does not already exist. Users edit the file directly or through TUI overlays.
+ * Default settings shipped with Clio. Written to the resolved config
+ * directory's settings.yaml on first install if the file does not already
+ * exist. Users edit the file directly or through TUI overlays.
  */
 
 export type ThinkingFormat = "qwen" | "qwen-chat-template" | "openrouter" | "zai";
@@ -71,10 +72,11 @@ export const DEFAULT_SETTINGS = {
 export type DefaultSettings = typeof DEFAULT_SETTINGS;
 
 /**
- * Raw YAML document written to ~/.clio/settings.yaml on first install. Mirrors
- * every field of DEFAULT_SETTINGS at the same key path so settings migration
- * keeps working, and carries fully commented example endpoint blocks that a
- * new user can uncomment to point Clio at a local llama-server or LM Studio.
+ * Raw YAML document written to the resolved config directory's settings.yaml on
+ * first install. Mirrors every field of DEFAULT_SETTINGS at the same key path
+ * so settings migration keeps working, and carries fully commented example
+ * endpoint blocks that a new user can uncomment to point Clio at a local
+ * llama-server or LM Studio.
  *
  * The YAML library strips comments when round-tripping through stringify, so
  * first-install writes this raw string directly instead of going through
@@ -82,6 +84,19 @@ export type DefaultSettings = typeof DEFAULT_SETTINGS;
  */
 export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first install; edit freely.
 # Docs: https://github.com/iowarp/clio-coder
+#
+# Default location:
+#   Linux:   ~/.config/clio/settings.yaml
+#   macOS:   ~/Library/Application Support/clio/settings.yaml
+#   Windows: %APPDATA%/clio/settings.yaml
+# Set CLIO_HOME for a single-tree install, or CLIO_CONFIG_DIR / CLIO_DATA_DIR /
+# CLIO_CACHE_DIR to override config, data, and cache separately.
+#
+# Common first run:
+#   1. Run: clio setup
+#   2. Verify the endpoint: clio providers
+#   3. Start chat: clio
+#   4. Later switch to LM Studio: clio setup dynamo
 
 version: 1
 identity: clio
@@ -95,19 +110,19 @@ provider:
   model: null
 
 # Local inference engines. Each entry under endpoints becomes a selectable
-# target. Replace endpoints: {} with one of the blocks below, then run
-# clio doctor and clio providers to verify.
+# target. The default guided path is clio setup, but the commented examples
+# below remain as a manual reference.
 providers:
   llamacpp:
     endpoints: {}
-    # Example: llama.cpp on the homelab.
+    # Example: llama.cpp on the local machine.
     # Replace endpoints: {} above with the block below.
     # Replace the host and port with the values you pass to llama-server.
     # clio-example:start provider=llamacpp endpoint=mini
     # endpoints:
     #   mini:
-    #     url: http://192.168.86.141:8080
-    #     default_model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL
+    #     url: http://127.0.0.1:8080
+    #     default_model: Qwen3.6-35B-A3B-UD-Q4_K_XL
     #     # api_key: llama-no-auth
     #     context_window: 262144
     #     max_tokens: 16384
@@ -115,13 +130,13 @@ providers:
 
   lmstudio:
     endpoints: {}
-    # Example: LM Studio on the homelab.
+    # Example: LM Studio on the local machine.
     # Replace endpoints: {} above with the block below.
     # Point at the LM Studio server on :1234 with the model loaded.
     # clio-example:start provider=lmstudio endpoint=dynamo
     # endpoints:
     #   dynamo:
-    #     url: http://192.168.86.143:1234
+    #     url: http://127.0.0.1:1234
     #     default_model: qwen3.6-35b-a3b
     #     # api_key: lm-studio
     #     context_window: 262144
@@ -142,7 +157,7 @@ orchestrator: {
   # clio-example:start block=orchestrator
   # provider: llamacpp,
   # endpoint: mini,
-  # model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL,
+  # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
   # clio-example:end block=orchestrator
 }
 
@@ -156,7 +171,7 @@ workers:
     # clio-example:start block=workers
     # provider: llamacpp,
     # endpoint: mini,
-    # model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL,
+    # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
     # clio-example:end block=workers
   }
 
@@ -165,7 +180,8 @@ budget:
   sessionCeilingUsd: 5
   concurrency: auto           # auto or a positive integer
 
-# Runtimes Clio will load. native is always available.
+# Runtimes Clio will load. native is always available. clio setup appends the
+# selected local engine here automatically.
 runtimes:
   enabled:
     - native

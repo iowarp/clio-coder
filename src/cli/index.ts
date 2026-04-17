@@ -4,6 +4,7 @@ import { runDoctorCommand } from "./doctor.js";
 import { runInstallCommand } from "./install.js";
 import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
+import { runSetupCommand } from "./setup.js";
 import { parseFlags, printError } from "./shared.js";
 import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
@@ -14,7 +15,8 @@ Usage:
   clio                  start interactive mode
   clio --version, -v    print version info
   clio doctor           run environment diagnostics
-  clio install          bootstrap ~/.clio directory
+  clio setup [preset]   guided provider and model setup (mini, dynamo, ollama, openai-compat)
+  clio install          bootstrap Clio config/data/cache directories
   clio upgrade          upgrade clio and run pending state migrations
   clio providers        list configured providers
   clio agents           list discovered agent recipes
@@ -42,6 +44,8 @@ async function main(argv: string[]): Promise<number> {
 			return runClioRun(argv.slice(1));
 		case "doctor":
 			return runDoctorCommand();
+		case "setup":
+			return runSetupCommand(argv.slice(1));
 		case "install":
 			return runInstallCommand();
 		case "upgrade":

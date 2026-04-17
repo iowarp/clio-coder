@@ -1,4 +1,4 @@
-import type { ClioSettings } from "../core/config.js";
+import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { EndpointSpec, LocalProvidersSettings } from "../core/defaults.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
@@ -49,8 +49,9 @@ interface AgentRuntime {
 	modelId: string;
 }
 
-const NOT_CONFIGURED_NOTICE =
-	"[clio] orchestrator not configured. Edit ~/.clio/settings.yaml (orchestrator.* block) to enable chat.";
+function notConfiguredNotice(): string {
+	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.* block) to enable chat.`;
+}
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
 
@@ -264,7 +265,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(NOT_CONFIGURED_NOTICE);
+				emitNotice(notConfiguredNotice());
 				return;
 			}
 

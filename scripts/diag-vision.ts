@@ -34,7 +34,7 @@ const TARGET = {
 	providerId: "llamacpp" as const,
 	endpointName: "mini",
 	url: "http://192.168.86.141:8080",
-	defaultModel: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+	defaultModel: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
 };
 
 const PROMPT = "What color is the square in this image? Reply with one word.";

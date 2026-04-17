@@ -171,9 +171,21 @@ async function main(): Promise<void> {
 			const first = await runCli(["install"], env);
 			if (first.code !== 0) fail(`${step}:first`, `exit ${first.code}: ${first.stderr.trim()}`);
 			if (!first.stdout.includes("created")) fail(`${step}:first`, "stdout missing 'created'");
+			if (!first.stdout.includes(`settings    ${home}/settings.yaml`)) {
+				fail(`${step}:first`, `stdout missing resolved settings path ${home}/settings.yaml`);
+			}
+			if (first.stdout.includes("~/.clio/settings.yaml")) {
+				fail(`${step}:first`, "stdout still includes stale ~/.clio/settings.yaml hint");
+			}
 			const second = await runCli(["install"], env);
 			if (second.code !== 0) fail(`${step}:second`, `exit ${second.code}: ${second.stderr.trim()}`);
 			if (!second.stdout.includes("already installed")) fail(`${step}:second`, "stdout missing 'already installed'");
+			if (!second.stdout.includes(`settings    ${home}/settings.yaml`)) {
+				fail(`${step}:second`, `stdout missing resolved settings path ${home}/settings.yaml`);
+			}
+			if (second.stdout.includes("~/.clio/settings.yaml")) {
+				fail(`${step}:second`, "stdout still includes stale ~/.clio/settings.yaml hint");
+			}
 		}
 
 		// Step 3: clio doctor

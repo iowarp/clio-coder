@@ -65,9 +65,10 @@ Prerequisites: Node.js `>=20`.
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm install
-npm run build
-npm link
-clio --version
+npm run build && npm link
+clio install
+clio setup
+clio
 ```
 
 `npm link` exposes the `clio` binary declared in [`package.json`](package.json) (`dist/cli/index.js`). Re-run `npm run build` after source changes because the link points at built output, not the TypeScript sources.
@@ -87,11 +88,15 @@ The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_D
 ## First run
 
 ```bash
-clio install                                    # seed ~/.clio/settings.yaml with example blocks
-clio doctor                                     # validate settings and resolved paths
+clio install                                    # bootstrap config/data/cache dirs and seed settings.yaml
+clio setup                                      # guided local-engine setup; defaults to mini
 clio providers                                  # probe endpoints and register models
-clio run scout "summarize the repo layout"      # dispatch a native worker and write a receipt
+clio                                            # start the interactive TUI
 ```
+
+`clio setup` writes the selected endpoint under `providers.<engine>.endpoints`, updates `provider.active` / `provider.model`, and points both `orchestrator` and `workers.default` at the same target so chat and workers are usable immediately. Re-run `clio setup dynamo` later to switch from the default `mini` path to LM Studio without hand-editing YAML.
+
+After setup, `clio run scout "summarize the repo layout"` dispatches a worker and writes a receipt.
 
 Append `--faux` to `clio run` for a provider-less smoke test.
 
@@ -104,7 +109,8 @@ Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  IOW
 | Command | What it does |
 | --- | --- |
 | `clio` | Launch the interactive TUI. |
-| `clio install` | Seed `~/.clio/settings.yaml` with commented `llamacpp@mini` and `lmstudio@dynamo` examples. |
+| `clio install` | Bootstrap the resolved config/data/cache dirs and seed `settings.yaml` with commented `llamacpp@mini` and `lmstudio@dynamo` examples. |
+| `clio setup [mini|dynamo|ollama|openai-compat]` | Guided provider setup. Probes the endpoint when possible, writes valid settings, and makes chat plus workers usable immediately. |
 | `clio doctor` | Parse settings, resolve XDG paths, and report health. |
 | `clio providers` | Probe configured endpoints and register discovered models into the pi-ai runtime catalog. |
 | `clio agents` | List builtin agent specs. |
@@ -147,34 +153,51 @@ Parser source: [`src/interactive/`](src/interactive/).
 
 ## Configuration
 
-Clio reads from `~/.clio/settings.yaml` by default. Every path is overridable via XDG or Clio-specific env vars so you can keep dev and prod state separate.
+Clio reads from the platform config dir by default: `~/.config/clio/settings.yaml` on Linux, `~/Library/Application Support/clio/settings.yaml` on macOS, and `%APPDATA%/clio/settings.yaml` on Windows. Every path is overridable via XDG or Clio-specific env vars so you can keep dev and prod state separate.
+
+The happy path is `clio install` followed by `clio setup`. The guided setup writes the selected local engine into `runtimes.enabled`, keeps nested defaults intact, and updates both the chat target and worker target together.
 
 ```yaml
-# ~/.clio/settings.yaml (excerpt)
-orchestrator:
-  provider: lmstudio
-  endpoint: dynamo
-workers:
-  default:
-    provider: llamacpp
-    endpoint: mini
+# Linux default: ~/.config/clio/settings.yaml (excerpt)
 providers:
   llamacpp:
     endpoints:
       mini:
-        baseUrl: http://mini.local:8080
+        url: http://127.0.0.1:8080
+        default_model: Qwen3.6-35B-A3B-UD-Q4_K_XL
   lmstudio:
     endpoints:
       dynamo:
-        baseUrl: http://dynamo.local:1234
+        url: http://127.0.0.1:1234
+        default_model: qwen3.6-35b-a3b
+
+runtimes:
+  enabled:
+    - native
+    - llamacpp
+
+provider:
+  active: llamacpp
+  model: Qwen3.6-35B-A3B-UD-Q4_K_XL
+
+orchestrator:
+  provider: llamacpp
+  endpoint: mini
+  model: Qwen3.6-35B-A3B-UD-Q4_K_XL
+
+workers:
+  default:
+    provider: llamacpp
+    endpoint: mini
+    model: Qwen3.6-35B-A3B-UD-Q4_K_XL
 ```
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `CLIO_HOME` | `~/.clio` | Root of all Clio state. |
-| `CLIO_CONFIG_DIR` | `$CLIO_HOME` | Location of `settings.yaml`. |
-| `CLIO_DATA_DIR` | `$CLIO_HOME/data` | Receipts, ledgers, sessions. |
-| `CLIO_CACHE_DIR` | `$CLIO_HOME/cache` | Transient caches. |
+| `CLIO_HOME` | unset | Optional single-tree root for all Clio state. |
+| `CLIO_CONFIG_DIR` | platform config dir, or `$CLIO_HOME` when set | Location of `settings.yaml`. |
+| `CLIO_DATA_DIR` | platform data dir, or `$CLIO_HOME/data` when set | Receipts, ledgers, sessions. |
+| `CLIO_CACHE_DIR` | platform cache dir, or `$CLIO_HOME/cache` when set | Transient caches. |
 | `ANTHROPIC_API_KEY` | — | Enables Claude providers. |
 | `OPENAI_API_KEY` | — | Enables OpenAI providers. |
 
@@ -192,6 +215,8 @@ providers:
 | Local | `openai-compat` | Any OpenAI-compatible HTTP endpoint. |
 
 Each local runtime reads its endpoint list from `settings.yaml` and registers discovered models into the pi-ai runtime catalog under the provider id.
+
+The simplest local path is `clio setup` for `llamacpp@mini`. When LM Studio is ready, run `clio setup dynamo` to switch the defaults while keeping the earlier `mini` endpoint in the config.
 
 ---
 

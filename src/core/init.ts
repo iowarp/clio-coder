@@ -1,6 +1,7 @@
 /**
- * Bootstrap ~/.clio on first install. Creates the full directory tree required by
- * subsequent domains and writes defaults when absent. Idempotent.
+ * Bootstrap Clio's config/data/cache directories on first install. Creates the
+ * full directory tree required by subsequent domains and writes defaults when
+ * absent. Idempotent.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
