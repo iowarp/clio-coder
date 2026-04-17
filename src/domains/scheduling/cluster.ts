@@ -1,7 +1,6 @@
 /**
- * Remote-dispatch scaffold. v0.1 ships a single-node implementation; the real
- * cluster fan-out lands in v0.2 along with SSH/gRPC transports. listNodes()
- * returns an empty array so callers can code against the surface today.
+ * v0.1 ships a single-node scheduler. Remote fan-out lands in v0.2 along with
+ * SSH/gRPC transports.
  */
 
 export interface ClusterNode {
@@ -12,5 +11,12 @@ export interface ClusterNode {
 }
 
 export function listNodes(): ReadonlyArray<ClusterNode> {
-	return [];
+	return [
+		{
+			id: "local",
+			host: "localhost",
+			available: true,
+			lastSeenAt: null,
+		},
+	];
 }

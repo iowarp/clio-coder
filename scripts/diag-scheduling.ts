@@ -88,7 +88,16 @@ async function run(): Promise<void> {
 			`verdict=${freshPre.verdict} current=${freshPre.currentUsd} ceiling=${freshPre.ceilingUsd}`,
 		);
 
-		check("cluster:empty-nodes", sched.listNodes().length === 0);
+		const nodes = sched.listNodes();
+		check("cluster:single-local-node", nodes.length === 1, `count=${nodes.length}`);
+		check(
+			"cluster:local-node-shape",
+			nodes[0]?.id === "local" &&
+				nodes[0]?.host === "localhost" &&
+				nodes[0]?.available === true &&
+				nodes[0]?.lastSeenAt === null,
+			nodes[0] ? JSON.stringify(nodes[0]) : "missing",
+		);
 		check("concurrency:no-active", sched.activeWorkers() === 0);
 		check("concurrency:acquire", sched.tryAcquireWorker() === true);
 		check("concurrency:active-after-acquire", sched.activeWorkers() === 1);
