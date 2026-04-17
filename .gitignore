@@ -12,3 +12,6 @@ coverage/
 
 # Orchestrator-of-orchestrators runtime scripts (not part of the product).
 scripts/orch/
+
+# Local session handoff notes (not shipped; regenerated per session).
+NEXT-SESSION.md
