@@ -8,10 +8,12 @@
 import {
 	type KnownProvider,
 	type Model,
-	getModel,
+	fauxAssistantMessage,
 	getModels,
 	getProviders,
+	getModel as piGetModel,
 	registerBuiltInApiProviders,
+	registerFauxProvider,
 } from "@mariozechner/pi-ai";
 
 export interface EngineAi {
@@ -35,10 +37,47 @@ export function createEngineAi(): EngineAi {
 		listModels: (provider) => getModels(provider) as unknown as Model<never>[],
 		getModel: (provider, modelId) => {
 			try {
-				return getModel(provider, modelId as never) as unknown as Model<never>;
+				return piGetModel(provider, modelId as never) as unknown as Model<never>;
 			} catch {
 				return undefined;
 			}
 		},
 	};
+}
+
+/**
+ * Resolve a model by provider id + model id for consumers that accept unvalidated
+ * strings (e.g. the worker subprocess, which is handed strings from the dispatch
+ * domain after the domain has already validated them). Throws if the provider or
+ * model is unknown.
+ */
+export function getModel(providerId: string, modelId: string): Model<never> {
+	ensurePiAiRegistered();
+	try {
+		return piGetModel(providerId as KnownProvider, modelId as never) as unknown as Model<never>;
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`getModel failed for ${providerId}/${modelId}: ${msg}`);
+	}
+}
+
+/**
+ * When `CLIO_WORKER_FAUX=1`, register the pi-ai faux provider and queue a single
+ * deterministic assistant response. Used by the worker-entry diag so the worker
+ * subprocess can run end-to-end without provider credentials or network access.
+ *
+ * Env vars (all optional except the gate):
+ *   CLIO_WORKER_FAUX       must equal "1" to arm registration
+ *   CLIO_WORKER_FAUX_MODEL model id registered under the faux provider (default "faux-model")
+ *   CLIO_WORKER_FAUX_TEXT  assistant response text (default "ok")
+ */
+export function registerFauxFromEnv(): void {
+	if (process.env.CLIO_WORKER_FAUX !== "1") return;
+	const modelId = process.env.CLIO_WORKER_FAUX_MODEL ?? "faux-model";
+	const text = process.env.CLIO_WORKER_FAUX_TEXT ?? "ok";
+	const reg = registerFauxProvider({
+		provider: "faux",
+		models: [{ id: modelId }],
+	});
+	reg.setResponses([fauxAssistantMessage(text, { stopReason: "stop" })]);
 }
