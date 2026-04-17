@@ -9,6 +9,7 @@
  */
 
 import { startWorkerRun } from "../engine/worker-runtime.js";
+import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 
 interface WorkerSpec {
@@ -22,6 +23,7 @@ interface WorkerSpec {
 
 async function main(): Promise<number> {
 	const spec = await readSpecFromStdin();
+	const stopHeartbeat = startWorkerHeartbeat();
 	const handle = startWorkerRun(spec, emitEvent);
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);
@@ -30,6 +32,7 @@ async function main(): Promise<number> {
 		const result = await handle.promise;
 		return result.exitCode;
 	} finally {
+		stopHeartbeat();
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);
 	}
