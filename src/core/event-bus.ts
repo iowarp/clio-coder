@@ -1,3 +1,20 @@
+/**
+ * Listener invoked by {@link SafeEventBus.emit}.
+ *
+ * Listener-duration invariant: emit() fan-out runs synchronously on the
+ * emitter's stack. Keep listeners short and non-blocking. A long-running
+ * synchronous listener blocks every subsequent listener on the channel AND
+ * the emit() caller until it returns.
+ *
+ * For async work, return a Promise: the bus does not await it, but it
+ * installs a .catch() so rejections route through the same error-reporting
+ * path as synchronous throws. The emitter is not blocked on the Promise
+ * settling, so side effects that must happen before the next emit() must be
+ * completed synchronously.
+ *
+ * Phase 2+ registers domain listeners here; violate the invariant and
+ * shutdown.* ordering or banner timing will drift.
+ */
 export type SafeEventListener = (payload: unknown) => void | Promise<void>;
 
 export interface SafeEventBus {
@@ -22,6 +39,8 @@ export function createSafeEventBus(): SafeEventBus {
 		// emitter; it does not mean deferred delivery. Deferred delivery would
 		// drop shutdown.* events when process.exit runs before the Promise
 		// microtask chain resolves (observed during diag-interactive).
+		// Iterating a snapshot so re-entrant emit()/on()/off() inside a listener
+		// is safe; registration changes take effect on the next emit().
 		for (const listener of [...ls]) {
 			try {
 				const result = listener(payload);

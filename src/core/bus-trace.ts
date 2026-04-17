@@ -9,6 +9,15 @@
  * The tracer lives in `src/core/` (engine-free zone) because it is
  * orchestrator-wide observability, not a domain concern. Add channels to the
  * `TRACED_CHANNELS` list if a future front needs to observe them.
+ *
+ * Ordering invariant: the first `[clio:bus] shutdown.requested` line must
+ * never reach stderr before the `clio: received <SIGNAL>, shutting down...`
+ * notice written by termination.installSignalHandlers in
+ * src/core/termination.ts. The Front 1 diag (scripts/diag-interactive.ts)
+ * asserts the SIGINT notice is present on stderr before the bus trace lines,
+ * and future edits to termination.ts must preserve that stderr ordering.
+ * Concretely: write the signal notice synchronously from the signal handler
+ * before calling shutdown(), which is where ShutdownRequested is emitted.
  */
 
 import { BusChannels } from "./bus-events.js";
