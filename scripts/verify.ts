@@ -207,6 +207,21 @@ function checkExampleFixture(body: string, spec: ExampleSpec): void {
 	}
 }
 
+const TEMPLATE_EXAMPLE_BLOCK_MARKERS: readonly string[] = [
+	"# clio-example:start block=orchestrator",
+	"# clio-example:end block=orchestrator",
+	"# clio-example:start block=workers",
+	"# clio-example:end block=workers",
+];
+
+function assertBlockMarkers(body: string): void {
+	for (const marker of TEMPLATE_EXAMPLE_BLOCK_MARKERS) {
+		if (!body.includes(marker)) {
+			fail(`settings.yaml missing example marker: ${marker}`);
+		}
+	}
+}
+
 function checkSettingsTemplate(home: string): void {
 	const settingsPath = join(home, "settings.yaml");
 	const body = readFileSync(settingsPath, "utf8");
@@ -224,6 +239,7 @@ function checkSettingsTemplate(home: string): void {
 	for (const spec of EXAMPLE_SPECS) {
 		checkExampleFixture(body, spec);
 	}
+	assertBlockMarkers(body);
 	log("settings.yaml example block OK");
 }
 
