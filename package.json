@@ -32,7 +32,8 @@
 		"diag:interactive": "tsx scripts/diag-interactive.ts",
 		"diag:config": "tsx scripts/diag-config.ts",
 		"diag:xdg": "tsx scripts/diag-xdg.ts",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run build && npm run verify"
+		"diag:boundaries": "tsx scripts/diag-boundaries.ts",
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run build && npm run verify"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",
