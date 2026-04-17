@@ -5,8 +5,8 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { DEFAULT_SETTINGS } from "./defaults.js";
+import { parse as parseYaml } from "yaml";
+import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
 import { clioCacheDir, clioConfigDir, clioDataDir } from "./xdg.js";
 
 export interface InitReport {
@@ -44,7 +44,7 @@ export function initializeClioHome(): InitReport {
 	const settingsPath = join(configDir, "settings.yaml");
 	let touched = false;
 	if (!existsSync(settingsPath)) {
-		writeFileSync(settingsPath, stringifyYaml(DEFAULT_SETTINGS), { encoding: "utf8", mode: 0o644 });
+		writeFileSync(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
 		created.push(settingsPath);
 		touched = true;
 	} else {
