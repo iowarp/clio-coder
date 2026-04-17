@@ -181,6 +181,9 @@ Day-to-day work mostly comes down to a small set of commands.
   the production build, and `verify`.
 - `npm run stress`: the concurrency harness. It spawns ten faux runs and
   checks that the shared run ledger stays correct under contention.
+- `npm run stress:real`: opt-in real-provider variant. Runs four workers split
+  across `llamacpp@mini` and `lmstudio@dynamo`. Requires network access to the
+  homelab and is excluded from CI.
 - `npm run typecheck`: the fastest strict TypeScript pass when you want
   quick feedback before the full gate.
 - `npm run diag:*`: targeted probes for boundaries, safety, modes,
