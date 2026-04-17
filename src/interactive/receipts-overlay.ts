@@ -7,20 +7,23 @@ import {
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
+	type SelectListLayoutOptions,
 	type SelectListTheme,
 	type TUI,
 	Text,
+	truncateToWidth,
 } from "../engine/tui.js";
 
 export const RECEIPTS_OVERLAY_WIDTH = 78;
 export const RECEIPTS_OVERLAY_MAX_VISIBLE = 10;
-export const RECEIPTS_OVERLAY_HINT = "[Up/Down] scroll  [/receipt verify <id>] validate  [Esc] close";
+export const RECEIPTS_OVERLAY_HINT = "[Up/Down] /receipt verify <id> [Esc]";
 
 const SHORT_ID_LEN = 8;
 const AGENT_COL_WIDTH = 10;
 const MODEL_COL_WIDTH = 18;
 const EXIT_COL_WIDTH = 5;
-const TOKENS_COL_WIDTH = 7;
+const TOKENS_COL_WIDTH = 9;
+const RECEIPT_SUFFIX_WIDTH = 22;
 
 const IDENTITY = (s: string): string => s;
 
@@ -32,6 +35,12 @@ const RECEIPTS_THEME: SelectListTheme = {
 	noMatch: IDENTITY,
 };
 
+const RECEIPTS_LAYOUT: SelectListLayoutOptions = {
+	minPrimaryColumnWidth: 48,
+	maxPrimaryColumnWidth: 64,
+	truncatePrimary: ({ text, maxWidth }) => truncateReceiptLabel(text, maxWidth),
+};
+
 export function shortRunId(runId: string): string {
 	if (!runId) return "-";
 	return runId.length <= SHORT_ID_LEN ? runId : runId.slice(0, SHORT_ID_LEN);
@@ -41,22 +50,37 @@ function fitLeft(text: string, width: number): string {
 	return text.length >= width ? text.slice(0, width) : text.padEnd(width);
 }
 
+function formatReceiptTokens(tokens: number): string {
+	return `${Math.max(0, Math.round(tokens)).toLocaleString("en-US")}t`;
+}
+
+function formatReceiptUsd(usd: number): string {
+	return `$${Math.max(0, usd).toFixed(2)}`;
+}
+
+function truncateReceiptLabel(text: string, maxWidth: number): string {
+	if (maxWidth <= 0) return "";
+	if (text.length <= maxWidth) return text;
+	const suffixWidth = Math.min(RECEIPT_SUFFIX_WIDTH, Math.max(0, maxWidth - 4));
+	const prefixWidth = maxWidth - suffixWidth - 3;
+	if (prefixWidth <= 0) return truncateToWidth(text, maxWidth, "");
+	return `${truncateToWidth(text, prefixWidth, "")}...${text.slice(-suffixWidth)}`;
+}
+
 export function formatReceiptRow(env: RunEnvelope): string {
 	const id = fitLeft(shortRunId(env.id), SHORT_ID_LEN);
 	const agent = fitLeft(env.agentId || "-", AGENT_COL_WIDTH);
 	const model = fitLeft(env.modelId || "-", MODEL_COL_WIDTH);
 	const exit = fitLeft(env.exitCode === null ? "e=?" : `e=${env.exitCode}`, EXIT_COL_WIDTH);
-	const tokens = `${Math.max(0, Math.round(env.tokenCount))}t`.padStart(TOKENS_COL_WIDTH);
-	return `${id} ${agent} ${model} ${exit} ${tokens} $${Math.max(0, env.costUsd).toFixed(4)}`;
+	const tokens = formatReceiptTokens(env.tokenCount).padStart(TOKENS_COL_WIDTH);
+	return `${id} ${agent} ${model} ${exit} ${tokens} ${formatReceiptUsd(env.costUsd)}`;
 }
 
 export function buildReceiptItems(envelopes: ReadonlyArray<RunEnvelope>): SelectItem[] {
-	// startedAt is not put into SelectList's description column; pi-tui reserves
-	// that column and truncates the primary column to fit, which shaves off the
-	// right-hand exit/tokens/usd cells. Keep the whole row in the primary label.
 	return envelopes.map((env) => ({
 		value: env.id,
-		label: `${formatReceiptRow(env)}  ${env.startedAt}`,
+		label: formatReceiptRow(env),
+		description: env.startedAt,
 	}));
 }
 
@@ -96,7 +120,7 @@ export function openReceiptsOverlay(
 	const selectList =
 		items.length === 0
 			? null
-			: new SelectList(items, options?.maxVisible ?? RECEIPTS_OVERLAY_MAX_VISIBLE, RECEIPTS_THEME);
+			: new SelectList(items, options?.maxVisible ?? RECEIPTS_OVERLAY_MAX_VISIBLE, RECEIPTS_THEME, RECEIPTS_LAYOUT);
 	if (selectList && options?.onSelect) {
 		selectList.onSelect = (item: SelectItem): void => options.onSelect?.(item.value);
 	}
