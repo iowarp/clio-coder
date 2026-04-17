@@ -5,6 +5,7 @@ import { runInstallCommand } from "./install.js";
 import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
 import { parseFlags, printError } from "./shared.js";
+import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
 
 const HELP = `clio. IOWarp orchestrator coding-agent
@@ -14,6 +15,7 @@ Usage:
   clio --version, -v    print version info
   clio doctor           run environment diagnostics
   clio install          bootstrap ~/.clio directory
+  clio upgrade          upgrade clio and run pending state migrations
   clio providers        list configured providers
   clio agents           list discovered agent recipes
   clio run <agent> <task>  run an agent headlessly (NDJSON)
@@ -42,6 +44,8 @@ async function main(argv: string[]): Promise<number> {
 			return runDoctorCommand();
 		case "install":
 			return runInstallCommand();
+		case "upgrade":
+			return runUpgradeCommand(argv.slice(1));
 		case "version":
 			return runVersionCommand();
 		default:
