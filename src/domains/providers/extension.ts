@@ -1,6 +1,6 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { registerLocalProviders } from "../../engine/ai.js";
+import { registerDiscoveredLocalModels, registerLocalProviders } from "../../engine/ai.js";
 import type { ConfigContract } from "../config/contract.js";
 import { PROVIDER_CATALOG, type ProviderId, isLocalEngineId } from "./catalog.js";
 import type { ProviderEndpointEntry, ProviderListEntry, ProvidersContract } from "./contract.js";
@@ -119,6 +119,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			}
 			const results = await adapter.probeEndpoints(endpoints);
 			endpointProbes.set(adapter.id, results);
+			for (const probe of results) {
+				if (!probe.ok) continue;
+				const spec = endpoints[probe.name];
+				if (!spec) continue;
+				const modelIds = probe.models ?? [];
+				if (modelIds.length === 0) continue;
+				registerDiscoveredLocalModels(adapter.id, probe.name, spec, modelIds);
+			}
 		}
 	}
 
