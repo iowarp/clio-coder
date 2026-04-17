@@ -89,9 +89,13 @@ function findAdapter(id: ProviderId): RuntimeAdapter {
 }
 
 async function main(): Promise<void> {
-	check("registry:length", RUNTIME_ADAPTERS.length === 8, `len=${RUNTIME_ADAPTERS.length}`);
+	// RUNTIME_ADAPTERS now contains 8 provider adapters plus 6 CLI adapters
+	// (added in Phase 7). Provider-tier checks below only inspect the
+	// provider-tier slice; CLI adapters are covered by diag-cli-runtimes.
+	const providerAdapters = RUNTIME_ADAPTERS.filter((a) => a.tier !== "cli");
+	check("registry:provider-length", providerAdapters.length === 8, `len=${providerAdapters.length}`);
 
-	const ids = RUNTIME_ADAPTERS.map((a) => a.id);
+	const ids = providerAdapters.map((a) => a.id);
 	const uniqueIds = new Set(ids);
 	check("registry:unique-ids", uniqueIds.size === ids.length, `ids=${JSON.stringify(ids)}`);
 
@@ -107,7 +111,7 @@ async function main(): Promise<void> {
 	];
 	check(
 		"registry:order",
-		expectedOrder.every((id, i) => RUNTIME_ADAPTERS[i]?.id === id),
+		expectedOrder.every((id, i) => providerAdapters[i]?.id === id),
 		`got ${JSON.stringify(ids)}`,
 	);
 

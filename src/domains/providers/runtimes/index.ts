@@ -1,6 +1,7 @@
 import type { RuntimeAdapter } from "../runtime-contract.js";
 import { anthropicAdapter } from "./anthropic.js";
 import { bedrockAdapter } from "./bedrock.js";
+import { CLI_ADAPTERS } from "./cli/index.js";
 import { googleAdapter } from "./google.js";
 import { groqAdapter } from "./groq.js";
 import { localAdapter } from "./local.js";
@@ -16,8 +17,9 @@ export { localAdapter } from "./local.js";
 export { mistralAdapter } from "./mistral.js";
 export { openaiAdapter } from "./openai.js";
 export { openrouterAdapter } from "./openrouter.js";
+export { CLI_ADAPTERS } from "./cli/index.js";
 
-export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
+const PROVIDER_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
 	anthropicAdapter,
 	openaiAdapter,
 	googleAdapter,
@@ -27,3 +29,5 @@ export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
 	bedrockAdapter,
 	localAdapter,
 ];
+
+export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [...PROVIDER_ADAPTERS, ...CLI_ADAPTERS];
