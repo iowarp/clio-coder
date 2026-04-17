@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile } from "../src/domains/prompts/compiler.js";
@@ -150,6 +150,27 @@ async function runHarness(): Promise<void> {
 			"compile:null-placeholder-renders-empty",
 			!noProvider.text.includes("anthropic") && noProvider.text.includes("Provider: "),
 		);
+
+		// Reload resilience: a broken fragment dir (duplicate id) must throw from
+		// loadFragments, and the extension's try/catch guard keeps the previous
+		// table usable. We replicate that guard here and assert the old table
+		// still compiles.
+		const brokenRoot = join(home, "broken-fragments");
+		mkdirSync(join(brokenRoot, "providers"), { recursive: true });
+		const dupe = "---\nid: providers.dupe\nversion: 1\nbudgetTokens: 10\ndescription: dupe\n---\nbody\n";
+		writeFileSync(join(brokenRoot, "providers", "a.md"), dupe);
+		writeFileSync(join(brokenRoot, "providers", "b.md"), dupe);
+		let keptTable = table;
+		let caught = "";
+		try {
+			keptTable = loadFragments(brokenRoot);
+		} catch (err) {
+			caught = err instanceof Error ? err.message : String(err);
+		}
+		check("reload:duplicate-id-throws", caught.includes("duplicate fragment id"), `caught=${caught}`);
+		check("reload:previous-table-retained", keptTable === table);
+		const afterBroken = compile(keptTable, baseInputs);
+		check("reload:previous-table-still-compiles", afterBroken.text === first.text);
 
 		// Writing a scratch file inside the ephemeral home to exercise cleanup.
 		writeFileSync(join(home, "scratch.txt"), "diag");

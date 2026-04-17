@@ -8,6 +8,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
+import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
@@ -37,6 +38,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		ConfigDomainModule,
 		SafetyDomainModule,
 		ModesDomainModule,
+		PromptsDomainModule,
 		SessionDomainModule,
 		LifecycleDomainModule,
 	]);
