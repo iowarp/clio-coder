@@ -75,6 +75,7 @@
 		"diag:dispatch-primitives": "tsx scripts/diag-dispatch-primitives.ts",
 		"diag:dispatch": "tsx scripts/diag-dispatch.ts",
 		"diag:tools": "tsx scripts/diag-tools.ts",
+		"diag:selectors": "tsx scripts/diag-selectors.ts",
 		"diag:worker-entry": "tsx scripts/diag-worker-entry.ts",
 		"diag:worker-tools": "tsx scripts/diag-worker-tools.ts",
 		"diag:single-dispatch": "tsx scripts/diag-single-dispatch.ts",
