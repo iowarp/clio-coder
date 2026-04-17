@@ -4,18 +4,38 @@
  * type is scaffolded for v0.2; v0.1 always reads/writes the YAML file.
  *
  * Security posture:
- *   - file is (re)chmod'd to 0600 after every write; umask is not trusted.
- *   - write path is tmp + fsync + rename to avoid partial files.
+ *   - write path opens tmp with explicit 0o600 (umask is not trusted) then
+ *     fsync + rename; the file never exists on disk under a wider mode.
+ *   - chmod 0o600 is re-applied after rename as belt-and-suspenders.
  *   - logging NEVER includes the credential value. `[clio:credentials] set
  *     provider=<id>` is the only supported log shape.
  */
 
-import { chmodSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { chmodSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
 import { PROVIDER_CATALOG } from "./catalog.js";
+
+/**
+ * Secret-grade atomic write. Opens the tmp file with an explicit 0o600 mode so
+ * the secret never lives on disk under a wider mode (umask can otherwise leave
+ * a transient 0o644 window between write and chmod). Intentionally does NOT
+ * reuse `engine/session.ts#atomicWrite`, which is tuned for non-secret
+ * artifacts and opens with the process umask.
+ */
+function atomicWriteSecret(absPath: string, contents: string): void {
+	const tmp = join(dirname(absPath), `.${basename(absPath)}.${randomUUID()}.tmp`);
+	const fd = openSync(tmp, "wx", 0o600);
+	try {
+		writeSync(fd, contents);
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	renameSync(tmp, absPath);
+}
 
 export interface CredentialEntry {
 	providerId: string;
@@ -61,7 +81,10 @@ function readShape(path: string): FileShape {
 }
 
 function writeShape(path: string, shape: FileShape): void {
-	atomicWrite(path, stringifyYaml(shape));
+	atomicWriteSecret(path, stringifyYaml(shape));
+	// Redundant once the tmp file is opened at 0o600 and renamed, but kept as
+	// belt-and-suspenders: obvious intent, and it covers edge cases where the
+	// destination name pre-exists with a wider mode on some filesystems.
 	chmodSync(path, 0o600);
 }
 
