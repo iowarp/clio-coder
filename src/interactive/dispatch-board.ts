@@ -47,7 +47,12 @@ interface WorkerEventShape {
 	type?: unknown;
 	message?: {
 		role?: unknown;
-		usage?: { input?: unknown; output?: unknown };
+		usage?: {
+			input?: unknown;
+			output?: unknown;
+			cacheRead?: unknown;
+			cacheWrite?: unknown;
+		};
 	};
 }
 
@@ -169,6 +174,10 @@ function parseFiniteNumber(value: unknown, fallback: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function parseFiniteNumberOrZero(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	const startedAtMs = entry.startedAtMs ?? entry.enqueuedAtMs;
 	if (entry.durationMs !== null) return entry.durationMs;
@@ -288,9 +297,11 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
 			if (type === "message_end" && workerEvent.message?.role === "assistant") {
 				const usage = workerEvent.message.usage;
-				const input = typeof usage?.input === "number" && Number.isFinite(usage.input) ? usage.input : 0;
-				const output = typeof usage?.output === "number" && Number.isFinite(usage.output) ? usage.output : 0;
-				entry.tokenCount += input + output;
+				entry.tokenCount +=
+					parseFiniteNumberOrZero(usage?.input) +
+					parseFiniteNumberOrZero(usage?.output) +
+					parseFiniteNumberOrZero(usage?.cacheRead) +
+					parseFiniteNumberOrZero(usage?.cacheWrite);
 			}
 		}),
 	];
