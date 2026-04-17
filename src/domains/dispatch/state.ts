@@ -14,8 +14,8 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
@@ -101,6 +101,64 @@ function cloneEnvelope(envelope: RunEnvelope): RunEnvelope {
 	return structuredClone(envelope);
 }
 
+/**
+ * Cross-process mutex for runs.json writes. A stress harness (scripts/stress.ts)
+ * spawns N concurrent `clio run` subprocesses, each of which calls ledger.persist();
+ * without coordination the last writer clobbers the others and the ledger only
+ * reflects one run. We serialize with an O_EXCL lockfile + bounded retry. The
+ * lockfile path lives alongside runs.json so it shares the same CLIO_HOME namespace.
+ */
+async function withLedgerLock<T>(targetPath: string, fn: () => T | Promise<T>): Promise<T> {
+	const lockPath = `${targetPath}.lock`;
+	const dir = dirname(lockPath);
+	mkdirSync(dir, { recursive: true });
+	const deadlineMs = Date.now() + 5_000;
+	let held = false;
+	while (!held) {
+		try {
+			const fd = openSync(lockPath, "wx");
+			closeSync(fd);
+			held = true;
+		} catch (err) {
+			const e = err as NodeJS.ErrnoException;
+			if (e.code !== "EEXIST") throw err;
+			if (Date.now() > deadlineMs) {
+				// Stale lock: best-effort cleanup and keep trying. Better to retry than
+				// to wedge the ledger forever if a predecessor crashed between openSync
+				// and unlinkSync. Any loss here is bounded to the runs.json file and the
+				// receipts/ directory remains authoritative.
+				try {
+					unlinkSync(lockPath);
+				} catch {
+					// raced with another waiter; loop again.
+				}
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+		}
+	}
+	try {
+		return await fn();
+	} finally {
+		try {
+			unlinkSync(lockPath);
+		} catch {
+			// already gone; fine.
+		}
+	}
+}
+
+function mergeRunsById(disk: RunEnvelope[], memory: RunEnvelope[]): RunEnvelope[] {
+	// In-memory writes represent newer state (we just updated them in this process),
+	// so they win on id conflict. Disk-only entries are preserved so sibling
+	// processes' runs survive this process's persist().
+	const merged = new Map<string, RunEnvelope>();
+	for (const r of disk) merged.set(r.id, r);
+	for (const r of memory) merged.set(r.id, r);
+	const all = Array.from(merged.values());
+	all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
+	return all;
+}
+
 export function openLedger(opts?: LedgerOptions): Ledger {
 	const maxRuns = resolveMaxRuns(opts?.maxRuns);
 	let runs: RunEnvelope[] = readRuns();
@@ -174,9 +232,14 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		},
 
 		async persist(): Promise<void> {
-			const capped = runs.slice(0, maxRuns);
-			runs = capped;
-			atomicWrite(runsPath(), JSON.stringify(capped, null, 2));
+			const target = runsPath();
+			await withLedgerLock(target, () => {
+				const diskRuns = readRuns();
+				const merged = mergeRunsById(diskRuns, runs);
+				const capped = merged.slice(0, maxRuns);
+				runs = capped;
+				atomicWrite(target, JSON.stringify(capped, null, 2));
+			});
 		},
 
 		reload(): void {

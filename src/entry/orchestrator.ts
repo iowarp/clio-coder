@@ -7,6 +7,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
@@ -49,6 +50,18 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		LifecycleDomainModule,
 	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
+
+	// DRAIN: abort active dispatch runs and persist the ledger before domain teardown.
+	// PERSIST: invoke domain-loader stop() (reverse topo order) to run each domain's stop hook.
+	const dispatch = result.getContract<DispatchContract>("dispatch");
+	if (dispatch) {
+		termination.onDrain(async () => {
+			await dispatch.drain();
+		});
+	}
+	termination.onPersist(async () => {
+		await result.stop();
+	});
 
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
