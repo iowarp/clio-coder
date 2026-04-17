@@ -8,7 +8,7 @@ import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { readTool } from "./read.js";
-import type { ToolRegistry } from "./registry.js";
+import type { ToolIndex, ToolRegistry } from "./registry.js";
 import { webFetchTool } from "./web-fetch.js";
 import { webSearchTool } from "./web-search.js";
 import { writePlanTool } from "./write-plan.js";
@@ -21,7 +21,7 @@ import { writeTool } from "./write.js";
  * `allowedModes` provides defence-in-depth at the per-spec layer so invoke paths
  * never admit a tool outside its intended modes even if the matrix drifts.
  */
-export function registerAllTools(registry: ToolRegistry): void {
+export function registerAllTools(registry: ToolRegistry | ToolIndex): void {
 	const everyMode: ReadonlyArray<ModeName> = [...ALL_MODES];
 	const defaultAndSuper: ReadonlyArray<ModeName> = ["default", "super"];
 	const adviseOnly: ReadonlyArray<ModeName> = ["advise"];

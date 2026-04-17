@@ -24,6 +24,10 @@ export interface WorkerSpec {
 	sessionId?: string;
 	apiKey?: string;
 	runtime?: "native";
+	/** Tool ids the worker Agent is permitted to call. */
+	allowedTools?: ReadonlyArray<string>;
+	/** Mode matrix the worker runs under (default, advise, super). */
+	mode?: string;
 }
 
 export interface SpawnedWorker {

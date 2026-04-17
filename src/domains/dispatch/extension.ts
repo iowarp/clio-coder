@@ -127,8 +127,16 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 
 		const settings = config?.get();
 		const workerDefault = settings?.workers?.default;
-		const providerId = req.providerId ?? recipe?.provider ?? workerDefault?.provider ?? "faux";
-		const resolvedModelRaw = req.modelId ?? recipe?.model ?? workerDefault?.model ?? "faux-model";
+		const providerId = req.providerId ?? recipe?.provider ?? workerDefault?.provider;
+		if (!providerId) {
+			throw new Error(
+				"dispatch: no provider configured (set providers.<engine>.endpoints or run `clio run --provider <id> --model <id>`)",
+			);
+		}
+		const resolvedModelRaw = req.modelId ?? recipe?.model ?? workerDefault?.model;
+		if (!resolvedModelRaw) {
+			throw new Error("dispatch: no model configured (set workers.default.model or pass `--model <id>`)");
+		}
 		// For local engines, rewrite modelId to `${modelId}@${endpointName}` so the
 		// worker can resolve the correct endpoint via the pi-ai side-registry.
 		const endpointName = req.endpoint ?? workerDefault?.endpoint;
@@ -140,11 +148,21 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
 
+		// Derive the worker's tool allowlist. Prefer the recipe's explicit tools
+		// list; otherwise expose every tool visible in the current mode matrix so
+		// the worker mirrors interactive expectations.
+		const recipeTools = recipe?.tools;
+		const allowedTools =
+			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
+		const workerMode = currentMode;
+
 		const spec: WorkerSpec = {
 			systemPrompt,
 			task: req.task,
 			providerId,
 			modelId,
+			allowedTools,
+			mode: workerMode,
 		};
 
 		const worker = spawnNativeWorker(spec, { cwd });

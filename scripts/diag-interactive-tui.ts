@@ -420,13 +420,36 @@ async function main(): Promise<void> {
 	const plain = parseSlashCommand("just text");
 	check("parse:unknown-plain", plain.kind === "unknown" && plain.text === "just text", JSON.stringify(plain));
 
-	// (5) handleRun dispatches with faux defaults and streams non-heartbeat events
+	// (5) handleRun refuses to dispatch when no worker default is configured
+	const emptyDispatchStdout: string[] = [];
+	const emptyDispatchStderr: string[] = [];
+	const emptyDispatch = makeMockDispatch();
+	await handleRun("scout", "hello", {
+		dispatch: emptyDispatch,
+		io: {
+			stdout: (s) => emptyDispatchStdout.push(s),
+			stderr: (s) => emptyDispatchStderr.push(s),
+		},
+		workerDefault: undefined,
+	});
+	check("handleRun:no-provider-skips-dispatch", emptyDispatch.calls.length === 0, String(emptyDispatch.calls.length));
+	check(
+		"handleRun:no-provider-prints-config-hint",
+		emptyDispatchStderr.join("").includes("no provider configured"),
+		emptyDispatchStderr.join(""),
+	);
+
+	// (5b) handleRun dispatches when caller provides a worker default
 	const stdout: string[] = [];
 	const stderr: string[] = [];
 	const mockDispatch = makeMockDispatch();
-	await handleRun("scout", "hello", mockDispatch, {
-		stdout: (s) => stdout.push(s),
-		stderr: (s) => stderr.push(s),
+	await handleRun("scout", "hello", {
+		dispatch: mockDispatch,
+		io: {
+			stdout: (s) => stdout.push(s),
+			stderr: (s) => stderr.push(s),
+		},
+		workerDefault: { provider: "faux", model: "faux-model" },
 	});
 	check("handleRun:dispatch-called-once", mockDispatch.calls.length === 1, String(mockDispatch.calls.length));
 	const req = mockDispatch.calls[0];
@@ -436,8 +459,8 @@ async function main(): Promise<void> {
 		JSON.stringify(req),
 	);
 	check(
-		"handleRun:dispatch-defaults-to-faux-provider",
-		req.providerId === "faux" && req.modelId === "faux-model" && req.runtime === "native",
+		"handleRun:dispatch-omits-provider-fields-when-settings-resolve",
+		req.providerId === undefined && req.modelId === undefined && req.runtime === "native",
 		JSON.stringify(req),
 	);
 	const joined = stdout.join("");
@@ -453,9 +476,13 @@ async function main(): Promise<void> {
 	const failStdout: string[] = [];
 	const failStderr: string[] = [];
 	const failingDispatch = makeMockDispatch({ throwOnDispatch: new Error("boom") });
-	await handleRun("scout", "hello", failingDispatch, {
-		stdout: (s) => failStdout.push(s),
-		stderr: (s) => failStderr.push(s),
+	await handleRun("scout", "hello", {
+		dispatch: failingDispatch,
+		io: {
+			stdout: (s) => failStdout.push(s),
+			stderr: (s) => failStderr.push(s),
+		},
+		workerDefault: { provider: "faux", model: "faux-model" },
 	});
 	check("handleRun:failure-routes-to-stderr", failStderr.join("").includes("[run] failed: boom"), failStderr.join(""));
 	check("handleRun:failure-no-stdout-run-lines", failStdout.length === 0, failStdout.join(""));

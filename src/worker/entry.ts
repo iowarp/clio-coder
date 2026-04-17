@@ -8,6 +8,7 @@
  * it must never import pi-mono or any domain directly.
  */
 
+import type { ToolName } from "../core/tool-names.js";
 import { startWorkerRun } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
@@ -19,12 +20,26 @@ interface WorkerSpec {
 	modelId: string;
 	sessionId?: string;
 	apiKey?: string;
+	allowedTools?: ReadonlyArray<string>;
+	mode?: string;
 }
 
 async function main(): Promise<number> {
 	const spec = await readSpecFromStdin();
 	const stopHeartbeat = startWorkerHeartbeat();
-	const handle = startWorkerRun(spec, emitEvent);
+	const mode = (spec.mode ?? "default") as "default" | "advise" | "super";
+	const { allowedTools: rawAllowed, mode: _mode, ...rest } = spec;
+	if (rawAllowed === undefined) {
+		process.stderr.write("[worker] warning: spec missing allowedTools; falling back to mode matrix\n");
+	}
+	const handle = startWorkerRun(
+		{
+			...rest,
+			mode,
+			...(rawAllowed !== undefined ? { allowedTools: rawAllowed as ReadonlyArray<ToolName> } : {}),
+		},
+		emitEvent,
+	);
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
