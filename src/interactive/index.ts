@@ -16,6 +16,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openModelOverlay } from "./overlays/model-selector.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
@@ -72,12 +73,15 @@ export interface InteractiveDeps {
 	onSetThinkingLevel?: (level: ThinkingLevel) => void;
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
+	/** Persist the orchestrator target selected in /model. */
+	onSelectModel?: (ref: { providerId: string; modelId: string; endpoint?: string }) => void;
 	onShutdown: () => Promise<void>;
 }
 
 export const SHIFT_TAB = "\x1b[Z";
 export const CTRL_D = "\x04";
 export const CTRL_B = "\x02";
+export const CTRL_L = "\x0c";
 export const ALT_S = "\x1bs";
 export const ALT_M = "\x1bm";
 export const ENTER = "\r";
@@ -89,7 +93,8 @@ export type OverlayState =
 	| "providers"
 	| "cost"
 	| "receipts"
-	| "thinking";
+	| "thinking"
+	| "model";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -97,6 +102,7 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	requestSuper: () => void;
 	toggleDispatchBoard: () => void;
+	openModelSelector: () => void;
 }
 
 export interface SuperOverlayKeyDeps {
@@ -125,13 +131,18 @@ export interface ThinkingOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface ModelOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
 		CostOverlayKeyDeps,
 		ReceiptsOverlayKeyDeps,
-		ThinkingOverlayKeyDeps {
+		ThinkingOverlayKeyDeps,
+		ModelOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -151,6 +162,10 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	}
 	if (data === CTRL_B) {
 		deps.toggleDispatchBoard();
+		return true;
+	}
+	if (data === CTRL_L) {
+		deps.openModelSelector();
 		return true;
 	}
 	if (data === CTRL_D) {
@@ -228,6 +243,18 @@ export function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDe
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /model overlay. Same policy as thinking:
+ * Esc closes; arrows and Enter fall through to the focused SelectList.
+ */
+export function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -260,6 +287,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "thinking") {
 		// Same policy as receipts: the Box forwards unconsumed input to the SelectList.
 		return routeThinkingOverlayKey(data, deps);
+	}
+	if (overlayState === "model") {
+		// Same policy as thinking: the Box forwards unconsumed input to the SelectList.
+		return routeModelOverlayKey(data, deps);
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
@@ -321,6 +352,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openCost: () => openCostOverlayState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
+		openModel: () => openModelOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
@@ -445,6 +477,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const openModelOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		overlayState = "model";
+		overlayHandle = openModelOverlay(tui, {
+			settings,
+			providers: deps.providers,
+			onSelect: (ref) => {
+				deps.onSelectModel?.(ref);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
 	const toggleDispatchBoardOverlay = (): void => {
 		if (overlayState === "dispatch-board") {
 			closeOverlay();
@@ -561,6 +610,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			toggleDispatchBoard: () => {
 				toggleDispatchBoardOverlay();
+			},
+			openModelSelector: () => {
+				openModelOverlayState();
 			},
 		});
 		return consumed ? { consume: true } : undefined;
