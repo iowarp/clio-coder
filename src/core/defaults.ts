@@ -136,11 +136,30 @@ providers:
 
 # Orchestrator target override. Leave empty to use the active provider.
 orchestrator: {}
+# Example: pin the orchestrator loop to the llamacpp mini endpoint above.
+# Replace orchestrator: {} above with the block below after you uncomment
+# the matching provider.endpoints.mini example.
+# clio-example:start block=orchestrator
+# orchestrator:
+#   provider: llamacpp
+#   endpoint: mini
+#   model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL
+# clio-example:end block=orchestrator
 
 # Per-worker target overrides. default applies to every worker spec that
 # does not declare its own target block.
 workers:
   default: {}
+# Example: route /run and clio run at the same llamacpp mini endpoint.
+# Replace the workers: block above (including default: {}) with the block
+# below after you uncomment the matching provider.endpoints.mini example.
+# clio-example:start block=workers
+# workers:
+#   default:
+#     provider: llamacpp
+#     endpoint: mini
+#     model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL
+# clio-example:end block=workers
 
 # Session budget guardrails.
 budget:
