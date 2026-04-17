@@ -7,11 +7,13 @@
 export {
 	Box,
 	CancellableLoader,
+	Container,
 	Editor,
 	Image,
 	Input,
 	Loader,
 	Markdown,
+	ProcessTerminal,
 	SelectList,
 	SettingsList,
 	Spacer,
@@ -22,6 +24,7 @@ export {
 } from "@mariozechner/pi-tui";
 
 export type {
+	Component,
 	EditorOptions,
 	EditorTheme,
 	SelectItem,
@@ -29,4 +32,5 @@ export type {
 	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
+	Terminal,
 } from "@mariozechner/pi-tui";
