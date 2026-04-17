@@ -5,8 +5,8 @@ import { join } from "node:path";
 /**
  * Phase 5 slice 6 consolidated diag. Boots the config + safety + modes domains
  * against an ephemeral CLIO_HOME, wires every tool onto a fresh registry via
- * registerAllTools, and asserts the admission contract across modes: 12 tools
- * registered, 10 visible in default, 8 visible in advise, bash rejected in
+ * registerAllTools, and asserts the admission contract across modes: 11 tools
+ * registered, 9 visible in default, 8 visible in advise, bash rejected in
  * advise, write admitted in default, write_plan's path guard produces a
  * tool-level error while still admitting the call.
  */
@@ -67,12 +67,12 @@ async function runDomainHarness(): Promise<void> {
 
 		// --- test 1: listAll length ---
 		const all = registry.listAll();
-		check("registry:listAll-length-12", all.length === 12, `len=${all.length}`);
+		check("registry:listAll-length-11", all.length === 11, `len=${all.length}`);
 
-		// --- test 2: default mode → 10 visible (all except write_plan/write_review) ---
+		// --- test 2: default mode → 9 visible (all except write_plan/write_review) ---
 		check("mode:default-at-boot", modes.current() === "default", `got ${modes.current()}`);
 		const defaultVisible = registry.listVisible().map((t) => t.name);
-		check("registry:default-visible-length-10", defaultVisible.length === 10, `visible=${defaultVisible.join(",")}`);
+		check("registry:default-visible-length-9", defaultVisible.length === 9, `visible=${defaultVisible.join(",")}`);
 		check(
 			"registry:default-excludes-write_plan",
 			!defaultVisible.includes(ToolNames.WritePlan),

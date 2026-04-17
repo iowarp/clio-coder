@@ -15,7 +15,6 @@ export const ToolNames = {
 	WebSearch: "web_search",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
-	ChainDispatch: "chain_dispatch",
 } as const;
 
 export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
