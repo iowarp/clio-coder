@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { bashTool } from "../src/tools/bash.js";
+import { bashTool, truncateUtf8 } from "../src/tools/bash.js";
 import { editTool } from "../src/tools/edit.js";
 import { readTool } from "../src/tools/read.js";
 import { writeTool } from "../src/tools/write.js";
@@ -116,6 +116,15 @@ async function main(): Promise<void> {
 		// 8. bash nonexistent command
 		const bashFail = await bashTool.run({ command: "this-command-does-not-exist-xyz" });
 		check("bash:nonexistent-error", bashFail.kind === "error", `got ${JSON.stringify(bashFail)}`);
+
+		// 9. UTF-8 truncation backs up to a code point boundary.
+		const longAscii = "a".repeat(1_000_000 - 2);
+		const utf8Truncated = truncateUtf8(longAscii + "€".repeat(10), 1_000_000, "\n[output truncated]\n");
+		check(
+			"bash:truncate-utf8-boundary-safe",
+			!utf8Truncated.includes("\uFFFD") && utf8Truncated === `${longAscii}\n[output truncated]\n`,
+			`got length=${utf8Truncated.length}`,
+		);
 	} finally {
 		try {
 			rmSync(tmp, { recursive: true, force: true });

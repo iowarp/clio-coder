@@ -5,7 +5,7 @@ import type { ActionClass, ClassifierCall } from "../domains/safety/action-class
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 
 /**
- * Tool registry — admission point for every tool call. Filters visible tools
+ * Tool registry. Admission point for every tool call. Filters visible tools
  * by current mode, delegates classification + hard-block decisions to the
  * safety domain, then enforces the per-mode action-class policy gate before
  * running the tool body. Never throws on safety rejections; the caller (agent

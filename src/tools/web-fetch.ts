@@ -1,9 +1,11 @@
 import { fetch } from "undici";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
+const TRUNCATION_MARKER = "\n[output truncated]";
 
 function parseHeaders(raw: unknown): Record<string, string> | null {
 	if (raw === undefined || raw === null) return {};
@@ -17,9 +19,7 @@ function parseHeaders(raw: unknown): Record<string, string> | null {
 }
 
 function truncate(text: string, maxBytes: number): string {
-	if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-	const buf = Buffer.from(text, "utf8").subarray(0, maxBytes);
-	return `${buf.toString("utf8")}\n[output truncated]`;
+	return truncateUtf8(text, maxBytes, TRUNCATION_MARKER);
 }
 
 export const webFetchTool: ToolSpec = {

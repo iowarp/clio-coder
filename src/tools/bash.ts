@@ -1,14 +1,13 @@
 import { execFile } from "node:child_process";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const TRUNCATION_MARKER = "\n[output truncated]\n";
 
 function truncate(text: string): string {
-	if (Buffer.byteLength(text, "utf8") <= MAX_OUTPUT_BYTES) return text;
-	const buf = Buffer.from(text, "utf8").subarray(0, MAX_OUTPUT_BYTES);
-	return `${buf.toString("utf8")}${TRUNCATION_MARKER}`;
+	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
 }
 
 interface ExecOutcome {
@@ -61,3 +60,5 @@ export const bashTool: ToolSpec = {
 		}
 	},
 };
+
+export { truncateUtf8 };
