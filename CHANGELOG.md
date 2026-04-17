@@ -37,9 +37,9 @@ Post-`phase-10-partial` commits on `main` (in landing order):
   30s. 5-worker concurrent regression test lives in
   `diag-dispatch-state`.
 
-## 0.1.0-dev (phase-10-partial) — 2026-04-17
+## 0.1.0-dev (phase-10-partial): 2026-04-17
 
-### Phase 10 — Observability, Scheduling, Intelligence scaffolding (`phase-10-partial`, cbf70fc)
+### Phase 10: Observability, Scheduling, Intelligence scaffolding (`phase-10-partial`, cbf70fc)
 
 - Added: `observability` domain tracks telemetry counters and histograms,
   aggregates metrics into p50/p95/avg views, and accumulates per-session
@@ -61,7 +61,7 @@ Post-`phase-10-partial` commits on `main` (in landing order):
 
 Source commit: `cbf70fc feat(domains): scaffold observability + scheduling + intelligence`.
 
-### Phase 9 — Interactive TUI scaffold (`phase-9-partial`, e47b4f7)
+### Phase 9: Interactive TUI scaffold (`phase-9-partial`, e47b4f7)
 
 - Added: minimal interactive TUI scaffold with banner, editor, and
   footer panel mounted under pi-tui.
@@ -77,7 +77,7 @@ Source commit: `cbf70fc feat(domains): scaffold observability + scheduling + int
 
 Source commit: `e47b4f7 feat(interactive): add minimal TUI scaffold with banner + footer + mode cycle`.
 
-### Phase 8 — Claude SDK subprocess adapter (`phase-8-complete`, bb0028c)
+### Phase 8: Claude SDK subprocess adapter (`phase-8-complete`, bb0028c)
 
 - Added: `claude-sdk` adapter with runtime-assembled specifier,
   `sdk_missing` graceful-fallback message, and `ANTHROPIC_API_KEY`-gated
@@ -85,7 +85,7 @@ Source commit: `e47b4f7 feat(interactive): add minimal TUI scaffold with banner 
 
 Source commit: `bb0028c feat(providers): add Claude SDK subprocess adapter with graceful fallback`.
 
-### Phase 7 — CLI adapter fleet (`phase-7-complete`, c6100f2)
+### Phase 7: CLI adapter fleet (`phase-7-complete`, c6100f2)
 
 - Added: six CLI adapter stubs plus generic `cli-entry` wrapper.
 - Added: capability manifest silver/bronze tiers, `RUNTIME_ADAPTERS`
@@ -93,7 +93,7 @@ Source commit: `bb0028c feat(providers): add Claude SDK subprocess adapter with 
 
 Source commit: `c6100f2 feat(providers): ship six CLI adapter stubs + generic cli-entry wrapper`.
 
-### Phase 6 — Dispatch and native worker (`phase-6-complete`, 6356b27)
+### Phase 6: Dispatch and native worker (`phase-6-complete`, 6356b27)
 
 - Added: `clio run` headless dispatch surface that spawns a native
   worker subprocess with NDJSON stream, heartbeat, receipt, and exit
@@ -113,7 +113,7 @@ Source commit: `c6100f2 feat(providers): ship six CLI adapter stubs + generic cl
 Source commits (oldest → newest): `40a39b6`, `ff93f98`, `647faa3`,
 `d4621f3`, `c07fc54`, `424f5e4`, `322c12e`, `07f46f8`, `6356b27`.
 
-### Phase 5 — Core tool registry (`phase-5-complete`, 44c637c)
+### Phase 5: Core tool registry (`phase-5-complete`, 44c637c)
 
 - Added: `read` + `write` + `edit` + `bash` core tools.
 - Added: `grep` + `glob` + `ls` search tools.
@@ -126,7 +126,7 @@ Source commits (oldest → newest): `40a39b6`, `ff93f98`, `647faa3`,
 Source commits: `e905731`, `dd3ed3d`, `fa2703f`, `05efdf6`, `6ce8d79`,
 `44c637c`.
 
-### Phase 4 — Providers and agents (`phase-4-complete`, 0e70be3)
+### Phase 4: Providers and agents (`phase-4-complete`, 0e70be3)
 
 - Added: provider catalog, matcher, discovery, and health pure logic.
 - Added: eight-provider runtime adapter stubs.
@@ -144,7 +144,7 @@ Source commits: `e905731`, `dd3ed3d`, `fa2703f`, `05efdf6`, `6ce8d79`,
 Source commits: `ba71856`, `958d784`, `9798e5d`, `31b8fb0`, `8040900`,
 `3686ae5`, `0309111`, `19ddb7a`, `ebd5055`, `59f2966`, `0e70be3`.
 
-### Phase 3 — Prompts and session (`phase-3-complete`, dfebddc)
+### Phase 3: Prompts and session (`phase-3-complete`, dfebddc)
 
 - Added: prompt fragment set (nine files) and full frontmatter
   validator.
@@ -158,7 +158,7 @@ Source commits: `ba71856`, `958d784`, `9798e5d`, `31b8fb0`, `8040900`,
 Source commits: `d08278c`, `1ab6848`, `91cc038`, `4892bc4`, `c6f0adb`,
 `dfebddc`.
 
-### Phase 2 — Safety and modes (`phase-2-complete`, d0e31c1)
+### Phase 2: Safety and modes (`phase-2-complete`, d0e31c1)
 
 - Added: safety action classifier, scope rules, and NDJSON audit
   writer.
@@ -172,7 +172,7 @@ Source commits: `d08278c`, `1ab6848`, `91cc038`, `4892bc4`, `c6f0adb`,
 Source commits: `a81aa2c`, `a1e00bb`, `01ce3ae`, `28103a5`, `a43fde6`,
 `d0e31c1`.
 
-### Phase 1 — Foundation and hardening (`phase-1-hardened`, 2f82d8c)
+### Phase 1: Foundation and hardening (`phase-1-hardened`, 2f82d8c)
 
 Pre-orchestrator scaffolding that established the runtime shape: config
 domain (TypeBox schema, manifest, watcher with hot-reload classifier,

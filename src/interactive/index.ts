@@ -24,6 +24,7 @@ export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
 export const ENTER = "\r";
 export const ESC = "\x1b";
+export type OverlayState = "closed" | "super-confirm" | "dispatch-board";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -40,6 +41,10 @@ export interface SuperOverlayKeyDeps {
 
 export interface DispatchBoardOverlayKeyDeps {
 	closeOverlay: () => void;
+}
+
+export interface OverlayKeyDeps extends SuperOverlayKeyDeps, DispatchBoardOverlayKeyDeps {
+	requestShutdown: () => void;
 }
 
 /** Pure key router: returns true when the input was consumed. */
@@ -86,6 +91,21 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 		return true;
 	}
 	return false;
+}
+
+/** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
+export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
+	if (overlayState === "closed") return false;
+	if (data === CTRL_D) {
+		deps.requestShutdown();
+		return true;
+	}
+	if (overlayState === "super-confirm") {
+		routeSuperOverlayKey(data, deps);
+		return true;
+	}
+	routeDispatchBoardOverlayKey(data, deps);
+	return true;
 }
 
 export type SlashCommand =
@@ -215,7 +235,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// let the process exit before the termination coordinator runs.
 	const keepAlive = setInterval(() => {}, 1 << 30);
 
-	let overlayState: "closed" | "super-confirm" | "dispatch-board" = "closed";
+	let overlayState: OverlayState = "closed";
 	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
@@ -316,26 +336,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	];
 
 	tui.addInputListener((data: string) => {
-		if (overlayState === "super-confirm") {
-			const consumed = routeSuperOverlayKey(data, {
-				cancelSuper: () => {
-					closeOverlay();
-				},
-				confirmSuper: (conf) => {
-					deps.modes.confirmSuper(conf);
-					closeOverlay();
-					footer.refresh();
-					tui.requestRender();
-				},
-				now: () => Date.now(),
-			});
-			return consumed ? { consume: true } : undefined;
-		}
-		if (overlayState === "dispatch-board") {
-			const consumed = routeDispatchBoardOverlayKey(data, {
-				closeOverlay,
-			});
-			return consumed ? { consume: true } : undefined;
+		const overlayConsumed = routeOverlayKey(data, overlayState, {
+			cancelSuper: () => {
+				closeOverlay();
+			},
+			confirmSuper: (conf) => {
+				deps.modes.confirmSuper(conf);
+				closeOverlay();
+				footer.refresh();
+				tui.requestRender();
+			},
+			now: () => Date.now(),
+			closeOverlay,
+			requestShutdown: () => {
+				void shutdown();
+			},
+		});
+		if (overlayConsumed) {
+			return { consume: true };
 		}
 
 		const consumed = routeInteractiveKey(data, {
