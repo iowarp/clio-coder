@@ -11,13 +11,26 @@ import { createCostTracker } from "./cost.js";
 import { aggregateMetrics } from "./metrics.js";
 import { createTelemetry } from "./telemetry.js";
 
-interface DispatchCompletedPayload {
+interface DispatchCostPayload {
 	runId: string;
 	exitCode: number;
 	providerId?: string;
 	modelId?: string;
 	tokenCount?: number;
+	costUsd?: number;
 	durationMs?: number;
+}
+
+function recordDispatchCost(
+	telemetry: ReturnType<typeof createTelemetry>,
+	cost: ReturnType<typeof createCostTracker>,
+	payload: DispatchCostPayload,
+): void {
+	if (!payload.providerId || !payload.modelId || typeof payload.tokenCount !== "number") {
+		return;
+	}
+	telemetry.record("counter", "tokens.total", payload.tokenCount);
+	cost.accumulate(payload.providerId, payload.modelId, payload.tokenCount, payload.costUsd);
 }
 
 export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {
@@ -29,20 +42,22 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		async start() {
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
-					const payload = (raw ?? {}) as DispatchCompletedPayload;
+					const payload = (raw ?? {}) as DispatchCostPayload;
 					telemetry.record("counter", "dispatch.completed", 1);
 					if (typeof payload.durationMs === "number") {
 						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
 					}
-					if (payload.providerId && payload.modelId && typeof payload.tokenCount === "number") {
-						telemetry.record("counter", "tokens.total", payload.tokenCount);
-						cost.accumulate(payload.providerId, payload.modelId, payload.tokenCount);
-					}
+					recordDispatchCost(telemetry, cost, payload);
 				}),
 			);
 			unsubscribes.push(
-				context.bus.on(BusChannels.DispatchFailed, () => {
+				context.bus.on(BusChannels.DispatchFailed, (raw) => {
+					const payload = (raw ?? {}) as DispatchCostPayload;
 					telemetry.record("counter", "dispatch.failed", 1);
+					if (typeof payload.durationMs === "number") {
+						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
+					}
+					recordDispatchCost(telemetry, cost, payload);
 				}),
 			);
 			unsubscribes.push(
