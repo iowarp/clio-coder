@@ -334,11 +334,6 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 	const extension: DomainExtension = {
 		async start() {
 			ledger = openLedger();
-			// Subscribe (minimal) to modes + safety contract channels so the dispatch
-			// domain participates in their lifecycle. Bodies are no-op today; slice 6+
-			// wires the session/provider side effects.
-			context.bus.on(BusChannels.ModeChanged, () => {});
-			context.bus.on(BusChannels.SafetyBlocked, () => {});
 		},
 		async stop() {
 			await drain();
