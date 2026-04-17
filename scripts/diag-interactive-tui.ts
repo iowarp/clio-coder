@@ -22,10 +22,17 @@
  * Full keyboard-driven tests live post-v0.1 when the terminal harness lands.
  */
 
+import { BusChannels } from "../src/core/bus-events.js";
+import { createSafeEventBus } from "../src/core/event-bus.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
+import {
+	type DispatchBoardRow,
+	createDispatchBoardStore,
+	formatDispatchBoardLines,
+} from "../src/interactive/dispatch-board.js";
 import { buildFooter } from "../src/interactive/footer-panel.js";
 import {
 	ALT_S,
@@ -674,6 +681,195 @@ async function main(): Promise<void> {
 	});
 	check("handleRun:failure-routes-to-stderr", failStderr.join("").includes("[run] failed: boom"), failStderr.join(""));
 	check("handleRun:failure-no-stdout-run-lines", failStdout.length === 0, failStdout.join(""));
+
+	// (7) /run scout streams real worker events into the dispatch-board overlay.
+	// Simulates the golden-path flow: dispatch emits enqueued + started,
+	// worker stream yields message_update / tool_execution_* / message_end,
+	// handleRun forwards each non-heartbeat event on BusChannels.DispatchProgress,
+	// the dispatch-board store updates the in-flight row live, and the row
+	// transitions to completed on the terminal receipt.
+	const streamBus = createSafeEventBus();
+	const streamStore = createDispatchBoardStore(streamBus);
+
+	const progressEvents: Array<{ runId?: string; event?: { type?: string } }> = [];
+	streamBus.on(BusChannels.DispatchProgress, (raw) => {
+		progressEvents.push(raw as { runId?: string; event?: { type?: string } });
+	});
+
+	let midStreamSnapshot: ReadonlyArray<DispatchBoardRow> | null = null;
+	let postMessageEndSnapshot: ReadonlyArray<DispatchBoardRow> | null = null;
+
+	const streamRunId = "run-stream-smoke";
+	const streamEvents: Array<{ type: string; [k: string]: unknown }> = [
+		{ type: "agent_start" },
+		{ type: "heartbeat" },
+		{ type: "message_update", message: { content: [{ type: "text", text: "partial" }] } },
+		{ type: "tool_execution_start", toolCallId: "t1", toolName: "read" },
+		{ type: "tool_execution_end", toolCallId: "t1", toolName: "read" },
+		{ type: "message_end", message: { role: "assistant", usage: { input: 7, output: 13 } } },
+		{ type: "agent_end" },
+	];
+	const streamReceipt: RunReceipt = {
+		runId: streamRunId,
+		agentId: "scout",
+		task: "faux-smoke",
+		providerId: "faux",
+		modelId: "faux-model",
+		runtime: "native",
+		startedAt: "2026-04-17T00:00:00.000Z",
+		endedAt: "2026-04-17T00:00:01.000Z",
+		exitCode: 0,
+		tokenCount: 20,
+		costUsd: 0,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.1.0-dev",
+		piMonoVersion: "0.67.4",
+		platform: "linux",
+		nodeVersion: "v20",
+		toolCalls: 1,
+		sessionId: null,
+	};
+
+	const streamDispatch: DispatchContract = {
+		dispatch: async (req: DispatchRequest) => {
+			streamBus.emit(BusChannels.DispatchEnqueued, {
+				runId: streamRunId,
+				agentId: req.agentId,
+				providerId: "faux",
+				modelId: "faux-model",
+				runtime: "native",
+			});
+			streamBus.emit(BusChannels.DispatchStarted, {
+				runId: streamRunId,
+				agentId: req.agentId,
+				providerId: "faux",
+				modelId: "faux-model",
+				runtime: "native",
+			});
+			let finalResolve = (): void => {};
+			const finalGate = new Promise<void>((resolve) => {
+				finalResolve = resolve;
+			});
+			async function* iter(): AsyncIterableIterator<unknown> {
+				let sawMidStream = false;
+				let sawMessageEnd = false;
+				for (const e of streamEvents) {
+					yield e;
+					// Snapshots run right after handleRun has processed `yield e` —
+					// at that point any DispatchProgress emit for this event has
+					// already fanned out through the store's synchronous listener.
+					if (!sawMidStream && e.type === "message_update") {
+						midStreamSnapshot = streamStore.rows();
+						sawMidStream = true;
+					}
+					if (!sawMessageEnd && e.type === "message_end") {
+						postMessageEndSnapshot = streamStore.rows();
+						sawMessageEnd = true;
+					}
+				}
+				finalResolve();
+			}
+			const finalPromise = (async (): Promise<RunReceipt> => {
+				await finalGate;
+				streamBus.emit(BusChannels.DispatchCompleted, {
+					runId: streamRunId,
+					agentId: req.agentId,
+					providerId: "faux",
+					modelId: "faux-model",
+					runtime: "native",
+					tokenCount: streamReceipt.tokenCount,
+					costUsd: 0,
+					durationMs: 1000,
+				});
+				return streamReceipt;
+			})();
+			return { runId: streamRunId, events: iter(), finalPromise };
+		},
+		listRuns: (_status?: RunStatus): ReadonlyArray<RunEnvelope> => [],
+		getRun: () => null,
+		abort: () => {},
+		drain: async () => {},
+	};
+
+	const streamStdout: string[] = [];
+	const streamStderr: string[] = [];
+	await handleRun("scout", "faux-smoke", {
+		dispatch: streamDispatch,
+		io: {
+			stdout: (s) => streamStdout.push(s),
+			stderr: (s) => streamStderr.push(s),
+		},
+		workerDefault: { provider: "faux", model: "faux-model" },
+		bus: streamBus,
+	});
+
+	check(
+		"stream:mid-stream-row-present",
+		midStreamSnapshot !== null && midStreamSnapshot.length === 1 && midStreamSnapshot[0]?.runId === streamRunId,
+		JSON.stringify(midStreamSnapshot),
+	);
+	check(
+		"stream:mid-stream-row-status-running",
+		midStreamSnapshot?.[0]?.status === "running",
+		JSON.stringify(midStreamSnapshot),
+	);
+	const midLines = midStreamSnapshot ? formatDispatchBoardLines(midStreamSnapshot) : [];
+	check(
+		"stream:mid-stream-overlay-shows-in-flight-row",
+		midLines.some((line) => line.includes("scout") && line.includes("running")),
+		JSON.stringify(midLines),
+	);
+
+	check(
+		"stream:tokens-update-from-message-end-before-terminal-receipt",
+		postMessageEndSnapshot?.[0]?.status === "running" && postMessageEndSnapshot?.[0]?.tokenCount === 20,
+		JSON.stringify(postMessageEndSnapshot),
+	);
+
+	const progressTypes = progressEvents.map((ev) => ev.event?.type ?? "?");
+	check(
+		"stream:progress-forwards-message-update",
+		progressTypes.includes("message_update"),
+		JSON.stringify(progressTypes),
+	);
+	check(
+		"stream:progress-forwards-tool-execution-start",
+		progressTypes.includes("tool_execution_start"),
+		JSON.stringify(progressTypes),
+	);
+	check(
+		"stream:progress-forwards-tool-execution-end",
+		progressTypes.includes("tool_execution_end"),
+		JSON.stringify(progressTypes),
+	);
+	check("stream:progress-forwards-message-end", progressTypes.includes("message_end"), JSON.stringify(progressTypes));
+	check("stream:progress-suppresses-heartbeat", !progressTypes.includes("heartbeat"), JSON.stringify(progressTypes));
+	check(
+		"stream:progress-payload-carries-runid",
+		progressEvents.every((ev) => ev.runId === streamRunId),
+		JSON.stringify(progressEvents.map((ev) => ev.runId)),
+	);
+
+	const finalRows = streamStore.rows();
+	check(
+		"stream:final-row-status-completed",
+		finalRows.length === 1 && finalRows[0]?.status === "completed",
+		JSON.stringify(finalRows),
+	);
+	check(
+		"stream:final-row-tokens-match-receipt",
+		finalRows[0]?.tokenCount === streamReceipt.tokenCount,
+		JSON.stringify(finalRows),
+	);
+	const finalLines = formatDispatchBoardLines(finalRows);
+	check(
+		"stream:final-overlay-shows-completed-row",
+		finalLines.some((line) => line.includes("scout") && line.includes("completed")),
+		JSON.stringify(finalLines),
+	);
+
+	streamStore.unsubscribe();
 
 	if (failures.length > 0) {
 		process.stderr.write(`[diag-interactive-tui] FAILED ${failures.length} check(s)\n`);
