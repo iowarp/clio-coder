@@ -65,7 +65,6 @@ function baseClassify(tool: string): ActionClass | null {
 			return "write";
 		case ToolNames.Bash:
 			return "execute";
-		case ToolNames.BatchDispatch:
 		case ToolNames.ChainDispatch:
 			return "dispatch";
 		default:

@@ -15,7 +15,6 @@ export const ToolNames = {
 	WebSearch: "web_search",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
-	BatchDispatch: "batch_dispatch",
 	ChainDispatch: "chain_dispatch",
 } as const;
 

@@ -1,4 +1,3 @@
-import { batchDispatchTool } from "../src/tools/batch-dispatch.js";
 import { registerAllTools } from "../src/tools/bootstrap.js";
 import { chainDispatchTool } from "../src/tools/chain-dispatch.js";
 import { createToolIndex } from "../src/tools/registry.js";
@@ -22,20 +21,10 @@ async function main(): Promise<void> {
 		index.listAll().every((tool) => tool.name !== "dispatch_agent"),
 		JSON.stringify(index.listAll().map((tool) => tool.name)),
 	);
-
-	const bdOk = await batchDispatchTool.run({
-		dispatches: [
-			{ agent: "scout", task: "a" },
-			{ agent: "worker", task: "b" },
-		],
-	});
 	check(
-		"batch_dispatch:stub-ok",
-		bdOk.kind === "ok" &&
-			bdOk.output.includes("batch_dispatch stub") &&
-			bdOk.output.includes("scout") &&
-			bdOk.output.includes("worker"),
-		`got ${JSON.stringify(bdOk)}`,
+		"batch_dispatch:not-registered",
+		index.listAll().every((tool) => tool.name !== "batch_dispatch"),
+		JSON.stringify(index.listAll().map((tool) => tool.name)),
 	);
 
 	const cdOk = await chainDispatchTool.run({ fleet: "scout -> worker" });
