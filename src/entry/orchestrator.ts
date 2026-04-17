@@ -7,6 +7,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { SafetyDomainModule } from "../domains/safety/index.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -30,7 +31,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	ensureInstalled();
 	timer.mark("install check");
 
-	const result = await loadDomains([ConfigDomainModule, LifecycleDomainModule]);
+	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, LifecycleDomainModule]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
