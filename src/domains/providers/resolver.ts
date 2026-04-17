@@ -1,3 +1,4 @@
+import { type Api, type Model, supportsXhigh as piSupportsXhigh } from "@mariozechner/pi-ai";
 import { PROVIDER_CATALOG, type ProviderId, isLocalEngineId } from "./catalog.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -11,8 +12,35 @@ export const VALID_THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"xhigh",
 ] as const;
 
+const THINKING_LEVELS_WITHOUT_XHIGH: readonly ThinkingLevel[] = VALID_THINKING_LEVELS.filter(
+	(level) => level !== "xhigh",
+);
+
 export function isValidThinkingLevel(value: string): value is ThinkingLevel {
 	return (VALID_THINKING_LEVELS as readonly string[]).includes(value);
+}
+
+/** True when the model exposes pi-ai's `reasoning` capability flag. */
+export function supportsThinking(model: Model<never> | undefined): boolean {
+	return !!(model as { reasoning?: boolean } | undefined)?.reasoning;
+}
+
+/**
+ * Delegates to pi-ai's canonical `supportsXhigh` helper so the gate stays in
+ * sync with model registry updates. Returns false when no model is supplied.
+ */
+export function supportsXhighThinking(model: Model<never> | undefined): boolean {
+	if (!model) return false;
+	return piSupportsXhigh(model as unknown as Model<Api>);
+}
+
+/**
+ * Pure lookup of the thinking levels an active model accepts. Used by the
+ * /thinking overlay and Shift+Tab cycling to clamp choices to model capability.
+ */
+export function getAvailableThinkingLevels(model: Model<never> | undefined): readonly ThinkingLevel[] {
+	if (!supportsThinking(model)) return ["off"];
+	return supportsXhighThinking(model) ? VALID_THINKING_LEVELS : THINKING_LEVELS_WITHOUT_XHIGH;
 }
 
 export interface ResolvedModelRef {
