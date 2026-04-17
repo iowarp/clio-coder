@@ -78,6 +78,8 @@ async function run(): Promise<void> {
 		const { PromptsDomainModule } = await import("../src/domains/prompts/index.js");
 		const { AgentsDomainModule } = await import("../src/domains/agents/index.js");
 		const { DispatchDomainModule } = await import("../src/domains/dispatch/index.js");
+		const { SessionDomainModule } = await import("../src/domains/session/index.js");
+		const { ObservabilityDomainModule } = await import("../src/domains/observability/index.js");
 		const { BusChannels } = await import("../src/core/bus-events.js");
 
 		const bus = getSharedBus();
@@ -95,6 +97,8 @@ async function run(): Promise<void> {
 			PromptsDomainModule,
 			AgentsDomainModule,
 			DispatchDomainModule,
+			SessionDomainModule,
+			ObservabilityDomainModule,
 		]);
 		check("domain:loaded", loaded.loaded.includes("dispatch"), `loaded=${loaded.loaded.join(",")}`);
 
@@ -177,6 +181,23 @@ async function run(): Promise<void> {
 		check("receipt:file-exists", existsSync(receiptPath), receiptPath);
 		const onDiskReceipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { runId: string };
 		check("receipt:file-runId-matches", onDiskReceipt.runId === res.runId, `runId=${onDiskReceipt.runId}`);
+
+		// ---- observability sees enriched DispatchCompleted payload --------------
+		type ObservabilityContractType = import("../src/domains/observability/contract.js").ObservabilityContract;
+		const obs = loaded.getContract<ObservabilityContractType>("observability");
+		check("observability:contract-exposed", obs !== undefined);
+		if (obs) {
+			const entries = obs.costEntries();
+			const matching = entries.find((e) => e.providerId === "faux" && e.modelId === "faux-model");
+			check("observability:cost-entry-for-completed-run", matching !== undefined, `entries=${JSON.stringify(entries)}`);
+			const snapshot = obs.metrics();
+			const hist = snapshot.histograms["dispatch.duration_ms"];
+			check(
+				"observability:duration-histogram-from-real-dispatch",
+				hist !== undefined && hist.count >= 1,
+				`hist=${JSON.stringify(hist)}`,
+			);
+		}
 
 		// ---- 2nd dispatch: abort immediately, expect "interrupted" --------------
 		const res2 = await dispatch.dispatch({

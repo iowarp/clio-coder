@@ -134,8 +134,19 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		});
 		ledgerRef.update(envelope.id, { status: "running", pid: worker.pid });
 
-		context.bus.emit(BusChannels.DispatchEnqueued, { runId: envelope.id, agentId: req.agentId });
-		context.bus.emit(BusChannels.DispatchStarted, { runId: envelope.id, pid: worker.pid });
+		context.bus.emit(BusChannels.DispatchEnqueued, {
+			runId: envelope.id,
+			agentId: req.agentId,
+			providerId,
+			modelId,
+		});
+		context.bus.emit(BusChannels.DispatchStarted, {
+			runId: envelope.id,
+			agentId: req.agentId,
+			providerId,
+			modelId,
+			pid: worker.pid,
+		});
 
 		const startedAt = envelope.startedAt;
 
@@ -184,11 +195,29 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			ledgerRef.recordReceipt(envelope.id, receipt);
 			await ledgerRef.persist();
 			active.delete(envelope.id);
+			const startMs = Date.parse(receipt.startedAt);
+			const endMs = Date.parse(receipt.endedAt);
+			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
 			if (status === "completed") {
-				context.bus.emit(BusChannels.DispatchCompleted, { runId: envelope.id, exitCode: receiptExitCode });
+				context.bus.emit(BusChannels.DispatchCompleted, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					providerId,
+					modelId,
+					tokenCount: receipt.tokenCount,
+					costUsd: receipt.costUsd,
+					durationMs,
+					exitCode: receiptExitCode,
+				});
 			} else {
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
+					agentId: req.agentId,
+					providerId,
+					modelId,
+					tokenCount: receipt.tokenCount,
+					costUsd: receipt.costUsd,
+					durationMs,
 					exitCode: receiptExitCode,
 					reason: status,
 				});
