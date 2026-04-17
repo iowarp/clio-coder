@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { listModels } from "../src/cli/list-models.js";
 import {
 	VALID_THINKING_LEVELS,
+	getAvailableThinkingLevels,
 	parseModelPattern,
 	resolveModelPattern,
 	resolveModelScope,
@@ -138,6 +139,22 @@ run("routeInteractiveKey Alt+M triggers cycleMode", () => {
 	assert.equal(consumed, true);
 	assert.equal(mode, 1);
 	assert.equal(thinking, 0);
+});
+
+// Slice 2.5: thinking-level clamping by model reasoning capability.
+run("getAvailableThinkingLevels(undefined) -> [off]", () => {
+	assert.deepEqual(getAvailableThinkingLevels(undefined), ["off"]);
+});
+run("getAvailableThinkingLevels(non-reasoning model) -> [off]", () => {
+	assert.deepEqual(getAvailableThinkingLevels({ reasoning: false } as never), ["off"]);
+});
+run("getAvailableThinkingLevels(reasoning model) -> 5 or 6 levels", () => {
+	const levels = getAvailableThinkingLevels({ reasoning: true, id: "diag-thinking" } as never);
+	assert.ok(
+		levels.length === 5 || levels.length === 6,
+		`expected 5 or 6 levels, got ${levels.length}: ${levels.join(",")}`,
+	);
+	assert.equal(levels[0], "off");
 });
 
 process.stdout.write("[diag-selectors] all checks ok\n");
