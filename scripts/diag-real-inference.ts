@@ -20,7 +20,8 @@
  * Exits 0 on full pass, 1 on any assertion failure.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -355,6 +356,101 @@ async function run(): Promise<void> {
 					`input=${finalMessage.usage.input} output=${finalMessage.usage.output} total=${finalMessage.usage.totalTokens}`,
 				);
 				info(`${label}:stop-reason`, finalMessage.stopReason);
+			}
+
+			// Subprocess dispatch check. Spawn the worker via the dispatch-domain
+			// spawn path with endpointName + endpointSpec threaded through the
+			// WorkerSpec and assert it emits at least one message_update event
+			// carrying non-empty content or thinking. Proves the S10 bootstrap
+			// fix works end-to-end, not just in-process.
+			const projectRoot = process.cwd();
+			const workerJs = join(projectRoot, "dist/worker/entry.js");
+			if (!existsSync(workerJs)) {
+				info("subprocess:build", "dist/worker/entry.js missing, running build");
+				execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: projectRoot });
+			}
+			check("subprocess:worker-bundle-present", existsSync(workerJs), `path=${workerJs}`);
+
+			const { spawnNativeWorker } = await import("../src/domains/dispatch/worker-spawn.js");
+
+			for (const target of TARGETS) {
+				const label = `${target.providerId}/${target.endpointName}:subprocess`;
+				const envKey = target.apiKeyEnv ? process.env[target.apiKeyEnv] : undefined;
+				const apiKey = envKey && envKey.length > 0 ? envKey : "clio-local-endpoint";
+				const endpointSpec: import("../src/engine/worker-runtime.js").EndpointSpec = {
+					url: target.url,
+					default_model: target.defaultModel,
+					api_key: apiKey,
+				};
+				const spec = {
+					systemPrompt: "You are a terse assistant.",
+					task: PROMPT,
+					providerId: target.providerId,
+					modelId: `${target.defaultModel}@${target.endpointName}`,
+					endpointName: target.endpointName,
+					endpointSpec,
+					allowedTools: [] as ReadonlyArray<string>,
+					mode: "default",
+				};
+
+				const spawnStart = Date.now();
+				const worker = spawnNativeWorker(spec, { cwd: projectRoot });
+				const events: Array<{ type: string; [key: string]: unknown }> = [];
+				const deadline = Date.now() + STREAM_TIMEOUT_MS;
+				let sawNonEmptyUpdate = false;
+				const iterator = worker.events[Symbol.asyncIterator]();
+				while (true) {
+					const remaining = deadline - Date.now();
+					if (remaining <= 0) {
+						worker.abort();
+						break;
+					}
+					const timeoutPromise = new Promise<{ done: true; value: undefined; __timeout: true }>((resolve) => {
+						setTimeout(() => resolve({ done: true, value: undefined, __timeout: true }), remaining).unref();
+					});
+					const result = (await Promise.race([iterator.next(), timeoutPromise])) as
+						| IteratorResult<unknown>
+						| { done: true; value: undefined; __timeout: true };
+					if ("__timeout" in result) {
+						worker.abort();
+						break;
+					}
+					if (result.done) break;
+					const evt = result.value as { type: string; [key: string]: unknown };
+					events.push(evt);
+					if (evt.type === "message_update") {
+						const message = evt.message as
+							| { content?: Array<{ type: string; text?: string; thinking?: string }> }
+							| undefined;
+						const content = message?.content ?? [];
+						for (const block of content) {
+							if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+								sawNonEmptyUpdate = true;
+								break;
+							}
+							if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) {
+								sawNonEmptyUpdate = true;
+								break;
+							}
+						}
+					}
+				}
+				const exitStatus = await worker.promise;
+				const elapsed = Date.now() - spawnStart;
+				info(`${label}:elapsed-ms`, String(elapsed));
+				info(`${label}:event-count`, String(events.length));
+				info(`${label}:exit-code`, String(exitStatus.exitCode ?? "null"));
+
+				check(
+					`${label}:exit-code-zero`,
+					exitStatus.exitCode === 0,
+					`exitCode=${exitStatus.exitCode} signal=${exitStatus.signal ?? "null"}`,
+				);
+				check(
+					`${label}:message-update-with-content`,
+					sawNonEmptyUpdate,
+					`types=${JSON.stringify(events.map((e) => e.type))}`,
+				);
 			}
 		} finally {
 			await domains.stop();
