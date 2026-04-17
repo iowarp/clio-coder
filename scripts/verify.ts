@@ -131,7 +131,7 @@ function checkProvidersCommand(env: NodeJS.ProcessEnv): void {
 	const { stdout, exitCode } = runCli(["providers"], env);
 	if (exitCode !== 0) fail(`clio providers exited ${exitCode}`, stdout);
 	if (!stdout.includes("anthropic")) fail("clio providers missing anthropic row", stdout);
-	if (!stdout.includes("local")) fail("clio providers missing local row", stdout);
+	if (!stdout.includes("llamacpp")) fail("clio providers missing llamacpp row", stdout);
 	log("clio providers OK");
 }
 
