@@ -9,3 +9,14 @@ export const ProvidersDomainModule: DomainModule = {
 
 export { ProvidersManifest } from "./manifest.js";
 export type { ProvidersContract, ProviderListEntry } from "./contract.js";
+export {
+	isValidThinkingLevel,
+	parseModelPattern,
+	resolveModelPattern,
+	resolveModelScope,
+	VALID_THINKING_LEVELS,
+	type ResolvedModelRef,
+	type ResolveOptions,
+	type ResolveResult,
+	type ThinkingLevel,
+} from "./resolver.js";
