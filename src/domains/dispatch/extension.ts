@@ -15,6 +15,7 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import type { EndpointSpec } from "../../engine/worker-runtime.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -144,6 +145,19 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			isLocalEngineId(providerId) && endpointName && !resolvedModelRaw.includes("@")
 				? `${resolvedModelRaw}@${endpointName}`
 				: resolvedModelRaw;
+		// Resolve the EndpointSpec so the worker subprocess can seed its own
+		// local-model registry. Worker subprocesses boot fresh and never load
+		// settings.yaml; without this the worker's `getModel` lookup falls
+		// through to pi-ai's catalog, which does not know the local engine ids.
+		let endpointSpec: EndpointSpec | undefined;
+		if (isLocalEngineId(providerId) && endpointName) {
+			const providerKey = providerId as keyof NonNullable<typeof settings>["providers"];
+			const providerEndpoints = settings?.providers?.[providerKey]?.endpoints;
+			endpointSpec = providerEndpoints?.[endpointName];
+			if (!endpointSpec) {
+				throw new Error(`dispatch: endpoint "${endpointName}" not found under providers.${providerId}.endpoints`);
+			}
+		}
 		const runtime = req.runtime ?? recipe?.runtime ?? "native";
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
@@ -164,6 +178,10 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			allowedTools,
 			mode: workerMode,
 		};
+		if (endpointName && endpointSpec) {
+			spec.endpointName = endpointName;
+			spec.endpointSpec = endpointSpec;
+		}
 
 		const worker = spawnNativeWorker(spec, { cwd });
 

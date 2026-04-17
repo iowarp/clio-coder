@@ -9,7 +9,7 @@
  */
 
 import type { ToolName } from "../core/tool-names.js";
-import { startWorkerRun } from "../engine/worker-runtime.js";
+import { type EndpointSpec, startWorkerRun } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 
@@ -22,6 +22,8 @@ interface WorkerSpec {
 	apiKey?: string;
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
+	endpointName?: string;
+	endpointSpec?: EndpointSpec;
 }
 
 async function main(): Promise<number> {

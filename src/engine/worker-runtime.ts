@@ -12,11 +12,14 @@
  * pre-tool-registration baseline; the worker will never call a tool on this run.
  */
 
+import type { EndpointSpec } from "../core/defaults.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
-import { getModel, registerFauxFromEnv } from "./ai.js";
+import { getModel, registerFauxFromEnv, registerLocalProviders } from "./ai.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import { resolveAgentTools } from "./worker-tools.js";
+
+export type { EndpointSpec };
 
 export interface WorkerRunInput {
 	systemPrompt: string;
@@ -29,6 +32,16 @@ export interface WorkerRunInput {
 	allowedTools?: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
 	mode?: ModeName;
+	/**
+	 * Local-engine endpoint name. When both this and `endpointSpec` are set, the
+	 * worker registers the endpoint into its in-process local-model registry
+	 * before calling `getModel`, so a freshly spawned worker subprocess can
+	 * resolve `${providerId}:${modelId}` for llamacpp/lmstudio/ollama/openai-compat
+	 * without re-reading settings.yaml.
+	 */
+	endpointName?: string;
+	/** EndpointSpec for the worker's single local endpoint. See `endpointName`. */
+	endpointSpec?: EndpointSpec;
 }
 
 export interface WorkerRunResult {
@@ -68,6 +81,11 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const fauxModel = registerFauxFromEnv();
+	if (input.endpointName && input.endpointSpec) {
+		registerLocalProviders({
+			[input.providerId]: { endpoints: { [input.endpointName]: input.endpointSpec } },
+		} as Parameters<typeof registerLocalProviders>[0]);
+	}
 	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
 	const mode: ModeName = input.mode ?? "default";
 	const tools = resolveAgentTools(input.allowedTools, mode);
@@ -86,6 +104,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		getApiKey: async (provider: string) => {
 			if (input.apiKey && input.apiKey.length > 0) return input.apiKey;
+			if (input.endpointSpec?.api_key && input.endpointSpec.api_key.length > 0) {
+				return input.endpointSpec.api_key;
+			}
 			return process.env[`${provider.toUpperCase()}_API_KEY`];
 		},
 	};

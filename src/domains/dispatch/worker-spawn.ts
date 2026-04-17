@@ -15,6 +15,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { EndpointSpec } from "../../engine/worker-runtime.js";
 
 export interface WorkerSpec {
 	systemPrompt: string;
@@ -28,6 +29,14 @@ export interface WorkerSpec {
 	allowedTools?: ReadonlyArray<string>;
 	/** Mode matrix the worker runs under (default, advise, super). */
 	mode?: string;
+	/**
+	 * Local-engine endpoint name that pairs with `endpointSpec`. Present only
+	 * when `providerId` is one of llamacpp/lmstudio/ollama/openai-compat; the
+	 * worker uses both fields to seed its in-process local-model registry.
+	 */
+	endpointName?: string;
+	/** EndpointSpec for the single local endpoint the worker is dispatching to. */
+	endpointSpec?: EndpointSpec;
 }
 
 export interface SpawnedWorker {
