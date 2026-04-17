@@ -25,6 +25,9 @@
 		"LICENSE",
 		"damage-control-rules.yaml"
 	],
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"build": "tsup",
 		"dev": "tsup --watch",
@@ -86,7 +89,8 @@
 		"stress": "tsx scripts/stress.ts",
 		"stress:real": "CLIO_STRESS_REAL=1 tsx scripts/stress.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:providers-llamacpp && npm run diag:providers-lmstudio && npm run diag:providers-ollama && npm run diag:providers-openai-compat && npm run diag:setup && npm run diag:agents && npm run diag:tools && npm run diag:cli-runtimes && npm run diag:interactive-tui && npm run diag:dispatch-board && npm run build && npm run diag:claude-sdk && npm run diag:dispatch && npm run diag:single-dispatch && npm run diag:worker-tools && npm run diag:orchestrator && npm run diag:intelligence && npm run diag:observability && npm run diag:scheduling && npm run diag:dispatch-budget && npm run diag:upgrade && npm run verify && npm run smoke"
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:providers-llamacpp && npm run diag:providers-lmstudio && npm run diag:providers-ollama && npm run diag:providers-openai-compat && npm run diag:setup && npm run diag:agents && npm run diag:tools && npm run diag:cli-runtimes && npm run diag:interactive-tui && npm run diag:dispatch-board && npm run build && npm run diag:claude-sdk && npm run diag:dispatch && npm run diag:single-dispatch && npm run diag:worker-tools && npm run diag:orchestrator && npm run diag:intelligence && npm run diag:observability && npm run diag:scheduling && npm run diag:dispatch-budget && npm run diag:upgrade && npm run verify && npm run smoke",
+		"prepublishOnly": "npm run typecheck && npm run lint && npm run build && node scripts/check-dist.mjs"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",
