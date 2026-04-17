@@ -39,9 +39,11 @@ import {
 	routeDispatchBoardOverlayKey,
 	routeInteractiveKey,
 	routeOverlayKey,
+	routeProvidersOverlayKey,
 	routeSuperOverlayKey,
 	startInteractive,
 } from "../src/interactive/index.js";
+import { formatProvidersOverlayLines } from "../src/interactive/providers-overlay.js";
 import { renderSuperOverlayLines } from "../src/interactive/super-overlay.js";
 
 const failures: string[] = [];
@@ -471,6 +473,192 @@ async function main(): Promise<void> {
 	check("handleRun:filters-heartbeat", !joined.includes("[run] heartbeat"), joined);
 	check("handleRun:prints-final-receipt", joined.includes("[run] done exit=0 tokens=42"), joined);
 	check("handleRun:no-stderr-on-success", stderr.length === 0, stderr.join(""));
+
+	// (6) /providers slash command parsing + overlay formatting
+	check("parse:providers-command", parseSlashCommand("/providers").kind === "providers");
+	check(
+		"parse:providers-with-trailing-space",
+		parseSlashCommand("  /providers  ").kind === "providers",
+		parseSlashCommand("  /providers  ").kind,
+	);
+	check(
+		"parse:providers-with-arg-is-unknown",
+		parseSlashCommand("/providers set").kind === "unknown",
+		parseSlashCommand("/providers set").kind,
+	);
+
+	const providersFixture: ProviderListEntry[] = [
+		{
+			id: "anthropic",
+			displayName: "Anthropic",
+			tier: "sdk",
+			available: false,
+			reason: "missing ANTHROPIC_API_KEY",
+			health: {
+				providerId: "anthropic",
+				status: "unknown",
+				lastCheckAt: null,
+				lastError: null,
+				latencyMs: null,
+			},
+		},
+		{
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			tier: "native",
+			available: true,
+			reason: "endpoints configured",
+			health: {
+				providerId: "llamacpp",
+				status: "healthy",
+				lastCheckAt: "2026-04-17T00:00:00.000Z",
+				lastError: null,
+				latencyMs: 42,
+			},
+			endpoints: [
+				{
+					name: "primary",
+					url: "http://localhost:8080",
+					probe: {
+						name: "primary",
+						url: "http://localhost:8080",
+						ok: true,
+						latencyMs: 12,
+						models: ["qwen2.5-coder-7b", "llama-3.2-3b"],
+					},
+				},
+			],
+		},
+		{
+			id: "lmstudio",
+			displayName: "LM Studio",
+			tier: "native",
+			available: false,
+			reason: "endpoint unreachable",
+			health: {
+				providerId: "lmstudio",
+				status: "down",
+				lastCheckAt: "2026-04-17T00:00:00.000Z",
+				lastError: "connection refused",
+				latencyMs: null,
+			},
+			endpoints: [
+				{
+					name: "main",
+					url: "http://localhost:1234",
+					probe: {
+						name: "main",
+						url: "http://localhost:1234",
+						ok: false,
+						error: "connection refused",
+					},
+				},
+			],
+		},
+	];
+
+	const overlayRender = formatProvidersOverlayLines(providersFixture);
+	check("providers-overlay:first-line-is-top-border", overlayRender[0]?.startsWith("┌"), overlayRender[0]);
+	check(
+		"providers-overlay:last-line-is-bottom-border",
+		overlayRender[overlayRender.length - 1]?.startsWith("└"),
+		overlayRender[overlayRender.length - 1],
+	);
+	const joinedOverlay = overlayRender.join("\n");
+	check("providers-overlay:lists-anthropic-row", joinedOverlay.includes("anthropic"), joinedOverlay);
+	check(
+		"providers-overlay:shows-unknown-tag-for-anthropic",
+		/anthropic\s+sdk\s+unknown/.test(joinedOverlay),
+		joinedOverlay,
+	);
+	check(
+		"providers-overlay:lists-llamacpp-header",
+		joinedOverlay.includes("llamacpp (1 endpoint, 1 healthy)"),
+		joinedOverlay,
+	);
+	check("providers-overlay:shows-endpoint-model-count", joinedOverlay.includes("2 models"), joinedOverlay);
+	check("providers-overlay:shows-endpoint-latency", joinedOverlay.includes("12ms"), joinedOverlay);
+	check(
+		"providers-overlay:lists-lmstudio-header",
+		joinedOverlay.includes("lmstudio (1 endpoint, 0 healthy, 1 unreachable)"),
+		joinedOverlay,
+	);
+	check("providers-overlay:shows-endpoint-error", joinedOverlay.includes("connection refused"), joinedOverlay);
+	check("providers-overlay:hint-line-present", joinedOverlay.includes("[Esc] close"), joinedOverlay);
+
+	const widths = new Set(overlayRender.map((l) => l.length));
+	check("providers-overlay:every-line-same-width", widths.size === 1, [...widths].join(","));
+
+	const errorRender = formatProvidersOverlayLines([], { error: "network down" });
+	check(
+		"providers-overlay:surfaces-probe-error",
+		errorRender.some((line) => line.includes("probe error: network down")),
+		errorRender.join("\n"),
+	);
+
+	let providersOverlayCloseCalls = 0;
+	const providersEsc = routeProvidersOverlayKey(ESC, {
+		closeOverlay: () => {
+			providersOverlayCloseCalls += 1;
+		},
+	});
+	check("providers-overlay:esc-consumed", providersEsc === true);
+	check("providers-overlay:esc-calls-close", providersOverlayCloseCalls === 1, String(providersOverlayCloseCalls));
+
+	const providersOtherKey = routeProvidersOverlayKey("x", {
+		closeOverlay: () => {
+			providersOverlayCloseCalls += 1;
+		},
+	});
+	check("providers-overlay:other-key-not-routed", providersOtherKey === false);
+	check(
+		"providers-overlay:other-key-does-not-close",
+		providersOverlayCloseCalls === 1,
+		String(providersOverlayCloseCalls),
+	);
+
+	let providersOverlayShutdownCalls = 0;
+	let providersOverlayGenericCloseCalls = 0;
+	const providersOverlayCtrlD = routeOverlayKey(CTRL_D, "providers", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_010,
+		closeOverlay: () => {
+			providersOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			providersOverlayShutdownCalls += 1;
+		},
+	});
+	check("providers-overlay:ctrl-d-consumed", providersOverlayCtrlD === true);
+	check(
+		"providers-overlay:ctrl-d-calls-shutdown",
+		providersOverlayShutdownCalls === 1,
+		String(providersOverlayShutdownCalls),
+	);
+	check(
+		"providers-overlay:ctrl-d-does-not-close",
+		providersOverlayGenericCloseCalls === 0,
+		String(providersOverlayGenericCloseCalls),
+	);
+
+	const providersOverlayEscGeneric = routeOverlayKey(ESC, "providers", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_011,
+		closeOverlay: () => {
+			providersOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			providersOverlayShutdownCalls += 1;
+		},
+	});
+	check("providers-overlay:esc-via-overlay-router-consumed", providersOverlayEscGeneric === true);
+	check(
+		"providers-overlay:esc-via-overlay-router-calls-close",
+		providersOverlayGenericCloseCalls === 1,
+		String(providersOverlayGenericCloseCalls),
+	);
 
 	// handleRun on failure routes the error to stderr
 	const failStdout: string[] = [];
