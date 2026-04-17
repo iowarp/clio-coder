@@ -81,19 +81,115 @@ function checkInstall(home: string, env: NodeJS.ProcessEnv): void {
 	log("clio install OK (idempotent)");
 }
 
+type ExampleSpec = {
+	provider: "llamacpp" | "lmstudio";
+	endpoint: "mini" | "dynamo";
+	expected: {
+		url: string;
+		default_model: string;
+		context_window: number;
+		max_tokens: number;
+	};
+};
+
+const EXAMPLE_SPECS: readonly ExampleSpec[] = [
+	{
+		provider: "llamacpp",
+		endpoint: "mini",
+		expected: {
+			url: "http://192.168.86.141:8080",
+			default_model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			context_window: 262144,
+			max_tokens: 16384,
+		},
+	},
+	{
+		provider: "lmstudio",
+		endpoint: "dynamo",
+		expected: {
+			url: "http://192.168.86.143:1234",
+			default_model: "qwen3.6-35b-a3b",
+			context_window: 262144,
+			max_tokens: 16384,
+		},
+	},
+];
+
+function uncommentTemplateLine(line: string): string {
+	return line.replace(/^(\s*)# /, "$1");
+}
+
+function materializeExampleBlock(body: string, provider: ExampleSpec["provider"], endpoint: ExampleSpec["endpoint"]): string {
+	const lines = body.split("\n");
+	const providerLine = `  ${provider}:`;
+	const providerIndex = lines.findIndex((line) => line === providerLine);
+	if (providerIndex < 0) fail(`settings.yaml missing provider block ${provider}`);
+
+	const endpointsIndex = lines.findIndex((line, index) => index > providerIndex && line === "    endpoints: {}");
+	if (endpointsIndex < 0) fail(`settings.yaml missing endpoints placeholder for ${provider}`);
+
+	const startMarker = `# clio-example:start provider=${provider} endpoint=${endpoint}`;
+	const endMarker = `# clio-example:end provider=${provider} endpoint=${endpoint}`;
+	const startIndex = lines.findIndex((line) => line.trim() === startMarker);
+	const endIndex = lines.findIndex((line) => line.trim() === endMarker);
+	if (startIndex < 0 || endIndex < 0 || endIndex <= startIndex) {
+		fail(`settings.yaml missing canonical example markers for ${provider}/${endpoint}`);
+	}
+
+	const exampleLines = lines.slice(startIndex + 1, endIndex).map(uncommentTemplateLine);
+	return [...lines.slice(0, endpointsIndex), ...exampleLines, ...lines.slice(endpointsIndex + 1)].join("\n");
+}
+
+function checkExampleFixture(body: string, spec: ExampleSpec): void {
+	let parsed: unknown;
+	try {
+		parsed = parseYaml(materializeExampleBlock(body, spec.provider, spec.endpoint));
+	} catch (err) {
+		fail(`settings.yaml example for ${spec.provider}/${spec.endpoint} did not parse after replacement`, (err as Error).message);
+	}
+
+	const endpoint =
+		(parsed as {
+			providers?: Record<string, { endpoints?: Record<string, unknown> }>;
+		}).providers?.[spec.provider]?.endpoints?.[spec.endpoint];
+	if (endpoint === undefined || endpoint === null || typeof endpoint !== "object" || Array.isArray(endpoint)) {
+		fail(`settings.yaml example for ${spec.provider}/${spec.endpoint} did not materialize an endpoint object`);
+	}
+
+	const actual = endpoint as Record<string, unknown>;
+	const expectedKeys = Object.keys(spec.expected).sort();
+	const actualKeys = Object.keys(actual).sort();
+	if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+		fail(
+			`settings.yaml example for ${spec.provider}/${spec.endpoint} had the wrong key set`,
+			`expected=${JSON.stringify(expectedKeys)} actual=${JSON.stringify(actualKeys)}`,
+		);
+	}
+
+	for (const [key, value] of Object.entries(spec.expected)) {
+		if (actual[key] !== value) {
+			fail(
+				`settings.yaml example for ${spec.provider}/${spec.endpoint} had the wrong value for ${key}`,
+				`expected=${JSON.stringify(value)} actual=${JSON.stringify(actual[key])}`,
+			);
+		}
+	}
+}
+
 function checkSettingsTemplate(home: string): void {
 	const settingsPath = join(home, "settings.yaml");
 	const body = readFileSync(settingsPath, "utf8");
-	const requiredLiterals = ["# Example: llama.cpp on the homelab", "mini:", "dynamo:", "# api_key:"];
-	for (const literal of requiredLiterals) {
-		if (!body.includes(literal)) {
-			fail(`settings.yaml missing literal ${JSON.stringify(literal)}; regression of first-install example block`, body);
-		}
-	}
+	if (body.includes("clio providers use")) fail("settings.yaml still advertises the nonexistent 'clio providers use' flow", body);
+
+	let parsed: unknown;
 	try {
-		parseYaml(body);
+		parsed = parseYaml(body);
 	} catch (err) {
 		fail("settings.yaml did not parse after install", (err as Error).message);
+	}
+
+	for (const spec of EXAMPLE_SPECS) {
+		checkExampleFixture(body, spec);
 	}
 	log("settings.yaml example block OK");
 }

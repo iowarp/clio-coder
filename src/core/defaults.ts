@@ -89,19 +89,21 @@ defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
 # Active provider and model for the orchestrator loop. Leave null until
-# you pick one by uncommenting an example below or running clio providers.
+# you configure a provider and model below.
 provider:
   active: null
   model: null
 
 # Local inference engines. Each entry under endpoints becomes a selectable
-# target. Uncomment a block below, then run clio doctor to verify.
+# target. Replace endpoints: {} with one of the blocks below, then run
+# clio doctor and clio providers to verify.
 providers:
   llamacpp:
     endpoints: {}
-    # Example: llama.cpp on the homelab (uncomment to use)
-    # Replace the host and port with your llama-server --host --port.
-    # Then run clio providers use llamacpp mini to activate.
+    # Example: llama.cpp on the homelab.
+    # Replace endpoints: {} above with the block below.
+    # Replace the host and port with the values you pass to llama-server.
+    # clio-example:start provider=llamacpp endpoint=mini
     # endpoints:
     #   mini:
     #     url: http://192.168.86.141:8080
@@ -109,11 +111,14 @@ providers:
     #     # api_key: llama-no-auth
     #     context_window: 262144
     #     max_tokens: 16384
+    # clio-example:end provider=llamacpp endpoint=mini
 
   lmstudio:
     endpoints: {}
-    # Example: LM Studio on the homelab (uncomment to use)
+    # Example: LM Studio on the homelab.
+    # Replace endpoints: {} above with the block below.
     # Point at the LM Studio server on :1234 with the model loaded.
+    # clio-example:start provider=lmstudio endpoint=dynamo
     # endpoints:
     #   dynamo:
     #     url: http://192.168.86.143:1234
@@ -121,6 +126,7 @@ providers:
     #     # api_key: lm-studio
     #     context_window: 262144
     #     max_tokens: 16384
+    # clio-example:end provider=lmstudio endpoint=dynamo
 
   ollama:
     endpoints: {}
