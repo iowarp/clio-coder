@@ -29,13 +29,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BusChannels } from "../src/core/bus-events.js";
 import { createSafeEventBus } from "../src/core/event-bus.js";
-import { visibleWidth } from "../src/engine/tui.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
-import type { CostEntry, ObservabilityContract } from "../src/domains/observability/index.js";
 import { createObservabilityBundle } from "../src/domains/observability/extension.js";
+import type { CostEntry, ObservabilityContract } from "../src/domains/observability/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
+import { visibleWidth } from "../src/engine/tui.js";
 import {
 	COST_OVERLAY_WIDTH,
 	aggregateCostEntries,
@@ -1150,7 +1150,9 @@ async function main(): Promise<void> {
 	);
 
 	const liveObsBus = createSafeEventBus();
-	const liveObsBundle = createObservabilityBundle({ bus: liveObsBus } as Parameters<typeof createObservabilityBundle>[0]);
+	const liveObsBundle = createObservabilityBundle({ bus: liveObsBus } as Parameters<
+		typeof createObservabilityBundle
+	>[0]);
 	await liveObsBundle.extension.start();
 	liveObsBus.emit(BusChannels.DispatchFailed, {
 		runId: "obs-fail-1",
@@ -1179,8 +1181,7 @@ async function main(): Promise<void> {
 	});
 	check(
 		"cost-observability:completed-run-adds-on-top-of-failed-run",
-		Math.abs(liveObsBundle.contract.sessionCost() - 0.08) < 1e-9 &&
-			liveObsBundle.contract.costEntries().length === 2,
+		Math.abs(liveObsBundle.contract.sessionCost() - 0.08) < 1e-9 && liveObsBundle.contract.costEntries().length === 2,
 		JSON.stringify({
 			total: liveObsBundle.contract.sessionCost(),
 			entries: liveObsBundle.contract.costEntries(),
