@@ -1,5 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
-import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../../domains/providers/resolver.js";
+import type { ThinkingLevel } from "../../domains/providers/resolver.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -32,6 +32,7 @@ const DESCRIPTIONS: Record<ThinkingLevel, string> = {
 
 export interface OpenThinkingOverlayDeps {
 	current: ThinkingLevel;
+	available: readonly ThinkingLevel[];
 	onSelect: (next: ThinkingLevel) => void;
 	onClose: () => void;
 }
@@ -48,8 +49,8 @@ class ThinkingOverlayBox extends Box {
 	}
 }
 
-export function buildThinkingItems(current: ThinkingLevel): SelectItem[] {
-	return VALID_THINKING_LEVELS.map((lvl) => ({
+export function buildThinkingItems(current: ThinkingLevel, available: readonly ThinkingLevel[]): SelectItem[] {
+	return available.map((lvl) => ({
 		value: lvl,
 		label: `${lvl === current ? "●" : " "} ${lvl}`,
 		description: DESCRIPTIONS[lvl],
@@ -57,9 +58,9 @@ export function buildThinkingItems(current: ThinkingLevel): SelectItem[] {
 }
 
 export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): OverlayHandle {
-	const items = buildThinkingItems(deps.current);
-	const list = new SelectList(items, VALID_THINKING_LEVELS.length, THINKING_THEME);
-	const initialIndex = Math.max(0, VALID_THINKING_LEVELS.indexOf(deps.current));
+	const items = buildThinkingItems(deps.current, deps.available);
+	const list = new SelectList(items, deps.available.length, THINKING_THEME);
+	const initialIndex = Math.max(0, deps.available.indexOf(deps.current));
 	list.setSelectedIndex(initialIndex);
 	list.onSelect = (item: SelectItem): void => {
 		deps.onSelect(item.value as ThinkingLevel);

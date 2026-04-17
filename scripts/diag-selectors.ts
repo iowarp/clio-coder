@@ -6,7 +6,12 @@
 
 import assert from "node:assert/strict";
 import { listModels } from "../src/cli/list-models.js";
-import { parseModelPattern, resolveModelPattern, resolveModelScope } from "../src/domains/providers/resolver.js";
+import {
+	VALID_THINKING_LEVELS,
+	parseModelPattern,
+	resolveModelPattern,
+	resolveModelScope,
+} from "../src/domains/providers/resolver.js";
 import { ALT_M, SHIFT_TAB, parseSlashCommand, routeInteractiveKey } from "../src/interactive/index.js";
 import { buildThinkingItems } from "../src/interactive/overlays/thinking-selector.js";
 
@@ -89,7 +94,7 @@ run("parseSlashCommand /thinking", () => {
 	assert.deepEqual(parseSlashCommand("/thinking"), { kind: "thinking" });
 });
 run("buildThinkingItems marks current level with a filled dot", () => {
-	const items = buildThinkingItems("high");
+	const items = buildThinkingItems("high", VALID_THINKING_LEVELS);
 	assert.equal(items.length, 6);
 	const high = items.find((item) => item.value === "high");
 	assert.ok(high);

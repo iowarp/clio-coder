@@ -1,9 +1,8 @@
 import { type Component, Text } from "../engine/tui.js";
 import type { ChatLoopEvent } from "./chat-loop.js";
 
-const ANSI_DIM = "\u001b[2m";
+const ANSI_DIM_ITALIC = "\u001b[2;3m";
 const ANSI_RESET = "\u001b[0m";
-const THINKING_PREVIEW_LIMIT = 240;
 const TOOL_PREVIEW_LIMIT = 96;
 
 type TranscriptEntry =
@@ -21,10 +20,6 @@ type ToolLine = {
 	args: unknown;
 	preview: string;
 };
-
-export interface ChatPanelTheme {
-	dim?: (text: string) => string;
-}
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
@@ -81,8 +76,7 @@ function extractAssistantThinking(message: unknown): string {
 		.join("");
 }
 
-export function createChatPanel(theme?: ChatPanelTheme): ChatPanel {
-	const dim = theme?.dim ?? ((text: string) => `${ANSI_DIM}${text}${ANSI_RESET}`);
+export function createChatPanel(): ChatPanel {
 	const view = new Text("", 0, 0);
 	const transcript: TranscriptEntry[] = [];
 
@@ -94,9 +88,9 @@ export function createChatPanel(theme?: ChatPanelTheme): ChatPanel {
 				lines.push(`you: ${entry.text}`);
 				continue;
 			}
-			const thinking = shorten(entry.thinking, THINKING_PREVIEW_LIMIT);
+			const thinking = entry.thinking.trim();
 			if (thinking.length > 0) {
-				lines.push(dim(`  thinking: ${thinking}`));
+				lines.push(`${ANSI_DIM_ITALIC}${thinking}${ANSI_RESET}`);
 			}
 			lines.push(`clio: ${entry.text.trim().length > 0 ? entry.text : ""}`);
 			for (const tool of entry.tools) {
