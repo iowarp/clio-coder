@@ -1713,7 +1713,7 @@ function topoSort(modules: ReadonlyArray<DomainModule>): string[] {
 export class DomainLoadError extends Error {
 	constructor(
 		public readonly domain: string,
-		public readonly cause: unknown,
+		public override readonly cause: unknown,
 	) {
 		super(`Domain '${domain}' failed to load: ${cause instanceof Error ? cause.message : String(cause)}`);
 		this.name = "DomainLoadError";
