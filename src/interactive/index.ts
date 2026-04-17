@@ -1,13 +1,17 @@
+import { BusChannels } from "../core/bus-events.js";
+import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { Editor, ProcessTerminal, TUI, Text } from "../engine/tui.js";
+import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 
 export interface InteractiveDeps {
+	bus: SafeEventBus;
 	modes: ModesContract;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
@@ -16,6 +20,7 @@ export interface InteractiveDeps {
 
 export const SHIFT_TAB = "\x1b[Z";
 export const CTRL_D = "\x04";
+export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
 export const ENTER = "\r";
 export const ESC = "\x1b";
@@ -24,12 +29,17 @@ export interface KeyBindingDeps {
 	cycleMode: () => void;
 	requestShutdown: () => void;
 	requestSuper: () => void;
+	toggleDispatchBoard: () => void;
 }
 
 export interface SuperOverlayKeyDeps {
 	cancelSuper: () => void;
 	confirmSuper: (conf: SuperModeConfirmation) => void;
 	now: () => number;
+}
+
+export interface DispatchBoardOverlayKeyDeps {
+	closeOverlay: () => void;
 }
 
 /** Pure key router: returns true when the input was consumed. */
@@ -40,6 +50,10 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	}
 	if (data === SHIFT_TAB) {
 		deps.cycleMode();
+		return true;
+	}
+	if (data === CTRL_B) {
+		deps.toggleDispatchBoard();
 		return true;
 	}
 	if (data === CTRL_D) {
@@ -60,6 +74,15 @@ export function routeSuperOverlayKey(data: string, deps: SuperOverlayKeyDeps): b
 	}
 	if (data === ESC) {
 		deps.cancelSuper();
+		return true;
+	}
+	return false;
+}
+
+/** Pure overlay key router for the dispatch board. */
+export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
 		return true;
 	}
 	return false;
@@ -143,6 +166,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const superOverlayLines = renderSuperOverlayLines();
 	const superOverlayWidth = superOverlayLines.reduce((max, line) => Math.max(max, line.length), 0);
 	const superOverlay = new Text(superOverlayLines.join("\n"), 0, 0);
+	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
+	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
+	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, line.length), 0);
 
 	const io: RunIo = {
 		stdout: (s) => process.stdout.write(s),
@@ -189,13 +215,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// let the process exit before the termination coordinator runs.
 	const keepAlive = setInterval(() => {}, 1 << 30);
 
-	let overlayState: "closed" | "super-confirm" = "closed";
+	let overlayState: "closed" | "super-confirm" | "dispatch-board" = "closed";
 	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
+	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 
-	const closeSuperOverlay = (): void => {
+	const renderDispatchBoard = (): void => {
+		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"));
+		dispatchBoard.invalidate();
+	};
+
+	const stopDispatchBoardTicker = (): void => {
+		if (!dispatchBoardTicker) return;
+		clearInterval(dispatchBoardTicker);
+		dispatchBoardTicker = null;
+	};
+
+	const startDispatchBoardTicker = (): void => {
+		stopDispatchBoardTicker();
+		dispatchBoardTicker = setInterval(() => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}, 250);
+	};
+
+	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
 		overlayState = "closed";
+		stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
 		tui.requestRender();
@@ -212,10 +260,29 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const toggleDispatchBoardOverlay = (): void => {
+		if (overlayState === "dispatch-board") {
+			closeOverlay();
+			return;
+		}
+		if (overlayState !== "closed") return;
+		renderDispatchBoard();
+		overlayState = "dispatch-board";
+		overlayHandle = tui.showOverlay(dispatchBoard, {
+			anchor: "center",
+			width: dispatchBoardWidth,
+		});
+		startDispatchBoardTicker();
+		tui.requestRender();
+	};
+
 	const shutdown = async (): Promise<void> => {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		clearInterval(keepAlive);
+		stopDispatchBoardTicker();
+		dispatchBoardStore.unsubscribe();
+		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
 			tui.stop();
 		} catch {
@@ -225,19 +292,48 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		resolveRun(0);
 	};
 
+	const dispatchBoardRenderUnsubscribers = [
+		deps.bus.on(BusChannels.DispatchEnqueued, () => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchStarted, () => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchCompleted, () => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchFailed, () => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}),
+	];
+
 	tui.addInputListener((data: string) => {
 		if (overlayState === "super-confirm") {
 			const consumed = routeSuperOverlayKey(data, {
 				cancelSuper: () => {
-					closeSuperOverlay();
+					closeOverlay();
 				},
 				confirmSuper: (conf) => {
 					deps.modes.confirmSuper(conf);
-					closeSuperOverlay();
+					closeOverlay();
 					footer.refresh();
 					tui.requestRender();
 				},
 				now: () => Date.now(),
+			});
+			return consumed ? { consume: true } : undefined;
+		}
+		if (overlayState === "dispatch-board") {
+			const consumed = routeDispatchBoardOverlayKey(data, {
+				closeOverlay,
 			});
 			return consumed ? { consume: true } : undefined;
 		}
@@ -253,6 +349,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			requestSuper: () => {
 				openSuperOverlay();
+			},
+			toggleDispatchBoard: () => {
+				toggleDispatchBoardOverlay();
 			},
 		});
 		return consumed ? { consume: true } : undefined;

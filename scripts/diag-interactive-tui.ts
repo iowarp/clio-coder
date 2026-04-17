@@ -29,12 +29,14 @@ import type { ProviderListEntry, ProvidersContract } from "../src/domains/provid
 import { buildFooter } from "../src/interactive/footer-panel.js";
 import {
 	ALT_S,
+	CTRL_B,
 	CTRL_D,
 	ENTER,
 	ESC,
 	SHIFT_TAB,
 	handleRun,
 	parseSlashCommand,
+	routeDispatchBoardOverlayKey,
 	routeInteractiveKey,
 	routeSuperOverlayKey,
 	startInteractive,
@@ -165,11 +167,13 @@ async function main(): Promise<void> {
 	// (1) exports
 	check("export:startInteractive-is-function", typeof startInteractive === "function");
 	check("export:routeInteractiveKey-is-function", typeof routeInteractiveKey === "function");
+	check("export:routeDispatchBoardOverlayKey-is-function", typeof routeDispatchBoardOverlayKey === "function");
 	check("export:routeSuperOverlayKey-is-function", typeof routeSuperOverlayKey === "function");
 	check("export:parseSlashCommand-is-function", typeof parseSlashCommand === "function");
 	check("export:handleRun-is-function", typeof handleRun === "function");
 	check("export:ALT_S-matches-esc-s", ALT_S === "\x1bs", JSON.stringify(ALT_S));
 	check("export:SHIFT_TAB-matches-CSI-Z", SHIFT_TAB === "\x1b[Z", JSON.stringify(SHIFT_TAB));
+	check("export:CTRL_B-matches-0x02", CTRL_B === "\x02", JSON.stringify(CTRL_B));
 	check("export:CTRL_D-matches-0x04", CTRL_D === "\x04", JSON.stringify(CTRL_D));
 	check("export:ENTER-matches-cr", ENTER === "\r", JSON.stringify(ENTER));
 	check("export:ESC-matches-0x1b", ESC === "\x1b", JSON.stringify(ESC));
@@ -192,6 +196,7 @@ async function main(): Promise<void> {
 	let cycleCalls = 0;
 	let shutdownCalls = 0;
 	let requestSuperCalls = 0;
+	let toggleDispatchBoardCalls = 0;
 	const routed = routeInteractiveKey(SHIFT_TAB, {
 		cycleMode: () => {
 			cycleCalls += 1;
@@ -201,6 +206,9 @@ async function main(): Promise<void> {
 		},
 		requestSuper: () => {
 			requestSuperCalls += 1;
+		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardCalls += 1;
 		},
 	});
 	check("route:shift-tab-consumed", routed === true);
@@ -216,6 +224,9 @@ async function main(): Promise<void> {
 		requestSuper: () => {
 			requestSuperCalls += 1;
 		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardCalls += 1;
+		},
 	});
 	check("route:ctrl-d-consumed", routedCtrlD === true);
 	check("route:ctrl-d-calls-shutdown", shutdownCalls === 1, String(shutdownCalls));
@@ -230,11 +241,35 @@ async function main(): Promise<void> {
 		requestSuper: () => {
 			requestSuperCalls += 1;
 		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardCalls += 1;
+		},
 	});
 	check("route:alt-s-consumed", routedAltS === true);
 	check("route:alt-s-calls-request-super", requestSuperCalls === 1, String(requestSuperCalls));
 	check("route:alt-s-does-not-cycle", cycleCalls === 1, String(cycleCalls));
 	check("route:alt-s-does-not-shutdown", shutdownCalls === 1, String(shutdownCalls));
+	check("route:alt-s-does-not-toggle-dispatch-board", toggleDispatchBoardCalls === 0, String(toggleDispatchBoardCalls));
+
+	const routedCtrlB = routeInteractiveKey(CTRL_B, {
+		cycleMode: () => {
+			cycleCalls += 1;
+		},
+		requestShutdown: () => {
+			shutdownCalls += 1;
+		},
+		requestSuper: () => {
+			requestSuperCalls += 1;
+		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardCalls += 1;
+		},
+	});
+	check("route:ctrl-b-consumed", routedCtrlB === true);
+	check("route:ctrl-b-calls-toggle-dispatch-board", toggleDispatchBoardCalls === 1, String(toggleDispatchBoardCalls));
+	check("route:ctrl-b-does-not-cycle", cycleCalls === 1, String(cycleCalls));
+	check("route:ctrl-b-does-not-shutdown", shutdownCalls === 1, String(shutdownCalls));
+	check("route:ctrl-b-does-not-request-super", requestSuperCalls === 1, String(requestSuperCalls));
 
 	const unrouted = routeInteractiveKey("a", {
 		cycleMode: () => {
@@ -245,6 +280,9 @@ async function main(): Promise<void> {
 		},
 		requestSuper: () => {
 			requestSuperCalls += 1;
+		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardCalls += 1;
 		},
 	});
 	check("route:ordinary-char-not-consumed", unrouted === false);
@@ -303,6 +341,23 @@ async function main(): Promise<void> {
 	check("overlay:other-key-not-consumed", overlayOther === false);
 	check("overlay:other-key-keeps-confirm-count", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
 	check("overlay:other-key-keeps-cancel-count", overlayCancelCalls === 1, String(overlayCancelCalls));
+
+	let closeOverlayCalls = 0;
+	const dispatchBoardEsc = routeDispatchBoardOverlayKey(ESC, {
+		closeOverlay: () => {
+			closeOverlayCalls += 1;
+		},
+	});
+	check("dispatch-overlay:esc-consumed", dispatchBoardEsc === true);
+	check("dispatch-overlay:esc-calls-close-overlay", closeOverlayCalls === 1, String(closeOverlayCalls));
+
+	const dispatchBoardOther = routeDispatchBoardOverlayKey("x", {
+		closeOverlay: () => {
+			closeOverlayCalls += 1;
+		},
+	});
+	check("dispatch-overlay:other-key-not-consumed", dispatchBoardOther === false);
+	check("dispatch-overlay:other-key-does-not-close", closeOverlayCalls === 1, String(closeOverlayCalls));
 
 	// (4) parseSlashCommand — discriminated union covers each branch
 	check("parse:empty", parseSlashCommand("   ").kind === "empty");
