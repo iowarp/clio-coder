@@ -1,0 +1,38 @@
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+import { ToolNames } from "../core/tool-names.js";
+import type { ToolResult, ToolSpec } from "./registry.js";
+
+const ALLOWED_BASENAME = "REVIEW.md";
+
+export const writeReviewTool: ToolSpec = {
+	name: ToolNames.WriteReview,
+	description: "Write a review document to REVIEW.md at the project root. Any other path is rejected.",
+	baseActionClass: "write",
+	async run(args): Promise<ToolResult> {
+		const rawPath = typeof args.path === "string" ? args.path : ALLOWED_BASENAME;
+		const content = typeof args.content === "string" ? args.content : "";
+		const projectRoot = path.resolve(process.cwd());
+		const expected = path.join(projectRoot, ALLOWED_BASENAME);
+		const resolved = path.resolve(projectRoot, rawPath);
+		if (resolved !== expected) {
+			return {
+				kind: "error",
+				message: `write_review only accepts path="${ALLOWED_BASENAME}" at the project root; got ${rawPath}`,
+			};
+		}
+		if (content.length === 0) {
+			return { kind: "error", message: "write_review: empty content" };
+		}
+		try {
+			writeFileSync(expected, content, "utf8");
+			return {
+				kind: "ok",
+				output: `wrote ${Buffer.byteLength(content, "utf8")}B to ${ALLOWED_BASENAME}`,
+			};
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return { kind: "error", message: `write_review: ${msg}` };
+		}
+	},
+};
