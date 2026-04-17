@@ -125,6 +125,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		observability,
 		chat,
 		dataDir: clioDataDir(),
+		getSettings: () => config?.get() ?? readSettings(),
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		onShutdown: async () => {

@@ -1,10 +1,17 @@
 import { readFileSync, statSync } from "node:fs";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: "Read a file from the filesystem. Returns the content as text.",
+	parameters: Type.Object(
+		{
+			path: Type.String({ description: "Absolute or relative path to the file." }),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "read",
 	async run(args): Promise<ToolResult> {
 		const pathArg =

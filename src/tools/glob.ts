@@ -1,5 +1,6 @@
 import { type Stats, lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -93,6 +94,15 @@ export const globTool: ToolSpec = {
 	name: ToolNames.Glob,
 	description:
 		"Match files and directories with a minimal glob (*, **, ?, [abc]) and return absolute paths sorted by mtime desc.",
+	parameters: Type.Object(
+		{
+			pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
+			path: Type.Optional(
+				Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." }),
+			),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "read",
 	async run(args): Promise<ToolResult> {
 		const patternArg = typeof args.pattern === "string" ? args.pattern : null;

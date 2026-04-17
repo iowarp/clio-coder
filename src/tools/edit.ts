@@ -1,11 +1,23 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 export const editTool: ToolSpec = {
 	name: ToolNames.Edit,
 	description: "Search-and-replace on a file. old_string must match exactly once unless replace_all=true.",
+	parameters: Type.Object(
+		{
+			path: Type.String({ description: "Absolute or relative path to the file to edit." }),
+			old_string: Type.String({ description: "Exact substring to replace. Must be non-empty." }),
+			new_string: Type.String({ description: "Replacement substring. May be empty to delete." }),
+			replace_all: Type.Optional(
+				Type.Boolean({ description: "Set true to replace every occurrence. Defaults to false (single match required)." }),
+			),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "write",
 	async run(args): Promise<ToolResult> {
 		const pathArg =

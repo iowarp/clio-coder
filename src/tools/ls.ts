@@ -1,5 +1,6 @@
 import { type Stats, lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -14,6 +15,12 @@ function entryType(stat: Stats): "d" | "f" | "l" {
 export const lsTool: ToolSpec = {
 	name: ToolNames.Ls,
 	description: "List directory entries as one line per item with type, size, and name.",
+	parameters: Type.Object(
+		{
+			path: Type.Optional(Type.String({ description: "Directory to list. Defaults to the orchestrator cwd." })),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "read",
 	async run(args): Promise<ToolResult> {
 		const rootArg = typeof args.path === "string" ? args.path : process.cwd();

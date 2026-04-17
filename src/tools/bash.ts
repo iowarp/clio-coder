@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -36,6 +37,16 @@ function execBash(command: string, cwd: string | undefined, timeout: number): Pr
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description: "Execute a shell command via /bin/bash -lc. Captures stdout and stderr.",
+	parameters: Type.Object(
+		{
+			command: Type.String({ description: "Shell command to run. Piped into bash -lc." }),
+			cwd: Type.Optional(
+				Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
+			),
+			timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds. Defaults to 60000. Must be > 0." })),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "execute",
 	async run(args): Promise<ToolResult> {
 		if (typeof args.command !== "string" || args.command.length === 0) {
