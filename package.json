@@ -57,6 +57,7 @@
 		"diag:tools-web": "tsx scripts/diag-tools-web.ts",
 		"diag:tools-plan-review": "tsx scripts/diag-tools-plan-review.ts",
 		"diag:tools-dispatch": "tsx scripts/diag-tools-dispatch.ts",
+		"diag:dispatch-state": "tsx scripts/diag-dispatch-state.ts",
 		"diag:tools": "tsx scripts/diag-tools.ts",
 		"diag:worker-entry": "tsx scripts/diag-worker-entry.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
