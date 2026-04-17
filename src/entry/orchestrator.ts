@@ -5,6 +5,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -112,6 +113,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		providers,
 		dispatch,
 		observability,
+		dataDir: clioDataDir(),
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
