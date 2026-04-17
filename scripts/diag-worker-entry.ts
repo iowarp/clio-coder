@@ -37,6 +37,22 @@ interface WorkerRunDiag {
 	stderr: string;
 }
 
+function hasNonEmptyMessageUpdate(events: ReadonlyArray<AgentEventShape>): boolean {
+	for (const event of events) {
+		if (event.type !== "message_update") continue;
+		const message = event.message as
+			| { content?: Array<{ type?: string; text?: string; thinking?: string }> }
+			| undefined;
+		for (const block of message?.content ?? []) {
+			if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) return true;
+			if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim().length > 0) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 const projectRoot = process.cwd();
 const workerJs = path.join(projectRoot, "dist/worker/entry.js");
 
@@ -255,8 +271,8 @@ try {
 		`local-endpoint worker emitted "agent_start" (did not fail fast in getModel)`,
 	);
 	assert(
-		local.eventTypes.includes("text_delta") || local.eventTypes.includes("agent_end"),
-		`local-endpoint worker streamed at least one text_delta or agent_end (got ${JSON.stringify(local.eventTypes)})`,
+		hasNonEmptyMessageUpdate(local.events),
+		`local-endpoint worker emitted a non-empty message_update (got ${JSON.stringify(local.eventTypes)})`,
 	);
 	const completionCall = stub.requests.find((r) => r.url.endsWith("/chat/completions"));
 	assert(
