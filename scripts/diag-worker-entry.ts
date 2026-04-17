@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { startWorkerRun, type EndpointSpec } from "../src/engine/worker-runtime.js";
+import { type EndpointSpec, startWorkerRun } from "../src/engine/worker-runtime.js";
 
 interface WorkerSpec {
 	systemPrompt: string;
@@ -40,9 +40,7 @@ interface WorkerRunDiag {
 function hasNonEmptyMessageUpdate(events: ReadonlyArray<AgentEventShape>): boolean {
 	for (const event of events) {
 		if (event.type !== "message_update") continue;
-		const message = event.message as
-			| { content?: Array<{ type?: string; text?: string; thinking?: string }> }
-			| undefined;
+		const message = event.message as { content?: Array<{ type?: string; text?: string; thinking?: string }> } | undefined;
 		for (const block of message?.content ?? []) {
 			if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) return true;
 			if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim().length > 0) {
@@ -284,7 +282,7 @@ try {
 		`local-endpoint worker forwarded endpointSpec.api_key as Bearer (got ${JSON.stringify(completionCall?.authorization ?? null)})`,
 	);
 
-	console.log(`diag:worker-entry: running in-process bootstrap regression ...`);
+	console.log("diag:worker-entry: running in-process bootstrap regression ...");
 	const inProcessLocalEvents: AgentEventShape[] = [];
 	const inProcessLocal = startWorkerRun(localSpec, (event) => {
 		inProcessLocalEvents.push(event as AgentEventShape);
