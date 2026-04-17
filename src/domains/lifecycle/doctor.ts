@@ -1,9 +1,9 @@
-import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { constants, accessSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { clioConfigDir, clioDataDir } from "../../core/xdg.js";
 import { settingsPath } from "../../core/config.js";
-import { getVersionInfo } from "./version.js";
+import { clioConfigDir, clioDataDir } from "../../core/xdg.js";
 import { readInstallInfo } from "./install.js";
+import { getVersionInfo } from "./version.js";
 
 export interface DoctorFinding {
 	ok: boolean;
@@ -29,7 +29,11 @@ export function runDoctor(): DoctorFinding[] {
 
 	const settings = settingsPath();
 	const settingsOk = existsSync(settings);
-	findings.push({ ok: settingsOk, name: "settings.yaml", detail: settingsOk ? settings : "missing (run `clio install`)" });
+	findings.push({
+		ok: settingsOk,
+		name: "settings.yaml",
+		detail: settingsOk ? settings : "missing (run `clio install`)",
+	});
 
 	const creds = join(clioConfigDir(), "credentials.yaml");
 	if (existsSync(creds)) {

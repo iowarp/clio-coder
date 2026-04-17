@@ -34,12 +34,12 @@ export async function bootOrchestrator(): Promise<BootResult> {
 
 	process.stdout.write(BANNER);
 	if (process.env.CLIO_TIMING === "1") {
-		process.stdout.write(timer.report() + "\n");
+		process.stdout.write(`${timer.report()}\n`);
 	}
 
 	const runInteractive = process.env.CLIO_PHASE1_INTERACTIVE === "1";
 	if (!runInteractive) {
-		process.stdout.write(chalk.dim("  (Phase 1 stub. Interactive loop lands in Phase 6.)") + "\n");
+		process.stdout.write(`${chalk.dim("  (Phase 1 stub. Interactive loop lands in Phase 6.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}

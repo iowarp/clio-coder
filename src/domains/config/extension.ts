@@ -1,11 +1,11 @@
 import { Value } from "@sinclair/typebox/value";
 import { BusChannels } from "../../core/bus-events.js";
-import { readSettings, type ClioSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { diffSettings, type ChangeKind, type ConfigDiff } from "./classify.js";
+import { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
 import { SettingsSchema } from "./schema.js";
-import { startConfigWatcher, type ConfigWatcher } from "./watcher.js";
+import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
 
 type ChangeListener = (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void;
 
@@ -21,12 +21,19 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 	function validate(candidate: ClioSettings): void {
 		if (Value.Check(SettingsSchema, candidate)) return;
 		const first = [...Value.Errors(SettingsSchema, candidate)][0];
-		throw new Error(`settings.yaml failed schema validation at ${first?.path ?? "(root)"}: ${first?.message ?? "unknown"}`);
+		throw new Error(
+			`settings.yaml failed schema validation at ${first?.path ?? "(root)"}: ${first?.message ?? "unknown"}`,
+		);
 	}
 
 	function dispatch(kind: ChangeKind, payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }): void {
 		const bus = context.bus;
-		const channel = kind === "hotReload" ? BusChannels.ConfigHotReload : kind === "nextTurn" ? BusChannels.ConfigNextTurn : BusChannels.ConfigRestartRequired;
+		const channel =
+			kind === "hotReload"
+				? BusChannels.ConfigHotReload
+				: kind === "nextTurn"
+					? BusChannels.ConfigNextTurn
+					: BusChannels.ConfigRestartRequired;
 		bus.emit(channel, payload);
 		for (const listener of listeners.get(kind) ?? []) {
 			try {

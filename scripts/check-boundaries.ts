@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -106,9 +106,7 @@ for (const filePath of walk(srcRoot)) {
 		// Rule 1: pi-mono imports outside src/engine/**. No exceptions.
 		if (specifier.startsWith("@mariozechner/pi-")) {
 			if (!inEngine) {
-				violations.push(
-					`rule1: ${path.relative(projectRoot, filePath)} imports ${specifier} outside src/engine`,
-				);
+				violations.push(`rule1: ${path.relative(projectRoot, filePath)} imports ${specifier} outside src/engine`);
 			}
 			continue;
 		}
