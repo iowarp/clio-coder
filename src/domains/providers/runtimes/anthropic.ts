@@ -1,6 +1,6 @@
 import { getProviderSpec } from "../catalog.js";
 import { initialHealth } from "../health.js";
-import type { RuntimeAdapter, RuntimeProbeResult } from "../runtime-contract.js";
+import { type RuntimeAdapter, type RuntimeProbeResult, configOnlyLiveProbe } from "../runtime-contract.js";
 
 const DEFAULT_PROBE_MODEL = "claude-sonnet-4-6";
 
@@ -24,7 +24,9 @@ export const anthropicAdapter: RuntimeAdapter = {
 		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: creds });
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
-	async probeLive(): Promise<RuntimeProbeResult> {
-		return { ok: false, error: "live probe not implemented for anthropic; config-only" };
+	async probeLive(opts): Promise<RuntimeProbeResult> {
+		const creds = opts?.credentialsPresent ?? new Set<string>();
+		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: creds });
+		return configOnlyLiveProbe("anthropic", verdict);
 	},
 };

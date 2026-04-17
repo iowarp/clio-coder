@@ -1,5 +1,5 @@
 import { initialHealth } from "../../health.js";
-import type { RuntimeAdapter } from "../../runtime-contract.js";
+import { type RuntimeAdapter, configOnlyLiveProbe } from "../../runtime-contract.js";
 import { CLI_CAPABILITIES } from "../capability-manifest.js";
 import { resolveBinaryWithEnv } from "./resolve-binary.js";
 
@@ -24,6 +24,7 @@ export const geminiCliAdapter: RuntimeAdapter = {
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
 	async probeLive() {
-		return { ok: false, error: `live probe not implemented for ${ADAPTER_ID}; config-only` };
+		const verdict = this.canSatisfy({ modelId: "", credentialsPresent: new Set<string>() });
+		return configOnlyLiveProbe(ADAPTER_ID, verdict);
 	},
 };

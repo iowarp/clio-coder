@@ -1,5 +1,7 @@
 import { initialHealth } from "../health.js";
-import type { RuntimeAdapter, RuntimeProbeResult } from "../runtime-contract.js";
+import { type RuntimeAdapter, type RuntimeProbeResult, configOnlyLiveProbe } from "../runtime-contract.js";
+
+const DEFAULT_PROBE_MODEL = "openai/gpt-4.1-mini";
 
 export const openrouterAdapter: RuntimeAdapter = {
 	id: "openrouter",
@@ -24,7 +26,9 @@ export const openrouterAdapter: RuntimeAdapter = {
 		}
 		return { ok: true };
 	},
-	async probeLive(): Promise<RuntimeProbeResult> {
-		return { ok: false, error: "live probe not implemented for openrouter; config-only" };
+	async probeLive(opts): Promise<RuntimeProbeResult> {
+		const creds = opts?.credentialsPresent ?? new Set<string>();
+		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: creds });
+		return configOnlyLiveProbe("openrouter", verdict);
 	},
 };
