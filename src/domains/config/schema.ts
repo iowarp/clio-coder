@@ -27,6 +27,11 @@ export const SettingsSchema = Type.Object({
 	state: Type.Object({
 		lastMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	}),
+	intelligence: Type.Optional(
+		Type.Object({
+			enabled: Type.Boolean(),
+		}),
+	),
 });
 
 export type ValidatedSettings = Static<typeof SettingsSchema>;
