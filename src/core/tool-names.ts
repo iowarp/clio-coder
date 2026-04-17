@@ -12,7 +12,6 @@ export const ToolNames = {
 	Glob: "glob",
 	Ls: "ls",
 	WebFetch: "web_fetch",
-	WebSearch: "web_search",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
 } as const;

@@ -30,7 +30,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,
-			ToolNames.WebSearch,
 		]),
 		allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch"]),
 		dispatchScope: "any",
@@ -42,7 +41,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,
-			ToolNames.WebSearch,
 			ToolNames.WritePlan,
 			ToolNames.WriteReview,
 		]),
@@ -63,7 +61,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,
-			ToolNames.WebSearch,
 		]),
 		// git_destructive remains hard-blocked regardless of mode.
 		allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify"]),

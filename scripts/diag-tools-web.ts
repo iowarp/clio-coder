@@ -1,10 +1,11 @@
+import { registerAllTools } from "../src/tools/bootstrap.js";
+import { createToolIndex } from "../src/tools/registry.js";
 import { webFetchTool } from "../src/tools/web-fetch.js";
-import { webSearchTool } from "../src/tools/web-search.js";
 
 /**
- * Phase 5 Slice 3 diag harness. Exercises web-fetch + web-search argument
- * validation without making any network calls. Real provider integration
- * lands later; CI must never hit the network from this script.
+ * Phase 5 slice 3 diag harness. Exercises web-fetch argument validation and
+ * confirms that web_search is absent from the shipped tool registry. CI must
+ * never hit the network from this script.
  */
 
 const failures: string[] = [];
@@ -33,18 +34,12 @@ async function main(): Promise<void> {
 		`got ${JSON.stringify(missingUrl)}`,
 	);
 
-	const searchOk = await webSearchTool.run({ query: "hello" });
+	const index = createToolIndex();
+	registerAllTools(index);
 	check(
-		"web_search:stub-ok",
-		searchOk.kind === "ok" && searchOk.output.includes("web_search stub for query: hello"),
-		`got ${JSON.stringify(searchOk)}`,
-	);
-
-	const searchMissing = await webSearchTool.run({});
-	check(
-		"web_search:missing-query-error",
-		searchMissing.kind === "error" && searchMissing.message.includes("missing query"),
-		`got ${JSON.stringify(searchMissing)}`,
+		"web_search:not-registered",
+		index.listAll().every((tool) => tool.name !== "web_search"),
+		JSON.stringify(index.listAll().map((tool) => tool.name)),
 	);
 
 	if (failures.length > 0) {
