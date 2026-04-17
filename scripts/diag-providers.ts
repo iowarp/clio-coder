@@ -128,7 +128,12 @@ async function run(): Promise<void> {
 
 		const credBearing: ReadonlyArray<string> = ["anthropic", "openai", "google", "groq", "mistral", "openrouter"];
 		const allCredBearingUnavailable = credBearing.every((id) => unavailable.includes(id));
-		check("config", "list:all-cred-bearing-unavailable", allCredBearingUnavailable, `unavailable=${JSON.stringify(unavailable)}`);
+		check(
+			"config",
+			"list:all-cred-bearing-unavailable",
+			allCredBearingUnavailable,
+			`unavailable=${JSON.stringify(unavailable)}`,
+		);
 
 		const anthropicInitial = initial.find((e) => e.id === "anthropic");
 		check(
@@ -224,7 +229,12 @@ async function run(): Promise<void> {
 
 		const liveEventStart = healthEvents;
 		await providers.probeAllLive();
-		check("live", "probeAllLive:bus-fired-for-all", healthEvents - liveEventStart === 11, `delta=${healthEvents - liveEventStart}`);
+		check(
+			"live",
+			"probeAllLive:bus-fired-for-all",
+			healthEvents - liveEventStart === 11,
+			`delta=${healthEvents - liveEventStart}`,
+		);
 
 		const afterLive = providers.list();
 		const anthropicAfterLive = afterLive.find((e) => e.id === "anthropic");

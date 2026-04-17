@@ -1,7 +1,6 @@
 /**
- * Phase 4 slice 2 diag. Exercises each RuntimeAdapter stub without issuing
- * network traffic. Verifies canSatisfy branches, initialHealth, and the
- * sync probe contract.
+ * Provider-runtime diag. Exercises config-only readiness separately from the
+ * explicit live probe path.
  */
 
 import type { ProviderId } from "../src/domains/providers/catalog.js";
@@ -12,11 +11,15 @@ interface AdapterCase {
 	id: ProviderId;
 	credEnv: string | null;
 	validModel: string;
-	/** Whether canSatisfy rejects unknown model ids. openrouter+local accept anything. */
+	/** Whether canSatisfy rejects unknown model ids. */
 	rejectsUnknownModel: boolean;
-	/** Whether probe returns ok=false when no credentials are provided. amazon-bedrock+local succeed regardless. */
+	/** Whether the legacy config probe fails when credentials are absent. */
 	probeFailsWithoutCreds: boolean;
 }
+
+type DiagMode = "config" | "live";
+
+const RUN_LIVE = process.env.CLIO_DIAG_LIVE === "1";
 
 const CASES: ReadonlyArray<AdapterCase> = [
 	{
@@ -68,22 +71,30 @@ const CASES: ReadonlyArray<AdapterCase> = [
 		rejectsUnknownModel: true,
 		probeFailsWithoutCreds: false,
 	},
-	{ id: "local", credEnv: null, validModel: "llama-local", rejectsUnknownModel: false, probeFailsWithoutCreds: false },
-	// llamacpp/lmstudio/ollama/openai-compat are covered by their own
-	// hermetic diag-providers-*.ts scripts (they require a live HTTP server
-	// for the probe to succeed). Excluded here so the stub-only contract
-	// tests stay network-free.
+	// llamacpp/lmstudio/ollama/openai-compat are covered by the dedicated
+	// local-engine diags because their live probe path performs real HTTP.
 ];
 
 const failures: string[] = [];
 
-function check(label: string, ok: boolean, detail?: string): void {
+function emit(status: "OK" | "FAIL" | "SKIP", mode: DiagMode, label: string, detail?: string): void {
+	const suffix = detail ? ` ${detail}` : "";
+	const line = `[diag-provider-runtimes] [${mode}] ${status.padEnd(4)} ${label}${suffix}\n`;
+	if (status === "FAIL") process.stderr.write(line);
+	else process.stdout.write(line);
+}
+
+function check(mode: DiagMode, label: string, ok: boolean, detail?: string): void {
 	if (ok) {
-		process.stdout.write(`[diag-provider-runtimes] OK   ${label}\n`);
+		emit("OK", mode, label);
 		return;
 	}
 	failures.push(detail ? `${label}: ${detail}` : label);
-	process.stderr.write(`[diag-provider-runtimes] FAIL ${label}${detail ? ` — ${detail}` : ""}\n`);
+	emit("FAIL", mode, label, detail ? `(${detail})` : undefined);
+}
+
+function skip(mode: DiagMode, label: string, detail: string): void {
+	emit("SKIP", mode, label, `(${detail})`);
 }
 
 function findAdapter(id: ProviderId): RuntimeAdapter {
@@ -93,11 +104,6 @@ function findAdapter(id: ProviderId): RuntimeAdapter {
 }
 
 async function main(): Promise<void> {
-	// RUNTIME_ADAPTERS now contains 8 provider adapters, the Claude SDK
-	// adapter (tier=sdk, id=claude-sdk, registered in Phase 8), and 6 CLI
-	// adapters. Provider-tier checks below scope to the catalog-backed
-	// provider slice; claude-sdk is covered by diag-cli-runtimes... no,
-	// diag-claude-sdk.
 	const expectedOrder: ReadonlyArray<ProviderId> = [
 		"anthropic",
 		"openai",
@@ -110,17 +116,16 @@ async function main(): Promise<void> {
 		"lmstudio",
 		"ollama",
 		"openai-compat",
-		"local",
 	];
 	const expectedProviderIds = new Set<string>(expectedOrder);
 	const providerAdapters = RUNTIME_ADAPTERS.filter((a) => expectedProviderIds.has(String(a.id)));
-	check("registry:provider-length", providerAdapters.length === 12, `len=${providerAdapters.length}`);
+	check("config", "registry:provider-length", providerAdapters.length === 11, `len=${providerAdapters.length}`);
 
 	const ids = providerAdapters.map((a) => a.id);
 	const uniqueIds = new Set(ids);
-	check("registry:unique-ids", uniqueIds.size === ids.length, `ids=${JSON.stringify(ids)}`);
-
+	check("config", "registry:unique-ids", uniqueIds.size === ids.length, `ids=${JSON.stringify(ids)}`);
 	check(
+		"config",
 		"registry:order",
 		expectedOrder.every((id, i) => providerAdapters[i]?.id === id),
 		`got ${JSON.stringify(ids)}`,
@@ -130,36 +135,47 @@ async function main(): Promise<void> {
 		const adapter = findAdapter(c.id);
 		const credsSet = c.credEnv ? new Set<string>([c.credEnv]) : new Set<string>();
 
-		// 1. canSatisfy with a valid model + expected creds → ok=true
 		const satisfyOk = adapter.canSatisfy({ modelId: c.validModel, credentialsPresent: credsSet });
-		check(`${c.id}:canSatisfy-valid`, satisfyOk.ok === true, `got ${JSON.stringify(satisfyOk)}`);
+		check("config", `${c.id}:canSatisfy-valid`, satisfyOk.ok === true, `got ${JSON.stringify(satisfyOk)}`);
 
-		// 2. canSatisfy with an unknown model → ok=false (except openrouter + local)
 		if (c.rejectsUnknownModel) {
 			const satisfyBad = adapter.canSatisfy({ modelId: "nonexistent-xyz", credentialsPresent: credsSet });
-			check(`${c.id}:canSatisfy-unknown-rejected`, satisfyBad.ok === false, `got ${JSON.stringify(satisfyBad)}`);
+			check("config", `${c.id}:canSatisfy-unknown-rejected`, satisfyBad.ok === false, `got ${JSON.stringify(satisfyBad)}`);
 		}
 
-		// 3. initialHealth.status === "unknown"
 		const health = adapter.initialHealth();
 		check(
+			"config",
 			`${c.id}:initialHealth-unknown`,
 			health.status === "unknown" && health.providerId === c.id,
 			`got ${JSON.stringify(health)}`,
 		);
 
-		// 4. probe with creds present → ok=true
 		const probeOk = await adapter.probe({ credentialsPresent: credsSet });
-		check(`${c.id}:probe-ok`, probeOk.ok === true, `got ${JSON.stringify(probeOk)}`);
+		check("config", `${c.id}:probe-ok`, probeOk.ok === true, `got ${JSON.stringify(probeOk)}`);
 
-		// 5. probe with empty creds → ok=false (except amazon-bedrock + local)
 		if (c.probeFailsWithoutCreds) {
 			const probeBad = await adapter.probe({ credentialsPresent: new Set<string>() });
-			check(`${c.id}:probe-fail-without-creds`, probeBad.ok === false, `got ${JSON.stringify(probeBad)}`);
+			check("config", `${c.id}:probe-fail-without-creds`, probeBad.ok === false, `got ${JSON.stringify(probeBad)}`);
 		} else {
 			const probeStill = await adapter.probe({ credentialsPresent: new Set<string>() });
-			check(`${c.id}:probe-ok-without-creds`, probeStill.ok === true, `got ${JSON.stringify(probeStill)}`);
+			check("config", `${c.id}:probe-ok-without-creds`, probeStill.ok === true, `got ${JSON.stringify(probeStill)}`);
 		}
+
+		if (!RUN_LIVE) {
+			skip("live", `${c.id}:probeLive-skipped`, "set CLIO_DIAG_LIVE=1 to exercise adapter.probeLive()");
+			continue;
+		}
+
+		check("live", `${c.id}:probeLive-exposed`, typeof adapter.probeLive === "function");
+		if (!adapter.probeLive) continue;
+		const live = await adapter.probeLive({ credentialsPresent: credsSet });
+		check(
+			"live",
+			`${c.id}:probeLive-config-only-error`,
+			live.ok === false && live.error === `live probe not implemented for ${c.id}; config-only`,
+			`got ${JSON.stringify(live)}`,
+		);
 	}
 
 	if (failures.length > 0) {
