@@ -15,6 +15,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const originalCwd = process.cwd();
+
 const failures: string[] = [];
 
 function check(label: string, ok: boolean, detail?: string): void {
@@ -46,6 +48,10 @@ async function run(): Promise<void> {
 	}
 	process.env.CLIO_HOME = home;
 
+	const projectCwd = join(home, "project");
+	mkdirSync(projectCwd, { recursive: true });
+	process.chdir(projectCwd);
+
 	try {
 		writeFileSync(join(home, "settings.yaml"), "");
 
@@ -74,7 +80,7 @@ async function run(): Promise<void> {
 		}
 
 		const initial = agents.list();
-		check("list:has-at-least-7", initial.length >= 7, `len=${initial.length}`);
+		check("list:has-exactly-7-builtins", initial.length === 7, `got ${initial.length}`);
 
 		const ids = new Set(initial.map((r) => r.id));
 		for (const required of REQUIRED_BUILTINS) {
@@ -111,6 +117,9 @@ async function run(): Promise<void> {
 
 		agents.reload();
 
+		const after = agents.list();
+		check("reload:list-still-7-builtins", after.length === 7, `got ${after.length}`);
+
 		const afterReload = agents.get("scout");
 		check("reload:scout-returned", afterReload !== null, `got=${afterReload ? afterReload.id : "null"}`);
 		check("reload:scout-source-user", afterReload?.source === "user", `source=${afterReload?.source ?? "undefined"}`);
@@ -130,6 +139,11 @@ async function run(): Promise<void> {
 
 		await result.stop();
 	} finally {
+		try {
+			process.chdir(originalCwd);
+		} catch {
+			// best-effort restore
+		}
 		for (const [k, v] of snapshot) {
 			if (v === undefined) delete process.env[k];
 			else process.env[k] = v;

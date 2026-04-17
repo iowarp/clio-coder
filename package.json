@@ -17,7 +17,14 @@
 	"bin": {
 		"clio": "dist/cli/index.js"
 	},
-	"files": ["dist", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"src/domains/agents/builtins/**",
+		"src/domains/prompts/fragments/**",
+		"README.md",
+		"LICENSE",
+		"damage-control-rules.yaml"
+	],
 	"scripts": {
 		"build": "tsup",
 		"dev": "tsup --watch",
