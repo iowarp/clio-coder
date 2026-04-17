@@ -127,6 +127,22 @@ function checkSessionRoundTrip(env: NodeJS.ProcessEnv): void {
 	}
 }
 
+function checkProvidersCommand(env: NodeJS.ProcessEnv): void {
+	const { stdout, exitCode } = runCli(["providers"], env);
+	if (exitCode !== 0) fail(`clio providers exited ${exitCode}`, stdout);
+	if (!stdout.includes("anthropic")) fail("clio providers missing anthropic row", stdout);
+	if (!stdout.includes("local")) fail("clio providers missing local row", stdout);
+	log("clio providers OK");
+}
+
+function checkAgentsCommand(env: NodeJS.ProcessEnv): void {
+	const { stdout, exitCode } = runCli(["agents"], env);
+	if (exitCode !== 0) fail(`clio agents exited ${exitCode}`, stdout);
+	if (!stdout.includes("scout")) fail("clio agents missing scout row", stdout);
+	if (!stdout.includes("worker")) fail("clio agents missing worker row", stdout);
+	log("clio agents OK");
+}
+
 function main(): void {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-verify-"));
@@ -139,6 +155,8 @@ function main(): void {
 	checkRegistryPaths(env);
 	checkPromptCompile(env);
 	checkSessionRoundTrip(env);
+	checkProvidersCommand(env);
+	checkAgentsCommand(env);
 	log("all checks passed");
 }
 
