@@ -1,16 +1,17 @@
 import type { ProviderEndpointEntry, ProviderListEntry, ProvidersContract } from "../domains/providers/contract.js";
-import { Box, Loader, type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import { Box, type Component, Loader, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 
 const DEFAULT_CONTENT_WIDTH = 70;
 const TITLE = "─ Providers ";
 const HINT = "[Esc] close";
+const ANSI_RESET = "\u001b[0m";
 
 export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 const IDENTITY = (s: string): string => s;
 
 function padContent(text: string, contentWidth: number): string {
-	return `│ ${truncateToWidth(text, contentWidth, "...", true)} │`;
+	return `│ ${truncateToWidth(text, contentWidth, "...", true).replaceAll(ANSI_RESET, "")} │`;
 }
 
 function topBorder(contentWidth: number): string {
