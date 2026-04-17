@@ -44,8 +44,9 @@
 		"diag:provider-runtimes": "tsx scripts/diag-provider-runtimes.ts",
 		"diag:credentials": "tsx scripts/diag-credentials.ts",
 		"diag:providers": "tsx scripts/diag-providers.ts",
+		"diag:agents": "tsx scripts/diag-agents.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run build && npm run verify"
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:agents && npm run build && npm run verify"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",
