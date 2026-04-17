@@ -107,17 +107,17 @@ function main(): void {
 		`got ${JSON.stringify(anthropicMissing)}`,
 	);
 
-	// discovery — bedrock has no credEnv, so credential counts as present when enabled
+	// discovery — amazon-bedrock has no credEnv, so credential counts as present when enabled
 	const bedrockSettings = {
 		...DEFAULT_SETTINGS,
-		runtimes: { ...DEFAULT_SETTINGS.runtimes, enabled: ["bedrock"] },
+		runtimes: { ...DEFAULT_SETTINGS.runtimes, enabled: ["amazon-bedrock"] },
 	} as typeof DEFAULT_SETTINGS;
 	const bedrockAvail = discoverProviders({
 		settings: bedrockSettings,
 		credentialsPresent: new Set<string>(),
-	}).find((a) => a.id === "bedrock");
+	}).find((a) => a.id === "amazon-bedrock");
 	check(
-		"discovery:bedrock-no-credEnv-available",
+		"discovery:amazon-bedrock-no-credEnv-available",
 		bedrockAvail?.available === true && bedrockAvail?.hasCredential === true,
 		`got ${JSON.stringify(bedrockAvail)}`,
 	);
