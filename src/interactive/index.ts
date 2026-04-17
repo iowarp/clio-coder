@@ -17,6 +17,7 @@ import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-b
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
+import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
@@ -75,6 +76,12 @@ export interface InteractiveDeps {
 	onCycleThinking?: () => void;
 	/** Persist the orchestrator target selected in /model. */
 	onSelectModel?: (ref: { providerId: string; modelId: string; endpoint?: string }) => void;
+	/** Persist the next `provider.scope` list committed in /scoped-models. */
+	onSetScope?: (scope: string[]) => void;
+	/** Advance the orchestrator target one step forward through `provider.scope`. */
+	onCycleScopedModelForward?: () => void;
+	/** Advance the orchestrator target one step backward through `provider.scope`. */
+	onCycleScopedModelBackward?: () => void;
 	onShutdown: () => Promise<void>;
 }
 
@@ -82,6 +89,12 @@ export const SHIFT_TAB = "\x1b[Z";
 export const CTRL_D = "\x04";
 export const CTRL_B = "\x02";
 export const CTRL_L = "\x0c";
+export const CTRL_P = "\x10";
+// pi-coding-agent emits Shift+Ctrl+P as the CSI-u sequence for key 80 with the
+// shift+ctrl modifiers. Terminals in kitty-protocol mode deliver this literally;
+// legacy terminals without CSI-u will not fire this binding, by design — fall
+// back to /scoped-models to reach the scope in that environment.
+export const SHIFT_CTRL_P = "\x1b[80;6u";
 export const ALT_S = "\x1bs";
 export const ALT_M = "\x1bm";
 export const ENTER = "\r";
@@ -94,7 +107,8 @@ export type OverlayState =
 	| "cost"
 	| "receipts"
 	| "thinking"
-	| "model";
+	| "model"
+	| "scoped-models";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -103,6 +117,8 @@ export interface KeyBindingDeps {
 	requestSuper: () => void;
 	toggleDispatchBoard: () => void;
 	openModelSelector: () => void;
+	cycleScopedModelForward: () => void;
+	cycleScopedModelBackward: () => void;
 }
 
 export interface SuperOverlayKeyDeps {
@@ -135,6 +151,10 @@ export interface ModelOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface ScopedModelsOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -142,7 +162,8 @@ export interface OverlayKeyDeps
 		CostOverlayKeyDeps,
 		ReceiptsOverlayKeyDeps,
 		ThinkingOverlayKeyDeps,
-		ModelOverlayKeyDeps {
+		ModelOverlayKeyDeps,
+		ScopedModelsOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -166,6 +187,16 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	}
 	if (data === CTRL_L) {
 		deps.openModelSelector();
+		return true;
+	}
+	if (data === SHIFT_CTRL_P) {
+		// Match before CTRL_P so the longer sequence wins. SHIFT_CTRL_P starts
+		// with \x1b, CTRL_P is a single \x10 byte, so the two do not prefix-match.
+		deps.cycleScopedModelBackward();
+		return true;
+	}
+	if (data === CTRL_P) {
+		deps.cycleScopedModelForward();
 		return true;
 	}
 	if (data === CTRL_D) {
@@ -255,6 +286,18 @@ export function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): b
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /scoped-models overlay. Esc closes; Space
+ * toggles inclusion and Enter commits, both handled inside ScopedOverlayBox.
+ */
+export function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -291,6 +334,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "model") {
 		// Same policy as thinking: the Box forwards unconsumed input to the SelectList.
 		return routeModelOverlayKey(data, deps);
+	}
+	if (overlayState === "scoped-models") {
+		// The ScopedOverlayBox owns Space and Enter; route only Esc here.
+		return routeScopedModelsOverlayKey(data, deps);
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
@@ -353,6 +400,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
+		openScopedModels: () => openScopedModelsOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
@@ -494,6 +542,22 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const openScopedModelsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		overlayState = "scoped-models";
+		overlayHandle = openScopedOverlay(tui, {
+			currentScope: extractScopeFromSettings(settings),
+			onCommit: (next) => {
+				deps.onSetScope?.(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
 	const toggleDispatchBoardOverlay = (): void => {
 		if (overlayState === "dispatch-board") {
 			closeOverlay();
@@ -613,6 +677,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			openModelSelector: () => {
 				openModelOverlayState();
+			},
+			cycleScopedModelForward: () => {
+				deps.onCycleScopedModelForward?.();
+				footer.refresh();
+				tui.requestRender();
+			},
+			cycleScopedModelBackward: () => {
+				deps.onCycleScopedModelBackward?.();
+				footer.refresh();
+				tui.requestRender();
 			},
 		});
 		return consumed ? { consume: true } : undefined;
