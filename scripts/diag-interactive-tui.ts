@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BusChannels } from "../src/core/bus-events.js";
 import { createSafeEventBus } from "../src/core/event-bus.js";
+import { visibleWidth } from "../src/engine/tui.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
@@ -1409,7 +1410,7 @@ async function main(): Promise<void> {
 	);
 	check(
 		"receipts-overlay:row-contains-exit-tokens-usd",
-		receiptRowSample.includes("e=0") && receiptRowSample.includes("42t") && receiptRowSample.includes("$0.0000"),
+		receiptRowSample.includes("e=0") && receiptRowSample.includes("42t") && receiptRowSample.includes("$0.00"),
 		receiptRowSample,
 	);
 
@@ -1423,9 +1424,15 @@ async function main(): Promise<void> {
 		JSON.stringify(receiptItems.map((i) => i.value)),
 	);
 	check(
-		"receipts-overlay:items-carry-startedAt-in-label",
-		receiptItems[0]?.label.includes("2026-04-17T00:00:00.000Z"),
-		receiptItems[0]?.label,
+		"receipts-overlay:items-carry-startedAt-in-description",
+		receiptItems[0]?.description === "2026-04-17T00:00:00.000Z" &&
+			!receiptItems[0]?.label.includes("2026-04-17T00:00:00.000Z"),
+		JSON.stringify(receiptItems[0]),
+	);
+	check(
+		"receipts-overlay:items-format-tokens-and-usd-for-humans",
+		receiptItems[1]?.label.includes("1,234t") && receiptItems[1]?.label.includes("$0.01"),
+		receiptItems[1]?.label,
 	);
 
 	check(
@@ -1495,10 +1502,31 @@ async function main(): Promise<void> {
 		"receipts-overlay:renders-exit-tokens-for-each-row",
 		receiptsRenderJoined.includes("e=0") &&
 			receiptsRenderJoined.includes("e=2") &&
-			receiptsRenderJoined.includes("1234t"),
+			receiptsRenderJoined.includes("1,234t") &&
+			receiptsRenderJoined.includes("$0.01"),
 		receiptsRenderJoined,
 	);
-	check("receipts-overlay:renders-esc-close-hint", receiptsRenderJoined.includes("[Esc] close"), receiptsRenderJoined);
+	check(
+		"receipts-overlay:renders-verify-hint",
+		receiptsRenderJoined.includes("/receipt verify <id>") && receiptsRenderJoined.includes("[Esc]"),
+		receiptsRenderJoined,
+	);
+	for (const width of [40, 80, 120]) {
+		const lines = receiptsOverlayCapturedComponent?.render(width) ?? [];
+		check(
+			`receipts-overlay:width-${width}-does-not-wrap`,
+			lines.every((line) => visibleWidth(line) <= width),
+			lines.join("\n"),
+		);
+	}
+	const narrowReceiptsJoined = (receiptsOverlayCapturedComponent?.render(40) ?? []).join("\n");
+	check(
+		"receipts-overlay:narrow-width-preserves-right-hand-cells",
+		narrowReceiptsJoined.includes("e=0") &&
+			narrowReceiptsJoined.includes("1,234t") &&
+			narrowReceiptsJoined.includes("$0.01"),
+		narrowReceiptsJoined,
+	);
 	receiptsHandle.hide();
 
 	// Empty-state overlay still renders a hint line
