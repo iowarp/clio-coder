@@ -55,6 +55,7 @@ export interface DomainModule<TContract extends DomainContract = DomainContract>
 export interface LoadResult {
 	loaded: ReadonlyArray<string>;
 	failed: ReadonlyArray<{ name: string; error: unknown }>;
+	getContract<T extends DomainContract = DomainContract>(name: string): T | undefined;
 	stop(): Promise<void>;
 }
 
@@ -103,7 +104,11 @@ export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise
 		}
 	};
 
-	return { loaded, failed, stop };
+	const getContract = <T extends DomainContract = DomainContract>(name: string): T | undefined => {
+		return contracts.get(name) as T | undefined;
+	};
+
+	return { loaded, failed, getContract, stop };
 }
 
 function topoSort(modules: ReadonlyArray<DomainModule>): string[] {
