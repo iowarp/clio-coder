@@ -18,6 +18,7 @@ import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ModesContract } from "../modes/contract.js";
+import { type ProviderId, getModelSpec } from "../providers/catalog.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import { admit } from "./admission.js";
@@ -122,6 +123,25 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 
 		const worker = spawnNativeWorker(spec, { cwd });
 
+		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
+		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
+			for await (const raw of worker.events) {
+				const event = raw as {
+					type?: string;
+					message?: {
+						role?: string;
+						usage?: { input?: number; output?: number; totalTokens?: number };
+					};
+				};
+				if (event.type === "message_end" && event.message?.role === "assistant" && event.message.usage) {
+					const u = event.message.usage;
+					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+				}
+				yield raw;
+			}
+		})();
+
 		const ledgerRef = requireLedger();
 		const envelope = ledgerRef.create({
 			agentId: req.agentId,
@@ -170,6 +190,12 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			const receiptExitCode = result.exitCode ?? 1;
 			const endedAt = new Date().toISOString();
 			const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
+			const modelSpec = getModelSpec(providerId as ProviderId, modelId);
+			const costUsd = modelSpec
+				? (tokenMeter.inputTokens * (modelSpec.pricePer1MInput ?? 0)) / 1_000_000 +
+					(tokenMeter.outputTokens * (modelSpec.pricePer1MOutput ?? 0)) / 1_000_000
+				: 0;
+			const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
 			const receipt: RunReceipt = {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -180,8 +206,8 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
-				tokenCount: 0,
-				costUsd: 0,
+				tokenCount,
+				costUsd,
 				compiledPromptHash: null,
 				staticCompositionHash: null,
 				clioVersion: readClioVersion(),
@@ -230,7 +256,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 
 		return {
 			runId: envelope.id,
-			events: worker.events,
+			events: enrichedEvents,
 			finalPromise,
 		};
 	}

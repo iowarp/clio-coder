@@ -159,6 +159,16 @@ async function run(): Promise<void> {
 		);
 		check("receipt:platform-and-node", receipt.platform === process.platform && receipt.nodeVersion === process.version);
 		check("receipt:endedAt-non-empty", typeof receipt.endedAt === "string" && receipt.endedAt.length > 0);
+		check(
+			"receipt:tokenCount-from-usage",
+			typeof receipt.tokenCount === "number" && receipt.tokenCount > 0,
+			`tokenCount=${receipt.tokenCount}`,
+		);
+		check(
+			"receipt:costUsd-non-negative",
+			typeof receipt.costUsd === "number" && receipt.costUsd >= 0,
+			`costUsd=${receipt.costUsd}`,
+		);
 
 		// ---- ledger / filesystem checks -----------------------------------------
 		const completedRuns = dispatch.listRuns("completed");
@@ -190,6 +200,11 @@ async function run(): Promise<void> {
 			const entries = obs.costEntries();
 			const matching = entries.find((e) => e.providerId === "faux" && e.modelId === "faux-model");
 			check("observability:cost-entry-for-completed-run", matching !== undefined, `entries=${JSON.stringify(entries)}`);
+			check(
+				"observability:cost-entry-tokens-non-zero",
+				matching !== undefined && matching.tokens > 0,
+				`tokens=${matching?.tokens ?? 0}`,
+			);
 			const snapshot = obs.metrics();
 			const hist = snapshot.histograms["dispatch.duration_ms"];
 			check(
