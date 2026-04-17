@@ -22,21 +22,27 @@ function orchestratorTarget(settings: Readonly<ClioSettings>): string | null {
 	return endpoint ? `${providerId}/${endpoint}/${modelId}` : `${providerId}/${modelId}`;
 }
 
+function thinkingSuffix(settings: Readonly<ClioSettings>): string {
+	const level = settings.orchestrator?.thinkingLevel;
+	return level && level !== "off" ? `:${level}` : "";
+}
+
 export function buildFooter(deps: FooterDeps): FooterPanel {
 	const view = new Text("");
 	const refresh = (): void => {
 		const mode = deps.modes.current();
 		const settings = deps.getSettings?.();
 		const target = settings ? orchestratorTarget(settings) : null;
+		const suffix = settings ? thinkingSuffix(settings) : "";
 		if (target) {
-			view.setText(`  mode=${mode}  provider=${target}`);
+			view.setText(`  mode=${mode}  provider=${target}${suffix}`);
 			view.invalidate();
 			return;
 		}
 		const providers = deps.providers.list();
 		const active = providers.find((p) => p.available) ?? providers[0];
 		const modelName = active ? `${active.id}/${active.displayName}` : "no-provider";
-		view.setText(`  mode=${mode}  provider=${modelName}`);
+		view.setText(`  mode=${mode}  provider=${modelName}${suffix}`);
 		view.invalidate();
 	};
 	refresh();
