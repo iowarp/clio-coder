@@ -17,8 +17,9 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
+import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
-import { type ProviderId, getModelSpec } from "../providers/catalog.js";
+import { type ProviderId, getModelSpec, isLocalEngineId } from "../providers/catalog.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
@@ -70,6 +71,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const modes: ModesContract = maybeModes;
+	const config = context.getContract<ConfigContract>("config");
 	// scheduling is optional: when present (production boot order) dispatch gates
 	// admission on the session budget ceiling. If absent (test harnesses that
 	// exercise dispatch without the scheduling domain) dispatch falls back to
@@ -123,8 +125,17 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			throw new Error(`dispatch: admission denied — ${verdict.reason}`);
 		}
 
-		const providerId = req.providerId ?? recipe?.provider ?? "faux";
-		const modelId = req.modelId ?? recipe?.model ?? "faux-model";
+		const settings = config?.get();
+		const workerDefault = settings?.workers?.default;
+		const providerId = req.providerId ?? recipe?.provider ?? workerDefault?.provider ?? "faux";
+		const resolvedModelRaw = req.modelId ?? recipe?.model ?? workerDefault?.model ?? "faux-model";
+		// For local engines, rewrite modelId to `${modelId}@${endpointName}` so the
+		// worker can resolve the correct endpoint via the pi-ai side-registry.
+		const endpointName = req.endpoint ?? workerDefault?.endpoint;
+		const modelId =
+			isLocalEngineId(providerId) && endpointName && !resolvedModelRaw.includes("@")
+				? `${resolvedModelRaw}@${endpointName}`
+				: resolvedModelRaw;
 		const runtime = req.runtime ?? recipe?.runtime ?? "native";
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);

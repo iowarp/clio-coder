@@ -55,7 +55,11 @@ the fuller install and smoke path, use
    package and pi-mono versions, Node version, and missing runtime
    binaries.
 3. `clio providers`: list discovered providers with availability and
-   health so you can see which runtimes are ready before dispatch.
+   health so you can see which runtimes are ready before dispatch. Local
+   inference engines (`llamacpp`, `lmstudio`, `ollama`, `openai-compat`)
+   read their endpoint list from `~/.clio/settings.yaml` and report
+   per-endpoint probe status; see `docs/guides/overview.md` for the
+   settings shape.
 4. `clio agents`: list built-in, user, and project agent recipes with
    their default mode.
 5. `clio run scout hello --faux`: run a headless faux dispatch through

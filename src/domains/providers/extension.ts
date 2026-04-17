@@ -1,12 +1,13 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { registerLocalProviders } from "../../engine/ai.js";
 import type { ConfigContract } from "../config/contract.js";
-import { PROVIDER_CATALOG, type ProviderId } from "./catalog.js";
-import type { ProviderListEntry, ProvidersContract } from "./contract.js";
+import { PROVIDER_CATALOG, type ProviderId, isLocalEngineId } from "./catalog.js";
+import type { ProviderEndpointEntry, ProviderListEntry, ProvidersContract } from "./contract.js";
 import { type CredentialStore, credentialsPresent, openCredentialStore } from "./credentials.js";
 import { discoverProviders } from "./discovery.js";
 import { type ProviderHealth, applyProbeResult, initialHealth } from "./health.js";
-import type { RuntimeAdapter } from "./runtime-contract.js";
+import type { EndpointProbeResult, RuntimeAdapter } from "./runtime-contract.js";
 import { RUNTIME_ADAPTERS } from "./runtimes/index.js";
 
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
@@ -18,6 +19,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	let credStore: CredentialStore | null = null;
 	const healthState = new Map<ProviderId, ProviderHealth>();
+	const endpointProbes = new Map<ProviderId, EndpointProbeResult[]>();
 
 	// ProviderHealth + probeAll operate only on catalog-backed adapters. CLI
 	// adapters and the Claude SDK adapter (tier=sdk but not in the catalog)
@@ -36,10 +38,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const present = credentialsPresent();
 		const avail = discoverProviders({ settings, credentialsPresent: present });
 		const byId = new Map(avail.map((a) => [a.id, a]));
+		const localProviders = settings.providers ?? {};
 		return PROVIDER_CATALOG.map((spec) => {
 			const a = byId.get(spec.id);
 			const h = healthState.get(spec.id) ?? initialHealth(spec.id);
-			return {
+			const entry: ProviderListEntry = {
 				id: spec.id,
 				displayName: spec.displayName,
 				tier: spec.tier,
@@ -47,6 +50,23 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				reason: a?.reason ?? "unknown",
 				health: h,
 			};
+			if (isLocalEngineId(String(spec.id))) {
+				const engineKey = spec.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat";
+				const endpoints = localProviders[engineKey]?.endpoints ?? {};
+				const probeResults = endpointProbes.get(spec.id) ?? [];
+				const probeByName = new Map(probeResults.map((p) => [p.name, p]));
+				entry.endpoints = Object.entries(endpoints).map(([name, epSpec]): ProviderEndpointEntry => {
+					const e: ProviderEndpointEntry = {
+						name,
+						url: epSpec.url,
+					};
+					if (epSpec.default_model) e.defaultModel = epSpec.default_model;
+					const probe = probeByName.get(name);
+					if (probe) e.probe = probe;
+					return e;
+				});
+			}
+			return entry;
 		});
 	}
 
@@ -61,6 +81,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			const settings = config.get();
 			const present = credentialsPresent();
 			discoverProviders({ settings, credentialsPresent: present });
+			// Register local-engine endpoints with the pi-ai side-registry so
+			// workers can resolve `getModel(providerId, "${modelId}@${endpointName}")`.
+			registerLocalProviders(settings.providers ?? {});
 		},
 		async stop() {
 			// no-op; credential store has no close handle
@@ -76,9 +99,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		async probeAll(): Promise<void> {
 			const present = credentialsPresent();
+			const settings = config.get();
+			const localProviders = settings.providers ?? {};
 			for (const adapter of providerAdapters) {
 				const started = Date.now();
-				const result = await adapter.probe({ credentialsPresent: present });
+				const endpoints = isLocalEngineId(String(adapter.id))
+					? localProviders[adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat"]?.endpoints
+					: undefined;
+				const result = await adapter.probe({ credentialsPresent: present, endpoints });
 				const latency = result.latencyMs ?? Math.max(0, Date.now() - started);
 				const prev = healthState.get(adapter.id) ?? initialHealth(adapter.id);
 				const probe: { ok: boolean; latencyMs: number; error?: string } = {
@@ -89,6 +117,21 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				const next = applyProbeResult(prev, probe);
 				healthState.set(adapter.id, next);
 				context.bus.emit(BusChannels.ProviderHealth, { providerId: adapter.id, health: next });
+			}
+		},
+		async probeEndpoints(): Promise<void> {
+			const settings = config.get();
+			const localProviders = settings.providers ?? {};
+			for (const adapter of providerAdapters) {
+				if (!adapter.probeEndpoints) continue;
+				const engineKey = adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat";
+				const endpoints = localProviders[engineKey]?.endpoints ?? {};
+				if (Object.keys(endpoints).length === 0) {
+					endpointProbes.set(adapter.id, []);
+					continue;
+				}
+				const results = await adapter.probeEndpoints(endpoints);
+				endpointProbes.set(adapter.id, results);
 			}
 		},
 		credentials: {

@@ -131,10 +131,51 @@ removed from the lists below.
 
 - `clio --version`, `clio install`, `clio doctor`, `clio uninstall` handle
   lifecycle.
-- `clio providers [--json]` and `clio agents [--json]` list discovered
-  providers and agents.
-- `clio run <agent> <task> [--faux] [--json] [--provider ...] [--model ...]`
+- `clio providers [--json] [--no-probe]` and `clio agents [--json]` list
+  discovered providers and agents. Local-engine providers (llamacpp,
+  lmstudio, ollama, openai-compat) enumerate configured endpoints from
+  `~/.clio/settings.yaml` and report per-endpoint health.
+- `clio run <agent> <task> [--faux] [--json] [--provider ...] [--endpoint ...] [--model ...]`
   runs a headless dispatch and streams NDJSON events plus a final receipt.
+
+### Local inference engines
+
+Clio ships four native local providers that talk to any local server:
+
+- `llamacpp` drives `llama-server` over OpenAI-compat `/v1/*` plus
+  llama.cpp specifics (`/health`, `/props`, `/slots`, `/tokenize`).
+- `lmstudio` drives LM Studio with `/api/v0/models` preferred and a fall
+  back to `/v1/models`.
+- `ollama` drives any Ollama instance through its native `/api/tags`
+  listing; chat flows through Ollama's OpenAI-compat `/v1/*` for v0.1.
+- `openai-compat` is the generic fallback for SGLang, vLLM, tgi, and
+  other servers that expose `/v1/chat/completions` without matching the
+  above quirks.
+
+Endpoints are user-supplied. Example `~/.clio/settings.yaml`:
+
+```yaml
+providers:
+  llamacpp:
+    endpoints:
+      home-mini:
+        url: http://192.168.86.141:8080
+        default_model: Qwen3.6-35B-A3B-UD-Q4_K_XL
+  lmstudio:
+    endpoints:
+      home-dynamo:
+        url: http://192.168.86.143:1234
+        default_model: qwen3.6-35b-a3b
+orchestrator:
+  provider: llamacpp
+  endpoint: home-mini
+  model: Qwen3.6-35B-A3B-UD-Q4_K_XL
+workers:
+  default:
+    provider: lmstudio
+    endpoint: home-dynamo
+    model: qwen3.6-35b-a3b
+```
 - `clio` with no subcommand launches the interactive TUI scaffold. Slash
   commands available today are `/run <agent> <task>`, `/help`, and `/quit`.
 - `npm run diag:*` covers the diagnostic suite. Full index lives in

@@ -1,6 +1,13 @@
 import type { ProviderId, ProviderTier } from "./catalog.js";
 import type { ProviderHealth } from "./health.js";
-import type { RuntimeAdapter } from "./runtime-contract.js";
+import type { EndpointProbeResult, RuntimeAdapter } from "./runtime-contract.js";
+
+export interface ProviderEndpointEntry {
+	name: string;
+	url: string;
+	defaultModel?: string;
+	probe?: EndpointProbeResult;
+}
 
 export interface ProviderListEntry {
 	id: ProviderId;
@@ -9,6 +16,7 @@ export interface ProviderListEntry {
 	available: boolean;
 	reason: string;
 	health: ProviderHealth;
+	endpoints?: ReadonlyArray<ProviderEndpointEntry>;
 }
 
 export interface ProvidersContract {
@@ -20,6 +28,9 @@ export interface ProvidersContract {
 
 	/** Trigger a single probe across all enabled providers. Async. */
 	probeAll(): Promise<void>;
+
+	/** Probe every configured endpoint of every local-engine provider. */
+	probeEndpoints(): Promise<void>;
 
 	/** Credentials store access for /providers overlay (TUI in slice 8). */
 	credentials: {
