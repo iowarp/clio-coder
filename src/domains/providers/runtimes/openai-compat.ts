@@ -46,6 +46,18 @@ async function probeOne(name: string, spec: EndpointSpec): Promise<EndpointProbe
 	};
 }
 
+async function probeLiveEndpoints(endpoints: Record<string, EndpointSpec> | undefined): Promise<RuntimeProbeResult> {
+	if (!endpoints || Object.keys(endpoints).length === 0) {
+		return { ok: false, error: "no openai-compat endpoints configured" };
+	}
+	const results = await Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));
+	const healthy = results.filter((r) => r.ok).length;
+	if (healthy === 0) return { ok: false, error: "no healthy openai-compat endpoints" };
+	const latencies = results.filter((r) => r.ok).map((r) => r.latencyMs ?? 0);
+	const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+	return { ok: true, latencyMs: avg };
+}
+
 export const openaiCompatAdapter: RuntimeAdapter = {
 	id: "openai-compat",
 	tier: "native",
@@ -58,15 +70,10 @@ export const openaiCompatAdapter: RuntimeAdapter = {
 		return initialHealth("openai-compat");
 	},
 	async probe({ endpoints } = {}): Promise<RuntimeProbeResult> {
-		if (!endpoints || Object.keys(endpoints).length === 0) {
-			return { ok: false, error: "no openai-compat endpoints configured" };
-		}
-		const results = await Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));
-		const healthy = results.filter((r) => r.ok).length;
-		if (healthy === 0) return { ok: false, error: "no healthy openai-compat endpoints" };
-		const latencies = results.filter((r) => r.ok).map((r) => r.latencyMs ?? 0);
-		const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-		return { ok: true, latencyMs: avg };
+		return probeLiveEndpoints(endpoints);
+	},
+	async probeLive({ endpoints } = {}): Promise<RuntimeProbeResult> {
+		return probeLiveEndpoints(endpoints);
 	},
 	async probeEndpoints(endpoints) {
 		return Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));

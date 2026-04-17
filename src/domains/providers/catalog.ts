@@ -16,8 +16,7 @@ export type ProviderId =
 	| "llamacpp"
 	| "lmstudio"
 	| "ollama"
-	| "openai-compat"
-	| "local";
+	| "openai-compat";
 
 /**
  * IDs of inference engines that run locally. Every entry is also a ProviderId.
@@ -166,12 +165,6 @@ export const PROVIDER_CATALOG: ReadonlyArray<ProviderSpec> = [
 	{
 		id: "openai-compat",
 		displayName: "OpenAI-compatible",
-		tier: "native",
-		models: [],
-	},
-	{
-		id: "local",
-		displayName: "Local (deprecated alias)",
 		tier: "native",
 		models: [],
 	},

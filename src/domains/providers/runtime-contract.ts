@@ -1,14 +1,25 @@
 /**
- * Runtime adapter contract. Each provider in the catalog has a matching
- * adapter that reports readiness WITHOUT issuing network traffic. Phase 4
- * ships stubs; real provider calls land in Phase 6+ for native/sdk tiers.
+ * Runtime adapter contract. Adapters expose a pure config check via
+ * canSatisfy() and may optionally expose a live probe that performs real I/O.
+ * The legacy probe() method stays for compatibility.
  */
 
 import type { EndpointSpec } from "../../core/defaults.js";
 import type { ProviderId } from "./catalog.js";
 import type { ProviderHealth } from "./health.js";
 
+export interface CanSatisfyResult {
+	ok: boolean;
+	reason: string;
+}
+
 export interface RuntimeProbeResult {
+	ok: boolean;
+	latencyMs?: number;
+	error?: string;
+}
+
+export interface ProbeLiveResult {
 	ok: boolean;
 	latencyMs?: number;
 	error?: string;
@@ -36,13 +47,17 @@ export interface RuntimeAdapter {
 		modelId: string;
 		credentialsPresent: ReadonlySet<string>;
 		endpoints?: Record<string, EndpointSpec>;
-	}): { ok: boolean; reason: string };
+	}): CanSatisfyResult;
 	/** Reports initial health without network call (used at boot). */
 	initialHealth(): ProviderHealth;
-	/** Lightweight sync probe. v0.1: returns ok=true if canSatisfy passes, else ok=false.
-	 *  Local-engine adapters MAY issue HTTP probes against each configured endpoint
-	 *  (see probeEndpoints below) and aggregate the result. */
+	/**
+	 * Compatibility probe. Adapters that expose a real live probe should route
+	 * callers to probeLive(). Explicit config-only stubs may keep delegating to
+	 * canSatisfy() so older callers continue to see the legacy behavior.
+	 */
 	probe(opts?: ProbeOptions): Promise<RuntimeProbeResult>;
+	/** Real liveness check. May perform network I/O or spawn subprocesses. */
+	probeLive?(opts?: ProbeOptions): Promise<ProbeLiveResult>;
 	/** Per-endpoint probes — only implemented by local-engine adapters. */
 	probeEndpoints?(endpoints: Record<string, EndpointSpec>): Promise<EndpointProbeResult[]>;
 }

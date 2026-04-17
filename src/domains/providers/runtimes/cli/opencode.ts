@@ -23,4 +23,7 @@ export const opencodeCliAdapter: RuntimeAdapter = {
 		const verdict = this.canSatisfy({ modelId: "", credentialsPresent: new Set<string>() });
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
+	async probeLive() {
+		return { ok: false, error: `live probe not implemented for ${ADAPTER_ID}; config-only` };
+	},
 };
