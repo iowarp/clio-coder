@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
+import { installBusTracer } from "../core/bus-trace.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -21,6 +22,9 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
+	// CLIO_BUS_TRACE=1 turns on the stderr bus tracer used by diag scripts
+	// (see src/core/bus-trace.ts). Off by default; no production overhead.
+	installBusTracer();
 	termination.installSignalHandlers();
 
 	ensureInstalled();
@@ -45,9 +49,15 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 
 	// A real interactive loop lands in Phase 6. This stub keeps the process alive
-	// until the user sends SIGINT/SIGTERM, so Phase 1 can smoke-test boot-and-idle.
-	await new Promise<void>((resolve) => {
-		termination.onDrain(() => resolve());
-	});
+	// until the user sends SIGINT/SIGTERM. Signal handlers alone do not hold the
+	// Node event loop open, so we park a long no-op interval as an active handle.
+	// Once shutdown() fires from the signal handler it runs DRAIN -> TERMINATE ->
+	// PERSIST -> EXIT and calls process.exit itself with the correct signal-derived
+	// code (130 for SIGINT, 143 for SIGTERM). We never return from this path so
+	// the CLI entry cannot race shutdown and exit with code 0 before persist. The
+	// interval is deliberately never cleared: process.exit tears everything down.
+	void setInterval(() => {}, 1 << 30);
+	await new Promise<never>(() => {});
+	// Unreachable: the pending promise above is resolved only by process.exit.
 	return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 }
