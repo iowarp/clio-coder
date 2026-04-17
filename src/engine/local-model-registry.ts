@@ -29,6 +29,17 @@ interface EnginePreset {
 	input: ("text" | "image")[];
 }
 
+const QWEN3_FAMILY_RE = /(?:^|[^a-z0-9])qwen3(?:\.\d+)?(?:$|[^a-z0-9])/i;
+const VISION_TOKEN_RE = /(?:^|[^a-z0-9])(?:vl|vision)(?:$|[^a-z0-9])/i;
+
+function isQwen3FamilyModelId(id: string): boolean {
+	return QWEN3_FAMILY_RE.test(id);
+}
+
+function isVisionModelId(id: string): boolean {
+	return VISION_TOKEN_RE.test(id);
+}
+
 /**
  * Match table keyed by engine id. A preset is only applied when the model id
  * matches a known pattern; unknown model ids fall through to the engine's
@@ -42,7 +53,7 @@ const ENGINE_PRESETS: Record<
 	llamacpp: {
 		patterns: [
 			{
-				test: (id) => /qwen3?.*vl/i.test(id) || /qwen3?.*vision/i.test(id),
+				test: (id) => isQwen3FamilyModelId(id) && isVisionModelId(id),
 				preset: {
 					reasoning: true,
 					thinkingFormat: "qwen-chat-template",
@@ -52,7 +63,7 @@ const ENGINE_PRESETS: Record<
 				},
 			},
 			{
-				test: (id) => /qwen3?/i.test(id),
+				test: (id) => isQwen3FamilyModelId(id),
 				preset: {
 					reasoning: true,
 					thinkingFormat: "qwen-chat-template",
@@ -67,7 +78,7 @@ const ENGINE_PRESETS: Record<
 	lmstudio: {
 		patterns: [
 			{
-				test: (id) => /qwen3?.*vl/i.test(id) || /qwen3?.*vision/i.test(id),
+				test: (id) => isQwen3FamilyModelId(id) && isVisionModelId(id),
 				preset: {
 					reasoning: true,
 					thinkingFormat: "qwen-chat-template",
@@ -77,7 +88,7 @@ const ENGINE_PRESETS: Record<
 				},
 			},
 			{
-				test: (id) => /qwen3?/i.test(id),
+				test: (id) => isQwen3FamilyModelId(id),
 				preset: {
 					reasoning: true,
 					thinkingFormat: "qwen-chat-template",

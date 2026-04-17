@@ -230,7 +230,14 @@ async function run(): Promise<void> {
 		type PiModel = ReturnType<typeof engineAi.getModel>;
 		const s2Endpoint = "s2-mock";
 		const s2Spec: EndpointSpecType = { url: "http://127.0.0.1:9999" };
-		const s2ModelIds = ["Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL", "meta-llama-3.1-8b-instruct", "gpt-oss-20b"] as const;
+		const s2ModelIds = [
+			"Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			"meta-llama-3.1-8b-instruct",
+			"gpt-oss-20b",
+			"qwen3.6-35b-a3b",
+			"myqwen3-thing",
+			"qwenm-xyz",
+		] as const;
 		engineAi.registerDiscoveredLocalModels("llamacpp", s2Endpoint, s2Spec, s2ModelIds);
 		let s2Registered = 0;
 		for (const id of s2ModelIds) {
@@ -269,6 +276,40 @@ async function run(): Promise<void> {
 				s2VlRich.compat?.thinkingFormat === "qwen-chat-template",
 			`reasoning=${s2VlRich.reasoning} input=${JSON.stringify(s2VlRich.input)} ctx=${s2VlRich.contextWindow} tf=${s2VlRich.compat?.thinkingFormat ?? "null"}`,
 		);
+
+		const s2QwenText = engineAi.getModel("llamacpp", `${s2ModelIds[3]}@${s2Endpoint}`) as PiModel;
+		const s2QwenTextRich = s2QwenText as unknown as {
+			reasoning?: boolean;
+			input?: readonly string[];
+			contextWindow?: number;
+			compat?: { thinkingFormat?: string };
+		};
+		check(
+			"config",
+			"s2:qwen3.6-text-preset-applied",
+			s2QwenTextRich.reasoning === true &&
+				Array.isArray(s2QwenTextRich.input) &&
+				s2QwenTextRich.input.length === 1 &&
+				s2QwenTextRich.input[0] === "text" &&
+				s2QwenTextRich.contextWindow === 262144 &&
+				s2QwenTextRich.compat?.thinkingFormat === "qwen-chat-template",
+			`reasoning=${s2QwenTextRich.reasoning} input=${JSON.stringify(s2QwenTextRich.input)} ctx=${s2QwenTextRich.contextWindow} tf=${s2QwenTextRich.compat?.thinkingFormat ?? "null"}`,
+		);
+
+		const s2FalsePositiveIds = [s2ModelIds[4], s2ModelIds[5]] as const;
+		for (const id of s2FalsePositiveIds) {
+			const model = engineAi.getModel("llamacpp", `${id}@${s2Endpoint}`) as PiModel;
+			const richModel = model as unknown as {
+				reasoning?: boolean;
+				compat?: { thinkingFormat?: string };
+			};
+			check(
+				"config",
+				`s2:${id}-keeps-safe-baseline`,
+				richModel.reasoning === false && richModel.compat?.thinkingFormat === undefined,
+				`reasoning=${richModel.reasoning} tf=${richModel.compat?.thinkingFormat ?? "null"}`,
+			);
+		}
 
 		// Wildcard `@${endpoint}` key set at boot by registerLocalProviders must
 		// survive the per-model additions above. Re-running the boot registrar
