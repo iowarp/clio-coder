@@ -2,8 +2,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Value } from "@sinclair/typebox/value";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "../src/core/defaults.js";
+import { SettingsSchema } from "../src/domains/config/schema.js";
 
 /**
  * Verification script. Builds once, then runs:
@@ -116,6 +118,44 @@ const EXAMPLE_SPECS: readonly ExampleSpec[] = [
 	},
 ];
 
+type TargetOverrideSpec = {
+	block: "orchestrator" | "workers";
+	path: "orchestrator" | "workers.default";
+	expected: {
+		provider: string;
+		endpoint: string;
+		model: string;
+	};
+	select(parsed: unknown): unknown;
+};
+
+const TARGET_OVERRIDE_SPECS: readonly TargetOverrideSpec[] = [
+	{
+		block: "orchestrator",
+		path: "orchestrator",
+		expected: {
+			provider: "llamacpp",
+			endpoint: "mini",
+			model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+		},
+		select(parsed) {
+			return (parsed as { orchestrator?: unknown }).orchestrator;
+		},
+	},
+	{
+		block: "workers",
+		path: "workers.default",
+		expected: {
+			provider: "llamacpp",
+			endpoint: "mini",
+			model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+		},
+		select(parsed) {
+			return (parsed as { workers?: { default?: unknown } }).workers?.default;
+		},
+	},
+];
+
 function objectKeys(value: unknown): string[] | null {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
 	return Object.keys(value).sort();
@@ -165,6 +205,52 @@ function materializeExampleBlock(
 
 	const exampleLines = lines.slice(startIndex + 1, endIndex).map(uncommentTemplateLine);
 	return [...lines.slice(0, endpointsIndex), ...exampleLines, ...lines.slice(endpointsIndex + 1)].join("\n");
+}
+
+function uncommentBlockExample(body: string, block: TargetOverrideSpec["block"]): string {
+	const lines = body.split("\n");
+	const startMarker = `# clio-example:start block=${block}`;
+	const endMarker = `# clio-example:end block=${block}`;
+	const startIndex = lines.findIndex((line) => line.trim() === startMarker);
+	const endIndex = lines.findIndex((line) => line.trim() === endMarker);
+	if (startIndex < 0 || endIndex < 0 || endIndex <= startIndex) {
+		fail(`settings.yaml missing canonical block markers for ${block}`);
+	}
+
+	return lines
+		.map((line, index) => (index > startIndex && index < endIndex ? uncommentTemplateLine(line) : line))
+		.join("\n");
+}
+
+function assertExactObject(actual: unknown, expected: Record<string, string>, path: string): void {
+	if (actual === null || typeof actual !== "object" || Array.isArray(actual)) {
+		fail(`settings.yaml example for ${path} did not materialize an object`);
+	}
+
+	const actualRecord = actual as Record<string, unknown>;
+	const expectedKeys = Object.keys(expected).sort();
+	const actualKeys = Object.keys(actualRecord).sort();
+	if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+		fail(
+			`settings.yaml example for ${path} had the wrong key set`,
+			`expected=${JSON.stringify(expectedKeys)} actual=${JSON.stringify(actualKeys)}`,
+		);
+	}
+
+	for (const [key, value] of Object.entries(expected)) {
+		if (actualRecord[key] !== value) {
+			fail(
+				`settings.yaml example for ${path} had the wrong value for ${key}`,
+				`expected=${JSON.stringify(value)} actual=${JSON.stringify(actualRecord[key])}`,
+			);
+		}
+	}
+}
+
+function assertSchemaValid(candidate: unknown, label: string): void {
+	if (Value.Check(SettingsSchema, candidate)) return;
+	const first = [...Value.Errors(SettingsSchema, candidate)][0];
+	fail(`${label} failed schema validation`, `${first?.path ?? "(root)"} ${first?.message ?? "unknown schema error"}`);
 }
 
 function checkExampleFixture(body: string, spec: ExampleSpec): void {
@@ -222,6 +308,24 @@ function assertBlockMarkers(body: string): void {
 	}
 }
 
+function checkTargetOverrideExamples(body: string): void {
+	let parsed: unknown;
+	let materialized = materializeExampleBlock(body, "llamacpp", "mini");
+	for (const spec of TARGET_OVERRIDE_SPECS) {
+		materialized = uncommentBlockExample(materialized, spec.block);
+	}
+	try {
+		parsed = parseYaml(materialized);
+	} catch (err) {
+		fail("settings.yaml override examples did not parse after uncomment", (err as Error).message);
+	}
+
+	assertSchemaValid(parsed, "settings.yaml override examples");
+	for (const spec of TARGET_OVERRIDE_SPECS) {
+		assertExactObject(spec.select(parsed), spec.expected, spec.path);
+	}
+}
+
 function checkSettingsTemplate(home: string): void {
 	const settingsPath = join(home, "settings.yaml");
 	const body = readFileSync(settingsPath, "utf8");
@@ -240,6 +344,7 @@ function checkSettingsTemplate(home: string): void {
 		checkExampleFixture(body, spec);
 	}
 	assertBlockMarkers(body);
+	checkTargetOverrideExamples(body);
 	log("settings.yaml example block OK");
 }
 
