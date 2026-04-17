@@ -224,6 +224,43 @@ async function main(): Promise<void> {
 		JSON.stringify(failed),
 	);
 
+	for (let index = 0; index < 55; index += 1) {
+		withNow(3_000 + index, () => {
+			bus.emit(BusChannels.DispatchEnqueued, {
+				runId: `run-cap-${index}`,
+				agentId: `agent-${index}`,
+				providerId: "openai",
+				modelId: "gpt-5",
+				runtime: "native",
+			});
+		});
+		withNow(3_100 + index, () => {
+			bus.emit(BusChannels.DispatchCompleted, {
+				runId: `run-cap-${index}`,
+				agentId: `agent-${index}`,
+				providerId: "openai",
+				modelId: "gpt-5",
+				runtime: "native",
+				tokenCount: index,
+				costUsd: 0,
+				durationMs: 10,
+			});
+		});
+	}
+	rows = withNow(3_200, () => store.rows());
+	const rowIds = new Set(rows.map((row) => row.runId));
+	check("store:retains-at-most-50-rows", rows.length === 50, String(rows.length));
+	check(
+		"store:evicts-oldest-terminal-rows-first",
+		!rowIds.has("run-cap-0") &&
+			!rowIds.has("run-cap-1") &&
+			!rowIds.has("run-cap-2") &&
+			!rowIds.has("run-cap-3") &&
+			!rowIds.has("run-cap-4") &&
+			rowIds.has("run-cap-54"),
+		JSON.stringify([...rowIds].sort()),
+	);
+
 	store.unsubscribe();
 	const countAfterUnsubscribe = store.rows().length;
 	withNow(3_000, () => {
