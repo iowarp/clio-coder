@@ -101,6 +101,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 
 	await startInteractive({
+		bus,
 		modes,
 		providers,
 		dispatch,

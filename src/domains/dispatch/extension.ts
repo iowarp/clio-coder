@@ -174,12 +174,14 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			agentId: req.agentId,
 			providerId,
 			modelId,
+			runtime,
 		});
 		context.bus.emit(BusChannels.DispatchStarted, {
 			runId: envelope.id,
 			agentId: req.agentId,
 			providerId,
 			modelId,
+			runtime,
 			pid: worker.pid,
 		});
 
@@ -245,6 +247,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 					agentId: req.agentId,
 					providerId,
 					modelId,
+					runtime,
 					tokenCount: receipt.tokenCount,
 					costUsd: receipt.costUsd,
 					durationMs,
@@ -256,6 +259,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 					agentId: req.agentId,
 					providerId,
 					modelId,
+					runtime,
 					tokenCount: receipt.tokenCount,
 					costUsd: receipt.costUsd,
 					durationMs,
