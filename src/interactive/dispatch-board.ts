@@ -39,6 +39,18 @@ interface DispatchTerminalPayload extends DispatchEventBase {
 	durationMs?: unknown;
 }
 
+interface DispatchProgressPayload extends DispatchEventBase {
+	event?: unknown;
+}
+
+interface WorkerEventShape {
+	type?: unknown;
+	message?: {
+		role?: unknown;
+		usage?: { input?: unknown; output?: unknown };
+	};
+}
+
 const AGENT_WIDTH = 10;
 const RUNTIME_WIDTH = 7;
 const PROVIDER_MODEL_WIDTH = 24;
@@ -262,6 +274,24 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+		}),
+		bus.on(BusChannels.DispatchProgress, (raw) => {
+			const payload = (raw ?? {}) as DispatchProgressPayload;
+			const runId = parseRunId(payload.runId);
+			if (!runId) return;
+			const entry = entries.get(runId);
+			// Progress events before we've seen DispatchEnqueued/Started are out of
+			// order; leave them alone so the row reflects the lifecycle the
+			// dispatch domain actually emitted.
+			if (!entry) return;
+			const workerEvent = (payload.event ?? {}) as WorkerEventShape;
+			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
+			if (type === "message_end" && workerEvent.message?.role === "assistant") {
+				const usage = workerEvent.message.usage;
+				const input = typeof usage?.input === "number" && Number.isFinite(usage.input) ? usage.input : 0;
+				const output = typeof usage?.output === "number" && Number.isFinite(usage.output) ? usage.output : 0;
+				entry.tokenCount += input + output;
+			}
 		}),
 	];
 
