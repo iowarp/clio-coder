@@ -49,7 +49,7 @@ const TARGETS: ReadonlyArray<TargetSpec> = [
 ];
 
 const PROMPT = "Reply with the single word PONG, nothing else.";
-const PER_REQUEST_TIMEOUT_MS = 60_000;
+const STREAM_TIMEOUT_MS = 180_000;
 
 const failures: string[] = [];
 
@@ -73,14 +73,22 @@ function info(label: string, detail: string): void {
 	emit("INFO", label, detail);
 }
 
+function yamlString(value: string): string {
+	return JSON.stringify(value);
+}
+
 function buildSettingsYaml(): string {
 	const lines: string[] = ["runtimes:", "  enabled:", "    - llamacpp", "    - lmstudio", "providers:"];
 	for (const t of TARGETS) {
 		lines.push(`  ${t.providerId}:`);
 		lines.push("    endpoints:");
 		lines.push(`      ${t.endpointName}:`);
-		lines.push(`        url: ${t.url}`);
-		lines.push(`        default_model: ${t.defaultModel}`);
+		lines.push(`        url: ${yamlString(t.url)}`);
+		lines.push(`        default_model: ${yamlString(t.defaultModel)}`);
+		const apiKey = t.apiKeyEnv ? process.env[t.apiKeyEnv] : undefined;
+		if (apiKey && apiKey.length > 0) {
+			lines.push(`        api_key: ${yamlString(apiKey)}`);
+		}
 	}
 	lines.push("");
 	return lines.join("\n");
@@ -138,6 +146,33 @@ async function run(): Promise<void> {
 	for (const k of envKeys) envSnapshot.set(k, process.env[k]);
 	for (const k of envKeys) if (k !== "CLIO_HOME") delete process.env[k];
 	process.env.CLIO_HOME = home;
+	let cleaned = false;
+	const cleanup = (): void => {
+		if (cleaned) return;
+		cleaned = true;
+		for (const [k, v] of envSnapshot) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+		try {
+			rmSync(home, { recursive: true, force: true });
+		} catch {
+			// best-effort cleanup
+		}
+	};
+	const signalHandlers: Array<{ signal: NodeJS.Signals; handler: () => void }> = [];
+	const installSignalCleanup = (signal: NodeJS.Signals, exitCode: number): void => {
+		const handler = () => {
+			emit("FAIL", "signal", signal);
+			cleanup();
+			process.exit(exitCode);
+		};
+		signalHandlers.push({ signal, handler });
+		process.once(signal, handler);
+	};
+	process.once("exit", cleanup);
+	installSignalCleanup("SIGINT", 130);
+	installSignalCleanup("SIGTERM", 143);
 
 	try {
 		writeFileSync(join(home, "settings.yaml"), buildSettingsYaml());
@@ -157,185 +192,178 @@ async function run(): Promise<void> {
 		const engineAi = await import("../src/engine/ai.js");
 
 		const domains = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
-		check("domain:loaded", domains.loaded.includes("providers"), `loaded=${domains.loaded.join(",")}`);
-
-		type ProvidersContractType = import("../src/domains/providers/contract.js").ProvidersContract;
-		const providers = domains.getContract<ProvidersContractType>("providers");
-		if (!providers) {
-			check("domain:contract-exposed", false, "providers contract missing");
-			await domains.stop();
-			return;
-		}
-
-		const liveStart = Date.now();
-		await providers.probeAllLive();
-		await providers.probeEndpoints();
-		info("probe:elapsed-ms", String(Date.now() - liveStart));
-
-		const listing = providers.list();
-
-		for (const target of TARGETS) {
-			const label = `${target.providerId}/${target.endpointName}`;
-			const entry = listing.find((e) => e.id === target.providerId);
-			check(`${label}:provider-listed`, entry !== undefined);
-			if (!entry) continue;
-			check(
-				`${label}:provider-healthy`,
-				entry.health.status === "healthy" || entry.health.status === "degraded",
-				`status=${entry.health.status} error=${entry.health.lastError ?? "null"}`,
-			);
-
-			const endpointEntry = entry.endpoints?.find((ep) => ep.name === target.endpointName);
-			check(`${label}:endpoint-listed`, endpointEntry !== undefined);
-			if (!endpointEntry) continue;
-			const probe = endpointEntry.probe;
-			check(`${label}:endpoint-probe-ok`, probe?.ok === true, `probe=${JSON.stringify(probe ?? null)}`);
-			const discoveredModels = probe?.models ?? [];
-			check(
-				`${label}:endpoint-discovered-models-nonempty`,
-				discoveredModels.length > 0,
-				`count=${discoveredModels.length}`,
-			);
-			info(`${label}:discovered-count`, String(discoveredModels.length));
-			if (probe?.latencyMs !== undefined) info(`${label}:probe-latency-ms`, String(probe.latencyMs));
-
-			const modelKey = `${target.defaultModel}@${target.endpointName}`;
-			let registered: import("@mariozechner/pi-ai").Model<never>;
-			try {
-				registered = engineAi.getModel(target.providerId, modelKey);
-			} catch (err) {
-				check(`${label}:getModel`, false, `err=${err instanceof Error ? err.message : String(err)}`);
-				continue;
-			}
-			// The local registry uses `${modelId}@${endpointName}` as the unique
-			// key so multiple endpoints under the same provider don't collide.
-			// The server-visible model name is the bare modelId; override id
-			// before dispatching the chat-completions request.
-			const model = { ...registered, id: target.defaultModel } as typeof registered;
-			check(
-				`${label}:getModel`,
-				true,
-				`key=${registered.id} serverId=${model.id} api=${model.api} reasoning=${model.reasoning}`,
-			);
-
-			const context = {
-				messages: [
-					{
-						role: "user" as const,
-						content: PROMPT,
-						timestamp: Date.now(),
-					},
-				],
-			};
-
-			// Local llama-server / LM Studio endpoints ignore the bearer token but
-			// pi-ai's openai-completions provider refuses to construct a client with
-			// an empty key. A placeholder string satisfies the SDK while keeping
-			// the request unauthenticated from the server's perspective.
-			const envKey = target.apiKeyEnv ? process.env[target.apiKeyEnv] : undefined;
-			const apiKey = envKey && envKey.length > 0 ? envKey : "clio-local-endpoint";
-			const options: Record<string, unknown> = {
-				maxTokens: 512,
-				reasoning: "minimal" as const,
-				apiKey,
-			};
-
-			const streamStart = Date.now();
-			let eventsSnapshot: unknown[];
-			let timedOut = false;
-			try {
-				const events = engineAi.stream(model, context, options);
-				const drained = await drainStreamWithTimeout(events, PER_REQUEST_TIMEOUT_MS);
-				eventsSnapshot = drained.events;
-				timedOut = drained.timedOut;
-			} catch (err) {
-				check(`${label}:stream-threw`, false, `err=${err instanceof Error ? err.message : String(err)}`);
-				continue;
-			}
-			const streamElapsed = Date.now() - streamStart;
-			info(`${label}:stream-elapsed-ms`, String(streamElapsed));
-			check(`${label}:stream-not-timed-out`, timedOut === false, `timeoutMs=${PER_REQUEST_TIMEOUT_MS}`);
-
-			const counts = { text: 0, thinking: 0, toolCall: 0 };
-			let terminalEvent: { type: string; reason?: string; message?: unknown; error?: unknown } | null = null;
-			for (const raw of eventsSnapshot) {
-				const evt = raw as { type: string } & Record<string, unknown>;
-				switch (evt.type) {
-					case "text_delta":
-						counts.text += 1;
-						break;
-					case "thinking_delta":
-						counts.thinking += 1;
-						break;
-					case "toolcall_delta":
-						counts.toolCall += 1;
-						break;
-					case "done":
-					case "error":
-						terminalEvent = evt as typeof terminalEvent;
-						break;
-				}
-			}
-			info(`${label}:event-counts`, `text=${counts.text} thinking=${counts.thinking} toolCall=${counts.toolCall}`);
-
-			check(
-				`${label}:terminal-event`,
-				terminalEvent !== null,
-				`events=${eventsSnapshot.length} last=${String((eventsSnapshot.at(-1) as { type?: string } | undefined)?.type)}`,
-			);
-			if (!terminalEvent) continue;
-
-			const finalMessage = (terminalEvent.type === "done" ? terminalEvent.message : terminalEvent.error) as
-				| import("@mariozechner/pi-ai").AssistantMessage
-				| undefined;
-			check(`${label}:final-message-present`, finalMessage !== undefined, `terminal=${terminalEvent.type}`);
-			if (!finalMessage) continue;
-
-			check(
-				`${label}:stop-reason-not-error`,
-				finalMessage.stopReason === "stop" || finalMessage.stopReason === "length",
-				`stopReason=${finalMessage.stopReason} errorMessage=${finalMessage.errorMessage ?? ""}`,
-			);
-
-			check(
-				`${label}:has-thinking-or-text`,
-				counts.thinking > 0 || counts.text > 0,
-				`thinking=${counts.thinking} text=${counts.text}`,
-			);
-
-			check(
-				`${label}:usage-totalTokens-nonzero`,
-				typeof finalMessage.usage?.totalTokens === "number" && finalMessage.usage.totalTokens > 0,
-				`usage=${JSON.stringify(finalMessage.usage)}`,
-			);
-
-			const textBlocks = finalMessage.content.filter(
-				(c): c is import("@mariozechner/pi-ai").TextContent => c.type === "text",
-			);
-			const preview = textBlocks
-				.map((c) => c.text)
-				.join("")
-				.slice(0, 200)
-				.replace(/\s+/g, " ")
-				.trim();
-			info(`${label}:content-preview`, preview.length > 0 ? preview : "(empty)");
-			info(
-				`${label}:usage`,
-				`input=${finalMessage.usage.input} output=${finalMessage.usage.output} total=${finalMessage.usage.totalTokens}`,
-			);
-			info(`${label}:stop-reason`, finalMessage.stopReason);
-		}
-
-		await domains.stop();
-	} finally {
-		for (const [k, v] of envSnapshot) {
-			if (v === undefined) delete process.env[k];
-			else process.env[k] = v;
-		}
 		try {
-			rmSync(home, { recursive: true, force: true });
-		} catch {
-			// best-effort cleanup
+			check("domain:loaded", domains.loaded.includes("providers"), `loaded=${domains.loaded.join(",")}`);
+
+			type ProvidersContractType = import("../src/domains/providers/contract.js").ProvidersContract;
+			const providers = domains.getContract<ProvidersContractType>("providers");
+			if (!providers) {
+				check("domain:contract-exposed", false, "providers contract missing");
+				return;
+			}
+
+			const liveStart = Date.now();
+			await providers.probeAllLive();
+			await providers.probeEndpoints();
+			info("probe:elapsed-ms", String(Date.now() - liveStart));
+
+			const listing = providers.list();
+
+			for (const target of TARGETS) {
+				const label = `${target.providerId}/${target.endpointName}`;
+				const entry = listing.find((e) => e.id === target.providerId);
+				check(`${label}:provider-listed`, entry !== undefined);
+				if (!entry) continue;
+				check(
+					`${label}:provider-healthy`,
+					entry.health.status === "healthy" || entry.health.status === "degraded",
+					`status=${entry.health.status} error=${entry.health.lastError ?? "null"}`,
+				);
+
+				const endpointEntry = entry.endpoints?.find((ep) => ep.name === target.endpointName);
+				check(`${label}:endpoint-listed`, endpointEntry !== undefined);
+				if (!endpointEntry) continue;
+				const probe = endpointEntry.probe;
+				check(`${label}:endpoint-probe-ok`, probe?.ok === true, `probe=${JSON.stringify(probe ?? null)}`);
+				const discoveredModels = probe?.models ?? [];
+				check(
+					`${label}:endpoint-discovered-models-nonempty`,
+					discoveredModels.length > 0,
+					`count=${discoveredModels.length}`,
+				);
+				info(`${label}:discovered-count`, String(discoveredModels.length));
+				if (probe?.latencyMs !== undefined) info(`${label}:probe-latency-ms`, String(probe.latencyMs));
+
+				const modelKey = `${target.defaultModel}@${target.endpointName}`;
+				let model: import("@mariozechner/pi-ai").Model<never>;
+				try {
+					model = engineAi.getModel(target.providerId, modelKey);
+				} catch (err) {
+					check(`${label}:getModel`, false, `err=${err instanceof Error ? err.message : String(err)}`);
+					continue;
+				}
+				check(`${label}:getModel`, true);
+				check(`${label}:model-wire-id`, model.id === target.defaultModel, `lookup=${modelKey} modelId=${model.id}`);
+
+				const context = {
+					messages: [
+						{
+							role: "user" as const,
+							content: PROMPT,
+							timestamp: Date.now(),
+						},
+					],
+				};
+
+				// pi-ai's OpenAI-compatible client constructor requires a non-empty
+				// apiKey. Use the real endpoint key when configured; otherwise pass a
+				// benign placeholder because these local servers accept arbitrary
+				// Bearer values on the chat-completions path.
+				const envKey = target.apiKeyEnv ? process.env[target.apiKeyEnv] : undefined;
+				const apiKey = envKey && envKey.length > 0 ? envKey : "clio-local-endpoint";
+				const options: Record<string, unknown> = {
+					maxTokens: 512,
+					reasoning: "minimal" as const,
+					apiKey,
+				};
+
+				const streamStart = Date.now();
+				let eventsSnapshot: unknown[];
+				let timedOut = false;
+				try {
+					const events = engineAi.stream(model, context, options);
+					const drained = await drainStreamWithTimeout(events, STREAM_TIMEOUT_MS);
+					eventsSnapshot = drained.events;
+					timedOut = drained.timedOut;
+				} catch (err) {
+					check(`${label}:stream-threw`, false, `err=${err instanceof Error ? err.message : String(err)}`);
+					continue;
+				}
+				const streamElapsed = Date.now() - streamStart;
+				info(`${label}:stream-elapsed-ms`, String(streamElapsed));
+				check(`${label}:stream-not-timed-out`, timedOut === false, `timeoutMs=${STREAM_TIMEOUT_MS}`);
+
+				const counts = { text: 0, thinking: 0, toolCall: 0 };
+				let terminalEvent: { type: string; reason?: string; message?: unknown; error?: unknown } | null = null;
+				for (const raw of eventsSnapshot) {
+					const evt = raw as { type: string } & Record<string, unknown>;
+					switch (evt.type) {
+						case "text_delta":
+							counts.text += 1;
+							break;
+						case "thinking_delta":
+							counts.thinking += 1;
+							break;
+						case "toolcall_delta":
+							counts.toolCall += 1;
+							break;
+						case "done":
+						case "error":
+							terminalEvent = evt as typeof terminalEvent;
+							break;
+					}
+				}
+				info(`${label}:event-counts`, `text=${counts.text} thinking=${counts.thinking} toolCall=${counts.toolCall}`);
+
+				check(
+					`${label}:terminal-event`,
+					terminalEvent !== null,
+					`events=${eventsSnapshot.length} last=${String((eventsSnapshot.at(-1) as { type?: string } | undefined)?.type)}`,
+				);
+				if (!terminalEvent) continue;
+				check(
+					`${label}:terminal-done`,
+					terminalEvent.type === "done",
+					`terminal=${terminalEvent.type} reason=${terminalEvent.reason ?? "unknown"}`,
+				);
+				if (terminalEvent.type !== "done") continue;
+
+				const finalMessage = terminalEvent.message as import("@mariozechner/pi-ai").AssistantMessage | undefined;
+				check(`${label}:final-message-present`, finalMessage !== undefined, `terminal=${terminalEvent.type}`);
+				if (!finalMessage) continue;
+
+				check(
+					`${label}:stop-reason-allowed`,
+					finalMessage.stopReason === "stop" || finalMessage.stopReason === "length",
+					`stopReason=${finalMessage.stopReason} errorMessage=${finalMessage.errorMessage ?? ""}`,
+				);
+
+				check(
+					`${label}:has-thinking-or-text`,
+					counts.thinking > 0 || counts.text > 0,
+					`thinking=${counts.thinking} text=${counts.text}`,
+				);
+
+				check(
+					`${label}:usage-totalTokens-nonzero`,
+					typeof finalMessage.usage?.totalTokens === "number" && finalMessage.usage.totalTokens > 0,
+					`usage=${JSON.stringify(finalMessage.usage)}`,
+				);
+
+				const textBlocks = finalMessage.content.filter(
+					(c): c is import("@mariozechner/pi-ai").TextContent => c.type === "text",
+				);
+				const preview = textBlocks
+					.map((c) => c.text)
+					.join("")
+					.slice(0, 200)
+					.replace(/\s+/g, " ")
+					.trim();
+				info(`${label}:content-preview`, preview.length > 0 ? preview : "(empty)");
+				info(
+					`${label}:usage`,
+					`input=${finalMessage.usage.input} output=${finalMessage.usage.output} total=${finalMessage.usage.totalTokens}`,
+				);
+				info(`${label}:stop-reason`, finalMessage.stopReason);
+			}
+		} finally {
+			await domains.stop();
+		}
+	} finally {
+		cleanup();
+		process.off("exit", cleanup);
+		for (const { signal, handler } of signalHandlers) {
+			process.off(signal, handler);
 		}
 	}
 }

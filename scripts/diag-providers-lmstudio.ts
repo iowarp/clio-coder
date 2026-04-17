@@ -37,8 +37,10 @@ async function main(): Promise<void> {
 	check("adapter:tier", lmstudioAdapter.tier === "native");
 
 	// Server A: serves /api/v0/models (preferred path)
+	const unauthHeaders: string[] = [];
 	await withServer(
 		(req, res) => {
+			unauthHeaders.push(req.headers.authorization ?? "");
 			if (req.url === "/api/v0/models") {
 				res.writeHead(200, { "content-type": "application/json" });
 				res.end(JSON.stringify({ data: [{ id: "qwen3.6-35b-a3b", type: "llm", state: "loaded" }] }));
@@ -53,6 +55,33 @@ async function main(): Promise<void> {
 
 			const probe = await lmstudioAdapter.probe({ endpoints: { main: { url } } });
 			check("probe:v0-ok", probe.ok === true, `got ${JSON.stringify(probe)}`);
+			check(
+				"listModels:omits-bearer-when-unset",
+				unauthHeaders.length > 0 && unauthHeaders.every((value) => value.length === 0),
+				`headers=${JSON.stringify(unauthHeaders)}`,
+			);
+		},
+	);
+
+	let sawBearer = false;
+	await withServer(
+		(req, res) => {
+			if (req.headers.authorization === "Bearer sk-test") sawBearer = true;
+			if (req.url === "/api/v0/models") {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ data: [{ id: "qwen3.6-35b-a3b", type: "llm", state: "loaded" }] }));
+				return;
+			}
+			res.writeHead(404);
+			res.end();
+		},
+		async (url) => {
+			const models = await listModels({ url, api_key: "sk-test" });
+			check("listModels:authenticated-v0", models.includes("qwen3.6-35b-a3b"), `got ${JSON.stringify(models)}`);
+
+			const probe = await lmstudioAdapter.probe({ endpoints: { main: { url, api_key: "sk-test" } } });
+			check("probe:authenticated-v0-ok", probe.ok === true, `got ${JSON.stringify(probe)}`);
+			check("probe:forwards-bearer-when-set", sawBearer);
 		},
 	);
 
