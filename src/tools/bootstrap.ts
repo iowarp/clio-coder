@@ -2,7 +2,6 @@ import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import { bashTool } from "./bash.js";
 import { batchDispatchTool } from "./batch-dispatch.js";
 import { chainDispatchTool } from "./chain-dispatch.js";
-import { dispatchAgentTool } from "./dispatch-agent.js";
 import { editTool } from "./edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
@@ -37,7 +36,6 @@ export function registerAllTools(registry: ToolRegistry | ToolIndex): void {
 	registry.register({ ...webSearchTool, allowedModes: everyMode });
 	registry.register({ ...writePlanTool, allowedModes: adviseOnly });
 	registry.register({ ...writeReviewTool, allowedModes: adviseOnly });
-	registry.register({ ...dispatchAgentTool, allowedModes: everyMode });
 	registry.register({ ...batchDispatchTool, allowedModes: defaultAndSuper });
 	registry.register({ ...chainDispatchTool, allowedModes: defaultAndSuper });
 }

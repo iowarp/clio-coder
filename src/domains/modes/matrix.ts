@@ -31,7 +31,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Ls,
 			ToolNames.WebFetch,
 			ToolNames.WebSearch,
-			ToolNames.DispatchAgent,
 			ToolNames.BatchDispatch,
 			ToolNames.ChainDispatch,
 		]),
@@ -48,7 +47,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.WebSearch,
 			ToolNames.WritePlan,
 			ToolNames.WriteReview,
-			ToolNames.DispatchAgent,
 		]),
 		// write_plan/write_review are the only "write" tools in advise, so the
 		// action class "write" is allowed ONLY for those two tools. The registry
@@ -68,7 +66,6 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Ls,
 			ToolNames.WebFetch,
 			ToolNames.WebSearch,
-			ToolNames.DispatchAgent,
 			ToolNames.BatchDispatch,
 			ToolNames.ChainDispatch,
 		]),

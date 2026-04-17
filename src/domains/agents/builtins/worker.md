@@ -2,7 +2,7 @@
 name: Worker
 description: Execution agent for concrete sub-tasks from the orchestrator.
 mode: default
-tools: [read, write, edit, bash, grep, glob, ls, web_fetch, web_search, dispatch_agent, batch_dispatch, chain_dispatch]
+tools: [read, write, edit, bash, grep, glob, ls, web_fetch, web_search, batch_dispatch, chain_dispatch]
 model: null
 provider: null
 runtime: native
