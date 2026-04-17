@@ -221,6 +221,75 @@ async function run(): Promise<void> {
 			`status=${llamacppAfterConfig?.health.status} error=${llamacppAfterConfig?.health.lastError ?? "null"}`,
 		);
 
+		// Slice 2: discovered-model registration. The engine's local side-registry
+		// must gain an entry per id listed in a healthy EndpointProbeResult.models,
+		// keyed by `${modelId}@${endpoint}`. No network: we call the registrar
+		// directly with a stub spec and a stub model list.
+		const engineAi = await import("../src/engine/ai.js");
+		type EndpointSpecType = import("../src/core/defaults.js").EndpointSpec;
+		type PiModel = ReturnType<typeof engineAi.getModel>;
+		const s2Endpoint = "s2-mock";
+		const s2Spec: EndpointSpecType = { url: "http://127.0.0.1:9999" };
+		const s2ModelIds = ["Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL", "meta-llama-3.1-8b-instruct", "gpt-oss-20b"] as const;
+		engineAi.registerDiscoveredLocalModels("llamacpp", s2Endpoint, s2Spec, s2ModelIds);
+		let s2Registered = 0;
+		for (const id of s2ModelIds) {
+			const model = engineAi.getLocalRegisteredModel("llamacpp", `${id}@${s2Endpoint}`);
+			if (model) s2Registered += 1;
+		}
+		check(
+			"config",
+			"s2:discovered-models-registered",
+			s2Registered === s2ModelIds.length,
+			`registered=${s2Registered}/${s2ModelIds.length}`,
+		);
+
+		const s2VlKey = `${s2ModelIds[0]}@${s2Endpoint}`;
+		const s2VlModel = engineAi.getModel("llamacpp", s2VlKey) as PiModel & { baseUrl?: string };
+		check(
+			"config",
+			"s2:getModel-baseUrl-ends-in-/v1",
+			typeof s2VlModel.baseUrl === "string" && s2VlModel.baseUrl.endsWith("/v1"),
+			`baseUrl=${s2VlModel.baseUrl}`,
+		);
+
+		const s2VlRich = s2VlModel as unknown as {
+			reasoning?: boolean;
+			input?: readonly string[];
+			contextWindow?: number;
+			compat?: { thinkingFormat?: string };
+		};
+		check(
+			"config",
+			"s2:qwen3-vl-preset-applied",
+			s2VlRich.reasoning === true &&
+				Array.isArray(s2VlRich.input) &&
+				s2VlRich.input.includes("image") &&
+				s2VlRich.contextWindow === 262144 &&
+				s2VlRich.compat?.thinkingFormat === "qwen-chat-template",
+			`reasoning=${s2VlRich.reasoning} input=${JSON.stringify(s2VlRich.input)} ctx=${s2VlRich.contextWindow} tf=${s2VlRich.compat?.thinkingFormat ?? "null"}`,
+		);
+
+		// Wildcard `@${endpoint}` key set at boot by registerLocalProviders must
+		// survive the per-model additions above. Re-running the boot registrar
+		// and then the discovered-model registrar reproduces the production
+		// order (settings load -> live probe).
+		engineAi.registerLocalProviders({
+			llamacpp: {
+				endpoints: {
+					[s2Endpoint]: s2Spec,
+				},
+			},
+		});
+		engineAi.registerDiscoveredLocalModels("llamacpp", s2Endpoint, s2Spec, s2ModelIds);
+		const s2Wildcard = engineAi.getLocalRegisteredModel("llamacpp", `@${s2Endpoint}`);
+		check(
+			"config",
+			"s2:wildcard-key-preserved",
+			s2Wildcard !== undefined,
+			`wildcard=${s2Wildcard ? "present" : "missing"}`,
+		);
+
 		if (!RUN_LIVE) {
 			skip("live", "probeAllLive:skipped", "set CLIO_DIAG_LIVE=1 to exercise providers.probeAllLive()");
 			await result.stop();
