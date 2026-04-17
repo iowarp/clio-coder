@@ -32,16 +32,20 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 	const gate = createConcurrencyGate(resolveMaxWorkers(settings.budget.concurrency));
 	const unsubscribes: Array<() => void> = [];
 
+	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; currentUsd: number } {
+		const currentUsd = observability?.sessionCost() ?? 0;
+		return { verdict: budget.checkCeiling(currentUsd), currentUsd };
+	}
+
 	const extension: DomainExtension = {
 		async start() {
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchEnqueued, () => {
-					const current = observability?.sessionCost() ?? 0;
-					const verdict = budget.checkCeiling(current);
+					const { verdict, currentUsd } = evaluate();
 					if (verdict !== "under") {
 						context.bus.emit(BusChannels.BudgetAlert, {
 							level: verdict,
-							currentUsd: current,
+							currentUsd,
 							ceilingUsd: budget.ceilingUsd,
 						});
 					}
@@ -58,6 +62,10 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 		ceilingUsd: () => budget.ceilingUsd,
 		checkCeiling: (current) => budget.checkCeiling(current),
 		raiseCeiling: (next) => budget.raise(next),
+		preflight: () => {
+			const { verdict, currentUsd } = evaluate();
+			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
+		},
 		activeWorkers: () => gate.activeWorkers(),
 		tryAcquireWorker: () => gate.tryAcquire(),
 		releaseWorker: () => gate.release(),
