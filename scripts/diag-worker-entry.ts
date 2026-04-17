@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import type { EndpointSpec } from "../src/engine/worker-runtime.js";
+import { startWorkerRun, type EndpointSpec } from "../src/engine/worker-runtime.js";
 
 interface WorkerSpec {
 	systemPrompt: string;
@@ -266,6 +266,39 @@ try {
 	assert(
 		completionCall?.authorization === "Bearer stub-bearer",
 		`local-endpoint worker forwarded endpointSpec.api_key as Bearer (got ${JSON.stringify(completionCall?.authorization ?? null)})`,
+	);
+
+	console.log(`diag:worker-entry: running in-process bootstrap regression ...`);
+	const inProcessLocalEvents: AgentEventShape[] = [];
+	const inProcessLocal = startWorkerRun(localSpec, (event) => {
+		inProcessLocalEvents.push(event as AgentEventShape);
+	});
+	const inProcessLocalResult = await inProcessLocal.promise;
+	assert(
+		inProcessLocalResult.exitCode === 0,
+		`in-process local bootstrap succeeds before reuse check (got ${inProcessLocalResult.exitCode})`,
+	);
+	const requestsBeforeReuse = stub.requests.length;
+	const reusedEvents: AgentEventShape[] = [];
+	const reused = startWorkerRun(
+		{
+			systemPrompt: localSpec.systemPrompt,
+			task: localSpec.task,
+			providerId: localSpec.providerId,
+			modelId: localSpec.modelId,
+		},
+		(event) => {
+			reusedEvents.push(event as AgentEventShape);
+		},
+	);
+	const reusedResult = await reused.promise;
+	assert(
+		reusedResult.exitCode !== 0,
+		`reused in-process local worker without endpointSpec fails (got exit=${reusedResult.exitCode})`,
+	);
+	assert(
+		stub.requests.length === requestsBeforeReuse,
+		`reused in-process local worker without endpointSpec does not reuse the previous stub endpoint (before=${requestsBeforeReuse} after=${stub.requests.length} types=${JSON.stringify(reusedEvents.map((event) => event.type))})`,
 	);
 
 	// Sanity: a WorkerSpec for a local engine WITHOUT the endpointSpec must still
