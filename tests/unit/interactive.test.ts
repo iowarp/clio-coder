@@ -2,15 +2,19 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProviderListEntry, ProvidersContract } from "../../src/domains/providers/contract.js";
+import { scopedSegment } from "../../src/interactive/footer-panel.js";
 import {
 	ALT_M,
 	BUILTIN_SLASH_COMMANDS,
 	CTRL_L,
+	CTRL_P,
+	SHIFT_CTRL_P,
 	SHIFT_TAB,
 	parseSlashCommand,
 	routeInteractiveKey,
 } from "../../src/interactive/index.js";
 import { buildModelItems } from "../../src/interactive/overlays/model-selector.js";
+import { buildScopedModelItems } from "../../src/interactive/overlays/scoped-models.js";
 
 function makeProviders(list: ProviderListEntry[]): ProvidersContract {
 	return {
@@ -59,6 +63,7 @@ describe("slash-commands registry", () => {
 			"receipt-usage",
 			"thinking",
 			"model",
+			"scoped-models",
 		]);
 		const owned = new Map<string, string>();
 		for (const entry of BUILTIN_SLASH_COMMANDS) {
@@ -89,6 +94,10 @@ describe("slash-commands registry", () => {
 	it("/thinking still routes through the registry", () => {
 		deepStrictEqual(parseSlashCommand("/thinking"), { kind: "thinking" });
 	});
+
+	it("parses /scoped-models as the scoped-models kind", () => {
+		deepStrictEqual(parseSlashCommand("/scoped-models"), { kind: "scoped-models" });
+	});
 });
 
 describe("routeInteractiveKey", () => {
@@ -99,6 +108,8 @@ describe("routeInteractiveKey", () => {
 		requestSuper: () => {},
 		toggleDispatchBoard: () => {},
 		openModelSelector: () => {},
+		cycleScopedModelForward: () => {},
+		cycleScopedModelBackward: () => {},
 	};
 
 	it("Shift+Tab triggers cycleThinking and not cycleMode", () => {
@@ -145,6 +156,40 @@ describe("routeInteractiveKey", () => {
 		});
 		strictEqual(consumed, true);
 		strictEqual(opened, 1);
+	});
+
+	it("Ctrl+P triggers cycleScopedModelForward only", () => {
+		let fwd = 0;
+		let back = 0;
+		const consumed = routeInteractiveKey(CTRL_P, {
+			...noopDeps,
+			cycleScopedModelForward: () => {
+				fwd += 1;
+			},
+			cycleScopedModelBackward: () => {
+				back += 1;
+			},
+		});
+		strictEqual(consumed, true);
+		strictEqual(fwd, 1);
+		strictEqual(back, 0);
+	});
+
+	it("Shift+Ctrl+P triggers cycleScopedModelBackward only", () => {
+		let fwd = 0;
+		let back = 0;
+		const consumed = routeInteractiveKey(SHIFT_CTRL_P, {
+			...noopDeps,
+			cycleScopedModelForward: () => {
+				fwd += 1;
+			},
+			cycleScopedModelBackward: () => {
+				back += 1;
+			},
+		});
+		strictEqual(consumed, true);
+		strictEqual(back, 1);
+		strictEqual(fwd, 0);
 	});
 });
 
@@ -214,5 +259,46 @@ describe("model-selector buildModelItems", () => {
 			providers,
 		});
 		ok(!items.some((i) => i.value.startsWith("llamacpp/orphan")));
+	});
+});
+
+describe("scoped-models buildScopedModelItems", () => {
+	it("emits [x] for entries resolved by the current scope", () => {
+		const items = buildScopedModelItems(["anthropic/claude-sonnet-4-6"]);
+		const row = items.find((i) => i.value === "anthropic/claude-sonnet-4-6");
+		ok(row);
+		ok(row.label.startsWith("[x]"), `expected [x] marker, got ${row.label}`);
+		const other = items.find((i) => i.value.startsWith("openai/"));
+		ok(other);
+		ok(other.label.startsWith("[ ]"), `expected [ ] marker, got ${other.label}`);
+	});
+
+	it("treats empty scope as nothing selected", () => {
+		const items = buildScopedModelItems([]);
+		ok(items.every((i) => i.label.startsWith("[ ]")));
+	});
+});
+
+describe("footer scopedSegment", () => {
+	it("returns null when scope is empty", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		strictEqual(scopedSegment(settings), null);
+	});
+
+	it("renders scoped:N/M with the active orchestrator index", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.provider.scope = ["anthropic/claude-sonnet-4-6", "openai/gpt-5"];
+		settings.orchestrator.provider = "openai";
+		settings.orchestrator.model = "gpt-5";
+		strictEqual(scopedSegment(settings), "scoped:2/2");
+	});
+
+	it("renders N as `-` when the orchestrator target is not in scope", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.provider.scope = ["anthropic/claude-sonnet-4-6"];
+		settings.orchestrator.provider = "google";
+		settings.orchestrator.model = "gemini-2.5-pro";
+		const seg = scopedSegment(settings);
+		ok(seg?.startsWith("scoped:-/"), `expected scoped:-/…, got ${seg}`);
 	});
 });
