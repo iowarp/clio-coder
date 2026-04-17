@@ -9,10 +9,11 @@
  *      pinned to the Qwen3-VL-30B-A3B-Thinking default_model.
  *   2. Generates a 64x64 RGB PNG in-process (solid red square on white
  *      background) using the zlib stdlib. No binary dep, no external file.
- *   3. Resolves the vision model through src/engine/ai.js, builds a Context
- *      whose single user message carries one ImageContent block followed by
- *      a one-sentence text prompt, and calls stream() with maxTokens=256
- *      and reasoning=minimal.
+ *   3. Runs hermetic fixture checks for the generated PNG and multimodal
+ *      prompt shape, then resolves the vision model through src/engine/ai.js,
+ *      builds a Context whose single user message carries a text prompt
+ *      followed by one ImageContent block, and calls stream() with
+ *      maxTokens=256 and reasoning=minimal.
  *   4. Drains every event and asserts:
  *        (a) at least one text_delta OR thinking_delta fired
  *        (b) the terminal event is `done` with stopReason in {stop, length}
@@ -27,7 +28,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 const TARGET = {
 	providerId: "llamacpp" as const,
@@ -37,6 +38,9 @@ const TARGET = {
 };
 
 const PROMPT = "What color is the square in this image? Reply with one word.";
+const PNG_MIME_TYPE = "image/png";
+const PNG_SIZE = 64;
+const RED_SQUARE_MARGIN = 16;
 const STREAM_TIMEOUT_MS = 180_000;
 
 const failures: string[] = [];
@@ -117,8 +121,8 @@ function pngChunk(type: string, data: Buffer): Buffer {
  * or third-party decoder is needed.
  */
 function buildRedSquarePng(): Buffer {
-	const size = 64;
-	const inner = 16; // red square spans [16,48) in both axes -> 32x32.
+	const size = PNG_SIZE;
+	const inner = RED_SQUARE_MARGIN; // red square spans [16,48) in both axes -> 32x32.
 	const innerEnd = size - inner;
 
 	const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -147,6 +151,106 @@ function buildRedSquarePng(): Buffer {
 
 	const idat = deflateSync(raw);
 	return Buffer.concat([signature, pngChunk("IHDR", ihdr), pngChunk("IDAT", idat), pngChunk("IEND", Buffer.alloc(0))]);
+}
+
+type VisionUserMessage = Extract<import("@mariozechner/pi-ai").Context["messages"][number], { role: "user" }>;
+
+function buildVisionUserMessage(base64Png: string): VisionUserMessage {
+	return {
+		role: "user",
+		content: [
+			{ type: "text", text: PROMPT },
+			{ type: "image", data: base64Png, mimeType: PNG_MIME_TYPE },
+		],
+		timestamp: Date.now(),
+	};
+}
+
+function validateHermeticFixtures(): void {
+	const png = buildRedSquarePng();
+	const base64Png = png.toString("base64");
+	const message = buildVisionUserMessage(base64Png);
+	const content = Array.isArray(message.content) ? message.content : [];
+
+	check("image:b64-whitespace-free", !/\s/.test(base64Png), `length=${base64Png.length}`);
+	check("image:b64-roundtrip", Buffer.from(base64Png, "base64").equals(png), `length=${base64Png.length}`);
+	check(
+		"prompt:text-before-image",
+		content.length === 2 && content[0]?.type === "text" && content[1]?.type === "image",
+		`order=${content.map((item) => item.type).join(",")}`,
+	);
+	check(
+		"prompt:image-mime-type",
+		content[1]?.type === "image" && content[1].mimeType === PNG_MIME_TYPE,
+		`mimeType=${content[1]?.type === "image" ? content[1].mimeType : "missing"}`,
+	);
+
+	check("png:signature", png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
+	const chunks: Array<{ type: string; data: Buffer; crc: number }> = [];
+	let offset = 8;
+	while (offset < png.length) {
+		if (offset + 12 > png.length) {
+			check("png:chunk-layout", false, `offset=${offset} length=${png.length}`);
+			return;
+		}
+		const length = png.readUInt32BE(offset);
+		offset += 4;
+		const type = png.toString("ascii", offset, offset + 4);
+		offset += 4;
+		const dataEnd = offset + length;
+		if (dataEnd + 4 > png.length) {
+			check("png:chunk-layout", false, `type=${type} length=${length} fileBytes=${png.length}`);
+			return;
+		}
+		const data = png.subarray(offset, dataEnd);
+		offset = dataEnd;
+		const crc = png.readUInt32BE(offset);
+		offset += 4;
+		chunks.push({ type, data: Buffer.from(data), crc });
+		if (type === "IEND") break;
+	}
+	check("png:chunk-layout", offset === png.length, `offset=${offset} length=${png.length}`);
+	check(
+		"png:chunk-order",
+		chunks[0]?.type === "IHDR" && chunks.some((chunk) => chunk.type === "IDAT") && chunks.at(-1)?.type === "IEND",
+		`chunks=${chunks.map((chunk) => chunk.type).join(",")}`,
+	);
+
+	const ihdr = chunks.find((chunk) => chunk.type === "IHDR");
+	check("png:ihdr-present", ihdr !== undefined);
+	if (ihdr) {
+		check("png:ihdr-length", ihdr.data.length === 13, `length=${ihdr.data.length}`);
+		if (ihdr.data.length === 13) {
+			check("png:width", ihdr.data.readUInt32BE(0) === PNG_SIZE, `width=${ihdr.data.readUInt32BE(0)}`);
+			check("png:height", ihdr.data.readUInt32BE(4) === PNG_SIZE, `height=${ihdr.data.readUInt32BE(4)}`);
+		}
+	}
+
+	for (const chunk of chunks) {
+		const expectedCrc = crc32(Buffer.concat([Buffer.from(chunk.type, "ascii"), chunk.data]));
+		check(`png:crc:${chunk.type}`, chunk.crc === expectedCrc, `crc=${chunk.crc} expected=${expectedCrc}`);
+	}
+
+	const idatData = Buffer.concat(chunks.filter((chunk) => chunk.type === "IDAT").map((chunk) => chunk.data));
+	let raw: Buffer;
+	try {
+		raw = inflateSync(idatData);
+		check("png:idat-zlib", true);
+	} catch (err) {
+		check("png:idat-zlib", false, err instanceof Error ? err.message : String(err));
+		return;
+	}
+	const rowStride = 1 + PNG_SIZE * 3;
+	check("png:raw-length", raw.length === rowStride * PNG_SIZE, `rawLength=${raw.length}`);
+	const badFilterRow = Array.from({ length: PNG_SIZE }, (_, y) => y).find((y) => raw[y * rowStride] !== 0);
+	check("png:filter-none", badFilterRow === undefined, `row=${badFilterRow ?? "none"}`);
+
+	const pixelAt = (x: number, y: number): readonly [number, number, number] => {
+		const px = y * rowStride + 1 + x * 3;
+		return [raw[px], raw[px + 1], raw[px + 2]];
+	};
+	check("png:background-white", pixelAt(0, 0).join(",") === "255,255,255", `rgb=${pixelAt(0, 0).join(",")}`);
+	check("png:center-red", pixelAt(PNG_SIZE / 2, PNG_SIZE / 2).join(",") === "255,0,0", `rgb=${pixelAt(32, 32).join(",")}`);
 }
 
 async function drainStreamWithTimeout(
@@ -190,6 +294,9 @@ async function drainStreamWithTimeout(
 }
 
 async function run(): Promise<void> {
+	validateHermeticFixtures();
+	if (failures.length > 0) return;
+
 	if (process.env.CLIO_DIAG_LIVE !== "1") {
 		emit("SKIP", "CLIO_DIAG_LIVE!=1");
 		return;
@@ -283,16 +390,7 @@ async function run(): Promise<void> {
 			);
 
 			const context: import("@mariozechner/pi-ai").Context = {
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "image", data: base64Png, mimeType: "image/png" },
-							{ type: "text", text: PROMPT },
-						],
-						timestamp: Date.now(),
-					},
-				],
+				messages: [buildVisionUserMessage(base64Png)],
 			};
 
 			const streamStart = Date.now();
