@@ -18,12 +18,19 @@ export function createSafeEventBus(): SafeEventBus {
 	const deliver = (channel: string, payload: unknown): void => {
 		const ls = registry.get(channel);
 		if (!ls) return;
+		// Synchronous fan-out. "Safe" means listener errors never reach the
+		// emitter; it does not mean deferred delivery. Deferred delivery would
+		// drop shutdown.* events when process.exit runs before the Promise
+		// microtask chain resolves (observed during diag-interactive).
 		for (const listener of [...ls]) {
-			queueMicrotask(() => {
-				void Promise.resolve()
-					.then(() => listener(payload))
-					.catch((error) => reportListenerError(channel, error));
-			});
+			try {
+				const result = listener(payload);
+				if (result && typeof (result as Promise<void>).then === "function") {
+					(result as Promise<void>).catch((error) => reportListenerError(channel, error));
+				}
+			} catch (error) {
+				reportListenerError(channel, error);
+			}
 		}
 	};
 
