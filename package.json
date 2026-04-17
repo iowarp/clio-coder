@@ -35,8 +35,9 @@
 		"diag:boundaries": "tsx scripts/diag-boundaries.ts",
 		"diag:safety": "tsx scripts/diag-safety.ts",
 		"diag:modes": "tsx scripts/diag-modes.ts",
+		"diag:registry": "tsx scripts/diag-registry.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run build && npm run verify"
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run build && npm run verify"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",

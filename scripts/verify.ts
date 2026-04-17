@@ -93,6 +93,18 @@ function checkBoot(env: NodeJS.ProcessEnv): void {
 	log("clio (orchestrator boot) OK");
 }
 
+function checkRegistryPaths(env: NodeJS.ProcessEnv): void {
+	// Spawn scripts/diag-registry.ts through tsx so the registry exercises the
+	// real domain loader across a subprocess boundary, mirroring the CLI.
+	const script = join(projectRoot, "scripts", "diag-registry.ts");
+	try {
+		execFileSync("npx", ["tsx", script], { env, stdio: "inherit" });
+		log("registry allow + block paths OK");
+	} catch (err) {
+		fail("registry diag failed", (err as Error).message);
+	}
+}
+
 function main(): void {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-verify-"));
@@ -102,6 +114,7 @@ function main(): void {
 	checkInstall(home, env);
 	checkDoctor(env);
 	checkBoot(env);
+	checkRegistryPaths(env);
 	log("all checks passed");
 }
 
