@@ -1,9 +1,9 @@
 /**
  * Phase 9 minimal TUI scaffold diag.
  *
- * This test deliberately does NOT spin up a real terminal. Instead it exercises
- * the public seams that other code paths (the orchestrator, the key router, the
- * footer, the slash-command router) depend on:
+ * This test mostly stays in-process and exercises the public seams that other
+ * code paths (the orchestrator, the key router, the footer, the slash-command
+ * router) depend on:
  *
  *   1. `startInteractive` is exported from src/interactive/index.ts as a
  *      function.
@@ -18,10 +18,15 @@
  *   5. `handleRun` invokes the injected DispatchContract with faux provider +
  *      model defaults, streams events (filtering heartbeats), and prints the
  *      final receipt summary. On dispatch error it surfaces to stderr.
- *
- * Full keyboard-driven tests live post-v0.1 when the terminal harness lands.
+ *   6. A child-process harness drives `/run` and `Ctrl+B` against the real
+ *      interactive loop so the dispatch-board overlay is verified mid-stream.
  */
 
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { BusChannels } from "../src/core/bus-events.js";
 import { createSafeEventBus } from "../src/core/event-bus.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
@@ -61,7 +66,7 @@ function check(label: string, ok: boolean, detail?: string): void {
 		return;
 	}
 	failures.push(detail ? `${label}: ${detail}` : label);
-	process.stderr.write(`[diag-interactive-tui] FAIL ${label}${detail ? ` — ${detail}` : ""}\n`);
+	process.stderr.write(`[diag-interactive-tui] FAIL ${label}${detail ? ` - ${detail}` : ""}\n`);
 }
 
 function makeMockModes(): ModesContract & { cycleCalls: number } {
@@ -171,6 +176,324 @@ function makeMockDispatch(options?: {
 		drain: async () => {},
 	};
 	return contract;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readUtf8(path: string): string {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return "";
+	}
+}
+
+function fileLength(path: string): number {
+	return readUtf8(path).length;
+}
+
+async function waitForResult(
+	label: string,
+	probe: () => { ok: true; detail: string } | { ok: false; detail: string },
+	timeoutMs = 5_000,
+	pollMs = 20,
+): Promise<string> {
+	const deadline = Date.now() + timeoutMs;
+	let lastDetail = "";
+	while (Date.now() <= deadline) {
+		const result = probe();
+		lastDetail = result.detail;
+		if (result.ok) return result.detail;
+		await sleep(pollMs);
+	}
+	throw new Error(`${label}: ${lastDetail}`);
+}
+
+interface InteractiveStreamProbe {
+	stdout: string;
+	stderr: string;
+	midLog: string;
+	finalLog: string;
+	exitCode: number | null;
+}
+
+async function typeText(stream: NodeJS.WritableStream, text: string, delayMs = 5): Promise<void> {
+	for (const char of text) {
+		stream.write(char);
+		await sleep(delayMs);
+	}
+}
+
+async function runInteractiveStreamProbe(): Promise<InteractiveStreamProbe> {
+	const projectRoot = process.cwd();
+	const tempRoot = mkdtempSync(join(tmpdir(), "clio-diag-interactive-tui-"));
+	const childPath = join(tempRoot, "interactive-stream-probe.ts");
+	const writeLogPath = join(tempRoot, "interactive-stream-probe.log");
+	const tsxPath = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+	const busEventsUrl = pathToFileURL(join(projectRoot, "src/core/bus-events.ts")).href;
+	const eventBusUrl = pathToFileURL(join(projectRoot, "src/core/event-bus.ts")).href;
+	const interactiveUrl = pathToFileURL(join(projectRoot, "src/interactive/index.ts")).href;
+
+	const childSource = `
+import { setTimeout as sleep } from "node:timers/promises";
+import { BusChannels } from ${JSON.stringify(busEventsUrl)};
+import { createSafeEventBus } from ${JSON.stringify(eventBusUrl)};
+import { startInteractive } from ${JSON.stringify(interactiveUrl)};
+
+const bus = createSafeEventBus();
+const runId = "run-live-overlay";
+const usage = { input: 7, output: 13, cacheRead: 5, cacheWrite: 3 };
+const receipt = {
+	runId,
+	agentId: "scout",
+	task: "stream smoke",
+	providerId: "faux",
+	modelId: "faux-model",
+	runtime: "native",
+	startedAt: "2026-04-17T00:00:00.000Z",
+	endedAt: "2026-04-17T00:00:01.000Z",
+	exitCode: 0,
+	tokenCount: 28,
+	costUsd: 0,
+	compiledPromptHash: null,
+	staticCompositionHash: null,
+	clioVersion: "0.1.0-dev",
+	piMonoVersion: "0.67.4",
+	platform: "linux",
+	nodeVersion: "v20",
+	toolCalls: 1,
+	sessionId: null,
+};
+
+const modes = {
+	current: () => "default",
+	setMode: (next) => next,
+	cycleNormal: () => "default",
+	visibleTools: () => new Set(),
+	isToolVisible: () => true,
+	isActionAllowed: () => true,
+	requestSuper: () => {},
+	confirmSuper: () => "super",
+};
+
+const providers = {
+	list: () => [
+		{
+			id: "faux",
+			displayName: "Faux",
+			tier: "sdk",
+			available: true,
+			reason: "diag",
+			health: {
+				providerId: "faux",
+				status: "healthy",
+				lastCheckAt: null,
+				lastError: null,
+				latencyMs: null,
+			},
+		},
+	],
+	getAdapter: () => null,
+	probeAll: async () => {},
+	credentials: {
+		hasKey: () => false,
+		set: () => {},
+		remove: () => {},
+	},
+};
+
+	const dispatch = {
+		dispatch: async (req) => {
+			bus.emit(BusChannels.DispatchEnqueued, {
+				runId,
+			agentId: req.agentId,
+			providerId: "faux",
+			modelId: "faux-model",
+			runtime: "native",
+		});
+		bus.emit(BusChannels.DispatchStarted, {
+			runId,
+			agentId: req.agentId,
+			providerId: "faux",
+			modelId: "faux-model",
+			runtime: "native",
+		});
+			const events = [
+				{ type: "heartbeat" },
+				{ type: "message_update", message: { content: [{ type: "text", text: "partial" }] } },
+				{ type: "tool_execution_start", toolCallId: "t1", toolName: "read" },
+				{ type: "tool_execution_update", toolCallId: "t1", delta: "chunk" },
+				{ type: "turn_end", toolResults: [{ toolCallId: "t1", result: "ok" }] },
+				{ type: "message_end", message: { role: "assistant", usage } },
+				{
+					type: "agent_end",
+				messages: [
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "done" }],
+						usage,
+						stopReason: "stop",
+					},
+				],
+			},
+		];
+		let finishStream = () => {};
+		const streamFinished = new Promise((resolve) => {
+			finishStream = resolve;
+		});
+		async function* iter() {
+			for (const event of events) {
+				yield event;
+				await sleep(event.type === "heartbeat" ? 25 : 180);
+			}
+			finishStream();
+		}
+		const finalPromise = (async () => {
+			await streamFinished;
+			bus.emit(BusChannels.DispatchCompleted, {
+				runId,
+				agentId: req.agentId,
+				providerId: "faux",
+				modelId: "faux-model",
+				runtime: "native",
+				tokenCount: receipt.tokenCount,
+				costUsd: 0,
+				durationMs: 1000,
+			});
+			process.stderr.write("[child] completed\\n");
+			return receipt;
+		})();
+		return { runId, events: iter(), finalPromise };
+	},
+	listRuns: () => [],
+	getRun: () => null,
+	abort: () => {},
+	drain: async () => {},
+};
+
+bus.on(BusChannels.DispatchProgress, (raw) => {
+	process.stderr.write("[child] progress " + String(raw?.event?.type ?? "unknown") + "\\n");
+});
+bus.on(BusChannels.DispatchCompleted, () => {
+	process.stderr.write("[child] bus completed\\n");
+});
+
+async function main() {
+	const run = startInteractive({
+		bus,
+		modes,
+		providers,
+		dispatch,
+		getWorkerDefault: () => ({ provider: "faux", model: "faux-model" }),
+		onShutdown: async () => {},
+	});
+
+	process.stderr.write("[child] ready\\n");
+	const code = await run;
+	process.stderr.write("[child] exit " + String(code) + "\\n");
+	process.exit(code);
+}
+
+main().catch((err) => {
+	process.stderr.write("[child] crash " + (err instanceof Error ? err.stack ?? err.message : String(err)) + "\\n");
+	process.exit(1);
+});
+`;
+
+	writeFileSync(childPath, childSource, "utf8");
+
+	const child: ChildProcessWithoutNullStreams = spawn(tsxPath, [childPath], {
+		cwd: projectRoot,
+		env: {
+			...process.env,
+			PI_TUI_WRITE_LOG: writeLogPath,
+		},
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	child.stdout.on("data", (chunk: string) => {
+		stdout += chunk;
+	});
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+		child.once("exit", (code, signal) => resolve({ code, signal }));
+	});
+
+	try {
+		await waitForResult("child-ready", () => ({
+			ok: stderr.includes("[child] ready\n"),
+			detail: stderr,
+		}));
+
+		await typeText(child.stdin, "/run scout stream smoke");
+		await sleep(30);
+		child.stdin.write(ENTER);
+
+		await waitForResult("progress-message-update", () => ({
+			ok: stderr.includes("[child] progress message_update\n"),
+			detail: stderr,
+		}));
+
+		const midStart = fileLength(writeLogPath);
+		child.stdin.write(CTRL_B);
+		const midLog = await waitForResult("mid-stream-overlay", () => {
+			const slice = readUtf8(writeLogPath).slice(midStart);
+			return {
+				ok: slice.includes("Dispatch Board") && slice.includes("scout") && slice.includes("running"),
+				detail: slice,
+			};
+		});
+
+		child.stdin.write(ESC);
+
+		await waitForResult("run-completed", () => ({
+			ok: stderr.includes("[child] bus completed\n"),
+			detail: stderr,
+		}));
+
+		const finalStart = fileLength(writeLogPath);
+		child.stdin.write(CTRL_B);
+		const finalLog = await waitForResult("final-overlay", () => {
+			const slice = readUtf8(writeLogPath).slice(finalStart);
+			return {
+				ok: slice.includes("Dispatch Board") && slice.includes("scout") && slice.includes("completed"),
+				detail: slice,
+			};
+		});
+
+		child.stdin.write(CTRL_D);
+		const exit = await Promise.race([
+			exitPromise,
+			sleep(5_000).then(() => {
+				throw new Error(`child-exit-timeout: ${stderr}`);
+			}),
+		]);
+		if (exit.signal !== null) {
+			throw new Error(`child-exit-signal: ${JSON.stringify(exit)}`);
+		}
+		return {
+			stdout,
+			stderr,
+			midLog,
+			finalLog,
+			exitCode: typeof exit.code === "number" ? exit.code : null,
+		};
+	} finally {
+		if (child.exitCode === null && !child.killed) {
+			child.kill("SIGKILL");
+			await exitPromise.catch(() => {});
+		}
+		rmSync(tempRoot, { recursive: true, force: true });
+	}
 }
 
 async function main(): Promise<void> {
@@ -407,7 +730,7 @@ async function main(): Promise<void> {
 	check("overlay:ctrl-d-calls-shutdown", overlayShutdownCalls === 1, String(overlayShutdownCalls));
 	check("overlay:ctrl-d-does-not-close-overlay", closeOverlayCalls === 1, String(closeOverlayCalls));
 
-	// (4) parseSlashCommand — discriminated union covers each branch
+	// (4) parseSlashCommand - discriminated union covers each branch
 	check("parse:empty", parseSlashCommand("   ").kind === "empty");
 	check("parse:quit", parseSlashCommand("/quit").kind === "quit");
 	check("parse:exit-alias", parseSlashCommand("/exit").kind === "quit");
@@ -684,7 +1007,8 @@ async function main(): Promise<void> {
 
 	// (7) /run scout streams real worker events into the dispatch-board overlay.
 	// Simulates the golden-path flow: dispatch emits enqueued + started,
-	// worker stream yields message_update / tool_execution_* / message_end,
+	// worker stream yields message_update / tool_execution_* / turn_end /
+	// message_end / agent_end,
 	// handleRun forwards each non-heartbeat event on BusChannels.DispatchProgress,
 	// the dispatch-board store updates the in-flight row live, and the row
 	// transitions to completed on the terminal receipt.
@@ -705,9 +1029,14 @@ async function main(): Promise<void> {
 		{ type: "heartbeat" },
 		{ type: "message_update", message: { content: [{ type: "text", text: "partial" }] } },
 		{ type: "tool_execution_start", toolCallId: "t1", toolName: "read" },
+		{ type: "tool_execution_update", toolCallId: "t1", delta: "chunk" },
 		{ type: "tool_execution_end", toolCallId: "t1", toolName: "read" },
-		{ type: "message_end", message: { role: "assistant", usage: { input: 7, output: 13 } } },
-		{ type: "agent_end" },
+		{ type: "turn_end", toolResults: [{ toolCallId: "t1", result: "ok" }] },
+		{ type: "message_end", message: { role: "assistant", usage: { input: 7, output: 13, cacheRead: 5, cacheWrite: 3 } } },
+		{
+			type: "agent_end",
+			messages: [{ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" }],
+		},
 	];
 	const streamReceipt: RunReceipt = {
 		runId: streamRunId,
@@ -719,7 +1048,7 @@ async function main(): Promise<void> {
 		startedAt: "2026-04-17T00:00:00.000Z",
 		endedAt: "2026-04-17T00:00:01.000Z",
 		exitCode: 0,
-		tokenCount: 20,
+		tokenCount: 28,
 		costUsd: 0,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
@@ -756,7 +1085,7 @@ async function main(): Promise<void> {
 				let sawMessageEnd = false;
 				for (const e of streamEvents) {
 					yield e;
-					// Snapshots run right after handleRun has processed `yield e` —
+					// Snapshots run right after handleRun has processed `yield e` -
 					// at that point any DispatchProgress emit for this event has
 					// already fanned out through the store's synchronous listener.
 					if (!sawMidStream && e.type === "message_update") {
@@ -823,7 +1152,7 @@ async function main(): Promise<void> {
 
 	check(
 		"stream:tokens-update-from-message-end-before-terminal-receipt",
-		postMessageEndSnapshot?.[0]?.status === "running" && postMessageEndSnapshot?.[0]?.tokenCount === 20,
+		postMessageEndSnapshot?.[0]?.status === "running" && postMessageEndSnapshot?.[0]?.tokenCount === 28,
 		JSON.stringify(postMessageEndSnapshot),
 	);
 
@@ -839,11 +1168,18 @@ async function main(): Promise<void> {
 		JSON.stringify(progressTypes),
 	);
 	check(
+		"stream:progress-forwards-tool-execution-update",
+		progressTypes.includes("tool_execution_update"),
+		JSON.stringify(progressTypes),
+	);
+	check(
 		"stream:progress-forwards-tool-execution-end",
 		progressTypes.includes("tool_execution_end"),
 		JSON.stringify(progressTypes),
 	);
+	check("stream:progress-forwards-turn-end", progressTypes.includes("turn_end"), JSON.stringify(progressTypes));
 	check("stream:progress-forwards-message-end", progressTypes.includes("message_end"), JSON.stringify(progressTypes));
+	check("stream:progress-forwards-agent-end", progressTypes.includes("agent_end"), JSON.stringify(progressTypes));
 	check("stream:progress-suppresses-heartbeat", !progressTypes.includes("heartbeat"), JSON.stringify(progressTypes));
 	check(
 		"stream:progress-payload-carries-runid",
@@ -870,6 +1206,51 @@ async function main(): Promise<void> {
 	);
 
 	streamStore.unsubscribe();
+
+	try {
+		const interactiveProbe = await runInteractiveStreamProbe();
+		check(
+			"stream:interactive-run-command-prints-runid",
+			interactiveProbe.stdout.includes("[run] runId=run-live-overlay"),
+			interactiveProbe.stdout,
+		);
+		check(
+			"stream:interactive-progress-forwards-required-types",
+			interactiveProbe.stderr.includes("[child] progress message_update\n") &&
+				interactiveProbe.stderr.includes("[child] progress tool_execution_start\n") &&
+				interactiveProbe.stderr.includes("[child] progress tool_execution_update\n") &&
+				interactiveProbe.stderr.includes("[child] progress turn_end\n") &&
+				interactiveProbe.stderr.includes("[child] progress message_end\n") &&
+				interactiveProbe.stderr.includes("[child] progress agent_end\n"),
+			interactiveProbe.stderr,
+		);
+		check(
+			"stream:interactive-suppresses-heartbeat",
+			!interactiveProbe.stderr.includes("[child] progress heartbeat\n"),
+			interactiveProbe.stderr,
+		);
+		check(
+			"stream:interactive-overlay-opens-mid-stream",
+			interactiveProbe.midLog.includes("Dispatch Board") &&
+				interactiveProbe.midLog.includes("scout") &&
+				interactiveProbe.midLog.includes("running"),
+			interactiveProbe.midLog,
+		);
+		check(
+			"stream:interactive-overlay-reopens-with-terminal-state",
+			interactiveProbe.finalLog.includes("Dispatch Board") &&
+				interactiveProbe.finalLog.includes("scout") &&
+				interactiveProbe.finalLog.includes("completed"),
+			interactiveProbe.finalLog,
+		);
+		check("stream:interactive-child-exits-cleanly", interactiveProbe.exitCode === 0, String(interactiveProbe.exitCode));
+	} catch (err) {
+		check(
+			"stream:interactive-child-probe",
+			false,
+			err instanceof Error ? err.stack ?? err.message : String(err),
+		);
+	}
 
 	if (failures.length > 0) {
 		process.stderr.write(`[diag-interactive-tui] FAILED ${failures.length} check(s)\n`);
