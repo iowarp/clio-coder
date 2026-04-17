@@ -9,13 +9,16 @@ import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
+import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { startInteractive } from "../interactive/index.js";
 
@@ -50,6 +53,9 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		AgentsDomainModule,
 		DispatchDomainModule,
 		SessionDomainModule,
+		ObservabilityDomainModule,
+		SchedulingDomainModule,
+		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
