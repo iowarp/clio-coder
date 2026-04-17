@@ -40,4 +40,47 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.kill();
 		}
 	});
+
+	it("/model opens the picker, Esc closes, /quit exits clean", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/model\r");
+			// Any provider from the static catalog proves the picker rendered.
+			// A static catalog model id only appears inside the /model picker, not in the footer.
+			await p.expect(/claude-sonnet-4-6|gpt-5/, 10_000);
+			// Esc closes the overlay per routeModelOverlayKey.
+			p.send("\x1b");
+			// Give the TUI a tick to process the close and restore editor focus before
+			// the next submit; without it, /quit can race with the overlay teardown and
+			// land as a SelectList filter.
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("Ctrl+L opens the /model picker and Esc closes it", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			// Ctrl+L is \x0c (form feed).
+			p.send("\x0c");
+			// A static catalog model id only appears inside the /model picker, not in the footer.
+			await p.expect(/claude-sonnet-4-6|gpt-5/, 10_000);
+			p.send("\x1b");
+			// Give the TUI a tick to process the close and restore editor focus before
+			// the next submit; without it, /quit can race with the overlay teardown and
+			// land as a SelectList filter.
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
 });
