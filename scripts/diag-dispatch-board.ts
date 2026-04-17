@@ -147,6 +147,31 @@ async function main(): Promise<void> {
 		JSON.stringify(enqueued),
 	);
 
+	withNow(1_500, () => {
+		bus.emit(BusChannels.DispatchProgress, {
+			runId: "run-enqueued",
+			event: {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					usage: {
+						input: 7,
+						output: 13,
+						cacheRead: 5,
+						cacheWrite: 3,
+					},
+				},
+			},
+		});
+	});
+	rows = withNow(1_500, () => store.rows());
+	enqueued = rows.find((row) => row.runId === "run-enqueued");
+	check(
+		"store:progress-message-end-includes-cache-tokens",
+		enqueued?.status === "running" && enqueued?.tokenCount === 28,
+		JSON.stringify(enqueued),
+	);
+
 	withNow(1_600, () => {
 		bus.emit(BusChannels.DispatchCompleted, {
 			runId: "run-enqueued",
