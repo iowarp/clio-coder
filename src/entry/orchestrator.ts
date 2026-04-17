@@ -92,8 +92,8 @@ export async function bootOrchestrator(): Promise<BootResult> {
 
 	const modes = result.getContract<ModesContract>("modes");
 	const providers = result.getContract<ProvidersContract>("providers");
-	if (!modes || !providers) {
-		process.stderr.write("clio: interactive mode requires modes + providers contracts; aborting.\n");
+	if (!modes || !providers || !dispatch) {
+		process.stderr.write("clio: interactive mode requires modes + providers + dispatch contracts; aborting.\n");
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -101,6 +101,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	await startInteractive({
 		modes,
 		providers,
+		dispatch,
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

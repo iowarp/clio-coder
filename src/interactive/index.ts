@@ -1,3 +1,4 @@
+import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { Editor, ProcessTerminal, TUI } from "../engine/tui.js";
@@ -7,6 +8,7 @@ import { buildLayout, defaultBanner } from "./layout.js";
 export interface InteractiveDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
+	dispatch: DispatchContract;
 	onShutdown: () => Promise<void>;
 }
 
@@ -31,6 +33,61 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	return false;
 }
 
+export type SlashCommand =
+	| { kind: "quit" }
+	| { kind: "help" }
+	| { kind: "run"; agentId: string; task: string }
+	| { kind: "run-usage" }
+	| { kind: "unknown"; text: string }
+	| { kind: "empty" };
+
+/** Pure slash-command parser: no I/O, no side effects. */
+export function parseSlashCommand(input: string): SlashCommand {
+	const trimmed = input.trim();
+	if (trimmed.length === 0) return { kind: "empty" };
+	if (trimmed === "/quit" || trimmed === "/exit") return { kind: "quit" };
+	if (trimmed === "/help" || trimmed.startsWith("/help ")) return { kind: "help" };
+	if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
+	if (trimmed.startsWith("/run ")) {
+		const rest = trimmed.slice(5).trim();
+		const [agentId, ...taskParts] = rest.split(/\s+/);
+		const task = taskParts.join(" ").trim();
+		if (!agentId || !task) return { kind: "run-usage" };
+		return { kind: "run", agentId, task };
+	}
+	return { kind: "unknown", text: trimmed };
+}
+
+export interface RunIo {
+	stdout: (s: string) => void;
+	stderr: (s: string) => void;
+}
+
+/** Dispatches /run through the dispatch contract and streams events to stdout. */
+export async function handleRun(agentId: string, task: string, dispatch: DispatchContract, io: RunIo): Promise<void> {
+	try {
+		const handle = await dispatch.dispatch({
+			agentId,
+			task,
+			providerId: "faux",
+			modelId: "faux-model",
+			runtime: "native",
+		});
+		io.stdout(`\n[run] runId=${handle.runId}\n`);
+		for await (const event of handle.events) {
+			const e = event as { type?: string };
+			if (e.type && e.type !== "heartbeat") {
+				io.stdout(`[run] ${e.type}\n`);
+			}
+		}
+		const receipt = await handle.finalPromise;
+		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}\n`);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		io.stderr(`[run] failed: ${msg}\n`);
+	}
+}
+
 const IDENTITY = (s: string): string => s;
 
 export async function startInteractive(deps: InteractiveDeps): Promise<number> {
@@ -50,13 +107,36 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 	});
 	editor.focused = true;
+
+	const io: RunIo = {
+		stdout: (s) => process.stdout.write(s),
+		stderr: (s) => process.stderr.write(s),
+	};
+
 	editor.onSubmit = (text: string): void => {
-		if (text === "/quit" || text === "/exit") {
-			void shutdown();
-			return;
+		const command = parseSlashCommand(text);
+		switch (command.kind) {
+			case "empty":
+				return;
+			case "quit":
+				void shutdown();
+				return;
+			case "help":
+				io.stdout("\ncommands: /run <agent> <task>, /help, /quit\n");
+				return;
+			case "run-usage":
+				io.stdout("\nusage: /run <agent> <task>\n");
+				return;
+			case "run":
+				void (async () => {
+					await handleRun(command.agentId, command.task, deps.dispatch, io);
+					tui.requestRender();
+				})();
+				return;
+			case "unknown":
+				io.stderr(`[interactive] unknown input: ${command.text}\n`);
+				return;
 		}
-		// v0.1 stub: echo to stderr. Dispatch wiring lands post-v0.1.
-		process.stderr.write(`[interactive] received: ${text}\n`);
 	};
 
 	const root = buildLayout({ banner, body: editor, footer: footer.view });
