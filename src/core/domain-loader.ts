@@ -35,7 +35,7 @@ export interface DomainExtension {
  * Query-only surface exposed to other domains. Each domain's index.ts defines its
  * own concrete contract type and exports it alongside the module.
  */
-export type DomainContract = Readonly<Record<string, unknown>>;
+export type DomainContract = object;
 
 export interface DomainBundle<TContract extends DomainContract = DomainContract> {
 	extension: DomainExtension;
