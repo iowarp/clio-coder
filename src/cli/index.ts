@@ -2,6 +2,7 @@ import { runAgentsCommand } from "./agents.js";
 import { runClioCommand } from "./clio.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runInstallCommand } from "./install.js";
+import { runListModelsCommand } from "./list-models-command.js";
 import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
 import { runSetupCommand } from "./setup.js";
@@ -31,6 +32,8 @@ async function main(argv: string[]): Promise<number> {
 		return 0;
 	}
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
+	const listExit = runListModelsCommand(argv);
+	if (listExit !== null) return listExit;
 
 	const subcommand = positional[0];
 	if (!subcommand) return runClioCommand();
