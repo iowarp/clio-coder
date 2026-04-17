@@ -125,7 +125,10 @@ function assertExactKeyShape(actual: unknown, expected: unknown, path = "(root)"
 	const actualKeys = objectKeys(actual);
 	const expectedKeys = objectKeys(expected);
 	if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
-		fail(`settings.yaml key shape mismatch at ${path}`, `expected=${JSON.stringify(expectedKeys)} actual=${JSON.stringify(actualKeys)}`);
+		fail(
+			`settings.yaml key shape mismatch at ${path}`,
+			`expected=${JSON.stringify(expectedKeys)} actual=${JSON.stringify(actualKeys)}`,
+		);
 	}
 	if (!actualKeys || !expectedKeys) return;
 	const actualRecord = actual as Record<string, unknown>;
@@ -139,7 +142,11 @@ function uncommentTemplateLine(line: string): string {
 	return line.replace(/^(\s*)# /, "$1");
 }
 
-function materializeExampleBlock(body: string, provider: ExampleSpec["provider"], endpoint: ExampleSpec["endpoint"]): string {
+function materializeExampleBlock(
+	body: string,
+	provider: ExampleSpec["provider"],
+	endpoint: ExampleSpec["endpoint"],
+): string {
 	const lines = body.split("\n");
 	const providerLine = `  ${provider}:`;
 	const providerIndex = lines.findIndex((line) => line === providerLine);
@@ -165,13 +172,17 @@ function checkExampleFixture(body: string, spec: ExampleSpec): void {
 	try {
 		parsed = parseYaml(materializeExampleBlock(body, spec.provider, spec.endpoint));
 	} catch (err) {
-		fail(`settings.yaml example for ${spec.provider}/${spec.endpoint} did not parse after replacement`, (err as Error).message);
+		fail(
+			`settings.yaml example for ${spec.provider}/${spec.endpoint} did not parse after replacement`,
+			(err as Error).message,
+		);
 	}
 
-	const endpoint =
-		(parsed as {
+	const endpoint = (
+		parsed as {
 			providers?: Record<string, { endpoints?: Record<string, unknown> }>;
-		}).providers?.[spec.provider]?.endpoints?.[spec.endpoint];
+		}
+	).providers?.[spec.provider]?.endpoints?.[spec.endpoint];
 	if (endpoint === undefined || endpoint === null || typeof endpoint !== "object" || Array.isArray(endpoint)) {
 		fail(`settings.yaml example for ${spec.provider}/${spec.endpoint} did not materialize an endpoint object`);
 	}
@@ -199,7 +210,8 @@ function checkExampleFixture(body: string, spec: ExampleSpec): void {
 function checkSettingsTemplate(home: string): void {
 	const settingsPath = join(home, "settings.yaml");
 	const body = readFileSync(settingsPath, "utf8");
-	if (body.includes("clio providers use")) fail("settings.yaml still advertises the nonexistent 'clio providers use' flow", body);
+	if (body.includes("clio providers use"))
+		fail("settings.yaml still advertises the nonexistent 'clio providers use' flow", body);
 
 	let parsed: unknown;
 	try {
