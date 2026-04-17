@@ -143,6 +143,16 @@ function checkAgentsCommand(env: NodeJS.ProcessEnv): void {
 	log("clio agents OK");
 }
 
+function checkToolAdmission(env: NodeJS.ProcessEnv): void {
+	const script = join(projectRoot, "scripts", "diag-tools.ts");
+	try {
+		execFileSync("npx", ["tsx", script], { env, stdio: "inherit" });
+		log("tool admission OK");
+	} catch (err) {
+		fail("tool admission diag failed", (err as Error).message);
+	}
+}
+
 function main(): void {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-verify-"));
@@ -157,6 +167,7 @@ function main(): void {
 	checkSessionRoundTrip(env);
 	checkProvidersCommand(env);
 	checkAgentsCommand(env);
+	checkToolAdmission(env);
 	log("all checks passed");
 }
 
