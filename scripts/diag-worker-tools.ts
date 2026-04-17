@@ -72,18 +72,7 @@ async function main(): Promise<void> {
 
 		const defaultFallback = resolveAgentTools(undefined, "default");
 		const defaultNames = defaultFallback.map((t) => t.name).sort();
-		const expectedDefault = [
-			"read",
-			"write",
-			"edit",
-			"bash",
-			"grep",
-			"glob",
-			"ls",
-			"web_fetch",
-			"web_search",
-			"chain_dispatch",
-		].sort();
+		const expectedDefault = ["read", "write", "edit", "bash", "grep", "glob", "ls", "web_fetch", "web_search"].sort();
 		check(
 			"resolve:undefined+default → every default tool",
 			defaultNames.length === expectedDefault.length && defaultNames.every((n, i) => n === expectedDefault[i]),
