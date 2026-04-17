@@ -8,7 +8,7 @@
 export interface JobSpec {
 	agentId: string;
 	task: string;
-	runtime?: "native" | "sdk" | "cli";
+	runtime?: "native";
 	providerId?: string;
 	modelId?: string;
 	endpoint?: string;
@@ -18,7 +18,7 @@ export interface JobSpec {
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 
 const KNOWN_KEYS = new Set(["agentId", "task", "runtime", "providerId", "modelId", "endpoint", "cwd"]);
-const RUNTIME_VALUES = new Set(["native", "sdk", "cli"]);
+const RUNTIME_VALUES = new Set(["native"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,8 +48,10 @@ export function validateJobSpec(spec: unknown): Validated {
 	}
 
 	if ("runtime" in spec && spec.runtime !== undefined) {
-		if (typeof spec.runtime !== "string" || !RUNTIME_VALUES.has(spec.runtime)) {
-			errors.push("runtime must be one of: native, sdk, cli");
+		if (spec.runtime === "sdk" || spec.runtime === "cli") {
+			errors.push(`runtime=${spec.runtime} not supported in v0.1`);
+		} else if (typeof spec.runtime !== "string" || !RUNTIME_VALUES.has(spec.runtime)) {
+			errors.push("runtime must be one of: native");
 		}
 	}
 

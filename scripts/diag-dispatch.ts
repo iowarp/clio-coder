@@ -110,6 +110,23 @@ async function run(): Promise<void> {
 			return;
 		}
 
+		for (const runtime of ["sdk", "cli"] as const) {
+			try {
+				const unsupportedReq = {
+					agentId: "scout",
+					task: "reject unsupported runtime",
+					providerId: "faux",
+					modelId: "faux-model",
+					runtime,
+				} as unknown as Parameters<typeof dispatch.dispatch>[0];
+				await dispatch.dispatch(unsupportedReq);
+				check(`dispatch:rejects-runtime-${runtime}`, false, "dispatch unexpectedly accepted the runtime");
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				check(`dispatch:rejects-runtime-${runtime}`, message.includes(`runtime=${runtime} not supported in v0.1`), message);
+			}
+		}
+
 		// ---- 1st dispatch: expect clean completion ------------------------------
 		const res = await dispatch.dispatch({
 			agentId: "scout",
