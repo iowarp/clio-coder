@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Phase 1 verification script. Builds once, then runs:
+ * Verification script. Builds once, then runs:
  *   clio --version
  *   clio install  (into an ephemeral CLIO_HOME)
  *   clio doctor   (against the install)
  *   clio          (orchestrator boot stub against the install)
+ *   verify-prompt.ts
+ *   verify-session.ts
  *
  * Exits 0 on success. Any step that deviates from expected output exits 1.
  */
@@ -105,6 +107,26 @@ function checkRegistryPaths(env: NodeJS.ProcessEnv): void {
 	}
 }
 
+function checkPromptCompile(env: NodeJS.ProcessEnv): void {
+	const script = join(projectRoot, "scripts", "verify-prompt.ts");
+	try {
+		execFileSync("npx", ["tsx", script], { env, stdio: "inherit" });
+		log("prompt compile OK");
+	} catch (err) {
+		fail("prompt compile check failed", (err as Error).message);
+	}
+}
+
+function checkSessionRoundTrip(env: NodeJS.ProcessEnv): void {
+	const script = join(projectRoot, "scripts", "verify-session.ts");
+	try {
+		execFileSync("npx", ["tsx", script], { env, stdio: "inherit" });
+		log("session round-trip OK");
+	} catch (err) {
+		fail("session round-trip check failed", (err as Error).message);
+	}
+}
+
 function main(): void {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-verify-"));
@@ -115,6 +137,8 @@ function main(): void {
 	checkDoctor(env);
 	checkBoot(env);
 	checkRegistryPaths(env);
+	checkPromptCompile(env);
+	checkSessionRoundTrip(env);
 	log("all checks passed");
 }
 
