@@ -1,4 +1,4 @@
-import { unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classify } from "../src/domains/safety/action-classifier.js";
@@ -9,13 +9,12 @@ import { formatRejection } from "../src/domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, READONLY_SCOPE, isSubset } from "../src/domains/safety/scope.js";
 
 /**
- * Slice 1 self-check. Exercises the pure helpers only:
- *   - classify(): fixture table covering every ActionClass branch
- *   - isSubset(): canonical read-only vs default
- *   - buildAuditRecord(): shape assertions
- *
- * Slice 3 adds a full diag-safety that opens the writer against ~/.clio and
- * wires the domain into the orchestrator. Do NOT touch the filesystem here.
+ * Slice 3 diag harness. Exercises pure helpers AND the wired SafetyDomainModule
+ * against an ephemeral CLIO_HOME so it can be appended to `npm run ci`. The
+ * domain-level section:
+ *   - mounts loadDomains([ConfigDomainModule, SafetyDomainModule])
+ *   - calls contract.evaluate() across a fixture table
+ *   - asserts bus events fire and NDJSON audit lines land on disk
  */
 
 const failures: string[] = [];
@@ -201,15 +200,162 @@ function runRejectionFeedbackFixtures(): void {
 	);
 }
 
-runClassifyFixtures();
-runScopeFixtures();
-runAuditFixtures();
-runDamageControlFixtures();
-runLoopDetectorFixtures();
-runRejectionFeedbackFixtures();
-
-if (failures.length > 0) {
-	process.stderr.write(`[diag-safety] FAILED ${failures.length} check(s)\n`);
-	process.exit(1);
+function today(): string {
+	const fmt = new Intl.DateTimeFormat("en-CA", {
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	});
+	return fmt.format(new Date());
 }
-process.stdout.write("[diag-safety] PASS\n");
+
+async function runDomainHarness(): Promise<void> {
+	const home = mkdtempSync(join(tmpdir(), "clio-diag-safety-"));
+	const ENV_KEYS = ["CLIO_HOME", "CLIO_DATA_DIR", "CLIO_CONFIG_DIR", "CLIO_CACHE_DIR"] as const;
+	const snapshot = new Map<string, string | undefined>();
+	for (const k of ENV_KEYS) snapshot.set(k, process.env[k]);
+	// Clear per-kind overrides BEFORE setting CLIO_HOME so that xdg.ts resolves
+	// paths under the ephemeral home. Per-kind env vars take precedence over
+	// CLIO_HOME inside xdg.ts, so a poisoned caller env would otherwise redirect
+	// audit writes outside `home`.
+	for (const k of ["CLIO_DATA_DIR", "CLIO_CONFIG_DIR", "CLIO_CACHE_DIR"] as const) {
+		delete process.env[k];
+	}
+	process.env.CLIO_HOME = home;
+	try {
+		// Dynamic imports AFTER CLIO_HOME is set so the xdg module caches the
+		// ephemeral path rather than the user's real home.
+		const { resetXdgCache, clioDataDir } = await import("../src/core/xdg.js");
+		resetXdgCache();
+		const expectedData = join(home, "data");
+		const resolvedData = clioDataDir();
+		if (resolvedData !== expectedData) {
+			throw new Error(`expected data dir ${expectedData}, got ${resolvedData}`);
+		}
+		check("xdg:data-dir-matches-home", true);
+		const { resetSharedBus, getSharedBus } = await import("../src/core/shared-bus.js");
+		resetSharedBus();
+		const { loadDomains } = await import("../src/core/domain-loader.js");
+		const { ConfigDomainModule } = await import("../src/domains/config/index.js");
+		const { SafetyDomainModule } = await import("../src/domains/safety/index.js");
+		const { BusChannels } = await import("../src/core/bus-events.js");
+		const { resetPackageRootCache } = await import("../src/core/package-root.js");
+		resetPackageRootCache();
+
+		// Touch settings.yaml so ConfigDomainModule's fs.watch() has a target.
+		// readSettings() falls back to DEFAULT_SETTINGS when the file is absent
+		// but the watcher still needs the inode.
+		writeFileSync(join(home, "settings.yaml"), "");
+
+		const bus = getSharedBus();
+		const seen = { classified: 0, allowed: 0, blocked: 0 };
+		bus.on(BusChannels.SafetyClassified, () => {
+			seen.classified += 1;
+		});
+		bus.on(BusChannels.SafetyAllowed, () => {
+			seen.allowed += 1;
+		});
+		bus.on(BusChannels.SafetyBlocked, () => {
+			seen.blocked += 1;
+		});
+
+		const result = await loadDomains([ConfigDomainModule, SafetyDomainModule]);
+		check("domain:loaded", result.loaded.includes("safety"), `loaded=${result.loaded.join(",")}`);
+
+		type SafetyContractType = import("../src/domains/safety/contract.js").SafetyContract;
+		const safety = result.getContract<SafetyContractType>("safety");
+		check("domain:contract-exposed", safety !== undefined);
+		if (!safety) {
+			await result.stop();
+			return;
+		}
+
+		const before = safety.audit.recordCount();
+
+		const readDecision = safety.evaluate({ tool: "read", args: { file_path: "/tmp/ok" } });
+		check("evaluate:read-allow", readDecision.kind === "allow" && readDecision.classification.actionClass === "read");
+		const readCount = safety.audit.recordCount();
+		check("evaluate:read-audit-bumped", readCount === before + 1, `before=${before} after=${readCount}`);
+
+		const writeDecision = safety.evaluate({ tool: "write", args: { path: "./src/foo.ts" } });
+		check(
+			"evaluate:write-in-cwd-allow",
+			writeDecision.kind === "allow" && writeDecision.classification.actionClass === "write",
+		);
+
+		const gitDecision = safety.evaluate({ tool: "bash", args: { command: "git push --force origin main" } });
+		check(
+			"evaluate:git-force-block",
+			gitDecision.kind === "block" && gitDecision.classification.actionClass === "git_destructive",
+		);
+		check(
+			"evaluate:git-force-rejection-short",
+			gitDecision.kind === "block" && gitDecision.rejection.short.includes("blocked"),
+		);
+
+		const sudoDecision = safety.evaluate({ tool: "bash", args: { command: "sudo apt install vim" } });
+		check(
+			"evaluate:sudo-apt-allow-at-safety",
+			sudoDecision.kind === "allow" && sudoDecision.classification.actionClass === "system_modify",
+			`kind=${sudoDecision.kind} class=${sudoDecision.classification.actionClass}`,
+		);
+
+		const rmDecision = safety.evaluate({ tool: "bash", args: { command: "rm -rf /" } });
+		check("evaluate:rm-rf-root-block", rmDecision.kind === "block");
+
+		check("bus:classified-fired", seen.classified >= 5, `count=${seen.classified}`);
+		check("bus:allowed-fired", seen.allowed >= 3, `count=${seen.allowed}`);
+		check("bus:blocked-fired", seen.blocked >= 2, `count=${seen.blocked}`);
+
+		await result.stop();
+
+		const auditPath = join(home, "data", "audit", `${today()}.jsonl`);
+		check("audit:file-exists", existsSync(auditPath), auditPath);
+		if (existsSync(auditPath)) {
+			const raw = readFileSync(auditPath, "utf8");
+			const lines = raw.split("\n").filter((l) => l.length > 0);
+			check("audit:at-least-5-lines", lines.length >= 5, `lines=${lines.length}`);
+			let parsedOk = true;
+			for (const line of lines) {
+				try {
+					const parsed = JSON.parse(line);
+					if (typeof parsed !== "object" || parsed === null) parsedOk = false;
+				} catch {
+					parsedOk = false;
+				}
+			}
+			check("audit:lines-parse-as-json", parsedOk);
+		}
+	} finally {
+		try {
+			rmSync(home, { recursive: true, force: true });
+		} catch {
+			// best-effort cleanup
+		}
+		for (const [k, v] of snapshot) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	}
+}
+
+async function main(): Promise<void> {
+	runClassifyFixtures();
+	runScopeFixtures();
+	runAuditFixtures();
+	runDamageControlFixtures();
+	runLoopDetectorFixtures();
+	runRejectionFeedbackFixtures();
+	await runDomainHarness();
+
+	if (failures.length > 0) {
+		process.stderr.write(`[diag-safety] FAILED ${failures.length} check(s)\n`);
+		process.exit(1);
+	}
+	process.stdout.write("[diag-safety] PASS\n");
+}
+
+main().catch((err) => {
+	process.stderr.write(`[diag-safety] crashed: ${err instanceof Error ? err.stack : String(err)}\n`);
+	process.exit(1);
+});
