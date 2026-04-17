@@ -56,6 +56,8 @@ export interface WorkerRunHandle {
 
 export type WorkerEventEmit = (event: AgentEvent) => void;
 
+const LOCAL_WORKER_PROVIDER_IDS = new Set(["llamacpp", "lmstudio", "ollama", "openai-compat"]);
+
 function isAssistantMessage(
 	message: AgentMessage | undefined,
 ): message is AgentMessage & { role: "assistant"; stopReason?: string; errorMessage?: string } {
@@ -73,6 +75,19 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
 	return null;
 }
 
+function seedWorkerLocalRegistry(input: Pick<WorkerRunInput, "providerId" | "endpointName" | "endpointSpec">): void {
+	if (!LOCAL_WORKER_PROVIDER_IDS.has(input.providerId)) return;
+	if (input.endpointName && input.endpointSpec) {
+		registerLocalProviders({
+			[input.providerId]: { endpoints: { [input.endpointName]: input.endpointSpec } },
+		} as Parameters<typeof registerLocalProviders>[0]);
+		return;
+	}
+	// Reused worker processes must not inherit a previous local endpoint when the
+	// current run omitted bootstrap fields.
+	registerLocalProviders({});
+}
+
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -81,11 +96,7 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const fauxModel = registerFauxFromEnv();
-	if (input.endpointName && input.endpointSpec) {
-		registerLocalProviders({
-			[input.providerId]: { endpoints: { [input.endpointName]: input.endpointSpec } },
-		} as Parameters<typeof registerLocalProviders>[0]);
-	}
+	seedWorkerLocalRegistry(input);
 	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
 	const mode: ModeName = input.mode ?? "default";
 	const tools = resolveAgentTools(input.allowedTools, mode);
