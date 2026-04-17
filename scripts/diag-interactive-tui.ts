@@ -23,7 +23,7 @@
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -60,10 +60,19 @@ import {
 	routeInteractiveKey,
 	routeOverlayKey,
 	routeProvidersOverlayKey,
+	routeReceiptsOverlayKey,
 	routeSuperOverlayKey,
 	startInteractive,
 } from "../src/interactive/index.js";
 import { formatProvidersOverlayLines } from "../src/interactive/providers-overlay.js";
+import {
+	RECEIPTS_OVERLAY_WIDTH,
+	buildReceiptItems,
+	formatReceiptRow,
+	formatReceiptsHeader,
+	openReceiptsOverlay,
+	verifyReceiptFile,
+} from "../src/interactive/receipts-overlay.js";
 import { renderSuperOverlayLines } from "../src/interactive/super-overlay.js";
 
 const failures: string[] = [];
@@ -403,6 +412,7 @@ async function main() {
 		providers,
 		dispatch,
 		observability,
+		dataDir: ${JSON.stringify(tempRoot)},
 		getWorkerDefault: () => ({ provider: "faux", model: "faux-model" }),
 		onShutdown: async () => {},
 	});
@@ -1228,6 +1238,403 @@ async function main(): Promise<void> {
 		costRenderCalls === rendersAfterHide,
 		`${rendersAfterHide} -> ${costRenderCalls}`,
 	);
+
+	// (6c) /receipts overlay + /receipt verify slash command
+	check("parse:receipts-command", parseSlashCommand("/receipts").kind === "receipts");
+	check(
+		"parse:receipts-with-trailing-space",
+		parseSlashCommand("  /receipts  ").kind === "receipts",
+		parseSlashCommand("  /receipts  ").kind,
+	);
+	check("parse:receipt-bare-is-usage", parseSlashCommand("/receipt").kind === "receipt-usage");
+	check(
+		"parse:receipt-verify-missing-id-is-usage",
+		parseSlashCommand("/receipt verify").kind === "receipt-usage",
+		parseSlashCommand("/receipt verify").kind,
+	);
+	const verifyCmd = parseSlashCommand("/receipt verify abc123");
+	check(
+		"parse:receipt-verify-with-id",
+		verifyCmd.kind === "receipt-verify" && verifyCmd.runId === "abc123",
+		JSON.stringify(verifyCmd),
+	);
+	check(
+		"parse:receipt-verify-extra-args-is-usage",
+		parseSlashCommand("/receipt verify abc extra").kind === "receipt-usage",
+		parseSlashCommand("/receipt verify abc extra").kind,
+	);
+	check("parse:receipt-unknown-subcommand-is-usage", parseSlashCommand("/receipt show abc").kind === "receipt-usage");
+
+	const receiptsFixtureEnvelopes: RunEnvelope[] = [
+		{
+			id: "run-aaaaaaaa1",
+			agentId: "scout",
+			task: "hello world",
+			providerId: "faux",
+			modelId: "faux-model",
+			runtime: "native",
+			startedAt: "2026-04-17T00:00:00.000Z",
+			endedAt: "2026-04-17T00:00:01.000Z",
+			status: "completed",
+			exitCode: 0,
+			pid: 1234,
+			heartbeatAt: null,
+			receiptPath: "/tmp/receipts/run-aaaaaaaa1.json",
+			sessionId: null,
+			cwd: "/tmp",
+			tokenCount: 42,
+			costUsd: 0,
+		},
+		{
+			id: "run-bbbbbbbb2",
+			agentId: "sage",
+			task: "draft",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4.5",
+			runtime: "sdk",
+			startedAt: "2026-04-17T00:01:00.000Z",
+			endedAt: "2026-04-17T00:01:05.000Z",
+			status: "completed",
+			exitCode: 0,
+			pid: 1235,
+			heartbeatAt: null,
+			receiptPath: null,
+			sessionId: "sess-1",
+			cwd: "/tmp",
+			tokenCount: 1234,
+			costUsd: 0.0123,
+		},
+		{
+			id: "run-ccccccc3",
+			agentId: "builder",
+			task: "compile",
+			providerId: "llamacpp",
+			modelId: "qwen3-coder",
+			runtime: "native",
+			startedAt: "2026-04-17T00:02:00.000Z",
+			endedAt: null,
+			status: "failed",
+			exitCode: 2,
+			pid: 1236,
+			heartbeatAt: null,
+			receiptPath: null,
+			sessionId: null,
+			cwd: "/tmp",
+			tokenCount: 9,
+			costUsd: 0,
+		},
+	];
+
+	const receiptRowSample = formatReceiptRow(receiptsFixtureEnvelopes[0]);
+	check(
+		"receipts-overlay:row-contains-short-id-agent-model",
+		receiptRowSample.includes("run-aaaa") &&
+			receiptRowSample.includes("scout") &&
+			receiptRowSample.includes("faux-model"),
+		receiptRowSample,
+	);
+	check(
+		"receipts-overlay:row-contains-exit-tokens-usd",
+		receiptRowSample.includes("e=0") && receiptRowSample.includes("42t") && receiptRowSample.includes("$0.0000"),
+		receiptRowSample,
+	);
+
+	const receiptItems = buildReceiptItems(receiptsFixtureEnvelopes);
+	check("receipts-overlay:one-item-per-envelope", receiptItems.length === 3, String(receiptItems.length));
+	check(
+		"receipts-overlay:items-carry-runid-as-value",
+		receiptItems[0]?.value === "run-aaaaaaaa1" &&
+			receiptItems[1]?.value === "run-bbbbbbbb2" &&
+			receiptItems[2]?.value === "run-ccccccc3",
+		JSON.stringify(receiptItems.map((i) => i.value)),
+	);
+	check(
+		"receipts-overlay:items-carry-startedAt-in-label",
+		receiptItems[0]?.label.includes("2026-04-17T00:00:00.000Z"),
+		receiptItems[0]?.label,
+	);
+
+	check(
+		"receipts-overlay:header-includes-count",
+		formatReceiptsHeader(3) === "─ Receipts (3) ─" && formatReceiptsHeader(0) === "─ Receipts (empty) ─",
+	);
+
+	let receiptsOverlayCapturedComponent: { render: (w: number) => string[] } | null = null;
+	let receiptsOverlayCapturedWidth: number | undefined;
+	const receiptsListRunsCalls: unknown[] = [];
+	const receiptsFakeDispatch: DispatchContract = {
+		dispatch: async () => {
+			throw new Error("unexpected");
+		},
+		listRuns: (status?: RunStatus) => {
+			receiptsListRunsCalls.push(status);
+			return receiptsFixtureEnvelopes;
+		},
+		getRun: () => null,
+		abort: () => {},
+		drain: async () => {},
+	};
+	const receiptsFakeTui = {
+		requestRender: () => {},
+		showOverlay: (component: { render: (w: number) => string[] }, opts?: { width?: number }) => {
+			receiptsOverlayCapturedComponent = component;
+			receiptsOverlayCapturedWidth = opts?.width;
+			return {
+				hide: () => {},
+				setHidden: () => {},
+				isHidden: () => false,
+				focus: () => {},
+				unfocus: () => {},
+				isFocused: () => true,
+			};
+		},
+	};
+	const receiptsHandle = openReceiptsOverlay(
+		receiptsFakeTui as unknown as Parameters<typeof openReceiptsOverlay>[0],
+		receiptsFakeDispatch,
+	);
+	check(
+		"receipts-overlay:open-uses-fixed-width",
+		receiptsOverlayCapturedWidth === RECEIPTS_OVERLAY_WIDTH,
+		String(receiptsOverlayCapturedWidth),
+	);
+	check(
+		"receipts-overlay:open-calls-listRuns-once",
+		receiptsListRunsCalls.length === 1,
+		String(receiptsListRunsCalls.length),
+	);
+	const receiptsRenderLines = receiptsOverlayCapturedComponent?.render(RECEIPTS_OVERLAY_WIDTH) ?? [];
+	const receiptsRenderJoined = receiptsRenderLines.join("\n");
+	check(
+		"receipts-overlay:renders-header-with-count",
+		receiptsRenderJoined.includes("Receipts (3)"),
+		receiptsRenderJoined,
+	);
+	check(
+		"receipts-overlay:renders-all-three-fixture-agents",
+		receiptsRenderJoined.includes("scout") &&
+			receiptsRenderJoined.includes("sage") &&
+			receiptsRenderJoined.includes("builder"),
+		receiptsRenderJoined,
+	);
+	check(
+		"receipts-overlay:renders-exit-tokens-for-each-row",
+		receiptsRenderJoined.includes("e=0") &&
+			receiptsRenderJoined.includes("e=2") &&
+			receiptsRenderJoined.includes("1234t"),
+		receiptsRenderJoined,
+	);
+	check("receipts-overlay:renders-esc-close-hint", receiptsRenderJoined.includes("[Esc] close"), receiptsRenderJoined);
+	receiptsHandle.hide();
+
+	// Empty-state overlay still renders a hint line
+	let emptyReceiptsCaptured: { render: (w: number) => string[] } | null = null;
+	const emptyReceiptsFakeTui = {
+		requestRender: () => {},
+		showOverlay: (component: { render: (w: number) => string[] }) => {
+			emptyReceiptsCaptured = component;
+			return {
+				hide: () => {},
+				setHidden: () => {},
+				isHidden: () => false,
+				focus: () => {},
+				unfocus: () => {},
+				isFocused: () => true,
+			};
+		},
+	};
+	const emptyDispatchForReceipts: DispatchContract = {
+		dispatch: async () => {
+			throw new Error("unexpected");
+		},
+		listRuns: () => [],
+		getRun: () => null,
+		abort: () => {},
+		drain: async () => {},
+	};
+	openReceiptsOverlay(
+		emptyReceiptsFakeTui as unknown as Parameters<typeof openReceiptsOverlay>[0],
+		emptyDispatchForReceipts,
+	);
+	const emptyReceiptsRenderJoined = (emptyReceiptsCaptured?.render(RECEIPTS_OVERLAY_WIDTH) ?? []).join("\n");
+	check(
+		"receipts-overlay:empty-state-header",
+		emptyReceiptsRenderJoined.includes("Receipts (empty)"),
+		emptyReceiptsRenderJoined,
+	);
+	check(
+		"receipts-overlay:empty-state-placeholder",
+		emptyReceiptsRenderJoined.includes("no dispatch runs yet"),
+		emptyReceiptsRenderJoined,
+	);
+
+	let receiptsOverlayCloseCalls = 0;
+	const receiptsEsc = routeReceiptsOverlayKey(ESC, {
+		closeOverlay: () => {
+			receiptsOverlayCloseCalls += 1;
+		},
+	});
+	check("receipts-overlay:esc-consumed", receiptsEsc === true);
+	check("receipts-overlay:esc-calls-close", receiptsOverlayCloseCalls === 1, String(receiptsOverlayCloseCalls));
+
+	const receiptsOverlayArrow = routeReceiptsOverlayKey("\x1b[A", {
+		closeOverlay: () => {
+			receiptsOverlayCloseCalls += 1;
+		},
+	});
+	check("receipts-overlay:arrow-key-passes-through", receiptsOverlayArrow === false);
+	check("receipts-overlay:arrow-key-does-not-close", receiptsOverlayCloseCalls === 1, String(receiptsOverlayCloseCalls));
+
+	let receiptsOverlayShutdownCalls = 0;
+	let receiptsOverlayGenericCloseCalls = 0;
+	const receiptsOverlayCtrlD = routeOverlayKey(CTRL_D, "receipts", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_030,
+		closeOverlay: () => {
+			receiptsOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			receiptsOverlayShutdownCalls += 1;
+		},
+	});
+	check("receipts-overlay:ctrl-d-consumed", receiptsOverlayCtrlD === true);
+	check(
+		"receipts-overlay:ctrl-d-calls-shutdown",
+		receiptsOverlayShutdownCalls === 1,
+		String(receiptsOverlayShutdownCalls),
+	);
+
+	const receiptsOverlayEscGeneric = routeOverlayKey(ESC, "receipts", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_031,
+		closeOverlay: () => {
+			receiptsOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			receiptsOverlayShutdownCalls += 1;
+		},
+	});
+	check("receipts-overlay:esc-via-overlay-router-consumed", receiptsOverlayEscGeneric === true);
+	check(
+		"receipts-overlay:esc-via-overlay-router-calls-close",
+		receiptsOverlayGenericCloseCalls === 1,
+		String(receiptsOverlayGenericCloseCalls),
+	);
+
+	const receiptsOverlayArrowGeneric = routeOverlayKey("\x1b[A", "receipts", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_032,
+		closeOverlay: () => {
+			receiptsOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			receiptsOverlayShutdownCalls += 1;
+		},
+	});
+	check("receipts-overlay:arrow-not-consumed-by-overlay-router", receiptsOverlayArrowGeneric === false);
+
+	// (6d) verifyReceiptFile against on-disk fixtures
+	const verifyTempRoot = mkdtempSync(join(tmpdir(), "clio-diag-receipts-"));
+	mkdirSync(join(verifyTempRoot, "receipts"), { recursive: true });
+	const validReceipt = {
+		runId: "run-verify-ok",
+		agentId: "scout",
+		task: "hello",
+		providerId: "faux",
+		modelId: "faux-model",
+		runtime: "native",
+		startedAt: "2026-04-17T00:00:00.000Z",
+		endedAt: "2026-04-17T00:00:01.000Z",
+		exitCode: 0,
+		tokenCount: 42,
+		costUsd: 0,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.1.0-dev",
+		piMonoVersion: "0.67.4",
+		platform: "linux",
+		nodeVersion: "v20",
+		toolCalls: 0,
+		sessionId: null,
+	};
+	writeFileSync(join(verifyTempRoot, "receipts", "run-verify-ok.json"), JSON.stringify(validReceipt, null, 2), "utf8");
+	const verifyOk = verifyReceiptFile(verifyTempRoot, "run-verify-ok");
+	check("receipt-verify:ok-for-valid-receipt", verifyOk.ok === true, JSON.stringify(verifyOk));
+
+	const missingResult = verifyReceiptFile(verifyTempRoot, "does-not-exist");
+	check(
+		"receipt-verify:missing-file-reports-fail-not-found",
+		missingResult.ok === false && missingResult.reason === "receipt file not found",
+		JSON.stringify(missingResult),
+	);
+
+	writeFileSync(join(verifyTempRoot, "receipts", "run-bad-json.json"), "{ not json", "utf8");
+	const badJsonResult = verifyReceiptFile(verifyTempRoot, "run-bad-json");
+	check(
+		"receipt-verify:malformed-json-reports-fail",
+		badJsonResult.ok === false && badJsonResult.reason?.startsWith("invalid json"),
+		JSON.stringify(badJsonResult),
+	);
+
+	const { clioVersion: _stripVer, ...malformedMissing } = { ...validReceipt, runId: "run-missing" };
+	void _stripVer;
+	writeFileSync(join(verifyTempRoot, "receipts", "run-missing.json"), JSON.stringify(malformedMissing), "utf8");
+	const missingFieldResult = verifyReceiptFile(verifyTempRoot, "run-missing");
+	check(
+		"receipt-verify:missing-field-reports-fail",
+		missingFieldResult.ok === false && missingFieldResult.reason === "missing field: clioVersion",
+		JSON.stringify(missingFieldResult),
+	);
+
+	const wrongIdReceipt = { ...validReceipt, runId: "run-different" };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-wrong-id.json"), JSON.stringify(wrongIdReceipt), "utf8");
+	const wrongIdResult = verifyReceiptFile(verifyTempRoot, "run-wrong-id");
+	check(
+		"receipt-verify:runid-mismatch-reports-fail",
+		wrongIdResult.ok === false && wrongIdResult.reason?.includes("runId mismatch"),
+		JSON.stringify(wrongIdResult),
+	);
+
+	const badExit = { ...validReceipt, runId: "run-bad-exit", exitCode: 9 };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-bad-exit.json"), JSON.stringify(badExit), "utf8");
+	const badExitResult = verifyReceiptFile(verifyTempRoot, "run-bad-exit");
+	check(
+		"receipt-verify:bad-exit-code-reports-fail",
+		badExitResult.ok === false && badExitResult.reason?.includes("exitCode out of range"),
+		JSON.stringify(badExitResult),
+	);
+
+	const badTokens = { ...validReceipt, runId: "run-bad-tokens", tokenCount: -1 };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-bad-tokens.json"), JSON.stringify(badTokens), "utf8");
+	const badTokensResult = verifyReceiptFile(verifyTempRoot, "run-bad-tokens");
+	check(
+		"receipt-verify:negative-tokens-reports-fail",
+		badTokensResult.ok === false && badTokensResult.reason?.includes("tokenCount out of range"),
+		JSON.stringify(badTokensResult),
+	);
+
+	const badStarted = { ...validReceipt, runId: "run-bad-started", startedAt: "not-iso" };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-bad-started.json"), JSON.stringify(badStarted), "utf8");
+	const badStartedResult = verifyReceiptFile(verifyTempRoot, "run-bad-started");
+	check(
+		"receipt-verify:non-iso-startedAt-reports-fail",
+		badStartedResult.ok === false && badStartedResult.reason?.includes("startedAt not ISO-8601"),
+		JSON.stringify(badStartedResult),
+	);
+
+	const emptyVersion = { ...validReceipt, runId: "run-empty-ver", clioVersion: "" };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-empty-ver.json"), JSON.stringify(emptyVersion), "utf8");
+	const emptyVersionResult = verifyReceiptFile(verifyTempRoot, "run-empty-ver");
+	check(
+		"receipt-verify:empty-clioVersion-reports-fail",
+		emptyVersionResult.ok === false && emptyVersionResult.reason === "clioVersion empty",
+		JSON.stringify(emptyVersionResult),
+	);
+
+	rmSync(verifyTempRoot, { recursive: true, force: true });
 
 	// handleRun on failure routes the error to stderr
 	const failStdout: string[] = [];

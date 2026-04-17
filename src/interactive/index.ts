@@ -11,6 +11,7 @@ import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-b
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
+import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 
 export interface InteractiveDeps {
@@ -19,6 +20,8 @@ export interface InteractiveDeps {
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
+	/** XDG data dir (clioDataDir()). `/receipt verify` reads from <dataDir>/receipts/<id>.json. */
+	dataDir: string;
 	/**
 	 * Resolver for the current `workers.default` block. `/run` uses this to
 	 * short-circuit with an actionable error when no provider is configured
@@ -36,7 +39,7 @@ export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
 export const ENTER = "\r";
 export const ESC = "\x1b";
-export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers" | "cost";
+export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers" | "cost" | "receipts";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -63,11 +66,16 @@ export interface CostOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface ReceiptsOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
-		CostOverlayKeyDeps {
+		CostOverlayKeyDeps,
+		ReceiptsOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -135,6 +143,19 @@ export function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boo
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /receipts overlay. Esc closes. Every other
+ * key is left untouched so the Box-wrapped SelectList can handle Up/Down/Enter
+ * through the TUI's focused-component pipeline.
+ */
+export function routeReceiptsOverlayKey(data: string, deps: ReceiptsOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -160,6 +181,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		routeCostOverlayKey(data, deps);
 		return true;
 	}
+	if (overlayState === "receipts") {
+		// Do not swallow arrow keys or Enter; the focused SelectList needs them.
+		return routeReceiptsOverlayKey(data, deps);
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -171,6 +196,9 @@ export type SlashCommand =
 	| { kind: "run-usage" }
 	| { kind: "providers" }
 	| { kind: "cost" }
+	| { kind: "receipts" }
+	| { kind: "receipt-verify"; runId: string }
+	| { kind: "receipt-usage" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -182,6 +210,15 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (trimmed === "/help" || trimmed.startsWith("/help ")) return { kind: "help" };
 	if (trimmed === "/providers") return { kind: "providers" };
 	if (trimmed === "/cost") return { kind: "cost" };
+	if (trimmed === "/receipts") return { kind: "receipts" };
+	if (trimmed === "/receipt" || trimmed === "/receipt ") return { kind: "receipt-usage" };
+	if (trimmed.startsWith("/receipt ")) {
+		const parts = trimmed.slice("/receipt ".length).trim().split(/\s+/);
+		if (parts[0] === "verify" && parts[1] && parts.length === 2) {
+			return { kind: "receipt-verify", runId: parts[1] };
+		}
+		return { kind: "receipt-usage" };
+	}
 	if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
 	if (trimmed.startsWith("/run ")) {
 		const rest = trimmed.slice(5).trim();
@@ -290,7 +327,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				void shutdown();
 				return;
 			case "help":
-				io.stdout("\ncommands: /run <agent> <task>, /providers, /cost, /help, /quit\n");
+				io.stdout("\ncommands: /run <agent> <task>, /providers, /cost, /receipts, /receipt verify <id>, /help, /quit\n");
 				return;
 			case "run-usage":
 				io.stdout("\nusage: /run <agent> <task>\n");
@@ -312,6 +349,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			case "cost":
 				openCostOverlayState();
 				return;
+			case "receipts":
+				openReceiptsOverlayState();
+				return;
+			case "receipt-usage":
+				io.stdout("\nusage: /receipt verify <runId>\n");
+				return;
+			case "receipt-verify": {
+				const result = verifyReceiptFile(deps.dataDir, command.runId);
+				if (result.ok) {
+					io.stdout(`[/receipt verify] ok ${command.runId}\n`);
+				} else {
+					io.stdout(`[/receipt verify] fail ${command.runId} ${result.reason}\n`);
+				}
+				return;
+			}
 			case "unknown":
 				io.stderr(`[interactive] unknown input: ${command.text}\n`);
 				return;
@@ -392,6 +444,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			bus: deps.bus,
 			sessionId: deps.getSessionId?.() ?? null,
 		});
+		tui.requestRender();
+	};
+
+	const openReceiptsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "receipts";
+		overlayHandle = openReceiptsOverlay(tui, deps.dispatch);
 		tui.requestRender();
 	};
 
