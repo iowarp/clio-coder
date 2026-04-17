@@ -159,7 +159,7 @@ Status: frozen for Clio v0.1. Update this file only on a deliberate pi-mono vers
 ### Types
 - `KnownProvider` — string-literal union of registered provider names.
 - `Model<TApi>` — provider-specific model descriptor.
-- `Usage`, `Api`, `StreamFn`, `streamSimple` — streaming primitives.
+- `Usage`, `Api`, `streamSimple` — streaming primitives. (`StreamFn` lives in pi-agent-core, not pi-ai.)
 
 ### Initialization
 - Registration is process-wide. Calling `registerBuiltInApiProviders()` twice is safe (idempotent).
@@ -1931,13 +1931,13 @@ export type {
 	AgentState,
 	AgentEvent,
 	AgentMessage,
+	StreamFn,
 } from "@mariozechner/pi-agent-core";
 
 export type {
 	Api,
 	KnownProvider,
 	Model,
-	StreamFn,
 	Usage,
 } from "@mariozechner/pi-ai";
 
