@@ -1,3 +1,4 @@
+import type { TSchema } from "@sinclair/typebox";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import type { ModeName } from "../domains/modes/matrix.js";
@@ -15,6 +16,13 @@ import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
+	/**
+	 * TypeBox schema advertised to the model so it knows which named
+	 * parameters the tool accepts. Must be a Type.Object(...). Runtime
+	 * validation still happens inside `run()` — the schema is advisory
+	 * to the model, not an enforcement boundary.
+	 */
+	parameters: TSchema;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
 	/**

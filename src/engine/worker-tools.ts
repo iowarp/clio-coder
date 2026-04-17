@@ -9,19 +9,18 @@
  * gate already enforced at dispatch time.
  */
 
-import { Type } from "@sinclair/typebox";
+import type { TSchema } from "@sinclair/typebox";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { type ToolSpec, createToolIndex } from "../tools/registry.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
-function toAgentTool(spec: ToolSpec): AgentTool<ReturnType<typeof Type.Object>> {
+function toAgentTool(spec: ToolSpec): AgentTool<TSchema> {
 	return {
 		name: spec.name,
 		description: spec.description,
-		// Permissive schema; each tool validates its own fields inside run().
-		parameters: Type.Object({}, { additionalProperties: true }),
+		parameters: spec.parameters,
 		label: spec.name,
 		async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ kind: "ok" } | { kind: "error" }>> {
 			const args = (params && typeof params === "object" ? (params as Record<string, unknown>) : {}) as Record<

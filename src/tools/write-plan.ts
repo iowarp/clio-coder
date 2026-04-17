@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -8,6 +9,13 @@ const ALLOWED_BASENAME = "PLAN.md";
 export const writePlanTool: ToolSpec = {
 	name: ToolNames.WritePlan,
 	description: "Write a planning document to PLAN.md at the project root. Any other path is rejected.",
+	parameters: Type.Object(
+		{
+			content: Type.String({ description: "Full plan contents in Markdown. Must be non-empty." }),
+			path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "PLAN.md" at the project root.' })),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "write",
 	async run(args): Promise<ToolResult> {
 		const rawPath = typeof args.path === "string" ? args.path : ALLOWED_BASENAME;

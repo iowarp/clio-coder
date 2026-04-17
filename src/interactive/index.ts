@@ -1,4 +1,5 @@
 import { BusChannels } from "../core/bus-events.js";
+import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
@@ -33,6 +34,12 @@ export interface InteractiveDeps {
 	 * instead of letting the dispatch throw with no config context.
 	 */
 	getWorkerDefault?: () => { provider?: string; model?: string; endpoint?: string } | undefined;
+	/**
+	 * Resolver for current settings. Footer reads the orchestrator target
+	 * (what chat actually dispatches to) rather than the providers catalog's
+	 * first-available entry.
+	 */
+	getSettings?: () => Readonly<ClioSettings>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
 	onShutdown: () => Promise<void>;
@@ -262,7 +269,7 @@ export async function handleRun(agentId: string, task: string, deps: HandleRunDe
 	const { dispatch, io, workerDefault, bus } = deps;
 	if (!workerDefault?.provider) {
 		io.stderr(
-			"[run] no provider configured. Edit ~/.clio/settings.yaml (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n",
+			`[run] no provider configured. Edit ${settingsPath()} (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
 		);
 		return;
 	}
@@ -299,7 +306,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const banner = defaultBanner();
 	const chatPanel = createChatPanel();
-	const footer = buildFooter({ modes: deps.modes, providers: deps.providers });
+	const footer = buildFooter({
+		modes: deps.modes,
+		providers: deps.providers,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
 		selectList: {

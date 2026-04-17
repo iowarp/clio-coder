@@ -1,5 +1,6 @@
 import { type Stats, lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { Type } from "@sinclair/typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { compileGlobRegex, normalizeGlobInput } from "./glob.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -46,6 +47,19 @@ export const grepTool: ToolSpec = {
 	name: ToolNames.Grep,
 	description:
 		"Search files under a path with a JS regex and optional glob filter, returning file:line: content matches.",
+	parameters: Type.Object(
+		{
+			pattern: Type.String({ description: "JavaScript RegExp pattern (no leading slash)." }),
+			path: Type.Optional(Type.String({ description: "Root directory to search. Defaults to the orchestrator cwd." })),
+			glob: Type.Optional(
+				Type.String({ description: "Glob filter for file paths (e.g. **/*.ts). Omit to include every file." }),
+			),
+			context: Type.Optional(
+				Type.Number({ description: "Lines of surrounding context per match. Must be >= 0. Defaults to 0." }),
+			),
+		},
+		{ additionalProperties: false },
+	),
 	baseActionClass: "read",
 	async run(args): Promise<ToolResult> {
 		const patternArg = typeof args.pattern === "string" ? args.pattern : null;
