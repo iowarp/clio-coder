@@ -13,10 +13,14 @@
 import type { Model } from "@mariozechner/pi-ai";
 import type { EndpointSpec, LocalProvidersSettings, ThinkingFormat } from "../core/defaults.js";
 
-const LOCAL_MODEL_REGISTRY = new Map<string, Model<never>>();
+let LOCAL_MODEL_REGISTRY = new Map<string, Model<never>>();
 
 function localKey(providerId: string, modelId: string): string {
 	return `${providerId}\u0000${modelId}`;
+}
+
+function endpointSuffix(endpointName: string): string {
+	return `@${endpointName}`;
 }
 
 type EngineId = keyof LocalProvidersSettings;
@@ -119,6 +123,23 @@ function isEngineId(id: string): id is EngineId {
 	return id in ENGINE_PRESETS;
 }
 
+function replaceEndpointModels(
+	registry: Map<string, Model<never>>,
+	providerId: string,
+	endpointName: string,
+): Map<string, Model<never>> {
+	const next = new Map(registry);
+	const suffix = endpointSuffix(endpointName);
+	const wildcardKey = localKey(providerId, suffix);
+	for (const key of next.keys()) {
+		if (!key.startsWith(`${providerId}\u0000`)) continue;
+		if (!key.endsWith(suffix)) continue;
+		if (key === wildcardKey) continue;
+		next.delete(key);
+	}
+	return next;
+}
+
 function resolvePreset(engine: EngineId, modelId: string): EnginePreset {
 	const table = ENGINE_PRESETS[engine];
 	for (const entry of table.patterns) {
@@ -181,7 +202,7 @@ function endpointToModel(providerId: string, modelId: string, endpointName: stri
  * Safe to call multiple times; later calls replace earlier entries.
  */
 export function registerLocalProviders(providers: Partial<LocalProvidersSettings>): void {
-	LOCAL_MODEL_REGISTRY.clear();
+	const next = new Map<string, Model<never>>();
 	const engines: Array<keyof LocalProvidersSettings> = ["llamacpp", "lmstudio", "ollama", "openai-compat"];
 	for (const engine of engines) {
 		const cfg = providers[engine];
@@ -189,10 +210,11 @@ export function registerLocalProviders(providers: Partial<LocalProvidersSettings
 		for (const [endpointName, spec] of Object.entries(cfg.endpoints)) {
 			const modelId = spec.default_model ?? "__default__";
 			const model = endpointToModel(engine, modelId, endpointName, spec);
-			LOCAL_MODEL_REGISTRY.set(localKey(engine, `${modelId}@${endpointName}`), model);
-			LOCAL_MODEL_REGISTRY.set(localKey(engine, `@${endpointName}`), model);
+			next.set(localKey(engine, `${modelId}@${endpointName}`), model);
+			next.set(localKey(engine, endpointSuffix(endpointName)), model);
 		}
 	}
+	LOCAL_MODEL_REGISTRY = next;
 }
 
 /**
@@ -217,11 +239,13 @@ export function registerDiscoveredLocalModels(
 	modelIds: readonly string[],
 ): void {
 	if (!isEngineId(providerId)) return;
+	const next = replaceEndpointModels(LOCAL_MODEL_REGISTRY, providerId, endpointName);
 	for (const modelId of modelIds) {
 		if (typeof modelId !== "string" || modelId.length === 0) continue;
 		const model = endpointToModel(providerId, modelId, endpointName, spec);
-		LOCAL_MODEL_REGISTRY.set(localKey(providerId, `${modelId}@${endpointName}`), model);
+		next.set(localKey(providerId, `${modelId}@${endpointName}`), model);
 	}
+	LOCAL_MODEL_REGISTRY = next;
 }
 
 export function getLocalRegisteredModel(providerId: string, modelId: string): Model<never> | undefined {

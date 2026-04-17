@@ -32,6 +32,20 @@ function skip(mode: DiagMode, label: string, detail: string): void {
 	emit("SKIP", mode, label, `(${detail})`);
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(check: () => boolean, capMs: number, pollMs = 10): Promise<{ ok: boolean; elapsedMs: number }> {
+	const start = Date.now();
+	const deadline = start + capMs;
+	while (!check()) {
+		if (Date.now() > deadline) return { ok: false, elapsedMs: Date.now() - start };
+		await sleep(pollMs);
+	}
+	return { ok: true, elapsedMs: Date.now() - start };
+}
+
 async function run(): Promise<void> {
 	const home = mkdtempSync(join(tmpdir(), "clio-diag-providers-"));
 	const ENV_KEYS = [
@@ -330,6 +344,71 @@ async function run(): Promise<void> {
 			s2Wildcard !== undefined,
 			`wildcard=${s2Wildcard ? "present" : "missing"}`,
 		);
+
+		// Hermetic extension-path regression for endpoint discovery replacement:
+		// drive providers.probeEndpoints() with a stub adapter so no HTTP runs,
+		// then assert each healthy probe batch replaces the prior endpoint models
+		// while keeping the wildcard fallback key intact.
+		const { readSettings, writeSettings } = await import("../src/core/config.js");
+		const s2ReplaceEndpoint = "s2-replace";
+		const nextSettings = readSettings();
+		nextSettings.providers.llamacpp.endpoints = {
+			[s2ReplaceEndpoint]: {
+				url: s2Spec.url,
+				default_model: "bootstrap-default",
+			},
+		};
+		writeSettings(nextSettings);
+		const s2Reloaded = await waitFor(() => {
+			const entry = providers.list().find((provider) => provider.id === "llamacpp");
+			return entry?.endpoints?.some((endpoint) => endpoint.name === s2ReplaceEndpoint) ?? false;
+		}, 2000);
+		check("config", "s2:replacement-settings-reloaded", s2Reloaded.ok, `elapsedMs=${s2Reloaded.elapsedMs}`);
+
+		engineAi.registerLocalProviders(readSettings().providers ?? {});
+		const s2StubbedAdapter = providers.getAdapter("llamacpp" as ProviderIdType);
+		const originalProbeEndpoints = s2StubbedAdapter?.probeEndpoints;
+		let s2StubModels: readonly string[] = ["stale-model", "stale-extra"];
+		if (s2StubbedAdapter?.probeEndpoints) {
+			s2StubbedAdapter.probeEndpoints = async (endpoints) => [
+				{
+					name: s2ReplaceEndpoint,
+					url: endpoints[s2ReplaceEndpoint]?.url ?? s2Spec.url,
+					ok: true,
+					models: [...s2StubModels],
+				},
+			];
+		}
+		await providers.probeEndpoints();
+		const s2SeededStale = engineAi.getLocalRegisteredModel("llamacpp", `stale-model@${s2ReplaceEndpoint}`);
+		check("config", "s2:replacement-seed-registered", s2SeededStale !== undefined);
+
+		s2StubModels = ["fresh-model"];
+		await providers.probeEndpoints();
+		const s2StaleAfterReplace = engineAi.getLocalRegisteredModel("llamacpp", `stale-model@${s2ReplaceEndpoint}`);
+		const s2FreshAfterReplace = engineAi.getLocalRegisteredModel("llamacpp", `fresh-model@${s2ReplaceEndpoint}`);
+		const s2WildcardAfterReplace = engineAi.getLocalRegisteredModel("llamacpp", `@${s2ReplaceEndpoint}`);
+		check(
+			"config",
+			"s2:replacement-clears-stale-models",
+			s2StaleAfterReplace === undefined && s2FreshAfterReplace !== undefined && s2WildcardAfterReplace !== undefined,
+			`stale=${s2StaleAfterReplace ? "present" : "missing"} fresh=${s2FreshAfterReplace ? "present" : "missing"} wildcard=${s2WildcardAfterReplace ? "present" : "missing"}`,
+		);
+
+		s2StubModels = [];
+		await providers.probeEndpoints();
+		const s2FreshAfterEmpty = engineAi.getLocalRegisteredModel("llamacpp", `fresh-model@${s2ReplaceEndpoint}`);
+		const s2WildcardAfterEmpty = engineAi.getLocalRegisteredModel("llamacpp", `@${s2ReplaceEndpoint}`);
+		check(
+			"config",
+			"s2:healthy-empty-probe-clears-old-models",
+			s2FreshAfterEmpty === undefined && s2WildcardAfterEmpty !== undefined,
+			`fresh=${s2FreshAfterEmpty ? "present" : "missing"} wildcard=${s2WildcardAfterEmpty ? "present" : "missing"}`,
+		);
+
+		if (s2StubbedAdapter && originalProbeEndpoints) {
+			s2StubbedAdapter.probeEndpoints = originalProbeEndpoints;
+		}
 
 		if (!RUN_LIVE) {
 			skip("live", "probeAllLive:skipped", "set CLIO_DIAG_LIVE=1 to exercise providers.probeAllLive()");

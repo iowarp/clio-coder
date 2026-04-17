@@ -124,7 +124,6 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				const spec = endpoints[probe.name];
 				if (!spec) continue;
 				const modelIds = probe.models ?? [];
-				if (modelIds.length === 0) continue;
 				registerDiscoveredLocalModels(adapter.id, probe.name, spec, modelIds);
 			}
 		}
