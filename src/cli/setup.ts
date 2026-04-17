@@ -179,6 +179,23 @@ function seedSwitchPreset(settings: ClioSettings, selectedPreset: SetupPreset): 
 	return `${alternate.engine}/${alternate.endpointName} -> ${alternate.defaultUrl}`;
 }
 
+function normalizeEndpointUrl(input: string, defaultUrl: string): string {
+	const trimmed = input.trim();
+	if (trimmed.length === 0) return trimTrailingSlash(defaultUrl);
+	const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+	const withScheme = hasScheme ? trimmed : `http://${trimmed}`;
+	try {
+		const parsed = new URL(withScheme);
+		if (!hasScheme && !parsed.port) {
+			const fallbackPort = new URL(defaultUrl).port;
+			if (fallbackPort) parsed.port = fallbackPort;
+		}
+		return trimTrailingSlash(parsed.toString());
+	} catch {
+		return trimTrailingSlash(withScheme);
+	}
+}
+
 async function ask(rl: ReturnType<typeof createInterface>, label: string, defaultValue?: string): Promise<string> {
 	const suffix = defaultValue && defaultValue.length > 0 ? `${chalk.dim(`[${defaultValue}]`)} ` : "";
 	try {
@@ -304,10 +321,14 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 		const existingEndpoint = settings.providers[preset.engine]?.endpoints?.[preset.endpointName];
 
 		process.stdout.write(`\nConfiguring ${preset.engine}/${preset.endpointName}.\n`);
-		const url = trimTrailingSlash(await ask(rl, "Endpoint URL", existingEndpoint?.url?.trim() || preset.defaultUrl));
+		const rawUrl = await ask(rl, "Endpoint URL", existingEndpoint?.url?.trim() || preset.defaultUrl);
+		const url = normalizeEndpointUrl(rawUrl, preset.defaultUrl);
 		if (url.length === 0) {
 			printError("endpoint URL is required");
 			return 1;
+		}
+		if (url !== rawUrl.trim()) {
+			process.stdout.write(chalk.dim(`  using ${url}\n`));
 		}
 
 		let apiKey = existingEndpoint?.api_key;
