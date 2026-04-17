@@ -9,6 +9,7 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { SessionDomainModule } from "../domains/session/index.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -32,7 +33,13 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	ensureInstalled();
 	timer.mark("install check");
 
-	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, ModesDomainModule, LifecycleDomainModule]);
+	const result = await loadDomains([
+		ConfigDomainModule,
+		SafetyDomainModule,
+		ModesDomainModule,
+		SessionDomainModule,
+		LifecycleDomainModule,
+	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
