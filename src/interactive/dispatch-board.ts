@@ -3,7 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { RunStatus } from "../domains/dispatch/types.js";
 
 export type DispatchBoardRuntime = "native" | "sdk" | "cli";
-export type DispatchBoardStatus = Extract<RunStatus, "running" | "completed" | "failed"> | "enqueued";
+export type DispatchBoardStatus = Extract<RunStatus, "running" | "completed" | "failed"> | "aborted" | "enqueued";
 
 export interface DispatchBoardRow {
 	runId: string;
@@ -37,6 +37,7 @@ interface DispatchTerminalPayload extends DispatchEventBase {
 	tokenCount?: unknown;
 	costUsd?: unknown;
 	durationMs?: unknown;
+	reason?: unknown;
 }
 
 interface DispatchProgressPayload extends DispatchEventBase {
@@ -54,6 +55,12 @@ interface WorkerEventShape {
 			cacheWrite?: unknown;
 		};
 	};
+	messages?: unknown;
+}
+
+interface AssistantMessageShape {
+	role?: unknown;
+	stopReason?: unknown;
 }
 
 const AGENT_WIDTH = 10;
@@ -71,7 +78,8 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,
 	enqueued: 1,
 	failed: 2,
-	completed: 3,
+	aborted: 3,
+	completed: 4,
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
 
@@ -179,6 +187,23 @@ function parseFiniteNumberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null {
+	if (!Array.isArray(rawMessages)) return null;
+	for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
+		const message = (rawMessages[index] ?? {}) as AssistantMessageShape;
+		if (message.role !== "assistant") continue;
+		if (message.stopReason === "stop") return "completed";
+		if (message.stopReason === "error") return "failed";
+		if (message.stopReason === "aborted") return "aborted";
+		return null;
+	}
+	return null;
+}
+
+function resolveFailedStatus(reason: unknown): DispatchBoardStatus {
+	return reason === "interrupted" ? "aborted" : "failed";
+}
+
 function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	const startedAtMs = entry.startedAtMs ?? entry.enqueuedAtMs;
 	if (entry.durationMs !== null) return entry.durationMs;
@@ -215,9 +240,7 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 		.filter((entry) => entry.status === "completed" || entry.status === "failed")
 		.sort((a, b) => a.sequence - b.sequence);
 	const evictionQueue =
-		terminalEntries.length > 0
-			? terminalEntries
-			: [...entries.values()].sort((a, b) => a.sequence - b.sequence);
+		terminalEntries.length > 0 ? terminalEntries : [...entries.values()].sort((a, b) => a.sequence - b.sequence);
 	for (const entry of evictionQueue) {
 		if (entries.size <= MAX_DISPATCH_BOARD_ROWS) break;
 		entries.delete(entry.runId);
@@ -293,7 +316,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		bus.on(BusChannels.DispatchFailed, (raw) => {
 			const now = Date.now();
 			const payload = (raw ?? {}) as DispatchTerminalPayload;
-			const entry = upsertBase(payload, "failed", now);
+			const entry = upsertBase(payload, resolveFailedStatus(payload.reason), now);
 			if (!entry) return;
 			entry.startedAtMs ??= entry.enqueuedAtMs;
 			entry.finishedAtMs = now;
@@ -319,6 +342,12 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 					parseFiniteNumberOrZero(usage?.output) +
 					parseFiniteNumberOrZero(usage?.cacheRead) +
 					parseFiniteNumberOrZero(usage?.cacheWrite);
+			}
+			if (type === "agent_end") {
+				const status = resolveAgentEndStatus(workerEvent.messages);
+				if (!status) return;
+				entry.status = status;
+				entry.finishedAtMs ??= Date.now();
 			}
 		}),
 	];

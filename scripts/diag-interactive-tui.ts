@@ -1245,11 +1245,7 @@ async function main(): Promise<void> {
 		);
 		check("stream:interactive-child-exits-cleanly", interactiveProbe.exitCode === 0, String(interactiveProbe.exitCode));
 	} catch (err) {
-		check(
-			"stream:interactive-child-probe",
-			false,
-			err instanceof Error ? err.stack ?? err.message : String(err),
-		);
+		check("stream:interactive-child-probe", false, err instanceof Error ? (err.stack ?? err.message) : String(err));
 	}
 
 	if (failures.length > 0) {
