@@ -1,7 +1,8 @@
 /**
  * Phase 4 slice 4 diag. Exercises the wired ProvidersDomainModule end-to-end
  * against a hermetic CLIO_HOME. Validates:
- *   - list() returns 8 entries (one per catalog provider).
+ *   - list() returns one entry per catalog provider (12 after local-engine
+ *     providers land in Phase 4 redux).
  *   - With no credentials set, every entry is unavailable except `local`
  *     (which has no credentialsEnvVar).
  *   - Setting an anthropic credential flips that entry to available=true and
@@ -63,6 +64,10 @@ async function run(): Promise<void> {
 				"    - mistral",
 				"    - openrouter",
 				"    - amazon-bedrock",
+				"    - llamacpp",
+				"    - lmstudio",
+				"    - ollama",
+				"    - openai-compat",
 				"    - local",
 				"",
 			].join("\n"),
@@ -103,23 +108,26 @@ async function run(): Promise<void> {
 			return;
 		}
 
-		// 2. list() returns 8 entries
+		// 2. list() returns one entry per catalog provider. After the local-engine
+		// providers (llamacpp/lmstudio/ollama/openai-compat) were added the catalog
+		// carries 12 entries (7 remote + 4 local engines + deprecated `local` alias).
 		const initial = providers.list();
-		check("list:has-8-entries", initial.length === 8, `len=${initial.length}`);
+		check("list:has-12-entries", initial.length === 12, `len=${initial.length}`);
 
 		// 3. No credentials set → every entry's available === false except
-		// those with no credentialsEnvVar in the catalog (local, amazon-bedrock).
-		// amazon-bedrock's AWS SDK chain is outside credentialsPresent()'s purview,
-		// so discovery treats it as available when enabled; local has no
-		// credential requirement at all.
+		// those with no credentialsEnvVar in the catalog (local-engine providers,
+		// `local` alias, amazon-bedrock). amazon-bedrock's AWS SDK chain is
+		// outside credentialsPresent()'s purview, so discovery treats it as
+		// available when enabled; local adapters have no credential requirement.
 		const unavailable = initial.filter((e) => !e.available).map((e) => e.id);
 		const available = initial
 			.filter((e) => e.available)
 			.map((e) => e.id)
 			.sort();
+		const expectedCredless = ["amazon-bedrock", "llamacpp", "lmstudio", "local", "ollama", "openai-compat"].sort();
 		check(
 			"list:only-credless-available",
-			available.length === 2 && available[0] === "amazon-bedrock" && available[1] === "local",
+			available.length === expectedCredless.length && expectedCredless.every((id, i) => available[i] === id),
 			`available=${JSON.stringify(available)} unavailable=${JSON.stringify(unavailable)}`,
 		);
 		const credBearing: ReadonlyArray<string> = ["anthropic", "openai", "google", "groq", "mistral", "openrouter"];
@@ -143,7 +151,7 @@ async function run(): Promise<void> {
 
 		// 5. probeAll
 		await providers.probeAll();
-		check("probe:bus-fired-for-all", healthEvents === 8, `events=${healthEvents}`);
+		check("probe:bus-fired-for-all", healthEvents === 12, `events=${healthEvents}`);
 
 		// 6. list() again: anthropic is available=true, health=healthy
 		const afterProbe = providers.list();

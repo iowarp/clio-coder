@@ -11,12 +11,13 @@ export interface JobSpec {
 	runtime?: "native" | "sdk" | "cli";
 	providerId?: string;
 	modelId?: string;
+	endpoint?: string;
 	cwd?: string;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 
-const KNOWN_KEYS = new Set(["agentId", "task", "runtime", "providerId", "modelId", "cwd"]);
+const KNOWN_KEYS = new Set(["agentId", "task", "runtime", "providerId", "modelId", "endpoint", "cwd"]);
 const RUNTIME_VALUES = new Set(["native", "sdk", "cli"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -64,6 +65,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("endpoint" in spec && spec.endpoint !== undefined) {
+		if (typeof spec.endpoint !== "string" || spec.endpoint.length === 0) {
+			errors.push("endpoint must be a non-empty string");
+		}
+	}
+
 	if ("cwd" in spec && spec.cwd !== undefined) {
 		if (typeof spec.cwd !== "string" || spec.cwd.length === 0) {
 			errors.push("cwd must be a non-empty string");
@@ -81,6 +88,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.runtime === "string") out.runtime = spec.runtime as Exclude<JobSpec["runtime"], undefined>;
 	if (typeof spec.providerId === "string") out.providerId = spec.providerId;
 	if (typeof spec.modelId === "string") out.modelId = spec.modelId;
+	if (typeof spec.endpoint === "string") out.endpoint = spec.endpoint;
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	return { ok: true, spec: out };
 }

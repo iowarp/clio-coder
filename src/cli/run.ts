@@ -12,7 +12,9 @@ import { SessionDomainModule } from "../domains/session/index.js";
 
 export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 	if (args.length < 2) {
-		process.stderr.write("usage: clio run <agent> <task> [--provider <id>] [--model <id>] [--faux] [--json]\n");
+		process.stderr.write(
+			"usage: clio run <agent> <task> [--provider <id>] [--endpoint <name>] [--model <id>] [--faux] [--json]\n",
+		);
 		return 2;
 	}
 
@@ -20,12 +22,14 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 	const taskParts: string[] = [];
 	let providerId: string | undefined;
 	let modelId: string | undefined;
+	let endpointName: string | undefined;
 	let faux = false;
 	let json = false;
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i];
 		if (a === "--provider") providerId = rest[++i];
 		else if (a === "--model") modelId = rest[++i];
+		else if (a === "--endpoint") endpointName = rest[++i];
 		else if (a === "--faux") faux = true;
 		else if (a === "--json") json = true;
 		else if (typeof a === "string") taskParts.push(a);
@@ -62,13 +66,22 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	try {
-		const handle = await dispatch.dispatch({
+		const dispatchReq: {
+			agentId: string;
+			task: string;
+			providerId: string;
+			modelId: string;
+			runtime: "native";
+			endpoint?: string;
+		} = {
 			agentId: agentId as string,
 			task,
 			providerId: providerId ?? "faux",
 			modelId: modelId ?? "faux-model",
 			runtime: "native",
-		});
+		};
+		if (endpointName) dispatchReq.endpoint = endpointName;
+		const handle = await dispatch.dispatch(dispatchReq);
 
 		const onSignal = (): void => dispatch.abort(handle.runId);
 		process.on("SIGINT", onSignal);

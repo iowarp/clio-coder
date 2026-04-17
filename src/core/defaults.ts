@@ -3,27 +3,65 @@
  * if the file does not already exist. Users edit the file directly or through TUI overlays.
  */
 
+export interface EndpointSpec {
+	url: string;
+	default_model?: string;
+	api_key?: string;
+	headers?: Record<string, string>;
+}
+
+export interface LocalProviderConfig {
+	endpoints: Record<string, EndpointSpec>;
+}
+
+export interface WorkerTargetConfig {
+	provider: string;
+	endpoint?: string;
+	model?: string;
+}
+
+export interface LocalProvidersSettings {
+	llamacpp: LocalProviderConfig;
+	lmstudio: LocalProviderConfig;
+	ollama: LocalProviderConfig;
+	"openai-compat": LocalProviderConfig;
+}
+
 export const DEFAULT_SETTINGS = {
-	version: 1,
+	version: 1 as const,
 	identity: "clio",
-	defaultMode: "default" as const,
-	safetyLevel: "auto-edit" as const,
+	defaultMode: "default" as "default" | "advise" | "super",
+	safetyLevel: "auto-edit" as "suggest" | "auto-edit" | "full-auto",
 	provider: {
 		active: null as string | null,
 		model: null as string | null,
 	},
+	providers: {
+		llamacpp: { endpoints: {} },
+		lmstudio: { endpoints: {} },
+		ollama: { endpoints: {} },
+		"openai-compat": { endpoints: {} },
+	} as LocalProvidersSettings,
+	orchestrator: {
+		provider: "faux",
+	} as WorkerTargetConfig,
+	workers: {
+		default: {
+			provider: "faux",
+		} as WorkerTargetConfig,
+	},
 	budget: {
 		sessionCeilingUsd: 5,
-		concurrency: "auto" as const,
+		concurrency: "auto" as "auto" | number,
 	},
 	runtimes: {
-		enabled: ["native"],
+		enabled: ["native"] as string[],
 	},
 	theme: "default",
-	keybindings: {},
+	keybindings: {} as Record<string, string>,
 	state: {
-		lastMode: "default" as const,
+		lastMode: "default" as "default" | "advise" | "super",
 	},
-} as const;
+};
 
 export type DefaultSettings = typeof DEFAULT_SETTINGS;

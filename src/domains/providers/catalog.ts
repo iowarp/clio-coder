@@ -13,7 +13,23 @@ export type ProviderId =
 	| "mistral"
 	| "openrouter"
 	| "amazon-bedrock"
+	| "llamacpp"
+	| "lmstudio"
+	| "ollama"
+	| "openai-compat"
 	| "local";
+
+/**
+ * IDs of inference engines that run locally. Every entry is also a ProviderId.
+ * Endpoints for these providers are configured per-user in settings.yaml rather
+ * than baked into the catalog.
+ */
+export const LOCAL_ENGINE_IDS = ["llamacpp", "lmstudio", "ollama", "openai-compat"] as const;
+export type LocalEngineId = (typeof LOCAL_ENGINE_IDS)[number];
+
+export function isLocalEngineId(id: string): id is LocalEngineId {
+	return (LOCAL_ENGINE_IDS as ReadonlyArray<string>).includes(id);
+}
 
 export interface ModelSpec {
 	id: string;
@@ -130,8 +146,32 @@ export const PROVIDER_CATALOG: ReadonlyArray<ProviderSpec> = [
 		],
 	},
 	{
+		id: "llamacpp",
+		displayName: "llama.cpp",
+		tier: "native",
+		models: [],
+	},
+	{
+		id: "lmstudio",
+		displayName: "LM Studio",
+		tier: "native",
+		models: [],
+	},
+	{
+		id: "ollama",
+		displayName: "Ollama",
+		tier: "native",
+		models: [],
+	},
+	{
+		id: "openai-compat",
+		displayName: "OpenAI-compatible",
+		tier: "native",
+		models: [],
+	},
+	{
 		id: "local",
-		displayName: "Local (ollama/vLLM)",
+		displayName: "Local (deprecated alias)",
 		tier: "native",
 		models: [],
 	},

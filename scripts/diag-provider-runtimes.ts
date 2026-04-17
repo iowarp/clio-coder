@@ -69,6 +69,10 @@ const CASES: ReadonlyArray<AdapterCase> = [
 		probeFailsWithoutCreds: false,
 	},
 	{ id: "local", credEnv: null, validModel: "llama-local", rejectsUnknownModel: false, probeFailsWithoutCreds: false },
+	// llamacpp/lmstudio/ollama/openai-compat are covered by their own
+	// hermetic diag-providers-*.ts scripts (they require a live HTTP server
+	// for the probe to succeed). Excluded here so the stub-only contract
+	// tests stay network-free.
 ];
 
 const failures: string[] = [];
@@ -102,11 +106,15 @@ async function main(): Promise<void> {
 		"mistral",
 		"openrouter",
 		"amazon-bedrock",
+		"llamacpp",
+		"lmstudio",
+		"ollama",
+		"openai-compat",
 		"local",
 	];
 	const expectedProviderIds = new Set<string>(expectedOrder);
 	const providerAdapters = RUNTIME_ADAPTERS.filter((a) => expectedProviderIds.has(String(a.id)));
-	check("registry:provider-length", providerAdapters.length === 8, `len=${providerAdapters.length}`);
+	check("registry:provider-length", providerAdapters.length === 12, `len=${providerAdapters.length}`);
 
 	const ids = providerAdapters.map((a) => a.id);
 	const uniqueIds = new Set(ids);
