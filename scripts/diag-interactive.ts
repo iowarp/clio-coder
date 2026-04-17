@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,10 +27,25 @@ function log(msg: string): void {
 	process.stdout.write(`[diag-interactive] ${msg}\n`);
 }
 
+// Ephemeral CLIO_HOME created by main(). Tracked at module scope so both the
+// success path and dumpAndFail can see it: success cleans, failure keeps the
+// directory on disk for post-mortem and logs the path.
+let ephemeralHome: string | null = null;
+
+function cleanEphemeralHome(): void {
+	if (!ephemeralHome) return;
+	rmSync(ephemeralHome, { recursive: true, force: true });
+	log(`cleaned ephemeral CLIO_HOME=${ephemeralHome}`);
+	ephemeralHome = null;
+}
+
 function dumpAndFail(msg: string, stdout: string, stderr: string): never {
 	process.stderr.write(`[diag-interactive] FAIL: ${msg}\n`);
 	process.stderr.write(`[diag-interactive] --- stdout ---\n${stdout}\n`);
 	process.stderr.write(`[diag-interactive] --- stderr ---\n${stderr}\n`);
+	if (ephemeralHome) {
+		process.stderr.write(`[diag-interactive] keeping CLIO_HOME for post-mortem: ${ephemeralHome}\n`);
+	}
 	process.exit(1);
 }
 
@@ -74,6 +89,10 @@ interface RunResult {
 	timedOut: boolean;
 }
 
+const BANNER_MARKER = "◆ clio";
+const BANNER_WAIT_MS = 3000;
+const BANNER_POLL_MS = 10;
+
 async function runInteractive(home: string): Promise<RunResult> {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
@@ -102,8 +121,26 @@ async function runInteractive(home: string): Promise<RunResult> {
 		child.once("exit", (code, signal) => resolve({ code, signal }));
 	});
 
-	// Wait 200ms for the banner.
-	await sleep(200);
+	// Wait for the banner before sending SIGINT. A fixed sleep races the child's
+	// process.once("SIGINT", handler) installation inside bootOrchestrator: on a
+	// slow CI runner SIGINT can arrive before the handler is registered, Node's
+	// default handler terminates with code 130, the banner never reaches stdout,
+	// and neither the "clio: received SIGINT..." notice nor the bus trace lines
+	// reach stderr. The banner is written AFTER installSignalHandlers (see
+	// src/entry/orchestrator.ts), so observing it proves the handler is live.
+	const deadline = Date.now() + BANNER_WAIT_MS;
+	while (!stdout.includes(BANNER_MARKER)) {
+		if (Date.now() > deadline) {
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// child may already be gone
+			}
+			await exitPromise;
+			dumpAndFail(`banner marker ${JSON.stringify(BANNER_MARKER)} not seen within ${BANNER_WAIT_MS}ms`, stdout, stderr);
+		}
+		await sleep(BANNER_POLL_MS);
+	}
 
 	// Send SIGINT.
 	child.kill("SIGINT");
@@ -139,6 +176,8 @@ function assertOrdered(haystack: string, needles: string[], stdout: string, stde
 async function main(): Promise<void> {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-diag-interactive-"));
+	ephemeralHome = home;
+
 	ensureInstalled(home);
 
 	const result = await runInteractive(home);
@@ -181,10 +220,17 @@ async function main(): Promise<void> {
 	}
 
 	log("PASS: banner, SIGINT notice, DRAIN→TERMINATE→PERSIST→EXIT bus trace, exit 130");
+	// Success: clean the ephemeral CLIO_HOME. process.exit() does not run
+	// finally blocks, and dumpAndFail exits 1 without cleanup so the failure
+	// path leaves the directory on disk for post-mortem.
+	cleanEphemeralHome();
 	process.exit(0);
 }
 
 main().catch((err) => {
 	process.stderr.write(`[diag-interactive] unexpected error: ${err instanceof Error ? err.stack : String(err)}\n`);
+	if (ephemeralHome) {
+		process.stderr.write(`[diag-interactive] keeping CLIO_HOME for post-mortem: ${ephemeralHome}\n`);
+	}
 	process.exit(1);
 });
