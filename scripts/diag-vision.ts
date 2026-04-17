@@ -255,7 +255,11 @@ function validateHermeticFixtures(): void {
 		return [raw[px], raw[px + 1], raw[px + 2]];
 	};
 	check("png:background-white", pixelAt(0, 0).join(",") === "255,255,255", `rgb=${pixelAt(0, 0).join(",")}`);
-	check("png:center-red", pixelAt(PNG_SIZE / 2, PNG_SIZE / 2).join(",") === "255,0,0", `rgb=${pixelAt(32, 32).join(",")}`);
+	check(
+		"png:center-red",
+		pixelAt(PNG_SIZE / 2, PNG_SIZE / 2).join(",") === "255,0,0",
+		`rgb=${pixelAt(32, 32).join(",")}`,
+	);
 }
 
 async function drainStreamWithTimeout(
@@ -452,17 +456,16 @@ async function run(): Promise<void> {
 				`events=${eventsSnapshot.length} last=${String((eventsSnapshot.at(-1) as { type?: string } | undefined)?.type)}`,
 			);
 			if (!terminalEvent) return;
+			let terminalDetail = `terminal=${terminalEvent.type} reason=${terminalEvent.reason ?? "unknown"}`;
 			if (terminalEvent.type === "error") {
 				const errMsg = terminalEvent.error as { errorMessage?: string; stopReason?: string; content?: unknown } | undefined;
-				info(
-					"terminal-error-detail",
-					`errorMessage=${JSON.stringify(errMsg?.errorMessage ?? null)} stopReason=${String(errMsg?.stopReason ?? "unknown")}`,
-				);
+				terminalDetail = `${terminalDetail} errorMessage=${JSON.stringify(errMsg?.errorMessage ?? null)} stopReason=${String(errMsg?.stopReason ?? "unknown")}`;
+				info("terminal-error-detail", terminalDetail);
 			}
 			check(
 				"terminal-done",
 				terminalEvent.type === "done",
-				`terminal=${terminalEvent.type} reason=${terminalEvent.reason ?? "unknown"}`,
+				terminalDetail,
 			);
 			if (terminalEvent.type !== "done") return;
 
