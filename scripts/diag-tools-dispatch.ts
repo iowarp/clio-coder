@@ -1,6 +1,7 @@
 import { batchDispatchTool } from "../src/tools/batch-dispatch.js";
+import { registerAllTools } from "../src/tools/bootstrap.js";
 import { chainDispatchTool } from "../src/tools/chain-dispatch.js";
-import { dispatchAgentTool } from "../src/tools/dispatch-agent.js";
+import { createToolIndex } from "../src/tools/registry.js";
 
 const failures: string[] = [];
 
@@ -14,18 +15,12 @@ function check(label: string, ok: boolean, detail?: string): void {
 }
 
 async function main(): Promise<void> {
-	const daOk = await dispatchAgentTool.run({ agent: "scout", task: "hello" });
+	const index = createToolIndex();
+	registerAllTools(index);
 	check(
-		"dispatch_agent:stub-ok",
-		daOk.kind === "ok" && daOk.output.includes("dispatch_agent stub") && daOk.output.includes("scout"),
-		`got ${JSON.stringify(daOk)}`,
-	);
-
-	const daMissing = await dispatchAgentTool.run({});
-	check(
-		"dispatch_agent:missing-args",
-		daMissing.kind === "error" && /missing (agent|task)/.test(daMissing.message),
-		`got ${JSON.stringify(daMissing)}`,
+		"dispatch_agent:not-registered",
+		index.listAll().every((tool) => tool.name !== "dispatch_agent"),
+		JSON.stringify(index.listAll().map((tool) => tool.name)),
 	);
 
 	const bdOk = await batchDispatchTool.run({
