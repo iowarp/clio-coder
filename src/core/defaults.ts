@@ -27,6 +27,7 @@ export interface WorkerTargetConfig {
 	provider?: string;
 	endpoint?: string;
 	model?: string;
+	thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 export interface LocalProvidersSettings {
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS = {
 	provider: {
 		active: null as string | null,
 		model: null as string | null,
+		scope: [] as string[],
 	},
 	providers: {
 		llamacpp: { endpoints: {} },
@@ -105,9 +107,15 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
 # Active provider and model for the orchestrator loop. Leave null until
 # you configure a provider and model below.
+#
+# scope is an ordered list of model patterns used by Ctrl+P cycling inside
+# the TUI. Patterns accept plain ids, provider/id, globs (anthropic/*,
+# *sonnet*), and :thinking suffixes (gpt-5:high). Leave [] to disable the
+# cycle. Edit interactively with /scoped-models.
 provider:
   active: null
   model: null
+  scope: []
 
 # Local inference engines. Each entry under endpoints becomes a selectable
 # target. The default guided path is clio setup, but the commented examples
@@ -150,6 +158,8 @@ providers:
     endpoints: {}
 
 # Orchestrator target override. Leave empty to use the active provider.
+# thinkingLevel controls reasoning depth for models that support it.
+# Valid values: off | minimal | low | medium | high | xhigh.
 orchestrator: {
   # Example: pin the orchestrator loop to the llamacpp mini endpoint above.
   # Uncomment the lines below after you uncomment the matching
@@ -159,6 +169,7 @@ orchestrator: {
   # endpoint: mini,
   # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
   # clio-example:end block=orchestrator
+  # Add thinkingLevel: high (or any level above) to enable reasoning tokens.
 }
 
 # Per-worker target overrides. default applies to every worker spec that
@@ -173,6 +184,7 @@ workers:
     # endpoint: mini,
     # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
     # clio-example:end block=workers
+    # Add thinkingLevel: medium (or another level) to tune worker reasoning.
   }
 
 # Session budget guardrails.

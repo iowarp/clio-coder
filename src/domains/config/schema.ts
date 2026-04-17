@@ -30,10 +30,20 @@ const LocalProviderSchema = Type.Object({
 	endpoints: Type.Record(Type.String(), EndpointSpecSchema),
 });
 
+const ThinkingLevelSchema = Type.Union([
+	Type.Literal("off"),
+	Type.Literal("minimal"),
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("xhigh"),
+]);
+
 const WorkerTargetSchema = Type.Object({
 	provider: Type.Optional(Type.String({ minLength: 1 })),
 	endpoint: Type.Optional(Type.String()),
 	model: Type.Optional(Type.String()),
+	thinkingLevel: Type.Optional(ThinkingLevelSchema),
 });
 
 export const SettingsSchema = Type.Object({
@@ -44,6 +54,7 @@ export const SettingsSchema = Type.Object({
 	provider: Type.Object({
 		active: Type.Union([Type.String(), Type.Null()]),
 		model: Type.Union([Type.String(), Type.Null()]),
+		scope: Type.Optional(Type.Array(Type.String())),
 	}),
 	providers: Type.Optional(
 		Type.Object({
