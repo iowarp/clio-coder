@@ -1,3 +1,4 @@
+import type { Model } from "@mariozechner/pi-ai";
 import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -6,7 +7,7 @@ import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import type { ThinkingLevel } from "../domains/providers/resolver.js";
+import { type ThinkingLevel, getAvailableThinkingLevels } from "../domains/providers/resolver.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -42,6 +43,12 @@ export interface InteractiveDeps {
 	 * first-available entry.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
+	/**
+	 * Resolver for the active orchestrator model. Used to clamp the /thinking
+	 * overlay and Shift+Tab cycle to model capability and to drive the footer's
+	 * `◆ <level>` reasoning suffix.
+	 */
+	getOrchestratorModel?: () => Model<never> | undefined;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
 	/** Persist a thinking level chosen in the /thinking overlay. */
@@ -352,6 +359,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.getOrchestratorModel ? { getOrchestratorModel: deps.getOrchestratorModel } : {}),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -537,8 +545,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "thinking";
 		const settings = deps.getSettings?.();
 		const current = settings ? readThinkingLevel(settings) : "off";
+		const available = getAvailableThinkingLevels(deps.getOrchestratorModel?.());
 		overlayHandle = openThinkingOverlay(tui, {
 			current,
+			available,
 			onSelect: (next) => {
 				deps.onSetThinkingLevel?.(next);
 				footer.refresh();
@@ -646,6 +656,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				tui.requestRender();
 			},
 			cycleThinking: () => {
+				const available = getAvailableThinkingLevels(deps.getOrchestratorModel?.());
+				if (available.length === 1 && available[0] === "off") {
+					footer.refresh();
+					tui.requestRender();
+					return;
+				}
 				deps.onCycleThinking?.();
 				footer.refresh();
 				tui.requestRender();

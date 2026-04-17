@@ -27,6 +27,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { getModel } from "../engine/ai.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
 
@@ -131,6 +132,17 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		chat,
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
+		getOrchestratorModel: () => {
+			const settings = config?.get() ?? readSettings();
+			const providerId = settings.orchestrator?.provider?.trim();
+			const modelId = settings.orchestrator?.model?.trim();
+			if (!providerId || !modelId) return undefined;
+			try {
+				return getModel(providerId, modelId);
+			} catch {
+				return undefined;
+			}
+		},
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		onSetThinkingLevel: (level) => {
