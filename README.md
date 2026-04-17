@@ -89,12 +89,12 @@ The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_D
 
 ```bash
 clio install                                    # bootstrap config/data/cache dirs and seed settings.yaml
-clio setup                                      # guided local-engine setup; defaults to mini
+clio setup                                      # guided setup wizard
 clio providers                                  # probe endpoints and register models
 clio                                            # start the interactive TUI
 ```
 
-`clio setup` writes the selected endpoint under `providers.<engine>.endpoints`, updates `provider.active` / `provider.model`, and points both `orchestrator` and `workers.default` at the same target so chat and workers are usable immediately. Re-run `clio setup dynamo` later to switch from the default `mini` path to LM Studio without hand-editing YAML.
+`clio setup` writes the selected endpoint under `providers.<engine>.endpoints`, updates `provider.active` / `provider.model`, and points both `orchestrator` and `workers.default` at the same target so chat and workers are usable immediately. Re-run `clio setup` later to switch from the current target to any engine without hand-editing YAML.
 
 After setup, `clio run scout "summarize the repo layout"` dispatches a worker and writes a receipt.
 
@@ -110,7 +110,7 @@ Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  IOW
 | --- | --- |
 | `clio` | Launch the interactive TUI. |
 | `clio install` | Bootstrap the resolved config/data/cache dirs and seed `settings.yaml` with commented `llamacpp@mini` and `lmstudio@dynamo` examples. |
-| `clio setup [mini|dynamo|ollama|openai-compat]` | Guided provider setup. Probes the endpoint when possible, writes valid settings, and makes chat plus workers usable immediately. |
+| `clio setup` | Guided provider setup. Probes configured endpoints, updates chat and worker targets, and writes valid settings. |
 | `clio doctor` | Parse settings, resolve XDG paths, and report health. |
 | `clio providers` | Probe configured endpoints and register discovered models into the pi-ai runtime catalog. |
 | `clio agents` | List builtin agent specs. |
@@ -216,7 +216,7 @@ workers:
 
 Each local runtime reads its endpoint list from `settings.yaml` and registers discovered models into the pi-ai runtime catalog under the provider id.
 
-The simplest local path is `clio setup` for `llamacpp@mini`. When LM Studio is ready, run `clio setup dynamo` to switch the defaults while keeping the earlier `mini` endpoint in the config.
+The simplest local path is `clio setup` for `llamacpp@mini`. Use the interactive menu to switch the defaults while keeping the earlier `mini` endpoint in the config.
 
 ---
 

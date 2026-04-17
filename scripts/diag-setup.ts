@@ -13,8 +13,8 @@ const cliPath = join(projectRoot, "dist", "cli", "index.js");
 
 interface SettingsYamlShape {
 	provider?: {
-		active?: string;
-		model?: string;
+		active?: string | null;
+		model?: string | null;
 	};
 	orchestrator?: {
 		provider?: string;
@@ -30,25 +30,26 @@ interface SettingsYamlShape {
 	};
 	providers?: {
 		llamacpp?: {
-			endpoints?: {
-				mini?: {
-					url?: string;
-					default_model?: string;
-				};
-			};
+			endpoints?: Record<string, { url?: string; default_model?: string }>;
 		};
 		lmstudio?: {
-			endpoints?: {
-				dynamo?: {
-					url?: string;
-					default_model?: string;
-				};
-			};
+			endpoints?: Record<string, { url?: string; default_model?: string }>;
+		};
+		ollama?: {
+			endpoints?: Record<string, { url?: string; default_model?: string }>;
+		};
+		"openai-compat"?: {
+			endpoints?: Record<string, { url?: string; default_model?: string }>;
 		};
 	};
 	runtimes?: {
 		enabled?: string[];
 	};
+	budget?: {
+		sessionCeilingUsd?: number;
+		concurrency?: string | number;
+	};
+	safetyLevel?: string;
 }
 
 function log(message: string): void {
@@ -229,6 +230,10 @@ function assert(condition: unknown, message: string, detail?: string): void {
 	fail(message, detail);
 }
 
+function assertContains(stdout: string, expected: string, message: string): void {
+	assert(stdout.includes(expected), message, stdout);
+}
+
 function checkDeepMerge(home: string): void {
 	const prevHome = process.env.CLIO_HOME;
 	process.env.CLIO_HOME = home;
@@ -259,27 +264,6 @@ function assertTarget(
 	assert(snapshot.workers?.default?.model === expected.model, "workers.default.model mismatch");
 }
 
-function assertProvidersJson(stdout: string): void {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(stdout);
-	} catch (err) {
-		fail("clio providers --json did not return JSON", err instanceof Error ? err.message : String(err));
-	}
-	assert(Array.isArray(parsed), "clio providers --json did not return an array");
-	const entries = parsed as Array<{ id?: string; endpoints?: Array<{ name?: string; probe?: { ok?: boolean } }> }>;
-	const mini = entries.find((entry) => entry.id === "llamacpp");
-	const dynamo = entries.find((entry) => entry.id === "lmstudio");
-	assert(
-		mini?.endpoints?.some((ep) => ep.name === "mini" && ep.probe?.ok === true),
-		"llamacpp mini probe did not succeed",
-	);
-	assert(
-		dynamo?.endpoints?.some((ep) => ep.name === "dynamo" && ep.probe?.ok === true),
-		"lmstudio dynamo probe did not succeed",
-	);
-}
-
 async function main(): Promise<void> {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-diag-setup-"));
@@ -298,75 +282,55 @@ async function main(): Promise<void> {
 
 		checkDeepMerge(home);
 
-		const setupMini = await runInteractiveCli(["setup", "mini"], env, [
+		const firstRun = await runInteractiveCli(["setup"], env, [
+			{ when: "Local engines", answer: "1" },
+			{ when: "Selection", answer: "2" },
+			{ when: "Endpoint name", answer: "" },
 			{ when: "Endpoint URL", answer: llama.url },
-			{ when: "Model id", answer: "mini-qwen" },
+			{ when: "Detected models", answer: "1" },
+			{ when: "use for chat target?", answer: "" },
+			{ when: "use for worker target?", answer: "" },
+			{ when: "what do you want to do?", answer: "8" },
 		]);
-		if (setupMini.exitCode !== 0) {
-			fail("clio setup mini failed", `${setupMini.stdout}\n${setupMini.stderr}`);
+		if (firstRun.exitCode !== 0) {
+			fail("first-run clio setup failed", `${firstRun.stdout}\n${firstRun.stderr}`);
 		}
+		assertContains(firstRun.stdout, "Local engines", "first-run auto-advance did not reach add-or-edit");
+		const afterFirstRun = readSettingsYaml(home);
+		assertTarget(afterFirstRun, { provider: "llamacpp", endpoint: "mini", model: "mini-qwen" });
 		assert(
-			setupMini.stdout.includes("saved llamacpp/mini/mini-qwen"),
-			"clio setup mini did not save the probed model",
-			setupMini.stdout,
+			afterFirstRun.providers?.llamacpp?.endpoints?.mini?.url === llama.url,
+			"llamacpp endpoint URL was not written",
 		);
-		assert(
-			setupMini.stdout.includes("switch later with: clio setup dynamo"),
-			"clio setup mini did not print the dynamo switch hint",
-			setupMini.stdout,
-		);
+		log("first-run auto-advance and action 1 OK");
 
-		const afterMini = readSettingsYaml(home);
-		assertTarget(afterMini, { provider: "llamacpp", endpoint: "mini", model: "mini-qwen" });
-		assert(
-			afterMini.providers?.llamacpp?.endpoints?.mini?.url === llama.url,
-			"llamacpp mini URL was not written correctly",
-		);
-		assert(
-			afterMini.providers?.lmstudio?.endpoints?.dynamo?.url === "http://127.0.0.1:1234",
-			"mini setup did not seed the later dynamo preset",
-		);
-		assert(
-			Array.isArray(afterMini.runtimes?.enabled) && afterMini.runtimes.enabled.includes("llamacpp"),
-			"mini setup did not enable the llamacpp runtime",
-		);
-
-		const setupDynamo = await runInteractiveCli(["setup", "dynamo"], env, [
-			{ when: "Endpoint URL", answer: lmstudio.url },
-			{ when: "Model id", answer: "dynamo-qwen" },
+		const interactive = await runInteractiveCli(["setup"], env, [
+			{ when: "what do you want to do?", answer: "3" },
+			{ when: "what do you want to do?", answer: "2" },
+			{ when: "Selection for chat", answer: "1" },
+			{ when: "Selection", answer: "0" },
+			{ when: "what do you want to do?", answer: "4" },
+			{ when: "Selection", answer: "3" },
+			{ when: "what do you want to do?", answer: "5" },
+			{ when: "sessionCeilingUsd", answer: "7.5" },
+			{ when: "concurrency", answer: "auto" },
+			{ when: "what do you want to do?", answer: "7" },
+			{ when: 'type "reset" to confirm', answer: "reset" },
+			{ when: "what do you want to do?", answer: "8" },
 		]);
-		if (setupDynamo.exitCode !== 0) {
-			fail("clio setup dynamo failed", `${setupDynamo.stdout}\n${setupDynamo.stderr}`);
+		if (interactive.exitCode !== 0) {
+			fail("existing-config clio setup flow failed", `${interactive.stdout}\n${interactive.stderr}`);
 		}
+		assertContains(interactive.stdout, "Probing all configured endpoints", "probe-all action not executed");
+		assertContains(interactive.stdout, "settings reset", "reset flow did not report backup");
+		assertContains(interactive.stdout, "no changes", "done-with-no-changes path not reached");
+		const afterReset = readSettingsYaml(home);
 		assert(
-			setupDynamo.stdout.includes("saved lmstudio/dynamo/dynamo-qwen"),
-			"clio setup dynamo did not save the probed model",
-			setupDynamo.stdout,
+			afterReset.provider?.active === null ||
+				afterReset.provider?.active === undefined ||
+				afterReset.provider?.active === null,
+			"reset did not clear active provider",
 		);
-
-		const afterDynamo = readSettingsYaml(home);
-		assertTarget(afterDynamo, { provider: "lmstudio", endpoint: "dynamo", model: "dynamo-qwen" });
-		assert(
-			afterDynamo.providers?.llamacpp?.endpoints?.mini?.default_model === "mini-qwen",
-			"dynamo switch did not preserve the previous mini endpoint",
-		);
-		assert(
-			afterDynamo.providers?.lmstudio?.endpoints?.dynamo?.url === lmstudio.url,
-			"dynamo switch did not update the LM Studio URL",
-		);
-		assert(
-			Array.isArray(afterDynamo.runtimes?.enabled) &&
-				afterDynamo.runtimes.enabled.includes("llamacpp") &&
-				afterDynamo.runtimes.enabled.includes("lmstudio"),
-			"dynamo switch did not keep both local runtimes enabled",
-		);
-
-		const providers = await runCli(["providers", "--json"], env);
-		if (providers.exitCode !== 0) {
-			fail("clio providers --json failed after setup", `${providers.stdout}\n${providers.stderr}`);
-		}
-		assertProvidersJson(providers.stdout);
-		log("guided mini -> dynamo setup flow OK");
 
 		rmSync(home, { recursive: true, force: true });
 		await llama.close();

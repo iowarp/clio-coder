@@ -15,7 +15,7 @@ Usage:
   clio                  start interactive mode
   clio --version, -v    print version info
   clio doctor           run environment diagnostics
-  clio setup [preset]   guided provider and model setup (mini, dynamo, ollama, openai-compat)
+  clio setup               guided provider and model setup
   clio install          bootstrap Clio config/data/cache directories
   clio upgrade          upgrade clio and run pending state migrations
   clio providers        list configured providers
