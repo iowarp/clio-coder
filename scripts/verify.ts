@@ -153,6 +153,17 @@ function checkToolAdmission(env: NodeJS.ProcessEnv): void {
 	}
 }
 
+function checkRunCommand(env: NodeJS.ProcessEnv): void {
+	const { stdout, exitCode } = runCli(["run", "scout", "--faux", "hello"], {
+		...env,
+		CLIO_WORKER_FAUX: "1",
+	});
+	if (exitCode !== 0) fail(`clio run exited ${exitCode}`, stdout);
+	if (!stdout.includes("receipt:")) fail("clio run missing receipt output", stdout);
+	if (!stdout.includes("agent_end") && !stdout.includes("agent=")) fail("clio run missing event output", stdout);
+	log("clio run (faux) OK");
+}
+
 function main(): void {
 	ensureBuilt();
 	const home = mkdtempSync(join(tmpdir(), "clio-verify-"));
@@ -168,6 +179,7 @@ function main(): void {
 	checkProvidersCommand(env);
 	checkAgentsCommand(env);
 	checkToolAdmission(env);
+	checkRunCommand(env);
 	log("all checks passed");
 }
 

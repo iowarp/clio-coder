@@ -3,6 +3,7 @@ import { runClioCommand } from "./clio.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runInstallCommand } from "./install.js";
 import { runProvidersCommand } from "./providers.js";
+import { runClioRun } from "./run.js";
 import { parseFlags, printError } from "./shared.js";
 import { runVersionCommand } from "./version.js";
 
@@ -15,6 +16,7 @@ Usage:
   clio install          bootstrap ~/.clio directory
   clio providers        list configured providers
   clio agents           list discovered agent recipes
+  clio run <agent> <task>  run an agent headlessly (NDJSON)
   clio --help, -h       this message
 `;
 
@@ -34,6 +36,8 @@ async function main(argv: string[]): Promise<number> {
 			return runProvidersCommand(argv.slice(1));
 		case "agents":
 			return runAgentsCommand(argv.slice(1));
+		case "run":
+			return runClioRun(argv.slice(1));
 		case "doctor":
 			return runDoctorCommand();
 		case "install":
