@@ -1,0 +1,25 @@
+import { getProviderSpec } from "../catalog.js";
+import { initialHealth } from "../health.js";
+import type { RuntimeAdapter, RuntimeProbeResult } from "../runtime-contract.js";
+
+const DEFAULT_PROBE_MODEL = "anthropic.claude-sonnet-4-6";
+
+export const bedrockAdapter: RuntimeAdapter = {
+	id: "bedrock",
+	tier: "sdk",
+	canSatisfy({ modelId }) {
+		// AWS SDK handles credentials via its own env/config chain, so credential
+		// presence is assumed true here.
+		const spec = getProviderSpec("bedrock");
+		const hasModel = spec.models.some((m) => m.id === modelId);
+		if (!hasModel) return { ok: false, reason: `model ${modelId} not in bedrock catalog` };
+		return { ok: true, reason: "ready" };
+	},
+	initialHealth() {
+		return initialHealth("bedrock");
+	},
+	async probe(): Promise<RuntimeProbeResult> {
+		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: new Set<string>() });
+		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
+	},
+};
