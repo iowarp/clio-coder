@@ -28,13 +28,18 @@ import type { ModesContract } from "../src/domains/modes/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
 import { buildFooter } from "../src/interactive/footer-panel.js";
 import {
+	ALT_S,
 	CTRL_D,
+	ENTER,
+	ESC,
 	SHIFT_TAB,
 	handleRun,
 	parseSlashCommand,
 	routeInteractiveKey,
+	routeSuperOverlayKey,
 	startInteractive,
 } from "../src/interactive/index.js";
+import { renderSuperOverlayLines } from "../src/interactive/super-overlay.js";
 
 const failures: string[] = [];
 
@@ -160,10 +165,14 @@ async function main(): Promise<void> {
 	// (1) exports
 	check("export:startInteractive-is-function", typeof startInteractive === "function");
 	check("export:routeInteractiveKey-is-function", typeof routeInteractiveKey === "function");
+	check("export:routeSuperOverlayKey-is-function", typeof routeSuperOverlayKey === "function");
 	check("export:parseSlashCommand-is-function", typeof parseSlashCommand === "function");
 	check("export:handleRun-is-function", typeof handleRun === "function");
+	check("export:ALT_S-matches-esc-s", ALT_S === "\x1bs", JSON.stringify(ALT_S));
 	check("export:SHIFT_TAB-matches-CSI-Z", SHIFT_TAB === "\x1b[Z", JSON.stringify(SHIFT_TAB));
 	check("export:CTRL_D-matches-0x04", CTRL_D === "\x04", JSON.stringify(CTRL_D));
+	check("export:ENTER-matches-cr", ENTER === "\r", JSON.stringify(ENTER));
+	check("export:ESC-matches-0x1b", ESC === "\x1b", JSON.stringify(ESC));
 
 	// (2) buildFooter initial render
 	const modes = makeMockModes();
@@ -182,12 +191,16 @@ async function main(): Promise<void> {
 	// (3) routeInteractiveKey wiring
 	let cycleCalls = 0;
 	let shutdownCalls = 0;
+	let requestSuperCalls = 0;
 	const routed = routeInteractiveKey(SHIFT_TAB, {
 		cycleMode: () => {
 			cycleCalls += 1;
 		},
 		requestShutdown: () => {
 			shutdownCalls += 1;
+		},
+		requestSuper: () => {
+			requestSuperCalls += 1;
 		},
 	});
 	check("route:shift-tab-consumed", routed === true);
@@ -200,9 +213,28 @@ async function main(): Promise<void> {
 		requestShutdown: () => {
 			shutdownCalls += 1;
 		},
+		requestSuper: () => {
+			requestSuperCalls += 1;
+		},
 	});
 	check("route:ctrl-d-consumed", routedCtrlD === true);
 	check("route:ctrl-d-calls-shutdown", shutdownCalls === 1, String(shutdownCalls));
+
+	const routedAltS = routeInteractiveKey(ALT_S, {
+		cycleMode: () => {
+			cycleCalls += 1;
+		},
+		requestShutdown: () => {
+			shutdownCalls += 1;
+		},
+		requestSuper: () => {
+			requestSuperCalls += 1;
+		},
+	});
+	check("route:alt-s-consumed", routedAltS === true);
+	check("route:alt-s-calls-request-super", requestSuperCalls === 1, String(requestSuperCalls));
+	check("route:alt-s-does-not-cycle", cycleCalls === 1, String(cycleCalls));
+	check("route:alt-s-does-not-shutdown", shutdownCalls === 1, String(shutdownCalls));
 
 	const unrouted = routeInteractiveKey("a", {
 		cycleMode: () => {
@@ -211,8 +243,66 @@ async function main(): Promise<void> {
 		requestShutdown: () => {
 			shutdownCalls += 1;
 		},
+		requestSuper: () => {
+			requestSuperCalls += 1;
+		},
 	});
 	check("route:ordinary-char-not-consumed", unrouted === false);
+
+	const overlayLines = renderSuperOverlayLines();
+	check("overlay:render-line-count", overlayLines.length === 8, JSON.stringify(overlayLines));
+	check(
+		"overlay:render-contains-confirm-hint",
+		overlayLines.some((line) => line.includes("[Enter] confirm") && line.includes("[Esc] cancel")),
+		JSON.stringify(overlayLines),
+	);
+
+	let overlayCancelCalls = 0;
+	const overlayConfirmCalls: Array<{ requestedBy: string; acceptedAt: number }> = [];
+	const overlayEnter = routeSuperOverlayKey(ENTER, {
+		cancelSuper: () => {
+			overlayCancelCalls += 1;
+		},
+		confirmSuper: (conf) => {
+			overlayConfirmCalls.push(conf);
+		},
+		now: () => 1_710_000_000_000,
+	});
+	check("overlay:enter-consumed", overlayEnter === true);
+	check("overlay:enter-calls-confirm-once", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
+	check(
+		"overlay:enter-confirm-shape",
+		overlayConfirmCalls[0]?.requestedBy === "keybind" && overlayConfirmCalls[0]?.acceptedAt === 1_710_000_000_000,
+		JSON.stringify(overlayConfirmCalls[0]),
+	);
+	check("overlay:enter-does-not-cancel", overlayCancelCalls === 0, String(overlayCancelCalls));
+
+	const overlayEsc = routeSuperOverlayKey(ESC, {
+		cancelSuper: () => {
+			overlayCancelCalls += 1;
+		},
+		confirmSuper: (conf) => {
+			overlayConfirmCalls.push(conf);
+		},
+		now: () => 1_710_000_000_001,
+	});
+	check("overlay:esc-consumed", overlayEsc === true);
+	check("overlay:esc-calls-cancel", overlayCancelCalls === 1, String(overlayCancelCalls));
+	check("overlay:esc-does-not-confirm", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
+	check("overlay:esc-does-not-cycle", cycleCalls === 1, String(cycleCalls));
+
+	const overlayOther = routeSuperOverlayKey("x", {
+		cancelSuper: () => {
+			overlayCancelCalls += 1;
+		},
+		confirmSuper: (conf) => {
+			overlayConfirmCalls.push(conf);
+		},
+		now: () => 1_710_000_000_002,
+	});
+	check("overlay:other-key-not-consumed", overlayOther === false);
+	check("overlay:other-key-keeps-confirm-count", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
+	check("overlay:other-key-keeps-cancel-count", overlayCancelCalls === 1, String(overlayCancelCalls));
 
 	// (4) parseSlashCommand — discriminated union covers each branch
 	check("parse:empty", parseSlashCommand("   ").kind === "empty");
