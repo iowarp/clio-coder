@@ -2,8 +2,8 @@
  * Phase 9 minimal TUI scaffold diag.
  *
  * This test deliberately does NOT spin up a real terminal. Instead it exercises
- * the three public seams that other code paths (the orchestrator, the key
- * router, the footer) depend on:
+ * the public seams that other code paths (the orchestrator, the key router, the
+ * footer, the slash-command router) depend on:
  *
  *   1. `startInteractive` is exported from src/interactive/index.ts as a
  *      function.
@@ -12,14 +12,29 @@
  *   3. The Shift+Tab sequence ("\x1b[Z") routes through `routeInteractiveKey`
  *      to cycleNormal on the modes contract. Ctrl+D ("\x04") routes to
  *      requestShutdown.
+ *   4. `parseSlashCommand` produces a discriminated union covering /quit,
+ *      /help, /run <agent> <task>, /run with missing args, empty input, and
+ *      unknown slash/plain input.
+ *   5. `handleRun` invokes the injected DispatchContract with faux provider +
+ *      model defaults, streams events (filtering heartbeats), and prints the
+ *      final receipt summary. On dispatch error it surfaces to stderr.
  *
  * Full keyboard-driven tests live post-v0.1 when the terminal harness lands.
  */
 
+import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
+import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
 import { buildFooter } from "../src/interactive/footer-panel.js";
-import { CTRL_D, SHIFT_TAB, routeInteractiveKey, startInteractive } from "../src/interactive/index.js";
+import {
+	CTRL_D,
+	SHIFT_TAB,
+	handleRun,
+	parseSlashCommand,
+	routeInteractiveKey,
+	startInteractive,
+} from "../src/interactive/index.js";
 
 const failures: string[] = [];
 
@@ -86,10 +101,67 @@ function makeMockProviders(): ProvidersContract {
 	};
 }
 
-function main(): void {
+interface MockDispatch extends DispatchContract {
+	calls: DispatchRequest[];
+}
+
+function makeMockDispatch(options?: {
+	events?: Array<{ type: string }>;
+	receipt?: Partial<RunReceipt>;
+	throwOnDispatch?: Error;
+}): MockDispatch {
+	const calls: DispatchRequest[] = [];
+	const events = options?.events ?? [{ type: "start" }, { type: "heartbeat" }, { type: "stdout" }, { type: "end" }];
+	const receipt: RunReceipt = {
+		runId: "run-mock-1",
+		agentId: "scout",
+		task: "hello",
+		providerId: "faux",
+		modelId: "faux-model",
+		runtime: "native",
+		startedAt: "2026-04-17T00:00:00.000Z",
+		endedAt: "2026-04-17T00:00:01.000Z",
+		exitCode: 0,
+		tokenCount: 42,
+		costUsd: 0,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.1.0-dev",
+		piMonoVersion: "0.67.4",
+		platform: "linux",
+		nodeVersion: "v20",
+		toolCalls: 0,
+		sessionId: null,
+		...options?.receipt,
+	};
+	async function* iter(): AsyncIterableIterator<unknown> {
+		for (const e of events) yield e;
+	}
+	const contract: MockDispatch = {
+		calls,
+		dispatch: async (req) => {
+			calls.push(req);
+			if (options?.throwOnDispatch) throw options.throwOnDispatch;
+			return {
+				runId: receipt.runId,
+				events: iter(),
+				finalPromise: Promise.resolve(receipt),
+			};
+		},
+		listRuns: (_status?: RunStatus): ReadonlyArray<RunEnvelope> => [],
+		getRun: () => null,
+		abort: () => {},
+		drain: async () => {},
+	};
+	return contract;
+}
+
+async function main(): Promise<void> {
 	// (1) exports
 	check("export:startInteractive-is-function", typeof startInteractive === "function");
 	check("export:routeInteractiveKey-is-function", typeof routeInteractiveKey === "function");
+	check("export:parseSlashCommand-is-function", typeof parseSlashCommand === "function");
+	check("export:handleRun-is-function", typeof handleRun === "function");
 	check("export:SHIFT_TAB-matches-CSI-Z", SHIFT_TAB === "\x1b[Z", JSON.stringify(SHIFT_TAB));
 	check("export:CTRL_D-matches-0x04", CTRL_D === "\x04", JSON.stringify(CTRL_D));
 
@@ -102,7 +174,6 @@ function main(): void {
 	check("footer:initial-contains-mode-default", initial.includes("mode=default"), initial);
 	check("footer:initial-contains-provider-displayname", initial.includes("anthropic/Anthropic"), initial);
 
-	// After cycle the footer should refresh to advise.
 	modes.cycleNormal();
 	footer.refresh();
 	const afterCycle = footer.view.render(80).join("");
@@ -143,6 +214,68 @@ function main(): void {
 	});
 	check("route:ordinary-char-not-consumed", unrouted === false);
 
+	// (4) parseSlashCommand — discriminated union covers each branch
+	check("parse:empty", parseSlashCommand("   ").kind === "empty");
+	check("parse:quit", parseSlashCommand("/quit").kind === "quit");
+	check("parse:exit-alias", parseSlashCommand("/exit").kind === "quit");
+	check("parse:help", parseSlashCommand("/help").kind === "help");
+	check("parse:help-with-arg", parseSlashCommand("/help run").kind === "help");
+	check("parse:run-usage-bare", parseSlashCommand("/run").kind === "run-usage");
+	check("parse:run-usage-agent-only", parseSlashCommand("/run scout").kind === "run-usage");
+
+	const runCmd = parseSlashCommand("/run scout  hello world");
+	check(
+		"parse:run-agent+task",
+		runCmd.kind === "run" && runCmd.agentId === "scout" && runCmd.task === "hello world",
+		JSON.stringify(runCmd),
+	);
+
+	const unk = parseSlashCommand("/foo bar");
+	check("parse:unknown-slash", unk.kind === "unknown" && unk.text === "/foo bar", JSON.stringify(unk));
+
+	const plain = parseSlashCommand("just text");
+	check("parse:unknown-plain", plain.kind === "unknown" && plain.text === "just text", JSON.stringify(plain));
+
+	// (5) handleRun dispatches with faux defaults and streams non-heartbeat events
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	const mockDispatch = makeMockDispatch();
+	await handleRun("scout", "hello", mockDispatch, {
+		stdout: (s) => stdout.push(s),
+		stderr: (s) => stderr.push(s),
+	});
+	check("handleRun:dispatch-called-once", mockDispatch.calls.length === 1, String(mockDispatch.calls.length));
+	const req = mockDispatch.calls[0];
+	check(
+		"handleRun:dispatch-passes-agent-and-task",
+		req.agentId === "scout" && req.task === "hello",
+		JSON.stringify(req),
+	);
+	check(
+		"handleRun:dispatch-defaults-to-faux-provider",
+		req.providerId === "faux" && req.modelId === "faux-model" && req.runtime === "native",
+		JSON.stringify(req),
+	);
+	const joined = stdout.join("");
+	check("handleRun:prints-runId", joined.includes("[run] runId=run-mock-1"), joined);
+	check("handleRun:prints-start-event", joined.includes("[run] start"), joined);
+	check("handleRun:prints-stdout-event", joined.includes("[run] stdout"), joined);
+	check("handleRun:prints-end-event", joined.includes("[run] end"), joined);
+	check("handleRun:filters-heartbeat", !joined.includes("[run] heartbeat"), joined);
+	check("handleRun:prints-final-receipt", joined.includes("[run] done exit=0 tokens=42"), joined);
+	check("handleRun:no-stderr-on-success", stderr.length === 0, stderr.join(""));
+
+	// handleRun on failure routes the error to stderr
+	const failStdout: string[] = [];
+	const failStderr: string[] = [];
+	const failingDispatch = makeMockDispatch({ throwOnDispatch: new Error("boom") });
+	await handleRun("scout", "hello", failingDispatch, {
+		stdout: (s) => failStdout.push(s),
+		stderr: (s) => failStderr.push(s),
+	});
+	check("handleRun:failure-routes-to-stderr", failStderr.join("").includes("[run] failed: boom"), failStderr.join(""));
+	check("handleRun:failure-no-stdout-run-lines", failStdout.length === 0, failStdout.join(""));
+
 	if (failures.length > 0) {
 		process.stderr.write(`[diag-interactive-tui] FAILED ${failures.length} check(s)\n`);
 		process.exit(1);
@@ -150,9 +283,7 @@ function main(): void {
 	process.stdout.write("[diag-interactive-tui] PASS\n");
 }
 
-try {
-	main();
-} catch (err) {
+main().catch((err: unknown) => {
 	process.stderr.write(`[diag-interactive-tui] crashed: ${err instanceof Error ? err.stack : String(err)}\n`);
 	process.exit(1);
-}
+});
