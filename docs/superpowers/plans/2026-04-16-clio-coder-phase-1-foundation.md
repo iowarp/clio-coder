@@ -663,6 +663,12 @@ function extractSpecifiers(source: string): string[] {
 
 function resolveRelativeImport(fromFile: string, specifier: string): string {
 	const candidate = path.resolve(path.dirname(fromFile), specifier);
+	const tsRewrites: string[] = [];
+	const jsSuffix = /\.m?jsx?$/;
+	if (jsSuffix.test(candidate)) {
+		const stripped = candidate.replace(jsSuffix, "");
+		tsRewrites.push(`${stripped}.ts`, `${stripped}.tsx`, `${stripped}.mts`);
+	}
 	const candidates = [
 		candidate,
 		`${candidate}.ts`,
@@ -671,6 +677,7 @@ function resolveRelativeImport(fromFile: string, specifier: string): string {
 		path.join(candidate, "index.ts"),
 		path.join(candidate, "index.tsx"),
 		path.join(candidate, "index.mts"),
+		...tsRewrites,
 	];
 	for (const item of candidates) {
 		try {
