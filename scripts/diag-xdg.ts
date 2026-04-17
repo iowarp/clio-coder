@@ -38,7 +38,18 @@ const projectRoot = process.cwd();
 const cliPath = join(projectRoot, "dist", "cli", "index.js");
 const SUBDIRS = ["sessions", "audit", "state", "agents", "prompts", "receipts"] as const;
 const CLIO_ENV_VARS = ["CLIO_HOME", "CLIO_CONFIG_DIR", "CLIO_DATA_DIR", "CLIO_CACHE_DIR"] as const;
-const XDG_ENV_VARS = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"] as const;
+// Full XDG Base Directory spec surface. src/core/xdg.ts only reads the first
+// three today, but we strip the rest defensively so future additions (or a
+// stray env var in CI) cannot contaminate a permutation.
+const XDG_ENV_VARS = [
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+	"XDG_STATE_HOME",
+	"XDG_RUNTIME_DIR",
+	"XDG_DATA_DIRS",
+	"XDG_CONFIG_DIRS",
+] as const;
 
 // Any ephemeral tmp dir we created. On failure we keep them; on success we remove.
 const createdTmpDirs: string[] = [];
@@ -342,15 +353,20 @@ function runBreakageMatrix(): void {
 	writeFileSync(settingsFile, settingsBackup, { encoding: "utf8", mode: 0o644 });
 
 	// Round B: wrong credentials mode (0644 instead of 0600).
+	// Post-unify, doctor emits a single row named "credentials" whose detail
+	// is the octal mode. We word-bound both the row name and "644" so a tmp
+	// dir path containing "644" cannot accidentally satisfy the assertion,
+	// and we scope to the row that matches the word-bounded name only.
 	chmodSync(credsFile, 0o644);
 	{
 		const r = runCli(["doctor"], env);
 		if (r.exitCode === 0) {
 			fail("breakage B: expected clio doctor to exit non-zero with credentials mode 0644", r.stdout);
 		}
-		const line = r.stdout.split("\n").find((l) => l.includes("credentials mode"));
-		if (!line || !line.startsWith("!!") || !line.includes("644")) {
-			fail("breakage B: credentials mode row not flagged red with detail '644'", r.stdout);
+		const credsRowRe = /^!! \s*\bcredentials\b\s+\b644\b\s*$/;
+		const line = r.stdout.split("\n").find((l) => credsRowRe.test(l));
+		if (!line) {
+			fail("breakage B: credentials row not flagged red with detail '644'", r.stdout);
 		}
 		log("breakage B (credentials mode 0644): PASS");
 	}
