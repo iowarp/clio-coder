@@ -1602,9 +1602,13 @@ export interface DomainExtension {
 
 /**
  * Query-only surface exposed to other domains. Each domain's index.ts defines its
- * own concrete contract type and exports it alongside the module.
+ * own concrete contract type and exports it alongside the module. The base type
+ * is object-shaped so interfaces with named methods (e.g. `get()`, `onChange()`)
+ * satisfy the constraint without requiring an index signature. Query-only
+ * discipline is enforced by convention (domain `index.ts` exports only the
+ * contract type) plus boundary rule 3 (no cross-domain `extension.ts` imports).
  */
-export type DomainContract = Readonly<Record<string, unknown>>;
+export type DomainContract = object;
 
 export interface DomainBundle<TContract extends DomainContract = DomainContract> {
 	extension: DomainExtension;
