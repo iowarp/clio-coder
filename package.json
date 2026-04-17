@@ -63,8 +63,13 @@
 		"diag:dispatch": "tsx scripts/diag-dispatch.ts",
 		"diag:tools": "tsx scripts/diag-tools.ts",
 		"diag:worker-entry": "tsx scripts/diag-worker-entry.ts",
+		"diag:worker-tools": "tsx scripts/diag-worker-tools.ts",
+		"diag:single-dispatch": "tsx scripts/diag-single-dispatch.ts",
+		"diag:orchestrator": "tsx scripts/diag-orchestrator.ts",
+		"diag:bootstrap": "tsx scripts/diag-bootstrap.ts",
+		"stress": "tsx scripts/stress.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:agents && npm run diag:tools && npm run build && npm run diag:dispatch && npm run verify"
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:agents && npm run diag:tools && npm run build && npm run diag:dispatch && npm run diag:single-dispatch && npm run diag:worker-tools && npm run diag:orchestrator && npm run verify"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",

@@ -10,12 +10,18 @@ import {
 	type KnownProvider,
 	type Model,
 	fauxAssistantMessage,
+	fauxToolCall,
 	getModels,
 	getProviders,
 	getModel as piGetModel,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 } from "@mariozechner/pi-ai";
+
+// Re-exports for diag scripts that need to drive the faux provider with custom
+// tool-call responses (e.g. scripts/diag-worker-tools.ts). Kept narrow on purpose:
+// production code paths use registerFauxFromEnv below.
+export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
 
 export interface EngineAi {
 	listProviders(): KnownProvider[];
