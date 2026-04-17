@@ -1,146 +1,320 @@
-# Clio-Coder
+<p align="center">
+  <picture>
+    <source srcset="assets/banner.webp" type="image/webp" />
+    <img src="assets/banner.png" alt="Clio Coder — the CLIO Agent for your science" width="100%" />
+  </picture>
+</p>
 
-Clio is IOWarp's orchestrator coding-agent for running agent work through one safety model.
+<h1 align="center">Clio Coder</h1>
 
-Clio is the brain of a distributed agentic harness. Workers are the hands.
-It is built as a Level 3 custom harness on pi-mono, so Clio owns the agent
-loop, prompt compilation, tool registry, session format, slash commands, and
-interactive surface instead of handing that identity to a single worker
-runtime. The project exists inside IOWarp to make orchestration itself the
-product, with native, SDK, and CLI workers all treated as guests.
+<p align="center"><strong>The CLIO Agent for your science.</strong></p>
 
-## Status
+<p align="center">
+  A composable coding agent inside the <a href="https://iowarp.ai">CLIO Agent</a> framework.
+</p>
 
-Package version in `package.json`: `0.1.0-dev`. Next tag is
-`v0.1.0-rc1`; see [CHANGELOG.md](CHANGELOG.md) for the rc1 notes and
-[docs/guides/overview.md](docs/guides/overview.md) for the phase roll-up.
+<p align="center">
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--rc1-00d4db?style=flat-square" /></a>
+  <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/badge/npm-coming%20soon-lightgrey?style=flat-square" /></a>
+  <a href="https://iowarp.ai"><img alt="IOWarp CLIO" src="https://img.shields.io/badge/IOWarp-CLIO-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/mariozechner"><img alt="pi-mono" src="https://img.shields.io/badge/pi--mono-0.67.4-241131?style=flat-square" /></a>
+</p>
 
-## Install from source
+---
 
-Clio targets Node 20+ and ships as `@iowarp/clio-coder`.
+## Table of contents
+
+1. [What is Clio Coder?](#what-is-clio-coder)
+2. [Install](#install)
+3. [First run](#first-run)
+4. [CLI commands](#cli-commands)
+5. [Slash commands](#slash-commands)
+6. [Keybindings](#keybindings)
+7. [Configuration](#configuration)
+8. [Providers](#providers)
+9. [Runtimes](#runtimes)
+10. [Agents](#agents)
+11. [Safety model](#safety-model)
+12. [Receipts and cost](#receipts-and-cost)
+13. [Architecture at a glance](#architecture-at-a-glance)
+14. [Development](#development)
+15. [Roadmap](#roadmap)
+16. [Lineage and credits](#lineage-and-credits)
+17. [License](#license)
+
+---
+
+## What is Clio Coder?
+
+Clio Coder is the coding specialization of the [CLIO Agent](https://iowarp.ai) framework, the autonomous-agent layer of the [IOWarp](https://iowarp.ai) platform. It is a terminal-first coding agent that researchers, scientists, and developers can install and drive directly, and a composable coding primitive that larger CLIO-based multi-agent systems can embed.
+
+Status: **v0.1.0-rc1**. Pre-release. Expect sharp edges. See [CHANGELOG.md](CHANGELOG.md) for rc1 notes and [docs/guides/overview.md](docs/guides/overview.md) for the phase roll-up.
+
+---
+
+## Install
+
+Prerequisites: Node.js `>=20`.
+
+### From source (current path for v0.1)
 
 ```bash
+git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
 npm install
 npm run build
 npm link
 clio --version
 ```
 
-`npm link` exposes the same `clio` binary declared in `package.json`
-(`dist/cli/index.js`). Re-run `npm run build` after source changes
-because the link points at built output, not the TypeScript sources.
+`npm link` exposes the `clio` binary declared in [`package.json`](package.json) (`dist/cli/index.js`). Re-run `npm run build` after source changes because the link points at built output, not the TypeScript sources.
 
-The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`,
-`CLIO_DATA_DIR`, and `CLIO_CACHE_DIR` for isolated state trees.
-[docs/guides/interactive-test-walkthrough.md](docs/guides/interactive-test-walkthrough.md)
-covers the fuller install and smoke path.
-
-## Quickstart with the homelab examples
-
-`clio install` seeds `~/.clio/settings.yaml` with commented
-`llamacpp@mini` and `lmstudio@dynamo` example blocks. To light them
-up: edit `~/.clio/settings.yaml`, uncomment the block between
-`# clio-example:start provider=llamacpp endpoint=mini` and
-`# clio-example:end` so the `mini` entry replaces the surrounding
-`endpoints: {}`; do the same for `provider=lmstudio endpoint=dynamo`
-and for the matching `block=workers` section if you want `clio run`
-to route there by default. Then:
+### From npm
 
 ```bash
-clio doctor                                    # settings parse + paths
-clio providers                                 # probe endpoints + register models
-clio run scout "summarize the repo layout"    # native worker + receipt
+npm install -g @iowarp/clio-coder   # coming with v0.1.0
 ```
 
-Append `--faux` to the `clio run` line for a provider-less smoke test.
+### Isolated state trees
 
-## Interactive surface
+The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_DATA_DIR`, and `CLIO_CACHE_DIR` so you can sandbox a dev install from your daily config. The full walkthrough lives in [docs/guides/interactive-test-walkthrough.md](docs/guides/interactive-test-walkthrough.md).
 
-Start the TUI with bare `clio`. The banner renders as
-`◆ clio  IOWarp orchestrator coding-agent`.
+---
 
-Slash commands in v0.1:
+## First run
 
-- `/run <agent> <task>` dispatches a worker and streams its events.
-- `/providers` overlays provider + endpoint health from the providers
-  domain.
-- `/cost` overlays session token totals and USD cost accumulated
-  from completed runs.
-- `/receipts` opens a paginated list of run receipts persisted under
-  `<dataDir>/receipts/`.
-- `/receipt verify <runId>` reads a receipt and reports whether its
-  ledger hash matches on disk.
-- `/help` and `/quit` do the obvious.
+```bash
+clio install                                    # seed ~/.clio/settings.yaml with example blocks
+clio doctor                                     # validate settings and resolved paths
+clio providers                                  # probe endpoints and register models
+clio run scout "summarize the repo layout"      # dispatch a native worker and write a receipt
+```
 
-Keybindings: `Shift+Tab` cycles `default` ⇄ `advise`, `Alt+S` opens
-the super-mode confirmation overlay, `Ctrl+B` toggles the
-dispatch-board overlay whose rows update live from the dispatch event
-bus, and `Ctrl+D` triggers the four-phase shutdown.
+Append `--faux` to `clio run` for a provider-less smoke test.
 
-## Providers and runtimes
+Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  IOWarp orchestrator coding-agent`. The surface gives you a prompt, the dispatch-board overlay (`Ctrl+B`), and the slash-command parser documented below.
 
-Local runtimes are `llamacpp`, `lmstudio`, `ollama`, and
-`openai-compat`. Each reads its endpoint list from `settings.yaml`
-and registers the endpoint's discovered models into pi-ai's runtime
-catalog under the provider id. Qwen-family local models have
-thinking-content pass-through enabled via the `thinkingFormat`
-compat field so reasoning output reaches the worker and the receipt.
+---
 
-Runtime tiers: `native` (Clio's own worker subprocess on
-`pi-agent-core`, the only tier admitted by dispatch in v0.1), `sdk`
-(Claude Agent SDK adapter, scaffolded; dispatch rejects `sdk` in
-v0.1), `cli` (`pi-coding-agent`, `claude-code`, `codex`, `gemini`,
-`opencode`, `copilot`, scaffolded; dispatch rejects `cli` in v0.1).
+## CLI commands
 
-Safety modes: `default` (read + write + edit + bash + search +
-dispatch tools visible), `advise` (read-oriented), `super`
-(privileged writes outside cwd, requires the confirmation overlay).
+| Command | What it does |
+| --- | --- |
+| `clio` | Launch the interactive TUI. |
+| `clio install` | Seed `~/.clio/settings.yaml` with commented `llamacpp@mini` and `lmstudio@dynamo` examples. |
+| `clio doctor` | Parse settings, resolve XDG paths, and report health. |
+| `clio providers` | Probe configured endpoints and register discovered models into the pi-ai runtime catalog. |
+| `clio agents` | List builtin agent specs. |
+| `clio run <agent> <task>` | Dispatch a single worker non-interactively and persist a receipt. |
+| `clio upgrade` | Check for and apply runtime upgrades. |
+| `clio --version` | Print the installed version. |
+
+Source: [`src/cli/`](src/cli/).
+
+---
+
+## Slash commands
+
+Available inside the interactive TUI.
+
+| Command | What it does |
+| --- | --- |
+| `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
+| `/providers` | Overlay provider and endpoint health from the providers domain. |
+| `/cost` | Overlay session token totals and USD cost accumulated from completed runs. |
+| `/receipts` | Paginated list of run receipts persisted under `<dataDir>/receipts/`. |
+| `/receipt verify <runId>` | Read a receipt and report whether its ledger hash matches on disk. |
+| `/help` | Show the slash-command reference. |
+| `/quit` | Exit the TUI cleanly. |
+
+Parser source: [`src/interactive/`](src/interactive/).
+
+---
+
+## Keybindings
+
+| Binding | Action |
+| --- | --- |
+| `Shift+Tab` | Cycle safety mode `default` ⇄ `advise`. |
+| `Alt+S` | Open the super-mode confirmation overlay. |
+| `Ctrl+B` | Toggle the dispatch-board overlay. Rows update live from the dispatch event bus. |
+| `Ctrl+D` | Trigger the four-phase shutdown. |
+
+---
+
+## Configuration
+
+Clio reads from `~/.clio/settings.yaml` by default. Every path is overridable via XDG or Clio-specific env vars so you can keep dev and prod state separate.
+
+```yaml
+# ~/.clio/settings.yaml (excerpt)
+orchestrator:
+  provider: lmstudio
+  endpoint: dynamo
+workers:
+  default:
+    provider: llamacpp
+    endpoint: mini
+providers:
+  llamacpp:
+    endpoints:
+      mini:
+        baseUrl: http://mini.local:8080
+  lmstudio:
+    endpoints:
+      dynamo:
+        baseUrl: http://dynamo.local:1234
+```
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `CLIO_HOME` | `~/.clio` | Root of all Clio state. |
+| `CLIO_CONFIG_DIR` | `$CLIO_HOME` | Location of `settings.yaml`. |
+| `CLIO_DATA_DIR` | `$CLIO_HOME/data` | Receipts, ledgers, sessions. |
+| `CLIO_CACHE_DIR` | `$CLIO_HOME/cache` | Transient caches. |
+| `ANTHROPIC_API_KEY` | — | Enables Claude providers. |
+| `OPENAI_API_KEY` | — | Enables OpenAI providers. |
+
+---
+
+## Providers
+
+| Tier | Provider | Notes |
+| --- | --- | --- |
+| Hosted | `anthropic` | Claude Sonnet, Opus, and Haiku. Thinking-content supported. |
+| Hosted | `openai` | GPT-5 and GPT-4o. |
+| Local | `llamacpp` | OpenAI-compatible `llama.cpp` servers. Qwen thinking-content passes through via the `thinkingFormat` compat field. |
+| Local | `lmstudio` | LM Studio endpoints. |
+| Local | `ollama` | Ollama endpoints. |
+| Local | `openai-compat` | Any OpenAI-compatible HTTP endpoint. |
+
+Each local runtime reads its endpoint list from `settings.yaml` and registers discovered models into the pi-ai runtime catalog under the provider id.
+
+---
+
+## Runtimes
+
+Runtime tiers classify how a worker process is started and spoken to.
+
+| Tier | Status in v0.1 | What it is |
+| --- | --- | --- |
+| `native` | Admitted | Clio's own worker subprocess on `pi-agent-core`. The only tier dispatch accepts in v0.1. |
+| `sdk` | Scaffolded, rejected | Claude Agent SDK adapter. Code exists, dispatch refuses to spawn it in v0.1. |
+| `cli` | Scaffolded, rejected | Adapters for `pi-coding-agent`, `claude-code`, `codex`, `gemini`, `opencode`, and `copilot`. Dispatch refuses to spawn in v0.1. |
+
+SDK and CLI tiers ship for v0.2. The v0.1 rejection is deliberate so that one worker path is fully hardened before more surface area lands.
+
+---
+
+## Agents
+
+Seven builtin agent specs ship in [`src/domains/agents/builtins/`](src/domains/agents/builtins/).
+
+| Agent | Purpose |
+| --- | --- |
+| `scout` | Fast repo exploration and context assembly. |
+| `planner` | Turns a goal into a reviewable implementation plan. |
+| `researcher` | Literature, documentation, and web-grounded investigation. |
+| `reviewer` | Reviews work against a plan and a coding standard. |
+| `delegate` | Routes work across multiple sub-agents. |
+| `context-builder` | Assembles focused context bundles for downstream agents. |
+| `worker` | Generic execution worker for bounded tasks. |
+
+Specs are plain Markdown with frontmatter. Drop new files into the same directory to register additional agents.
+
+---
+
+## Safety model
+
+Three modes gate tool visibility and permission.
+
+| Mode | What it allows |
+| --- | --- |
+| `default` | Read, write, edit, bash, search, and dispatch tools visible. |
+| `advise` | Read-oriented. No filesystem mutation. |
+| `super` | Privileged writes outside the working directory. Gated by the confirmation overlay (`Alt+S`). |
+
+Hardcoded kill-switches for dangerous Bash patterns live in [`damage-control-rules.yaml`](damage-control-rules.yaml). The list includes `rm -rf /`, `git push --force main`, and raw `dd` writes to block devices.
+
+---
+
+## Receipts and cost
+
+Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and endpoint used, and a hash of the event ledger.
+
+```bash
+/receipts                   # paginated list in the TUI
+/receipt verify <runId>     # re-hash the ledger and report match / mismatch
+/cost                       # session-level token and USD totals
+```
+
+Receipts are the source of truth for cost accounting and the audit trail. Nothing else in the system is trusted to report cost.
+
+---
 
 ## Architecture at a glance
 
-Thirteen domains: `config`, `providers`, `safety`, `modes`, `prompts`,
-`session`, `agents`, `dispatch`, `observability`, `scheduling`,
-`intelligence`, `lifecycle`, and `ui` (folded under `src/interactive/`
-in v0.1). Hard invariants enforced by `scripts/check-boundaries.ts`:
-only `src/engine/**` imports pi-mono packages, `src/worker/**` never
-imports `src/domains/**`, and cross-domain traffic goes through
-`SafeEventBus`. Full design:
-[docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md),
-[docs/architecture/pi-mono-boundary-0.67.4.md](docs/architecture/pi-mono-boundary-0.67.4.md).
+Thirteen domains under [`src/domains/`](src/domains/): `config`, `providers`, `safety`, `modes`, `prompts`, `session`, `agents`, `dispatch`, `observability`, `scheduling`, `intelligence`, `lifecycle`, and `ui` (folded under `src/interactive/` in v0.1).
+
+Three hard invariants are enforced at build time by [`scripts/check-boundaries.ts`](scripts/check-boundaries.ts):
+
+1. Only `src/engine/**` imports pi-mono packages.
+2. `src/worker/**` never imports `src/domains/**`.
+3. Cross-domain traffic goes through `SafeEventBus`.
+
+Full design: [docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md). Engine boundary detail: [docs/architecture/pi-mono-boundary-0.67.4.md](docs/architecture/pi-mono-boundary-0.67.4.md).
+
+---
 
 ## Development
 
 Full script index: [docs/guides/scripts.md](docs/guides/scripts.md).
 
-- `npm run ci`: repo gate. Typecheck, lint, `check:boundaries`,
-  `check:prompts`, the CI-enforced `diag:*` suite, production build,
-  and `verify`.
-- `npm run stress`: ten concurrent faux runs against the shared run
-  ledger.
-- `npm run stress:real`: opt-in real-provider variant against
-  `llamacpp@mini` and `lmstudio@dynamo`. Excluded from CI.
-- `npm run diag:inference:live` and `npm run diag:vision:live`:
-  end-to-end real-inference and vision-inference probes against the
-  homelab. Excluded from CI.
-- `npm run typecheck`, `npm run build`, `npm run dev`: strict TS
-  pass, production bundle, and `tsup --watch` loop.
+| Script | Purpose |
+| --- | --- |
+| `npm run ci` | Repo gate. Typecheck, lint, boundary checks, prompt checks, CI diag suite, production build, verify, smoke. |
+| `npm run typecheck` | Strict TypeScript pass. |
+| `npm run lint` | Biome. |
+| `npm run build` | Production bundle via `tsup`. |
+| `npm run dev` | `tsup --watch`. |
+| `npm run check:boundaries` | Enforce engine, worker, and domain boundaries. |
+| `npm run stress` | Ten concurrent faux runs against the shared run ledger. |
+| `npm run stress:real` | Opt-in real-provider variant against `llamacpp@mini` and `lmstudio@dynamo`. Excluded from CI. |
+| `npm run inference:live` | End-to-end real-inference probe against the homelab. Excluded from CI. |
+| `npm run vision:live` | Vision-inference probe. Excluded from CI. |
+| `npm run hooks:install` | Opt-in pre-commit hook enforcing format and boundaries. |
+| `npm run diag:*` | Forty-plus subsystem probes. Run `npm run | grep diag:` for the full list. |
 
-## Contributing
+CI runs on GitHub Actions, matrix `ubuntu-latest` and `macos-14`, with a ten-minute timeout per job.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before sending a non-trivial
-change. The repo prefers small, reviewable slices, and the working
-discipline is one commit per slice whenever possible so intent stays
-obvious in history. Keep `npm run ci` green on every commit. No
-em-dash clause separators in commit subjects, commit bodies, or docs.
+---
+
+## Roadmap
+
+- **v0.1 (current)**: native runtime, local provider dispatch, interactive TUI, receipts and cost ledger, three-mode safety, dispatch-board overlay.
+- **v0.2**: real tool implementations beyond stubs, SDK runtime admitted, CLI runtime admitted, MCP support, richer agent library.
+- **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
+
+See [docs/superpowers/plans/](docs/superpowers/plans/) for detailed phase plans.
+
+---
+
+## Lineage and credits
+
+### CLIO family
+
+Clio Coder is a first-class IOWarp product and a coding specialization of the [CLIO Agent](https://iowarp.ai) framework. The CLIO platform is built by the [Gnosis Research Center](https://grc.iit.edu/) at the Illinois Institute of Technology. Companion projects:
+
+- [clio-core](https://github.com/iowarp/clio-core): the Chimaera-based context storage runtime.
+- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific data (HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, Zarr, and more).
+
+Clio Coder is the code-centric sibling of those systems. It is designed to be used standalone and to be composed as a coding primitive inside multi-agent scientific workflows orchestrated by CLIO Agent.
+
+---
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
-
-## Acknowledgements
-
-Clio builds on pi-mono and the wider agent tooling work by Mario
-Zechner ([@mariozechner](https://github.com/mariozechner)). The
-project also takes direct inspiration from `pi-subagents` for
-agent-spec structure and from `pi-coding-agent` for the lessons
-about what belongs in a worker adapter versus the orchestrator core.
+Apache-2.0. See [LICENSE](LICENSE).
