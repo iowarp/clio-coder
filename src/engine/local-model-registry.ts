@@ -5,6 +5,9 @@
  * `getModel(providerId, "${modelId}@${endpointName}")` once the endpoint
  * has been registered via `registerLocalProviders` (boot) or had its model
  * list discovered via `registerDiscoveredLocalModels` (post live probe).
+ * The registry key is composite; the stored `Model.id` stays the bare
+ * server-visible id so downstream chat-completions requests send the wire
+ * model name the endpoint actually knows about.
  *
  * Extracted from engine/ai.ts so the registration surface and the pi-ai
  * catalog wrapper can evolve independently.
@@ -168,7 +171,7 @@ function endpointToModel(providerId: string, modelId: string, endpointName: stri
 	}
 
 	const model: Record<string, unknown> = {
-		id: `${modelId}@${endpointName}`,
+		id: modelId,
 		name: `${modelId} (${endpointName})`,
 		api: "openai-completions" as const,
 		provider: providerId,
@@ -192,7 +195,8 @@ function endpointToModel(providerId: string, modelId: string, endpointName: stri
  * For every llamacpp/lmstudio/ollama/openai-compat endpoint in settings,
  * compose a Model pointing at `${url}/v1` (OpenAI-compat path) and stash it
  * in the side-registry under key `${modelId}@${endpointName}` so multiple
- * endpoints under the same provider id don't collide.
+ * endpoints under the same provider id don't collide. The map key is the
+ * unique lookup id; `Model.id` remains the bare server-known model id.
  *
  * `modelId` defaults to the endpoint's `default_model` entry. Endpoints
  * without a default are still registered under a wildcard `@${endpointName}`
