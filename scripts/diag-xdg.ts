@@ -284,6 +284,13 @@ function runInstallPermutation(p: Permutation): void {
 	if (!first.stdout.includes("created")) {
 		fail(`perm ${p.id}: clio install (first) did not report created paths`, first.stdout);
 	}
+	const expectedSettings = join(p.expect.configDir, "settings.yaml");
+	if (!first.stdout.includes(`settings    ${expectedSettings}`)) {
+		fail(`perm ${p.id}: clio install (first) did not print resolved settings path ${expectedSettings}`, first.stdout);
+	}
+	if (first.stdout.includes("~/.clio/settings.yaml")) {
+		fail(`perm ${p.id}: clio install (first) still printed stale ~/.clio/settings.yaml hint`, first.stdout);
+	}
 	// Second install must be idempotent.
 	const second = runCli(["install"], p.env);
 	if (second.exitCode !== 0) {
@@ -291,6 +298,12 @@ function runInstallPermutation(p: Permutation): void {
 	}
 	if (!second.stdout.includes("already installed")) {
 		fail(`perm ${p.id}: clio install (second) not idempotent`, second.stdout);
+	}
+	if (!second.stdout.includes(`settings    ${expectedSettings}`)) {
+		fail(`perm ${p.id}: clio install (second) did not print resolved settings path ${expectedSettings}`, second.stdout);
+	}
+	if (second.stdout.includes("~/.clio/settings.yaml")) {
+		fail(`perm ${p.id}: clio install (second) still printed stale ~/.clio/settings.yaml hint`, second.stdout);
 	}
 	assertTree(p.expect, `perm ${p.id}`);
 	assertInstallJson(p.expect.dataDir, `perm ${p.id}`);

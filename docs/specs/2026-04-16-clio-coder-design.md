@@ -80,7 +80,7 @@ Three pi-mono packages as direct npm dependencies, pinned at exact version:
 |---|---|
 | **Pan-provider** | Anthropic, OpenAI, Google, Groq, Mistral, OpenRouter, Bedrock, local engines (LM Studio, Ollama, llama.cpp, vLLM). Registered via `pi-ai`'s provider system. |
 | **Pan-model** | Tiered model catalog (frontier/mid/fast). Capability routing. Fallback chains. |
-| **Pan-agent** | Agent specs as markdown + YAML frontmatter (inspired by pi-subagents). Discovered from `.clio/agents/*.md` and `~/.clio/agents/*.md`. |
+| **Pan-agent** | Agent specs as markdown + YAML frontmatter (inspired by pi-subagents). Discovered from `.clio/agents/*.md` and `<dataDir>/agents/*.md`. |
 | **Pan-runtime** | Native Clio workers, plus CLI adapters for pi-coding-agent, claude-code, codex, gemini, opencode, copilot. Plus SDK-tier Claude Agent SDK in subprocess. |
 | **Pan-safety** | Shared action classifier, audit trail, scope enforcement, mode gating, across every runtime. |
 | **Pan-observe** | Unified cost, tokens, turns, wall time, receipts across every runtime. |
@@ -89,7 +89,7 @@ Three pi-mono packages as direct npm dependencies, pinned at exact version:
 
 | # | Domain | Depends on | Owns | Exposes |
 |---|---|---|---|---|
-| 1 | **config** | — | `~/.clio/settings.yaml`, file watcher, schema | settings access, hot-reload bus events |
+| 1 | **config** | — | `<configDir>/settings.yaml`, file watcher, schema | settings access, hot-reload bus events |
 | 2 | **providers** | config | provider registry, model catalog, credentials, health | `/providers`, `/models`, health events |
 | 3 | **safety** | config | audit trail, action classifier, scope rules, dangerous-command interception | safety gate on every tool call, `/audit` |
 | 4 | **modes** | safety | current mode, tool allowlist matrix | `/mode`, Shift+Tab, Alt+S |
@@ -140,7 +140,7 @@ Structural, not prompt-based. Four layers:
 3. **Policy gate.** Per safety level (suggest, auto-edit, full-auto), each ActionClass is allowed, confirmation-gated, or blocked. Hard blocks: `system_modify`, `git_destructive`.
 4. **Scope contract.** Worker permissions are a strict subset of orchestrator permissions. Privilege non-escalation enforced at dispatch admission.
 
-Audit trail: every action (allowed or blocked) writes a structured entry to `~/.clio/audit/YYYY-MM-DD.jsonl` with correlation ID, reason code, redacted args.
+Audit trail: every action (allowed or blocked) writes a structured entry to `<dataDir>/audit/YYYY-MM-DD.jsonl` with correlation ID, reason code, redacted args.
 
 ## 9. Prompt Compilation
 
@@ -157,11 +157,11 @@ identity/clio.md            ← "You are Clio, the orchestrator..."
 
 Compilation output: compiled prompt text + SHA-256 hash + fragment manifest (file paths + hashes). Hash lands in every audit record and receipt. Reproducibility depends on this determinism.
 
-Fragment loading: built-ins live in `src/domains/prompts/fragments/`, user/project overrides in `~/.clio/prompts/` and `.clio/prompts/`, discovered at boot and at `/reload`.
+Fragment loading: built-ins live in `src/domains/prompts/fragments/`, user/project overrides in `<dataDir>/prompts/` and `.clio/prompts/`, discovered at boot and at `/reload`.
 
 ## 10. Session and Reproducibility
 
-Session JSONL is Clio's own format. Append-only. Tree-structured (id + parentId) for branching (fork, revert, navigate). Stored under `~/.clio/sessions/[cwd-hash]/current.jsonl`.
+Session JSONL is Clio's own format. Append-only. Tree-structured (id + parentId) for branching (fork, revert, navigate). Stored under `<dataDir>/sessions/[cwd-hash]/current.jsonl`.
 
 Per-session metadata persisted separately: model, provider, token usage, cost, turns, compiled-prompt hash, environment manifest (Node version, Clio version, pi-mono version, platform, git ref of cwd), start/end timestamps.
 
@@ -191,7 +191,7 @@ Cluster registry: scaffolded for v0.2+ (multi-node SSH/SLURM). Populated from se
 
 ## 13. Configuration Model
 
-Single human-editable `~/.clio/settings.yaml`. TypeBox-validated. **No LLM-callable config tools** (security invariant). All configuration happens through:
+Single human-editable `<configDir>/settings.yaml`. TypeBox-validated. **No LLM-callable config tools** (security invariant). All configuration happens through:
 
 - Direct file edit (watcher picks up changes)
 - TUI overlays (`/clio-settings`, `/providers`, `/presets`, `/theme`, `/mode`)
@@ -206,7 +206,7 @@ Hot-reload matrix:
 
 Restart nudge: friendly overlay saying "Settings change detected. Press R to restart, Esc to keep editing." Clio writes the settings, shuts down multi-phase, re-execs. No data loss.
 
-Credentials: `~/.clio/credentials.yaml` (mode 0600) or OS keychain when available. Never in settings.yaml. Never LLM-readable. Managed through the `/providers` TUI overlay which shells out to OS keychain APIs.
+Credentials: `<configDir>/credentials.yaml` (mode 0600) or OS keychain when available. Never in settings.yaml. Never LLM-readable. Managed through the `/providers` TUI overlay which shells out to OS keychain APIs.
 
 ## 14. Slash Command Surface (all ours)
 
@@ -350,7 +350,7 @@ clio-coder/
 
 **Boot (target ≤800ms to first frame):**
 1. CLI entry resolves subcommand
-2. Load `~/.clio/settings.yaml`, validate against schema
+2. Load `<configDir>/settings.yaml`, validate against schema
 3. Core init: XDG paths, shared event bus, termination coordinator, startup timer
 4. Collect domain manifests → topological sort → load order
 5. Instantiate each domain's ExtensionFactory in dependency order
@@ -369,20 +369,20 @@ clio-coder/
 
 | State | Owner | File |
 |---|---|---|
-| User settings | config | `~/.clio/settings.yaml` |
-| Credentials | providers | `~/.clio/credentials.yaml` (0600) or OS keychain |
+| User settings | config | `<configDir>/settings.yaml` |
+| Credentials | providers | `<configDir>/credentials.yaml` (0600) or OS keychain |
 | Provider registry (live) | providers | memory, recreated at boot |
-| Model cache | providers | `~/.clio/cache/models.json` |
-| Agent specs | agents | `~/.clio/agents/` + `.clio/agents/` |
-| Session (current) | session | `~/.clio/sessions/[cwd-hash]/current.jsonl` |
-| Session tree | session | `~/.clio/sessions/[cwd-hash]/tree.json` |
-| Audit trail | safety | `~/.clio/audit/YYYY-MM-DD.jsonl` |
-| Run ledger | dispatch | `~/.clio/state/runs.json` |
-| Metrics | observability | `~/.clio/state/metrics.json` |
-| Receipts | observability | `~/.clio/receipts/<run-id>.json` |
-| Budget counters | scheduling | `~/.clio/state/budget.json` |
-| Install metadata | lifecycle | `~/.clio/install.json` |
-| Cluster nodes | scheduling | `~/.clio/state/cluster.json` |
+| Model cache | providers | `<cacheDir>/models.json` |
+| Agent specs | agents | `<dataDir>/agents/` + `.clio/agents/` |
+| Session (current) | session | `<dataDir>/sessions/[cwd-hash]/current.jsonl` |
+| Session tree | session | `<dataDir>/sessions/[cwd-hash]/tree.json` |
+| Audit trail | safety | `<dataDir>/audit/YYYY-MM-DD.jsonl` |
+| Run ledger | dispatch | `<dataDir>/state/runs.json` |
+| Metrics | observability | `<dataDir>/state/metrics.json` |
+| Receipts | observability | `<dataDir>/receipts/<run-id>.json` |
+| Budget counters | scheduling | `<dataDir>/state/budget.json` |
+| Install metadata | lifecycle | `<dataDir>/install.json` |
+| Cluster nodes | scheduling | `<dataDir>/state/cluster.json` |
 
 All writes atomic (tmp + fsync + rename).
 
@@ -475,7 +475,7 @@ These are real features Clio will have. They are not in v0.1 because their integ
 | Product name | Clio-Coder |
 | User-facing brand | Clio (IOWarp's orchestrator coding-agent) |
 | CLI binary | `clio` |
-| Config dir | `~/.clio/` (XDG-aware, respects `$XDG_CONFIG_HOME/clio`) |
+| Config dir | Platform config dir (for example `~/.config/clio` on Linux) |
 | NPM package | `@iowarp/clio-coder` |
 | License | Apache 2.0 |
 | Voice | Professional, scientific, no emojis, no em-dashes |
@@ -497,7 +497,7 @@ These are real features Clio will have. They are not in v0.1 because their integ
 | Subprocess-only dispatch from day one | PAN-SDK-V2 plan; avoids PanCode's dual-path debt structurally | Yes |
 | 3 modes (default/advise/super) | Cleaner than PanCode's 4; default is useful, advise is distinct, super is rare | Yes |
 | TUI-first config, no LLM-callable config tools | Security invariant | Yes |
-| Single `~/.clio/settings.yaml`, file-watched, hot-reload with restart-nudge | Simpler than PanCode's multi-file approach | Yes |
+| Single `<configDir>/settings.yaml`, file-watched, hot-reload with restart-nudge | Simpler than PanCode's multi-file approach | Yes |
 | All slash commands owned by Clio (no inheritance) | Level 3 dividend | Yes |
 | Engine boundary enforced at build time | Upstream churn containment | Yes |
 | Worker isolation enforced by directory structure | Physical impossibility of worker reaching orchestrator state | Yes |

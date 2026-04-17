@@ -13,6 +13,7 @@ import { SettingsSchema } from "../src/domains/config/schema.js";
  *   clio install  (into an ephemeral CLIO_HOME)
  *   clio doctor   (against the install)
  *   clio          (orchestrator boot stub against the install)
+ *   diag-setup.ts (guided setup + mini/dynamo switch flow)
  *   verify-prompt.ts
  *   verify-session.ts
  *
@@ -68,10 +69,22 @@ function checkInstall(home: string, env: NodeJS.ProcessEnv): void {
 	const first = runCli(["install"], env);
 	if (first.exitCode !== 0) fail(`clio install (first) exited ${first.exitCode}`, first.stdout);
 	if (!first.stdout.includes("created")) fail("clio install (first) did not report created paths", first.stdout);
+	if (!first.stdout.includes(`settings    ${join(home, "settings.yaml")}`)) {
+		fail("clio install (first) did not print the resolved settings path", first.stdout);
+	}
+	if (first.stdout.includes("~/.clio/settings.yaml")) {
+		fail("clio install (first) still printed the stale ~/.clio/settings.yaml hint", first.stdout);
+	}
 
 	const second = runCli(["install"], env);
 	if (second.exitCode !== 0) fail(`clio install (second) exited ${second.exitCode}`, second.stdout);
 	if (!second.stdout.includes("already installed")) fail("clio install (second) not idempotent", second.stdout);
+	if (!second.stdout.includes(`settings    ${join(home, "settings.yaml")}`)) {
+		fail("clio install (second) did not print the resolved settings path", second.stdout);
+	}
+	if (second.stdout.includes("~/.clio/settings.yaml")) {
+		fail("clio install (second) still printed the stale ~/.clio/settings.yaml hint", second.stdout);
+	}
 
 	const settings = join(home, "settings.yaml");
 	if (!existsSync(settings)) fail(`expected ${settings} to exist after install`);
@@ -100,8 +113,8 @@ const EXAMPLE_SPECS: readonly ExampleSpec[] = [
 		provider: "llamacpp",
 		endpoint: "mini",
 		expected: {
-			url: "http://192.168.86.141:8080",
-			default_model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			url: "http://127.0.0.1:8080",
+			default_model: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
 			context_window: 262144,
 			max_tokens: 16384,
 		},
@@ -110,7 +123,7 @@ const EXAMPLE_SPECS: readonly ExampleSpec[] = [
 		provider: "lmstudio",
 		endpoint: "dynamo",
 		expected: {
-			url: "http://192.168.86.143:1234",
+			url: "http://127.0.0.1:1234",
 			default_model: "qwen3.6-35b-a3b",
 			context_window: 262144,
 			max_tokens: 16384,
@@ -136,7 +149,7 @@ const TARGET_OVERRIDE_SPECS: readonly TargetOverrideSpec[] = [
 		expected: {
 			provider: "llamacpp",
 			endpoint: "mini",
-			model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			model: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
 		},
 		select(parsed) {
 			return (parsed as { orchestrator?: unknown }).orchestrator;
@@ -148,7 +161,7 @@ const TARGET_OVERRIDE_SPECS: readonly TargetOverrideSpec[] = [
 		expected: {
 			provider: "llamacpp",
 			endpoint: "mini",
-			model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			model: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
 		},
 		select(parsed) {
 			return (parsed as { workers?: { default?: unknown } }).workers?.default;
@@ -375,6 +388,16 @@ function checkRegistryPaths(env: NodeJS.ProcessEnv): void {
 	}
 }
 
+function checkSetupFlow(env: NodeJS.ProcessEnv): void {
+	const script = join(projectRoot, "scripts", "diag-setup.ts");
+	try {
+		execFileSync("npx", ["tsx", script], { env, stdio: "inherit" });
+		log("guided setup flow OK");
+	} catch (err) {
+		fail("guided setup flow failed", (err as Error).message);
+	}
+}
+
 function checkPromptCompile(env: NodeJS.ProcessEnv): void {
 	const script = join(projectRoot, "scripts", "verify-prompt.ts");
 	try {
@@ -442,6 +465,7 @@ function main(): void {
 	checkSettingsTemplate(home);
 	checkDoctor(env);
 	checkBoot(env);
+	checkSetupFlow(env);
 	checkRegistryPaths(env);
 	checkPromptCompile(env);
 	checkSessionRoundTrip(env);
