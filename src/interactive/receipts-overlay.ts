@@ -162,6 +162,14 @@ function isIso8601(value: unknown): value is string {
 	return typeof value === "string" && ISO_8601_REGEX.test(value) && !Number.isNaN(Date.parse(value));
 }
 
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0;
+}
+
+function isNullableString(value: unknown): value is string | null {
+	return value === null || typeof value === "string";
+}
+
 export function receiptFilePath(dataDir: string, runId: string): string {
 	return join(dataDir, "receipts", `${runId}.json`);
 }
@@ -184,15 +192,33 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	} catch (err) {
 		return { ok: false, reason: `invalid json: ${(err as Error).message}` };
 	}
-	if (!parsed || typeof parsed !== "object") {
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		return { ok: false, reason: "receipt is not an object" };
 	}
 	const r = parsed as Record<string, unknown>;
 	for (const key of RECEIPT_REQUIRED_KEYS) {
 		if (!(key in r)) return { ok: false, reason: `missing field: ${key}` };
 	}
+	if (!isNonEmptyString(r.runId)) {
+		return { ok: false, reason: `runId invalid: ${String(r.runId)}` };
+	}
 	if (r.runId !== runId) {
 		return { ok: false, reason: `runId mismatch: file has ${String(r.runId)}` };
+	}
+	if (!isNonEmptyString(r.agentId)) {
+		return { ok: false, reason: `agentId invalid: ${String(r.agentId)}` };
+	}
+	if (!isNonEmptyString(r.task)) {
+		return { ok: false, reason: `task invalid: ${String(r.task)}` };
+	}
+	if (!isNonEmptyString(r.providerId)) {
+		return { ok: false, reason: `providerId invalid: ${String(r.providerId)}` };
+	}
+	if (!isNonEmptyString(r.modelId)) {
+		return { ok: false, reason: `modelId invalid: ${String(r.modelId)}` };
+	}
+	if (r.runtime !== "native" && r.runtime !== "sdk" && r.runtime !== "cli") {
+		return { ok: false, reason: `runtime invalid: ${String(r.runtime)}` };
 	}
 	const exitCode = r.exitCode;
 	if (typeof exitCode !== "number" || !(exitCode === 0 || exitCode === 1 || exitCode === 2)) {
@@ -202,6 +228,10 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (typeof tokenCount !== "number" || !Number.isFinite(tokenCount) || tokenCount < 0) {
 		return { ok: false, reason: `tokenCount out of range: ${String(tokenCount)}` };
 	}
+	const costUsd = r.costUsd;
+	if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
+		return { ok: false, reason: `costUsd out of range: ${String(costUsd)}` };
+	}
 	if (!isIso8601(r.startedAt)) {
 		return { ok: false, reason: `startedAt not ISO-8601: ${String(r.startedAt)}` };
 	}
@@ -210,6 +240,27 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	}
 	if (typeof r.clioVersion !== "string" || r.clioVersion.length === 0) {
 		return { ok: false, reason: "clioVersion empty" };
+	}
+	if (!isNonEmptyString(r.piMonoVersion)) {
+		return { ok: false, reason: `piMonoVersion invalid: ${String(r.piMonoVersion)}` };
+	}
+	if (!isNonEmptyString(r.platform)) {
+		return { ok: false, reason: `platform invalid: ${String(r.platform)}` };
+	}
+	if (!isNonEmptyString(r.nodeVersion)) {
+		return { ok: false, reason: `nodeVersion invalid: ${String(r.nodeVersion)}` };
+	}
+	if (typeof r.toolCalls !== "number" || !Number.isInteger(r.toolCalls) || r.toolCalls < 0) {
+		return { ok: false, reason: `toolCalls out of range: ${String(r.toolCalls)}` };
+	}
+	if (!isNullableString(r.compiledPromptHash)) {
+		return { ok: false, reason: `compiledPromptHash invalid: ${String(r.compiledPromptHash)}` };
+	}
+	if (!isNullableString(r.staticCompositionHash)) {
+		return { ok: false, reason: `staticCompositionHash invalid: ${String(r.staticCompositionHash)}` };
+	}
+	if (!isNullableString(r.sessionId)) {
+		return { ok: false, reason: `sessionId invalid: ${String(r.sessionId)}` };
 	}
 	return { ok: true };
 }

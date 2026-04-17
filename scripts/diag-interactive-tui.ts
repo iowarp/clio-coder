@@ -1680,6 +1680,20 @@ async function main(): Promise<void> {
 		badJsonResult.ok === false && badJsonResult.reason?.startsWith("invalid json"),
 		JSON.stringify(badJsonResult),
 	);
+	writeFileSync(join(verifyTempRoot, "receipts", "run-empty.json"), "", "utf8");
+	const emptyJsonResult = verifyReceiptFile(verifyTempRoot, "run-empty");
+	check(
+		"receipt-verify:empty-file-reports-fail",
+		emptyJsonResult.ok === false && emptyJsonResult.reason?.startsWith("invalid json"),
+		JSON.stringify(emptyJsonResult),
+	);
+	writeFileSync(join(verifyTempRoot, "receipts", "run-truncated.json"), '{"runId":', "utf8");
+	const truncatedJsonResult = verifyReceiptFile(verifyTempRoot, "run-truncated");
+	check(
+		"receipt-verify:truncated-file-reports-fail",
+		truncatedJsonResult.ok === false && truncatedJsonResult.reason?.startsWith("invalid json"),
+		JSON.stringify(truncatedJsonResult),
+	);
 
 	const { clioVersion: _stripVer, ...malformedMissing } = { ...validReceipt, runId: "run-missing" };
 	void _stripVer;
@@ -1734,6 +1748,26 @@ async function main(): Promise<void> {
 		"receipt-verify:empty-clioVersion-reports-fail",
 		emptyVersionResult.ok === false && emptyVersionResult.reason === "clioVersion empty",
 		JSON.stringify(emptyVersionResult),
+	);
+	const wrongProviderType = { ...validReceipt, runId: "run-bad-provider-type", providerId: 7 };
+	writeFileSync(
+		join(verifyTempRoot, "receipts", "run-bad-provider-type.json"),
+		JSON.stringify(wrongProviderType),
+		"utf8",
+	);
+	const wrongProviderTypeResult = verifyReceiptFile(verifyTempRoot, "run-bad-provider-type");
+	check(
+		"receipt-verify:wrong-provider-type-reports-fail",
+		wrongProviderTypeResult.ok === false && wrongProviderTypeResult.reason?.includes("providerId invalid"),
+		JSON.stringify(wrongProviderTypeResult),
+	);
+	const wrongCostType = { ...validReceipt, runId: "run-bad-cost-type", costUsd: "0.1" };
+	writeFileSync(join(verifyTempRoot, "receipts", "run-bad-cost-type.json"), JSON.stringify(wrongCostType), "utf8");
+	const wrongCostTypeResult = verifyReceiptFile(verifyTempRoot, "run-bad-cost-type");
+	check(
+		"receipt-verify:wrong-cost-type-reports-fail",
+		wrongCostTypeResult.ok === false && wrongCostTypeResult.reason?.includes("costUsd out of range"),
+		JSON.stringify(wrongCostTypeResult),
 	);
 
 	rmSync(verifyTempRoot, { recursive: true, force: true });
