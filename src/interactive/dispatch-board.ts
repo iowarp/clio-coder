@@ -73,6 +73,7 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	failed: 2,
 	completed: 3,
 };
+const MAX_DISPATCH_BOARD_ROWS = 50;
 
 function leftCell(text: string, width: number): string {
 	if (text.length <= width) return text.padEnd(width);
@@ -208,6 +209,21 @@ function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
 	return a.sequence - b.sequence;
 }
 
+function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
+	if (entries.size <= MAX_DISPATCH_BOARD_ROWS) return;
+	const terminalEntries = [...entries.values()]
+		.filter((entry) => entry.status === "completed" || entry.status === "failed")
+		.sort((a, b) => a.sequence - b.sequence);
+	const evictionQueue =
+		terminalEntries.length > 0
+			? terminalEntries
+			: [...entries.values()].sort((a, b) => a.sequence - b.sequence);
+	for (const entry of evictionQueue) {
+		if (entries.size <= MAX_DISPATCH_BOARD_ROWS) break;
+		entries.delete(entry.runId);
+	}
+}
+
 export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>): string[] {
 	const body = rows.length > 0 ? rows.map(renderRowContent) : [EMPTY_MESSAGE];
 	return [
@@ -247,6 +263,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			durationMs: previous?.durationMs ?? null,
 		};
 		entries.set(runId, entry);
+		pruneEntries(entries);
 		return entry;
 	};
 
