@@ -1,6 +1,7 @@
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../engine/tui.js";
 import { visibleWidth } from "../engine/tui.js";
+import { shouldPassCtrlCToProcess } from "./index.js";
 import { formatProvidersOverlayLines, openProvidersOverlay } from "./providers-overlay.js";
 
 const failures: string[] = [];
@@ -42,6 +43,22 @@ function createFakeTui(): TUI {
 }
 
 async function main(): Promise<void> {
+	check(
+		"providers-overlay:ctrl-c-passes-through-when-open",
+		shouldPassCtrlCToProcess("\x03", "providers") === true,
+		String(shouldPassCtrlCToProcess("\x03", "providers")),
+	);
+	check(
+		"providers-overlay:ctrl-c-does-not-pass-through-when-closed",
+		shouldPassCtrlCToProcess("\x03", "closed") === false,
+		String(shouldPassCtrlCToProcess("\x03", "closed")),
+	);
+	check(
+		"providers-overlay:ctrl-c-release-does-not-retrigger-sigint",
+		shouldPassCtrlCToProcess("\x1b[99;5:3u", "providers") === false,
+		String(shouldPassCtrlCToProcess("\x1b[99;5:3u", "providers")),
+	);
+
 	const narrowLines = formatProvidersOverlayLines(
 		[
 			{

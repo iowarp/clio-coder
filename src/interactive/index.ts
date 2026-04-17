@@ -4,7 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { Editor, ProcessTerminal, TUI, Text } from "../engine/tui.js";
+import { Editor, isKeyRelease, matchesKey, ProcessTerminal, TUI, Text } from "../engine/tui.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
@@ -113,9 +113,15 @@ export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKey
 	return false;
 }
 
+/** Ctrl+C must still raise SIGINT while any overlay is open. */
+export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
+	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
+}
+
 /** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
 export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
 	if (overlayState === "closed") return false;
+	if (shouldPassCtrlCToProcess(data, overlayState)) return false;
 	if (data === CTRL_D) {
 		deps.requestShutdown();
 		return true;
@@ -408,6 +414,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	];
 
 	tui.addInputListener((data: string) => {
+		if (shouldPassCtrlCToProcess(data, overlayState)) {
+			process.kill(process.pid, "SIGINT");
+			return { consume: true };
+		}
+
 		const overlayConsumed = routeOverlayKey(data, overlayState, {
 			cancelSuper: () => {
 				closeOverlay();
