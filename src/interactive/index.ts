@@ -3,8 +3,10 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
@@ -16,12 +18,15 @@ export interface InteractiveDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
+	observability: ObservabilityContract;
 	/**
 	 * Resolver for the current `workers.default` block. `/run` uses this to
 	 * short-circuit with an actionable error when no provider is configured
 	 * instead of letting the dispatch throw with no config context.
 	 */
 	getWorkerDefault?: () => { provider?: string; model?: string; endpoint?: string } | undefined;
+	/** Optional resolver for the active session id used as the cost overlay title suffix. */
+	getSessionId?: () => string | null;
 	onShutdown: () => Promise<void>;
 }
 
@@ -31,7 +36,7 @@ export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
 export const ENTER = "\r";
 export const ESC = "\x1b";
-export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers";
+export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers" | "cost";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -54,7 +59,15 @@ export interface ProvidersOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface OverlayKeyDeps extends SuperOverlayKeyDeps, DispatchBoardOverlayKeyDeps, ProvidersOverlayKeyDeps {
+export interface CostOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
+export interface OverlayKeyDeps
+	extends SuperOverlayKeyDeps,
+		DispatchBoardOverlayKeyDeps,
+		ProvidersOverlayKeyDeps,
+		CostOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -113,6 +126,15 @@ export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKey
 	return false;
 }
 
+/** Pure overlay key router for the /cost overlay. Esc closes; everything else is swallowed. */
+export function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -134,6 +156,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		routeProvidersOverlayKey(data, deps);
 		return true;
 	}
+	if (overlayState === "cost") {
+		routeCostOverlayKey(data, deps);
+		return true;
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -144,6 +170,7 @@ export type SlashCommand =
 	| { kind: "run"; agentId: string; task: string }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
+	| { kind: "cost" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -154,6 +181,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (trimmed === "/quit" || trimmed === "/exit") return { kind: "quit" };
 	if (trimmed === "/help" || trimmed.startsWith("/help ")) return { kind: "help" };
 	if (trimmed === "/providers") return { kind: "providers" };
+	if (trimmed === "/cost") return { kind: "cost" };
 	if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
 	if (trimmed.startsWith("/run ")) {
 		const rest = trimmed.slice(5).trim();
@@ -262,7 +290,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				void shutdown();
 				return;
 			case "help":
-				io.stdout("\ncommands: /run <agent> <task>, /providers, /help, /quit\n");
+				io.stdout("\ncommands: /run <agent> <task>, /providers, /cost, /help, /quit\n");
 				return;
 			case "run-usage":
 				io.stdout("\nusage: /run <agent> <task>\n");
@@ -280,6 +308,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			case "providers":
 				openProvidersOverlayState();
+				return;
+			case "cost":
+				openCostOverlayState();
 				return;
 			case "unknown":
 				io.stderr(`[interactive] unknown input: ${command.text}\n`);
@@ -351,6 +382,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "providers";
 		overlayHandle = openProvidersOverlay(tui, deps.providers);
+		tui.requestRender();
+	};
+
+	const openCostOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "cost";
+		overlayHandle = openCostOverlay(tui, deps.observability, {
+			bus: deps.bus,
+			sessionId: deps.getSessionId?.() ?? null,
+		});
 		tui.requestRender();
 	};
 

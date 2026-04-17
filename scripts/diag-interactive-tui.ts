@@ -32,7 +32,14 @@ import { createSafeEventBus } from "../src/core/event-bus.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
+import type { CostEntry, ObservabilityContract } from "../src/domains/observability/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
+import {
+	COST_OVERLAY_WIDTH,
+	aggregateCostEntries,
+	formatCostOverlayLines,
+	openCostOverlay,
+} from "../src/interactive/cost-overlay.js";
 import {
 	type DispatchBoardRow,
 	createDispatchBoardStore,
@@ -48,6 +55,7 @@ import {
 	SHIFT_TAB,
 	handleRun,
 	parseSlashCommand,
+	routeCostOverlayKey,
 	routeDispatchBoardOverlayKey,
 	routeInteractiveKey,
 	routeOverlayKey,
@@ -304,6 +312,14 @@ const providers = {
 	},
 };
 
+const observability = {
+	telemetry: () => ({ counters: {}, histograms: {} }),
+	metrics: () => ({ counters: {}, histograms: {} }),
+	sessionCost: () => 0,
+	costEntries: () => [],
+	recordTokens: () => {},
+};
+
 	const dispatch = {
 		dispatch: async (req) => {
 			bus.emit(BusChannels.DispatchEnqueued, {
@@ -386,6 +402,7 @@ async function main() {
 		modes,
 		providers,
 		dispatch,
+		observability,
 		getWorkerDefault: () => ({ provider: "faux", model: "faux-model" }),
 		onShutdown: async () => {},
 	});
@@ -988,6 +1005,228 @@ async function main(): Promise<void> {
 		"providers-overlay:esc-via-overlay-router-calls-close",
 		providersOverlayGenericCloseCalls === 1,
 		String(providersOverlayGenericCloseCalls),
+	);
+
+	// (6b) /cost slash command + overlay formatting
+	check("parse:cost-command", parseSlashCommand("/cost").kind === "cost");
+	check(
+		"parse:cost-with-trailing-space",
+		parseSlashCommand("  /cost  ").kind === "cost",
+		parseSlashCommand("  /cost  ").kind,
+	);
+	check("parse:cost-with-arg-is-unknown", parseSlashCommand("/cost now").kind === "unknown");
+
+	const costFixtureEntries: CostEntry[] = [
+		{ providerId: "anthropic", modelId: "claude-sonnet-4.5", tokens: 1200, usd: 0.018 },
+		{ providerId: "anthropic", modelId: "claude-sonnet-4.5", tokens: 800, usd: 0.012 },
+		{ providerId: "llamacpp", modelId: "qwen3-coder", tokens: 4500, usd: 0 },
+	];
+	const costAggregate = aggregateCostEntries(costFixtureEntries);
+	check(
+		"cost-overlay:aggregates-one-row-per-provider-model-pair",
+		costAggregate.length === 2,
+		JSON.stringify(costAggregate),
+	);
+	const anthropicRow = costAggregate.find((r) => r.providerId === "anthropic" && r.modelId === "claude-sonnet-4.5");
+	check(
+		"cost-overlay:anthropic-row-sums-runs-tokens-usd",
+		anthropicRow?.runs === 2 && anthropicRow?.tokens === 2000 && Math.abs((anthropicRow?.usd ?? 0) - 0.03) < 1e-9,
+		JSON.stringify(anthropicRow),
+	);
+	const llamaRow = costAggregate.find((r) => r.providerId === "llamacpp" && r.modelId === "qwen3-coder");
+	check(
+		"cost-overlay:llamacpp-row-reports-local-zero-usd",
+		llamaRow?.runs === 1 && llamaRow?.tokens === 4500 && llamaRow?.usd === 0,
+		JSON.stringify(llamaRow),
+	);
+
+	const costOverlayLines = formatCostOverlayLines(0.03, 6500, costAggregate, { sessionId: "sess-abc123" });
+	check("cost-overlay:first-line-is-top-border", costOverlayLines[0]?.startsWith("┌"), costOverlayLines[0]);
+	check(
+		"cost-overlay:top-border-carries-session-id-suffix",
+		costOverlayLines[0]?.includes("Session cost") && costOverlayLines[0]?.includes("sess-abc123"),
+		costOverlayLines[0],
+	);
+	check(
+		"cost-overlay:last-line-is-bottom-border",
+		costOverlayLines[costOverlayLines.length - 1]?.startsWith("└"),
+		costOverlayLines[costOverlayLines.length - 1],
+	);
+	const costOverlayJoined = costOverlayLines.join("\n");
+	check(
+		"cost-overlay:shows-total-usd-and-tokens",
+		costOverlayJoined.includes("Total: $0.03") && costOverlayJoined.includes("6,500 tokens"),
+		costOverlayJoined,
+	);
+	check(
+		"cost-overlay:renders-anthropic-breakdown-row",
+		/anthropic\s+claude-sonnet-4\.5\s+2\s+2,000\s+\$0\.03/.test(costOverlayJoined),
+		costOverlayJoined,
+	);
+	check(
+		"cost-overlay:renders-llamacpp-breakdown-row-with-local-marker",
+		/llamacpp\s+qwen3-coder\s+1\s+4,500\s+\$0\.00 \(local\)/.test(costOverlayJoined) &&
+			!costOverlayJoined.includes("(l..."),
+		costOverlayJoined,
+	);
+	check("cost-overlay:hint-line-present", costOverlayJoined.includes("[Esc] close"), costOverlayJoined);
+	const costWidths = new Set(costOverlayLines.map((l) => l.length));
+	check("cost-overlay:every-line-same-width", costWidths.size === 1, [...costWidths].join(","));
+
+	const emptyCostLines = formatCostOverlayLines(0, 0, []);
+	check(
+		"cost-overlay:empty-state-shows-total-zero",
+		emptyCostLines.some((line) => line.includes("Total: $0.00") && line.includes("0 tokens")),
+		emptyCostLines.join("\n"),
+	);
+	check(
+		"cost-overlay:empty-state-shows-placeholder-row",
+		emptyCostLines.some((line) => line.includes("no dispatch runs yet")),
+		emptyCostLines.join("\n"),
+	);
+
+	let costOverlayCloseCalls = 0;
+	const costEsc = routeCostOverlayKey(ESC, {
+		closeOverlay: () => {
+			costOverlayCloseCalls += 1;
+		},
+	});
+	check("cost-overlay:esc-consumed", costEsc === true);
+	check("cost-overlay:esc-calls-close", costOverlayCloseCalls === 1, String(costOverlayCloseCalls));
+
+	const costOtherKey = routeCostOverlayKey("x", {
+		closeOverlay: () => {
+			costOverlayCloseCalls += 1;
+		},
+	});
+	check("cost-overlay:other-key-not-routed", costOtherKey === false);
+	check("cost-overlay:other-key-does-not-close", costOverlayCloseCalls === 1, String(costOverlayCloseCalls));
+
+	let costOverlayShutdownCalls = 0;
+	let costOverlayGenericCloseCalls = 0;
+	const costOverlayCtrlD = routeOverlayKey(CTRL_D, "cost", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_020,
+		closeOverlay: () => {
+			costOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			costOverlayShutdownCalls += 1;
+		},
+	});
+	check("cost-overlay:ctrl-d-consumed", costOverlayCtrlD === true);
+	check("cost-overlay:ctrl-d-calls-shutdown", costOverlayShutdownCalls === 1, String(costOverlayShutdownCalls));
+	check("cost-overlay:ctrl-d-does-not-close", costOverlayGenericCloseCalls === 0, String(costOverlayGenericCloseCalls));
+
+	const costOverlayEscGeneric = routeOverlayKey(ESC, "cost", {
+		cancelSuper: () => {},
+		confirmSuper: () => {},
+		now: () => 1_710_000_000_021,
+		closeOverlay: () => {
+			costOverlayGenericCloseCalls += 1;
+		},
+		requestShutdown: () => {
+			costOverlayShutdownCalls += 1;
+		},
+	});
+	check("cost-overlay:esc-via-overlay-router-consumed", costOverlayEscGeneric === true);
+	check(
+		"cost-overlay:esc-via-overlay-router-calls-close",
+		costOverlayGenericCloseCalls === 1,
+		String(costOverlayGenericCloseCalls),
+	);
+
+	// cost overlay live re-render on DispatchCompleted bus events using a fake TUI
+	const costObservabilityState = {
+		total: 0,
+		entries: [] as CostEntry[],
+	};
+	const costObservability: ObservabilityContract = {
+		telemetry: () => ({ counters: {}, histograms: {} }),
+		metrics: () => ({
+			dispatchesCompleted: 0,
+			dispatchesFailed: 0,
+			safetyClassifications: 0,
+			totalTokens: 0,
+			histograms: {},
+		}),
+		sessionCost: () => costObservabilityState.total,
+		costEntries: () => costObservabilityState.entries,
+		recordTokens: (providerId, modelId, tokens) => {
+			costObservabilityState.entries.push({ providerId, modelId, tokens, usd: 0 });
+		},
+	};
+	let costRenderCalls = 0;
+	let lastCostText = "";
+	const costFakeTui = {
+		requestRender: () => {
+			costRenderCalls += 1;
+		},
+		showOverlay: (component: { setText?: (s: string) => void }, opts?: { width?: number }) => {
+			check("cost-overlay:open-uses-fixed-width", opts?.width === COST_OVERLAY_WIDTH, JSON.stringify(opts));
+			const originalSetText = component?.setText;
+			if (originalSetText) {
+				const bound = originalSetText.bind(component);
+				component.setText = (s: string) => {
+					lastCostText = s;
+					bound(s);
+				};
+			}
+			return {
+				hide: () => {},
+				setHidden: () => {},
+				isHidden: () => false,
+				focus: () => {},
+				unfocus: () => {},
+				isFocused: () => true,
+			};
+		},
+	};
+	const costBus = createSafeEventBus();
+	const costHandle = openCostOverlay(
+		costFakeTui as unknown as Parameters<typeof openCostOverlay>[0],
+		costObservability,
+		{ bus: costBus, sessionId: "sess-live" },
+	);
+	costObservabilityState.entries.push({ providerId: "openai", modelId: "gpt-5", tokens: 150, usd: 0.05 });
+	costObservabilityState.total = 0.05;
+	const rendersBeforeEvent = costRenderCalls;
+	costBus.emit(BusChannels.DispatchCompleted, {
+		runId: "cost-live-1",
+		exitCode: 0,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 150,
+		durationMs: 12,
+	});
+	check(
+		"cost-overlay:dispatch-completed-triggers-rerender",
+		costRenderCalls === rendersBeforeEvent + 1,
+		`${rendersBeforeEvent} -> ${costRenderCalls}`,
+	);
+	check(
+		"cost-overlay:rerender-reflects-new-total-and-row",
+		lastCostText.includes("Total: $0.05") &&
+			lastCostText.includes("openai") &&
+			lastCostText.includes("gpt-5") &&
+			lastCostText.includes("150"),
+		lastCostText,
+	);
+	costHandle.hide();
+	const rendersAfterHide = costRenderCalls;
+	costBus.emit(BusChannels.DispatchCompleted, {
+		runId: "cost-live-2",
+		exitCode: 0,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 50,
+		durationMs: 8,
+	});
+	check(
+		"cost-overlay:hide-unsubscribes-from-bus",
+		costRenderCalls === rendersAfterHide,
+		`${rendersAfterHide} -> ${costRenderCalls}`,
 	);
 
 	// handleRun on failure routes the error to stderr
