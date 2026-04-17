@@ -11,10 +11,13 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
+import type { ModesContract } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
+import type { ProvidersContract } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { startInteractive } from "../interactive/index.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -71,23 +74,30 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		process.stdout.write(`${timer.report()}\n`);
 	}
 
-	const runInteractive = process.env.CLIO_PHASE1_INTERACTIVE === "1";
+	// CLIO_INTERACTIVE=1 is the current env; CLIO_PHASE1_INTERACTIVE=1 is a
+	// backward-compat alias from Phase 1's stub loop. Both route into the
+	// minimal interactive TUI introduced in Phase 9.
+	const runInteractive = process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
 	if (!runInteractive) {
-		process.stdout.write(`${chalk.dim("  (Phase 1 stub. Interactive loop lands in Phase 6.)")}\n`);
+		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}
 
-	// A real interactive loop lands in Phase 6. This stub keeps the process alive
-	// until the user sends SIGINT/SIGTERM. Signal handlers alone do not hold the
-	// Node event loop open, so we park a long no-op interval as an active handle.
-	// Once shutdown() fires from the signal handler it runs DRAIN -> TERMINATE ->
-	// PERSIST -> EXIT and calls process.exit itself with the correct signal-derived
-	// code (130 for SIGINT, 143 for SIGTERM). We never return from this path so
-	// the CLI entry cannot race shutdown and exit with code 0 before persist. The
-	// interval is deliberately never cleared: process.exit tears everything down.
-	void setInterval(() => {}, 1 << 30);
-	await new Promise<never>(() => {});
-	// Unreachable: the pending promise above is resolved only by process.exit.
+	const modes = result.getContract<ModesContract>("modes");
+	const providers = result.getContract<ProvidersContract>("providers");
+	if (!modes || !providers) {
+		process.stderr.write("clio: interactive mode requires modes + providers contracts; aborting.\n");
+		await termination.shutdown(1);
+		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
+	}
+
+	await startInteractive({
+		modes,
+		providers,
+		onShutdown: async () => {
+			await termination.shutdown(0);
+		},
+	});
 	return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 }
