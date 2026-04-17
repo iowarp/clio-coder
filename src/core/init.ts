@@ -1,0 +1,78 @@
+/**
+ * Bootstrap ~/.clio on first install. Creates the full directory tree required by
+ * subsequent domains and writes defaults when absent. Idempotent.
+ */
+
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { DEFAULT_SETTINGS } from "./defaults.js";
+import { clioConfigDir, clioDataDir, clioCacheDir } from "./xdg.js";
+
+export interface InitReport {
+	configDir: string;
+	dataDir: string;
+	cacheDir: string;
+	createdPaths: string[];
+	touchedSettings: boolean;
+}
+
+const SUBDIRS = ["sessions", "audit", "state", "agents", "prompts", "receipts"] as const;
+
+export function initializeClioHome(): InitReport {
+	const configDir = clioConfigDir();
+	const dataDir = clioDataDir();
+	const cacheDir = clioCacheDir();
+
+	const created: string[] = [];
+
+	for (const dir of [configDir, dataDir, cacheDir]) {
+		if (!existsSync(dir)) {
+			mkdirSync(dir, { recursive: true });
+			created.push(dir);
+		}
+	}
+
+	for (const sub of SUBDIRS) {
+		const full = join(dataDir, sub);
+		if (!existsSync(full)) {
+			mkdirSync(full, { recursive: true });
+			created.push(full);
+		}
+	}
+
+	const settingsPath = join(configDir, "settings.yaml");
+	let touched = false;
+	if (!existsSync(settingsPath)) {
+		writeFileSync(settingsPath, stringifyYaml(DEFAULT_SETTINGS), { encoding: "utf8", mode: 0o644 });
+		created.push(settingsPath);
+		touched = true;
+	} else {
+		// Sanity check: parse to catch broken edits; leave the file untouched.
+		parseYaml(readFileSync(settingsPath, "utf8"));
+	}
+
+	const credentialsPath = join(configDir, "credentials.yaml");
+	if (!existsSync(credentialsPath)) {
+		writeFileSync(credentialsPath, "# Managed via the /providers overlay. Do not edit manually unless you know what you are doing.\n{}\n", {
+			encoding: "utf8",
+			mode: 0o600,
+		});
+		chmodSync(credentialsPath, 0o600);
+		created.push(credentialsPath);
+	}
+
+	const installPath = join(dataDir, "install.json");
+	if (!existsSync(installPath)) {
+		const payload = {
+			version: "0.1.0-dev",
+			installedAt: new Date().toISOString(),
+			platform: process.platform,
+			nodeVersion: process.version,
+		};
+		writeFileSync(installPath, JSON.stringify(payload, null, 2), "utf8");
+		created.push(installPath);
+	}
+
+	return { configDir, dataDir, cacheDir, createdPaths: created, touchedSettings: touched };
+}
