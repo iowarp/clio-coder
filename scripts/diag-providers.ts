@@ -68,8 +68,14 @@ async function run(): Promise<void> {
 			].join("\n"),
 		);
 
-		const { resetXdgCache } = await import("../src/core/xdg.js");
+		const { resetXdgCache, clioDataDir } = await import("../src/core/xdg.js");
 		resetXdgCache();
+		const expectedData = join(home, "data");
+		const resolvedData = clioDataDir();
+		if (resolvedData !== expectedData) {
+			throw new Error(`expected data dir ${expectedData}, got ${resolvedData}`);
+		}
+		check("xdg:data-dir-matches-home", true);
 		const { resetSharedBus, getSharedBus } = await import("../src/core/shared-bus.js");
 		resetSharedBus();
 		const { loadDomains } = await import("../src/core/domain-loader.js");
