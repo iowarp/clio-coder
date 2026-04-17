@@ -6,6 +6,7 @@
  */
 
 import {
+	type Api,
 	type AssistantMessage,
 	type KnownProvider,
 	type Model,
@@ -15,6 +16,7 @@ import {
 	getProviders,
 	getModel as piGetModel,
 	stream as piStream,
+	supportsXhigh as piSupportsXhigh,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 } from "@mariozechner/pi-ai";
@@ -47,6 +49,16 @@ export function ensurePiAiRegistered(): void {
 	if (registered) return;
 	registerBuiltInApiProviders();
 	registered = true;
+}
+
+/**
+ * Engine-side wrapper for pi-ai's `supportsXhigh` so domain code can gate
+ * xhigh thinking without importing pi-ai directly. Accepts the engine-facing
+ * `Model<never>` shape; rewraps to pi-ai's internal `Model<Api>` on the call.
+ */
+export function supportsXhighModel(model: Model<never> | undefined): boolean {
+	if (!model) return false;
+	return piSupportsXhigh(model as unknown as Model<Api>);
 }
 
 export function createEngineAi(): EngineAi {

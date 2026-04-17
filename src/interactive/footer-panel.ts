@@ -1,9 +1,9 @@
-import type { Model } from "@mariozechner/pi-ai";
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { supportsThinking } from "../domains/providers/resolver.js";
 import { Text } from "../engine/tui.js";
+import type { Model } from "../engine/types.js";
 
 const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";

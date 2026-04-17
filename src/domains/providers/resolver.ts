@@ -1,4 +1,5 @@
-import { type Api, type Model, supportsXhigh as piSupportsXhigh } from "@mariozechner/pi-ai";
+import { supportsXhighModel } from "../../engine/ai.js";
+import type { Model } from "../../engine/types.js";
 import { PROVIDER_CATALOG, type ProviderId, isLocalEngineId } from "./catalog.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -26,12 +27,12 @@ export function supportsThinking(model: Model<never> | undefined): boolean {
 }
 
 /**
- * Delegates to pi-ai's canonical `supportsXhigh` helper so the gate stays in
- * sync with model registry updates. Returns false when no model is supplied.
+ * Delegates to pi-ai's canonical `supportsXhigh` helper via the engine wrapper
+ * so the gate stays in sync with model registry updates. Returns false when no
+ * model is supplied.
  */
 export function supportsXhighThinking(model: Model<never> | undefined): boolean {
-	if (!model) return false;
-	return piSupportsXhigh(model as unknown as Model<Api>);
+	return supportsXhighModel(model);
 }
 
 /**
