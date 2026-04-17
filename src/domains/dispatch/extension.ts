@@ -21,6 +21,7 @@ import type { ModesContract } from "../modes/contract.js";
 import { type ProviderId, getModelSpec } from "../providers/catalog.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
+import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { type Ledger, openLedger } from "./state.js";
@@ -69,6 +70,11 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const modes: ModesContract = maybeModes;
+	// scheduling is optional: when present (production boot order) dispatch gates
+	// admission on the session budget ceiling. If absent (test harnesses that
+	// exercise dispatch without the scheduling domain) dispatch falls back to
+	// pre-gate behaviour.
+	const scheduling = context.getContract<SchedulingContract>("scheduling");
 
 	let ledger: Ledger | null = null;
 	const active = new Map<string, ActiveRun>();
@@ -88,6 +94,15 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec — ${validated.errors.join("; ")}`);
+		}
+
+		if (scheduling) {
+			const preflight = scheduling.preflight();
+			if (preflight.verdict === "over" || preflight.verdict === "at") {
+				throw new Error(
+					`dispatch: admission denied — budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
+				);
+			}
 		}
 
 		const recipe = agents.get(req.agentId);

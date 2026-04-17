@@ -51,10 +51,12 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		ModesDomainModule,
 		PromptsDomainModule,
 		AgentsDomainModule,
-		DispatchDomainModule,
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
+		// scheduling before dispatch: dispatch consults scheduling.preflight()
+		// during admission to gate on the session budget ceiling.
+		DispatchDomainModule,
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);

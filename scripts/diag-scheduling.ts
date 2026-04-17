@@ -81,6 +81,13 @@ async function run(): Promise<void> {
 		check("budget:at-ceiling", sched.checkCeiling(ceiling) === "at");
 		check("budget:over-ceiling", sched.checkCeiling(ceiling + 1) === "over");
 
+		const freshPre = sched.preflight();
+		check(
+			"preflight:under-fresh-session",
+			freshPre.verdict === "under" && freshPre.currentUsd === 0 && freshPre.ceilingUsd === ceiling,
+			`verdict=${freshPre.verdict} current=${freshPre.currentUsd} ceiling=${freshPre.ceilingUsd}`,
+		);
+
 		check("cluster:empty-nodes", sched.listNodes().length === 0);
 		check("concurrency:no-active", sched.activeWorkers() === 0);
 		check("concurrency:acquire", sched.tryAcquireWorker() === true);
@@ -107,6 +114,13 @@ async function run(): Promise<void> {
 			check("alert:level-over", alerts[0].level === "over", `level=${String(alerts[0].level)}`);
 			check("alert:ceiling-value", alerts[0].ceilingUsd === ceiling, `got=${String(alerts[0].ceilingUsd)}`);
 		}
+
+		const overPre = sched.preflight();
+		check(
+			"preflight:over-once-cost-exceeds-ceiling",
+			overPre.verdict === "over" && overPre.currentUsd > overPre.ceilingUsd,
+			`verdict=${overPre.verdict} current=${overPre.currentUsd} ceiling=${overPre.ceilingUsd}`,
+		);
 
 		off();
 		await result.stop();
