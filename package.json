@@ -35,7 +35,7 @@
 		"check:boundaries": "tsx scripts/check-boundaries.ts",
 		"check:prompts": "tsx scripts/check-prompts.ts",
 		"verify": "tsx scripts/verify.ts",
-		"smoke": "tsx scripts/verify.ts --smoke",
+		"smoke": "tsx scripts/smoke.ts",
 		"diag:interactive": "tsx scripts/diag-interactive.ts",
 		"diag:interactive-tui": "tsx scripts/diag-interactive-tui.ts",
 		"diag:dispatch-board": "tsx scripts/diag-dispatch-board.ts",
@@ -77,7 +77,7 @@
 		"diag:upgrade": "tsx scripts/diag-upgrade.ts",
 		"stress": "tsx scripts/stress.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:agents && npm run diag:tools && npm run diag:cli-runtimes && npm run diag:interactive-tui && npm run diag:dispatch-board && npm run build && npm run diag:claude-sdk && npm run diag:dispatch && npm run diag:single-dispatch && npm run diag:worker-tools && npm run diag:orchestrator && npm run diag:observability && npm run diag:scheduling && npm run diag:dispatch-budget && npm run diag:upgrade && npm run verify"
+		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run diag:credentials && npm run diag:providers && npm run diag:agents && npm run diag:tools && npm run diag:cli-runtimes && npm run diag:interactive-tui && npm run diag:dispatch-board && npm run build && npm run diag:claude-sdk && npm run diag:dispatch && npm run diag:single-dispatch && npm run diag:worker-tools && npm run diag:orchestrator && npm run diag:observability && npm run diag:scheduling && npm run diag:dispatch-budget && npm run diag:upgrade && npm run verify && npm run smoke"
 	},
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.67.4",
