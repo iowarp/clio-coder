@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { type ClioSettings, settingsPath } from "../src/core/config.js";
+import { stringify as stringifyYaml } from "yaml";
+import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../src/core/config.js";
 import { loadDomains } from "../src/core/domain-loader.js";
 import { initializeClioHome } from "../src/core/init.js";
 import { resetSharedBus } from "../src/core/shared-bus.js";
@@ -54,6 +54,7 @@ function cleanEphemeralHome(): void {
 }
 
 function fail(msg: string, extra?: string): never {
+	// writes to process.stderr.write to bypass the overridden console.error so dumped output isn't re-captured.
 	process.stderr.write(`[diag-config] FAIL: ${msg}\n`);
 	if (extra) process.stderr.write(`${extra}\n`);
 	if (ephemeralHome) {
@@ -66,21 +67,14 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(check: () => boolean, capMs: number, pollMs = 10): Promise<boolean> {
-	const deadline = Date.now() + capMs;
+async function waitFor(check: () => boolean, capMs: number, pollMs = 10): Promise<{ ok: boolean; elapsedMs: number }> {
+	const start = Date.now();
+	const deadline = start + capMs;
 	while (!check()) {
-		if (Date.now() > deadline) return false;
+		if (Date.now() > deadline) return { ok: false, elapsedMs: Date.now() - start };
 		await sleep(pollMs);
 	}
-	return true;
-}
-
-function readSettingsFile(path: string): ClioSettings {
-	return parseYaml(readFileSync(path, "utf8")) as ClioSettings;
-}
-
-function writeSettingsFile(path: string, settings: ClioSettings): void {
-	writeFileSync(path, stringifyYaml(settings), { encoding: "utf8", mode: 0o644 });
+	return { ok: true, elapsedMs: Date.now() - start };
 }
 
 async function main(): Promise<void> {
@@ -144,13 +138,13 @@ async function main(): Promise<void> {
 			nextTurn: received.nextTurn.length,
 			restartRequired: received.restartRequired.length,
 		};
-		const current = readSettingsFile(path);
+		const current = readSettings();
 		args.mutate(current);
-		writeSettingsFile(path, current);
+		writeSettings(current);
 
-		const ok = await waitFor(() => received[args.bucket].length > baselineCounts[args.bucket], 2000);
+		const { ok, elapsedMs } = await waitFor(() => received[args.bucket].length > baselineCounts[args.bucket], 2000);
 		if (!ok) {
-			fail(`[${args.label}] ${args.bucket} listener did not fire within 2s`);
+			fail(`[${args.label}] ${args.bucket} listener did not fire within 2s (elapsed=${elapsedMs}ms)`);
 		}
 		const event = received[args.bucket].at(-1);
 		if (!event) fail(`[${args.label}] ${args.bucket} listener fired but event was undefined`);
@@ -220,14 +214,20 @@ async function main(): Promise<void> {
 		nextTurn: received.nextTurn.length,
 		restartRequired: received.restartRequired.length,
 	};
-	const bogus = readSettingsFile(path) as unknown as Record<string, unknown>;
+	// Round 4 intentionally writes a value that fails schema validation, so it
+	// bypasses writeSettings (which would type-check its argument) and stamps
+	// the file with raw YAML.
+	const bogus = readSettings() as unknown as Record<string, unknown>;
 	bogus.safetyLevel = "bogus";
 	writeFileSync(path, stringifyYaml(bogus), { encoding: "utf8", mode: 0o644 });
 
-	const sawError = await waitFor(() => capturedStderr.includes("reload rejected"), 2000);
+	const { ok: sawError, elapsedMs: invalidElapsed } = await waitFor(
+		() => capturedStderr.includes("reload rejected"),
+		2000,
+	);
 	if (!sawError) {
 		fail(
-			"invalid edit: expected 'reload rejected' on stderr after bogus safetyLevel",
+			`[invalid] expected 'reload rejected' on stderr after bogus safetyLevel (elapsed=${invalidElapsed}ms)`,
 			`captured stderr so far:\n${capturedStderr}`,
 		);
 	}
@@ -236,12 +236,12 @@ async function main(): Promise<void> {
 	await sleep(150);
 	const post = contract.get();
 	if (post.safetyLevel !== preInvalidSafety) {
-		fail(`invalid edit: snapshot was replaced. pre=${String(preInvalidSafety)} post=${String(post.safetyLevel)}`);
+		fail(`[invalid] snapshot was replaced. pre=${String(preInvalidSafety)} post=${String(post.safetyLevel)}`);
 	}
 	for (const other of ["hotReload", "nextTurn", "restartRequired"] as const) {
 		if (received[other].length !== preInvalidCounts[other]) {
 			fail(
-				`invalid edit: bucket ${other} fired (before=${preInvalidCounts[other]} after=${received[other].length}); invalid edits must not dispatch`,
+				`[invalid] bucket ${other} fired (before=${preInvalidCounts[other]} after=${received[other].length}); invalid edits must not dispatch`,
 			);
 		}
 	}
