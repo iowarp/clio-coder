@@ -1,25 +1,28 @@
 import type { ProviderEndpointEntry, ProviderListEntry, ProvidersContract } from "../domains/providers/contract.js";
-import { Box, Loader, type OverlayHandle, type TUI, Text } from "../engine/tui.js";
+import { Box, Loader, type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 
-const CONTENT_WIDTH = 70;
-const INNER_WIDTH = CONTENT_WIDTH + 2;
+const DEFAULT_CONTENT_WIDTH = 70;
 const TITLE = "─ Providers ";
 const HINT = "[Esc] close";
 
-export const PROVIDERS_OVERLAY_WIDTH = INNER_WIDTH + 2;
+export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 const IDENTITY = (s: string): string => s;
 
-function padContent(text: string): string {
-	return `│ ${text.padEnd(CONTENT_WIDTH)} │`;
+function padContent(text: string, contentWidth: number): string {
+	return `│ ${truncateToWidth(text, contentWidth, "...", true)} │`;
 }
 
-function topBorder(): string {
-	return `┌${TITLE.padEnd(INNER_WIDTH, "─")}┐`;
+function topBorder(contentWidth: number): string {
+	const innerWidth = contentWidth + 2;
+	if (innerWidth <= TITLE.length) {
+		return `┌${"─".repeat(innerWidth)}┐`;
+	}
+	return `┌${TITLE.padEnd(innerWidth, "─")}┐`;
 }
 
-function bottomBorder(): string {
-	return `└${"─".repeat(INNER_WIDTH)}┘`;
+function bottomBorder(contentWidth: number): string {
+	return `└${"─".repeat(contentWidth + 2)}┘`;
 }
 
 function statusTag(entry: ProviderListEntry): "ok" | "off" | "unknown" {
@@ -64,39 +67,57 @@ function formatEndpointRow(endpoint: ProviderEndpointEntry): string {
 	return `    ${name} ${url} off ${endpoint.probe.error ?? "unreachable"}`;
 }
 
-function truncateContent(line: string): string {
-	if (line.length <= CONTENT_WIDTH) return line;
-	if (CONTENT_WIDTH <= 3) return line.slice(0, CONTENT_WIDTH);
-	return `${line.slice(0, CONTENT_WIDTH - 3)}...`;
+function resolveContentWidth(contentWidth?: number): number {
+	return Math.max(1, contentWidth ?? DEFAULT_CONTENT_WIDTH);
 }
 
 export function formatProvidersOverlayLines(
 	entries: ReadonlyArray<ProviderListEntry>,
-	options?: { error?: string | null },
+	options?: { error?: string | null; contentWidth?: number },
 ): string[] {
-	const lines: string[] = [topBorder()];
+	const contentWidth = resolveContentWidth(options?.contentWidth);
+	const lines: string[] = [topBorder(contentWidth)];
 	if (options?.error) {
-		lines.push(padContent(truncateContent(`probe error: ${options.error}`)));
-		lines.push(padContent(""));
+		lines.push(padContent(`probe error: ${options.error}`, contentWidth));
+		lines.push(padContent("", contentWidth));
 	}
 	if (entries.length === 0) {
-		lines.push(padContent("no providers configured"));
+		lines.push(padContent("no providers configured", contentWidth));
 	} else {
 		for (const entry of entries) {
 			if (entry.endpoints !== undefined) {
-				lines.push(padContent(truncateContent(formatLocalHeader(entry))));
+				lines.push(padContent(formatLocalHeader(entry), contentWidth));
 				for (const endpoint of entry.endpoints) {
-					lines.push(padContent(truncateContent(formatEndpointRow(endpoint))));
+					lines.push(padContent(formatEndpointRow(endpoint), contentWidth));
 				}
 			} else {
-				lines.push(padContent(truncateContent(formatRemoteRow(entry))));
+				lines.push(padContent(formatRemoteRow(entry), contentWidth));
 			}
 		}
 	}
-	lines.push(padContent(""));
-	lines.push(padContent(HINT));
-	lines.push(bottomBorder());
+	lines.push(padContent("", contentWidth));
+	lines.push(padContent(HINT, contentWidth));
+	lines.push(bottomBorder(contentWidth));
 	return lines;
+}
+
+class ProvidersOverlayView implements Component {
+	constructor(
+		private readonly entries: ReadonlyArray<ProviderListEntry>,
+		private readonly error: string | null,
+	) {}
+
+	render(width: number): string[] {
+		if (width <= 4) {
+			return [truncateToWidth("Providers", width, "", true)];
+		}
+		return formatProvidersOverlayLines(this.entries, {
+			error: this.error,
+			contentWidth: width - 4,
+		});
+	}
+
+	invalidate(): void {}
 }
 
 export interface OpenProvidersOverlayOptions {
@@ -122,17 +143,18 @@ export function openProvidersOverlay(
 		width: PROVIDERS_OVERLAY_WIDTH,
 	});
 
-	const finalize = (lines: string[]): void => {
+	const finalize = (entries: ReadonlyArray<ProviderListEntry>, error: string | null): void => {
 		if (lifecycle.signal.aborted) return;
 		loader.stop();
 		box.clear();
-		box.addChild(new Text(lines.join("\n"), 0, 0));
+		box.addChild(new ProvidersOverlayView(entries, error));
 		tui.requestRender();
 		options?.onComplete?.();
 	};
 
 	void (async () => {
 		let error: string | null = null;
+		let entries: ReadonlyArray<ProviderListEntry> = [];
 		try {
 			await providers.probeAllLive();
 		} catch (err) {
@@ -145,9 +167,9 @@ export function openProvidersOverlay(
 				error = err instanceof Error ? err.message : String(err);
 			}
 		}
-		const entries = providers.list();
+		entries = providers.list();
 		if (lifecycle.signal.aborted) return;
-		finalize(formatProvidersOverlayLines(entries, { error }));
+		finalize(entries, error);
 	})();
 
 	return {

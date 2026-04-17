@@ -1,6 +1,7 @@
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../engine/tui.js";
-import { openProvidersOverlay } from "./providers-overlay.js";
+import { visibleWidth } from "../engine/tui.js";
+import { formatProvidersOverlayLines, openProvidersOverlay } from "./providers-overlay.js";
 
 const failures: string[] = [];
 
@@ -41,6 +42,48 @@ function createFakeTui(): TUI {
 }
 
 async function main(): Promise<void> {
+	const narrowLines = formatProvidersOverlayLines(
+		[
+			{
+				id: "openai-compat",
+				displayName: "OpenAI-Compatible Long Endpoint",
+				tier: "native",
+				available: true,
+				reason: "configured",
+				health: {
+					providerId: "openai-compat",
+					status: "healthy",
+					lastCheckAt: "2026-04-17T00:00:00.000Z",
+					lastError: null,
+					latencyMs: 12,
+				},
+				endpoints: [
+					{
+						name: "primary-endpoint",
+						url: "http://localhost:8011/v1/very/long/path",
+						probe: {
+							name: "primary-endpoint",
+							url: "http://localhost:8011/v1/very/long/path",
+							ok: false,
+							error: "connection refused",
+						},
+					},
+				],
+			},
+		],
+		{ contentWidth: 36 },
+	);
+	check(
+		"providers-overlay:narrow-lines-stay-at-overlay-width",
+		narrowLines.every((line) => visibleWidth(line) === 40),
+		narrowLines.join("\n"),
+	);
+	check(
+		"providers-overlay:narrow-unhealthy-endpoint-skips-undefined-latency",
+		!narrowLines.some((line) => line.includes("undefined ms")),
+		narrowLines.join("\n"),
+	);
+
 	const realSetInterval = globalThis.setInterval;
 	const realClearInterval = globalThis.clearInterval;
 	let nextId = 0;
