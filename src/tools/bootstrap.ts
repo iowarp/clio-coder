@@ -7,7 +7,6 @@ import { lsTool } from "./ls.js";
 import { readTool } from "./read.js";
 import type { ToolIndex, ToolRegistry } from "./registry.js";
 import { webFetchTool } from "./web-fetch.js";
-import { webSearchTool } from "./web-search.js";
 import { writePlanTool } from "./write-plan.js";
 import { writeReviewTool } from "./write-review.js";
 import { writeTool } from "./write.js";
@@ -31,7 +30,6 @@ export function registerAllTools(registry: ToolRegistry | ToolIndex): void {
 	registry.register({ ...globTool, allowedModes: everyMode });
 	registry.register({ ...lsTool, allowedModes: everyMode });
 	registry.register({ ...webFetchTool, allowedModes: everyMode });
-	registry.register({ ...webSearchTool, allowedModes: everyMode });
 	registry.register({ ...writePlanTool, allowedModes: adviseOnly });
 	registry.register({ ...writeReviewTool, allowedModes: adviseOnly });
 }
