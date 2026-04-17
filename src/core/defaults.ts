@@ -69,3 +69,87 @@ export const DEFAULT_SETTINGS = {
 };
 
 export type DefaultSettings = typeof DEFAULT_SETTINGS;
+
+/**
+ * Raw YAML document written to ~/.clio/settings.yaml on first install. Mirrors
+ * every field of DEFAULT_SETTINGS at the same key path so settings migration
+ * keeps working, and carries fully commented example endpoint blocks that a
+ * new user can uncomment to point Clio at a local llama-server or LM Studio.
+ *
+ * The YAML library strips comments when round-tripping through stringify, so
+ * first-install writes this raw string directly instead of going through
+ * stringifyYaml(DEFAULT_SETTINGS).
+ */
+export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first install; edit freely.
+# Docs: https://github.com/iowarp/clio-coder
+
+version: 1
+identity: clio
+defaultMode: default        # default | advise | super
+safetyLevel: auto-edit      # suggest | auto-edit | full-auto
+
+# Active provider and model for the orchestrator loop. Leave null until
+# you pick one by uncommenting an example below or running clio providers.
+provider:
+  active: null
+  model: null
+
+# Local inference engines. Each entry under endpoints becomes a selectable
+# target. Uncomment a block below, then run clio doctor to verify.
+providers:
+  llamacpp:
+    endpoints: {}
+    # Example: llama.cpp on the homelab (uncomment to use)
+    # Replace the host and port with your llama-server --host --port.
+    # Then run clio providers use llamacpp mini to activate.
+    # endpoints:
+    #   mini:
+    #     url: http://192.168.86.141:8080
+    #     default_model: Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL
+    #     # api_key: llama-no-auth
+    #     context_window: 262144
+    #     max_tokens: 16384
+
+  lmstudio:
+    endpoints: {}
+    # Example: LM Studio on the homelab (uncomment to use)
+    # Point at the LM Studio server on :1234 with the model loaded.
+    # endpoints:
+    #   dynamo:
+    #     url: http://192.168.86.143:1234
+    #     default_model: qwen3.6-35b-a3b
+    #     # api_key: lm-studio
+    #     context_window: 262144
+    #     max_tokens: 16384
+
+  ollama:
+    endpoints: {}
+
+  openai-compat:
+    endpoints: {}
+
+# Orchestrator target override. Leave empty to use the active provider.
+orchestrator: {}
+
+# Per-worker target overrides. default applies to every worker spec that
+# does not declare its own target block.
+workers:
+  default: {}
+
+# Session budget guardrails.
+budget:
+  sessionCeilingUsd: 5
+  concurrency: auto           # auto or a positive integer
+
+# Runtimes Clio will load. native is always available.
+runtimes:
+  enabled:
+    - native
+
+theme: default
+keybindings: {}
+
+# Transient session state. Clio rewrites this block; do not hand-edit.
+state:
+  lastMode: default
+`;
