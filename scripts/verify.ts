@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 /**
  * Verification script. Builds once, then runs:
@@ -78,6 +79,23 @@ function checkInstall(home: string, env: NodeJS.ProcessEnv): void {
 		fail(`expected install.json under ${installJsonDataDir} or ${installJsonDirect}`);
 	}
 	log("clio install OK (idempotent)");
+}
+
+function checkSettingsTemplate(home: string): void {
+	const settingsPath = join(home, "settings.yaml");
+	const body = readFileSync(settingsPath, "utf8");
+	const requiredLiterals = ["# Example: llama.cpp on the homelab", "mini:", "dynamo:", "# api_key:"];
+	for (const literal of requiredLiterals) {
+		if (!body.includes(literal)) {
+			fail(`settings.yaml missing literal ${JSON.stringify(literal)}; regression of first-install example block`, body);
+		}
+	}
+	try {
+		parseYaml(body);
+	} catch (err) {
+		fail("settings.yaml did not parse after install", (err as Error).message);
+	}
+	log("settings.yaml example block OK");
 }
 
 function checkDoctor(env: NodeJS.ProcessEnv): void {
@@ -171,6 +189,7 @@ function main(): void {
 	log(`ephemeral CLIO_HOME=${home}`);
 	checkVersion(env);
 	checkInstall(home, env);
+	checkSettingsTemplate(home);
 	checkDoctor(env);
 	checkBoot(env);
 	checkRegistryPaths(env);
