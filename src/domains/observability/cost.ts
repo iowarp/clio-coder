@@ -16,7 +16,7 @@ export interface CostEntry {
 }
 
 export interface CostTracker {
-	accumulate(providerId: string, modelId: string, tokens: number): number;
+	accumulate(providerId: string, modelId: string, tokens: number, usd?: number): number;
 	sessionTotal(): number;
 	entries(): ReadonlyArray<CostEntry>;
 	reset(): void;
@@ -35,11 +35,11 @@ export function createCostTracker(): CostTracker {
 	const log: CostEntry[] = [];
 	let total = 0;
 	return {
-		accumulate(providerId, modelId, tokens) {
-			const usd = priceUsdPerToken(providerId, modelId) * tokens;
-			log.push({ providerId, modelId, tokens, usd });
-			total += usd;
-			return usd;
+		accumulate(providerId, modelId, tokens, usd) {
+			const resolvedUsd = usd ?? priceUsdPerToken(providerId, modelId) * tokens;
+			log.push({ providerId, modelId, tokens, usd: resolvedUsd });
+			total += resolvedUsd;
+			return resolvedUsd;
 		},
 		sessionTotal() {
 			return total;

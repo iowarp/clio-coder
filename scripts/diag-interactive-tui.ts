@@ -33,6 +33,7 @@ import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
 import type { CostEntry, ObservabilityContract } from "../src/domains/observability/index.js";
+import { createObservabilityBundle } from "../src/domains/observability/extension.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
 import {
 	COST_OVERLAY_WIDTH,
@@ -1054,7 +1055,7 @@ async function main(): Promise<void> {
 	check("cost-overlay:first-line-is-top-border", costOverlayLines[0]?.startsWith("┌"), costOverlayLines[0]);
 	check(
 		"cost-overlay:top-border-carries-session-id-suffix",
-		costOverlayLines[0]?.includes("Session cost") && costOverlayLines[0]?.includes("sess-abc123"),
+		costOverlayLines[0]?.includes("Session cost") && costOverlayLines[0]?.includes("(sess-abc123)"),
 		costOverlayLines[0],
 	);
 	check(
@@ -1147,6 +1148,45 @@ async function main(): Promise<void> {
 		String(costOverlayGenericCloseCalls),
 	);
 
+	const liveObsBus = createSafeEventBus();
+	const liveObsBundle = createObservabilityBundle({ bus: liveObsBus } as Parameters<typeof createObservabilityBundle>[0]);
+	await liveObsBundle.extension.start();
+	liveObsBus.emit(BusChannels.DispatchFailed, {
+		runId: "obs-fail-1",
+		exitCode: 1,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 1000,
+		costUsd: 0.07,
+		durationMs: 5,
+	});
+	check(
+		"cost-observability:failed-run-contributes-actual-usd",
+		liveObsBundle.contract.sessionCost() === 0.07 &&
+			liveObsBundle.contract.costEntries()[0]?.usd === 0.07 &&
+			liveObsBundle.contract.costEntries()[0]?.tokens === 1000,
+		JSON.stringify(liveObsBundle.contract.costEntries()),
+	);
+	liveObsBus.emit(BusChannels.DispatchCompleted, {
+		runId: "obs-complete-1",
+		exitCode: 0,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 200,
+		costUsd: 0.01,
+		durationMs: 3,
+	});
+	check(
+		"cost-observability:completed-run-adds-on-top-of-failed-run",
+		Math.abs(liveObsBundle.contract.sessionCost() - 0.08) < 1e-9 &&
+			liveObsBundle.contract.costEntries().length === 2,
+		JSON.stringify({
+			total: liveObsBundle.contract.sessionCost(),
+			entries: liveObsBundle.contract.costEntries(),
+		}),
+	);
+	await liveObsBundle.extension.stop();
+
 	// cost overlay live re-render on DispatchCompleted bus events using a fake TUI
 	const costObservabilityState = {
 		total: 0,
@@ -1223,6 +1263,27 @@ async function main(): Promise<void> {
 			lastCostText.includes("150"),
 		lastCostText,
 	);
+	costObservabilityState.entries.push({ providerId: "openai", modelId: "gpt-5", tokens: 50, usd: 0.02 });
+	costObservabilityState.total = 0.07;
+	const rendersBeforeFailedEvent = costRenderCalls;
+	costBus.emit(BusChannels.DispatchFailed, {
+		runId: "cost-live-fail-1",
+		exitCode: 1,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 50,
+		durationMs: 4,
+	});
+	check(
+		"cost-overlay:dispatch-failed-triggers-rerender",
+		costRenderCalls === rendersBeforeFailedEvent + 1,
+		`${rendersBeforeFailedEvent} -> ${costRenderCalls}`,
+	);
+	check(
+		"cost-overlay:failed-rerender-reflects-updated-total",
+		lastCostText.includes("Total: $0.07") && lastCostText.includes("200"),
+		lastCostText,
+	);
 	costHandle.hide();
 	const rendersAfterHide = costRenderCalls;
 	costBus.emit(BusChannels.DispatchCompleted, {
@@ -1235,6 +1296,19 @@ async function main(): Promise<void> {
 	});
 	check(
 		"cost-overlay:hide-unsubscribes-from-bus",
+		costRenderCalls === rendersAfterHide,
+		`${rendersAfterHide} -> ${costRenderCalls}`,
+	);
+	costBus.emit(BusChannels.DispatchFailed, {
+		runId: "cost-live-fail-2",
+		exitCode: 1,
+		providerId: "openai",
+		modelId: "gpt-5",
+		tokenCount: 25,
+		durationMs: 2,
+	});
+	check(
+		"cost-overlay:hide-unsubscribes-from-failed-bus-events",
 		costRenderCalls === rendersAfterHide,
 		`${rendersAfterHide} -> ${costRenderCalls}`,
 	);

@@ -24,7 +24,7 @@ function padContent(text: string, contentWidth: number): string {
 
 function topBorder(contentWidth: number, sessionId: string | null): string {
 	const innerWidth = contentWidth + 2;
-	const label = sessionId && sessionId.length > 0 ? `${TITLE_PREFIX} \u2014 ${sessionId} ` : `${TITLE_PREFIX} `;
+	const label = sessionId && sessionId.length > 0 ? `${TITLE_PREFIX} (${sessionId}) ` : `${TITLE_PREFIX} `;
 	if (innerWidth <= label.length) {
 		const truncated = truncateToWidth(label, innerWidth, "...", true);
 		return `┌${truncated.padEnd(innerWidth, "─")}┐`;
@@ -181,6 +181,7 @@ export function openCostOverlay(
 	const unsubscribes: Array<() => void> = [];
 	if (options?.bus) {
 		unsubscribes.push(options.bus.on(BusChannels.DispatchCompleted, refresh));
+		unsubscribes.push(options.bus.on(BusChannels.DispatchFailed, refresh));
 	}
 
 	return {
