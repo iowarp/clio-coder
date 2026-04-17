@@ -16,9 +16,9 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `get state(): AgentState`
   - `get steeringMode(): "all" | "one-at-a-time"` / `set steeringMode(mode)`
   - `get followUpMode(): "all" | "one-at-a-time"` / `set followUpMode(mode)`
-  - `get signal(): AbortSignal | undefined` — active run's signal
+  - `get signal(): AbortSignal | undefined`. Returns the active run's signal.
   - Public fields (assignable after construction): `convertToLlm`, `transformContext?`, `streamFn: StreamFn`, `getApiKey?`, `onPayload?`, `beforeToolCall?`, `afterToolCall?`, `sessionId?`, `thinkingBudgets?`, `transport: Transport`, `maxRetryDelayMs?`, `toolExecution: ToolExecutionMode`.
-  - `subscribe(listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void): () => void` — returns unsubscribe fn.
+  - `subscribe(listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void): () => void`. Returns an unsubscribe fn.
   - `steer(message: AgentMessage): void`
   - `followUp(message: AgentMessage): void`
   - `clearSteeringQueue(): void` / `clearFollowUpQueue(): void` / `clearAllQueues(): void`
@@ -27,7 +27,7 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `waitForIdle(): Promise<void>`
   - `reset(): void`
   - Overloaded `prompt`: `async prompt(message: AgentMessage | AgentMessage[]): Promise<void>` and `async prompt(input: string, images?: ImageContent[]): Promise<void>` (implementation accepts `string | AgentMessage | AgentMessage[]`).
-  - `async continue(): Promise<void>` — continues from the current transcript; throws if the last message is an assistant message and no steering/follow-up queue is drainable.
+  - `async continue(): Promise<void>`. Continues from the current transcript; throws if the last message is an assistant message and no steering/follow-up queue is drainable.
 
 ### Loop functions (from `agent-loop.ts`)
 
@@ -39,13 +39,13 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
 
 ### Proxy helpers (from `proxy.ts`)
 
-- `type ProxyAssistantMessageEvent` — discriminated union (`start`, `text_*`, `thinking_*`, `toolcall_*`, `done`, `error`) used for server-side proxy streaming.
+- `type ProxyAssistantMessageEvent` is a discriminated union (`start`, `text_*`, `thinking_*`, `toolcall_*`, `done`, `error`) used for server-side proxy streaming.
 - `interface ProxyStreamOptions extends SimpleStreamOptions { authToken: string; proxyUrl: string; }`
-- `streamProxy(model: Model<any>, context: Context, options: ProxyStreamOptions): ProxyMessageEventStream` — drop-in `streamFn` replacement when routing through a server. `ProxyMessageEventStream` (a private subclass of `EventStream`) is returned but not re-exported as a type.
+- `streamProxy(model: Model<any>, context: Context, options: ProxyStreamOptions): ProxyMessageEventStream`. This is a drop-in `streamFn` replacement when routing through a server. `ProxyMessageEventStream` (a private subclass of `EventStream`) is returned but not re-exported as a type.
 
 ### Interfaces and types (from `types.ts`)
 
-- `type StreamFn = (...args: Parameters<typeof streamSimple>) => ReturnType<typeof streamSimple> | Promise<ReturnType<typeof streamSimple>>;` — must not throw; failures must be encoded in the returned stream.
+- `type StreamFn = (...args: Parameters<typeof streamSimple>) => ReturnType<typeof streamSimple> | Promise<ReturnType<typeof streamSimple>>;`. The function must not throw; failures must be encoded in the returned stream.
 - `type ToolExecutionMode = "sequential" | "parallel";`
 - `type AgentToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;`
 - `interface BeforeToolCallResult { block?: boolean; reason?: string; }`
@@ -54,9 +54,9 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
 - `interface AfterToolCallContext { assistantMessage: AssistantMessage; toolCall: AgentToolCall; args: unknown; result: AgentToolResult<any>; isError: boolean; context: AgentContext; }`
 - `interface AgentLoopConfig extends SimpleStreamOptions` with fields: `model: Model<any>`; `convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>`; `transformContext?`; `getApiKey?`; `getSteeringMessages?: () => Promise<AgentMessage[]>`; `getFollowUpMessages?: () => Promise<AgentMessage[]>`; `toolExecution?: ToolExecutionMode`; `beforeToolCall?`; `afterToolCall?`.
 - `type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";` (distinct from the pi-ai `ThinkingLevel`, which omits `"off"`).
-- `interface CustomAgentMessages {}` — empty seam for consumer declaration merging.
+- `interface CustomAgentMessages {}` is an empty seam for consumer declaration merging.
 - `type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];`
-- `interface AgentState` — fields (order matters because accessors vs readonly):
+- `interface AgentState` has these fields (order matters because accessors vs readonly):
   - `systemPrompt: string`
   - `model: Model<any>`
   - `thinkingLevel: ThinkingLevel`
@@ -66,7 +66,7 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `readonly streamingMessage?: AgentMessage`
   - `readonly pendingToolCalls: ReadonlySet<string>`
   - `readonly errorMessage?: string`
-- `interface AgentOptions` (from `agent.ts`) — every field optional:
+- `interface AgentOptions` (from `agent.ts`) has every field optional:
   - `initialState?: Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming" | "streamingMessage" | "errorMessage">>`
   - `convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>`
   - `transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>`
@@ -108,24 +108,24 @@ The index also re-exports `Type` (value) and the `Static`, `TSchema` types from 
 - `streamSimple<TApi extends Api>(model: Model<TApi>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream`.
 - `completeSimple<TApi extends Api>(model: Model<TApi>, context: Context, options?: SimpleStreamOptions): Promise<AssistantMessage>`.
 - `registerApiProvider<TApi, TOptions>(provider: ApiProvider<TApi, TOptions>, sourceId?: string): void` (from `api-registry.ts`).
-- `getApiProvider(api: Api): ApiProviderInternal | undefined` (returns the `ApiProviderInternal` type — note that type is not exported; `getApiProviders()` returns an array of the same).
+- `getApiProvider(api: Api): ApiProviderInternal | undefined` (returns the `ApiProviderInternal` type; note that type is not exported; `getApiProviders()` returns an array of the same).
 - `getApiProviders(): ApiProviderInternal[]`
 - `unregisterApiProviders(sourceId: string): void`
 - `clearApiProviders(): void`
 - `registerBuiltInApiProviders(): void` (from `providers/register-builtins.ts`; called automatically at module load, and again on `resetApiProviders()`).
 - `resetApiProviders(): void`
-- `setBedrockProviderModule(module: BedrockProviderModule): void` — opt-in override for host environments that bundle Bedrock separately.
+- `setBedrockProviderModule(module: BedrockProviderModule): void` is an opt-in override for host environments that bundle Bedrock separately.
 
-There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those live in `models.ts` — see below.
+There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those live in `models.ts`; see below.
 
 ### Model-registry helpers (from `models.ts`)
 
 - `getProviders(): KnownProvider[]`
 - `getModel<TProvider extends KnownProvider, TModelId extends keyof (typeof MODELS)[TProvider]>(provider: TProvider, modelId: TModelId): Model<ModelApi<TProvider, TModelId>>`
 - `getModels<TProvider extends KnownProvider>(provider: TProvider): Model<ModelApi<TProvider, keyof (typeof MODELS)[TProvider]>>[]`
-- `calculateCost<TApi>(model: Model<TApi>, usage: Usage): Usage["cost"]` — mutates and returns `usage.cost`.
-- `supportsXhigh<TApi>(model: Model<TApi>): boolean` — true for gpt-5.2/5.3/5.4 and opus-4.6.
-- `modelsAreEqual<TApi>(a, b): boolean` — compares `id` and `provider`.
+- `calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"]`. Mutates and returns `usage.cost`.
+- `supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean`. Returns true for gpt-5.2/5.3/5.4 and opus-4.6.
+- `modelsAreEqual<TApi extends Api>(a, b): boolean`. Compares `id` and `provider`.
 
 ### Lazy provider stream exports (from `providers/register-builtins.ts`)
 
@@ -139,7 +139,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 - `streamOpenAICompletions`, `streamSimpleOpenAICompletions`
 - `streamOpenAIResponses`, `streamSimpleOpenAIResponses`
 
-(Bedrock is registered but its `streamBedrockLazy` is not re-exported — you reach it via `streamSimple()` or `stream()`.)
+(Bedrock is registered but its `streamBedrockLazy` is not re-exported; you reach it via `streamSimple()` or `stream()`.)
 
 ### Faux provider (from `providers/faux.ts`)
 
@@ -188,7 +188,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 - `type Message = UserMessage | AssistantMessage | ToolResultMessage`
 - `interface Tool<TParameters extends TSchema = TSchema> { name: string; description: string; parameters: TParameters; }`
 - `interface Context { systemPrompt?: string; messages: Message[]; tools?: Tool[]; }`
-- `type AssistantMessageEvent` — discriminated union (`start`, `text_start/delta/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`, `done`, `error`) every payload carrying `partial: AssistantMessage`.
+- `type AssistantMessageEvent` is a discriminated union (`start`, `text_start/delta/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`, `done`, `error`) with every payload carrying `partial: AssistantMessage`.
 - `interface OpenAICompletionsCompat { supportsStore?; supportsDeveloperRole?; supportsReasoningEffort?; reasoningEffortMap?; supportsUsageInStreaming?; maxTokensField?; requiresToolResultName?; requiresAssistantAfterToolResult?; requiresThinkingAsText?; thinkingFormat?; openRouterRouting?; vercelGatewayRouting?; zaiToolStream?; supportsStrictMode?; }`
 - `interface OpenAIResponsesCompat {}`
 - `interface OpenRouterRouting { allow_fallbacks?; require_parameters?; data_collection?; zdr?; enforce_distillable_text?; order?; only?; ignore?; quantizations?; sort?; max_price?; preferred_min_throughput?; preferred_max_latency?; }`
@@ -229,12 +229,12 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/tui/src/`. Index re-
 
 ### Core TUI and container types (from `tui.ts`)
 
-- `class TUI extends Container` — main renderer. Constructor: `new TUI(terminal: Terminal, showHardwareCursor?: boolean)`. Key members: `terminal: Terminal`, `onDebug?: () => void`, `start()`, `stop()`, `requestRender(force?)`, `setFocus(component)`, `showOverlay(component, options?) => OverlayHandle`, `hideOverlay()`, `hasOverlay()`, `addInputListener(listener) => () => void`, `removeInputListener(listener)`, `addChild()/removeChild()/clear()` (inherited from `Container`), `invalidate()`, `getShowHardwareCursor()/setShowHardwareCursor()`, `getClearOnShrink()/setClearOnShrink()`, getter `fullRedraws: number`.
-- `class Container implements Component` — base container with `children: Component[]`, `addChild()`, `removeChild()`, `clear()`, `invalidate()`, `render(width): string[]`.
+- `class TUI extends Container` is the main renderer. Constructor: `new TUI(terminal: Terminal, showHardwareCursor?: boolean)`. Key members: `terminal: Terminal`, `onDebug?: () => void`, `start()`, `stop()`, `requestRender(force?)`, `setFocus(component)`, `showOverlay(component, options?) => OverlayHandle`, `hideOverlay()`, `hasOverlay()`, `addInputListener(listener) => () => void`, `removeInputListener(listener)`, `addChild()/removeChild()/clear()` (inherited from `Container`), `invalidate()`, `getShowHardwareCursor()/setShowHardwareCursor()`, `getClearOnShrink()/setClearOnShrink()`, getter `fullRedraws: number`.
+- `class Container implements Component` is the base container with `children: Component[]`, `addChild()`, `removeChild()`, `clear()`, `invalidate()`, `render(width): string[]`.
 - `interface Component { render(width: number): string[]; handleInput?(data: string): void; wantsKeyRelease?: boolean; invalidate(): void; }`
 - `interface Focusable { focused: boolean; }`
 - `isFocusable(component: Component | null): component is Component & Focusable`
-- `const CURSOR_MARKER: string` — zero-width APC marker components emit at the cursor position.
+- `const CURSOR_MARKER: string` is the zero-width APC marker components emit at the cursor position.
 - `type OverlayAnchor = "center" | "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top-center" | "bottom-center" | "left-center" | "right-center"`
 - `interface OverlayMargin { top?; right?; bottom?; left?; }`
 - `type SizeValue = number | \`${number}%\``
@@ -246,37 +246,37 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/tui/src/`. Index re-
 
 All components implement `Component`; Editor and Input additionally implement `Focusable`.
 
-- `Box` (from `components/box.ts`) — padded container. `new Box(paddingX = 1, paddingY = 1, bgFn?: (text: string) => string)`. Methods: `addChild`, `removeChild`, `clear`, `setBgFn`, `invalidate`, `render`.
-- `CancellableLoader` (from `components/cancellable-loader.ts`) — `extends Loader`. Exposes `signal: AbortSignal`, `aborted: boolean`, `onAbort?: () => void`, `dispose()`.
-- `Editor` (from `components/editor.ts`) — prompt editor with slash-command autocomplete and bracketed paste. `new Editor(tui: TUI, theme: EditorTheme, options: EditorOptions = {})`. Field `focused: boolean`, `borderColor: (str: string) => string`, `onSubmit?: (text: string) => void`. Numerous runtime methods (setText/getText, setAutocomplete, setHistory, etc.) live on the class; re-export the class and document-specific methods per-feature as Clio needs them.
+- `Box` (from `components/box.ts`) is a padded container. `new Box(paddingX = 1, paddingY = 1, bgFn?: (text: string) => string)`. Methods: `addChild`, `removeChild`, `clear`, `setBgFn`, `invalidate`, `render`.
+- `CancellableLoader` (from `components/cancellable-loader.ts`) `extends Loader`. Exposes `signal: AbortSignal`, `aborted: boolean`, `onAbort?: () => void`, `dispose()`.
+- `Editor` (from `components/editor.ts`) is a prompt editor with slash-command autocomplete and bracketed paste. `new Editor(tui: TUI, theme: EditorTheme, options: EditorOptions = {})`. Field `focused: boolean`, `borderColor: (str: string) => string`, `onSubmit?: (text: string) => void`. Numerous runtime methods (setText/getText, setAutocomplete, setHistory, etc.) live on the class; re-export the class and document-specific methods per-feature as Clio needs them.
   - `interface EditorTheme { borderColor: (str) => string; selectList: SelectListTheme; }`
   - `interface EditorOptions { paddingX?: number; autocompleteMaxVisible?: number; }`
-  - `interface TextChunk { text: string; startIndex: number; endIndex: number; }` — also exported for wrap helpers.
+  - `interface TextChunk { text: string; startIndex: number; endIndex: number; }` is also exported for wrap helpers.
   - `wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl.SegmentData[]): TextChunk[]`
-- `Image` (from `components/image.ts`) — inline image with terminal-specific rendering. `new Image(base64Data: string, mimeType: string, theme: ImageTheme, options: ImageOptions = {}, dimensions?: ImageDimensions)`. Additional API: `getImageId()`.
+- `Image` (from `components/image.ts`) is an inline image with terminal-specific rendering. `new Image(base64Data: string, mimeType: string, theme: ImageTheme, options: ImageOptions = {}, dimensions?: ImageDimensions)`. Additional API: `getImageId()`.
   - `interface ImageOptions { maxWidthCells?; maxHeightCells?; filename?; imageId?; }`
   - `interface ImageTheme { fallbackColor: (str) => string; }`
-- `Input` (from `components/input.ts`) — single-line input. Zero-arg constructor. Public fields: `focused: boolean`, `onSubmit?: (value: string) => void`, `onEscape?: () => void`. Accessors `getValue()` / `setValue()`.
-- `Loader` (from `components/loader.ts`) — `extends Text`. `new Loader(ui: TUI, spinnerColorFn, messageColorFn, message = "Loading...")`. Methods `start()`, `stop()`, `setMessage(message)`.
-- `Markdown` (from `components/markdown.ts`) — renders markdown. `new Markdown(text: string, paddingX: number, paddingY: number, theme: MarkdownTheme, defaultTextStyle?: DefaultTextStyle)`.
+- `Input` (from `components/input.ts`) is a single-line input. Zero-arg constructor. Public fields: `focused: boolean`, `onSubmit?: (value: string) => void`, `onEscape?: () => void`. Accessors `getValue()` / `setValue()`.
+- `Loader` (from `components/loader.ts`) `extends Text`. `new Loader(ui: TUI, spinnerColorFn, messageColorFn, message = "Loading...")`. Methods `start()`, `stop()`, `setMessage(message)`.
+- `Markdown` (from `components/markdown.ts`) renders markdown. `new Markdown(text: string, paddingX: number, paddingY: number, theme: MarkdownTheme, defaultTextStyle?: DefaultTextStyle)`.
   - `interface DefaultTextStyle { color?; bgColor?; bold?; italic?; strikethrough?; underline?; }`
   - `interface MarkdownTheme { heading; link; linkUrl; code; codeBlock; codeBlockBorder; quote; quoteBorder; hr; listBullet; bold; italic; strikethrough; underline; highlightCode?; codeBlockIndent?; }`
-- `SelectList` (from `components/select-list.ts`) — `new SelectList(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions)`. Fields `onSelect?: (item) => void`, `onCancel?: () => void`, `onSelectionChange?: (item) => void`. Methods `setFilter(filter)`, `setSelectedIndex(index)`.
+- `SelectList` (from `components/select-list.ts`). Constructor: `new SelectList(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions)`. Fields `onSelect?: (item) => void`, `onCancel?: () => void`, `onSelectionChange?: (item) => void`. Methods `setFilter(filter)`, `setSelectedIndex(index)`.
   - `interface SelectItem { value: string; label: string; description?: string; }`
   - `interface SelectListTheme { selectedPrefix; selectedText; description; scrollInfo; noMatch; }` (all `(text: string) => string`)
   - `interface SelectListTruncatePrimaryContext { text; maxWidth; columnWidth; item: SelectItem; isSelected: boolean; }`
   - `interface SelectListLayoutOptions { minPrimaryColumnWidth?; maxPrimaryColumnWidth?; truncatePrimary?; }`
-- `SettingsList` (from `components/settings-list.ts`) — `new SettingsList(items: SettingItem[], maxVisible: number, theme: SettingsListTheme, onChange: (id, newValue) => void, onCancel: () => void, options?: SettingsListOptions)`. Method `updateValue(id, newValue)`.
+- `SettingsList` (from `components/settings-list.ts`). Constructor: `new SettingsList(items: SettingItem[], maxVisible: number, theme: SettingsListTheme, onChange: (id, newValue) => void, onCancel: () => void, options?: SettingsListOptions)`. Method `updateValue(id, newValue)`.
   - `interface SettingItem { id: string; label: string; description?: string; currentValue: string; values?: string[]; submenu?: (currentValue: string, done: (selectedValue?: string) => void) => Component; }`
   - `interface SettingsListTheme { label: (text, selected) => string; value: (text, selected) => string; description: (text) => string; cursor: string; hint: (text) => string; }`
   - `SettingsListOptions` is defined in the source but not re-exported from the package index; treat it as internal. If Clio needs `enableSearch`, pass the literal shape via the constructor.
-- `Spacer` (from `components/spacer.ts`) — `new Spacer(lines: number = 1)`. Method `setLines(lines)`.
-- `Text` (from `components/text.ts`) — `new Text(text = "", paddingX = 1, paddingY = 1, customBgFn?)`. Methods `setText`, `setCustomBgFn`, `invalidate`.
-- `TruncatedText` (from `components/truncated-text.ts`) — `new TruncatedText(text: string, paddingX = 0, paddingY = 0)`.
+- `Spacer` (from `components/spacer.ts`). Constructor: `new Spacer(lines: number = 1)`. Method `setLines(lines)`.
+- `Text` (from `components/text.ts`). Constructor: `new Text(text = "", paddingX = 1, paddingY = 1, customBgFn?)`. Methods `setText`, `setCustomBgFn`, `invalidate`.
+- `TruncatedText` (from `components/truncated-text.ts`). Constructor: `new TruncatedText(text: string, paddingX = 0, paddingY = 0)`.
 
 ### Editor-component helper (from `editor-component.ts`)
 
-- `type EditorComponent` — opaque interface consumed by host code that swaps in custom editors.
+- `type EditorComponent` is an opaque interface consumed by host code that swaps in custom editors.
 
 ### Autocomplete (from `autocomplete.ts`)
 
@@ -294,19 +294,19 @@ All components implement `Component`; Editor and Input additionally implement `F
 
 ### Keybindings (from `keybindings.ts`)
 
-- `const TUI_KEYBINDINGS` — default keybinding definitions for editor, input, and select keybinding ids (keys like `"tui.editor.cursorUp"`, `"tui.input.submit"`, `"tui.select.confirm"`, etc.). Satisfies `KeybindingDefinitions`.
-- `interface Keybindings` — declaration-merge seam; keys are the keybinding ids.
+- `const TUI_KEYBINDINGS` holds default keybinding definitions for editor, input, and select keybinding ids (keys like `"tui.editor.cursorUp"`, `"tui.input.submit"`, `"tui.select.confirm"`, etc.). Satisfies `KeybindingDefinitions`.
+- `interface Keybindings` is a declaration-merge seam; keys are the keybinding ids.
 - `type Keybinding = keyof Keybindings`
 - `interface KeybindingDefinition { defaultKeys: KeyId | KeyId[]; description?: string; }`
 - `type KeybindingDefinitions = Record<string, KeybindingDefinition>`
 - `type KeybindingsConfig = Record<string, KeyId | KeyId[] | undefined>`
 - `interface KeybindingConflict { key: KeyId; keybindings: string[]; }`
-- `class KeybindingsManager` — `new KeybindingsManager(definitions: KeybindingDefinitions, userBindings?: KeybindingsConfig)`. Methods: `matches(data, keybinding)`, `getKeys(keybinding)`, `getDefinition(keybinding)`, `getConflicts()`, `setUserBindings(userBindings)`, `getUserBindings()`, `getResolvedBindings()`.
-- `getKeybindings(): KeybindingsManager`, `setKeybindings(keybindings: KeybindingsManager): void` — process-wide singleton accessors.
+- `class KeybindingsManager`. Constructor: `new KeybindingsManager(definitions: KeybindingDefinitions, userBindings?: KeybindingsConfig)`. Methods: `matches(data, keybinding)`, `getKeys(keybinding)`, `getDefinition(keybinding)`, `getConflicts()`, `setUserBindings(userBindings)`, `getUserBindings()`, `getResolvedBindings()`.
+- `getKeybindings(): KeybindingsManager`, `setKeybindings(keybindings: KeybindingsManager): void` are process-wide singleton accessors.
 
 ### Keyboard parsing (from `keys.ts`)
 
-- `const Key` — frozen map of symbolic key ids.
+- `const Key` is a frozen map of symbolic key ids.
 - `type KeyId = BaseKey | ModifiedKeyId<BaseKey>`
 - `type KeyEventType = "press" | "repeat" | "release"`
 - `isKeyRelease(data: string): boolean`
@@ -325,8 +325,8 @@ All components implement `Component`; Editor and Input additionally implement `F
 
 ### Terminal (from `terminal.ts`)
 
-- `interface Terminal` — stdin/stdout/dimensions/cursor/kitty protocol contract (start, stop, drainInput, write, columns, rows, kittyProtocolActive, moveBy, hideCursor/showCursor, clearLine/clearFromCursor/clearScreen, setTitle).
-- `class ProcessTerminal implements Terminal` — concrete implementation over `process.stdin`/`process.stdout`.
+- `interface Terminal` is the stdin/stdout/dimensions/cursor/kitty protocol contract (start, stop, drainInput, write, columns, rows, kittyProtocolActive, moveBy, hideCursor/showCursor, clearLine/clearFromCursor/clearScreen, setTitle).
+- `class ProcessTerminal implements Terminal` is the concrete implementation over `process.stdin`/`process.stdout`.
 
 ### Terminal image utilities (from `terminal-image.ts`)
 
