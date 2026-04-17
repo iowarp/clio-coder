@@ -6,12 +6,12 @@
  */
 
 import {
+	type KnownProvider,
+	type Model,
 	getModel,
 	getModels,
 	getProviders,
 	registerBuiltInApiProviders,
-	type KnownProvider,
-	type Model,
 } from "@mariozechner/pi-ai";
 
 export interface EngineAi {

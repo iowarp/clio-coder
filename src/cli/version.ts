@@ -10,6 +10,6 @@ export function runVersionCommand(): number {
 		`pi-ai ${v.piAi ?? "(missing)"}`,
 		`pi-tui ${v.piTui ?? "(missing)"}`,
 	];
-	process.stdout.write(lines.join("\n") + "\n");
+	process.stdout.write(`${lines.join("\n")}\n`);
 	return 0;
 }

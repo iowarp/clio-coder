@@ -21,24 +21,11 @@ export interface ConfigDiff {
 	restartRequired: string[];
 }
 
-const HOT_RELOAD_FIELDS = new Set<string>([
-	"theme",
-	"keybindings",
-	"safetyLevel",
-	"defaultMode",
-	"state.lastMode",
-]);
+const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "safetyLevel", "defaultMode", "state.lastMode"]);
 
-const NEXT_TURN_FIELDS = new Set<string>([
-	"provider.model",
-	"budget.sessionCeilingUsd",
-]);
+const NEXT_TURN_FIELDS = new Set<string>(["provider.model", "budget.sessionCeilingUsd"]);
 
-const RESTART_REQUIRED_FIELDS = new Set<string>([
-	"provider.active",
-	"runtimes.enabled",
-	"budget.concurrency",
-]);
+const RESTART_REQUIRED_FIELDS = new Set<string>(["provider.active", "runtimes.enabled", "budget.concurrency"]);
 
 export function diffSettings(prev: ClioSettings, next: ClioSettings): ConfigDiff {
 	const changed = collectChangedPaths(prev, next);

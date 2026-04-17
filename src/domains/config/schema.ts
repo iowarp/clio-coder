@@ -1,4 +1,4 @@
-import { Type, type Static } from "@sinclair/typebox";
+import { type Static, Type } from "@sinclair/typebox";
 
 /**
  * TypeBox schema for the settings file. Mirrors the DEFAULT_SETTINGS constant in

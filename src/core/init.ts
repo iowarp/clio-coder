@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "./defaults.js";
-import { clioConfigDir, clioDataDir, clioCacheDir } from "./xdg.js";
+import { clioCacheDir, clioConfigDir, clioDataDir } from "./xdg.js";
 
 export interface InitReport {
 	configDir: string;
@@ -54,10 +54,14 @@ export function initializeClioHome(): InitReport {
 
 	const credentialsPath = join(configDir, "credentials.yaml");
 	if (!existsSync(credentialsPath)) {
-		writeFileSync(credentialsPath, "# Managed via the /providers overlay. Do not edit manually unless you know what you are doing.\n{}\n", {
-			encoding: "utf8",
-			mode: 0o600,
-		});
+		writeFileSync(
+			credentialsPath,
+			"# Managed via the /providers overlay. Do not edit manually unless you know what you are doing.\n{}\n",
+			{
+				encoding: "utf8",
+				mode: 0o600,
+			},
+		);
 		chmodSync(credentialsPath, 0o600);
 		created.push(credentialsPath);
 	}
