@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#
+# Clio-Coder pre-commit hook.
+#
+# Runs `npm run format` and `npm run check:boundaries`. Aborts the commit if
+# either fails, or if `format` rewrote any tracked file. In that case the
+# developer must `git add` the reformatted files and re-run `git commit`.
+#
+# Install via: `npm run hooks:install`
+#
+
+set -euo pipefail
+
+# Locate the repo root from the hook's perspective so the hook works when git
+# invokes it from a subdirectory.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[clio pre-commit] running npm run format"
+before_hash="$(git diff | git hash-object --stdin)"
+npm run --silent format
+after_hash="$(git diff | git hash-object --stdin)"
+
+if [ "$before_hash" != "$after_hash" ]; then
+  echo "[clio pre-commit] format rewrote tracked files; review and 'git add' them, then retry the commit." >&2
+  git --no-pager diff --name-only >&2
+  exit 1
+fi
+
+echo "[clio pre-commit] running npm run check:boundaries"
+npm run --silent check:boundaries
+
+echo "[clio pre-commit] ok"
