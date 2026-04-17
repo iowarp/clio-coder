@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { DEFAULT_SETTINGS } from "../src/core/defaults.js";
 
 /**
  * Verification script. Builds once, then runs:
@@ -115,6 +116,25 @@ const EXAMPLE_SPECS: readonly ExampleSpec[] = [
 	},
 ];
 
+function objectKeys(value: unknown): string[] | null {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+	return Object.keys(value).sort();
+}
+
+function assertExactKeyShape(actual: unknown, expected: unknown, path = "(root)"): void {
+	const actualKeys = objectKeys(actual);
+	const expectedKeys = objectKeys(expected);
+	if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+		fail(`settings.yaml key shape mismatch at ${path}`, `expected=${JSON.stringify(expectedKeys)} actual=${JSON.stringify(actualKeys)}`);
+	}
+	if (!actualKeys || !expectedKeys) return;
+	const actualRecord = actual as Record<string, unknown>;
+	const expectedRecord = expected as Record<string, unknown>;
+	for (const key of expectedKeys) {
+		assertExactKeyShape(actualRecord[key], expectedRecord[key], path === "(root)" ? key : `${path}.${key}`);
+	}
+}
+
 function uncommentTemplateLine(line: string): string {
 	return line.replace(/^(\s*)# /, "$1");
 }
@@ -188,6 +208,7 @@ function checkSettingsTemplate(home: string): void {
 		fail("settings.yaml did not parse after install", (err as Error).message);
 	}
 
+	assertExactKeyShape(parsed, DEFAULT_SETTINGS);
 	for (const spec of EXAMPLE_SPECS) {
 		checkExampleFixture(body, spec);
 	}
