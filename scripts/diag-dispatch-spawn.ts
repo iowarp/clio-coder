@@ -136,6 +136,38 @@ async function main(): Promise<void> {
 		check("abort:exited-within-5s", !timedOut, "timed out waiting for abort");
 		const nonZeroOrSignal = abortResult.exitCode !== 0 || abortResult.signal !== null;
 		check("abort:non-zero-or-signal", nonZeroOrSignal, `exit=${abortResult.exitCode} signal=${abortResult.signal}`);
+
+		// Step 4: invalid cwd should surface a spawn_error event and resolve cleanly.
+		const spawnErrorWorker = spawnNativeWorker(
+			{
+				providerId: "faux",
+				modelId: "faux-model",
+				task: "spawn error",
+				systemPrompt: "You are a faux agent.",
+			},
+			{ env: childEnv, cwd: "/definitely/missing/path" },
+		);
+
+		const spawnErrorEvents: Array<{ type?: unknown; error?: unknown }> = [];
+		for await (const ev of spawnErrorWorker.events) {
+			if (typeof ev === "object" && ev !== null) {
+				spawnErrorEvents.push(ev as { type?: unknown; error?: unknown });
+			}
+		}
+		const spawnErrorResult = await spawnErrorWorker.promise;
+		const spawnErrorEvent = spawnErrorEvents.find((ev) => ev.type === "spawn_error");
+		check("spawn-error:pid-null", spawnErrorWorker.pid === null, `pid=${spawnErrorWorker.pid}`);
+		check("spawn-error:event-emitted", spawnErrorEvent !== undefined, `events=${JSON.stringify(spawnErrorEvents)}`);
+		check(
+			"spawn-error:event-has-message",
+			typeof spawnErrorEvent?.error === "string" && spawnErrorEvent.error.length > 0,
+			`event=${JSON.stringify(spawnErrorEvent)}`,
+		);
+		check(
+			"spawn-error:promise-resolved-null-exit",
+			spawnErrorResult.exitCode === null && spawnErrorResult.signal === null,
+			`exit=${spawnErrorResult.exitCode} signal=${spawnErrorResult.signal}`,
+		);
 	} finally {
 		for (const [k, v] of snapshot) {
 			if (v === undefined) delete process.env[k];

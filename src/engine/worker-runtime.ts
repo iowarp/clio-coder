@@ -36,6 +36,23 @@ export interface WorkerRunHandle {
 
 export type WorkerEventEmit = (event: AgentEvent) => void;
 
+function isAssistantMessage(
+	message: AgentMessage | undefined,
+): message is AgentMessage & { role: "assistant"; stopReason?: string; errorMessage?: string } {
+	if (typeof message !== "object" || message === null) return false;
+	return "role" in message && message.role === "assistant";
+}
+
+function getTerminalAgentError(messages: AgentMessage[]): string | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (!isAssistantMessage(message)) continue;
+		if (message.stopReason !== "error") return null;
+		return typeof message.errorMessage === "string" ? message.errorMessage : "";
+	}
+	return null;
+}
+
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -43,9 +60,8 @@ export type WorkerEventEmit = (event: AgentEvent) => void;
  * function; the promise resolves when `agent.waitForIdle()` returns.
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
-	registerFauxFromEnv();
-
-	const model = getModel(input.providerId, input.modelId);
+	const fauxModel = registerFauxFromEnv();
+	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
 	const options: AgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
@@ -71,7 +87,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			await agent.prompt(input.task);
 			await agent.waitForIdle();
 			unsubscribe();
-			return { messages: agent.state.messages, exitCode: 0 };
+			const messages = agent.state.messages;
+			const errorMessage = getTerminalAgentError(messages);
+			if (errorMessage !== null) {
+				if (errorMessage.length > 0) {
+					process.stderr.write(`[worker] agent ended with stopReason=error: ${errorMessage}\n`);
+				}
+				return { messages, exitCode: 1 };
+			}
+			return { messages, exitCode: 0 };
 		} catch (err) {
 			unsubscribe();
 			const msg = err instanceof Error ? err.message : String(err);

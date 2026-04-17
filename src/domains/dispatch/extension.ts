@@ -156,6 +156,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			const result = await worker.promise;
+			const receiptExitCode = result.exitCode ?? 1;
 			const endedAt = new Date().toISOString();
 			const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
 			const receipt: RunReceipt = {
@@ -167,7 +168,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 				runtime,
 				startedAt,
 				endedAt,
-				exitCode: result.exitCode,
+				exitCode: receiptExitCode,
 				tokenCount: 0,
 				costUsd: 0,
 				compiledPromptHash: null,
@@ -179,16 +180,16 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 				toolCalls: 0,
 				sessionId: null,
 			};
-			ledgerRef.update(envelope.id, { status, endedAt, exitCode: result.exitCode });
+			ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode });
 			ledgerRef.recordReceipt(envelope.id, receipt);
 			await ledgerRef.persist();
 			active.delete(envelope.id);
 			if (status === "completed") {
-				context.bus.emit(BusChannels.DispatchCompleted, { runId: envelope.id, exitCode: result.exitCode });
+				context.bus.emit(BusChannels.DispatchCompleted, { runId: envelope.id, exitCode: receiptExitCode });
 			} else {
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
-					exitCode: result.exitCode,
+					exitCode: receiptExitCode,
 					reason: status,
 				});
 			}

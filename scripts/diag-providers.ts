@@ -62,7 +62,7 @@ async function run(): Promise<void> {
 				"    - groq",
 				"    - mistral",
 				"    - openrouter",
-				"    - bedrock",
+				"    - amazon-bedrock",
 				"    - local",
 				"",
 			].join("\n"),
@@ -108,8 +108,8 @@ async function run(): Promise<void> {
 		check("list:has-8-entries", initial.length === 8, `len=${initial.length}`);
 
 		// 3. No credentials set → every entry's available === false except
-		// those with no credentialsEnvVar in the catalog (local, bedrock).
-		// bedrock's AWS SDK chain is outside credentialsPresent()'s purview,
+		// those with no credentialsEnvVar in the catalog (local, amazon-bedrock).
+		// amazon-bedrock's AWS SDK chain is outside credentialsPresent()'s purview,
 		// so discovery treats it as available when enabled; local has no
 		// credential requirement at all.
 		const unavailable = initial.filter((e) => !e.available).map((e) => e.id);
@@ -119,7 +119,7 @@ async function run(): Promise<void> {
 			.sort();
 		check(
 			"list:only-credless-available",
-			available.length === 2 && available[0] === "bedrock" && available[1] === "local",
+			available.length === 2 && available[0] === "amazon-bedrock" && available[1] === "local",
 			`available=${JSON.stringify(available)} unavailable=${JSON.stringify(unavailable)}`,
 		);
 		const credBearing: ReadonlyArray<string> = ["anthropic", "openai", "google", "groq", "mistral", "openrouter"];

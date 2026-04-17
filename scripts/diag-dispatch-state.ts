@@ -57,6 +57,14 @@ async function main(): Promise<void> {
 		check("create:status-queued", created.status === "queued", `status=${created.status}`);
 		check("create:counters-zero", created.tokenCount === 0 && created.costUsd === 0);
 		check("create:nullable-defaults", created.endedAt === null && created.pid === null && created.receiptPath === null);
+		created.status = "dead";
+		created.tokenCount = 999;
+		const afterCreateMutation = ledger.get(created.id);
+		check(
+			"create:returns-clone",
+			afterCreateMutation?.status === "queued" && afterCreateMutation?.tokenCount === 0,
+			`got=${JSON.stringify(afterCreateMutation)}`,
+		);
 
 		// Step 3: update to running.
 		const heartbeat = new Date().toISOString();
@@ -64,12 +72,45 @@ async function main(): Promise<void> {
 		check("update:returns-updated", updated !== null && updated.status === "running" && updated.pid === 12345);
 		check("update:heartbeat-set", updated?.heartbeatAt === heartbeat);
 		check("update:unknown-id-returns-null", ledger.update("nonexistent!!", { status: "dead" }) === null);
+		if (updated) {
+			updated.pid = 77777;
+			updated.heartbeatAt = "tampered";
+		}
+		const afterUpdateMutation = ledger.get(created.id);
+		check(
+			"update:returns-clone",
+			afterUpdateMutation?.pid === 12345 && afterUpdateMutation?.heartbeatAt === heartbeat,
+			`got=${JSON.stringify(afterUpdateMutation)}`,
+		);
+
+		const fetched = ledger.get(created.id);
+		if (fetched) {
+			fetched.status = "dead";
+			fetched.receiptPath = "/tmp/tampered";
+		}
+		const refetched = ledger.get(created.id);
+		check(
+			"get:returns-clone",
+			refetched?.status === "running" && refetched?.receiptPath === null,
+			`got=${JSON.stringify(refetched)}`,
+		);
 
 		// Step 4: list filtered by status.
 		const running = ledger.list({ status: "running" });
 		check("list:running-has-1", running.length === 1, `len=${running.length}`);
 		check("list:running-id-matches", running[0]?.id === created.id);
 		check("list:queued-empty", ledger.list({ status: "queued" }).length === 0);
+		check("list:returns-frozen-array", Object.isFrozen(running));
+		if (running[0]) {
+			running[0].status = "dead";
+			running[0].pid = 4242;
+		}
+		const afterListMutation = ledger.get(created.id);
+		check(
+			"list:returns-cloned-elements",
+			afterListMutation?.status === "running" && afterListMutation?.pid === 12345,
+			`got=${JSON.stringify(afterListMutation)}`,
+		);
 
 		// Step 5: recordReceipt writes file and updates envelope.
 		const receipt = {

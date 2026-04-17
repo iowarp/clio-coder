@@ -97,6 +97,10 @@ function applyPatch(rec: RunEnvelope, patch: Partial<RunEnvelope>): RunEnvelope 
 	return out;
 }
 
+function cloneEnvelope(envelope: RunEnvelope): RunEnvelope {
+	return structuredClone(envelope);
+}
+
 export function openLedger(opts?: LedgerOptions): Ledger {
 	const maxRuns = resolveMaxRuns(opts?.maxRuns);
 	let runs: RunEnvelope[] = readRuns();
@@ -127,7 +131,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				costUsd: 0,
 			};
 			runs.unshift(envelope);
-			return envelope;
+			return cloneEnvelope(envelope);
 		},
 
 		update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null {
@@ -137,13 +141,14 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (!current) return null;
 			const next = applyPatch(current, patch);
 			runs[idx] = next;
-			return next;
+			return cloneEnvelope(next);
 		},
 
 		get(id: string): RunEnvelope | null {
 			const idx = findIndex(id);
 			if (idx === -1) return null;
-			return runs[idx] ?? null;
+			const envelope = runs[idx];
+			return envelope ? cloneEnvelope(envelope) : null;
 		},
 
 		list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope> {
@@ -155,7 +160,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (opts?.limit !== undefined && opts.limit >= 0) {
 				filtered = filtered.slice(0, opts.limit);
 			}
-			return filtered;
+			return Object.freeze(filtered.map((envelope) => cloneEnvelope(envelope)));
 		},
 
 		recordReceipt(id: string, receipt: RunReceipt): void {

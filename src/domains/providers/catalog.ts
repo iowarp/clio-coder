@@ -5,7 +5,15 @@
 
 export type ProviderTier = "native" | "sdk" | "cli";
 
-export type ProviderId = "anthropic" | "openai" | "google" | "groq" | "mistral" | "openrouter" | "bedrock" | "local";
+export type ProviderId =
+	| "anthropic"
+	| "openai"
+	| "google"
+	| "groq"
+	| "mistral"
+	| "openrouter"
+	| "amazon-bedrock"
+	| "local";
 
 export interface ModelSpec {
 	id: string;
@@ -113,7 +121,7 @@ export const PROVIDER_CATALOG: ReadonlyArray<ProviderSpec> = [
 		models: [],
 	},
 	{
-		id: "bedrock",
+		id: "amazon-bedrock",
 		displayName: "AWS Bedrock",
 		tier: "sdk",
 		models: [

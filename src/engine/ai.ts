@@ -6,6 +6,7 @@
  */
 
 import {
+	type AssistantMessage,
 	type KnownProvider,
 	type Model,
 	fauxAssistantMessage,
@@ -70,14 +71,26 @@ export function getModel(providerId: string, modelId: string): Model<never> {
  *   CLIO_WORKER_FAUX       must equal "1" to arm registration
  *   CLIO_WORKER_FAUX_MODEL model id registered under the faux provider (default "faux-model")
  *   CLIO_WORKER_FAUX_TEXT  assistant response text (default "ok")
+ *   CLIO_WORKER_FAUX_STOP_REASON assistant stopReason (default "stop")
+ *   CLIO_WORKER_FAUX_ERROR_MESSAGE optional assistant errorMessage
  */
-export function registerFauxFromEnv(): void {
-	if (process.env.CLIO_WORKER_FAUX !== "1") return;
+export function registerFauxFromEnv(): Model<never> | null {
+	if (process.env.CLIO_WORKER_FAUX !== "1") return null;
 	const modelId = process.env.CLIO_WORKER_FAUX_MODEL ?? "faux-model";
 	const text = process.env.CLIO_WORKER_FAUX_TEXT ?? "ok";
+	const stopReason = (process.env.CLIO_WORKER_FAUX_STOP_REASON ?? "stop") as AssistantMessage["stopReason"];
+	const errorMessage = process.env.CLIO_WORKER_FAUX_ERROR_MESSAGE;
 	const reg = registerFauxProvider({
 		provider: "faux",
 		models: [{ id: modelId }],
 	});
-	reg.setResponses([fauxAssistantMessage(text, { stopReason: "stop" })]);
+	const response = { stopReason } as {
+		stopReason: AssistantMessage["stopReason"];
+		errorMessage?: string;
+	};
+	if (errorMessage && errorMessage.length > 0) {
+		response.errorMessage = errorMessage;
+	}
+	reg.setResponses([fauxAssistantMessage(text, response)]);
+	return reg.getModel(modelId) as unknown as Model<never>;
 }

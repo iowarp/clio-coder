@@ -14,7 +14,7 @@ interface AdapterCase {
 	validModel: string;
 	/** Whether canSatisfy rejects unknown model ids. openrouter+local accept anything. */
 	rejectsUnknownModel: boolean;
-	/** Whether probe returns ok=false when no credentials are provided. bedrock+local succeed regardless. */
+	/** Whether probe returns ok=false when no credentials are provided. amazon-bedrock+local succeed regardless. */
 	probeFailsWithoutCreds: boolean;
 }
 
@@ -62,7 +62,7 @@ const CASES: ReadonlyArray<AdapterCase> = [
 		probeFailsWithoutCreds: true,
 	},
 	{
-		id: "bedrock",
+		id: "amazon-bedrock",
 		credEnv: null,
 		validModel: "anthropic.claude-sonnet-4-6",
 		rejectsUnknownModel: true,
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 		"groq",
 		"mistral",
 		"openrouter",
-		"bedrock",
+		"amazon-bedrock",
 		"local",
 	];
 	check(
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
 		const probeOk = await adapter.probe({ credentialsPresent: credsSet });
 		check(`${c.id}:probe-ok`, probeOk.ok === true, `got ${JSON.stringify(probeOk)}`);
 
-		// 5. probe with empty creds → ok=false (except bedrock + local)
+		// 5. probe with empty creds → ok=false (except amazon-bedrock + local)
 		if (c.probeFailsWithoutCreds) {
 			const probeBad = await adapter.probe({ credentialsPresent: new Set<string>() });
 			check(`${c.id}:probe-fail-without-creds`, probeBad.ok === false, `got ${JSON.stringify(probeBad)}`);

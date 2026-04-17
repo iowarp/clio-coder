@@ -27,8 +27,8 @@ export interface WorkerSpec {
 }
 
 export interface SpawnedWorker {
-	pid: number;
-	promise: Promise<{ exitCode: number; signal: NodeJS.Signals | null }>;
+	pid: number | null;
+	promise: Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>;
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
 	heartbeatAt: { current: number };
@@ -52,18 +52,9 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		cwd: opts?.cwd,
 		env: opts?.env ?? process.env,
 	});
-
-	if (typeof child.pid !== "number") {
-		throw new Error("spawnNativeWorker: failed to obtain child pid");
-	}
+	const pid = child.pid ?? null;
 
 	const heartbeatAt = { current: Date.now() };
-
-	// Feed the spec to the worker once, then close its stdin so readSpecFromStdin resolves.
-	if (child.stdin) {
-		child.stdin.write(`${JSON.stringify(spec)}\n`);
-		child.stdin.end();
-	}
 
 	// Async iterator plumbing. Stdout lines are queued; consumers either get a
 	// resolved value immediately (pending queue) or park in `waiters` until a
@@ -91,6 +82,29 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		}
 	}
 
+	let sawSpawnError = false;
+	child.once("error", (err) => {
+		sawSpawnError = true;
+		push({
+			type: "spawn_error",
+			error: err instanceof Error ? err.message : String(err),
+		});
+		if (!child.killed) {
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// Some spawn errors occur before a process exists. The close handler
+				// still resolves the promise and finishes the event iterator.
+			}
+		}
+	});
+
+	// Feed the spec to the worker once, then close its stdin so readSpecFromStdin resolves.
+	if (pid !== null && child.stdin) {
+		child.stdin.write(`${JSON.stringify(spec)}\n`);
+		child.stdin.end();
+	}
+
 	if (child.stdout) {
 		const rl = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
 		rl.on("line", (line) => {
@@ -102,9 +116,6 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 				// malformed line — drop silently; stderr carries operator diagnostics.
 			}
 		});
-		rl.on("close", () => end());
-	} else {
-		end();
 	}
 
 	// Drain stderr so the subprocess never blocks on a full pipe. Content is not
@@ -132,9 +143,13 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		},
 	};
 
-	const promise = new Promise<{ exitCode: number; signal: NodeJS.Signals | null }>((resolve) => {
+	const promise = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
 		child.on("close", (code, signal) => {
 			end();
+			if (sawSpawnError) {
+				resolve({ exitCode: null, signal: null });
+				return;
+			}
 			resolve({ exitCode: code ?? 0, signal: signal ?? null });
 		});
 	});
@@ -163,7 +178,7 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	};
 
 	return {
-		pid: child.pid,
+		pid,
 		promise,
 		events,
 		abort,
