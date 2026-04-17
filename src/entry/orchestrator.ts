@@ -7,6 +7,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
@@ -43,6 +44,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		ModesDomainModule,
 		PromptsDomainModule,
 		AgentsDomainModule,
+		DispatchDomainModule,
 		SessionDomainModule,
 		LifecycleDomainModule,
 	]);
