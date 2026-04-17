@@ -5,7 +5,7 @@
  * wiring against the provider catalog.
  */
 
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -138,6 +138,23 @@ async function run(): Promise<void> {
 			"audit:openai-key-absent-in-output",
 			!captured.includes(OPENAI_KEY),
 			`found occurrence count=${(captured.match(new RegExp(OPENAI_KEY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length}`,
+		);
+
+		// 9. Source audit: credentials.ts atomic-writer must open the tmp file
+		// at mode 0o600 so the secret never lives on disk under a wider mode.
+		// Re-checking the file mode after set() is necessary but not sufficient
+		// because umask leaves the tmp file 0o644 during the write/rename window.
+		const { resolvePackageRoot } = await import("../src/core/package-root.js");
+		const credsSource = readFileSync(join(resolvePackageRoot(), "src/domains/providers/credentials.ts"), "utf8");
+		check(
+			"credentials:tmp-opens-at-0o600",
+			/openSync\([^)]*,\s*"wx",\s*0o600\)/.test(credsSource),
+			"credentials.ts atomic writer not using 0o600 open mode",
+		);
+		check(
+			"credentials:does-not-import-engine-atomicWrite",
+			!/from\s+"\.\.\/\.\.\/engine\/session\.js"/.test(credsSource),
+			"credentials.ts still imports atomicWrite from engine/session",
 		);
 	} finally {
 		process.stdout.write = origStdoutWrite;
