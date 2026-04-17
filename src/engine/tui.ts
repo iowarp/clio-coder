@@ -27,6 +27,8 @@ export type {
 	Component,
 	EditorOptions,
 	EditorTheme,
+	OverlayHandle,
+	OverlayOptions,
 	SelectItem,
 	SelectListLayoutOptions,
 	SelectListTheme,

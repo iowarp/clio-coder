@@ -8,6 +8,7 @@ import { Editor, ProcessTerminal, TUI, Text } from "../engine/tui.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openProvidersOverlay } from "./providers-overlay.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 
 export interface InteractiveDeps {
@@ -30,7 +31,7 @@ export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
 export const ENTER = "\r";
 export const ESC = "\x1b";
-export type OverlayState = "closed" | "super-confirm" | "dispatch-board";
+export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -49,7 +50,11 @@ export interface DispatchBoardOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface OverlayKeyDeps extends SuperOverlayKeyDeps, DispatchBoardOverlayKeyDeps {
+export interface ProvidersOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
+export interface OverlayKeyDeps extends SuperOverlayKeyDeps, DispatchBoardOverlayKeyDeps, ProvidersOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -99,6 +104,15 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
+/** Pure overlay key router for the /providers overlay. Esc closes; everything else is swallowed. */
+export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
 export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
 	if (overlayState === "closed") return false;
@@ -110,6 +124,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		routeSuperOverlayKey(data, deps);
 		return true;
 	}
+	if (overlayState === "providers") {
+		routeProvidersOverlayKey(data, deps);
+		return true;
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -119,6 +137,7 @@ export type SlashCommand =
 	| { kind: "help" }
 	| { kind: "run"; agentId: string; task: string }
 	| { kind: "run-usage" }
+	| { kind: "providers" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -128,6 +147,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (trimmed.length === 0) return { kind: "empty" };
 	if (trimmed === "/quit" || trimmed === "/exit") return { kind: "quit" };
 	if (trimmed === "/help" || trimmed.startsWith("/help ")) return { kind: "help" };
+	if (trimmed === "/providers") return { kind: "providers" };
 	if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
 	if (trimmed.startsWith("/run ")) {
 		const rest = trimmed.slice(5).trim();
@@ -225,7 +245,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				void shutdown();
 				return;
 			case "help":
-				io.stdout("\ncommands: /run <agent> <task>, /help, /quit\n");
+				io.stdout("\ncommands: /run <agent> <task>, /providers, /help, /quit\n");
 				return;
 			case "run-usage":
 				io.stdout("\nusage: /run <agent> <task>\n");
@@ -239,6 +259,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					});
 					tui.requestRender();
 				})();
+				return;
+			case "providers":
+				openProvidersOverlayState();
 				return;
 			case "unknown":
 				io.stderr(`[interactive] unknown input: ${command.text}\n`);
@@ -302,6 +325,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			anchor: "center",
 			width: superOverlayWidth,
 		});
+		tui.requestRender();
+	};
+
+	const openProvidersOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "providers";
+		overlayHandle = openProvidersOverlay(tui, deps.providers);
 		tui.requestRender();
 	};
 
