@@ -157,6 +157,14 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			current.orchestrator.thinkingLevel = next;
 			writeSettings(current);
 		},
+		onSelectModel: ({ providerId, modelId, endpoint }) => {
+			const current = readSettings();
+			current.orchestrator.provider = providerId;
+			current.orchestrator.model = modelId;
+			if (endpoint) current.orchestrator.endpoint = endpoint;
+			else Reflect.deleteProperty(current.orchestrator, "endpoint");
+			writeSettings(current);
+		},
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},
