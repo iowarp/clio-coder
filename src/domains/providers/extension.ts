@@ -19,11 +19,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	let credStore: CredentialStore | null = null;
 	const healthState = new Map<ProviderId, ProviderHealth>();
 
-	// ProviderHealth + probeAll operate only on provider-tier adapters. CLI
-	// adapters live in RUNTIME_ADAPTERS for discovery but do not participate
-	// in the provider health bus; their readiness is reported via the
-	// diag-cli-runtimes surface.
-	const providerAdapters: ReadonlyArray<RuntimeAdapter> = RUNTIME_ADAPTERS.filter((a) => a.tier !== "cli");
+	// ProviderHealth + probeAll operate only on catalog-backed adapters. CLI
+	// adapters and the Claude SDK adapter (tier=sdk but not in the catalog)
+	// live in RUNTIME_ADAPTERS for discovery but do not participate in the
+	// provider health bus; their readiness is reported via diag-cli-runtimes
+	// and diag-claude-sdk respectively.
+	const catalogIds = new Set<string>(PROVIDER_CATALOG.map((p) => p.id));
+	const providerAdapters: ReadonlyArray<RuntimeAdapter> = RUNTIME_ADAPTERS.filter((a) => catalogIds.has(String(a.id)));
 
 	function adapterById(id: ProviderId): RuntimeAdapter | null {
 		return RUNTIME_ADAPTERS.find((a) => a.id === id) ?? null;
