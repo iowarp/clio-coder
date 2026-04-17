@@ -4,8 +4,6 @@ export default defineConfig({
 	entry: {
 		"cli/index": "src/cli/index.ts",
 		"worker/entry": "src/worker/entry.ts",
-		"worker/cli-entry": "src/worker/cli-entry.ts",
-		"worker/sdk-entry": "src/worker/sdk-entry.ts",
 	},
 	format: ["esm"],
 	target: "node20",

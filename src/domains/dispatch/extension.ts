@@ -126,6 +126,11 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			throw new Error(`dispatch: admission denied — ${verdict.reason}`);
 		}
 
+		const runtime = req.runtime ?? recipe?.runtime ?? "native";
+		if (runtime === "sdk" || runtime === "cli") {
+			throw new Error(`dispatch: runtime=${runtime} not supported in v0.1`);
+		}
+
 		const settings = config?.get();
 		const workerDefault = settings?.workers?.default;
 		const providerId = req.providerId ?? recipe?.provider ?? workerDefault?.provider;
@@ -158,7 +163,6 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 				throw new Error(`dispatch: endpoint "${endpointName}" not found under providers.${providerId}.endpoints`);
 			}
 		}
-		const runtime = req.runtime ?? recipe?.runtime ?? "native";
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
 
