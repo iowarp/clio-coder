@@ -1,7 +1,7 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.1.0-dev",
-	"description": "Clio — IOWarp's orchestrator coding-agent, built on a Level-3 custom harness over pi-mono",
+	"description": "Clio: IOWarp's orchestrator coding-agent, built on a Level-3 custom harness over pi-mono",
 	"type": "module",
 	"license": "Apache-2.0",
 	"author": "Anthony Kougkas <a.kougkas@gmail.com>",

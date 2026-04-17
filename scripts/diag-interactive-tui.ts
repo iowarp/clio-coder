@@ -38,6 +38,7 @@ import {
 	parseSlashCommand,
 	routeDispatchBoardOverlayKey,
 	routeInteractiveKey,
+	routeOverlayKey,
 	routeSuperOverlayKey,
 	startInteractive,
 } from "../src/interactive/index.js";
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
 	check("export:startInteractive-is-function", typeof startInteractive === "function");
 	check("export:routeInteractiveKey-is-function", typeof routeInteractiveKey === "function");
 	check("export:routeDispatchBoardOverlayKey-is-function", typeof routeDispatchBoardOverlayKey === "function");
+	check("export:routeOverlayKey-is-function", typeof routeOverlayKey === "function");
 	check("export:routeSuperOverlayKey-is-function", typeof routeSuperOverlayKey === "function");
 	check("export:parseSlashCommand-is-function", typeof parseSlashCommand === "function");
 	check("export:handleRun-is-function", typeof handleRun === "function");
@@ -329,7 +331,9 @@ async function main(): Promise<void> {
 	check("overlay:esc-does-not-confirm", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
 	check("overlay:esc-does-not-cycle", cycleCalls === 1, String(cycleCalls));
 
-	const overlayOther = routeSuperOverlayKey("x", {
+	let overlayShutdownCalls = 0;
+	let closeOverlayCalls = 0;
+	const overlayTypedChar = routeOverlayKey("x", "super-confirm", {
 		cancelSuper: () => {
 			overlayCancelCalls += 1;
 		},
@@ -337,12 +341,18 @@ async function main(): Promise<void> {
 			overlayConfirmCalls.push(conf);
 		},
 		now: () => 1_710_000_000_002,
+		closeOverlay: () => {
+			closeOverlayCalls += 1;
+		},
+		requestShutdown: () => {
+			overlayShutdownCalls += 1;
+		},
 	});
-	check("overlay:other-key-not-consumed", overlayOther === false);
-	check("overlay:other-key-keeps-confirm-count", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
-	check("overlay:other-key-keeps-cancel-count", overlayCancelCalls === 1, String(overlayCancelCalls));
+	check("overlay:typed-char-consumed", overlayTypedChar === true);
+	check("overlay:typed-char-keeps-confirm-count", overlayConfirmCalls.length === 1, JSON.stringify(overlayConfirmCalls));
+	check("overlay:typed-char-keeps-cancel-count", overlayCancelCalls === 1, String(overlayCancelCalls));
+	check("overlay:typed-char-does-not-shutdown", overlayShutdownCalls === 0, String(overlayShutdownCalls));
 
-	let closeOverlayCalls = 0;
 	const dispatchBoardEsc = routeDispatchBoardOverlayKey(ESC, {
 		closeOverlay: () => {
 			closeOverlayCalls += 1;
@@ -351,13 +361,42 @@ async function main(): Promise<void> {
 	check("dispatch-overlay:esc-consumed", dispatchBoardEsc === true);
 	check("dispatch-overlay:esc-calls-close-overlay", closeOverlayCalls === 1, String(closeOverlayCalls));
 
-	const dispatchBoardOther = routeDispatchBoardOverlayKey("x", {
+	const overlayArrow = routeOverlayKey("\x1b[A", "dispatch-board", {
+		cancelSuper: () => {
+			overlayCancelCalls += 1;
+		},
+		confirmSuper: (conf) => {
+			overlayConfirmCalls.push(conf);
+		},
+		now: () => 1_710_000_000_003,
 		closeOverlay: () => {
 			closeOverlayCalls += 1;
 		},
+		requestShutdown: () => {
+			overlayShutdownCalls += 1;
+		},
 	});
-	check("dispatch-overlay:other-key-not-consumed", dispatchBoardOther === false);
-	check("dispatch-overlay:other-key-does-not-close", closeOverlayCalls === 1, String(closeOverlayCalls));
+	check("dispatch-overlay:arrow-key-consumed", overlayArrow === true);
+	check("dispatch-overlay:arrow-key-does-not-close", closeOverlayCalls === 1, String(closeOverlayCalls));
+
+	const overlayCtrlD = routeOverlayKey(CTRL_D, "dispatch-board", {
+		cancelSuper: () => {
+			overlayCancelCalls += 1;
+		},
+		confirmSuper: (conf) => {
+			overlayConfirmCalls.push(conf);
+		},
+		now: () => 1_710_000_000_004,
+		closeOverlay: () => {
+			closeOverlayCalls += 1;
+		},
+		requestShutdown: () => {
+			overlayShutdownCalls += 1;
+		},
+	});
+	check("overlay:ctrl-d-consumed", overlayCtrlD === true);
+	check("overlay:ctrl-d-calls-shutdown", overlayShutdownCalls === 1, String(overlayShutdownCalls));
+	check("overlay:ctrl-d-does-not-close-overlay", closeOverlayCalls === 1, String(closeOverlayCalls));
 
 	// (4) parseSlashCommand — discriminated union covers each branch
 	check("parse:empty", parseSlashCommand("   ").kind === "empty");
