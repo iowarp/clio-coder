@@ -2,6 +2,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { LifecycleContract } from "./contract.js";
 import { runDoctor } from "./doctor.js";
 import { readInstallInfo } from "./install.js";
+import { runPending } from "./migrations/index.js";
 import { getVersionInfo } from "./version.js";
 
 export function createLifecycleBundle(_context: DomainContext): DomainBundle<LifecycleContract> {
@@ -15,6 +16,7 @@ export function createLifecycleBundle(_context: DomainContext): DomainBundle<Lif
 		version: getVersionInfo,
 		install: readInstallInfo,
 		doctor: runDoctor,
+		runMigrations: (dir: string) => runPending(dir),
 	};
 
 	return { extension, contract };
