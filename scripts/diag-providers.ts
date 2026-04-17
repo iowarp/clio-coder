@@ -269,6 +269,12 @@ async function run(): Promise<void> {
 		const s2VlModel = engineAi.getModel("llamacpp", s2VlKey) as PiModel & { baseUrl?: string };
 		check(
 			"config",
+			"s2:getModel-keeps-bare-wire-id",
+			s2VlModel.id === s2ModelIds[0],
+			`lookup=${s2VlKey} modelId=${s2VlModel.id}`,
+		);
+		check(
+			"config",
 			"s2:getModel-baseUrl-ends-in-/v1",
 			typeof s2VlModel.baseUrl === "string" && s2VlModel.baseUrl.endsWith("/v1"),
 			`baseUrl=${s2VlModel.baseUrl}`,
@@ -366,6 +372,13 @@ async function run(): Promise<void> {
 		check("config", "s2:replacement-settings-reloaded", s2Reloaded.ok, `elapsedMs=${s2Reloaded.elapsedMs}`);
 
 		engineAi.registerLocalProviders(readSettings().providers ?? {});
+		const s2BootstrapWildcard = engineAi.getLocalRegisteredModel("llamacpp", `@${s2ReplaceEndpoint}`);
+		check(
+			"config",
+			"s2:wildcard-bootstrap-keeps-bare-wire-id",
+			s2BootstrapWildcard?.id === "bootstrap-default",
+			`modelId=${s2BootstrapWildcard?.id ?? "null"}`,
+		);
 		const s2StubbedAdapter = providers.getAdapter("llamacpp" as ProviderIdType);
 		const originalProbeEndpoints = s2StubbedAdapter?.probeEndpoints;
 		let s2StubModels: readonly string[] = ["stale-model", "stale-extra"];
