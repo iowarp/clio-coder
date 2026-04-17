@@ -1,4 +1,3 @@
-import type { Model } from "@mariozechner/pi-ai";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -10,6 +9,7 @@ import type { ProvidersContract } from "../domains/providers/index.js";
 import { type ThinkingLevel, getAvailableThinkingLevels } from "../domains/providers/resolver.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import type { Model } from "../engine/types.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { openCostOverlay } from "./cost-overlay.js";

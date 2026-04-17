@@ -2,9 +2,10 @@
 #
 # Clio-Coder pre-commit hook.
 #
-# Runs `npm run format` and `npm run check:boundaries`. Aborts the commit if
-# either fails, or if `format` rewrote any tracked file. In that case the
-# developer must `git add` the reformatted files and re-run `git commit`.
+# Runs `npm run format` and the fast test suite (unit + integration +
+# boundaries). Aborts the commit if either fails, or if `format` rewrote any
+# tracked file. In that case the developer must `git add` the reformatted
+# files and re-run `git commit`.
 #
 # Install via: `npm run hooks:install`
 #
@@ -27,7 +28,7 @@ if [ "$before_hash" != "$after_hash" ]; then
   exit 1
 fi
 
-echo "[clio pre-commit] running npm run check:boundaries"
-npm run --silent check:boundaries
+echo "[clio pre-commit] running npm run test"
+npm run --silent test
 
 echo "[clio pre-commit] ok"
