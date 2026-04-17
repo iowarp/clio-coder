@@ -462,11 +462,7 @@ async function run(): Promise<void> {
 				terminalDetail = `${terminalDetail} errorMessage=${JSON.stringify(errMsg?.errorMessage ?? null)} stopReason=${String(errMsg?.stopReason ?? "unknown")}`;
 				info("terminal-error-detail", terminalDetail);
 			}
-			check(
-				"terminal-done",
-				terminalEvent.type === "done",
-				terminalDetail,
-			);
+			check("terminal-done", terminalEvent.type === "done", terminalDetail);
 			if (terminalEvent.type !== "done") return;
 
 			const finalMessage = terminalEvent.message as import("@mariozechner/pi-ai").AssistantMessage | undefined;
