@@ -15,6 +15,7 @@ import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/ind
 import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
@@ -95,8 +96,11 @@ export async function bootOrchestrator(): Promise<BootResult> {
 
 	const modes = result.getContract<ModesContract>("modes");
 	const providers = result.getContract<ProvidersContract>("providers");
-	if (!modes || !providers || !dispatch) {
-		process.stderr.write("clio: interactive mode requires modes + providers + dispatch contracts; aborting.\n");
+	const observability = result.getContract<ObservabilityContract>("observability");
+	if (!modes || !providers || !dispatch || !observability) {
+		process.stderr.write(
+			"clio: interactive mode requires modes + providers + dispatch + observability contracts; aborting.\n",
+		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -107,6 +111,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		modes,
 		providers,
 		dispatch,
+		observability,
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
