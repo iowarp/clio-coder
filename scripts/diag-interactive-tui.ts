@@ -28,7 +28,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BusChannels } from "../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../src/core/defaults.js";
 import { createSafeEventBus } from "../src/core/event-bus.js";
+import type { ToolName } from "../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "../src/domains/dispatch/types.js";
 import type { ModesContract } from "../src/domains/modes/index.js";
@@ -36,6 +38,9 @@ import { createObservabilityBundle } from "../src/domains/observability/extensio
 import type { CostEntry, ObservabilityContract } from "../src/domains/observability/index.js";
 import type { ProviderListEntry, ProvidersContract } from "../src/domains/providers/contract.js";
 import { visibleWidth } from "../src/engine/tui.js";
+import type { Model } from "../src/engine/types.js";
+import { createChatLoop } from "../src/interactive/chat-loop.js";
+import { createChatPanel } from "../src/interactive/chat-panel.js";
 import {
 	COST_OVERLAY_WIDTH,
 	aggregateCostEntries,
@@ -88,9 +93,12 @@ function check(label: string, ok: boolean, detail?: string): void {
 	process.stderr.write(`[diag-interactive-tui] FAIL ${label}${detail ? ` - ${detail}` : ""}\n`);
 }
 
-function makeMockModes(): ModesContract & { cycleCalls: number } {
+function makeMockModes(options?: {
+	visibleTools?: ReadonlyArray<ToolName>;
+}): ModesContract & { cycleCalls: number } {
 	let current: "default" | "advise" | "super" = "default";
 	let cycleCalls = 0;
+	const visible = new Set<ToolName>(options?.visibleTools ?? []);
 	return {
 		current: () => current,
 		setMode: (next) => {
@@ -102,8 +110,8 @@ function makeMockModes(): ModesContract & { cycleCalls: number } {
 			current = current === "default" ? "advise" : "default";
 			return current;
 		},
-		visibleTools: () => new Set(),
-		isToolVisible: () => true,
+		visibleTools: () => new Set(visible),
+		isToolVisible: (tool) => visible.has(tool),
 		isActionAllowed: () => true,
 		requestSuper: () => {},
 		confirmSuper: () => "super",
@@ -134,6 +142,9 @@ function makeMockProviders(): ProvidersContract {
 		list: () => entries,
 		getAdapter: () => null,
 		probeAll: async () => {},
+		probeEndpoints: async () => {},
+		probeAllLive: async () => {},
+		probeEndpointsLive: async () => {},
 		credentials: {
 			hasKey: () => false,
 			set: () => {},
@@ -238,6 +249,17 @@ interface InteractiveStreamProbe {
 	exitCode: number | null;
 }
 
+interface InteractiveChatSubmitProbe {
+	stderr: string;
+	exitCode: number | null;
+}
+
+interface InteractiveSlashProbe {
+	stderr: string;
+	log: string;
+	exitCode: number | null;
+}
+
 async function typeText(stream: NodeJS.WritableStream, text: string, delayMs = 5): Promise<void> {
 	for (const char of text) {
 		stream.write(char);
@@ -331,6 +353,14 @@ const observability = {
 	recordTokens: () => {},
 };
 
+const chat = {
+	submit: async (_text) => {},
+	cancel: () => {},
+	onEvent: () => () => {},
+	getSessionId: () => null,
+	isStreaming: () => false,
+};
+
 	const dispatch = {
 		dispatch: async (req) => {
 			bus.emit(BusChannels.DispatchEnqueued, {
@@ -414,6 +444,7 @@ async function main() {
 		providers,
 		dispatch,
 		observability,
+		chat,
 		dataDir: ${JSON.stringify(tempRoot)},
 		getWorkerDefault: () => ({ provider: "faux", model: "faux-model" }),
 		onShutdown: async () => {},
@@ -525,6 +556,312 @@ main().catch((err) => {
 	}
 }
 
+async function runInteractiveChatSubmitProbe(): Promise<InteractiveChatSubmitProbe> {
+	const projectRoot = process.cwd();
+	const tempRoot = mkdtempSync(join(tmpdir(), "clio-diag-interactive-chat-"));
+	const childPath = join(tempRoot, "interactive-chat-submit-probe.ts");
+	const tsxPath = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+	const eventBusUrl = pathToFileURL(join(projectRoot, "src/core/event-bus.ts")).href;
+	const interactiveUrl = pathToFileURL(join(projectRoot, "src/interactive/index.ts")).href;
+
+	const childSource = `
+import { createSafeEventBus } from ${JSON.stringify(eventBusUrl)};
+import { startInteractive } from ${JSON.stringify(interactiveUrl)};
+
+const bus = createSafeEventBus();
+const modes = {
+	current: () => "default",
+	setMode: (next) => next,
+	cycleNormal: () => "default",
+	visibleTools: () => new Set(["read", "grep"]),
+	isToolVisible: () => true,
+	isActionAllowed: () => true,
+	requestSuper: () => {},
+	confirmSuper: () => "super",
+};
+const providers = {
+	list: () => [
+		{
+			id: "anthropic",
+			displayName: "Anthropic",
+			tier: "sdk",
+			available: true,
+			reason: "diag",
+			health: {
+				providerId: "anthropic",
+				status: "healthy",
+				lastCheckAt: null,
+				lastError: null,
+				latencyMs: null,
+			},
+		},
+	],
+	getAdapter: () => null,
+	probeAll: async () => {},
+	probeEndpoints: async () => {},
+	probeAllLive: async () => {},
+	probeEndpointsLive: async () => {},
+	credentials: {
+		hasKey: () => false,
+		set: () => {},
+		remove: () => {},
+	},
+};
+const observability = {
+	telemetry: () => ({ counters: {}, histograms: {} }),
+	metrics: () => ({ counters: {}, histograms: {} }),
+	sessionCost: () => 0,
+	costEntries: () => [],
+	recordTokens: () => {},
+};
+const dispatch = {
+	dispatch: async () => {
+		throw new Error("dispatch not used in chat submit probe");
+	},
+	listRuns: () => [],
+	getRun: () => null,
+	abort: () => {},
+	drain: async () => {},
+};
+
+const chat = {
+	submit: async (text) => {
+		process.stderr.write("[child] submit " + text + "\\n");
+	},
+	cancel: () => {},
+	onEvent: () => () => {},
+	getSessionId: () => null,
+	isStreaming: () => false,
+};
+
+async function main() {
+	const run = startInteractive({
+		bus,
+		modes,
+		providers,
+		dispatch,
+		observability,
+		chat,
+		dataDir: ${JSON.stringify(tempRoot)},
+		onShutdown: async () => {},
+	});
+	process.stderr.write("[child] ready\\n");
+	const code = await run;
+	process.stderr.write("[child] exit " + String(code) + "\\n");
+	process.exit(code);
+}
+
+main().catch((err) => {
+	process.stderr.write("[child] crash " + (err instanceof Error ? err.stack ?? err.message : String(err)) + "\\n");
+	process.exit(1);
+});
+`;
+
+	writeFileSync(childPath, childSource, "utf8");
+
+	const child: ChildProcessWithoutNullStreams = spawn(tsxPath, [childPath], {
+		cwd: projectRoot,
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+
+	let stderr = "";
+	child.stderr.setEncoding("utf8");
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+		child.once("exit", (code, signal) => resolve({ code, signal }));
+	});
+
+	try {
+		await waitForResult("chat-submit-ready", () => ({
+			ok: stderr.includes("[child] ready\n"),
+			detail: stderr,
+		}));
+		await typeText(child.stdin, "hi");
+		child.stdin.write(ENTER);
+		await waitForResult("chat-submit-prompt", () => ({
+			ok: stderr.includes("[child] submit hi\n"),
+			detail: stderr,
+		}));
+		child.stdin.write(CTRL_D);
+		const exit = await Promise.race([
+			exitPromise,
+			sleep(5_000).then(() => {
+				throw new Error(`chat-submit-timeout: ${stderr}`);
+			}),
+		]);
+		if (exit.signal !== null) {
+			throw new Error(`chat-submit-signal: ${JSON.stringify(exit)}`);
+		}
+		return { stderr, exitCode: typeof exit.code === "number" ? exit.code : null };
+	} finally {
+		if (child.exitCode === null && !child.killed) {
+			child.kill("SIGKILL");
+			await exitPromise.catch(() => {});
+		}
+		rmSync(tempRoot, { recursive: true, force: true });
+	}
+}
+
+async function runInteractiveSlashOverlayProbe(): Promise<InteractiveSlashProbe> {
+	const projectRoot = process.cwd();
+	const tempRoot = mkdtempSync(join(tmpdir(), "clio-diag-interactive-slash-"));
+	const childPath = join(tempRoot, "interactive-slash-overlay-probe.ts");
+	const writeLogPath = join(tempRoot, "interactive-slash-overlay.log");
+	const tsxPath = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+	const eventBusUrl = pathToFileURL(join(projectRoot, "src/core/event-bus.ts")).href;
+	const interactiveUrl = pathToFileURL(join(projectRoot, "src/interactive/index.ts")).href;
+
+	const childSource = `
+import { createSafeEventBus } from ${JSON.stringify(eventBusUrl)};
+import { startInteractive } from ${JSON.stringify(interactiveUrl)};
+
+const bus = createSafeEventBus();
+const modes = {
+	current: () => "default",
+	setMode: (next) => next,
+	cycleNormal: () => "default",
+	visibleTools: () => new Set(),
+	isToolVisible: () => true,
+	isActionAllowed: () => true,
+	requestSuper: () => {},
+	confirmSuper: () => "super",
+};
+const providers = {
+	list: () => [
+		{
+			id: "anthropic",
+			displayName: "Anthropic",
+			tier: "sdk",
+			available: true,
+			reason: "diag",
+			health: {
+				providerId: "anthropic",
+				status: "healthy",
+				lastCheckAt: null,
+				lastError: null,
+				latencyMs: null,
+			},
+		},
+	],
+	getAdapter: () => null,
+	probeAll: async () => {},
+	probeEndpoints: async () => {},
+	probeAllLive: async () => {},
+	probeEndpointsLive: async () => {},
+	credentials: {
+		hasKey: () => false,
+		set: () => {},
+		remove: () => {},
+	},
+};
+const observability = {
+	telemetry: () => ({ counters: {}, histograms: {} }),
+	metrics: () => ({ counters: {}, histograms: {} }),
+	sessionCost: () => 0,
+	costEntries: () => [],
+	recordTokens: () => {},
+};
+const dispatch = {
+	dispatch: async () => {
+		throw new Error("dispatch not used in slash probe");
+	},
+	listRuns: () => [],
+	getRun: () => null,
+	abort: () => {},
+	drain: async () => {},
+};
+const chat = {
+	submit: async (text) => {
+		process.stderr.write("[child] chat submit " + text + "\\n");
+	},
+	cancel: () => {},
+	onEvent: () => () => {},
+	getSessionId: () => null,
+	isStreaming: () => false,
+};
+
+async function main() {
+	const run = startInteractive({
+		bus,
+		modes,
+		providers,
+		dispatch,
+		observability,
+		chat,
+		dataDir: ${JSON.stringify(tempRoot)},
+		onShutdown: async () => {},
+	});
+	process.stderr.write("[child] ready\\n");
+	const code = await run;
+	process.stderr.write("[child] exit " + String(code) + "\\n");
+	process.exit(code);
+}
+
+main().catch((err) => {
+	process.stderr.write("[child] crash " + (err instanceof Error ? err.stack ?? err.message : String(err)) + "\\n");
+	process.exit(1);
+});
+`;
+
+	writeFileSync(childPath, childSource, "utf8");
+
+	const child: ChildProcessWithoutNullStreams = spawn(tsxPath, [childPath], {
+		cwd: projectRoot,
+		env: {
+			...process.env,
+			PI_TUI_WRITE_LOG: writeLogPath,
+		},
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+
+	let stderr = "";
+	child.stderr.setEncoding("utf8");
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+		child.once("exit", (code, signal) => resolve({ code, signal }));
+	});
+
+	try {
+		await waitForResult("slash-ready", () => ({
+			ok: stderr.includes("[child] ready\n"),
+			detail: stderr,
+		}));
+		await typeText(child.stdin, "/providers");
+		child.stdin.write(ENTER);
+		const log = await waitForResult("slash-overlay", () => {
+			const contents = readUtf8(writeLogPath);
+			return {
+				ok: contents.includes("Providers") && contents.includes("anthropic"),
+				detail: contents,
+			};
+		});
+		await sleep(150);
+		child.stdin.write(CTRL_D);
+		const exit = await Promise.race([
+			exitPromise,
+			sleep(5_000).then(() => {
+				throw new Error(`slash-timeout: ${stderr}`);
+			}),
+		]);
+		if (exit.signal !== null) {
+			throw new Error(`slash-signal: ${JSON.stringify(exit)}`);
+		}
+		return { stderr, log, exitCode: typeof exit.code === "number" ? exit.code : null };
+	} finally {
+		if (child.exitCode === null && !child.killed) {
+			child.kill("SIGKILL");
+			await exitPromise.catch(() => {});
+		}
+		rmSync(tempRoot, { recursive: true, force: true });
+	}
+}
+
 async function main(): Promise<void> {
 	// (1) exports
 	check("export:startInteractive-is-function", typeof startInteractive === "function");
@@ -554,6 +891,103 @@ async function main(): Promise<void> {
 	footer.refresh();
 	const afterCycle = footer.view.render(80).join("");
 	check("footer:refresh-reflects-advise", afterCycle.includes("mode=advise"), afterCycle);
+
+	// (2b) chat loop + panel wiring
+	const chatModes = makeMockModes({ visibleTools: ["read", "grep"] });
+	const modelLookups: string[] = [];
+	const promptCalls: string[] = [];
+	const initialToolSets: string[][] = [];
+	let abortCalls = 0;
+	const chat = createChatLoop({
+		getSettings: () => ({
+			...structuredClone(DEFAULT_SETTINGS),
+			orchestrator: {
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+			},
+		}),
+		modes: chatModes,
+		knownProviders: () => new Set(["anthropic"]),
+		getModel: (providerId, modelId) => {
+			modelLookups.push(`${providerId}/${modelId}`);
+			return { id: modelId, provider: providerId } as Model<never>;
+		},
+		createAgent: (options) => {
+			initialToolSets.push(
+				Array.isArray(options?.initialState?.tools) ? options.initialState.tools.map((tool) => tool.name) : [],
+			);
+			const agent = {
+				state: {
+					tools: options?.initialState?.tools ?? [],
+					messages: [],
+				},
+				subscribe: () => () => {},
+				prompt: async (text: string) => {
+					promptCalls.push(text);
+				},
+				abort: () => {
+					abortCalls += 1;
+				},
+				sessionId: undefined,
+			};
+			return { agent, state: () => agent.state };
+		},
+	});
+	await chat.submit("hi");
+	check(
+		"chat-loop:submit-calls-agent-prompt",
+		promptCalls.length === 1 && promptCalls[0] === "hi",
+		JSON.stringify(promptCalls),
+	);
+	check(
+		"chat-loop:getModel-called-with-orchestrator-target",
+		modelLookups.length === 1 && modelLookups[0] === "anthropic/claude-sonnet-4-6",
+		JSON.stringify(modelLookups),
+	);
+	check(
+		"chat-loop:mode-visible-tools-seed-agent",
+		initialToolSets.length === 1 && initialToolSets[0]?.includes("read") && initialToolSets[0]?.includes("grep"),
+		JSON.stringify(initialToolSets),
+	);
+	chat.cancel();
+	check("chat-loop:cancel-calls-agent-abort", abortCalls === 1, String(abortCalls));
+
+	const chatPanel = createChatPanel();
+	chatPanel.appendUser("hi");
+	chatPanel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "PO", partialText: "PO" });
+	chatPanel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "NG", partialText: "PONG" });
+	const chatPanelRender = chatPanel.render(80).join("\n");
+	check("chat-panel:renders-user-message", chatPanelRender.includes("you: hi"), chatPanelRender);
+	check("chat-panel:renders-streamed-text-delta", chatPanelRender.includes("clio: PONG"), chatPanelRender);
+
+	try {
+		const chatSubmitProbe = await runInteractiveChatSubmitProbe();
+		check(
+			"chat:interactive-free-text-routes-to-chat-submit",
+			chatSubmitProbe.stderr.includes("[child] submit hi\n"),
+			chatSubmitProbe.stderr,
+		);
+		check(
+			"chat:interactive-free-text-child-exits-cleanly",
+			chatSubmitProbe.exitCode === 0,
+			String(chatSubmitProbe.exitCode),
+		);
+	} catch (err) {
+		check("chat:interactive-free-text-probe", false, err instanceof Error ? (err.stack ?? err.message) : String(err));
+	}
+
+	try {
+		const slashProbe = await runInteractiveSlashOverlayProbe();
+		check(
+			"chat:slash-command-still-routes-to-overlay",
+			slashProbe.log.includes("Providers") && slashProbe.log.includes("anthropic"),
+			slashProbe.log,
+		);
+		check("chat:slash-command-skips-chat-submit", !slashProbe.stderr.includes("[child] chat submit"), slashProbe.stderr);
+		check("chat:slash-overlay-child-exits-cleanly", slashProbe.exitCode === 0, String(slashProbe.exitCode));
+	} catch (err) {
+		check("chat:slash-overlay-probe", false, err instanceof Error ? (err.stack ?? err.message) : String(err));
+	}
 
 	// (3) routeInteractiveKey wiring
 	let cycleCalls = 0;
