@@ -1,6 +1,8 @@
+import { runAgentsCommand } from "./agents.js";
 import { runClioCommand } from "./clio.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runInstallCommand } from "./install.js";
+import { runProvidersCommand } from "./providers.js";
 import { parseFlags, printError } from "./shared.js";
 import { runVersionCommand } from "./version.js";
 
@@ -11,6 +13,8 @@ Usage:
   clio --version, -v    print version info
   clio doctor           run environment diagnostics
   clio install          bootstrap ~/.clio directory
+  clio providers        list configured providers
+  clio agents           list discovered agent recipes
   clio --help, -h       this message
 `;
 
@@ -26,6 +30,10 @@ async function main(argv: string[]): Promise<number> {
 	if (!subcommand) return runClioCommand();
 
 	switch (subcommand) {
+		case "providers":
+			return runProvidersCommand(argv.slice(1));
+		case "agents":
+			return runAgentsCommand(argv.slice(1));
 		case "doctor":
 			return runDoctorCommand();
 		case "install":
