@@ -39,6 +39,7 @@
 		"diag:session-engine": "tsx scripts/diag-session-engine.ts",
 		"diag:prompt": "tsx scripts/diag-prompt.ts",
 		"diag:session": "tsx scripts/diag-session.ts",
+		"diag:agents-parser": "tsx scripts/diag-agents-parser.ts",
 		"hooks:install": "bash scripts/install-hooks.sh",
 		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run diag:boundaries && npm run diag:safety && npm run diag:modes && npm run diag:registry && npm run diag:prompt && npm run diag:session && npm run build && npm run verify"
 	},
