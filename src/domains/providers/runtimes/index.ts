@@ -1,6 +1,7 @@
 import type { RuntimeAdapter } from "../runtime-contract.js";
 import { anthropicAdapter } from "./anthropic.js";
 import { bedrockAdapter } from "./bedrock.js";
+import { claudeSdkAdapter } from "./claude-sdk.js";
 import { CLI_ADAPTERS } from "./cli/index.js";
 import { googleAdapter } from "./google.js";
 import { groqAdapter } from "./groq.js";
@@ -11,6 +12,7 @@ import { openrouterAdapter } from "./openrouter.js";
 
 export { anthropicAdapter } from "./anthropic.js";
 export { bedrockAdapter } from "./bedrock.js";
+export { claudeSdkAdapter } from "./claude-sdk.js";
 export { googleAdapter } from "./google.js";
 export { groqAdapter } from "./groq.js";
 export { localAdapter } from "./local.js";
@@ -30,4 +32,8 @@ const PROVIDER_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
 	localAdapter,
 ];
 
-export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [...PROVIDER_ADAPTERS, ...CLI_ADAPTERS];
+export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
+	...PROVIDER_ADAPTERS,
+	claudeSdkAdapter,
+	...CLI_ADAPTERS,
+];

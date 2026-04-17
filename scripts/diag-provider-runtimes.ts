@@ -89,16 +89,11 @@ function findAdapter(id: ProviderId): RuntimeAdapter {
 }
 
 async function main(): Promise<void> {
-	// RUNTIME_ADAPTERS now contains 8 provider adapters plus 6 CLI adapters
-	// (added in Phase 7). Provider-tier checks below only inspect the
-	// provider-tier slice; CLI adapters are covered by diag-cli-runtimes.
-	const providerAdapters = RUNTIME_ADAPTERS.filter((a) => a.tier !== "cli");
-	check("registry:provider-length", providerAdapters.length === 8, `len=${providerAdapters.length}`);
-
-	const ids = providerAdapters.map((a) => a.id);
-	const uniqueIds = new Set(ids);
-	check("registry:unique-ids", uniqueIds.size === ids.length, `ids=${JSON.stringify(ids)}`);
-
+	// RUNTIME_ADAPTERS now contains 8 provider adapters, the Claude SDK
+	// adapter (tier=sdk, id=claude-sdk, registered in Phase 8), and 6 CLI
+	// adapters. Provider-tier checks below scope to the catalog-backed
+	// provider slice; claude-sdk is covered by diag-cli-runtimes... no,
+	// diag-claude-sdk.
 	const expectedOrder: ReadonlyArray<ProviderId> = [
 		"anthropic",
 		"openai",
@@ -109,6 +104,14 @@ async function main(): Promise<void> {
 		"amazon-bedrock",
 		"local",
 	];
+	const expectedProviderIds = new Set<string>(expectedOrder);
+	const providerAdapters = RUNTIME_ADAPTERS.filter((a) => expectedProviderIds.has(String(a.id)));
+	check("registry:provider-length", providerAdapters.length === 8, `len=${providerAdapters.length}`);
+
+	const ids = providerAdapters.map((a) => a.id);
+	const uniqueIds = new Set(ids);
+	check("registry:unique-ids", uniqueIds.size === ids.length, `ids=${JSON.stringify(ids)}`);
+
 	check(
 		"registry:order",
 		expectedOrder.every((id, i) => providerAdapters[i]?.id === id),
