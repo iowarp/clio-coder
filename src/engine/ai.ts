@@ -14,6 +14,7 @@ import {
 	getModels,
 	getProviders,
 	getModel as piGetModel,
+	stream as piStream,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 } from "@mariozechner/pi-ai";
@@ -23,6 +24,8 @@ import { getLocalRegisteredModel } from "./local-model-registry.js";
 // tool-call responses (e.g. scripts/diag-worker-tools.ts). Kept narrow on purpose:
 // production code paths use registerFauxFromEnv below.
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
+
+export const stream = piStream;
 
 // Local side-registry surface lives in ./local-model-registry.js; re-exported
 // here so existing callers that import from engine/ai.ts keep working.
