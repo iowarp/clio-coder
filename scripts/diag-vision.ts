@@ -41,7 +41,7 @@ const PROMPT = "What color is the square in this image? Reply with one word.";
 const PNG_MIME_TYPE = "image/png";
 const PNG_SIZE = 64;
 const RED_SQUARE_MARGIN = 16;
-const STREAM_TIMEOUT_MS = 180_000;
+const STREAM_TIMEOUT_MS = 90_000;
 
 const failures: string[] = [];
 
@@ -183,6 +183,11 @@ function validateHermeticFixtures(): void {
 		"prompt:image-mime-type",
 		content[1]?.type === "image" && content[1].mimeType === PNG_MIME_TYPE,
 		`mimeType=${content[1]?.type === "image" ? content[1].mimeType : "missing"}`,
+	);
+	check(
+		"stream:timeout-budget",
+		STREAM_TIMEOUT_MS >= 60_000 && STREAM_TIMEOUT_MS <= 90_000,
+		`timeoutMs=${STREAM_TIMEOUT_MS}`,
 	);
 
 	check("png:signature", png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
