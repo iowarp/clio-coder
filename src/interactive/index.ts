@@ -5,7 +5,10 @@ import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
+import type { SessionContract } from "../domains/session/contract.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import type { ChatLoop } from "./chat-loop.js";
+import { createChatPanel } from "./chat-panel.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
@@ -20,6 +23,8 @@ export interface InteractiveDeps {
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
+	chat: ChatLoop;
+	session?: SessionContract;
 	/** XDG data dir (clioDataDir()). `/receipt verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
 	/**
@@ -293,6 +298,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const tui = new TUI(terminal);
 
 	const banner = defaultBanner();
+	const chatPanel = createChatPanel();
 	const footer = buildFooter({ modes: deps.modes, providers: deps.providers });
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -317,6 +323,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stdout: (s) => process.stdout.write(s),
 		stderr: (s) => process.stderr.write(s),
 	};
+
+	const unsubscribeChat = deps.chat.onEvent((event) => {
+		chatPanel.applyEvent(event);
+		tui.requestRender();
+	});
 
 	editor.onSubmit = (text: string): void => {
 		const command = parseSlashCommand(text);
@@ -365,12 +376,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			}
 			case "unknown":
-				io.stderr(`[interactive] unknown input: ${command.text}\n`);
+				chatPanel.appendUser(command.text);
+				tui.requestRender();
+				void (async () => {
+					try {
+						await deps.chat.submit(command.text);
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[interactive] chat failed: ${msg}\n`);
+					} finally {
+						tui.requestRender();
+					}
+				})();
 				return;
 		}
 	};
 
-	const root = buildLayout({ banner, body: editor, footer: footer.view });
+	const root = buildLayout({ banner, chat: chatPanel, editor, footer: footer.view });
 	tui.addChild(root);
 	tui.setFocus(editor);
 	tui.start();
@@ -476,6 +498,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		clearInterval(keepAlive);
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
+		unsubscribeChat();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
 			tui.stop();
@@ -537,6 +560,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 		});
 		if (overlayConsumed) {
+			return { consume: true };
+		}
+		if (overlayState === "closed" && data === ESC && deps.chat.isStreaming()) {
+			deps.chat.cancel();
 			return { consume: true };
 		}
 

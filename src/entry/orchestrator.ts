@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
+import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -22,7 +23,9 @@ import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import type { SessionContract } from "../domains/session/contract.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
 
 export interface BootResult {
@@ -107,14 +110,23 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 
 	const config = result.getContract<ConfigContract>("config");
+	const session = result.getContract<SessionContract>("session");
+	const chat = createChatLoop({
+		getSettings: () => config?.get() ?? readSettings(),
+		modes,
+		knownProviders: () => new Set(providers.list().map((entry) => entry.id)),
+		...(session ? { session } : {}),
+	});
 	await startInteractive({
 		bus,
 		modes,
 		providers,
 		dispatch,
 		observability,
+		chat,
 		dataDir: clioDataDir(),
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
+		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},
