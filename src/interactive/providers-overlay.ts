@@ -116,13 +116,14 @@ export function openProvidersOverlay(
 	const box = new Box(0, 0);
 	const loader = new Loader(tui, IDENTITY, IDENTITY, "Probing providers...");
 	box.addChild(loader);
+	const lifecycle = new AbortController();
 	const handle = tui.showOverlay(box, {
 		anchor: "center",
 		width: PROVIDERS_OVERLAY_WIDTH,
 	});
-	loader.start();
 
 	const finalize = (lines: string[]): void => {
+		if (lifecycle.signal.aborted) return;
 		loader.stop();
 		box.clear();
 		box.addChild(new Text(lines.join("\n"), 0, 0));
@@ -145,8 +146,18 @@ export function openProvidersOverlay(
 			}
 		}
 		const entries = providers.list();
+		if (lifecycle.signal.aborted) return;
 		finalize(formatProvidersOverlayLines(entries, { error }));
 	})();
 
-	return handle;
+	return {
+		...handle,
+		hide(): void {
+			if (!lifecycle.signal.aborted) {
+				lifecycle.abort();
+			}
+			loader.stop();
+			handle.hide();
+		},
+	};
 }
