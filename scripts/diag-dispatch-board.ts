@@ -172,6 +172,23 @@ async function main(): Promise<void> {
 		JSON.stringify(enqueued),
 	);
 
+	withNow(1_550, () => {
+		bus.emit(BusChannels.DispatchProgress, {
+			runId: "run-enqueued",
+			event: {
+				type: "agent_end",
+				messages: [{ role: "assistant", stopReason: "stop" }],
+			},
+		});
+	});
+	rows = withNow(1_550, () => store.rows());
+	enqueued = rows.find((row) => row.runId === "run-enqueued");
+	check(
+		"store:agent-end-stop-marks-completed-before-receipt",
+		enqueued?.status === "completed" && enqueued?.tokenCount === 28,
+		JSON.stringify(enqueued),
+	);
+
 	withNow(1_600, () => {
 		bus.emit(BusChannels.DispatchCompleted, {
 			runId: "run-enqueued",
@@ -222,6 +239,61 @@ async function main(): Promise<void> {
 		"store:failed-row-shows-failed",
 		failed?.status === "failed" && failed?.tokenCount === 13 && failed?.costUsd === 0.222 && failed?.runtime === "cli",
 		JSON.stringify(failed),
+	);
+
+	withNow(2_300, () => {
+		bus.emit(BusChannels.DispatchEnqueued, {
+			runId: "run-aborted",
+			agentId: "reviewer",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			runtime: "cli",
+		});
+	});
+	withNow(2_350, () => {
+		bus.emit(BusChannels.DispatchStarted, {
+			runId: "run-aborted",
+			agentId: "reviewer",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			runtime: "cli",
+		});
+	});
+	withNow(2_375, () => {
+		bus.emit(BusChannels.DispatchProgress, {
+			runId: "run-aborted",
+			event: {
+				type: "agent_end",
+				messages: [{ role: "assistant", stopReason: "aborted" }],
+			},
+		});
+	});
+	rows = withNow(2_375, () => store.rows());
+	const abortedBeforeReceipt = rows.find((row) => row.runId === "run-aborted");
+	check(
+		"store:agent-end-aborted-marks-row-before-receipt",
+		abortedBeforeReceipt?.status === "aborted",
+		JSON.stringify(abortedBeforeReceipt),
+	);
+	withNow(2_400, () => {
+		bus.emit(BusChannels.DispatchFailed, {
+			runId: "run-aborted",
+			agentId: "reviewer",
+			providerId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+			runtime: "cli",
+			tokenCount: 9,
+			costUsd: 0,
+			durationMs: 25,
+			reason: "interrupted",
+		});
+	});
+	rows = withNow(2_450, () => store.rows());
+	const aborted = rows.find((row) => row.runId === "run-aborted");
+	check(
+		"store:dispatch-failed-interrupted-stays-aborted",
+		aborted?.status === "aborted" && aborted?.tokenCount === 9,
+		JSON.stringify(aborted),
 	);
 
 	for (let index = 0; index < 55; index += 1) {
