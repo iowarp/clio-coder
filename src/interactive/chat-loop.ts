@@ -195,11 +195,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		const model = getModel(target.providerId, target.modelId);
 		const tools = resolveAgentTools(visibleToolSnapshot(deps.modes), deps.modes.current());
+		const thinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: orchestratorPrompt(),
 				model,
-				thinkingLevel: "off",
+				thinkingLevel,
 				tools,
 				messages: [],
 			},

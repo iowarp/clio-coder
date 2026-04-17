@@ -6,6 +6,7 @@ import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
+import type { ThinkingLevel } from "../domains/providers/resolver.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -14,6 +15,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
@@ -42,6 +44,10 @@ export interface InteractiveDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
+	/** Persist a thinking level chosen in the /thinking overlay. */
+	onSetThinkingLevel?: (level: ThinkingLevel) => void;
+	/** Persist the next thinking level when Shift+Tab is pressed. */
+	onCycleThinking?: () => void;
 	onShutdown: () => Promise<void>;
 }
 
@@ -49,12 +55,21 @@ export const SHIFT_TAB = "\x1b[Z";
 export const CTRL_D = "\x04";
 export const CTRL_B = "\x02";
 export const ALT_S = "\x1bs";
+export const ALT_M = "\x1bm";
 export const ENTER = "\r";
 export const ESC = "\x1b";
-export type OverlayState = "closed" | "super-confirm" | "dispatch-board" | "providers" | "cost" | "receipts";
+export type OverlayState =
+	| "closed"
+	| "super-confirm"
+	| "dispatch-board"
+	| "providers"
+	| "cost"
+	| "receipts"
+	| "thinking";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
+	cycleThinking: () => void;
 	requestShutdown: () => void;
 	requestSuper: () => void;
 	toggleDispatchBoard: () => void;
@@ -82,12 +97,17 @@ export interface ReceiptsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface ThinkingOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
 		CostOverlayKeyDeps,
-		ReceiptsOverlayKeyDeps {
+		ReceiptsOverlayKeyDeps,
+		ThinkingOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -98,6 +118,10 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		return true;
 	}
 	if (data === SHIFT_TAB) {
+		deps.cycleThinking();
+		return true;
+	}
+	if (data === ALT_M) {
 		deps.cycleMode();
 		return true;
 	}
@@ -168,6 +192,18 @@ export function routeReceiptsOverlayKey(data: string, deps: ReceiptsOverlayKeyDe
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /thinking overlay. Same policy as receipts:
+ * Esc closes; arrows and Enter fall through to the focused SelectList.
+ */
+export function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -197,6 +233,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		// Do not swallow arrow keys or Enter; the focused SelectList needs them.
 		return routeReceiptsOverlayKey(data, deps);
 	}
+	if (overlayState === "thinking") {
+		// Same policy as receipts: the Box forwards unconsumed input to the SelectList.
+		return routeThinkingOverlayKey(data, deps);
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -211,6 +251,7 @@ export type SlashCommand =
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
 	| { kind: "receipt-usage" }
+	| { kind: "thinking" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -223,6 +264,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (trimmed === "/providers") return { kind: "providers" };
 	if (trimmed === "/cost") return { kind: "cost" };
 	if (trimmed === "/receipts") return { kind: "receipts" };
+	if (trimmed === "/thinking") return { kind: "thinking" };
 	if (trimmed === "/receipt" || trimmed === "/receipt ") return { kind: "receipt-usage" };
 	if (trimmed.startsWith("/receipt ")) {
 		const parts = trimmed.slice("/receipt ".length).trim().split(/\s+/);
@@ -386,6 +428,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				}
 				return;
 			}
+			case "thinking":
+				openThinkingOverlayState();
+				return;
 			case "unknown":
 				chatPanel.appendUser(command.text);
 				tui.requestRender();
@@ -487,6 +532,22 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const openThinkingOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "thinking";
+		const settings = deps.getSettings?.();
+		const current = settings ? readThinkingLevel(settings) : "off";
+		overlayHandle = openThinkingOverlay(tui, {
+			current,
+			onSelect: (next) => {
+				deps.onSetThinkingLevel?.(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
 	const toggleDispatchBoardOverlay = (): void => {
 		if (overlayState === "dispatch-board") {
 			closeOverlay();
@@ -581,6 +642,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		const consumed = routeInteractiveKey(data, {
 			cycleMode: () => {
 				deps.modes.cycleNormal();
+				footer.refresh();
+				tui.requestRender();
+			},
+			cycleThinking: () => {
+				deps.onCycleThinking?.();
 				footer.refresh();
 				tui.requestRender();
 			},

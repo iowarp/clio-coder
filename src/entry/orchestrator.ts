@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
-import { readSettings } from "../core/config.js";
+import { readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -22,6 +22,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
+import { VALID_THINKING_LEVELS } from "../domains/providers/resolver.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -132,6 +133,18 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		getSettings: () => config?.get() ?? readSettings(),
 		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
+		onSetThinkingLevel: (level) => {
+			const current = readSettings();
+			current.orchestrator.thinkingLevel = level;
+			writeSettings(current);
+		},
+		onCycleThinking: () => {
+			const current = readSettings();
+			const idx = VALID_THINKING_LEVELS.indexOf(current.orchestrator.thinkingLevel ?? "off");
+			const next = VALID_THINKING_LEVELS[(idx + 1) % VALID_THINKING_LEVELS.length] ?? "off";
+			current.orchestrator.thinkingLevel = next;
+			writeSettings(current);
+		},
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},
