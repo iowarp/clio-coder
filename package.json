@@ -1,0 +1,54 @@
+{
+  "name": "@iowarp/clio-coder",
+  "version": "0.1.0-dev",
+  "description": "Clio — IOWarp's orchestrator coding-agent, built on a Level-3 custom harness over pi-mono",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Anthony Kougkas <a.kougkas@gmail.com>",
+  "homepage": "https://github.com/iowarp/clio-coder",
+  "bugs": "https://github.com/iowarp/clio-coder/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iowarp/clio-coder.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "clio": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "check:boundaries": "tsx scripts/check-boundaries.ts",
+    "check:prompts": "tsx scripts/check-prompts.ts",
+    "verify": "tsx scripts/verify.ts",
+    "smoke": "tsx scripts/verify.ts --smoke",
+    "ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run build && npm run verify"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.67.4",
+    "@mariozechner/pi-ai": "0.67.4",
+    "@mariozechner/pi-tui": "0.67.4",
+    "@sinclair/typebox": "^0.34.0",
+    "chalk": "^5.3.0",
+    "undici": "^7.0.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^20.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.7.0"
+  }
+}
