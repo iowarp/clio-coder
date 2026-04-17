@@ -47,6 +47,9 @@ export function runDoctor(): DoctorFinding[] {
 		}
 	}
 
+	// Single "credentials" row covers all three states (missing / wrong mode /
+	// correct mode / read error) so external assertions can grep one stable
+	// row name instead of branching on state.
 	const creds = join(clioConfigDir(), "credentials.yaml");
 	if (!existsSync(creds)) {
 		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio install`)" });
@@ -57,8 +60,8 @@ export function runDoctor(): DoctorFinding[] {
 			const mode = st.mode & 0o777;
 			findings.push({
 				ok: mode === 0o600,
-				name: "credentials mode",
-				detail: `${mode.toString(8)}`,
+				name: "credentials",
+				detail: mode.toString(8),
 			});
 		} catch (err) {
 			findings.push({ ok: false, name: "credentials", detail: String(err) });
