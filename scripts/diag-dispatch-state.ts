@@ -1,6 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Diag harness for src/domains/dispatch/state.ts.
@@ -21,7 +23,45 @@ function check(label: string, ok: boolean, detail?: string): void {
 	process.stderr.write(`[diag-dispatch-state] FAIL ${label}${detail ? ` — ${detail}` : ""}\n`);
 }
 
+async function workerMain(home: string): Promise<void> {
+	// Subprocess entrypoint used by the "lock:concurrent-processes" regression
+	// test. Opens the ledger in the shared CLIO_HOME, creates one run tagged
+	// with the worker's PID, and persists. The parent inspects runs.json to
+	// verify all workers' entries survived the concurrent persist.
+	for (const k of ["CLIO_DATA_DIR", "CLIO_CONFIG_DIR", "CLIO_CACHE_DIR", "CLIO_MAX_RUNS"] as const) {
+		delete process.env[k];
+	}
+	process.env.CLIO_HOME = home;
+	const { resetXdgCache } = await import("../src/core/xdg.js");
+	resetXdgCache();
+	const { resetPackageRootCache } = await import("../src/core/package-root.js");
+	resetPackageRootCache();
+	const { openLedger } = await import("../src/domains/dispatch/state.js");
+	const ledger = openLedger();
+	ledger.create({
+		agentId: `worker-${process.pid}`,
+		task: `task-${process.pid}`,
+		providerId: "anthropic",
+		modelId: "claude-opus",
+		runtime: "native",
+		sessionId: null,
+		cwd: home,
+	});
+	await ledger.persist();
+}
+
 async function main(): Promise<void> {
+	const workerIdx = process.argv.indexOf("--worker");
+	if (workerIdx !== -1) {
+		const home = process.argv[workerIdx + 1];
+		if (!home) {
+			process.stderr.write("worker requires --worker <home>\n");
+			process.exit(2);
+		}
+		await workerMain(home);
+		return;
+	}
+
 	const home = mkdtempSync(join(tmpdir(), "clio-diag-dispatch-state-"));
 	const ENV_KEYS = ["CLIO_HOME", "CLIO_DATA_DIR", "CLIO_CONFIG_DIR", "CLIO_CACHE_DIR", "CLIO_MAX_RUNS"] as const;
 	const snapshot = new Map<string, string | undefined>();
@@ -206,6 +246,143 @@ async function main(): Promise<void> {
 			cappedList.map((r) => r.id).join(",") === newestThreeIds.join(","),
 			`got=${cappedList.map((r) => r.id).join(",")} want=${newestThreeIds.join(",")}`,
 		);
+
+		// Step 9: concurrent-processes regression for the ledger lock. Fork
+		// 5 tsx subprocesses, each creating + persisting one run; all 5 must
+		// survive. Before the fix, concurrent waiters would delete each
+		// other's live locks after a 5s deadline and clobber state.
+		const concurrentHome = mkdtempSync(join(tmpdir(), "clio-diag-dispatch-lock-"));
+		const selfPath = fileURLToPath(import.meta.url);
+		const spawnWorker = (): Promise<{ code: number; stderr: string }> =>
+			new Promise((resolvePromise) => {
+				const child = spawn(process.execPath, ["--import", "tsx", selfPath, "--worker", concurrentHome], {
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+				let stderrBuf = "";
+				child.stderr.on("data", (chunk: Buffer) => {
+					stderrBuf += chunk.toString("utf8");
+				});
+				child.stdout.on("data", () => {
+					// drain
+				});
+				child.on("close", (code) => resolvePromise({ code: code ?? -1, stderr: stderrBuf }));
+			});
+		const workerResults = await Promise.all([spawnWorker(), spawnWorker(), spawnWorker(), spawnWorker(), spawnWorker()]);
+		const allSucceeded = workerResults.every((r) => r.code === 0);
+		check(
+			"lock:concurrent-exit-codes",
+			allSucceeded,
+			workerResults.map((r, i) => `w${i}=${r.code}${r.code !== 0 ? ` err=${r.stderr.slice(0, 200)}` : ""}`).join(" "),
+		);
+		const concurrentRunsPath = join(concurrentHome, "data", "state", "runs.json");
+		const concurrentPersisted = existsSync(concurrentRunsPath)
+			? (JSON.parse(readFileSync(concurrentRunsPath, "utf8")) as Array<{ id: string; agentId: string }>)
+			: [];
+		check(
+			"lock:concurrent-all-5-survived",
+			concurrentPersisted.length === 5,
+			`len=${concurrentPersisted.length} ids=${concurrentPersisted.map((r) => r.agentId).join(",")}`,
+		);
+		try {
+			rmSync(concurrentHome, { recursive: true, force: true });
+		} catch {
+			// best-effort
+		}
+
+		// Step 10: stale lock with dead PID must be reclaimed quickly.
+		const staleHome = mkdtempSync(join(tmpdir(), "clio-diag-dispatch-stale-"));
+		const staleEnvSnapshot = process.env.CLIO_HOME;
+		process.env.CLIO_HOME = staleHome;
+		try {
+			const { resetXdgCache: resetStale, clioDataDir: staleClioDataDir } = await import("../src/core/xdg.js");
+			resetStale();
+			const { resetPackageRootCache: resetStalePkg } = await import("../src/core/package-root.js");
+			resetStalePkg();
+			const { openLedger: openStaleLedger } = await import("../src/domains/dispatch/state.js");
+			const staleRunsPath = join(staleClioDataDir(), "state", "runs.json");
+			const staleLockPath = `${staleRunsPath}.lock`;
+			const { mkdirSync } = await import("node:fs");
+			mkdirSync(dirname(staleLockPath), { recursive: true });
+			// PID far above any plausible active PID range; kill(pid, 0) throws ESRCH.
+			writeFileSync(staleLockPath, "2147483646");
+			const staleLedger = openStaleLedger();
+			staleLedger.create({
+				agentId: "stale-reclaim",
+				task: "reclaim-dead-pid-lock",
+				providerId: "anthropic",
+				modelId: "claude-opus",
+				runtime: "native",
+				sessionId: null,
+				cwd: staleHome,
+			});
+			const staleStart = Date.now();
+			await staleLedger.persist();
+			const staleElapsed = Date.now() - staleStart;
+			check("lock:stale-pid-reclaimed", existsSync(staleRunsPath), `elapsed=${staleElapsed}ms`);
+			check(
+				"lock:stale-pid-reclaimed-fast",
+				staleElapsed < 5_000,
+				`persist took ${staleElapsed}ms with a dead-PID stale lock`,
+			);
+		} finally {
+			const k = "CLIO_HOME";
+			if (staleEnvSnapshot === undefined) delete process.env[k];
+			else process.env[k] = staleEnvSnapshot;
+			try {
+				rmSync(staleHome, { recursive: true, force: true });
+			} catch {
+				// best-effort
+			}
+		}
+
+		// Step 11: lockfile containing a live PID (our own) must NOT be
+		// reclaimed. The waiter should back off until the lock is released.
+		const liveHome = mkdtempSync(join(tmpdir(), "clio-diag-dispatch-live-"));
+		const liveEnvSnapshot = process.env.CLIO_HOME;
+		process.env.CLIO_HOME = liveHome;
+		try {
+			const { resetXdgCache: resetLive, clioDataDir: liveClioDataDir } = await import("../src/core/xdg.js");
+			resetLive();
+			const { resetPackageRootCache: resetLivePkg } = await import("../src/core/package-root.js");
+			resetLivePkg();
+			const { openLedger: openLiveLedger } = await import("../src/domains/dispatch/state.js");
+			const liveRunsPath = join(liveClioDataDir(), "state", "runs.json");
+			const liveLockPath = `${liveRunsPath}.lock`;
+			const { mkdirSync } = await import("node:fs");
+			mkdirSync(dirname(liveLockPath), { recursive: true });
+			writeFileSync(liveLockPath, String(process.pid));
+			const liveLedger = openLiveLedger();
+			liveLedger.create({
+				agentId: "live-backoff",
+				task: "backoff-on-live-pid",
+				providerId: "anthropic",
+				modelId: "claude-opus",
+				runtime: "native",
+				sessionId: null,
+				cwd: liveHome,
+			});
+			const persistPromise = liveLedger.persist();
+			// Give the waiter time to observe the lock and back off at least once.
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			const stillPlanted = existsSync(liveLockPath) && readFileSync(liveLockPath, "utf8").trim() === String(process.pid);
+			check("lock:live-pid-not-reclaimed", stillPlanted, "waiter unlinked the live-PID lockfile instead of backing off");
+			try {
+				unlinkSync(liveLockPath);
+			} catch {
+				// ok if already gone
+			}
+			await persistPromise;
+			check("lock:live-pid-persist-completes-after-release", existsSync(liveRunsPath));
+		} finally {
+			const k = "CLIO_HOME";
+			if (liveEnvSnapshot === undefined) delete process.env[k];
+			else process.env[k] = liveEnvSnapshot;
+			try {
+				rmSync(liveHome, { recursive: true, force: true });
+			} catch {
+				// best-effort
+			}
+		}
 	} finally {
 		for (const [k, v] of snapshot) {
 			if (v === undefined) delete process.env[k];
