@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PI_MONO_PACKAGES } from "../engine/pi-mono-names.js";
 
 let cached: string | null = null;
 let cachedClioVersion: string | null = null;
@@ -48,7 +49,7 @@ export function readClioVersion(): string {
 export function readPiMonoVersion(): string {
 	if (cachedPiMonoVersion) return cachedPiMonoVersion;
 	const pkg = readPackageJson();
-	cachedPiMonoVersion = pkg.dependencies?.["@mariozechner/pi-agent-core"] ?? "unknown";
+	cachedPiMonoVersion = pkg.dependencies?.[PI_MONO_PACKAGES.agentCore] ?? "unknown";
 	return cachedPiMonoVersion;
 }
 

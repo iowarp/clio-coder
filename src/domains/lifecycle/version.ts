@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { PI_MONO_PACKAGES } from "../../engine/pi-mono-names.js";
 
 interface PackageJsonShape {
 	version?: string;
@@ -26,9 +27,9 @@ export function getVersionInfo(): VersionInfo {
 		clio: pkg.version ?? "0.0.0",
 		node: process.version,
 		platform: `${process.platform}-${process.arch}`,
-		piAgentCore: pkg.dependencies?.["@mariozechner/pi-agent-core"] ?? null,
-		piAi: pkg.dependencies?.["@mariozechner/pi-ai"] ?? null,
-		piTui: pkg.dependencies?.["@mariozechner/pi-tui"] ?? null,
+		piAgentCore: pkg.dependencies?.[PI_MONO_PACKAGES.agentCore] ?? null,
+		piAi: pkg.dependencies?.[PI_MONO_PACKAGES.ai] ?? null,
+		piTui: pkg.dependencies?.[PI_MONO_PACKAGES.tui] ?? null,
 	};
 	return cached;
 }
