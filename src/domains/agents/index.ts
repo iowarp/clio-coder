@@ -10,4 +10,5 @@ export const AgentsDomainModule: DomainModule = {
 export { AgentsManifest } from "./manifest.js";
 export type { AgentsContract } from "./contract.js";
 export type { AgentRecipe, RecipeSource } from "./recipe.js";
+export { parseFleet } from "./fleet-parser.js";
 export type { Fleet, FleetStep } from "./fleet-parser.js";
