@@ -82,7 +82,6 @@ async function main(): Promise<void> {
 			"ls",
 			"web_fetch",
 			"web_search",
-			"batch_dispatch",
 			"chain_dispatch",
 		].sort();
 		check(
