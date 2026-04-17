@@ -1,5 +1,11 @@
+import { unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { classify } from "../src/domains/safety/action-classifier.js";
 import { buildAuditRecord } from "../src/domains/safety/audit.js";
+import { loadDefaultRuleset, loadRuleset, match } from "../src/domains/safety/damage-control.js";
+import { createLoopState, observe } from "../src/domains/safety/loop-detector.js";
+import { formatRejection } from "../src/domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, READONLY_SCOPE, isSubset } from "../src/domains/safety/scope.js";
 
 /**
@@ -92,9 +98,115 @@ function runAuditFixtures(): void {
 	check("audit:args-present", record.args !== undefined);
 }
 
+function runDamageControlFixtures(): void {
+	const ruleset = loadDefaultRuleset();
+	const gp = match("git push --force origin main", ruleset);
+	check("damage-control:git-push-force-main", gp?.ruleId === "git-push-force-main", `got ${String(gp?.ruleId)}`);
+	const rm = match("rm -rf /", ruleset);
+	check("damage-control:rm-rf-root", rm?.ruleId === "rm-rf-root", `got ${String(rm?.ruleId)}`);
+	const benign = match("ls -la", ruleset);
+	check("damage-control:benign-null", benign === null);
+	check("damage-control:empty-string-null", match("", ruleset) === null);
+	const chmodBare = match("chmod -R 755 /", ruleset);
+	check(
+		"damage-control:chmod-recursive-root-bare-slash",
+		chmodBare?.ruleId === "chmod-recursive-root",
+		`got ${String(chmodBare?.ruleId)}`,
+	);
+	const chmodVar = match("chmod -R 755 /var/lib", ruleset);
+	check(
+		"damage-control:chmod-recursive-root-var",
+		chmodVar?.ruleId === "chmod-recursive-root",
+		`got ${String(chmodVar?.ruleId)}`,
+	);
+	const chmodLocal = match("chmod -R 755 ./local", ruleset);
+	check(
+		"damage-control:chmod-recursive-root-local-path-negative",
+		chmodLocal === null,
+		`got ${String(chmodLocal?.ruleId)}`,
+	);
+
+	const badPath = join(tmpdir(), `clio-diag-safety-bad-${Date.now()}.yaml`);
+	writeFileSync(
+		badPath,
+		[
+			"version: 1",
+			"rules:",
+			"  - description: missing id rule",
+			'    pattern: "\\\\bfoo\\\\b"',
+			"    class: execute",
+			"    block: false",
+			"",
+		].join("\n"),
+	);
+	let threw = false;
+	let message = "";
+	try {
+		loadRuleset(badPath);
+	} catch (err) {
+		threw = true;
+		message = err instanceof Error ? err.message : String(err);
+	} finally {
+		try {
+			unlinkSync(badPath);
+		} catch {
+			// best-effort cleanup
+		}
+	}
+	check(
+		"damage-control:loader-rejects-missing-id",
+		threw && message.includes("index") && message.includes("id"),
+		`threw=${threw} message=${message}`,
+	);
+}
+
+function runLoopDetectorFixtures(): void {
+	let state = createLoopState();
+	const now = 1_000_000;
+	let verdict = { looping: false, key: "", count: 0 };
+	for (let i = 0; i < 5; i += 1) {
+		const [next, v] = observe(state, "bash|ls", now + i);
+		state = next;
+		verdict = v;
+	}
+	check("loop-detector:5th-call-looping", verdict.looping === true && verdict.count === 5);
+	const [, sixth] = observe(state, "bash|ls", now + 5);
+	check("loop-detector:6th-call-still-looping", sixth.looping === true && sixth.count === 6);
+	const fresh = createLoopState();
+	const [, single] = observe(fresh, "bash|ls", now);
+	check("loop-detector:single-call-not-looping", single.looping === false && single.count === 1);
+}
+
+function runRejectionFeedbackFixtures(): void {
+	const msg = formatRejection({
+		tool: "bash",
+		actionClass: "git_destructive",
+		reasons: ["matched git-push-force-main"],
+		mode: "default",
+	});
+	check("rejection:short-has-blocked", msg.short.includes("blocked"));
+	check(
+		"rejection:hint-hard-block",
+		msg.hints.some((h) => h.includes("hard block")),
+	);
+	const sysMsg = formatRejection({
+		tool: "bash",
+		actionClass: "system_modify",
+		reasons: ["pattern:sudo-or-doas"],
+		mode: "default",
+	});
+	check(
+		"rejection:super-mode-hint",
+		sysMsg.hints.some((h) => h.includes("super mode")),
+	);
+}
+
 runClassifyFixtures();
 runScopeFixtures();
 runAuditFixtures();
+runDamageControlFixtures();
+runLoopDetectorFixtures();
+runRejectionFeedbackFixtures();
 
 if (failures.length > 0) {
 	process.stderr.write(`[diag-safety] FAILED ${failures.length} check(s)\n`);
