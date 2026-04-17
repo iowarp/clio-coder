@@ -6,11 +6,24 @@ import { type Static, Type } from "@sinclair/typebox";
  * Static type export downstream.
  */
 
+const ThinkingFormatSchema = Type.Union([
+	Type.Literal("qwen"),
+	Type.Literal("qwen-chat-template"),
+	Type.Literal("openrouter"),
+	Type.Literal("zai"),
+]);
+
 const EndpointSpecSchema = Type.Object({
 	url: Type.String({ minLength: 1 }),
 	default_model: Type.Optional(Type.String()),
 	api_key: Type.Optional(Type.String()),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+	reasoning: Type.Optional(Type.Boolean()),
+	thinking_format: Type.Optional(ThinkingFormatSchema),
+	context_window: Type.Optional(Type.Integer({ minimum: 1 })),
+	max_tokens: Type.Optional(Type.Integer({ minimum: 1 })),
+	supports_images: Type.Optional(Type.Boolean()),
+	compat: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 });
 
 const LocalProviderSchema = Type.Object({

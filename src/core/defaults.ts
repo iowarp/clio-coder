@@ -3,11 +3,19 @@
  * if the file does not already exist. Users edit the file directly or through TUI overlays.
  */
 
+export type ThinkingFormat = "qwen" | "qwen-chat-template" | "openrouter" | "zai";
+
 export interface EndpointSpec {
 	url: string;
 	default_model?: string;
 	api_key?: string;
 	headers?: Record<string, string>;
+	reasoning?: boolean;
+	thinking_format?: ThinkingFormat;
+	context_window?: number;
+	max_tokens?: number;
+	supports_images?: boolean;
+	compat?: Record<string, unknown>;
 }
 
 export interface LocalProviderConfig {
