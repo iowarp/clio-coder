@@ -6,6 +6,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
+import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
@@ -100,11 +101,13 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
 
+	const config = result.getContract<ConfigContract>("config");
 	await startInteractive({
 		bus,
 		modes,
 		providers,
 		dispatch,
+		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

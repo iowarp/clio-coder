@@ -12,8 +12,11 @@
  * pre-tool-registration baseline; the worker will never call a tool on this run.
  */
 
+import type { ToolName } from "../core/tool-names.js";
+import type { ModeName } from "../domains/modes/matrix.js";
 import { getModel, registerFauxFromEnv } from "./ai.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
+import { resolveAgentTools } from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	systemPrompt: string;
@@ -22,6 +25,10 @@ export interface WorkerRunInput {
 	modelId: string;
 	sessionId?: string;
 	apiKey?: string;
+	/** Tool ids the agent is allowed to use. Defaults to the mode matrix. */
+	allowedTools?: ReadonlyArray<ToolName>;
+	/** Mode matrix the worker runs under. Defaults to "default". */
+	mode?: ModeName;
 }
 
 export interface WorkerRunResult {
@@ -62,12 +69,19 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const fauxModel = registerFauxFromEnv();
 	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
+	const mode: ModeName = input.mode ?? "default";
+	const tools = resolveAgentTools(input.allowedTools, mode);
+	if (tools.length === 0 && (input.allowedTools?.length ?? 0) > 0) {
+		process.stderr.write(
+			`[worker] warning: no tools resolved for mode=${mode} allowed=[${(input.allowedTools ?? []).join(",")}]\n`,
+		);
+	}
 	const options: AgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
 			model: model as unknown as Model<never>,
 			thinkingLevel: "off",
-			tools: [],
+			tools,
 			messages: [],
 		},
 		getApiKey: async (provider: string) => {

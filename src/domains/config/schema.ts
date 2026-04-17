@@ -18,7 +18,7 @@ const LocalProviderSchema = Type.Object({
 });
 
 const WorkerTargetSchema = Type.Object({
-	provider: Type.String({ minLength: 1 }),
+	provider: Type.Optional(Type.String({ minLength: 1 })),
 	endpoint: Type.Optional(Type.String()),
 	model: Type.Optional(Type.String()),
 });

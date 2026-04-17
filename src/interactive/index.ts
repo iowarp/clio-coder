@@ -15,6 +15,12 @@ export interface InteractiveDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
+	/**
+	 * Resolver for the current `workers.default` block. `/run` uses this to
+	 * short-circuit with an actionable error when no provider is configured
+	 * instead of letting the dispatch throw with no config context.
+	 */
+	getWorkerDefault?: () => { provider?: string; model?: string; endpoint?: string } | undefined;
 	onShutdown: () => Promise<void>;
 }
 
@@ -138,14 +144,29 @@ export interface RunIo {
 	stderr: (s: string) => void;
 }
 
-/** Dispatches /run through the dispatch contract and streams events to stdout. */
-export async function handleRun(agentId: string, task: string, dispatch: DispatchContract, io: RunIo): Promise<void> {
+export interface HandleRunDeps {
+	dispatch: DispatchContract;
+	io: RunIo;
+	workerDefault?: { provider?: string; model?: string; endpoint?: string } | undefined;
+}
+
+/**
+ * Dispatches /run through the dispatch contract and streams events to stdout.
+ * Provider + model are resolved from `settings.workers.default`; when that
+ * block is empty, we refuse to dispatch and print an actionable error instead.
+ */
+export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
+	const { dispatch, io, workerDefault } = deps;
+	if (!workerDefault?.provider) {
+		io.stderr(
+			"[run] no provider configured. Edit ~/.clio/settings.yaml (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n",
+		);
+		return;
+	}
 	try {
 		const handle = await dispatch.dispatch({
 			agentId,
 			task,
-			providerId: "faux",
-			modelId: "faux-model",
 			runtime: "native",
 		});
 		io.stdout(`\n[run] runId=${handle.runId}\n`);
@@ -211,7 +232,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			case "run":
 				void (async () => {
-					await handleRun(command.agentId, command.task, deps.dispatch, io);
+					await handleRun(command.agentId, command.task, {
+						dispatch: deps.dispatch,
+						io,
+						workerDefault: deps.getWorkerDefault?.(),
+					});
 					tui.requestRender();
 				})();
 				return;

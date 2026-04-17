@@ -69,17 +69,17 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		const dispatchReq: {
 			agentId: string;
 			task: string;
-			providerId: string;
-			modelId: string;
+			providerId?: string;
+			modelId?: string;
 			runtime: "native";
 			endpoint?: string;
 		} = {
 			agentId: agentId as string,
 			task,
-			providerId: providerId ?? "faux",
-			modelId: modelId ?? "faux-model",
 			runtime: "native",
 		};
+		if (providerId) dispatchReq.providerId = providerId;
+		if (modelId) dispatchReq.modelId = modelId;
 		if (endpointName) dispatchReq.endpoint = endpointName;
 		const handle = await dispatch.dispatch(dispatchReq);
 
@@ -111,6 +111,7 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio run failed: ${msg}\n`);
 		await result.stop();
+		if (msg.startsWith("dispatch: no provider") || msg.startsWith("dispatch: no model")) return 2;
 		return 1;
 	}
 }

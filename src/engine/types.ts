@@ -13,6 +13,8 @@ export type {
 	AgentState,
 	AgentEvent,
 	AgentMessage,
+	AgentTool,
+	AgentToolResult,
 	StreamFn,
 } from "@mariozechner/pi-agent-core";
 

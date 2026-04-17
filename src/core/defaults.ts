@@ -15,7 +15,7 @@ export interface LocalProviderConfig {
 }
 
 export interface WorkerTargetConfig {
-	provider: string;
+	provider?: string;
 	endpoint?: string;
 	model?: string;
 }
@@ -42,13 +42,9 @@ export const DEFAULT_SETTINGS = {
 		ollama: { endpoints: {} },
 		"openai-compat": { endpoints: {} },
 	} as LocalProvidersSettings,
-	orchestrator: {
-		provider: "faux",
-	} as WorkerTargetConfig,
+	orchestrator: {} as WorkerTargetConfig,
 	workers: {
-		default: {
-			provider: "faux",
-		} as WorkerTargetConfig,
+		default: {} as WorkerTargetConfig,
 	},
 	budget: {
 		sessionCeilingUsd: 5,

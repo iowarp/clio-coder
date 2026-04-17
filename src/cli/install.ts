@@ -13,5 +13,15 @@ export function runInstallCommand(): number {
 		printOk(`created ${report.createdPaths.length} paths`);
 		for (const p of report.createdPaths) process.stdout.write(`  + ${p}\n`);
 	}
+	process.stdout.write(
+		[
+			"",
+			"clio installed. Configure a provider before running workers:",
+			"  $ clio providers               # shows configured + empty engines",
+			"  $ $EDITOR ~/.clio/settings.yaml  # add providers.<engine>.endpoints",
+			"For a no-provider smoke test, use `clio run <agent> <task> --faux`.",
+			"",
+		].join("\n"),
+	);
 	return 0;
 }
