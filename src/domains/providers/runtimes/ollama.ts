@@ -59,6 +59,18 @@ async function probeOne(name: string, spec: EndpointSpec): Promise<EndpointProbe
 	return { name, url: spec.url, ok: true, latencyMs: tags.latencyMs, models };
 }
 
+async function probeLiveEndpoints(endpoints: Record<string, EndpointSpec> | undefined): Promise<RuntimeProbeResult> {
+	if (!endpoints || Object.keys(endpoints).length === 0) {
+		return { ok: false, error: "no ollama endpoints configured" };
+	}
+	const results = await Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));
+	const healthy = results.filter((r) => r.ok).length;
+	if (healthy === 0) return { ok: false, error: "no healthy ollama endpoints" };
+	const latencies = results.filter((r) => r.ok).map((r) => r.latencyMs ?? 0);
+	const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+	return { ok: true, latencyMs: avg };
+}
+
 export const ollamaAdapter: RuntimeAdapter = {
 	id: "ollama",
 	tier: "native",
@@ -71,15 +83,10 @@ export const ollamaAdapter: RuntimeAdapter = {
 		return initialHealth("ollama");
 	},
 	async probe({ endpoints } = {}): Promise<RuntimeProbeResult> {
-		if (!endpoints || Object.keys(endpoints).length === 0) {
-			return { ok: false, error: "no ollama endpoints configured" };
-		}
-		const results = await Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));
-		const healthy = results.filter((r) => r.ok).length;
-		if (healthy === 0) return { ok: false, error: "no healthy ollama endpoints" };
-		const latencies = results.filter((r) => r.ok).map((r) => r.latencyMs ?? 0);
-		const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-		return { ok: true, latencyMs: avg };
+		return probeLiveEndpoints(endpoints);
+	},
+	async probeLive({ endpoints } = {}): Promise<RuntimeProbeResult> {
+		return probeLiveEndpoints(endpoints);
 	},
 	async probeEndpoints(endpoints) {
 		return Promise.all(Object.entries(endpoints).map(([name, spec]) => probeOne(name, spec)));

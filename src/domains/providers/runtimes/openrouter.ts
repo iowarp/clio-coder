@@ -24,4 +24,7 @@ export const openrouterAdapter: RuntimeAdapter = {
 		}
 		return { ok: true };
 	},
+	async probeLive(): Promise<RuntimeProbeResult> {
+		return { ok: false, error: "live probe not implemented for openrouter; config-only" };
+	},
 };

@@ -7,7 +7,6 @@ import { googleAdapter } from "./google.js";
 import { groqAdapter } from "./groq.js";
 import { llamacppAdapter } from "./llamacpp.js";
 import { lmstudioAdapter } from "./lmstudio.js";
-import { localAdapter } from "./local.js";
 import { mistralAdapter } from "./mistral.js";
 import { ollamaAdapter } from "./ollama.js";
 import { openaiCompatAdapter } from "./openai-compat.js";
@@ -21,7 +20,6 @@ export { googleAdapter } from "./google.js";
 export { groqAdapter } from "./groq.js";
 export { llamacppAdapter } from "./llamacpp.js";
 export { lmstudioAdapter } from "./lmstudio.js";
-export { localAdapter } from "./local.js";
 export { mistralAdapter } from "./mistral.js";
 export { ollamaAdapter } from "./ollama.js";
 export { openaiAdapter } from "./openai.js";
@@ -41,7 +39,6 @@ const PROVIDER_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [
 	lmstudioAdapter,
 	ollamaAdapter,
 	openaiCompatAdapter,
-	localAdapter,
 ];
 
 export const RUNTIME_ADAPTERS: ReadonlyArray<RuntimeAdapter> = [

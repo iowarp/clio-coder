@@ -26,11 +26,17 @@ export interface ProvidersContract {
 	/** Lookup a specific adapter by id. Null if not in RUNTIME_ADAPTERS. */
 	getAdapter(id: ProviderId): RuntimeAdapter | null;
 
-	/** Trigger a single probe across all enabled providers. Async. */
+	/** Trigger a config-only readiness sweep across all enabled providers. Async. */
 	probeAll(): Promise<void>;
 
 	/** Probe every configured endpoint of every local-engine provider. */
 	probeEndpoints(): Promise<void>;
+
+	/** Trigger the live probe path across all enabled providers. Async. */
+	probeAllLive(): Promise<void>;
+
+	/** Explicit alias for the live endpoint sweep. */
+	probeEndpointsLive(): Promise<void>;
 
 	/** Credentials store access for /providers overlay (TUI in slice 8). */
 	credentials: {

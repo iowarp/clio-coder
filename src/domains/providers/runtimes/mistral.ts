@@ -24,4 +24,7 @@ export const mistralAdapter: RuntimeAdapter = {
 		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: creds });
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
+	async probeLive(): Promise<RuntimeProbeResult> {
+		return { ok: false, error: "live probe not implemented for mistral; config-only" };
+	},
 };

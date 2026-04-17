@@ -70,6 +70,58 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		});
 	}
 
+	function probeFromVerdict(verdict: { ok: boolean; reason: string }): {
+		ok: boolean;
+		error?: string;
+		latencyMs?: number;
+	} {
+		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
+	}
+
+	async function runProbeSweep(mode: "config" | "live"): Promise<void> {
+		const present = credentialsPresent();
+		const settings = config.get();
+		const localProviders = settings.providers ?? {};
+		for (const adapter of providerAdapters) {
+			const endpoints = isLocalEngineId(String(adapter.id))
+				? localProviders[adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat"]?.endpoints
+				: undefined;
+			const localConfigInput =
+				endpoints === undefined
+					? { modelId: "", credentialsPresent: present }
+					: { modelId: "", credentialsPresent: present, endpoints };
+			const result =
+				mode === "config"
+					? isLocalEngineId(String(adapter.id))
+						? probeFromVerdict(adapter.canSatisfy(localConfigInput))
+						: await adapter.probe({ credentialsPresent: present, endpoints })
+					: await (adapter.probeLive ?? adapter.probe).call(adapter, { credentialsPresent: present, endpoints });
+			const prev = healthState.get(adapter.id) ?? initialHealth(adapter.id);
+			const probe: { ok: boolean; latencyMs?: number; error?: string } = { ok: result.ok };
+			if (result.latencyMs !== undefined) probe.latencyMs = result.latencyMs;
+			if (result.error !== undefined) probe.error = result.error;
+			const next = applyProbeResult(prev, probe);
+			healthState.set(adapter.id, next);
+			context.bus.emit(BusChannels.ProviderHealth, { providerId: adapter.id, health: next });
+		}
+	}
+
+	async function runEndpointProbeSweep(): Promise<void> {
+		const settings = config.get();
+		const localProviders = settings.providers ?? {};
+		for (const adapter of providerAdapters) {
+			if (!adapter.probeEndpoints) continue;
+			const engineKey = adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat";
+			const endpoints = localProviders[engineKey]?.endpoints ?? {};
+			if (Object.keys(endpoints).length === 0) {
+				endpointProbes.set(adapter.id, []);
+				continue;
+			}
+			const results = await adapter.probeEndpoints(endpoints);
+			endpointProbes.set(adapter.id, results);
+		}
+	}
+
 	const extension: DomainExtension = {
 		async start() {
 			credStore = openCredentialStore();
@@ -98,41 +150,16 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return adapterById(id);
 		},
 		async probeAll(): Promise<void> {
-			const present = credentialsPresent();
-			const settings = config.get();
-			const localProviders = settings.providers ?? {};
-			for (const adapter of providerAdapters) {
-				const started = Date.now();
-				const endpoints = isLocalEngineId(String(adapter.id))
-					? localProviders[adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat"]?.endpoints
-					: undefined;
-				const result = await adapter.probe({ credentialsPresent: present, endpoints });
-				const latency = result.latencyMs ?? Math.max(0, Date.now() - started);
-				const prev = healthState.get(adapter.id) ?? initialHealth(adapter.id);
-				const probe: { ok: boolean; latencyMs: number; error?: string } = {
-					ok: result.ok,
-					latencyMs: latency,
-				};
-				if (result.error !== undefined) probe.error = result.error;
-				const next = applyProbeResult(prev, probe);
-				healthState.set(adapter.id, next);
-				context.bus.emit(BusChannels.ProviderHealth, { providerId: adapter.id, health: next });
-			}
+			await runProbeSweep("config");
 		},
 		async probeEndpoints(): Promise<void> {
-			const settings = config.get();
-			const localProviders = settings.providers ?? {};
-			for (const adapter of providerAdapters) {
-				if (!adapter.probeEndpoints) continue;
-				const engineKey = adapter.id as "llamacpp" | "lmstudio" | "ollama" | "openai-compat";
-				const endpoints = localProviders[engineKey]?.endpoints ?? {};
-				if (Object.keys(endpoints).length === 0) {
-					endpointProbes.set(adapter.id, []);
-					continue;
-				}
-				const results = await adapter.probeEndpoints(endpoints);
-				endpointProbes.set(adapter.id, results);
-			}
+			await runEndpointProbeSweep();
+		},
+		async probeAllLive(): Promise<void> {
+			await runProbeSweep("live");
+		},
+		async probeEndpointsLive(): Promise<void> {
+			await runEndpointProbeSweep();
 		},
 		credentials: {
 			hasKey(providerId: ProviderId): boolean {
