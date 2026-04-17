@@ -6,4 +6,9 @@ dist/
 .env.local
 coverage/
 .claude/
+.codex
+.codex/
 .tsbuildinfo
+
+# Orchestrator-of-orchestrators runtime scripts (not part of the product).
+scripts/orch/
