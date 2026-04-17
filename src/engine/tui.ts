@@ -21,6 +21,8 @@ export {
 	TruncatedText,
 	TUI,
 	TUI_KEYBINDINGS,
+	truncateToWidth,
+	visibleWidth,
 } from "@mariozechner/pi-tui";
 
 export type {
