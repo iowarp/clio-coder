@@ -168,6 +168,13 @@ export interface HandleRunDeps {
 	dispatch: DispatchContract;
 	io: RunIo;
 	workerDefault?: { provider?: string; model?: string; endpoint?: string } | undefined;
+	/**
+	 * Optional bus for forwarding per-event worker output. When supplied,
+	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
+	 * so UI surfaces (dispatch-board overlay) can update their row as the
+	 * stream arrives instead of waiting for the terminal receipt.
+	 */
+	bus?: SafeEventBus;
 }
 
 /**
@@ -176,7 +183,7 @@ export interface HandleRunDeps {
  * block is empty, we refuse to dispatch and print an actionable error instead.
  */
 export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
-	const { dispatch, io, workerDefault } = deps;
+	const { dispatch, io, workerDefault, bus } = deps;
 	if (!workerDefault?.provider) {
 		io.stderr(
 			"[run] no provider configured. Edit ~/.clio/settings.yaml (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n",
@@ -192,9 +199,13 @@ export async function handleRun(agentId: string, task: string, deps: HandleRunDe
 		io.stdout(`\n[run] runId=${handle.runId}\n`);
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
-			if (e.type && e.type !== "heartbeat") {
-				io.stdout(`[run] ${e.type}\n`);
-			}
+			if (!e.type || e.type === "heartbeat") continue;
+			io.stdout(`[run] ${e.type}\n`);
+			bus?.emit(BusChannels.DispatchProgress, {
+				runId: handle.runId,
+				agentId,
+				event,
+			});
 		}
 		const receipt = await handle.finalPromise;
 		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}\n`);
@@ -256,6 +267,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						dispatch: deps.dispatch,
 						io,
 						workerDefault: deps.getWorkerDefault?.(),
+						bus: deps.bus,
 					});
 					tui.requestRender();
 				})();
@@ -374,6 +386,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchStarted, () => {
+			if (overlayState !== "dispatch-board") return;
+			renderDispatchBoard();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchProgress, () => {
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();
