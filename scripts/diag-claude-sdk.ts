@@ -97,6 +97,27 @@ async function main(): Promise<void> {
 	});
 	check("canSatisfy:creds-present-true", verdictFull.ok === true, `got ${JSON.stringify(verdictFull)}`);
 
+	const probeEmpty = await claudeSdkAdapter.probe({ credentialsPresent: new Set<string>() });
+	check(
+		"probe:empty-creds-false",
+		probeEmpty.ok === false && probeEmpty.error === "ANTHROPIC_API_KEY not set",
+		`got ${JSON.stringify(probeEmpty)}`,
+	);
+	const probeLiveEmpty = await claudeSdkAdapter.probeLive?.({ credentialsPresent: new Set<string>() });
+	check(
+		"probeLive:empty-creds-false",
+		probeLiveEmpty?.ok === false && probeLiveEmpty.error === "ANTHROPIC_API_KEY not set",
+		`got ${JSON.stringify(probeLiveEmpty)}`,
+	);
+	const probeLiveReady = await claudeSdkAdapter.probeLive?.({
+		credentialsPresent: new Set<string>(["ANTHROPIC_API_KEY"]),
+	});
+	check(
+		"probeLive:ready-not-implemented",
+		probeLiveReady?.ok === false && probeLiveReady.error === "live probe not implemented for claude-sdk; config-only",
+		`got ${JSON.stringify(probeLiveReady)}`,
+	);
+
 	// 5. registry contains adapter
 	const inRegistry = RUNTIME_ADAPTERS.find((a) => String(a.id) === "claude-sdk");
 	check("registry:contains-claude-sdk", inRegistry !== undefined, inRegistry ? "" : "not found");

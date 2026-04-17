@@ -154,28 +154,44 @@ async function main(): Promise<void> {
 		const probeOk = await adapter.probe({ credentialsPresent: credsSet });
 		check("config", `${c.id}:probe-ok`, probeOk.ok === true, `got ${JSON.stringify(probeOk)}`);
 
+		let probeMissingCreds = null as Awaited<ReturnType<RuntimeAdapter["probe"]>> | null;
 		if (c.probeFailsWithoutCreds) {
-			const probeBad = await adapter.probe({ credentialsPresent: new Set<string>() });
-			check("config", `${c.id}:probe-fail-without-creds`, probeBad.ok === false, `got ${JSON.stringify(probeBad)}`);
+			probeMissingCreds = await adapter.probe({ credentialsPresent: new Set<string>() });
+			check(
+				"config",
+				`${c.id}:probe-fail-without-creds`,
+				probeMissingCreds.ok === false,
+				`got ${JSON.stringify(probeMissingCreds)}`,
+			);
 		} else {
 			const probeStill = await adapter.probe({ credentialsPresent: new Set<string>() });
 			check("config", `${c.id}:probe-ok-without-creds`, probeStill.ok === true, `got ${JSON.stringify(probeStill)}`);
 		}
 
-		if (!RUN_LIVE) {
-			skip("live", `${c.id}:probeLive-skipped`, "set CLIO_DIAG_LIVE=1 to exercise adapter.probeLive()");
-			continue;
+		check("config", `${c.id}:probeLive-exposed`, typeof adapter.probeLive === "function");
+		if (!adapter.probeLive) continue;
+		const liveReady = await adapter.probeLive({ credentialsPresent: credsSet });
+		check(
+			"config",
+			`${c.id}:probeLive-ready-not-implemented`,
+			liveReady.ok === false && liveReady.error === `live probe not implemented for ${c.id}; config-only`,
+			`got ${JSON.stringify(liveReady)}`,
+		);
+		if (probeMissingCreds) {
+			const liveMissing = await adapter.probeLive({ credentialsPresent: new Set<string>() });
+			check(
+				"config",
+				`${c.id}:probeLive-preserves-config-error`,
+				liveMissing.ok === false && liveMissing.error === probeMissingCreds.error,
+				`probe=${JSON.stringify(probeMissingCreds)} live=${JSON.stringify(liveMissing)}`,
+			);
 		}
 
-		check("live", `${c.id}:probeLive-exposed`, typeof adapter.probeLive === "function");
-		if (!adapter.probeLive) continue;
-		const live = await adapter.probeLive({ credentialsPresent: credsSet });
-		check(
-			"live",
-			`${c.id}:probeLive-config-only-error`,
-			live.ok === false && live.error === `live probe not implemented for ${c.id}; config-only`,
-			`got ${JSON.stringify(live)}`,
-		);
+		if (!RUN_LIVE) {
+			skip("live", `${c.id}:probeLive-live-skip`, "stub adapter contract is already asserted in config mode");
+			continue;
+		}
+		skip("live", `${c.id}:probeLive-live-skip`, "stub adapter contract is already asserted in config mode");
 	}
 
 	if (failures.length > 0) {

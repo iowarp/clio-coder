@@ -11,7 +11,7 @@
  */
 
 import { initialHealth } from "../health.js";
-import type { RuntimeAdapter } from "../runtime-contract.js";
+import { type RuntimeAdapter, configOnlyLiveProbe } from "../runtime-contract.js";
 
 const ADAPTER_ID = "claude-sdk";
 
@@ -32,7 +32,9 @@ export const claudeSdkAdapter: RuntimeAdapter = {
 		const verdict = this.canSatisfy({ modelId: "claude-sonnet-4-6", credentialsPresent: creds });
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
-	async probeLive() {
-		return { ok: false, error: `live probe not implemented for ${ADAPTER_ID}; config-only` };
+	async probeLive(opts) {
+		const creds = opts?.credentialsPresent ?? new Set<string>();
+		const verdict = this.canSatisfy({ modelId: "claude-sonnet-4-6", credentialsPresent: creds });
+		return configOnlyLiveProbe(ADAPTER_ID, verdict);
 	},
 };

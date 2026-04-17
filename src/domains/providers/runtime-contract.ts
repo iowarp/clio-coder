@@ -25,6 +25,13 @@ export interface ProbeLiveResult {
 	error?: string;
 }
 
+export function configOnlyLiveProbe(adapterId: string, verdict: CanSatisfyResult): ProbeLiveResult {
+	if (!verdict.ok) {
+		return { ok: false, error: verdict.reason };
+	}
+	return { ok: false, error: `live probe not implemented for ${adapterId}; config-only` };
+}
+
 export interface EndpointProbeResult {
 	name: string;
 	url: string;
@@ -58,6 +65,6 @@ export interface RuntimeAdapter {
 	probe(opts?: ProbeOptions): Promise<RuntimeProbeResult>;
 	/** Real liveness check. May perform network I/O or spawn subprocesses. */
 	probeLive?(opts?: ProbeOptions): Promise<ProbeLiveResult>;
-	/** Per-endpoint probes — only implemented by local-engine adapters. */
+	/** Per-endpoint probes, only implemented by local-engine adapters. */
 	probeEndpoints?(endpoints: Record<string, EndpointSpec>): Promise<EndpointProbeResult[]>;
 }

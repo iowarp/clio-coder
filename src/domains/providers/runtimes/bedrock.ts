@@ -1,6 +1,6 @@
 import { getProviderSpec } from "../catalog.js";
 import { initialHealth } from "../health.js";
-import type { RuntimeAdapter, RuntimeProbeResult } from "../runtime-contract.js";
+import { type RuntimeAdapter, type RuntimeProbeResult, configOnlyLiveProbe } from "../runtime-contract.js";
 
 const DEFAULT_PROBE_MODEL = "anthropic.claude-sonnet-4-6";
 
@@ -23,6 +23,7 @@ export const bedrockAdapter: RuntimeAdapter = {
 		return verdict.ok ? { ok: true } : { ok: false, error: verdict.reason };
 	},
 	async probeLive(): Promise<RuntimeProbeResult> {
-		return { ok: false, error: "live probe not implemented for amazon-bedrock; config-only" };
+		const verdict = this.canSatisfy({ modelId: DEFAULT_PROBE_MODEL, credentialsPresent: new Set<string>() });
+		return configOnlyLiveProbe("amazon-bedrock", verdict);
 	},
 };

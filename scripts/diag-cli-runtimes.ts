@@ -76,21 +76,23 @@ async function main(): Promise<void> {
 
 		const probe = await adapter.probe();
 		check("config", `${id}:probe-shape`, typeof probe.ok === "boolean", `got ${JSON.stringify(probe)}`);
-
-		if (!RUN_LIVE) {
-			skip("live", `${id}:probeLive-skipped`, "set CLIO_DIAG_LIVE=1 to exercise adapter.probeLive()");
-			continue;
+		check("config", `${id}:probeLive-exposed`, typeof adapter.probeLive === "function");
+		if (adapter.probeLive) {
+			const live = await adapter.probeLive();
+			const expectedError = probe.ok ? `live probe not implemented for ${id}; config-only` : probe.error;
+			check(
+				"config",
+				`${id}:probeLive-contract`,
+				live.ok === false && live.error === expectedError,
+				`probe=${JSON.stringify(probe)} live=${JSON.stringify(live)}`,
+			);
 		}
 
-		check("live", `${id}:probeLive-exposed`, typeof adapter.probeLive === "function");
-		if (!adapter.probeLive) continue;
-		const live = await adapter.probeLive();
-		check(
-			"live",
-			`${id}:probeLive-config-only-error`,
-			live.ok === false && live.error === `live probe not implemented for ${id}; config-only`,
-			`got ${JSON.stringify(live)}`,
-		);
+		if (!RUN_LIVE) {
+			skip("live", `${id}:probeLive-live-skip`, "stub adapter contract is already asserted in config mode");
+			continue;
+		}
+		skip("live", `${id}:probeLive-live-skip`, "stub adapter contract is already asserted in config mode");
 	}
 
 	check("config", "capabilities:length", CLI_CAPABILITIES.length === 6, `len=${CLI_CAPABILITIES.length}`);
