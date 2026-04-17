@@ -22,7 +22,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { VALID_THINKING_LEVELS } from "../domains/providers/resolver.js";
+import { VALID_THINKING_LEVELS, resolveModelScope } from "../domains/providers/resolver.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -42,6 +42,28 @@ function buildBanner(): string {
   ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
   ${chalk.dim(`v${clio} · pi-mono 0.67.4 · ready`)}
 `;
+}
+
+/**
+ * Ctrl+P / Shift+Ctrl+P step the orchestrator target through the resolved
+ * `provider.scope` set. A no-op when scope is empty or resolves to nothing, so
+ * unconfigured users feel no phantom behavior.
+ */
+function cycleScoped(direction: "forward" | "backward"): void {
+	const current = readSettings();
+	const patterns = current.provider.scope ?? [];
+	if (patterns.length === 0) return;
+	const resolved = resolveModelScope(patterns).matches;
+	if (resolved.length === 0) return;
+	const active = `${current.orchestrator.provider ?? ""}::${current.orchestrator.model ?? ""}`;
+	const idx = resolved.findIndex((r) => `${r.providerId}::${r.modelId}` === active);
+	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : resolved.length - 1);
+	const next = resolved[base % resolved.length];
+	if (!next) return;
+	current.orchestrator.provider = next.providerId;
+	current.orchestrator.model = next.modelId;
+	if (next.thinkingLevel) current.orchestrator.thinkingLevel = next.thinkingLevel;
+	writeSettings(current);
 }
 
 export async function bootOrchestrator(): Promise<BootResult> {
@@ -165,6 +187,13 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			else Reflect.deleteProperty(current.orchestrator, "endpoint");
 			writeSettings(current);
 		},
+		onSetScope: (scope) => {
+			const current = readSettings();
+			current.provider.scope = scope;
+			writeSettings(current);
+		},
+		onCycleScopedModelForward: () => cycleScoped("forward"),
+		onCycleScopedModelBackward: () => cycleScoped("backward"),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

@@ -22,6 +22,7 @@ export type SlashCommand =
 	| { kind: "receipt-usage" }
 	| { kind: "thinking" }
 	| { kind: "model" }
+	| { kind: "scoped-models" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -102,6 +103,7 @@ export interface SlashCommandContext {
 	openReceipts: () => void;
 	openThinking: () => void;
 	openModel: () => void;
+	openScopedModels: () => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
@@ -268,6 +270,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openModel();
+		},
+	},
+	{
+		name: "scoped-models",
+		description: "Edit the Ctrl+P cycle set",
+		kinds: ["scoped-models"],
+		match(trimmed) {
+			return trimmed === "/scoped-models" ? { kind: "scoped-models" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openScopedModels();
 		},
 	},
 ];
