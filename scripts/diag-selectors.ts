@@ -7,6 +7,8 @@
 import assert from "node:assert/strict";
 import { listModels } from "../src/cli/list-models.js";
 import { parseModelPattern, resolveModelPattern, resolveModelScope } from "../src/domains/providers/resolver.js";
+import { ALT_M, SHIFT_TAB, parseSlashCommand, routeInteractiveKey } from "../src/interactive/index.js";
+import { buildThinkingItems } from "../src/interactive/overlays/thinking-selector.js";
 
 function ok(name: string): void {
 	process.stdout.write(`[diag-selectors] ok ${name}\n`);
@@ -80,6 +82,57 @@ run("listModels no match returns exit 1", () => {
 	const lines: string[] = [];
 	const code = listModels({ search: "openai/xyzzy-nothing-matches", stdout: (line) => lines.push(line) });
 	assert.equal(code, 1);
+});
+
+// Slice 2: thinking selector + Shift+Tab rebind.
+run("parseSlashCommand /thinking", () => {
+	assert.deepEqual(parseSlashCommand("/thinking"), { kind: "thinking" });
+});
+run("buildThinkingItems marks current level with a filled dot", () => {
+	const items = buildThinkingItems("high");
+	assert.equal(items.length, 6);
+	const high = items.find((item) => item.value === "high");
+	assert.ok(high);
+	assert.ok(high.label.includes("●"));
+	const off = items.find((item) => item.value === "off");
+	assert.ok(off);
+	assert.ok(!off.label.includes("●"));
+});
+run("routeInteractiveKey Shift+Tab triggers cycleThinking", () => {
+	let thinking = 0;
+	let mode = 0;
+	const consumed = routeInteractiveKey(SHIFT_TAB, {
+		cycleMode: () => {
+			mode += 1;
+		},
+		cycleThinking: () => {
+			thinking += 1;
+		},
+		requestShutdown: () => {},
+		requestSuper: () => {},
+		toggleDispatchBoard: () => {},
+	});
+	assert.equal(consumed, true);
+	assert.equal(thinking, 1);
+	assert.equal(mode, 0);
+});
+run("routeInteractiveKey Alt+M triggers cycleMode", () => {
+	let thinking = 0;
+	let mode = 0;
+	const consumed = routeInteractiveKey(ALT_M, {
+		cycleMode: () => {
+			mode += 1;
+		},
+		cycleThinking: () => {
+			thinking += 1;
+		},
+		requestShutdown: () => {},
+		requestSuper: () => {},
+		toggleDispatchBoard: () => {},
+	});
+	assert.equal(consumed, true);
+	assert.equal(mode, 1);
+	assert.equal(thinking, 0);
 });
 
 process.stdout.write("[diag-selectors] all checks ok\n");
