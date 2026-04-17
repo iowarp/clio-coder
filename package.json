@@ -30,6 +30,7 @@
 		"verify": "tsx scripts/verify.ts",
 		"smoke": "tsx scripts/verify.ts --smoke",
 		"diag:interactive": "tsx scripts/diag-interactive.ts",
+		"diag:config": "tsx scripts/diag-config.ts",
 		"ci": "npm run typecheck && npm run lint && npm run check:boundaries && npm run check:prompts && npm run build && npm run verify"
 	},
 	"dependencies": {
