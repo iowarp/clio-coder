@@ -1,5 +1,6 @@
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
+import type { ModeName } from "../domains/modes/matrix.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 
@@ -16,6 +17,12 @@ export interface ToolSpec {
 	description: string;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
+	/**
+	 * Modes in which this tool is admissible. When undefined, every mode is
+	 * allowed (the mode matrix remains authoritative for visibility). When set,
+	 * `invoke` rejects with `not_visible` for any mode outside this list.
+	 */
+	allowedModes?: ReadonlyArray<ModeName>;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>): Promise<ToolResult>;
 }
@@ -66,14 +73,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (!visible.has(spec.name)) {
 				return { kind: "not_visible", reason: `tool ${spec.name} not in current mode's allowlist` };
 			}
-			const decision = deps.safety.evaluate(call, deps.modes.current());
+			const currentMode = deps.modes.current();
+			if (spec.allowedModes && !spec.allowedModes.includes(currentMode)) {
+				return {
+					kind: "not_visible",
+					reason: `tool ${spec.name} not allowed in mode ${currentMode}`,
+				};
+			}
+			const decision = deps.safety.evaluate(call, currentMode);
 			if (decision.kind === "block") {
 				return { kind: "blocked", reason: decision.rejection.short, decision };
 			}
 			if (!deps.modes.isActionAllowed(decision.classification.actionClass)) {
 				return {
 					kind: "blocked",
-					reason: `action ${decision.classification.actionClass} not allowed in mode ${deps.modes.current()}`,
+					reason: `action ${decision.classification.actionClass} not allowed in mode ${currentMode}`,
 					decision,
 				};
 			}
