@@ -21,11 +21,15 @@ export function runInstallCommand(): number {
 		"",
 		"clio installed. Next:",
 		"  $ clio setup",
-		"      guided setup for local mini by default, with an easy dynamo switch later",
+		"      register endpoints against the runtime registry (cloud, local, CLI agents)",
 		"  $ clio providers",
+		"      print endpoint health and capabilities",
+		"  $ clio list-models",
+		"      list models discovered per endpoint",
 		"  $ clio",
-		'  $ clio run scout "summarize the repo layout"',
-		"For a no-provider smoke test, use `clio run <agent> <task> --faux`.",
+		"      start interactive mode",
+		'  $ clio run --endpoint <id> --model <wireId> "<task>"',
+		"      dispatch a one-shot worker",
 	];
 	if (!process.env.CLIO_HOME) {
 		lines.push("Tip: export CLIO_HOME=$HOME/.clio to keep config, data, and cache under one tree.");
