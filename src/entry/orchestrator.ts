@@ -19,6 +19,7 @@ import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { isLocalEngineId } from "../domains/providers/catalog.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -276,10 +277,12 @@ export async function bootOrchestrator(): Promise<BootResult> {
 
 	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
+	const prompts = result.getContract<PromptsContract>("prompts");
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
 		knownProviders: () => new Set(providers.list().map((entry) => entry.id)),
+		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		...(session
 			? {

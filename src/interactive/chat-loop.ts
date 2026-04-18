@@ -2,6 +2,8 @@ import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { EndpointSpec, LocalProvidersSettings } from "../core/defaults.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
+import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
+import type { PromptsContract } from "../domains/prompts/contract.js";
 import { isLocalEngineId } from "../domains/providers/catalog.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
@@ -48,6 +50,17 @@ export interface CreateChatLoopDeps {
 	modes: ModesContract;
 	knownProviders: () => ReadonlySet<string>;
 	session?: SessionContract;
+	/**
+	 * Prompt compiler. When wired, every `submit()` re-runs
+	 * `prompts.compileForTurn` with the current mode + safety level, writes the
+	 * compiled text into `state.systemPrompt`, and threads the resulting
+	 * `renderedPromptHash` onto the user + assistant session entries.
+	 *
+	 * Optional so unit tests can inject stubs and a degraded boot (prompts
+	 * failed to load) still runs with the built-in identity fallback below.
+	 * In production this is always wired by `entry/orchestrator.ts`.
+	 */
+	prompts?: PromptsContract;
 	getModel?: (providerId: string, modelId: string) => Model<never>;
 	registerLocalProviders?: (providers: Partial<LocalProvidersSettings>) => void;
 	createAgent?: typeof createEngineAgent;
@@ -135,11 +148,18 @@ function noticeMessage(text: string): AgentMessage {
 	} as AgentMessage;
 }
 
-function orchestratorPrompt(): string {
+/**
+ * Built-in identity text used when `deps.prompts` is not wired (tests, degraded
+ * boot). Production always overrides this via the prompts compiler; the
+ * fallback exists so a chat-loop without a compiler still identifies as Clio.
+ */
+function fallbackIdentityPrompt(): string {
 	return [
-		"You are clio, the orchestrator agent inside the Clio coding harness.",
-		"Use available tools to read and edit the workspace, inspect commands, and coordinate worker subagents through the harness when needed.",
-		"You are clio. Do not present yourself as Claude, GPT, or a generic chatbot.",
+		"You are Clio. You are Clio. You are Clio.",
+		"You are the orchestrator coding-agent for the Clio Coder harness, built by IOWarp.",
+		'If asked who made you or what model you are, reply: "I am Clio, built by IOWarp."',
+		"You are not Claude, GPT, Qwen, Gemini, Llama, or Mistral.",
+		"You are not from Anthropic, OpenAI, Alibaba, Google, Meta, or any other model vendor.",
 	].join(" ");
 }
 
@@ -178,6 +198,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let runtime: AgentRuntime | null = null;
 	let lastTurnId: string | null = null;
 	let streaming = false;
+	// Hash of the prompt compiled for the in-flight turn. User + assistant
+	// entries appended during that turn stamp this value so downstream
+	// analysis can reproduce exactly which fragments the model saw.
+	let currentTurnHash: string | null = null;
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -192,6 +216,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			kind: "assistant",
 			parentId: lastTurnId,
 			payload: { text },
+			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = turn.id;
 	};
@@ -246,9 +271,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const model = getModel(target.providerId, target.modelId);
 		const tools = resolveAgentTools(visibleToolSnapshot(deps.modes), deps.modes.current());
 		const thinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
+		// Seed the system prompt with the fallback identity text. `submit` then
+		// runs `compilePromptForTurn` before every `agent.prompt` call and
+		// overwrites this in place, so the fallback only shows up when the
+		// prompts contract is absent (tests, degraded boot).
 		const handle = createAgent({
 			initialState: {
-				systemPrompt: orchestratorPrompt(),
+				systemPrompt: fallbackIdentityPrompt(),
 				model,
 				thinkingLevel,
 				tools,
@@ -299,6 +328,54 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			modelId: target.modelId,
 		};
 		return runtime;
+	};
+
+	/**
+	 * Compile the prompt for the current turn, write the rendered text into
+	 * `state.systemPrompt`, and capture the renderedPromptHash so the user
+	 * and assistant entries appended this turn can carry it. Runs on every
+	 * `submit` so any mode/safety/provider change since the last turn is
+	 * picked up; compile is O(fragment table) and sha256 hashing, well under
+	 * a millisecond, so unconditional recompile beats per-turn change
+	 * detection.
+	 *
+	 * Throws are swallowed and downgraded to a user-visible notice because
+	 * a dead prompts domain must not block chat. The fallback identity
+	 * stays on `state.systemPrompt` from the previous compile (or from
+	 * `ensureRuntime`).
+	 */
+	const compilePromptForTurn = (agentRuntime: AgentRuntime): CompileResult | null => {
+		if (!deps.prompts) {
+			currentTurnHash = null;
+			return null;
+		}
+		const settings = deps.getSettings();
+		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
+		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
+		const dynamicInputs: DynamicInputs = {
+			provider: agentRuntime.providerId,
+			model: agentRuntime.modelId,
+			contextWindow,
+			thinkingBudget: settings.orchestrator.thinkingLevel ?? "off",
+			turnCount: 0,
+		};
+		const safetyLevel = settings.safetyLevel ?? "auto-edit";
+		try {
+			const result = deps.prompts.compileForTurn({
+				dynamicInputs,
+				overrideMode: deps.modes.current(),
+				safetyLevel,
+			});
+			agentRuntime.agent.state.systemPrompt = result.text;
+			currentTurnHash = result.renderedPromptHash;
+			return result;
+		} catch (err) {
+			currentTurnHash = null;
+			emitNotice(
+				`[clio] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return null;
+		}
 	};
 
 	/**
@@ -363,6 +440,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 
+			// Recompile the prompt before every turn so mode (/mode, Alt+M),
+			// safety level, provider, and model changes since the last turn
+			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
+			// side-effect so the user + assistant appends below stamp it.
+			compilePromptForTurn(agentRuntime);
+
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
 			// the threshold so /compact integration tests and live drills can
 			// force a run without driving real token usage. Compaction failures
@@ -387,6 +470,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					kind: "user",
 					parentId: lastTurnId,
 					payload: { text },
+					...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 				});
 				lastTurnId = userTurn.id;
 				const sessionId = deps.session.current()?.id ?? null;
