@@ -255,7 +255,7 @@ function recordingSession(): RecordingSession {
 
 interface RecordingObservability {
 	contract: ObservabilityContract;
-	calls: Array<{ providerId: string; modelId: string; tokens: number }>;
+	calls: Array<{ providerId: string; modelId: string; tokens: number; costUsd?: number }>;
 }
 
 function recordingObservability(): RecordingObservability {
@@ -272,8 +272,13 @@ function recordingObservability(): RecordingObservability {
 			}),
 			sessionCost: () => 0,
 			costEntries: () => [],
-			recordTokens(providerId, modelId, tokens) {
-				calls.push({ providerId, modelId, tokens });
+			recordTokens(providerId, modelId, tokens, costUsd) {
+				calls.push({
+					providerId,
+					modelId,
+					tokens,
+					...(costUsd !== undefined ? { costUsd } : {}),
+				});
 			},
 		},
 		calls,
@@ -478,6 +483,49 @@ describe("interactive/chat-loop observability", () => {
 				providerId: "anthropic",
 				modelId: "claude-sonnet-4-6",
 				tokens: 165,
+				costUsd: 0.001035,
+			},
+		]);
+	});
+
+	it("records cache-only assistant usage with totalTokens and authoritative cost", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		agent.responseUsage = {
+			input: 0,
+			output: 0,
+			cacheRead: 1000,
+			cacheWrite: 0,
+			totalTokens: 1000,
+			cost: { input: 0, output: 0, cacheRead: 0.0042, cacheWrite: 0, total: 0.0042 },
+		};
+		const observability = recordingObservability();
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			observability: observability.contract,
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+
+		await chat.submit("cache me");
+
+		deepStrictEqual(observability.calls, [
+			{
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-6",
+				tokens: 1000,
+				costUsd: 0.0042,
 			},
 		]);
 	});

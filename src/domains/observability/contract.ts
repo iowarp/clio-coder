@@ -12,5 +12,5 @@ export interface ObservabilityContract {
 	/** Per-dispatch cost log. */
 	costEntries(): ReadonlyArray<CostEntry>;
 	/** Record a token count. Primarily used by dispatch glue + diags. */
-	recordTokens(providerId: string, modelId: string, tokens: number): void;
+	recordTokens(providerId: string, modelId: string, tokens: number, costUsd?: number): void;
 }
