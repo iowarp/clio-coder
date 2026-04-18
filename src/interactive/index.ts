@@ -63,7 +63,7 @@ export interface InteractiveDeps {
 	 * short-circuit with an actionable error when no provider is configured
 	 * instead of letting the dispatch throw with no config context.
 	 */
-	getWorkerDefault?: () => { provider?: string; model?: string; endpoint?: string } | undefined;
+	getWorkerDefault?: () => { endpoint?: string; model?: string } | undefined;
 	/**
 	 * Resolver for current settings. Footer reads the orchestrator target
 	 * (what chat actually dispatches to) rather than the providers catalog's
@@ -83,7 +83,7 @@ export interface InteractiveDeps {
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
 	/** Persist the orchestrator target selected in /model. */
-	onSelectModel?: (ref: { providerId: string; modelId: string; endpoint?: string }) => void;
+	onSelectModel?: (ref: { endpoint: string; model: string }) => void;
 	/** Persist the next `provider.scope` list committed in /scoped-models. */
 	onSetScope?: (scope: string[]) => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
