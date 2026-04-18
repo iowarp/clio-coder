@@ -192,6 +192,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			current.provider.scope = scope;
 			writeSettings(current);
 		},
+		writeSettings: (next) => writeSettings(next),
 		onCycleScopedModelForward: () => cycleScoped("forward"),
 		onCycleScopedModelBackward: () => cycleScoped("backward"),
 		onShutdown: async () => {
