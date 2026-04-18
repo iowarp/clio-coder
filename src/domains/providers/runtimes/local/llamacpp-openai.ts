@@ -10,6 +10,7 @@ import type {
 	RuntimeDescriptor,
 } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
+import { probeLlamaCppProps } from "../common/probe-helpers.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -44,9 +45,15 @@ const llamacppOpenaiRuntime: RuntimeDescriptor = {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const probeOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
-		return ctx.signal
+		const health = await (ctx.signal
 			? probeHttp({ ...probeOpts, signal: ctx.signal })
-			: probeHttp(probeOpts);
+			: probeHttp(probeOpts));
+		if (!health.ok) return health;
+		const props = await probeLlamaCppProps(base, ctx);
+		const enriched: ProbeResult = { ...health };
+		if (props.discoveredCapabilities) enriched.discoveredCapabilities = props.discoveredCapabilities;
+		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
+		return enriched;
 	},
 	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const base = endpointUrl(endpoint);
