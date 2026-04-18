@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
-import { readSettings, writeSettings } from "../core/config.js";
+import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -20,16 +20,23 @@ import type { ModesContract } from "../domains/modes/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
+import { isLocalEngineId } from "../domains/providers/catalog.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { VALID_THINKING_LEVELS, resolveModelScope } from "../domains/providers/resolver.js";
+import { VALID_THINKING_LEVELS, resolveModelPattern, resolveModelScope } from "../domains/providers/resolver.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { compact } from "../domains/session/compaction/compact.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import { fromLegacyTurn } from "../domains/session/entries.js";
+import type { SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { getModel, resolveLocalModelId } from "../engine/ai.js";
+import { openSession } from "../engine/session.js";
+import type { Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
+import { renderCompactionSummaryLine } from "../interactive/renderers/compaction-summary.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -42,6 +49,90 @@ function buildBanner(): string {
   ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
   ${chalk.dim(`v${clio} · pi-mono 0.67.4 · ready`)}
 `;
+}
+
+const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
+
+function envApiKeyName(providerId: string): string {
+	return `${providerId.replaceAll("-", "_").toUpperCase()}_API_KEY`;
+}
+
+/**
+ * Resolve the model that should generate the compaction summary.
+ * Precedence (plan §4):
+ *   1. `settings.compaction.model` via resolveModelPattern, when set and
+ *      resolvable. Otherwise fall through silently — an unresolvable user
+ *      override should not suppress the orchestrator fallback.
+ *   2. `settings.orchestrator.{provider,model,endpoint}` via the same
+ *      `modelId@endpoint` composition the chat-loop uses.
+ * Returns `null` when neither path yields a model; the caller surfaces an
+ * actionable /compact error in that case.
+ */
+function resolveCompactionModel(
+	settings: ClioSettings,
+): { model: Model<never>; providerId: string; endpointSpec?: { api_key?: string } } | null {
+	const patternRaw = settings.compaction?.model?.trim();
+	if (patternRaw) {
+		const resolved = resolveModelPattern(patternRaw);
+		const first = resolved.matches[0];
+		if (first) {
+			try {
+				const model = getModel(first.providerId, first.modelId);
+				return { model, providerId: first.providerId };
+			} catch {
+				// fall through to orchestrator fallback
+			}
+		}
+	}
+	const providerId = settings.orchestrator?.provider?.trim();
+	const modelId = settings.orchestrator?.model?.trim();
+	if (!providerId || !modelId) return null;
+	const endpoint = settings.orchestrator?.endpoint?.trim();
+	const lookupId = resolveLocalModelId(providerId, modelId, endpoint);
+	try {
+		const model = getModel(providerId, lookupId);
+		let endpointSpec: { api_key?: string } | undefined;
+		if (isLocalEngineId(providerId) && endpoint) {
+			const raw = settings.providers?.[providerId]?.endpoints?.[endpoint];
+			if (raw) endpointSpec = { ...(raw.api_key ? { api_key: raw.api_key } : {}) };
+		}
+		return endpointSpec ? { model, providerId, endpointSpec } : { model, providerId };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Resolve the API key for a compaction call. Mirrors chat-loop.ts so the
+ * compaction model inherits the same key pool as the orchestrator.
+ */
+function resolveCompactionApiKey(
+	providerId: string,
+	endpointSpec: { api_key?: string } | undefined,
+): string | undefined {
+	if (endpointSpec?.api_key && endpointSpec.api_key.length > 0) return endpointSpec.api_key;
+	const envKey = process.env[envApiKeyName(providerId)];
+	if (envKey) return envKey;
+	return endpointSpec ? LOCAL_API_KEY_FALLBACK : undefined;
+}
+
+/**
+ * Load the current session's entries from disk for compaction input.
+ * Slice 12c reads legacy ClioTurnRecord lines only; rich SessionEntry lines
+ * are detected and skipped so the compaction engine never receives
+ * partially-shaped records. 12d replaces this with a unified reader.
+ */
+function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
+	const reader = openSession(sessionId);
+	const turns = reader.turns();
+	const out: SessionEntry[] = [];
+	for (const record of turns) {
+		const anyRecord = record as unknown as { id?: unknown; at?: unknown; kind?: unknown };
+		if (typeof anyRecord.id === "string" && typeof anyRecord.at === "string" && typeof anyRecord.kind === "string") {
+			out.push(fromLegacyTurn(record));
+		}
+	}
+	return out;
 }
 
 /**
@@ -218,6 +309,50 @@ export async function bootOrchestrator(): Promise<BootResult> {
 								`[/fork] failed at turn ${parentTurnId}: ${err instanceof Error ? err.message : String(err)}\n`,
 							);
 						}
+					},
+					onCompact: async (instructions) => {
+						const meta = session.current();
+						if (!meta) {
+							process.stderr.write("[/compact] no current session to compact; start one with /new or /resume first\n");
+							return;
+						}
+						const settings = config?.get() ?? readSettings();
+						const resolved = resolveCompactionModel(settings);
+						if (!resolved) {
+							process.stderr.write("[/compact] no model configured; set orchestrator.model or compaction.model\n");
+							return;
+						}
+						const apiKey = resolveCompactionApiKey(resolved.providerId, resolved.endpointSpec);
+						const entries = readSessionEntriesForCompact(meta.id);
+						if (entries.length === 0) {
+							process.stderr.write("[/compact] session has no entries yet; nothing to summarize\n");
+							return;
+						}
+						const result = await compact({
+							entries,
+							model: resolved.model,
+							...(apiKey !== undefined ? { apiKey } : {}),
+							...(instructions !== undefined ? { instructions } : {}),
+						});
+						if (result.messagesSummarized === 0 || result.summary.length === 0) {
+							process.stdout.write("[/compact] no entries crossed the cut point; skipping\n");
+							return;
+						}
+						session.appendEntry({
+							kind: "compactionSummary",
+							parentTurnId: result.firstKeptTurnId ?? null,
+							summary: result.summary,
+							tokensBefore: result.tokensBefore,
+							firstKeptTurnId: result.firstKeptTurnId ?? "",
+						});
+						process.stdout.write(
+							`${renderCompactionSummaryLine({
+								messagesSummarized: result.messagesSummarized,
+								summaryChars: result.summary.length,
+								tokensBefore: result.tokensBefore,
+								isSplitTurn: result.isSplitTurn,
+							})}\n`,
+						);
 					},
 				}
 			: {}),

@@ -46,6 +46,19 @@ const WorkerTargetSchema = Type.Object({
 	thinkingLevel: Type.Optional(ThinkingLevelSchema),
 });
 
+/**
+ * Compaction controls (Phase 12 slice 12c). Matches the shape of
+ * `CompactionSettings` in src/core/defaults.ts: threshold (0..1) gates the
+ * auto trigger, `auto` is the master switch, and the two optional fields
+ * let power users override the summarization model or system prompt.
+ */
+const CompactionSchema = Type.Object({
+	threshold: Type.Number({ minimum: 0, maximum: 1 }),
+	auto: Type.Boolean(),
+	model: Type.Optional(Type.String({ minLength: 1 })),
+	systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
+});
+
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
@@ -87,6 +100,7 @@ export const SettingsSchema = Type.Object({
 			enabled: Type.Boolean(),
 		}),
 	),
+	compaction: Type.Optional(CompactionSchema),
 });
 
 export type ValidatedSettings = Static<typeof SettingsSchema>;
