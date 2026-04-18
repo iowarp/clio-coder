@@ -18,6 +18,7 @@ import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
+import { openSettingsOverlay } from "./overlays/settings.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
@@ -78,6 +79,8 @@ export interface InteractiveDeps {
 	onSelectModel?: (ref: { providerId: string; modelId: string; endpoint?: string }) => void;
 	/** Persist the next `provider.scope` list committed in /scoped-models. */
 	onSetScope?: (scope: string[]) => void;
+	/** Write handler the /settings overlay uses to persist cycled values. */
+	writeSettings?: (next: ClioSettings) => void;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -108,7 +111,8 @@ export type OverlayState =
 	| "receipts"
 	| "thinking"
 	| "model"
-	| "scoped-models";
+	| "scoped-models"
+	| "settings";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -155,6 +159,10 @@ export interface ScopedModelsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface SettingsOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -163,7 +171,8 @@ export interface OverlayKeyDeps
 		ReceiptsOverlayKeyDeps,
 		ThinkingOverlayKeyDeps,
 		ModelOverlayKeyDeps,
-		ScopedModelsOverlayKeyDeps {
+		ScopedModelsOverlayKeyDeps,
+		SettingsOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -298,6 +307,18 @@ export function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOver
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /settings overlay. Esc closes; every other
+ * key falls through to the focused SettingsList for cycling and search.
+ */
+export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -338,6 +359,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "scoped-models") {
 		// The ScopedOverlayBox owns Space and Enter; route only Esc here.
 		return routeScopedModelsOverlayKey(data, deps);
+	}
+	if (overlayState === "settings") {
+		// SettingsList owns Enter/Space/search; route only Esc here.
+		return routeSettingsOverlayKey(data, deps);
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
@@ -401,6 +426,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
 		openScopedModels: () => openScopedModelsOverlayState(),
+		openSettings: () => openSettingsOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
@@ -551,6 +577,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			currentScope: extractScopeFromSettings(settings),
 			onCommit: (next) => {
 				deps.onSetScope?.(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openSettingsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.getSettings || !deps.writeSettings) return;
+		overlayState = "settings";
+		const getSettings = deps.getSettings;
+		const writeSettingsOut = deps.writeSettings;
+		overlayHandle = openSettingsOverlay(tui, {
+			getSettings,
+			writeSettings: (next) => {
+				writeSettingsOut(next);
 				footer.refresh();
 			},
 			onClose: () => closeOverlay(),
