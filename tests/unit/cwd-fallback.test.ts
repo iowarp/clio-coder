@@ -137,7 +137,7 @@ function meta(id: string): SessionMeta {
 		nodeVersion: "v24.0.0",
 		createdAt: "2026-04-17T12:00:00.000Z",
 		endedAt: null,
-		provider: null,
+		endpoint: null,
 		model: null,
 	} as SessionMeta;
 }

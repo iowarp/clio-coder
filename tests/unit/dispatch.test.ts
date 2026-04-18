@@ -29,14 +29,14 @@ describe("dispatch/validation", () => {
 		if (!v.ok) ok(v.errors.some((e) => e.includes("unknown key")));
 	});
 
-	it("rejects unsupported runtime values", () => {
-		const v = validateJobSpec({ agentId: "a", task: "t", runtime: "sdk" });
+	it("rejects the legacy 'runtime' field as an unknown key (W7 dropped it)", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", runtime: "native" });
 		strictEqual(v.ok, false);
-		if (!v.ok) ok(v.errors.some((e) => e.includes("sdk")));
+		if (!v.ok) ok(v.errors.some((e) => e.includes("unknown key")));
 	});
 
-	it("accepts runtime=native", () => {
-		const v = validateJobSpec({ agentId: "a", task: "t", runtime: "native" });
+	it("accepts endpoint + model as the post-W7 way to target a runtime", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", endpoint: "anthropic", model: "claude-sonnet-4-6" });
 		ok(v.ok);
 	});
 });

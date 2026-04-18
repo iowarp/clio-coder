@@ -113,8 +113,13 @@ function domainOf(filePath: string, domainsRoot: string): string | null {
 
 /**
  * Enforce the three static isolation rules:
- *   1. Only src/engine/** may import @mariozechner/pi-*.
- *   2. src/worker/** never imports src/domains/**.
+ *   1. Only src/engine/** may value-import @mariozechner/pi-*. Type-only imports
+ *      are allowed anywhere because types erase at compile time and the
+ *      RuntimeDescriptor contract in src/domains/providers inherently surfaces
+ *      Model<Api>.
+ *   2. src/worker/** never imports src/domains/** EXCEPT src/domains/providers,
+ *      which carries the pure-data EndpointDescriptor type and the runtime
+ *      registry + built-in descriptors the worker re-hydrates from stdin.
  *   3. src/domains/<x> never imports src/domains/<y>/extension.ts for y != x.
  */
 export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
@@ -122,6 +127,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const engineRoot = path.join(srcRoot, "engine");
 	const workerRoot = path.join(srcRoot, "worker");
 	const domainsRoot = path.join(srcRoot, "domains");
+	const providersDomainRoot = path.join(domainsRoot, "providers");
 
 	const violations: string[] = [];
 
@@ -136,10 +142,9 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
 			if (specifier.startsWith("@mariozechner/pi-")) {
-				if (!inEngine) {
-					const qualifier = typeOnly ? " (type-only)" : "";
+				if (!inEngine && !typeOnly) {
 					violations.push(
-						`rule1: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} outside src/engine`,
+						`rule1: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} outside src/engine (value import)`,
 					);
 				}
 				return;
@@ -148,11 +153,12 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			if (!(specifier.startsWith(".") || specifier.startsWith("/"))) return;
 			const resolved = resolveRelativeImport(filePath, specifier);
 
-			if (inWorker && isWithin(resolved, domainsRoot)) {
-				const qualifier = typeOnly ? " (type-only)" : "";
-				violations.push(
-					`rule2: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves inside src/domains`,
-				);
+			if (inWorker && isWithin(resolved, domainsRoot) && !isWithin(resolved, providersDomainRoot)) {
+				if (!typeOnly) {
+					violations.push(
+						`rule2: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (value imports outside src/domains/providers are not permitted from the worker)`,
+					);
+				}
 				return;
 			}
 
