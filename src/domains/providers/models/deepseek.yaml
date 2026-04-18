@@ -1,0 +1,57 @@
+# Source: https://huggingface.co/deepseek-ai (DeepSeek-V3, DeepSeek-R1, DeepSeek-Coder-V2 cards).
+# R1 and R1-Distill emit thinking inside <think>...</think> blocks per the model card.
+# V3 and Coder-V2 do not expose reasoning as a first-class mode.
+- family: deepseek-v3
+  matchPatterns:
+    - deepseek-v3
+    - deepseek_v3
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192
+
+- family: deepseek-r1
+  matchPatterns:
+    - deepseek-r1
+    - deepseek_r1
+    - deepseek-r1-distill
+    - r1-distill-qwen
+    - r1-distill-llama
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: deepseek-r1
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 16384
+
+- family: deepseek-coder
+  matchPatterns:
+    - deepseek-coder
+    - deepseek-coder-v2
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: true
+    contextWindow: 131072
+    maxTokens: 8192

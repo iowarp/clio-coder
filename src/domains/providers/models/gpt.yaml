@@ -1,0 +1,40 @@
+# Source: https://platform.openai.com/docs/models (GPT-5 family, GPT-4o family).
+# GPT-5 / 5.1 / 5.2 support xhigh reasoning_effort per pi-ai's supportsXhigh catalog.
+# Context windows: GPT-5 and GPT-4o serve 272K tokens per the OpenAI docs (2026).
+- family: gpt-5
+  matchPatterns:
+    - gpt-5
+    - gpt-5.1
+    - gpt-5.2
+    - gpt-5.3
+    - gpt-5.4
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 272000
+    maxTokens: 16384
+
+- family: gpt-4o
+  matchPatterns:
+    - gpt-4o
+    - gpt-4o-mini
+    - gpt-4.1
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    vision: true
+    audio: true
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 16384

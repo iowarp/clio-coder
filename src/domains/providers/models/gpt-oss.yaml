@@ -1,0 +1,42 @@
+# Source: https://huggingface.co/openai (gpt-oss-20b, gpt-oss-120b cards) and
+# https://openai.com/index/introducing-gpt-oss/ (MXFP4 native quantization announcement).
+# Context windows: 131,072 tokens per the HF cards. Both variants ship with tool use enabled.
+- family: gpt-oss-20b
+  matchPatterns:
+    - gpt-oss-20b
+    - gpt-oss_20b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: openrouter
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 16384
+  quirks:
+    quantization: "Native MXFP4 weights; vLLM and llama.cpp need MXFP4-aware kernels."
+
+- family: gpt-oss-120b
+  matchPatterns:
+    - gpt-oss-120b
+    - gpt-oss_120b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: openrouter
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 16384
+  quirks:
+    quantization: "Native MXFP4 weights; vLLM and llama.cpp need MXFP4-aware kernels."
