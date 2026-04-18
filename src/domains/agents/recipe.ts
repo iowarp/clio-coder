@@ -1,5 +1,7 @@
 import path from "node:path";
 
+export type RecipeThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export interface AgentRecipe {
 	id: string;
 	name: string;
@@ -7,7 +9,8 @@ export interface AgentRecipe {
 	mode?: "advise" | "default" | "super";
 	tools?: ReadonlyArray<string>;
 	model?: string;
-	provider?: string;
+	endpoint?: string;
+	thinkingLevel?: RecipeThinkingLevel;
 	runtime?: "native" | "sdk" | "cli";
 	skills?: ReadonlyArray<string>;
 	source: "builtin" | "user" | "project";
