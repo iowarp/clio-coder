@@ -24,6 +24,8 @@ export type SlashCommand =
 	| { kind: "model" }
 	| { kind: "scoped-models" }
 	| { kind: "settings" }
+	| { kind: "resume" }
+	| { kind: "new" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -106,6 +108,8 @@ export interface SlashCommandContext {
 	openModel: () => void;
 	openScopedModels: () => void;
 	openSettings: () => void;
+	openResume: () => void;
+	startNewSession: () => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
@@ -294,6 +298,28 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openSettings();
+		},
+	},
+	{
+		name: "resume",
+		description: "Pick a past session to resume",
+		kinds: ["resume"],
+		match(trimmed) {
+			return trimmed === "/resume" ? { kind: "resume" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openResume();
+		},
+	},
+	{
+		name: "new",
+		description: "Start a new session",
+		kinds: ["new"],
+		match(trimmed) {
+			return trimmed === "/new" ? { kind: "new" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.startNewSession();
 		},
 	},
 ];

@@ -18,6 +18,7 @@ import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
+import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSettingsOverlay } from "./overlays/settings.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
@@ -81,6 +82,10 @@ export interface InteractiveDeps {
 	onSetScope?: (scope: string[]) => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
 	writeSettings?: (next: ClioSettings) => void;
+	/** Resume a past session id. Called from the /resume overlay. */
+	onResumeSession?: (sessionId: string) => void;
+	/** Start a fresh session. Called from /new. */
+	onNewSession?: () => void;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -112,7 +117,8 @@ export type OverlayState =
 	| "thinking"
 	| "model"
 	| "scoped-models"
-	| "settings";
+	| "settings"
+	| "resume";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -163,6 +169,10 @@ export interface SettingsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface ResumeOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -172,7 +182,8 @@ export interface OverlayKeyDeps
 		ThinkingOverlayKeyDeps,
 		ModelOverlayKeyDeps,
 		ScopedModelsOverlayKeyDeps,
-		SettingsOverlayKeyDeps {
+		SettingsOverlayKeyDeps,
+		ResumeOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -319,6 +330,18 @@ export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDe
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /resume overlay. Esc closes; arrows and
+ * Enter fall through to the focused SelectList.
+ */
+export function routeResumeOverlayKey(data: string, deps: ResumeOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -363,6 +386,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "settings") {
 		// SettingsList owns Enter/Space/search; route only Esc here.
 		return routeSettingsOverlayKey(data, deps);
+	}
+	if (overlayState === "resume") {
+		// SelectList owns arrows and Enter; route only Esc here.
+		return routeResumeOverlayKey(data, deps);
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
@@ -427,6 +454,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openModel: () => openModelOverlayState(),
 		openScopedModels: () => openScopedModelsOverlayState(),
 		openSettings: () => openSettingsOverlayState(),
+		openResume: () => openResumeOverlayState(),
+		startNewSession: () => startNewSession(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
@@ -598,6 +627,36 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			onClose: () => closeOverlay(),
 		});
+		tui.requestRender();
+	};
+
+	const openResumeOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			io.stderr("[/resume] session contract unavailable\n");
+			return;
+		}
+		const sessionContract = deps.session;
+		overlayState = "resume";
+		overlayHandle = openSessionOverlay(tui, {
+			session: sessionContract,
+			onResume: (sessionId) => {
+				deps.onResumeSession?.(sessionId);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const startNewSession = (): void => {
+		if (!deps.onNewSession) {
+			io.stderr("[/new] session contract unavailable\n");
+			return;
+		}
+		deps.onNewSession();
+		chatPanel.reset();
+		footer.refresh();
 		tui.requestRender();
 	};
 

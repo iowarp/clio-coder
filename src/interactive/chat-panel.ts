@@ -24,6 +24,8 @@ type ToolLine = {
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	applyEvent(event: ChatLoopEvent): void;
+	/** Clears the visible transcript. /new uses this after rotating the session. */
+	reset(): void;
 }
 
 function shorten(value: string, limit: number): string {
@@ -117,6 +119,10 @@ export function createChatPanel(): ChatPanel {
 	return {
 		appendUser(text: string): void {
 			transcript.push({ role: "user", text });
+			sync();
+		},
+		reset(): void {
+			transcript.length = 0;
 			sync();
 		},
 		applyEvent(event: ChatLoopEvent): void {
