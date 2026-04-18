@@ -28,6 +28,7 @@ export type SlashCommand =
 	| { kind: "new" }
 	| { kind: "tree" }
 	| { kind: "fork" }
+	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "hotkeys" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
@@ -116,6 +117,13 @@ export interface SlashCommandContext {
 	openTree: () => void;
 	openMessagePicker: () => void;
 	openHotkeys: () => void;
+	/**
+	 * Run compaction for the current session. Handler resolves the target
+	 * model, reads session entries, calls session/compaction/compact, and
+	 * appends a compactionSummary entry. No-op when no session is open — the
+	 * handler prints an actionable stderr line instead.
+	 */
+	runCompact: (instructions: string | undefined) => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
@@ -349,6 +357,23 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openMessagePicker();
+		},
+	},
+	{
+		name: "compact",
+		description: "Summarize earlier context to free token budget",
+		kinds: ["compact"],
+		match(trimmed) {
+			if (trimmed === "/compact") return { kind: "compact", instructions: undefined };
+			if (trimmed.startsWith("/compact ")) {
+				const rest = trimmed.slice("/compact ".length).trim();
+				return { kind: "compact", instructions: rest.length > 0 ? rest : undefined };
+			}
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "compact") return;
+			ctx.runCompact(command.instructions);
 		},
 	},
 	{

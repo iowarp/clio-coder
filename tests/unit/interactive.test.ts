@@ -74,6 +74,7 @@ describe("slash-commands registry", () => {
 			"new",
 			"tree",
 			"fork",
+			"compact",
 			"hotkeys",
 		]);
 		const owned = new Map<string, string>();

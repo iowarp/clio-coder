@@ -95,6 +95,14 @@ export interface InteractiveDeps {
 	 * future slices can layer telemetry or settings merging on top.
 	 */
 	onForkSession?: (parentTurnId: string) => void;
+	/**
+	 * Run /compact for the current session. Resolves the compaction model
+	 * (settings.compaction.model with fallback to the orchestrator target),
+	 * reads session entries, streams a summary via the session compaction
+	 * engine, and persists a compactionSummary entry. Slice 12c ships the
+	 * hook; 12d adds the auto-trigger and overflow-recovery path.
+	 */
+	onCompact?: (instructions: string | undefined) => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -539,6 +547,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openTree: () => openTreeOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
 		openHotkeys: () => openHotkeysOverlayState(),
+		runCompact: (instructions) => {
+			if (!deps.onCompact) {
+				io.stderr("[/compact] compaction not wired; pass onCompact to startInteractive\n");
+				return;
+			}
+			const task = deps.onCompact(instructions);
+			void task.catch((err) => {
+				const msg = err instanceof Error ? err.message : String(err);
+				io.stderr(`[/compact] ${msg}\n`);
+			});
+		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
