@@ -13,6 +13,7 @@ import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "..
 import type { Model } from "../engine/types.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
+import { createCoalescingChatRenderer } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
@@ -574,10 +575,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stderr: (s) => process.stderr.write(s),
 	};
 
-	const unsubscribeChat = deps.chat.onEvent((event) => {
-		chatPanel.applyEvent(event);
-		tui.requestRender();
+	const chatRenderer = createCoalescingChatRenderer({
+		chatPanel,
+		requestRender: () => tui.requestRender(),
 	});
+	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
 
 	const slashCtx: SlashCommandContext = {
 		io,
