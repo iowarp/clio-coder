@@ -23,6 +23,7 @@ import {
 	type ChatMessagePartTextData,
 	type ChatMessagePartToolCallRequestData,
 	type ChatMessagePartToolCallResultData,
+	type FileHandle,
 	type FunctionToolCallRequest,
 	type LLMPredictionStopReason,
 	type LLMRespondOpts,
@@ -52,13 +53,48 @@ type AssistantPart =
 	| ChatMessagePartFileData
 	| ChatMessagePartToolCallRequestData;
 
-function userMessage(content: string | (TextContent | ImageContent)[]): ChatMessageData {
+function fileHandleToPart(handle: FileHandle): ChatMessagePartFileData {
+	return {
+		type: "file",
+		name: handle.name,
+		identifier: handle.identifier,
+		sizeBytes: handle.sizeBytes,
+		fileType: handle.type,
+	};
+}
+
+function imageFileName(mimeType: string, index: number): string {
+	const slash = mimeType.indexOf("/");
+	const ext = slash >= 0 ? mimeType.slice(slash + 1) : "png";
+	const safeExt = ext.replace(/[^a-zA-Z0-9]/g, "") || "png";
+	return `clio-image-${index}.${safeExt}`;
+}
+
+async function userMessage(
+	client: LMStudioClient,
+	content: string | (TextContent | ImageContent)[],
+	imageCounter: { next: number },
+): Promise<ChatMessageData> {
 	if (typeof content === "string") {
 		return { role: "user", content: [{ type: "text", text: content }] };
 	}
 	const parts: UserPart[] = [];
 	for (const block of content) {
-		if (block.type === "text") parts.push({ type: "text", text: block.text });
+		if (block.type === "text") {
+			parts.push({ type: "text", text: block.text });
+			continue;
+		}
+		if (block.type === "image") {
+			const fileName = imageFileName(block.mimeType, imageCounter.next++);
+			let handle: FileHandle;
+			try {
+				handle = await client.files.prepareImageBase64(fileName, block.data);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				throw new Error(`LM Studio prepareImage failed for ${fileName}: ${msg}`);
+			}
+			parts.push(fileHandleToPart(handle));
+		}
 	}
 	return { role: "user", content: parts };
 }
@@ -93,13 +129,14 @@ function toolResultMessage(msg: Extract<Message, { role: "toolResult" }>): ChatM
 	return { role: "tool", content: [result] };
 }
 
-function buildChatHistory(context: Context): ChatHistoryData {
+async function buildChatHistory(client: LMStudioClient, context: Context): Promise<ChatHistoryData> {
 	const messages: ChatMessageData[] = [];
+	const imageCounter = { next: 0 };
 	if (context.systemPrompt && context.systemPrompt.length > 0) {
 		messages.push({ role: "system", content: [{ type: "text", text: context.systemPrompt }] });
 	}
 	for (const msg of context.messages) {
-		if (msg.role === "user") messages.push(userMessage(msg.content));
+		if (msg.role === "user") messages.push(await userMessage(client, msg.content, imageCounter));
 		else if (msg.role === "assistant") messages.push(assistantMessage(msg.content));
 		else if (msg.role === "toolResult") messages.push(toolResultMessage(msg));
 	}
@@ -267,7 +304,9 @@ function runStream(
 			}
 			if (options?.maxTokens !== undefined) predictionOpts.maxTokens = options.maxTokens;
 			if (options?.temperature !== undefined) predictionOpts.temperature = options.temperature;
-			const prediction = llm.respond(buildChatHistory(context), predictionOpts);
+			const history = await buildChatHistory(client, context);
+			if (aborted) throw new Error("Request was aborted");
+			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
 			closeActiveText();
 			if (aborted) throw new Error("Request was aborted");
