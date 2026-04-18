@@ -6,6 +6,54 @@ Format follows the spirit of Keep a Changelog (https://keepachangelog.com).
 Versioning: semver after 0.1.0 ships; pre-release versions use `0.1.0-dev`
 with phase tags (`phase-N-complete`, `phase-N-partial`).
 
+## 0.1.0-rc2 (2026-04-17) — Phase 11 TUI selector suite
+
+Sprint range: `6d58797..HEAD`. Ports the pi-coding-agent selector
+surface to the Clio interactive TUI. One slash-command registry owns
+every command; overlays consume the existing providers, session, and
+config contracts.
+
+### Added
+
+- `/thinking` overlay with Shift+Tab cycling, clamped to model
+  reasoning capability via `getAvailableThinkingLevels`. Non-reasoning
+  models expose only `off` and Shift+Tab is a no-op; Alt+M takes over
+  mode cycling.
+- `/model` overlay and Ctrl+L. Rows carry health glyphs (● healthy,
+  ◐ degraded, ○ down, · unknown), a ★ scope marker, and a context +
+  price description. Selection writes
+  `orchestrator.{provider,model,endpoint}`.
+- `/scoped-models` overlay, Ctrl+P (forward), and Shift+Ctrl+P
+  (backward, CSI-u `\x1b[80;6u`). Space toggles inclusion and Enter
+  commits the `provider.scope` list. Cycling advances the orchestrator
+  target across the resolved scope.
+- `/settings` overlay wrapping pi-tui's `SettingsList`. Phase 11
+  cycles the enum fields (`defaultMode`, `safetyLevel`,
+  `orchestrator.thinkingLevel`); free-text fields render read-only
+  until an editor lands in Phase 12.
+- `/resume` overlay listing prior sessions for the current cwd with
+  ✓/● glyphs; selection calls `SessionContract.resume(id)`. `/new`
+  rotates to a fresh session via `SessionContract.create` and clears
+  the chat transcript.
+- `/hotkeys` overlay. Authoritative reference for every live Phase 11
+  keybinding and slash command, grouped by scope.
+- Branded footer grew from `clio · <mode> · <target>` to
+  `clio · <mode> · <target> · scoped:N/M · ◆ <level>`. The scope and
+  reasoning segments are capability-gated and omitted when not
+  applicable.
+- `BUILTIN_SLASH_COMMANDS` registry replaces the two parallel switches
+  (parser + dispatch) in `src/interactive/index.ts`. Every command
+  owns its parse function, dispatch handler, and help entry as one
+  registry row.
+
+### Internal
+
+- New `tests/unit/interactive.test.ts` covers registry coverage, every
+  new keybinding, every overlay's pure builder, and the footer scope
+  segment.
+- `tests/e2e/interactive.test.ts` exercises each new overlay
+  end-to-end through the pty harness.
+
 ## 0.1.0-rc1 (2026-04-17)
 
 Sprint range: `50ff10e..HEAD`. Real local-provider wiring against the
