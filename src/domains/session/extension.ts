@@ -1,8 +1,20 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { openSession } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
-import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import { enrichForkMeta, listSessionsForCwd } from "./history.js";
-import { type SessionManagerState, appendEntry, appendTurn, resumeSessionState, startSession } from "./manager.js";
+import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
+import type { SessionInfoEntry } from "./entries.js";
+import { listSessionsForCwd } from "./history.js";
+import {
+	type SessionManagerState,
+	appendEntry,
+	appendTurn,
+	newTurnId,
+	resumeSessionState,
+	startSession,
+} from "./manager.js";
+import { forkFromState } from "./tree/fork.js";
+import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
+import { type TreeSnapshot, buildTreeSnapshot } from "./tree/navigator.js";
 
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and
@@ -20,6 +32,24 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 		await s.writer.close();
 	}
 
+	async function flushIfCurrent(sessionId: string): Promise<void> {
+		if (state?.meta.id === sessionId) {
+			// tree.json lives on disk; the writer holds the canonical in-memory
+			// copy. Flush before a tree() read so the domain-level navigator
+			// observes every append since the last checkpoint.
+			await state.writer.persistTree();
+		}
+	}
+
+	function snapshotFor(sessionId: string): TreeSnapshot {
+		const bundle = readTreeBundle(sessionId);
+		// Prefer the live in-memory meta when we are looking at the current
+		// session so checkpoint/fork pointers are fresh; otherwise fall back
+		// to the on-disk read.
+		const meta: SessionMeta = state?.meta.id === sessionId ? state.meta : (openSession(sessionId).meta() as SessionMeta);
+		return buildTreeSnapshot({ meta, nodes: bundle.nodes, labels: bundle.labels });
+	}
+
 	const contract: SessionContract = {
 		current: () => state?.meta ?? null,
 		create(input) {
@@ -27,6 +57,15 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 			const startInput: { cwd: string; model?: string | null; provider?: string | null } = { cwd };
 			if (input?.model !== undefined) startInput.model = input.model;
 			if (input?.provider !== undefined) startInput.provider = input.provider;
+			// Close any prior writer first so tree.json + meta.json get the
+			// endedAt + final-tree flush. Without this, the old session leaks
+			// its in-memory tree to disk and /tree on a resume would miss
+			// every append since the last checkpoint.
+			if (state) {
+				const prior = state;
+				state = null;
+				void prior.writer.close();
+			}
 			const next = startSession(startInput);
 			state = next;
 			return next.meta;
@@ -57,20 +96,77 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 		},
 		fork(parentTurnId, input) {
 			if (!state) throw new Error("session.fork: no current session to fork from");
-			const parentMeta = state.meta;
 			const prior = state;
 			state = null;
-			void prior.writer.close();
-
-			const cwd = input?.cwd ?? parentMeta.cwd;
-			const next = startSession({
-				cwd,
-				model: parentMeta.model,
-				provider: parentMeta.provider,
+			const { next } = forkFromState({
+				from: prior,
+				parentTurnId,
+				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
 			});
-			enrichForkMeta(next.meta, parentMeta.id, parentTurnId);
 			state = next;
 			return next.meta;
+		},
+		tree(sessionId) {
+			const id = sessionId ?? state?.meta.id;
+			if (!id) throw new Error("session.tree: no sessionId provided and no current session");
+			// Current-session reads must see every append the in-memory writer
+			// has absorbed since the last checkpoint. persistTree runs
+			// atomicWrite synchronously in-body before yielding its Promise,
+			// so the file on disk is up to date by the time snapshotFor opens
+			// it below. The void-discarded Promise is settled on the next
+			// microtask and carries no return value we care about.
+			if (state?.meta.id === id) void flushIfCurrent(id);
+			return snapshotFor(id);
+		},
+		switchBranch(sessionId) {
+			// /tree-driven branch switch currently delegates to resume. Kept as a
+			// distinct contract method so later slices can layer telemetry or
+			// chat-loop rewiring without changing resume's semantics.
+			if (state?.meta.id === sessionId) return state.meta;
+			if (state) {
+				const prior = state;
+				state = null;
+				void prior.writer.close();
+			}
+			const next = resumeSessionState(sessionId);
+			state = next;
+			return next.meta;
+		},
+		editLabel(turnId, label, sessionId) {
+			const targetId = sessionId ?? state?.meta.id;
+			if (!targetId) throw new Error("session.editLabel: no sessionId provided and no current session");
+			// Label entries are side-car metadata; they do not project into
+			// tree.json (engine `appendEntry` path leaves non-message entries
+			// off the tree), so parentTurnId is left null.
+			if (state && state.meta.id === targetId) {
+				appendEntry(state, {
+					kind: "sessionInfo",
+					parentTurnId: null,
+					targetTurnId: turnId,
+					label,
+				} as SessionEntryInput);
+				return;
+			}
+			const entry: SessionInfoEntry = {
+				kind: "sessionInfo",
+				turnId: newTurnId(),
+				parentTurnId: null,
+				timestamp: new Date().toISOString(),
+				targetTurnId: turnId,
+				label,
+			};
+			appendEntryToSessionFile(targetId, entry);
+		},
+		deleteSession(id, opts) {
+			if (state?.meta.id === id) {
+				throw new Error("session.deleteSession: refusing to delete the currently open session; close() first");
+			}
+			const options: DeleteSessionOptions = opts ?? {};
+			if (options.keepFiles) {
+				tombstoneSession(id);
+			} else {
+				removeSessionDirectory(id);
+			}
 		},
 		history(): ReadonlyArray<SessionMeta> {
 			const cwd = state?.meta.cwd ?? process.cwd();
