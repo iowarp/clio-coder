@@ -207,6 +207,24 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("/compact without a current session prints the actionable error", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/compact\r");
+			// The orchestrator's onCompact short-circuits with a stderr line
+			// rather than calling the summarization model. The message string
+			// is part of the user-facing surface; if it changes, update the
+			// renderer + docs together.
+			await p.expect(/\[\/compact]\s+no current session/, 10_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("/thinking shows the full level set when orchestrator is a Qwen3 local model", async () => {
 		// Phase 12a pre-phase fix (see docs/superpowers/plans/...-phase-12-...).
 		// Before the resolveLocalModelId composition, getOrchestratorModel
