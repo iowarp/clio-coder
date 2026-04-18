@@ -6,11 +6,7 @@ export interface OpenAIModelsResponse {
 	data?: Array<{ id?: unknown }>;
 }
 
-export async function probeUrl(
-	url: string,
-	ctx: ProbeContext,
-	method: "GET" | "HEAD" = "GET",
-): Promise<ProbeResult> {
+export async function probeUrl(url: string, ctx: ProbeContext, method: "GET" | "HEAD" = "GET"): Promise<ProbeResult> {
 	const base = { url, timeoutMs: ctx.httpTimeoutMs, method } as const;
 	return ctx.signal ? probeHttp({ ...base, signal: ctx.signal }) : probeHttp(base);
 }
@@ -37,10 +33,7 @@ export interface LlamaCppPropsEnrichment {
 	serverVersion?: string;
 }
 
-export async function probeLlamaCppProps(
-	base: string,
-	ctx: ProbeContext,
-): Promise<LlamaCppPropsEnrichment> {
+export async function probeLlamaCppProps(base: string, ctx: ProbeContext): Promise<LlamaCppPropsEnrichment> {
 	const opts = { url: `${base}/props`, timeoutMs: ctx.httpTimeoutMs } as const;
 	const result = await (ctx.signal
 		? probeJson<LlamaCppProps>({ ...opts, signal: ctx.signal })

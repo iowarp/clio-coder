@@ -1,9 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
-import {
-	type ProvidersContract,
-	type ThinkingLevel,
-	availableThinkingLevels,
-} from "../../domains/providers/index.js";
+import { type ProvidersContract, type ThinkingLevel, availableThinkingLevels } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,

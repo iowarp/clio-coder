@@ -4,11 +4,7 @@ import { probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -69,11 +65,7 @@ const ollamaOpenaiRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.name === "string" ? row.name : null))
 			.filter((name): name is string => name !== null);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

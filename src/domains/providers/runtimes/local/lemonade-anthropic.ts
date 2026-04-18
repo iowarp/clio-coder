@@ -3,13 +3,9 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
-import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
+import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -42,11 +38,7 @@ const lemonadeAnthropicRuntime: RuntimeDescriptor = {
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

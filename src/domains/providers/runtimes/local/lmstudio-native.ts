@@ -1,15 +1,11 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
 import { LMStudioClient } from "@lmstudio/sdk";
+import type { Api, Model } from "@mariozechner/pi-ai";
 
 import { mergeCapabilities } from "../../capabilities.js";
-import { EMPTY_CAPABILITIES, type CapabilityFlags } from "../../types/capability-flags.js";
+import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -31,10 +27,7 @@ function toWebSocketUrl(url: string): string {
 	return `ws://${trimmed}`;
 }
 
-function buildClient(
-	endpoint: EndpointDescriptor,
-	ctx: ProbeContext,
-): LMStudioClient | { error: string } {
+function buildClient(endpoint: EndpointDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
 	if (!endpoint.url) return { error: "endpoint has no url" };
 	try {
 		const opts: ConstructorParameters<typeof LMStudioClient>[0] = {
@@ -94,11 +87,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		const client = built;
 		const started = Date.now();
 		try {
-			const version = await withTimeout(
-				client.system.getLMStudioVersion(),
-				ctx.httpTimeoutMs,
-				ctx.signal,
-			);
+			const version = await withTimeout(client.system.getLMStudioVersion(), ctx.httpTimeoutMs, ctx.signal);
 			const latencyMs = Date.now() - started;
 			return { ok: true, latencyMs, serverVersion: version.version };
 		} catch (err) {
@@ -126,11 +115,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			return [];
 		}
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const caps = mergeCapabilities(
 			defaultCapabilities,
 			kb?.entry.capabilities ?? null,

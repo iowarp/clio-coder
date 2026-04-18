@@ -29,12 +29,7 @@ describe("providers/capabilities mergeCapabilities", () => {
 
 	it("ignores undefined keys so a layer can be partial without blanking prior layers", () => {
 		const partialOverride: Partial<CapabilityFlags> = {};
-		const merged = mergeCapabilities(
-			base({ vision: false }),
-			{ vision: true },
-			null,
-			partialOverride,
-		);
+		const merged = mergeCapabilities(base({ vision: false }), { vision: true }, null, partialOverride);
 		strictEqual(merged.vision, true);
 	});
 
@@ -84,30 +79,19 @@ describe("providers/capabilities availableThinkingLevels", () => {
 	});
 
 	it("anthropic-extended includes 'xhigh' at the tail", () => {
-		const levels = availableThinkingLevels(
-			base({ reasoning: true, thinkingFormat: "anthropic-extended" }),
-		);
+		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "anthropic-extended" }));
 		deepStrictEqual(Array.from(levels), [...VALID_THINKING_LEVELS]);
 		ok(levels.includes("xhigh"));
 	});
 
 	it("non-anthropic thinking format omits 'xhigh'", () => {
-		const levels = availableThinkingLevels(
-			base({ reasoning: true, thinkingFormat: "qwen-chat-template" }),
-		);
+		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "qwen-chat-template" }));
 		ok(levels.includes("high"));
 		ok(!levels.includes("xhigh"));
 	});
 
 	it("VALID_THINKING_LEVELS is a 6-element readonly tuple", () => {
 		strictEqual(VALID_THINKING_LEVELS.length, 6);
-		deepStrictEqual(Array.from(VALID_THINKING_LEVELS), [
-			"off",
-			"minimal",
-			"low",
-			"medium",
-			"high",
-			"xhigh",
-		]);
+		deepStrictEqual(Array.from(VALID_THINKING_LEVELS), ["off", "minimal", "low", "medium", "high", "xhigh"]);
 	});
 });

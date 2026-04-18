@@ -6,11 +6,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { probeBinaryVersion } from "./probe-binary.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -47,11 +43,7 @@ const codexRuntime: RuntimeDescriptor = {
 		if (result.error) failed.error = result.error;
 		return failed;
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		_kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, _kb: KnowledgeBaseHit | null): Model<Api> {
 		const stub = {
 			id: wireModelId,
 			name: `${endpoint.id}`,

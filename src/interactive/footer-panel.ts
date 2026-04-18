@@ -1,10 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
-import {
-	type CapabilityFlags,
-	type ProvidersContract,
-	availableThinkingLevels,
-} from "../domains/providers/index.js";
+import { type CapabilityFlags, type ProvidersContract, availableThinkingLevels } from "../domains/providers/index.js";
 import { Text } from "../engine/tui.js";
 
 const ANSI_DIM = "\u001b[2m";

@@ -91,9 +91,14 @@ function resolveDispatchTarget(
 	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
 	const wireModelId = req.model ?? recipe?.model ?? workerDefault?.model ?? endpoint.defaultModel;
 	if (!wireModelId) {
-		throw new Error(`dispatch: no model for endpoint '${endpointId}' (set workers.default.model or endpoint.defaultModel)`);
+		throw new Error(
+			`dispatch: no model for endpoint '${endpointId}' (set workers.default.model or endpoint.defaultModel)`,
+		);
 	}
-	const thinkingLevel = (req.thinkingLevel ?? recipe?.thinkingLevel ?? workerDefault?.thinkingLevel ?? "off") as ThinkingLevel;
+	const thinkingLevel = (req.thinkingLevel ??
+		recipe?.thinkingLevel ??
+		workerDefault?.thinkingLevel ??
+		"off") as ThinkingLevel;
 	const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
 	return {
 		endpoint,
@@ -413,8 +418,7 @@ export function createDispatchBundle(
 				const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
 				const pricing = target.endpoint.pricing;
 				const costUsd = pricing
-					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
-						(tokenMeter.outputTokens * pricing.output) / 1_000_000
+					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
 					: 0;
 				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
 				const receipt: RunReceipt = {

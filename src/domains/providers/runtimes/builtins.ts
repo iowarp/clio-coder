@@ -8,8 +8,8 @@
  * separately by `loadPluginRuntimes` in `./plugins.ts`.
  */
 
-import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import type { RuntimeRegistry } from "../registry.js";
+import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
 
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
@@ -33,8 +33,8 @@ import llamacppCompletion from "./local/llamacpp-completion.js";
 import llamacppEmbed from "./local/llamacpp-embed.js";
 import llamacppOpenai from "./local/llamacpp-openai.js";
 import llamacppRerank from "./local/llamacpp-rerank.js";
-import lmstudio from "./local/lmstudio.js";
 import lmstudioNative from "./local/lmstudio-native.js";
+import lmstudio from "./local/lmstudio.js";
 import localai from "./local/localai.js";
 import mistralRs from "./local/mistral-rs.js";
 import mlc from "./local/mlc.js";

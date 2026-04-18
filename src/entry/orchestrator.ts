@@ -58,7 +58,10 @@ interface CompactionResolution {
 	apiKey?: string;
 }
 
-function resolveEndpoint(providers: ProvidersContract, endpointId: string | null | undefined): EndpointDescriptor | null {
+function resolveEndpoint(
+	providers: ProvidersContract,
+	endpointId: string | null | undefined,
+): EndpointDescriptor | null {
 	if (!endpointId) return null;
 	return providers.getEndpoint(endpointId);
 }

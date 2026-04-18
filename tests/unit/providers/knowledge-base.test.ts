@@ -2,8 +2,8 @@ import { ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { FileKnowledgeBase } from "../../../src/domains/providers/types/knowledge-base.js";
 
@@ -33,24 +33,12 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 	it("accepts both .yaml and .yml files", () => {
 		writeFileSync(
 			join(scratch, "a.yaml"),
-			[
-				"- family: fa",
-				"  matchPatterns: [fa]",
-				"  capabilities:",
-				"    chat: true",
-				"",
-			].join("\n"),
+			["- family: fa", "  matchPatterns: [fa]", "  capabilities:", "    chat: true", ""].join("\n"),
 			"utf8",
 		);
 		writeFileSync(
 			join(scratch, "b.yml"),
-			[
-				"- family: fb",
-				"  matchPatterns: [fb]",
-				"  capabilities:",
-				"    tools: true",
-				"",
-			].join("\n"),
+			["- family: fb", "  matchPatterns: [fb]", "  capabilities:", "    tools: true", ""].join("\n"),
 			"utf8",
 		);
 		const kb = new FileKnowledgeBase(scratch);
@@ -58,11 +46,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 	});
 
 	it("raises a helpful error when a YAML file is not a list of entries", () => {
-		writeFileSync(
-			join(scratch, "bad.yaml"),
-			["family: not-a-list", "capabilities: {}", ""].join("\n"),
-			"utf8",
-		);
+		writeFileSync(join(scratch, "bad.yaml"), ["family: not-a-list", "capabilities: {}", ""].join("\n"), "utf8");
 		throws(
 			() => new FileKnowledgeBase(scratch),
 			(err: Error) => err.message.includes("must be a YAML list"),
@@ -70,11 +54,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 	});
 
 	it("rejects entries that omit the 'family' string", () => {
-		writeFileSync(
-			join(scratch, "no-family.yaml"),
-			["- matchPatterns: [x]", "  capabilities: {}", ""].join("\n"),
-			"utf8",
-		);
+		writeFileSync(join(scratch, "no-family.yaml"), ["- matchPatterns: [x]", "  capabilities: {}", ""].join("\n"), "utf8");
 		throws(
 			() => new FileKnowledgeBase(scratch),
 			(err: Error) => err.message.includes("'family'"),

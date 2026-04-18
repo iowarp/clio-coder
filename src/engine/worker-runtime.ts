@@ -14,7 +14,11 @@ import { fileURLToPath } from "node:url";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor } from "../domains/providers/index.js";
-import { FileKnowledgeBase, type KnowledgeBase, type KnowledgeBaseHit } from "../domains/providers/types/knowledge-base.js";
+import {
+	FileKnowledgeBase,
+	type KnowledgeBase,
+	type KnowledgeBaseHit,
+} from "../domains/providers/types/knowledge-base.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";

@@ -1,7 +1,7 @@
 import type { DomainModule } from "../../core/domain-loader.js";
+import type { ProvidersContract } from "./contract.js";
 import { createProvidersBundle } from "./extension.js";
 import { ProvidersManifest } from "./manifest.js";
-import type { ProvidersContract } from "./contract.js";
 
 export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	manifest: ProvidersManifest,

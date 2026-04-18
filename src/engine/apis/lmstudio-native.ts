@@ -1,5 +1,19 @@
 import { randomUUID } from "node:crypto";
 
+import {
+	type ChatHistoryData,
+	type ChatMessageData,
+	type ChatMessagePartFileData,
+	type ChatMessagePartTextData,
+	type ChatMessagePartToolCallRequestData,
+	type ChatMessagePartToolCallResultData,
+	type FileHandle,
+	type FunctionToolCallRequest,
+	type LLMPredictionStopReason,
+	type LLMRespondOpts,
+	type LLMTool,
+	LMStudioClient,
+} from "@lmstudio/sdk";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import type {
 	ApiProvider,
@@ -15,20 +29,6 @@ import type {
 	Tool,
 	ToolCall,
 } from "@mariozechner/pi-ai";
-import {
-	LMStudioClient,
-	type ChatHistoryData,
-	type ChatMessageData,
-	type ChatMessagePartFileData,
-	type ChatMessagePartTextData,
-	type ChatMessagePartToolCallRequestData,
-	type ChatMessagePartToolCallResultData,
-	type FileHandle,
-	type FunctionToolCallRequest,
-	type LLMPredictionStopReason,
-	type LLMRespondOpts,
-	type LLMTool,
-} from "@lmstudio/sdk";
 
 function normalizeBaseUrl(url: string): string {
 	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;
@@ -48,10 +48,7 @@ function toolToLmStudio(tool: Tool): LLMTool {
 }
 
 type UserPart = ChatMessagePartTextData | ChatMessagePartFileData;
-type AssistantPart =
-	| ChatMessagePartTextData
-	| ChatMessagePartFileData
-	| ChatMessagePartToolCallRequestData;
+type AssistantPart = ChatMessagePartTextData | ChatMessagePartFileData | ChatMessagePartToolCallRequestData;
 
 function fileHandleToPart(handle: FileHandle): ChatMessagePartFileData {
 	return {
@@ -143,10 +140,7 @@ async function buildChatHistory(client: LMStudioClient, context: Context): Promi
 	return { messages };
 }
 
-function mapStopReason(
-	reason: LLMPredictionStopReason | undefined,
-	aborted: boolean,
-): AssistantMessage["stopReason"] {
+function mapStopReason(reason: LLMPredictionStopReason | undefined, aborted: boolean): AssistantMessage["stopReason"] {
 	if (aborted || reason === "userStopped") return "aborted";
 	if (reason === "failed" || reason === "modelUnloaded") return "error";
 	if (reason === "toolCalls") return "toolUse";
@@ -337,9 +331,7 @@ function safeParseArgs(raw: string): Record<string, unknown> {
 	if (!raw) return {};
 	try {
 		const parsed = JSON.parse(raw);
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: {};
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
 	} catch {
 		return {};
 	}
@@ -354,6 +346,5 @@ function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions
 export const lmstudioNativeApiProvider: ApiProvider<"lmstudio-native"> = {
 	api: "lmstudio-native",
 	stream: (model, context, options) => runStream(model, context, options),
-	streamSimple: (model, context, options?: SimpleStreamOptions) =>
-		runStream(model, context, stripReasoning(options)),
+	streamSimple: (model, context, options?: SimpleStreamOptions) => runStream(model, context, stripReasoning(options)),
 };

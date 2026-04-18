@@ -13,7 +13,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	"usage: clio run [--endpoint <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] \"<task>\"\n";
+	'usage: clio run [--endpoint <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 

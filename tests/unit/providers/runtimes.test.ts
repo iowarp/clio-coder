@@ -49,10 +49,7 @@ describe("providers/runtimes built-in descriptors", () => {
 			ok(desc.displayName.length > 0, `${label}: displayName must be non-empty`);
 
 			ok(VALID_KINDS.has(desc.kind), `${label}: invalid kind '${desc.kind}'`);
-			ok(
-				VALID_API_FAMILIES.has(desc.apiFamily),
-				`${label}: invalid apiFamily '${desc.apiFamily}'`,
-			);
+			ok(VALID_API_FAMILIES.has(desc.apiFamily), `${label}: invalid apiFamily '${desc.apiFamily}'`);
 			ok(VALID_AUTH.has(desc.auth), `${label}: invalid auth '${desc.auth}'`);
 
 			ok(
@@ -62,31 +59,15 @@ describe("providers/runtimes built-in descriptors", () => {
 			const caps = desc.defaultCapabilities;
 			strictEqual(typeof caps.chat, "boolean", `${label}: defaultCapabilities.chat must be boolean`);
 			strictEqual(typeof caps.tools, "boolean", `${label}: defaultCapabilities.tools must be boolean`);
-			strictEqual(
-				typeof caps.contextWindow,
-				"number",
-				`${label}: defaultCapabilities.contextWindow must be a number`,
-			);
-			strictEqual(
-				typeof caps.maxTokens,
-				"number",
-				`${label}: defaultCapabilities.maxTokens must be a number`,
-			);
+			strictEqual(typeof caps.contextWindow, "number", `${label}: defaultCapabilities.contextWindow must be a number`);
+			strictEqual(typeof caps.maxTokens, "number", `${label}: defaultCapabilities.maxTokens must be a number`);
 
-			strictEqual(
-				typeof desc.synthesizeModel,
-				"function",
-				`${label}: synthesizeModel must be a function`,
-			);
+			strictEqual(typeof desc.synthesizeModel, "function", `${label}: synthesizeModel must be a function`);
 			if (desc.probe !== undefined) {
 				strictEqual(typeof desc.probe, "function", `${label}: probe must be a function when set`);
 			}
 			if (desc.probeModels !== undefined) {
-				strictEqual(
-					typeof desc.probeModels,
-					"function",
-					`${label}: probeModels must be a function when set`,
-				);
+				strictEqual(typeof desc.probeModels, "function", `${label}: probeModels must be a function when set`);
 			}
 		}
 	});

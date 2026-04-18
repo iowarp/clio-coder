@@ -1,18 +1,6 @@
-export type ToolCallFormat =
-	| "openai"
-	| "anthropic"
-	| "hermes"
-	| "llama3-json"
-	| "mistral"
-	| "qwen"
-	| "xml";
+export type ToolCallFormat = "openai" | "anthropic" | "hermes" | "llama3-json" | "mistral" | "qwen" | "xml";
 
-export type ThinkingFormat =
-	| "qwen-chat-template"
-	| "openrouter"
-	| "zai"
-	| "anthropic-extended"
-	| "deepseek-r1";
+export type ThinkingFormat = "qwen-chat-template" | "openrouter" | "zai" | "anthropic-extended" | "deepseek-r1";
 
 export type StructuredOutputMode = "json-schema" | "gbnf" | "xgrammar" | "none";
 
@@ -49,13 +37,7 @@ export const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high",
 
 export type ThinkingLevel = (typeof VALID_THINKING_LEVELS)[number];
 
-const THINKING_LEVELS_WITHOUT_XHIGH: ReadonlyArray<ThinkingLevel> = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-];
+const THINKING_LEVELS_WITHOUT_XHIGH: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
 
 export function availableThinkingLevels(caps: CapabilityFlags): ReadonlyArray<ThinkingLevel> {
 	if (!caps.reasoning) return ["off"];

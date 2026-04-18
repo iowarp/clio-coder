@@ -6,11 +6,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { probeBinaryVersion } from "./probe-binary.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -38,11 +34,7 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return runVersionProbe(spawn, "claude", ctx);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		_kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, _kb: KnowledgeBaseHit | null): Model<Api> {
 		const stub = {
 			id: wireModelId,
 			name: `${endpoint.id}`,
@@ -59,11 +51,7 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	},
 };
 
-async function runVersionProbe(
-	spawnFn: typeof spawn,
-	binary: string,
-	ctx: ProbeContext,
-): Promise<ProbeResult> {
+async function runVersionProbe(spawnFn: typeof spawn, binary: string, ctx: ProbeContext): Promise<ProbeResult> {
 	const started = performance.now();
 	const result = await probeBinaryVersion(spawnFn, binary, ctx);
 	const latencyMs = Math.round(performance.now() - started);

@@ -1,10 +1,10 @@
 import { createInterface } from "node:readline/promises";
 import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
-import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 import { credentialsPresent, openCredentialStore } from "../domains/providers/credentials.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import { printError, printOk } from "./shared.js";
 
@@ -181,9 +181,11 @@ function defaultUrlFor(runtimeId: string): string {
 	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
-function groupByKind(
-	runtimes: ReadonlyArray<RuntimeDescriptor>,
-): { cloud: RuntimeDescriptor[]; local: RuntimeDescriptor[]; subprocess: RuntimeDescriptor[] } {
+function groupByKind(runtimes: ReadonlyArray<RuntimeDescriptor>): {
+	cloud: RuntimeDescriptor[];
+	local: RuntimeDescriptor[];
+	subprocess: RuntimeDescriptor[];
+} {
 	const cloud: RuntimeDescriptor[] = [];
 	const local: RuntimeDescriptor[] = [];
 	const subprocess: RuntimeDescriptor[] = [];
@@ -322,8 +324,16 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	}
 	const descriptor = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
-		...(args.model !== undefined ? { model: args.model } : existing?.defaultModel ? { model: existing.defaultModel } : {}),
-		...(args.apiKeyEnv !== undefined ? { apiKeyEnv: args.apiKeyEnv } : existing?.auth?.apiKeyEnvVar ? { apiKeyEnv: existing.auth.apiKeyEnvVar } : {}),
+		...(args.model !== undefined
+			? { model: args.model }
+			: existing?.defaultModel
+				? { model: existing.defaultModel }
+				: {}),
+		...(args.apiKeyEnv !== undefined
+			? { apiKeyEnv: args.apiKeyEnv }
+			: existing?.auth?.apiKeyEnvVar
+				? { apiKeyEnv: existing.auth.apiKeyEnvVar }
+				: {}),
 		gateway: args.gateway || existing?.gateway === true,
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
@@ -469,9 +479,7 @@ async function runInteractive(
 		if (manual && manual.length > 0) model = manual;
 	}
 
-	const gatewayAnswer = defaults.gateway
-		? true
-		: await askYesNo(rl, "Mark as gateway?", false);
+	const gatewayAnswer = defaults.gateway ? true : await askYesNo(rl, "Mark as gateway?", false);
 
 	const descriptor = buildDescriptor(runtime, endpointId, {
 		...(url !== undefined ? { url } : {}),

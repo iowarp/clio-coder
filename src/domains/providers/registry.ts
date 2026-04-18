@@ -50,9 +50,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 				register(desc);
 				loaded.push(desc.id);
 			} catch (err) {
-				process.stderr.write(
-					`[providers] runtime plugin ${full} rejected: ${describeError(err)}\n`,
-				);
+				process.stderr.write(`[providers] runtime plugin ${full} rejected: ${describeError(err)}\n`);
 			}
 		}
 		return loaded;
@@ -63,33 +61,25 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		try {
 			mod = await import(packageName);
 		} catch (err) {
-			process.stderr.write(
-				`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`,
-			);
+			process.stderr.write(`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`);
 			return [];
 		}
 		const exported = (mod as { clioRuntimes?: unknown }).clioRuntimes;
 		if (!Array.isArray(exported)) {
-			process.stderr.write(
-				`[providers] runtime package ${packageName} has no 'clioRuntimes' array export\n`,
-			);
+			process.stderr.write(`[providers] runtime package ${packageName} has no 'clioRuntimes' array export\n`);
 			return [];
 		}
 		const loaded: string[] = [];
 		for (const candidate of exported) {
 			if (!isRuntimeDescriptor(candidate)) {
-				process.stderr.write(
-					`[providers] runtime package ${packageName} exported an invalid descriptor\n`,
-				);
+				process.stderr.write(`[providers] runtime package ${packageName} exported an invalid descriptor\n`);
 				continue;
 			}
 			try {
 				register(candidate);
 				loaded.push(candidate.id);
 			} catch (err) {
-				process.stderr.write(
-					`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`,
-				);
+				process.stderr.write(`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`);
 			}
 		}
 		return loaded;
@@ -105,10 +95,7 @@ export function getRuntimeRegistry(): RuntimeRegistry {
 	return singleton;
 }
 
-async function importDescriptor(
-	file: string,
-	href: string,
-): Promise<RuntimeDescriptor | null> {
+async function importDescriptor(file: string, href: string): Promise<RuntimeDescriptor | null> {
 	let mod: unknown;
 	try {
 		mod = await import(href);
@@ -118,9 +105,7 @@ async function importDescriptor(
 	}
 	const candidate = (mod as { default?: unknown }).default;
 	if (!isRuntimeDescriptor(candidate)) {
-		process.stderr.write(
-			`[providers] runtime plugin ${file} has no valid default-export RuntimeDescriptor\n`,
-		);
+		process.stderr.write(`[providers] runtime plugin ${file} has no valid default-export RuntimeDescriptor\n`);
 		return null;
 	}
 	return candidate;

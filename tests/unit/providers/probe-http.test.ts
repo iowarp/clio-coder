@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 

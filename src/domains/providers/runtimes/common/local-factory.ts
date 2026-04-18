@@ -10,8 +10,8 @@ import type {
 	RuntimeAuth,
 	RuntimeDescriptor,
 } from "../../types/runtime-descriptor.js";
-import { probeOpenAIModels, probeUrl } from "./probe-helpers.js";
 import { endpointBase, synthLocalModel, withAsIs, withV1 } from "./local-synth.js";
+import { probeOpenAIModels, probeUrl } from "./probe-helpers.js";
 
 export interface OpenAICompatSpec {
 	id: string;
@@ -48,11 +48,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			if (modelsPath === "/v1/models") return probeOpenAIModels(base, ctx);
 			return probeOpenAIModels(base, ctx);
 		},
-		synthesizeModel(
-			endpoint: EndpointDescriptor,
-			wireModelId: string,
-			kb: KnowledgeBaseHit | null,
-		): Model<Api> {
+		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthLocalModel({
 				endpoint,
 				wireModelId,

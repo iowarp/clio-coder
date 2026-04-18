@@ -90,7 +90,12 @@ function planInvocation(input: SubprocessWorkerInput): InvocationPlan {
 	}
 }
 
-function buildAssistantMessage(plan: InvocationPlan, wireModelId: string, text: string, stopReason: AssistantMessage["stopReason"]): AssistantMessage {
+function buildAssistantMessage(
+	plan: InvocationPlan,
+	wireModelId: string,
+	text: string,
+	stopReason: AssistantMessage["stopReason"],
+): AssistantMessage {
 	return {
 		role: "assistant",
 		content: text.length > 0 ? [{ type: "text", text }] : [],
@@ -187,7 +192,8 @@ export function startSubprocessWorkerRun(
 			const exitCode = code ?? 1;
 			const stopReason: AssistantMessage["stopReason"] = aborted ? "aborted" : exitCode === 0 ? "stop" : "error";
 			const message = buildAssistantMessage(plan, input.wireModelId, text, stopReason);
-			const finalMessage = stopReason === "error" && errText.length > 0 ? { ...message, errorMessage: errText.trim() } : message;
+			const finalMessage =
+				stopReason === "error" && errText.length > 0 ? { ...message, errorMessage: errText.trim() } : message;
 			emit({ type: "message_end", message: finalMessage });
 			emit({ type: "agent_end", messages: [finalMessage] });
 			resolve({ messages: [finalMessage], exitCode: aborted ? 1 : exitCode });

@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 
-import { startSubprocessWorkerRun } from "../../../src/engine/subprocess-runtime.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
+import { startSubprocessWorkerRun } from "../../../src/engine/subprocess-runtime.js";
 import type { AgentEvent, AgentMessage } from "../../../src/engine/types.js";
 
 const ORIGINAL_PATH = process.env.PATH;
@@ -27,8 +27,7 @@ const runtime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "ANTHROPIC_API_KEY",
 	defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
-	synthesizeModel: () =>
-		({ id: "claude-sonnet-4-6", provider: "anthropic", baseUrl: "" }) as never,
+	synthesizeModel: () => ({ id: "claude-sonnet-4-6", provider: "anthropic", baseUrl: "" }) as never,
 };
 
 function installShim(dir: string, script: string): string {
@@ -78,9 +77,7 @@ describe("subprocess-runtime startSubprocessWorkerRun", () => {
 		const text = blocks
 			.filter(
 				(block: unknown): block is { type: "text"; text: string } =>
-					typeof block === "object" &&
-					block !== null &&
-					(block as { type?: unknown }).type === "text",
+					typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text",
 			)
 			.map((b) => b.text)
 			.join("");
