@@ -35,6 +35,7 @@ export {
 	getLocalRegisteredModel,
 	registerDiscoveredLocalModels,
 	registerLocalProviders,
+	resolveLocalModelId,
 } from "./local-model-registry.js";
 
 export interface EngineAi {

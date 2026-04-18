@@ -255,3 +255,18 @@ export function registerDiscoveredLocalModels(
 export function getLocalRegisteredModel(providerId: string, modelId: string): Model<never> | undefined {
 	return LOCAL_MODEL_REGISTRY.get(localKey(providerId, modelId));
 }
+
+/**
+ * Compose the registry lookup id for a provider+model pair. Local engines
+ * (llamacpp/lmstudio/ollama/openai-compat) keep each endpoint's Model under
+ * `${modelId}@${endpointName}`, so callers that read `settings.orchestrator`
+ * must fold the endpoint in before calling `getModel`. Cloud providers never
+ * carry an endpoint and always return the bare modelId unchanged. Idempotent:
+ * if the caller already composed `modelId@endpoint`, it passes through.
+ */
+export function resolveLocalModelId(providerId: string, modelId: string, endpoint?: string): string {
+	if (!endpoint || endpoint.length === 0) return modelId;
+	if (!isEngineId(providerId)) return modelId;
+	if (modelId.includes("@")) return modelId;
+	return `${modelId}@${endpoint}`;
+}

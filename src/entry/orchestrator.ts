@@ -27,7 +27,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { getModel } from "../engine/ai.js";
+import { getModel, resolveLocalModelId } from "../engine/ai.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
 
@@ -160,8 +160,10 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			const providerId = settings.orchestrator?.provider?.trim();
 			const modelId = settings.orchestrator?.model?.trim();
 			if (!providerId || !modelId) return undefined;
+			const endpoint = settings.orchestrator?.endpoint?.trim();
+			const lookupId = resolveLocalModelId(providerId, modelId, endpoint);
 			try {
-				return getModel(providerId, modelId);
+				return getModel(providerId, lookupId);
 			} catch {
 				return undefined;
 			}

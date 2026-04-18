@@ -12,6 +12,11 @@ import {
 	getAvailableThinkingLevels,
 	isValidThinkingLevel,
 } from "../../src/domains/providers/resolver.js";
+import {
+	getLocalRegisteredModel,
+	registerLocalProviders,
+	resolveLocalModelId,
+} from "../../src/engine/local-model-registry.js";
 
 describe("providers/catalog", () => {
 	it("catalog is non-empty", () => {
@@ -102,5 +107,33 @@ describe("providers/resolver/thinking", () => {
 	it("opus-4-6 exposes xhigh level", () => {
 		const levels = getAvailableThinkingLevels({ id: "claude-opus-4-6", reasoning: true } as never);
 		ok(levels.includes("xhigh"));
+	});
+});
+
+describe("engine/local-model-registry/resolveLocalModelId", () => {
+	it("composes modelId@endpoint for local engines with an endpoint", () => {
+		strictEqual(resolveLocalModelId("llamacpp", "Qwen", "mini"), "Qwen@mini");
+	});
+
+	it("leaves cloud provider modelIds unchanged even when endpoint is provided", () => {
+		strictEqual(resolveLocalModelId("anthropic", "claude-4", "mini"), "claude-4");
+	});
+
+	it("returns bare modelId when endpoint is undefined", () => {
+		strictEqual(resolveLocalModelId("llamacpp", "Qwen", undefined), "Qwen");
+	});
+
+	it("resolves the registered Model via the composed lookup id", () => {
+		registerLocalProviders({
+			llamacpp: {
+				endpoints: {
+					mini: { default_model: "Q", url: "http://x" },
+				},
+			},
+		});
+		const lookupId = resolveLocalModelId("llamacpp", "Q", "mini");
+		strictEqual(lookupId, "Q@mini");
+		const model = getLocalRegisteredModel("llamacpp", lookupId);
+		ok(model, "expected registered Model for llamacpp/Q@mini");
 	});
 });
