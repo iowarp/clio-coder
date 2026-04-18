@@ -8,4 +8,31 @@ export const SessionDomainModule: DomainModule = {
 };
 
 export { SessionManifest } from "./manifest.js";
-export type { SessionContract, SessionMeta, ClioSessionMetaExtension, TurnInput } from "./contract.js";
+export type {
+	ClioSessionMetaExtension,
+	SessionContract,
+	SessionEntryInput,
+	SessionMeta,
+	TurnInput,
+} from "./contract.js";
+export {
+	SESSION_ENTRY_KINDS,
+	fromLegacyTurn,
+	isSessionEntry,
+} from "./entries.js";
+export type {
+	BashExecutionEntry,
+	BaseSessionEntry,
+	BranchSummaryEntry,
+	CompactionSummaryEntry,
+	CustomEntry,
+	FileEntryEntry,
+	MessageEntry,
+	MessageRole,
+	ModelChangeEntry,
+	SessionEntry,
+	SessionEntryKind,
+	SessionInfoEntry,
+	ThinkingLevelChangeEntry,
+} from "./entries.js";
+export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";

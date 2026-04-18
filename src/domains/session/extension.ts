@@ -1,8 +1,8 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { performCheckpoint } from "./checkpoint.js";
-import type { SessionContract, SessionMeta, TurnInput } from "./contract.js";
+import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { enrichForkMeta, listSessionsForCwd } from "./history.js";
-import { type SessionManagerState, appendTurn, resumeSessionState, startSession } from "./manager.js";
+import { type SessionManagerState, appendEntry, appendTurn, resumeSessionState, startSession } from "./manager.js";
 
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and
@@ -34,6 +34,10 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 		append(turn: TurnInput) {
 			if (!state) throw new Error("session.append: no current session");
 			return appendTurn(state, turn);
+		},
+		appendEntry(entry: SessionEntryInput) {
+			if (!state) throw new Error("session.appendEntry: no current session");
+			return appendEntry(state, entry);
 		},
 		async checkpoint(reason) {
 			if (!state) throw new Error("session.checkpoint: no current session");
