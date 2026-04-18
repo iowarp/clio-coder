@@ -15,6 +15,7 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { resolveLocalModelId } from "../../engine/ai.js";
 import type { EndpointSpec } from "../../engine/worker-runtime.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
@@ -146,10 +147,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		// For local engines, rewrite modelId to `${modelId}@${endpointName}` so the
 		// worker can resolve the correct endpoint via the pi-ai side-registry.
 		const endpointName = req.endpoint ?? workerDefault?.endpoint;
-		const modelId =
-			isLocalEngineId(providerId) && endpointName && !resolvedModelRaw.includes("@")
-				? `${resolvedModelRaw}@${endpointName}`
-				: resolvedModelRaw;
+		const modelId = resolveLocalModelId(providerId, resolvedModelRaw, endpointName ?? undefined);
 		// Resolve the EndpointSpec so the worker subprocess can seed its own
 		// local-model registry. Worker subprocesses boot fresh and never load
 		// settings.yaml; without this the worker's `getModel` lookup falls
