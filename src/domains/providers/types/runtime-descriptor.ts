@@ -2,6 +2,13 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 
 import type { CapabilityFlags } from "./capability-flags.js";
 import type { EndpointDescriptor } from "./endpoint-descriptor.js";
+import type {
+	CompleteOptions,
+	CompletionChunk,
+	EmbedResult,
+	InfillOptions,
+	RerankResult,
+} from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 
 export type RuntimeKind = "http" | "subprocess";
@@ -57,4 +64,25 @@ export interface RuntimeDescriptor {
 		wireModelId: string,
 		kb: KnowledgeBaseHit | null,
 	): Model<Api>;
+	complete?(
+		endpoint: EndpointDescriptor,
+		opts: CompleteOptions,
+		ctx: ProbeContext,
+	): AsyncIterable<CompletionChunk>;
+	infill?(
+		endpoint: EndpointDescriptor,
+		opts: InfillOptions,
+		ctx: ProbeContext,
+	): AsyncIterable<CompletionChunk>;
+	embed?(
+		endpoint: EndpointDescriptor,
+		input: string | string[],
+		ctx: ProbeContext,
+	): Promise<EmbedResult>;
+	rerank?(
+		endpoint: EndpointDescriptor,
+		query: string,
+		documents: string[],
+		ctx: ProbeContext,
+	): Promise<RerankResult>;
 }
