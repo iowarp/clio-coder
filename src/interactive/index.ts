@@ -415,17 +415,43 @@ export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOv
 }
 
 /**
- * Pure overlay key router for the cwd-fallback overlay. Esc cancels; arrows
- * and Enter fall through to the SelectList (Continue / Cancel). The overlay
- * itself calls onContinue / onCancel via its own list.onSelect callback; this
- * router only handles Esc-to-close.
+ * Pure overlay key router for the cwd-fallback overlay. Esc is intentionally
+ * NOT consumed here: the SelectList inside the overlay owns its own
+ * cancel-on-Esc handling and routes it through onCancel, which restores the
+ * prior session via switchBranch (or reopens /resume when there was no prior
+ * session). Intercepting Esc at the router level bypassed that path and left
+ * the user inside the broken-cwd session; the SelectList's handler is the
+ * single source of truth for Cancel. Mirrors routeTreeOverlayKey.
  */
-export function routeCwdFallbackOverlayKey(data: string, deps: CwdFallbackOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
+export function routeCwdFallbackOverlayKey(_data: string, _deps: CwdFallbackOverlayKeyDeps): boolean {
 	return false;
+}
+
+/**
+ * Pure cancel logic for the cwd-fallback overlay. Restores the prior session
+ * when one existed and differs from the just-resumed session id; otherwise
+ * reopens the /resume overlay so the user can pick again. Lifted out of the
+ * openCwdFallbackOverlayState closure so both Esc-via-SelectList and
+ * Cancel-row-via-Enter exercise the same code path under test.
+ */
+export interface CwdFallbackCancelDeps {
+	session: SessionContract;
+	openResumeOverlay: () => void;
+	onWarning: (msg: string) => void;
+}
+
+export function handleCwdFallbackCancel(preResumeSessionId: string | null, deps: CwdFallbackCancelDeps): void {
+	const currentId = deps.session.current()?.id ?? null;
+	if (preResumeSessionId && preResumeSessionId !== currentId) {
+		try {
+			deps.session.switchBranch(preResumeSessionId);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.onWarning(`[cwd-fallback] could not restore prior session: ${msg}\n`);
+		}
+		return;
+	}
+	deps.openResumeOverlay();
 }
 
 /**
@@ -499,7 +525,8 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		return routeMessagePickerOverlayKey(data, deps);
 	}
 	if (overlayState === "cwd-fallback") {
-		// SelectList owns arrows and Enter; route only Esc here.
+		// SelectList owns its full keymap including Esc (cancel parity);
+		// routeCwdFallbackOverlayKey is a no-op stub kept for shape symmetry.
 		return routeCwdFallbackOverlayKey(data, deps);
 	}
 	if (overlayState === "hotkeys") {
@@ -896,16 +923,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				footer.refresh();
 			},
 			onCancel: () => {
-				if (args.preResumeSessionId && args.preResumeSessionId !== sessionContract.current()?.id) {
-					try {
-						sessionContract.switchBranch(args.preResumeSessionId);
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						io.stderr(`[cwd-fallback] could not restore prior session: ${msg}\n`);
-					}
-				} else {
-					queueMicrotask(() => openResumeOverlayState());
-				}
+				handleCwdFallbackCancel(args.preResumeSessionId, {
+					session: sessionContract,
+					// queueMicrotask defers past the current overlay's close so the
+					// resume overlay opens cleanly on a quiesced overlay stack.
+					openResumeOverlay: () => queueMicrotask(() => openResumeOverlayState()),
+					onWarning: (msg) => io.stderr(msg),
+				});
 				footer.refresh();
 			},
 			onClose: () => closeOverlay(),
