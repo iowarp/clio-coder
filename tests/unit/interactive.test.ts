@@ -15,6 +15,7 @@ import {
 } from "../../src/interactive/index.js";
 import { buildModelItems } from "../../src/interactive/overlays/model-selector.js";
 import { buildScopedModelItems } from "../../src/interactive/overlays/scoped-models.js";
+import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
 
 function makeProviders(list: ProviderListEntry[]): ProvidersContract {
 	return {
@@ -64,6 +65,7 @@ describe("slash-commands registry", () => {
 			"thinking",
 			"model",
 			"scoped-models",
+			"settings",
 		]);
 		const owned = new Map<string, string>();
 		for (const entry of BUILTIN_SLASH_COMMANDS) {
@@ -97,6 +99,10 @@ describe("slash-commands registry", () => {
 
 	it("parses /scoped-models as the scoped-models kind", () => {
 		deepStrictEqual(parseSlashCommand("/scoped-models"), { kind: "scoped-models" });
+	});
+
+	it("parses /settings as the settings kind", () => {
+		deepStrictEqual(parseSlashCommand("/settings"), { kind: "settings" });
 	});
 });
 
@@ -276,6 +282,47 @@ describe("scoped-models buildScopedModelItems", () => {
 	it("treats empty scope as nothing selected", () => {
 		const items = buildScopedModelItems([]);
 		ok(items.every((i) => i.label.startsWith("[ ]")));
+	});
+});
+
+describe("settings overlay", () => {
+	it("buildSettingItems exposes the three cycled enums with values arrays", () => {
+		const items = buildSettingItems(structuredClone(DEFAULT_SETTINGS));
+		const defaultMode = items.find((i) => i.id === "defaultMode");
+		ok(defaultMode);
+		deepStrictEqual(defaultMode.values, ["default", "advise", "super"]);
+		const safety = items.find((i) => i.id === "safetyLevel");
+		ok(safety);
+		deepStrictEqual(safety.values, ["suggest", "auto-edit", "full-auto"]);
+		const thinking = items.find((i) => i.id === "orchestrator.thinkingLevel");
+		ok(thinking);
+		deepStrictEqual(thinking.values, ["off", "minimal", "low", "medium", "high", "xhigh"]);
+	});
+
+	it("buildSettingItems renders free-text rows with currentValue but no values", () => {
+		const items = buildSettingItems(structuredClone(DEFAULT_SETTINGS));
+		const provider = items.find((i) => i.id === "orchestrator.provider");
+		ok(provider);
+		strictEqual(provider.currentValue, "(unset)");
+		strictEqual(provider.values, undefined);
+	});
+
+	it("applySettingChange cycles enum values and ignores invalid input", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		applySettingChange(settings, "defaultMode", "advise");
+		strictEqual(settings.defaultMode, "advise");
+		applySettingChange(settings, "defaultMode", "bogus");
+		strictEqual(settings.defaultMode, "advise");
+		applySettingChange(settings, "orchestrator.thinkingLevel", "high");
+		strictEqual(settings.orchestrator.thinkingLevel, "high");
+		applySettingChange(settings, "orchestrator.thinkingLevel", "definitely-not-a-level");
+		strictEqual(settings.orchestrator.thinkingLevel, "high");
+	});
+
+	it("applySettingChange ignores free-text ids", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		applySettingChange(settings, "orchestrator.provider", "openai");
+		strictEqual(settings.orchestrator.provider, undefined);
 	});
 });
 

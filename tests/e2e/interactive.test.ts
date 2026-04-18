@@ -100,4 +100,21 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.kill();
 		}
 	});
+
+	it("/settings opens the settings overlay, Esc closes", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/settings\r");
+			// defaultMode / safetyLevel labels are unique to the settings overlay.
+			await p.expect(/defaultMode|safetyLevel/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
 });
