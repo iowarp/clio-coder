@@ -28,11 +28,18 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 	const observability = context.getContract<ObservabilityContract>("observability");
 
 	const settings = config.get();
-	const budget = createBudgetState(settings.budget.sessionCeilingUsd);
+	let budget = createBudgetState(settings.budget.sessionCeilingUsd);
 	const gate = createConcurrencyGate(resolveMaxWorkers(settings.budget.concurrency));
 	const unsubscribes: Array<() => void> = [];
 
+	function syncBudget(): void {
+		const nextCeiling = config.get().budget.sessionCeilingUsd;
+		if (nextCeiling === budget.ceilingUsd) return;
+		budget = createBudgetState(nextCeiling);
+	}
+
 	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; currentUsd: number } {
+		syncBudget();
 		const currentUsd = observability?.sessionCost() ?? 0;
 		return { verdict: budget.checkCeiling(currentUsd), currentUsd };
 	}
@@ -59,9 +66,17 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 	};
 
 	const contract: SchedulingContract = {
-		ceilingUsd: () => budget.ceilingUsd,
-		checkCeiling: (current) => budget.checkCeiling(current),
-		raiseCeiling: (next) => budget.raise(next),
+		ceilingUsd: () => {
+			syncBudget();
+			return budget.ceilingUsd;
+		},
+		checkCeiling: (current) => {
+			syncBudget();
+			return budget.checkCeiling(current);
+		},
+		raiseCeiling: (next) => {
+			budget = createBudgetState(next);
+		},
 		preflight: () => {
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
