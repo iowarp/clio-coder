@@ -225,6 +225,33 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("CLIO_FORCE_COMPACT=1 boots the TUI without crashing and /quit exits clean", async () => {
+		// Slice 12d e2e. CLIO_FORCE_COMPACT=1 is the deterministic trigger
+		// for auto-compaction inside chat-loop.submit. This test verifies
+		// the env flag is accepted by the orchestrator boot path and the
+		// TUI lifecycle is not disturbed when it is set.
+		//
+		// Full "compactionSummary entry written" assertion requires either
+		// a mock OpenAI SSE server or a faux-orchestrator test hook, both
+		// of which are out of scope for this slice. The primitives that
+		// back the trigger are covered by unit tests:
+		//   - shouldCompact / AutoCompactionTrigger in tests/unit/compaction.test.ts
+		//   - toContextOverflowError in tests/unit/providers.test.ts
+		//   - resolveSessionCwd in tests/unit/cwd-fallback.test.ts
+		// The live drill (plan §6 slice 12d verification gate) is the
+		// manual end-to-end with a real local endpoint.
+		const env = { ...scratch.env, CLIO_FORCE_COMPACT: "1" };
+		const p = spawnClioPty({ env });
+		try {
+			await p.expect(/clio\s+IOWarp orchestrator coding-agent/, 15_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("/thinking shows the full level set when orchestrator is a Qwen3 local model", async () => {
 		// Phase 12a pre-phase fix (see docs/superpowers/plans/...-phase-12-...).
 		// Before the resolveLocalModelId composition, getOrchestratorModel
