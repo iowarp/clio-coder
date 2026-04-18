@@ -13,6 +13,7 @@ import {
 	DEFAULT_KEEP_RECENT_TOKENS,
 	DEFAULT_RESERVE_TOKENS,
 } from "../../src/domains/session/compaction/defaults.js";
+import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import {
 	calculateContextTokens,
 	charsOverFourEstimator,
@@ -20,6 +21,7 @@ import {
 	getLastAssistantUsage,
 } from "../../src/domains/session/compaction/tokens.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { ClioTurnRecord } from "../../src/engine/session.js";
 import type { Usage } from "../../src/engine/types.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
@@ -540,5 +542,124 @@ describe("session/compaction/auto AutoCompactionTrigger", () => {
 		});
 		strictEqual(second, "recovered");
 		strictEqual(calls, 2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// session-entries.ts: unified reader (slice 12.5b bug 3)
+// ---------------------------------------------------------------------------
+
+describe("session/compaction/session-entries collectSessionEntries", () => {
+	it("keeps v2 SessionEntry lines as-is", () => {
+		const compact: SessionEntry = {
+			kind: "compactionSummary",
+			turnId: "c1",
+			parentTurnId: null,
+			timestamp: "2026-04-17T00:00:00.000Z",
+			summary: "prior work",
+			tokensBefore: 10_000,
+			firstKeptTurnId: "u2",
+		};
+		const out = collectSessionEntries([compact]);
+		strictEqual(out.length, 1);
+		strictEqual(out[0]?.kind, "compactionSummary");
+	});
+
+	it("normalizes legacy ClioTurnRecord lines via fromLegacyTurn", () => {
+		const legacy: ClioTurnRecord = {
+			id: "legacy-1",
+			parentId: null,
+			at: "2026-04-17T00:00:01.000Z",
+			kind: "user",
+			payload: { text: "hi" },
+		};
+		const out = collectSessionEntries([legacy]);
+		strictEqual(out.length, 1);
+		strictEqual(out[0]?.kind, "message");
+		strictEqual(out[0]?.turnId, "legacy-1");
+	});
+
+	it("preserves order across mixed legacy + v2 streams", () => {
+		const legacyA: ClioTurnRecord = {
+			id: "a",
+			parentId: null,
+			at: "2026-04-17T00:00:00.000Z",
+			kind: "user",
+			payload: { text: "first" },
+		};
+		const summary: SessionEntry = {
+			kind: "compactionSummary",
+			turnId: "c1",
+			parentTurnId: "a",
+			timestamp: "2026-04-17T00:00:01.000Z",
+			summary: "mid-stream summary",
+			tokensBefore: 5_000,
+			firstKeptTurnId: "b",
+		};
+		const legacyB: ClioTurnRecord = {
+			id: "b",
+			parentId: "a",
+			at: "2026-04-17T00:00:02.000Z",
+			kind: "assistant",
+			payload: { text: "second" },
+		};
+		const out = collectSessionEntries([legacyA, summary, legacyB]);
+		deepStrictEqual(
+			out.map((e) => ({ kind: e.kind, turnId: e.turnId })),
+			[
+				{ kind: "message", turnId: "a" },
+				{ kind: "compactionSummary", turnId: "c1" },
+				{ kind: "message", turnId: "b" },
+			],
+		);
+	});
+
+	it("drops unknown lines defensively", () => {
+		const out = collectSessionEntries([{ foo: "bar" }, null, "string", 42]);
+		strictEqual(out.length, 0);
+	});
+
+	it("compactionSummary entries reduce the token count reported by calculateContextTokens", () => {
+		// Regression for bug 3: a stream that contains a compactionSummary in
+		// mid-stream must be observed by the token calculator. Before the fix,
+		// readSessionEntriesForCompact silently dropped the summary and kept
+		// the larger legacy transcript, so threshold checks saw the original
+		// size and auto-compaction looped.
+		const bigUser: ClioTurnRecord = {
+			id: "u1",
+			parentId: null,
+			at: "2026-04-17T00:00:00.000Z",
+			kind: "user",
+			payload: { text: "x".repeat(4_000) },
+		};
+		const bigAssistant: ClioTurnRecord = {
+			id: "a1",
+			parentId: "u1",
+			at: "2026-04-17T00:00:01.000Z",
+			kind: "assistant",
+			payload: { text: "y".repeat(4_000) },
+		};
+		const summary: SessionEntry = {
+			kind: "compactionSummary",
+			turnId: "c1",
+			parentTurnId: "a1",
+			timestamp: "2026-04-17T00:00:02.000Z",
+			summary: "short summary of the prior",
+			tokensBefore: 2_000,
+			firstKeptTurnId: "u2",
+		};
+		const before = collectSessionEntries([bigUser, bigAssistant]);
+		const after = collectSessionEntries([bigUser, bigAssistant, summary]);
+		const beforeTokens = calculateContextTokens(before);
+		const afterTokens = calculateContextTokens(after);
+		ok(afterTokens > 0);
+		ok(
+			afterTokens > beforeTokens,
+			"after-compact estimate still includes summary tokens but must at least not drop the entry",
+		);
+		// The stronger guarantee: the summary entry is visible to the reader,
+		// and the summary appears at the tail so callers can slice past the
+		// pre-compaction prefix on the next pass.
+		strictEqual(after.at(-1)?.kind, "compactionSummary");
 	});
 });

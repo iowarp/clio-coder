@@ -43,6 +43,16 @@ export interface ChatLoop {
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
 	isStreaming(): boolean;
+	/**
+	 * Force-run the compaction flow for the current session, swap the agent's
+	 * in-memory `state.messages` for a single bridge message carrying the
+	 * summary, and emit the standard summary notice. Used by the `/compact`
+	 * slash command so the next user turn ships only the bridge plus the new
+	 * text to the provider (slice 12.5b bug 4). Silent no-op when no session
+	 * or no compaction deps are wired; in both cases emits a user-visible
+	 * notice so the `/compact` handler does not have to mirror the logic.
+	 */
+	compact(instructions?: string): Promise<void>;
 }
 
 export interface CreateChatLoopDeps {
@@ -331,6 +341,72 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
+	 * Inspect the agent's state after `agent.prompt` resolves. pi-agent-core
+	 * 0.67.4's `handleRunFailure` records the upstream error on the assistant
+	 * message (stopReason="error", errorMessage="<text>") and on
+	 * `state.errorMessage`, then resolves the prompt() Promise normally.
+	 * Returns a ContextOverflowError when either surface matches the heuristic
+	 * in src/domains/providers/errors.ts; null otherwise.
+	 */
+	const detectOverflowFromState = (
+		agent: ReturnType<typeof createEngineAgent>["agent"],
+	): ReturnType<typeof toContextOverflowError> => {
+		const direct = agent.state.errorMessage;
+		if (typeof direct === "string" && direct.length > 0) {
+			const match = toContextOverflowError(direct);
+			if (match) return match;
+		}
+		const msgs = agent.state.messages;
+		const tail = Array.isArray(msgs) ? msgs[msgs.length - 1] : undefined;
+		if (tail && typeof tail === "object" && (tail as { stopReason?: unknown }).stopReason === "error") {
+			const em = (tail as { errorMessage?: unknown }).errorMessage;
+			if (typeof em === "string") {
+				const match = toContextOverflowError(em);
+				if (match) return match;
+			}
+		}
+		return null;
+	};
+
+	/**
+	 * Shared compact-and-retry worker used by both the post-resolve
+	 * (state-based) and catch (throw-based) overflow paths in `submit`.
+	 * Emits the "context overflow" notice when compaction is a no-op,
+	 * the "compact-on-overflow failed" notice when compaction itself
+	 * throws, and a "persisted" notice when the retry still surfaces an
+	 * overflow.
+	 */
+	const runCompactAndRetry = async (
+		agentRuntime: AgentRuntime,
+		text: string,
+		overflow: NonNullable<ReturnType<typeof toContextOverflowError>>,
+	): Promise<void> => {
+		let compacted = false;
+		try {
+			compacted = await runAutoCompact(agentRuntime, true);
+		} catch (compactErr) {
+			emitNotice(
+				`[clio] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
+			);
+		}
+		if (!compacted) {
+			emitNotice(`[clio] context overflow: ${overflow.message}`);
+			return;
+		}
+		try {
+			await agentRuntime.agent.prompt(text);
+			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
+			if (stillOverflowed) {
+				emitNotice(`[clio] context overflow persisted after compaction: ${stillOverflowed.message}`);
+			}
+		} catch (retryErr) {
+			emitNotice(
+				`[clio] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+			);
+		}
+	};
+
+	/**
 	 * Compile the prompt for the current turn, write the rendered text into
 	 * `state.systemPrompt`, and capture the renderedPromptHash so the user
 	 * and assistant entries appended this turn can carry it. Runs on every
@@ -484,34 +560,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			try {
 				await agentRuntime.agent.prompt(text);
+				// pi-agent-core 0.67.4 does NOT throw on provider failures:
+				// it pushes an assistant message with stopReason="error" and
+				// errorMessage="<provider text>" onto state.messages, sets
+				// state.errorMessage, emits agent_end, and resolves normally.
+				// The overflow-recovery heuristic must inspect the state after
+				// a resolve, not only the catch arm.
+				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
+				if (overflowPostResolve) {
+					await runCompactAndRetry(agentRuntime, text, overflowPostResolve);
+				}
 			} catch (err) {
-				// One-shot compact-and-retry on context overflow. See
-				// src/domains/providers/errors.ts for the detection heuristic;
-				// anything that does not match falls through as a plain notice.
+				// Genuine throws (network, abort, pre-stream bugs) still land
+				// here. The heuristic is the same so a thrown overflow from
+				// an older pi-agent-core still routes through compact-retry.
 				const overflow = toContextOverflowError(err);
 				if (!overflow) {
 					emitNotice(err instanceof Error ? err.message : String(err));
 					return;
 				}
-				let compacted = false;
-				try {
-					compacted = await runAutoCompact(agentRuntime, true);
-				} catch (compactErr) {
-					emitNotice(
-						`[clio] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
-					);
-				}
-				if (!compacted) {
-					emitNotice(`[clio] context overflow: ${overflow.message}`);
-					return;
-				}
-				try {
-					await agentRuntime.agent.prompt(text);
-				} catch (retryErr) {
-					emitNotice(
-						`[clio] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
-					);
-				}
+				await runCompactAndRetry(agentRuntime, text, overflow);
 			} finally {
 				streaming = false;
 			}
@@ -530,6 +598,38 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		isStreaming(): boolean {
 			return streaming;
+		},
+		async compact(instructions?: string): Promise<void> {
+			// Session check runs BEFORE orchestrator-configuration so a fresh
+			// TUI with nothing configured still reports the actionable "no
+			// current session" message rather than the "not configured"
+			// banner. The e2e regex in tests/e2e/interactive.test.ts locks
+			// this ordering.
+			if (!deps.session || !deps.session.current()) {
+				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");
+				return;
+			}
+			let agentRuntime: AgentRuntime | null;
+			try {
+				agentRuntime = ensureRuntime();
+			} catch (err) {
+				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				return;
+			}
+			if (!agentRuntime) {
+				emitNotice(`[/compact] ${notConfiguredNotice()}`);
+				return;
+			}
+			let compacted = false;
+			try {
+				compacted = await runAutoCompact(agentRuntime, true, instructions);
+			} catch (err) {
+				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				return;
+			}
+			if (!compacted) {
+				emitNotice("[/compact] nothing to compact; session is empty or no cut crossed");
+			}
 		},
 	};
 }
