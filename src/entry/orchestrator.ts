@@ -26,6 +26,7 @@ import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { VALID_THINKING_LEVELS, resolveModelPattern, resolveModelScope } from "../domains/providers/resolver.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import type { SafetyContract } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
@@ -37,6 +38,8 @@ import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
+import { registerAllTools } from "../tools/bootstrap.js";
+import { createRegistry } from "../tools/registry.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -259,13 +262,16 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const modes = result.getContract<ModesContract>("modes");
 	const providers = result.getContract<ProvidersContract>("providers");
 	const observability = result.getContract<ObservabilityContract>("observability");
-	if (!modes || !providers || !dispatch || !observability) {
+	const safety = result.getContract<SafetyContract>("safety");
+	if (!modes || !providers || !dispatch || !observability || !safety) {
 		process.stderr.write(
-			"clio: interactive mode requires modes + providers + dispatch + observability contracts; aborting.\n",
+			"clio: interactive mode requires safety + modes + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
+	const toolRegistry = createRegistry({ safety, modes });
+	registerAllTools(toolRegistry);
 
 	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
@@ -295,6 +301,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 					},
 				}
 			: {}),
+		toolRegistry,
 	});
 	await startInteractive({
 		bus,

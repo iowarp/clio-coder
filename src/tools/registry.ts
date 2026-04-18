@@ -42,42 +42,14 @@ export interface RegistryDeps {
 	modes: ModesContract;
 }
 
-/**
- * Lightweight registry variant used by the worker subprocess to resolve the
- * per-run tool set. It exposes only the read-only introspection surface
- * (`listAll` + `listForMode`) because the worker agent drives tool execution
- * through pi-agent-core directly, not through the orchestrator-side safety
- * gate. Full `createRegistry(deps)` stays the production admission path for
- * interactive + orchestrator callers.
- */
-export interface ToolIndex {
-	register(spec: ToolSpec): void;
-	listAll(): ReadonlyArray<ToolSpec>;
-	listForMode(mode: ModeName): ReadonlyArray<ToolName>;
-	get(name: ToolName): ToolSpec | undefined;
-}
-
-export function createToolIndex(): ToolIndex {
-	const tools = new Map<ToolName, ToolSpec>();
-	return {
-		register(spec) {
-			tools.set(spec.name, spec);
-		},
-		listAll: () => Array.from(tools.values()),
-		listForMode: (mode) =>
-			Array.from(tools.values())
-				.filter((t) => !t.allowedModes || t.allowedModes.includes(mode))
-				.map((t) => t.name),
-		get: (name) => tools.get(name),
-	};
-}
-
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
 	/** Tools visible to the current mode. Models only see these. */
 	listVisible(): ReadonlyArray<ToolSpec>;
 	/** Tools registered overall, regardless of mode. For /audit, /doctor. */
 	listAll(): ReadonlyArray<ToolSpec>;
+	/** Lookup by tool id. */
+	get(name: ToolName): ToolSpec | undefined;
 	/**
 	 * Tool names admissible in `mode`. A tool qualifies when its `allowedModes`
 	 * list includes `mode`, or when `allowedModes` is undefined (meaning every
@@ -106,6 +78,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			tools.set(spec.name, spec);
 		},
 		listAll: () => Array.from(tools.values()),
+		get: (name) => tools.get(name),
 		listForMode: (mode) =>
 			Array.from(tools.values())
 				.filter((t) => !t.allowedModes || t.allowedModes.includes(mode))
