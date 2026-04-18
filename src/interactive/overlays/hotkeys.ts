@@ -32,6 +32,7 @@ export const HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/resume", action: "Open session picker", scope: "editor" },
 	{ keys: "/new", action: "Start a new session", scope: "editor" },
 	{ keys: "/tree", action: "Open session tree navigator", scope: "editor" },
+	{ keys: "/fork", action: "Fork from a past assistant turn", scope: "editor" },
 	{ keys: "/providers", action: "Open providers overlay", scope: "editor" },
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
 	{ keys: "/receipts", action: "Open receipts overlay", scope: "editor" },

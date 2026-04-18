@@ -210,6 +210,15 @@ export async function bootOrchestrator(): Promise<BootResult> {
 					onNewSession: () => {
 						session.create({ cwd: process.cwd() });
 					},
+					onForkSession: (parentTurnId) => {
+						try {
+							session.fork(parentTurnId);
+						} catch (err) {
+							process.stderr.write(
+								`[/fork] failed at turn ${parentTurnId}: ${err instanceof Error ? err.message : String(err)}\n`,
+							);
+						}
+					},
 				}
 			: {}),
 		onCycleScopedModelForward: () => cycleScoped("forward"),

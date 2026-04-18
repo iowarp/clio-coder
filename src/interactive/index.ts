@@ -17,6 +17,7 @@ import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-b
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
+import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
@@ -88,6 +89,12 @@ export interface InteractiveDeps {
 	onResumeSession?: (sessionId: string) => void;
 	/** Start a fresh session. Called from /new. */
 	onNewSession?: () => void;
+	/**
+	 * Fork from a parent assistant turn picked in /fork. Default wiring
+	 * delegates to session.fork(parentTurnId); the override exists so
+	 * future slices can layer telemetry or settings merging on top.
+	 */
+	onForkSession?: (parentTurnId: string) => void;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -123,6 +130,7 @@ export type OverlayState =
 	| "settings"
 	| "resume"
 	| "tree"
+	| "message-picker"
 	| "hotkeys";
 
 export interface KeyBindingDeps {
@@ -183,6 +191,10 @@ export interface TreeOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface MessagePickerOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -199,6 +211,7 @@ export interface OverlayKeyDeps
 		SettingsOverlayKeyDeps,
 		ResumeOverlayKeyDeps,
 		TreeOverlayKeyDeps,
+		MessagePickerOverlayKeyDeps,
 		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
@@ -374,6 +387,18 @@ export function routeTreeOverlayKey(_data: string, _deps: TreeOverlayKeyDeps): b
 }
 
 /**
+ * Pure overlay key router for the /fork message-picker. Esc closes; arrows
+ * and Enter fall through to the focused SelectList (same policy as /resume).
+ */
+export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
+/**
  * Pure overlay key router for the /hotkeys overlay. Esc closes; everything
  * else is swallowed so arrow keys cannot disturb the banner-style render.
  */
@@ -438,6 +463,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 		// TreeOverlayBox owns its full keymap including Esc (submode-aware);
 		// routeTreeOverlayKey is a no-op stub kept for shape symmetry.
 		return routeTreeOverlayKey(data, deps);
+	}
+	if (overlayState === "message-picker") {
+		// SelectList owns arrows and Enter; route only Esc here.
+		return routeMessagePickerOverlayKey(data, deps);
 	}
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
@@ -508,6 +537,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),
+		openMessagePicker: () => openMessagePickerOverlayState(),
 		openHotkeys: () => openHotkeysOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
@@ -718,6 +748,41 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/tree] switchBranch failed: ${msg}\n`);
+				}
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openMessagePickerOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			io.stderr("[/fork] session contract unavailable\n");
+			return;
+		}
+		const sessionContract = deps.session;
+		// No-op stderr when there is no current session so the user can tell
+		// the overlay is intentionally inert rather than broken.
+		if (sessionContract.current() === null) {
+			io.stderr("[/fork] no current session to fork from; start one with /new or /resume first\n");
+			return;
+		}
+		overlayState = "message-picker";
+		overlayHandle = openMessagePickerOverlay(tui, {
+			session: sessionContract,
+			onFork: (parentTurnId) => {
+				try {
+					if (deps.onForkSession) {
+						deps.onForkSession(parentTurnId);
+					} else {
+						sessionContract.fork(parentTurnId);
+					}
+					chatPanel.reset();
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/fork] fork failed: ${msg}\n`);
 				}
 				footer.refresh();
 			},

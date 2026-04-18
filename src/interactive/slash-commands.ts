@@ -27,6 +27,7 @@ export type SlashCommand =
 	| { kind: "resume" }
 	| { kind: "new" }
 	| { kind: "tree" }
+	| { kind: "fork" }
 	| { kind: "hotkeys" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
@@ -113,6 +114,7 @@ export interface SlashCommandContext {
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
+	openMessagePicker: () => void;
 	openHotkeys: () => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
@@ -336,6 +338,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openTree();
+		},
+	},
+	{
+		name: "fork",
+		description: "Pick an assistant turn to fork from",
+		kinds: ["fork"],
+		match(trimmed) {
+			return trimmed === "/fork" ? { kind: "fork" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openMessagePicker();
 		},
 	},
 	{
