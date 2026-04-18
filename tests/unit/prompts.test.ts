@@ -1,5 +1,6 @@
-import { notStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 
 describe("prompts/hash", () => {
@@ -52,5 +53,41 @@ describe("prompts/canonicalJson", () => {
 
 	it("throws on undefined at root", () => {
 		throws(() => canonicalJson(undefined));
+	});
+});
+
+describe("prompts/fragments identity.clio anti-leak content", () => {
+	it("loads identity.clio with the Clio repetition + vendor rejection clauses", () => {
+		const table = loadFragments();
+		const identity = table.byId.get("identity.clio");
+		ok(identity, "identity.clio must be registered");
+		const body = identity?.body ?? "";
+		// Triple repetition anchors the name. Keeps Qwen3.6 from drifting to a
+		// Claude-synthetic self-image on the first turn.
+		ok(body.includes("You are Clio. You are Clio. You are Clio."), "identity must triple-assert the Clio name");
+		// IOWarp is the organizational anchor. Without it the model hedges.
+		ok(body.includes("IOWarp"), "identity must anchor the IOWarp org");
+		// Explicit rejection list keeps Claude-synthetic output from bleeding
+		// through the prompt.
+		ok(body.includes("not Claude"), "identity must reject Claude origin");
+		ok(body.includes("GPT"), "identity must reject GPT origin");
+		ok(body.includes("Qwen"), "identity must reject Qwen origin");
+		ok(body.includes("Anthropic"), "identity must reject Anthropic vendor");
+		ok(body.includes("OpenAI"), "identity must reject OpenAI vendor");
+		ok(body.includes("Alibaba"), "identity must reject Alibaba vendor");
+	});
+
+	it("identity.clio is static (no template placeholders)", () => {
+		const table = loadFragments();
+		const identity = table.byId.get("identity.clio");
+		ok(identity);
+		strictEqual(identity?.dynamic, false);
+		strictEqual(/\{\{[A-Za-z][A-Za-z0-9]*\}\}/.test(identity?.body ?? ""), false);
+	});
+
+	it("identity.clio contentHash is deterministic across two loads", () => {
+		const a = loadFragments();
+		const b = loadFragments();
+		strictEqual(a.byId.get("identity.clio")?.contentHash, b.byId.get("identity.clio")?.contentHash);
 	});
 });
