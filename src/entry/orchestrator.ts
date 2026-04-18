@@ -21,10 +21,9 @@ import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
-import { isLocalEngineId } from "../domains/providers/catalog.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
-import { VALID_THINKING_LEVELS, resolveModelPattern, resolveModelScope } from "../domains/providers/resolver.js";
+import type { EndpointDescriptor, ProvidersContract } from "../domains/providers/index.js";
+import { VALID_THINKING_LEVELS } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -33,7 +32,6 @@ import { collectSessionEntries } from "../domains/session/compaction/session-ent
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { getModel, resolveLocalModelId } from "../engine/ai.js";
 import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -54,115 +52,81 @@ function buildBanner(): string {
 `;
 }
 
-const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
-
-function envApiKeyName(providerId: string): string {
-	return `${providerId.replaceAll("-", "_").toUpperCase()}_API_KEY`;
+interface CompactionResolution {
+	model: Model<never>;
+	endpointId: string;
+	apiKey?: string;
 }
 
-/**
- * Resolve the model that should generate the compaction summary.
- * Precedence (plan §4):
- *   1. `settings.compaction.model` via resolveModelPattern, when set and
- *      resolvable. Otherwise fall through silently — an unresolvable user
- *      override should not suppress the orchestrator fallback.
- *   2. `settings.orchestrator.{provider,model,endpoint}` via the same
- *      `modelId@endpoint` composition the chat-loop uses.
- * Returns `null` when neither path yields a model; the caller surfaces an
- * actionable /compact error in that case.
- */
-function resolveCompactionModel(
-	settings: ClioSettings,
-): { model: Model<never>; providerId: string; endpointSpec?: { api_key?: string } } | null {
-	const patternRaw = settings.compaction?.model?.trim();
-	if (patternRaw) {
-		const resolved = resolveModelPattern(patternRaw);
-		const first = resolved.matches[0];
-		if (first) {
-			try {
-				const model = getModel(first.providerId, first.modelId);
-				return { model, providerId: first.providerId };
-			} catch {
-				// fall through to orchestrator fallback
-			}
-		}
+function resolveEndpoint(providers: ProvidersContract, endpointId: string | null | undefined): EndpointDescriptor | null {
+	if (!endpointId) return null;
+	return providers.getEndpoint(endpointId);
+}
+
+function resolveApiKeyForEndpoint(endpoint: EndpointDescriptor, providers: ProvidersContract): string | undefined {
+	const runtime = providers.getRuntime(endpoint.runtime);
+	const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime?.credentialsEnvVar;
+	if (envVar) {
+		const fromEnv = process.env[envVar]?.trim();
+		if (fromEnv && fromEnv.length > 0) return fromEnv;
 	}
-	const providerId = settings.orchestrator?.provider?.trim();
-	const modelId = settings.orchestrator?.model?.trim();
-	if (!providerId || !modelId) return null;
-	const endpoint = settings.orchestrator?.endpoint?.trim();
-	const lookupId = resolveLocalModelId(providerId, modelId, endpoint);
+	return undefined;
+}
+
+function synthesizeOrchestratorModel(
+	providers: ProvidersContract,
+	endpoint: EndpointDescriptor,
+	wireModelId: string,
+): Model<never> | null {
+	const runtime = providers.getRuntime(endpoint.runtime);
+	if (!runtime) return null;
 	try {
-		const model = getModel(providerId, lookupId);
-		let endpointSpec: { api_key?: string } | undefined;
-		if (isLocalEngineId(providerId) && endpoint) {
-			const raw = settings.providers?.[providerId]?.endpoints?.[endpoint];
-			if (raw) endpointSpec = { ...(raw.api_key ? { api_key: raw.api_key } : {}) };
-		}
-		return endpointSpec ? { model, providerId, endpointSpec } : { model, providerId };
+		return runtime.synthesizeModel(endpoint, wireModelId, null) as unknown as Model<never>;
 	} catch {
 		return null;
 	}
 }
 
-/**
- * Resolve the API key for a compaction call. Mirrors chat-loop.ts so the
- * compaction model inherits the same key pool as the orchestrator.
- */
-function resolveCompactionApiKey(
-	providerId: string,
-	endpointSpec: { api_key?: string } | undefined,
-): string | undefined {
-	if (endpointSpec?.api_key && endpointSpec.api_key.length > 0) return endpointSpec.api_key;
-	const envKey = process.env[envApiKeyName(providerId)];
-	if (envKey) return envKey;
-	return endpointSpec ? LOCAL_API_KEY_FALLBACK : undefined;
+function resolveCompactionModel(settings: ClioSettings, providers: ProvidersContract): CompactionResolution | null {
+	const endpointId = settings.orchestrator?.endpoint ?? null;
+	const wireModelId = settings.orchestrator?.model ?? null;
+	if (!endpointId || !wireModelId) return null;
+	const endpoint = resolveEndpoint(providers, endpointId);
+	if (!endpoint) return null;
+	const model = synthesizeOrchestratorModel(providers, endpoint, wireModelId);
+	if (!model) return null;
+	const apiKey = resolveApiKeyForEndpoint(endpoint, providers);
+	const resolution: CompactionResolution = { model, endpointId };
+	if (apiKey !== undefined) resolution.apiKey = apiKey;
+	return resolution;
 }
 
-/**
- * Load the current session's entries from disk for compaction input. Delegates
- * to `collectSessionEntries` which dispatches on shape so v2 entries
- * (compactionSummary, branchSummary, ...) survive the read. Slice 12.5b bug 3
- * traced a loop-on-threshold bug to the previous reader dropping every v2
- * entry; keeping the shared reader is the fix.
- */
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
 	return collectSessionEntries(reader.turns());
 }
 
-/**
- * Shared compaction flow used by both the `/compact` slash-command handler
- * and the chat-loop auto-trigger (slice 12d). Throws on configuration errors
- * that warrant user feedback (no session, no model); returns null on
- * no-op cases (no entries yet, no cut crossed) so the caller can decide
- * whether to stay silent (auto-path) or print a status line (manual path).
- *
- * On success, writes the compactionSummary entry via `session.appendEntry`
- * and returns the CompactResult the chat-loop needs to swap its in-memory
- * AgentMessage list.
- */
 async function runCompactionFlow(
 	session: SessionContract,
 	settings: ClioSettings,
+	providers: ProvidersContract,
 	instructions?: string,
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
-	const resolved = resolveCompactionModel(settings);
+	const resolved = resolveCompactionModel(settings, providers);
 	if (!resolved) {
-		throw new Error("no model configured; set orchestrator.model or compaction.model");
+		throw new Error("no model configured; set orchestrator.endpoint + orchestrator.model");
 	}
-	const apiKey = resolveCompactionApiKey(resolved.providerId, resolved.endpointSpec);
 	const entries = readSessionEntriesForCompact(meta.id);
 	if (entries.length === 0) return null;
 
 	const result = await compact({
 		entries,
 		model: resolved.model,
-		...(apiKey !== undefined ? { apiKey } : {}),
+		...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
 		...(instructions !== undefined ? { instructions } : {}),
 	});
 	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
@@ -178,24 +142,19 @@ async function runCompactionFlow(
 }
 
 /**
- * Ctrl+P / Shift+Ctrl+P step the orchestrator target through the resolved
- * `provider.scope` set. A no-op when scope is empty or resolves to nothing, so
- * unconfigured users feel no phantom behavior.
+ * Ctrl+P / Shift+Ctrl+P step the orchestrator through the `scope` list of
+ * endpoint ids. Absent scope is a no-op so unconfigured users feel nothing.
  */
 function cycleScoped(direction: "forward" | "backward"): void {
 	const current = readSettings();
-	const patterns = current.provider.scope ?? [];
-	if (patterns.length === 0) return;
-	const resolved = resolveModelScope(patterns).matches;
-	if (resolved.length === 0) return;
-	const active = `${current.orchestrator.provider ?? ""}::${current.orchestrator.model ?? ""}`;
-	const idx = resolved.findIndex((r) => `${r.providerId}::${r.modelId}` === active);
-	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : resolved.length - 1);
-	const next = resolved[base % resolved.length];
+	const scope = current.scope ?? [];
+	if (scope.length === 0) return;
+	const active = current.orchestrator.endpoint ?? "";
+	const idx = scope.findIndex((id) => id === active);
+	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : scope.length - 1);
+	const next = scope[base % scope.length];
 	if (!next) return;
-	current.orchestrator.provider = next.providerId;
-	current.orchestrator.model = next.modelId;
-	if (next.thinkingLevel) current.orchestrator.thinkingLevel = next.thinkingLevel;
+	current.orchestrator.endpoint = next;
 	writeSettings(current);
 }
 
@@ -203,8 +162,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
-	// CLIO_BUS_TRACE=1 turns on the stderr bus tracer used by diag scripts
-	// (see src/core/bus-trace.ts). Off by default; no production overhead.
 	installBusTracer();
 	termination.installSignalHandlers();
 
@@ -221,16 +178,12 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		// scheduling before dispatch: dispatch consults scheduling.preflight()
-		// during admission to gate on the session budget ceiling.
 		DispatchDomainModule,
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
-	// DRAIN: abort active dispatch runs and persist the ledger before domain teardown.
-	// PERSIST: invoke domain-loader stop() (reverse topo order) to run each domain's stop hook.
 	const dispatch = result.getContract<DispatchContract>("dispatch");
 	if (dispatch) {
 		termination.onDrain(async () => {
@@ -249,9 +202,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		process.stdout.write(`${timer.report()}\n`);
 	}
 
-	// CLIO_INTERACTIVE=1 is the current env; CLIO_PHASE1_INTERACTIVE=1 is a
-	// backward-compat alias from Phase 1's stub loop. Both route into the
-	// minimal interactive TUI introduced in Phase 9.
 	const runInteractive = process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
 	if (!runInteractive) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
@@ -279,7 +229,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
-		knownProviders: () => new Set(providers.list().map((entry) => entry.id)),
+		knownProviders: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
@@ -292,11 +242,8 @@ export async function bootOrchestrator(): Promise<BootResult> {
 					},
 					autoCompact: async (instructions?: string): Promise<CompactResult | null> => {
 						try {
-							return await runCompactionFlow(session, config?.get() ?? readSettings(), instructions);
+							return await runCompactionFlow(session, config?.get() ?? readSettings(), providers, instructions);
 						} catch {
-							// Auto-path is silent on configuration errors so the
-							// chat-loop does not spam the user on every turn.
-							// /compact still surfaces the error for manual runs.
 							return null;
 						}
 					},
@@ -316,18 +263,25 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		getSettings: () => config?.get() ?? readSettings(),
 		getOrchestratorModel: () => {
 			const settings = config?.get() ?? readSettings();
-			const providerId = settings.orchestrator?.provider?.trim();
-			const modelId = settings.orchestrator?.model?.trim();
-			if (!providerId || !modelId) return undefined;
-			const endpoint = settings.orchestrator?.endpoint?.trim();
-			const lookupId = resolveLocalModelId(providerId, modelId, endpoint);
-			try {
-				return getModel(providerId, lookupId);
-			} catch {
-				return undefined;
-			}
+			const endpointId = settings.orchestrator?.endpoint ?? null;
+			const wireModelId = settings.orchestrator?.model ?? null;
+			if (!endpointId || !wireModelId) return undefined;
+			const endpoint = providers.getEndpoint(endpointId);
+			if (!endpoint) return undefined;
+			return synthesizeOrchestratorModel(providers, endpoint, wireModelId) ?? undefined;
 		},
-		...(config ? { getWorkerDefault: () => config.get().workers?.default } : {}),
+		...(config
+			? {
+					getWorkerDefault: () => {
+						const workerDefault = config.get().workers?.default;
+						if (!workerDefault) return undefined;
+						const result: { endpoint?: string; model?: string } = {};
+						if (workerDefault.endpoint) result.endpoint = workerDefault.endpoint;
+						if (workerDefault.model) result.model = workerDefault.model;
+						return result;
+					},
+				}
+			: {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		onSetThinkingLevel: (level) => {
 			const current = readSettings();
@@ -341,17 +295,15 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			current.orchestrator.thinkingLevel = next;
 			writeSettings(current);
 		},
-		onSelectModel: ({ providerId, modelId, endpoint }) => {
+		onSelectModel: ({ endpoint, model }) => {
 			const current = readSettings();
-			current.orchestrator.provider = providerId;
-			current.orchestrator.model = modelId;
-			if (endpoint) current.orchestrator.endpoint = endpoint;
-			else Reflect.deleteProperty(current.orchestrator, "endpoint");
+			current.orchestrator.endpoint = endpoint;
+			current.orchestrator.model = model;
 			writeSettings(current);
 		},
 		onSetScope: (scope) => {
 			const current = readSettings();
-			current.provider.scope = scope;
+			current.scope = Array.from(scope);
 			writeSettings(current);
 		},
 		writeSettings: (next) => writeSettings(next),
@@ -378,13 +330,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 							);
 						}
 					},
-					// Delegate to chat.compact() so the shared flow runs
-					// runCompactionFlow, writes the compactionSummary entry,
-					// AND swaps `agent.state.messages` to the bridge before the
-					// user's next turn. Previously onCompact persisted the
-					// entry but left the stale transcript in memory, so the
-					// next provider request still shipped the full history
-					// (slice 12.5b bug 4).
 					onCompact: async (instructions) => {
 						await chat.compact(instructions);
 					},
