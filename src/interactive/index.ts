@@ -8,6 +8,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { type ThinkingLevel, getAvailableThinkingLevels } from "../domains/providers/resolver.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
 import type { Model } from "../engine/types.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -16,6 +17,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
@@ -139,6 +141,7 @@ export type OverlayState =
 	| "resume"
 	| "tree"
 	| "message-picker"
+	| "cwd-fallback"
 	| "hotkeys";
 
 export interface KeyBindingDeps {
@@ -203,6 +206,10 @@ export interface MessagePickerOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface CwdFallbackOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -220,6 +227,7 @@ export interface OverlayKeyDeps
 		ResumeOverlayKeyDeps,
 		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
+		CwdFallbackOverlayKeyDeps,
 		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
@@ -407,6 +415,20 @@ export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOv
 }
 
 /**
+ * Pure overlay key router for the cwd-fallback overlay. Esc cancels; arrows
+ * and Enter fall through to the SelectList (Continue / Cancel). The overlay
+ * itself calls onContinue / onCancel via its own list.onSelect callback; this
+ * router only handles Esc-to-close.
+ */
+export function routeCwdFallbackOverlayKey(data: string, deps: CwdFallbackOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
+/**
  * Pure overlay key router for the /hotkeys overlay. Esc closes; everything
  * else is swallowed so arrow keys cannot disturb the banner-style render.
  */
@@ -475,6 +497,10 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "message-picker") {
 		// SelectList owns arrows and Enter; route only Esc here.
 		return routeMessagePickerOverlayKey(data, deps);
+	}
+	if (overlayState === "cwd-fallback") {
+		// SelectList owns arrows and Enter; route only Esc here.
+		return routeCwdFallbackOverlayKey(data, deps);
 	}
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
@@ -739,6 +765,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		const sessionContract = deps.session;
+		const preResumeSessionId = sessionContract.current()?.id ?? null;
 		overlayState = "resume";
 		overlayHandle = openSessionOverlay(tui, {
 			session: sessionContract,
@@ -746,7 +773,27 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				deps.onResumeSession?.(sessionId);
 				footer.refresh();
 			},
-			onClose: () => closeOverlay(),
+			onClose: () => {
+				closeOverlay();
+				// Post-close cwd check: if /resume landed on a session whose
+				// recorded cwd is no longer valid, pop the cwd-fallback
+				// overlay so the user can either continue in the terminal's
+				// cwd or cancel back to the prior session. Queued as a
+				// microtask so the resume overlay state machine fully
+				// settles before the next overlay opens.
+				queueMicrotask(() => {
+					const current = sessionContract.current();
+					if (!current) return;
+					if (current.id === preResumeSessionId) return;
+					const probe = resolveSessionCwd(current);
+					if (probe.ok) return;
+					openCwdFallbackOverlayState({
+						sessionCwd: typeof current.cwd === "string" ? current.cwd : "",
+						reason: probe.reason,
+						preResumeSessionId,
+					});
+				});
+			},
 		});
 		tui.requestRender();
 	};
@@ -818,6 +865,51 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		deps.onNewSession();
 		chatPanel.reset();
 		footer.refresh();
+		tui.requestRender();
+	};
+
+	/**
+	 * Pop the cwd-fallback overlay after /resume landed on a session whose
+	 * recorded cwd no longer exists on disk (see src/domains/session/
+	 * cwd-fallback.ts for the reasons). Continue silently accepts the
+	 * broken-cwd session — downstream file ops will surface real errors.
+	 * Cancel restores the prior session when one existed, or re-opens the
+	 * /resume picker so the user can select a different session.
+	 */
+	const openCwdFallbackOverlayState = (args: {
+		sessionCwd: string;
+		reason: "no-cwd" | "missing" | "not-a-directory";
+		preResumeSessionId: string | null;
+	}): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) return;
+		const sessionContract = deps.session;
+		overlayState = "cwd-fallback";
+		overlayHandle = openCwdFallbackOverlay(tui, {
+			sessionCwd: args.sessionCwd,
+			currentCwd: process.cwd(),
+			reason: args.reason,
+			onContinue: () => {
+				// Accept the broken-cwd session. First fs access will surface a
+				// real error; no extra bookkeeping here. The user chose this
+				// explicitly, so leave meta.cwd untouched.
+				footer.refresh();
+			},
+			onCancel: () => {
+				if (args.preResumeSessionId && args.preResumeSessionId !== sessionContract.current()?.id) {
+					try {
+						sessionContract.switchBranch(args.preResumeSessionId);
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[cwd-fallback] could not restore prior session: ${msg}\n`);
+					}
+				} else {
+					queueMicrotask(() => openResumeOverlayState());
+				}
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 
