@@ -97,7 +97,9 @@ export function buildTreeSnapshot(input: {
 			children: [],
 		};
 		const resolved = input.labels.get(node.id);
-		if (resolved) entry.label = resolved.label;
+		// Empty-string label is a tombstone produced by resolveLabelMap; treat
+		// it as "no label" so tombstone entries do not surface as blank chips.
+		if (resolved && resolved.label !== "") entry.label = resolved.label;
 		nodesById[node.id] = entry;
 	}
 

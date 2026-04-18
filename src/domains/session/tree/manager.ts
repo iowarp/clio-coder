@@ -23,21 +23,19 @@ export interface ResolvedLabel {
 export interface SessionTreeFileBundle {
 	sessionId: string;
 	nodes: SessionTreeNode[];
-	entries: SessionEntry[];
 	labels: Map<string, ResolvedLabel>;
 }
 
 /**
- * Load the `tree.json` for an arbitrary session plus the rich entries and
- * resolved labels. Uses the engine reader (openSession) so we do not
- * re-implement its session-directory lookup.
+ * Load the `tree.json` for an arbitrary session plus the resolved labels.
+ * Uses the engine reader (openSession) so we do not re-implement its
+ * session-directory lookup.
  */
 export function readTreeBundle(sessionId: string): SessionTreeFileBundle {
 	const reader = openSession(sessionId);
 	const nodes = [...reader.tree()];
-	const entries = readRichEntries(sessionId);
-	const labels = resolveLabelMap(entries);
-	return { sessionId, nodes, entries, labels };
+	const labels = resolveLabelMap(readRichEntries(sessionId));
+	return { sessionId, nodes, labels };
 }
 
 /**
@@ -45,7 +43,7 @@ export function readTreeBundle(sessionId: string): SessionTreeFileBundle {
  * ClioTurnRecord lines are skipped (they contribute tree data via tree.json
  * already; labels only live on SessionEntry lines).
  */
-export function readRichEntries(sessionId: string): SessionEntry[] {
+function readRichEntries(sessionId: string): SessionEntry[] {
 	const meta = openSession(sessionId).meta();
 	const paths = sessionPaths(meta);
 	if (!existsSync(paths.current)) return [];
@@ -67,7 +65,12 @@ export function readRichEntries(sessionId: string): SessionEntry[] {
 /**
  * Scan rich entries for SessionInfoEntry label markers. Last-wins by
  * timestamp (ISO8601 strings sort lexicographically for same-format inputs).
- * Empty-string label clears the entry.
+ * Empty-string label acts as a tombstone: it is stored with its timestamp
+ * so that subsequent older-timestamp label sets do not resurrect the label.
+ * Consumers treat `label === ""` as "no label".
+ *
+ * Exported for unit tests via the manager module path. Intentionally kept
+ * off the domain index barrel.
  */
 export function resolveLabelMap(entries: ReadonlyArray<SessionEntry>): Map<string, ResolvedLabel> {
 	const out = new Map<string, ResolvedLabel>();
@@ -78,7 +81,7 @@ export function resolveLabelMap(entries: ReadonlyArray<SessionEntry>): Map<strin
 		const existing = out.get(info.targetTurnId);
 		if (existing && existing.timestamp > info.timestamp) continue;
 		if (info.label === undefined || info.label === "") {
-			out.delete(info.targetTurnId);
+			out.set(info.targetTurnId, { label: "", timestamp: info.timestamp });
 			continue;
 		}
 		out.set(info.targetTurnId, { label: info.label, timestamp: info.timestamp });

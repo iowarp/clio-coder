@@ -15,6 +15,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";
 import { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "../../src/domains/session/migrations/index.js";
 import { migrateV1ToV2 } from "../../src/domains/session/migrations/v1-to-v2.js";
+import { resolveLabelMap } from "../../src/domains/session/tree/manager.js";
 import { buildTreeSnapshot, computeLeafId } from "../../src/domains/session/tree/navigator.js";
 import {
 	getLocalRegisteredModel,
@@ -292,6 +293,69 @@ describe("session/tree navigator (pure)", () => {
 		];
 		const snap = buildTreeSnapshot({ meta: buildMeta(), nodes, labels: new Map() });
 		deepStrictEqual(snap.nodesById.root?.children, ["early", "late"]);
+	});
+
+	it("buildTreeSnapshot drops tombstone (empty-string) labels", () => {
+		const nodes = fakeTreeNodes(1);
+		const labels = new Map([["n0", { label: "", timestamp: "2026-04-17T00:00:05.000Z" }]]);
+		const snap = buildTreeSnapshot({ meta: buildMeta(), nodes, labels });
+		strictEqual(snap.nodesById.n0?.label, undefined);
+	});
+});
+
+describe("session/tree resolveLabelMap (pure)", () => {
+	function infoEntry(targetTurnId: string, label: string, timestamp: string): SessionEntry {
+		return {
+			kind: "sessionInfo",
+			turnId: `info-${targetTurnId}-${timestamp}`,
+			parentTurnId: null,
+			timestamp,
+			targetTurnId,
+			label,
+		} as SessionEntry;
+	}
+
+	it("last-wins by timestamp for forward-ordered entries", () => {
+		const labels = resolveLabelMap([
+			infoEntry("t1", "first", "2026-04-17T00:00:01.000Z"),
+			infoEntry("t1", "second", "2026-04-17T00:00:02.000Z"),
+		]);
+		strictEqual(labels.get("t1")?.label, "second");
+	});
+
+	it("stores a tombstone for empty-string label so older entries cannot resurrect", () => {
+		// Reproduces the ordering bug: clear at ts=3 arrives before an older
+		// set at ts=2. Without the tombstone the older label would win.
+		const labels = resolveLabelMap([
+			infoEntry("t1", "x", "2026-04-17T00:00:01.000Z"),
+			infoEntry("t1", "", "2026-04-17T00:00:03.000Z"),
+			infoEntry("t1", "y", "2026-04-17T00:00:02.000Z"),
+		]);
+		const resolved = labels.get("t1");
+		strictEqual(resolved?.label, "");
+		strictEqual(resolved?.timestamp, "2026-04-17T00:00:03.000Z");
+	});
+
+	it("a newer label overrides a prior tombstone at the same target", () => {
+		const labels = resolveLabelMap([
+			infoEntry("t1", "x", "2026-04-17T00:00:01.000Z"),
+			infoEntry("t1", "", "2026-04-17T00:00:02.000Z"),
+			infoEntry("t1", "z", "2026-04-17T00:00:03.000Z"),
+		]);
+		strictEqual(labels.get("t1")?.label, "z");
+	});
+
+	it("ignores sessionInfo entries without targetTurnId", () => {
+		const labels = resolveLabelMap([
+			{
+				kind: "sessionInfo",
+				turnId: "info-noop",
+				parentTurnId: null,
+				timestamp: "2026-04-17T00:00:01.000Z",
+				name: "pretty-name-only",
+			} as SessionEntry,
+		]);
+		strictEqual(labels.size, 0);
 	});
 });
 
