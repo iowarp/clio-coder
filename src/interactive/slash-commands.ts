@@ -26,6 +26,7 @@ export type SlashCommand =
 	| { kind: "settings" }
 	| { kind: "resume" }
 	| { kind: "new" }
+	| { kind: "hotkeys" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -110,6 +111,7 @@ export interface SlashCommandContext {
 	openSettings: () => void;
 	openResume: () => void;
 	startNewSession: () => void;
+	openHotkeys: () => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
@@ -320,6 +322,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.startNewSession();
+		},
+	},
+	{
+		name: "hotkeys",
+		description: "Show the keyboard + slash-command reference",
+		kinds: ["hotkeys"],
+		match(trimmed) {
+			return trimmed === "/hotkeys" ? { kind: "hotkeys" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openHotkeys();
 		},
 	},
 ];
