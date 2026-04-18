@@ -3,45 +3,36 @@
  *
  * Owns the pi-agent-core Agent instance for a worker run and forwards every
  * AgentEvent to an emit callback (the worker entry serializes events to NDJSON
- * stdout). This is the ONLY module the worker entry is allowed to import when it
- * needs to touch pi-mono; everything else in src/worker/** must stay pi-mono-free.
- *
- * Phase 6 slice 1 keeps the surface intentionally small: no tool registration,
- * no transform hooks, no custom streamFn. Later slices expand WorkerRunInput as
- * the dispatch domain needs more fields. The empty `initialState.tools` is the
- * pre-tool-registration baseline; the worker will never call a tool on this run.
+ * stdout). Post-W5 the surface takes a resolved EndpointDescriptor +
+ * RuntimeDescriptor + wire model id, not a provider/model pair. Subprocess
+ * runtimes (claude-code-cli, codex-cli, gemini-cli) do not touch pi-ai; they
+ * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
-import type { EndpointSpec } from "../core/defaults.js";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
-import { getModel, registerFauxFromEnv, registerLocalProviders } from "./ai.js";
+import type { EndpointDescriptor, RuntimeDescriptor } from "../domains/providers/index.js";
+import { FileKnowledgeBase, type KnowledgeBase, type KnowledgeBaseHit } from "../domains/providers/types/knowledge-base.js";
+import { registerFauxFromEnv } from "./ai.js";
+import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import { createWorkerToolRegistry, resolveAgentTools } from "./worker-tools.js";
 
-export type { EndpointSpec };
-
 export interface WorkerRunInput {
+	sessionId?: string;
 	systemPrompt: string;
 	task: string;
-	providerId: string;
-	modelId: string;
-	sessionId?: string;
+	endpoint: EndpointDescriptor;
+	runtime: RuntimeDescriptor;
+	wireModelId: string;
 	apiKey?: string;
 	/** Tool ids the agent is allowed to use. Defaults to the mode matrix. */
 	allowedTools?: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
 	mode?: ModeName;
-	/**
-	 * Local-engine endpoint name. When both this and `endpointSpec` are set, the
-	 * worker registers the endpoint into its in-process local-model registry
-	 * before calling `getModel`, so a freshly spawned worker subprocess can
-	 * resolve `${providerId}:${modelId}` for llamacpp/lmstudio/ollama/openai-compat
-	 * without re-reading settings.yaml.
-	 */
-	endpointName?: string;
-	/** EndpointSpec for the worker's single local endpoint. See `endpointName`. */
-	endpointSpec?: EndpointSpec;
+	signal?: AbortSignal;
 }
 
 export interface WorkerRunResult {
@@ -55,8 +46,6 @@ export interface WorkerRunHandle {
 }
 
 export type WorkerEventEmit = (event: AgentEvent) => void;
-
-const LOCAL_WORKER_PROVIDER_IDS = new Set(["llamacpp", "lmstudio", "ollama", "openai-compat"]);
 
 function isAssistantMessage(
 	message: AgentMessage | undefined,
@@ -75,17 +64,36 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
 	return null;
 }
 
-function seedWorkerLocalRegistry(input: Pick<WorkerRunInput, "providerId" | "endpointName" | "endpointSpec">): void {
-	if (!LOCAL_WORKER_PROVIDER_IDS.has(input.providerId)) return;
-	if (input.endpointName && input.endpointSpec) {
-		registerLocalProviders({
-			[input.providerId]: { endpoints: { [input.endpointName]: input.endpointSpec } },
-		} as Parameters<typeof registerLocalProviders>[0]);
-		return;
+class NullKnowledgeBase implements KnowledgeBase {
+	lookup(_modelId: string): KnowledgeBaseHit | null {
+		return null;
 	}
-	// Reused worker processes must not inherit a previous local endpoint when the
-	// current run omitted bootstrap fields.
-	registerLocalProviders({});
+	entries() {
+		return [];
+	}
+}
+
+let kbSingleton: KnowledgeBase | null = null;
+
+function getKnowledgeBase(): KnowledgeBase {
+	if (kbSingleton) return kbSingleton;
+	try {
+		const dir = fileURLToPath(new URL("../domains/providers/models/", import.meta.url));
+		kbSingleton = existsSync(dir) ? new FileKnowledgeBase(dir) : new NullKnowledgeBase();
+	} catch {
+		kbSingleton = new NullKnowledgeBase();
+	}
+	return kbSingleton;
+}
+
+function resolveApiKey(input: WorkerRunInput): string | undefined {
+	if (input.apiKey && input.apiKey.length > 0) return input.apiKey;
+	const envVar = input.endpoint.auth?.apiKeyEnvVar ?? input.runtime.credentialsEnvVar;
+	if (envVar) {
+		const fromEnv = process.env[envVar];
+		if (fromEnv && fromEnv.length > 0) return fromEnv;
+	}
+	return undefined;
 }
 
 /**
@@ -96,8 +104,25 @@ function seedWorkerLocalRegistry(input: Pick<WorkerRunInput, "providerId" | "end
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const fauxModel = registerFauxFromEnv();
-	seedWorkerLocalRegistry(input);
-	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
+
+	if (input.runtime.kind === "subprocess") {
+		const subprocessInput: Parameters<typeof startSubprocessWorkerRun>[0] = {
+			systemPrompt: input.systemPrompt,
+			task: input.task,
+			endpoint: input.endpoint,
+			runtime: input.runtime,
+			wireModelId: input.wireModelId,
+		};
+		if (input.apiKey !== undefined) subprocessInput.apiKey = input.apiKey;
+		if (input.signal !== undefined) subprocessInput.signal = input.signal;
+		return startSubprocessWorkerRun(subprocessInput, emit);
+	}
+
+	const kb = getKnowledgeBase();
+	const kbHit = kb.lookup(input.wireModelId);
+	const synthesized = input.runtime.synthesizeModel(input.endpoint, input.wireModelId, kbHit);
+	const model = input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>);
+
 	const mode: ModeName = input.mode ?? "default";
 	const registry = createWorkerToolRegistry(mode);
 	const tools = resolveAgentTools({
@@ -110,19 +135,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			`[worker] warning: no tools resolved for mode=${mode} allowed=[${(input.allowedTools ?? []).join(",")}]\n`,
 		);
 	}
+
+	const resolvedKey = resolveApiKey(input);
 	const options: AgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
-			model: model as unknown as Model<never>,
+			model,
 			thinkingLevel: "off",
 			tools,
 			messages: [],
 		},
 		getApiKey: async (provider: string) => {
-			if (input.apiKey && input.apiKey.length > 0) return input.apiKey;
-			if (input.endpointSpec?.api_key && input.endpointSpec.api_key.length > 0) {
-				return input.endpointSpec.api_key;
-			}
+			if (resolvedKey !== undefined) return resolvedKey;
 			return process.env[`${provider.toUpperCase()}_API_KEY`];
 		},
 	};
