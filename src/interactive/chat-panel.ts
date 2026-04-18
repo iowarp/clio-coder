@@ -78,28 +78,47 @@ function extractAssistantThinking(message: unknown): string {
 		.join("");
 }
 
+function renderEntryLines(entry: TranscriptEntry): string[] {
+	if (entry.role === "user") {
+		return [`you: ${entry.text}`];
+	}
+	const lines: string[] = [];
+	const thinking = entry.thinking.trim();
+	if (thinking.length > 0) {
+		lines.push(`${ANSI_DIM_ITALIC}${thinking}${ANSI_RESET}`);
+	}
+	lines.push(`clio: ${entry.text.trim().length > 0 ? entry.text : ""}`);
+	for (const tool of entry.tools) {
+		lines.push(`  tool: ${tool.name}(${previewValue(tool.args, 48)}) → ${tool.preview}`);
+	}
+	return lines;
+}
+
 export function createChatPanel(): ChatPanel {
 	const view = new Text("", 0, 0);
 	const transcript: TranscriptEntry[] = [];
+	// Pre-rendered text segments for every entry except the active (last) one.
+	// Streaming deltas only mutate the active entry, so caching the prior
+	// segments keeps sync()'s per-delta cost bounded by the active entry's
+	// size rather than the whole transcript.
+	const frozenSegments: string[] = [];
+
+	const freezePriorEntries = (): void => {
+		while (frozenSegments.length < transcript.length - 1) {
+			const entry = transcript[frozenSegments.length];
+			if (!entry) break;
+			frozenSegments.push(renderEntryLines(entry).join("\n"));
+		}
+	};
 
 	const sync = (): void => {
-		const lines: string[] = [];
-		for (const entry of transcript) {
-			if (lines.length > 0) lines.push("");
-			if (entry.role === "user") {
-				lines.push(`you: ${entry.text}`);
-				continue;
-			}
-			const thinking = entry.thinking.trim();
-			if (thinking.length > 0) {
-				lines.push(`${ANSI_DIM_ITALIC}${thinking}${ANSI_RESET}`);
-			}
-			lines.push(`clio: ${entry.text.trim().length > 0 ? entry.text : ""}`);
-			for (const tool of entry.tools) {
-				lines.push(`  tool: ${tool.name}(${previewValue(tool.args, 48)}) → ${tool.preview}`);
-			}
+		freezePriorEntries();
+		const segments: string[] = [...frozenSegments];
+		const active = transcript[transcript.length - 1];
+		if (active) {
+			segments.push(renderEntryLines(active).join("\n"));
 		}
-		view.setText(lines.join("\n"));
+		view.setText(segments.join("\n\n"));
 		view.invalidate();
 	};
 
@@ -123,6 +142,7 @@ export function createChatPanel(): ChatPanel {
 		},
 		reset(): void {
 			transcript.length = 0;
+			frozenSegments.length = 0;
 			sync();
 		},
 		applyEvent(event: ChatLoopEvent): void {
