@@ -37,6 +37,31 @@ export interface LocalProvidersSettings {
 	"openai-compat": LocalProviderConfig;
 }
 
+/**
+ * Compaction controls the session domain reads at runtime. Ships as Phase 12
+ * slice 12c. The structural type lives here so core/defaults.ts stays free
+ * of a backward domain dependency; the engine-level defaults and the
+ * companion DEFAULT_COMPACTION_SETTINGS value live alongside the rest of
+ * the compaction engine in src/domains/session/compaction/defaults.ts.
+ *
+ * Fields:
+ *   - threshold: fraction (0..1) of the orchestrator's contextWindow at
+ *     which auto-compaction fires. 12c persists it; 12d wires the check.
+ *   - auto: master switch for the chat-loop's pre-request trigger. Manual
+ *     /compact still runs when auto=false.
+ *   - model: optional pattern (e.g. "openai/gpt-5-mini") used to resolve
+ *     a dedicated summarization model. Falls back to the orchestrator
+ *     target when absent.
+ *   - systemPrompt: optional path to a prompt-override file; resolved to
+ *     text at call time, not at settings load.
+ */
+export interface CompactionSettings {
+	threshold: number;
+	auto: boolean;
+	model?: string;
+	systemPrompt?: string;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -69,6 +94,10 @@ export const DEFAULT_SETTINGS = {
 	state: {
 		lastMode: "default" as "default" | "advise" | "super",
 	},
+	compaction: {
+		threshold: 0.8,
+		auto: true,
+	} as CompactionSettings,
 };
 
 export type DefaultSettings = typeof DEFAULT_SETTINGS;
@@ -204,4 +233,22 @@ keybindings: {}
 # Transient session state. Clio rewrites this block; do not hand-edit.
 state:
   lastMode: default
+
+# Context compaction controls (Phase 12).
+#   threshold    fraction (0..1) of the orchestrator's contextWindow at which
+#                auto-compaction fires. 0.8 leaves 20% headroom for the next
+#                assistant turn before trimming.
+#   auto         master switch. true ⇒ the chat loop may compact on threshold;
+#                false disables the pre-request trigger (manual /compact still
+#                works). Slice 12d lands the auto trigger; in 12c this flag is
+#                persisted for forward compatibility.
+#   model        optional pattern (e.g. openai/gpt-5-mini) for a dedicated
+#                summarization model. Absent ⇒ the engine uses the orchestrator
+#                target.
+#   systemPrompt optional path to a prompt-override file.
+compaction:
+  threshold: 0.8
+  auto: true
+  # model: openai/gpt-5-mini
+  # systemPrompt: ~/.config/clio/prompts/compaction.md
 `;
