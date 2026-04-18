@@ -84,13 +84,20 @@ function stubModes(initial: ModeName = "default"): ModesContract & { set: (m: Mo
 }
 
 interface FakeAgent {
-	state: Partial<AgentState> & { systemPrompt: string; tools: unknown[]; messages: unknown[] };
+	state: Partial<AgentState> & {
+		systemPrompt: string;
+		tools: unknown[];
+		messages: AgentMessage[];
+		errorMessage?: string;
+	};
 	subscribers: Array<(event: AgentEvent) => void>;
 	subscribe(cb: (event: AgentEvent) => void): () => void;
 	prompt(text: string): Promise<void>;
 	abort(): void;
 	sessionId?: string;
 	promptCalls: string[];
+	/** When set, the NEXT prompt() call simulates pi-agent-core's overflow surface. */
+	queueFailure?: { errorMessage: string };
 }
 
 function fakeAgent(initial: Partial<FakeAgent["state"]> = {}): FakeAgent {
@@ -104,7 +111,7 @@ function fakeAgent(initial: Partial<FakeAgent["state"]> = {}): FakeAgent {
 	} as FakeAgent["state"];
 	const subscribers: Array<(event: AgentEvent) => void> = [];
 	const promptCalls: string[] = [];
-	return {
+	const self: FakeAgent = {
 		state,
 		subscribers,
 		promptCalls,
@@ -114,12 +121,34 @@ function fakeAgent(initial: Partial<FakeAgent["state"]> = {}): FakeAgent {
 		},
 		async prompt(text: string): Promise<void> {
 			promptCalls.push(text);
+			if (self.queueFailure) {
+				// Mirror pi-agent-core 0.67.4: the provider failure does NOT
+				// throw. The agent's internal handleRunFailure pushes an
+				// assistant message with stopReason "error" plus the captured
+				// errorMessage, and sets state.errorMessage, then emits
+				// agent_end and resolves the prompt() Promise normally.
+				const failure: AgentMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "" }],
+					stopReason: "error",
+					errorMessage: self.queueFailure.errorMessage,
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				state.messages.push(failure);
+				state.errorMessage = self.queueFailure.errorMessage;
+				Reflect.deleteProperty(self, "queueFailure");
+				for (const cb of subscribers) {
+					cb({ type: "agent_end", messages: [failure] } as unknown as AgentEvent);
+				}
+				return;
+			}
 			const assistantMsg: AgentMessage = {
 				role: "assistant",
 				content: [{ type: "text", text: "ack" }],
 				stopReason: "stop",
 				timestamp: Date.now(),
 			} as AgentMessage;
+			state.messages.push(assistantMsg);
 			for (const cb of subscribers) {
 				cb({ type: "message_end", message: assistantMsg } as unknown as AgentEvent);
 				cb({ type: "agent_end", messages: [assistantMsg] } as unknown as AgentEvent);
@@ -127,6 +156,7 @@ function fakeAgent(initial: Partial<FakeAgent["state"]> = {}): FakeAgent {
 		},
 		abort() {},
 	};
+	return self;
 }
 
 interface RecordingSession {
@@ -367,3 +397,195 @@ describe("interactive/chat-loop prompt compilation", () => {
 		ok(agent.state.systemPrompt.toLowerCase().includes("clio"));
 	});
 });
+
+// ---------------------------------------------------------------------------
+// slice 12.5b: overflow recovery via stopReason="error" surface
+// ---------------------------------------------------------------------------
+
+import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
+
+function compactResult(overrides: Partial<CompactResult> = {}): CompactResult {
+	return {
+		summary: "prior summary",
+		messagesSummarized: 2,
+		summaryChars: 100,
+		tokensBefore: 5_000,
+		isSplitTurn: false,
+		firstKeptTurnId: null,
+		...overrides,
+	} as CompactResult;
+}
+
+describe("interactive/chat-loop overflow recovery (slice 12.5b bug 2)", () => {
+	it("detects pi-agent-core stopReason=error overflow and runs compact-and-retry", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		const session = recordingSession();
+		let compactionRuns = 0;
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			session: session.contract,
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			readSessionEntries: () => [],
+			autoCompact: async () => {
+				compactionRuns++;
+				return compactResult();
+			},
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+		// First prompt resolves with an overflow-shaped failure. Second prompt
+		// (the retry) returns normally.
+		agent.queueFailure = { errorMessage: "context length exceeded" };
+		await chat.submit("hi");
+		strictEqual(agent.promptCalls.length, 2, "expected exactly one retry after compaction");
+		strictEqual(compactionRuns, 1, "expected exactly one compaction run");
+	});
+
+	it("does not run compaction when stopReason=error but the message is not an overflow pattern", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		const session = recordingSession();
+		let compactionRuns = 0;
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			session: session.contract,
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			readSessionEntries: () => [],
+			autoCompact: async () => {
+				compactionRuns++;
+				return compactResult();
+			},
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+		agent.queueFailure = { errorMessage: "unauthorized: bad api key" };
+		await chat.submit("hi");
+		strictEqual(agent.promptCalls.length, 1, "non-overflow failure should not retry");
+		strictEqual(compactionRuns, 0, "non-overflow failure should not fire compaction");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// slice 12.5b: chat.compact() swaps agent state.messages (bug 4)
+// ---------------------------------------------------------------------------
+
+describe("interactive/chat-loop compact method (slice 12.5b bug 4)", () => {
+	it("chat.compact() swaps agent.state.messages to [bridge] after a successful run", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		const session = recordingSession();
+		let compactionRuns = 0;
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			session: session.contract,
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			readSessionEntries: () => [],
+			autoCompact: async () => {
+				compactionRuns++;
+				return compactResult({ summary: "seeded summary" });
+			},
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+		// Drive a regular turn first so the runtime materializes and
+		// state.messages grows beyond the bridge.
+		await chat.submit("hi");
+		ok(agent.state.messages.length > 0);
+		await chat.compact();
+		strictEqual(compactionRuns, 1, "chat.compact() must force the compaction flow");
+		strictEqual(agent.state.messages.length, 1, "compact must leave exactly one bridge message");
+		const bridge = agent.state.messages[0] as AgentMessage;
+		strictEqual(bridge.role, "user");
+		const bridgeText = Array.isArray(bridge.content)
+			? bridge.content
+					.filter((c): c is { type: "text"; text: string } => c?.type === "text")
+					.map((c) => c.text)
+					.join("\n")
+			: "";
+		ok(bridgeText.includes("seeded summary"));
+	});
+
+	it("chat.compact() is a no-op when autoCompact returns null and emits a user-visible notice", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		const session = recordingSession();
+		const events: ChatLoopEvent[] = [];
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			session: session.contract,
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			readSessionEntries: () => [],
+			autoCompact: async () => null,
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+		chat.onEvent((e) => {
+			events.push(e);
+		});
+		await chat.submit("hi");
+		const before = agent.state.messages.length;
+		await chat.compact();
+		strictEqual(agent.state.messages.length, before, "no bridge swap on no-op compact");
+		// The message_end + agent_end notice pair surfaces via chat events so
+		// chat-panel renders a "/compact: nothing to compact" line. Assert at
+		// least one notice text mentions compact.
+		const noticeTexts: string[] = [];
+		for (const e of events) {
+			if (e.type === "message_end") {
+				const msg = (e as unknown as { message?: AgentMessage }).message;
+				if (msg && Array.isArray(msg.content)) {
+					for (const c of msg.content) {
+						if (c?.type === "text" && typeof c.text === "string") noticeTexts.push(c.text);
+					}
+				}
+			}
+		}
+		ok(
+			noticeTexts.some((t) => /compact/i.test(t)),
+			`expected a /compact notice, got ${JSON.stringify(noticeTexts)}`,
+		);
+	});
+});
+
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";

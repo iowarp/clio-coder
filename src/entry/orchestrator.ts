@@ -28,8 +28,8 @@ import { VALID_THINKING_LEVELS, resolveModelPattern, resolveModelScope } from ".
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
+import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import { fromLegacyTurn } from "../domains/session/entries.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { getModel, resolveLocalModelId } from "../engine/ai.js";
@@ -37,7 +37,6 @@ import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
-import { renderCompactionSummaryLine } from "../interactive/renderers/compaction-summary.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -118,22 +117,15 @@ function resolveCompactionApiKey(
 }
 
 /**
- * Load the current session's entries from disk for compaction input.
- * Slice 12c reads legacy ClioTurnRecord lines only; rich SessionEntry lines
- * are detected and skipped so the compaction engine never receives
- * partially-shaped records. 12d replaces this with a unified reader.
+ * Load the current session's entries from disk for compaction input. Delegates
+ * to `collectSessionEntries` which dispatches on shape so v2 entries
+ * (compactionSummary, branchSummary, ...) survive the read. Slice 12.5b bug 3
+ * traced a loop-on-threshold bug to the previous reader dropping every v2
+ * entry; keeping the shared reader is the fix.
  */
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
-	const turns = reader.turns();
-	const out: SessionEntry[] = [];
-	for (const record of turns) {
-		const anyRecord = record as unknown as { id?: unknown; at?: unknown; kind?: unknown };
-		if (typeof anyRecord.id === "string" && typeof anyRecord.at === "string" && typeof anyRecord.kind === "string") {
-			out.push(fromLegacyTurn(record));
-		}
-	}
-	return out;
+	return collectSessionEntries(reader.turns());
 }
 
 /**
@@ -378,24 +370,15 @@ export async function bootOrchestrator(): Promise<BootResult> {
 							);
 						}
 					},
+					// Delegate to chat.compact() so the shared flow runs
+					// runCompactionFlow, writes the compactionSummary entry,
+					// AND swaps `agent.state.messages` to the bridge before the
+					// user's next turn. Previously onCompact persisted the
+					// entry but left the stale transcript in memory, so the
+					// next provider request still shipped the full history
+					// (slice 12.5b bug 4).
 					onCompact: async (instructions) => {
-						try {
-							const result = await runCompactionFlow(session, config?.get() ?? readSettings(), instructions);
-							if (result === null) {
-								process.stdout.write("[/compact] nothing to compact; session is empty or no cut crossed\n");
-								return;
-							}
-							process.stdout.write(
-								`${renderCompactionSummaryLine({
-									messagesSummarized: result.messagesSummarized,
-									summaryChars: result.summary.length,
-									tokensBefore: result.tokensBefore,
-									isSplitTurn: result.isSplitTurn,
-								})}\n`,
-							);
-						} catch (err) {
-							process.stderr.write(`[/compact] ${err instanceof Error ? err.message : String(err)}\n`);
-						}
+						await chat.compact(instructions);
 					},
 				}
 			: {}),
