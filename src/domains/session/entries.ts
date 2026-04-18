@@ -87,7 +87,16 @@ export interface CompactionSummaryEntry extends BaseSessionEntry {
 
 export interface SessionInfoEntry extends BaseSessionEntry {
 	kind: "sessionInfo";
+	/** Optional human-readable session name. */
 	name?: string;
+	/**
+	 * When present, this entry labels an earlier turn. Readers scan
+	 * `sessionInfo` entries whose `targetTurnId` matches a turn id; the
+	 * last-wins `label` becomes that turn's display label in /tree.
+	 * Empty string clears the label.
+	 */
+	targetTurnId?: string;
+	label?: string;
 }
 
 export type SessionEntry =
