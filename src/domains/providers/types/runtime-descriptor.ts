@@ -16,6 +16,7 @@ export type RuntimeApiFamily =
 	| "google-generative-ai"
 	| "google-gemini-cli"
 	| "google-vertex"
+	| "lmstudio-native"
 	| "mistral-conversations"
 	| "ollama-native"
 	| "rerank-http"
