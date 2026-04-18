@@ -22,6 +22,7 @@ import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-m
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSettingsOverlay } from "./overlays/settings.js";
 import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
+import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { type RunIo, type SlashCommandContext, dispatchSlashCommand, parseSlashCommand } from "./slash-commands.js";
@@ -106,6 +107,7 @@ export const CTRL_P = "\x10";
 export const SHIFT_CTRL_P = "\x1b[80;6u";
 export const ALT_S = "\x1bs";
 export const ALT_M = "\x1bm";
+export const ALT_T = "\x1bt";
 export const ENTER = "\r";
 export const ESC = "\x1b";
 export type OverlayState =
@@ -120,6 +122,7 @@ export type OverlayState =
 	| "scoped-models"
 	| "settings"
 	| "resume"
+	| "tree"
 	| "hotkeys";
 
 export interface KeyBindingDeps {
@@ -129,6 +132,7 @@ export interface KeyBindingDeps {
 	requestSuper: () => void;
 	toggleDispatchBoard: () => void;
 	openModelSelector: () => void;
+	openTree: () => void;
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
 }
@@ -175,6 +179,10 @@ export interface ResumeOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface TreeOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -190,6 +198,7 @@ export interface OverlayKeyDeps
 		ScopedModelsOverlayKeyDeps,
 		SettingsOverlayKeyDeps,
 		ResumeOverlayKeyDeps,
+		TreeOverlayKeyDeps,
 		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
@@ -206,6 +215,10 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	}
 	if (data === ALT_M) {
 		deps.cycleMode();
+		return true;
+	}
+	if (data === ALT_T) {
+		deps.openTree();
 		return true;
 	}
 	if (data === CTRL_B) {
@@ -350,6 +363,17 @@ export function routeResumeOverlayKey(data: string, deps: ResumeOverlayKeyDeps):
 }
 
 /**
+ * Pure overlay key router for the /tree overlay. Esc is intentionally NOT
+ * consumed here because the overlay runs in three submodes (browse,
+ * edit-label, confirm-delete) and Esc cancels a submode before it closes the
+ * overlay. TreeOverlayBox.handleInput calls the onClose dep itself when Esc
+ * is pressed in browse mode; every other key also falls through to the Box.
+ */
+export function routeTreeOverlayKey(_data: string, _deps: TreeOverlayKeyDeps): boolean {
+	return false;
+}
+
+/**
  * Pure overlay key router for the /hotkeys overlay. Esc closes; everything
  * else is swallowed so arrow keys cannot disturb the banner-style render.
  */
@@ -409,6 +433,11 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "resume") {
 		// SelectList owns arrows and Enter; route only Esc here.
 		return routeResumeOverlayKey(data, deps);
+	}
+	if (overlayState === "tree") {
+		// TreeOverlayBox owns its full keymap including Esc (submode-aware);
+		// routeTreeOverlayKey is a no-op stub kept for shape symmetry.
+		return routeTreeOverlayKey(data, deps);
 	}
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
@@ -478,6 +507,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openSettings: () => openSettingsOverlayState(),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
+		openTree: () => openTreeOverlayState(),
 		openHotkeys: () => openHotkeysOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
@@ -672,6 +702,30 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const openTreeOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			io.stderr("[/tree] session contract unavailable\n");
+			return;
+		}
+		const sessionContract = deps.session;
+		overlayState = "tree";
+		overlayHandle = openTreeOverlay(tui, {
+			session: sessionContract,
+			onSwitchBranch: (sessionId) => {
+				try {
+					sessionContract.switchBranch(sessionId);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/tree] switchBranch failed: ${msg}\n`);
+				}
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
 	const startNewSession = (): void => {
 		if (!deps.onNewSession) {
 			io.stderr("[/new] session contract unavailable\n");
@@ -809,6 +863,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			openModelSelector: () => {
 				openModelOverlayState();
+			},
+			openTree: () => {
+				openTreeOverlayState();
 			},
 			cycleScopedModelForward: () => {
 				deps.onCycleScopedModelForward?.();

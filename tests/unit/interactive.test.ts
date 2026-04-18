@@ -70,6 +70,7 @@ describe("slash-commands registry", () => {
 			"settings",
 			"resume",
 			"new",
+			"tree",
 			"hotkeys",
 		]);
 		const owned = new Map<string, string>();
@@ -131,6 +132,7 @@ describe("routeInteractiveKey", () => {
 		requestSuper: () => {},
 		toggleDispatchBoard: () => {},
 		openModelSelector: () => {},
+		openTree: () => {},
 		cycleScopedModelForward: () => {},
 		cycleScopedModelBackward: () => {},
 	};

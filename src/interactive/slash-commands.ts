@@ -26,6 +26,7 @@ export type SlashCommand =
 	| { kind: "settings" }
 	| { kind: "resume" }
 	| { kind: "new" }
+	| { kind: "tree" }
 	| { kind: "hotkeys" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
@@ -111,6 +112,7 @@ export interface SlashCommandContext {
 	openSettings: () => void;
 	openResume: () => void;
 	startNewSession: () => void;
+	openTree: () => void;
 	openHotkeys: () => void;
 	/**
 	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
@@ -323,6 +325,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.startNewSession();
+		},
+	},
+	{
+		name: "tree",
+		description: "Open the session tree navigator",
+		kinds: ["tree"],
+		match(trimmed) {
+			return trimmed === "/tree" ? { kind: "tree" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openTree();
 		},
 	},
 	{
