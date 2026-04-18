@@ -47,6 +47,10 @@ interface ActiveRun {
 	finalPromise: Promise<RunReceipt>;
 }
 
+interface DispatchBundleOptions {
+	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+}
+
 function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined): ScopeSpec {
 	if (mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
@@ -64,7 +68,10 @@ function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): st
 	return "";
 }
 
-export function createDispatchBundle(context: DomainContext): DomainBundle<DispatchContract> {
+export function createDispatchBundle(
+	context: DomainContext,
+	options?: DispatchBundleOptions,
+): DomainBundle<DispatchContract> {
 	const maybeSafety = context.getContract<SafetyContract>("safety");
 	const maybeAgents = context.getContract<AgentsContract>("agents");
 	const maybeModes = context.getContract<ModesContract>("modes");
@@ -80,6 +87,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 	// exercise dispatch without the scheduling domain) dispatch falls back to
 	// pre-gate behaviour.
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
+	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 
 	let ledger: Ledger | null = null;
 	const active = new Map<string, ActiveRun>();
@@ -186,7 +194,29 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 			spec.endpointSpec = endpointSpec;
 		}
 
-		const worker = spawnNativeWorker(spec, { cwd });
+		let workerSlotHeld = false;
+		const releaseWorkerSlot = (): void => {
+			if (!workerSlotHeld || !scheduling) return;
+			workerSlotHeld = false;
+			scheduling.releaseWorker();
+		};
+
+		if (scheduling) {
+			workerSlotHeld = scheduling.tryAcquireWorker();
+			if (!workerSlotHeld) {
+				throw new Error(
+					`dispatch: admission denied — concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
+				);
+			}
+		}
+
+		let worker: SpawnedWorker;
+		try {
+			worker = spawnWorker(spec, { cwd });
+		} catch (error) {
+			releaseWorkerSlot();
+			throw error;
+		}
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
@@ -253,71 +283,75 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		};
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
-			const result = await worker.promise;
-			const receiptExitCode = result.exitCode ?? 1;
-			const endedAt = new Date().toISOString();
-			const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
-			const modelSpec = getModelSpec(providerId as ProviderId, modelId);
-			const costUsd = modelSpec
-				? (tokenMeter.inputTokens * (modelSpec.pricePer1MInput ?? 0)) / 1_000_000 +
-					(tokenMeter.outputTokens * (modelSpec.pricePer1MOutput ?? 0)) / 1_000_000
-				: 0;
-			const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
-			const receipt: RunReceipt = {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				providerId,
-				modelId,
-				runtime,
-				startedAt,
-				endedAt,
-				exitCode: receiptExitCode,
-				tokenCount,
-				costUsd,
-				compiledPromptHash: null,
-				staticCompositionHash: null,
-				clioVersion: readClioVersion(),
-				piMonoVersion: readPiMonoVersion(),
-				platform: process.platform,
-				nodeVersion: process.version,
-				toolCalls: 0,
-				sessionId: null,
-			};
-			ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode });
-			ledgerRef.recordReceipt(envelope.id, receipt);
-			await ledgerRef.persist();
-			active.delete(envelope.id);
-			const startMs = Date.parse(receipt.startedAt);
-			const endMs = Date.parse(receipt.endedAt);
-			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
-			if (status === "completed") {
-				context.bus.emit(BusChannels.DispatchCompleted, {
+			try {
+				const result = await worker.promise;
+				const receiptExitCode = result.exitCode ?? 1;
+				const endedAt = new Date().toISOString();
+				const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
+				const modelSpec = getModelSpec(providerId as ProviderId, modelId);
+				const costUsd = modelSpec
+					? (tokenMeter.inputTokens * (modelSpec.pricePer1MInput ?? 0)) / 1_000_000 +
+						(tokenMeter.outputTokens * (modelSpec.pricePer1MOutput ?? 0)) / 1_000_000
+					: 0;
+				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
+				const receipt: RunReceipt = {
 					runId: envelope.id,
 					agentId: req.agentId,
+					task: req.task,
 					providerId,
 					modelId,
 					runtime,
-					tokenCount: receipt.tokenCount,
-					costUsd: receipt.costUsd,
-					durationMs,
+					startedAt,
+					endedAt,
 					exitCode: receiptExitCode,
-				});
-			} else {
-				context.bus.emit(BusChannels.DispatchFailed, {
-					runId: envelope.id,
-					agentId: req.agentId,
-					providerId,
-					modelId,
-					runtime,
-					tokenCount: receipt.tokenCount,
-					costUsd: receipt.costUsd,
-					durationMs,
-					exitCode: receiptExitCode,
-					reason: status,
-				});
+					tokenCount,
+					costUsd,
+					compiledPromptHash: null,
+					staticCompositionHash: null,
+					clioVersion: readClioVersion(),
+					piMonoVersion: readPiMonoVersion(),
+					platform: process.platform,
+					nodeVersion: process.version,
+					toolCalls: 0,
+					sessionId: null,
+				};
+				ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode });
+				ledgerRef.recordReceipt(envelope.id, receipt);
+				await ledgerRef.persist();
+				active.delete(envelope.id);
+				const startMs = Date.parse(receipt.startedAt);
+				const endMs = Date.parse(receipt.endedAt);
+				const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+				if (status === "completed") {
+					context.bus.emit(BusChannels.DispatchCompleted, {
+						runId: envelope.id,
+						agentId: req.agentId,
+						providerId,
+						modelId,
+						runtime,
+						tokenCount: receipt.tokenCount,
+						costUsd: receipt.costUsd,
+						durationMs,
+						exitCode: receiptExitCode,
+					});
+				} else {
+					context.bus.emit(BusChannels.DispatchFailed, {
+						runId: envelope.id,
+						agentId: req.agentId,
+						providerId,
+						modelId,
+						runtime,
+						tokenCount: receipt.tokenCount,
+						costUsd: receipt.costUsd,
+						durationMs,
+						exitCode: receiptExitCode,
+						reason: status,
+					});
+				}
+				return receipt;
+			} finally {
+				releaseWorkerSlot();
 			}
-			return receipt;
 		})();
 
 		activeRun.finalPromise = finalPromise;
