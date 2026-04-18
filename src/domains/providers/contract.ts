@@ -1,5 +1,6 @@
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
+import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
 /**
@@ -61,7 +62,15 @@ export interface ProvidersContract {
 	 */
 	credentials: {
 		hasKey(runtimeId: string): boolean;
+		get(runtimeId: string): string | null;
 		set(runtimeId: string, key: string): void;
 		remove(runtimeId: string): void;
 	};
+
+	/**
+	 * Model knowledge base used by chat-loop and overlays to synthesize pi-ai
+	 * `Model<Api>` instances via `RuntimeDescriptor.synthesizeModel(endpoint,
+	 * wireModelId, kb)`. Null when the bundled YAMLs are unreadable at boot.
+	 */
+	knowledgeBase: KnowledgeBase | null;
 }

@@ -54,9 +54,9 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 		current: () => state?.meta ?? null,
 		create(input) {
 			const cwd = input?.cwd ?? process.cwd();
-			const startInput: { cwd: string; model?: string | null; provider?: string | null } = { cwd };
+			const startInput: { cwd: string; model?: string | null; endpoint?: string | null } = { cwd };
 			if (input?.model !== undefined) startInput.model = input.model;
-			if (input?.provider !== undefined) startInput.provider = input.provider;
+			if (input?.endpoint !== undefined) startInput.endpoint = input.endpoint;
 			// Close any prior writer first so tree.json + meta.json get the
 			// endedAt + final-tree flush. Without this, the old session leaks
 			// its in-memory tree to disk and /tree on a resume would miss

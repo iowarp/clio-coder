@@ -4,7 +4,7 @@ import { type SessionManagerState, startSession } from "../manager.js";
 
 /**
  * Single-point fork-from-parent-turn orchestration. Closes the caller's
- * prior state writer, starts a fresh session inheriting cwd/model/provider
+ * prior state writer, starts a fresh session inheriting cwd/model/endpoint
  * from the parent meta, then stamps parent pointers atomically via
  * enrichForkMeta. Returns the new SessionManagerState so the caller can
  * install it as current.
@@ -43,7 +43,7 @@ export function forkFromState(input: ForkInput): ForkResult {
 	const next = startSession({
 		cwd,
 		model: parentMeta.model,
-		provider: parentMeta.provider,
+		endpoint: parentMeta.endpoint,
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
 	return { next, parentMeta };

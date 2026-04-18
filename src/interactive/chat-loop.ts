@@ -1,23 +1,22 @@
 import { type ClioSettings, settingsPath } from "../core/config.js";
-import type { EndpointSpec, LocalProvidersSettings } from "../core/defaults.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
-import { isLocalEngineId } from "../domains/providers/catalog.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
+import type {
+	EndpointDescriptor,
+	ProvidersContract,
+	RuntimeDescriptor,
+	ThinkingLevel,
+} from "../domains/providers/index.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import { calculateContextTokens } from "../domains/session/compaction/tokens.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createEngineAgent } from "../engine/agent.js";
-import {
-	resolveLocalModelId,
-	getModel as resolveModel,
-	registerLocalProviders as seedLocalProviders,
-} from "../engine/ai.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -60,7 +59,14 @@ export interface ChatLoop {
 export interface CreateChatLoopDeps {
 	getSettings: () => Readonly<ClioSettings>;
 	modes: ModesContract;
-	knownProviders: () => ReadonlySet<string>;
+	providers: ProvidersContract;
+	/**
+	 * Whitelist of endpoint ids that the chat-loop is allowed to drive. The
+	 * orchestrator composes this from `providers.list()` so an unknown
+	 * `settings.orchestrator.endpoint` surfaces a configuration error before
+	 * the agent is constructed.
+	 */
+	knownEndpoints: () => ReadonlySet<string>;
 	session?: SessionContract;
 	/**
 	 * Prompt compiler. When wired, every `submit()` re-runs
@@ -73,8 +79,6 @@ export interface CreateChatLoopDeps {
 	 * In production this is always wired by `entry/orchestrator.ts`.
 	 */
 	prompts?: PromptsContract;
-	getModel?: (providerId: string, modelId: string) => Model<never>;
-	registerLocalProviders?: (providers: Partial<LocalProvidersSettings>) => void;
 	createAgent?: typeof createEngineAgent;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
@@ -106,21 +110,25 @@ export interface CreateChatLoopDeps {
 	toolRegistry?: ToolRegistry;
 }
 
+interface ChatLoopTarget {
+	endpoint: EndpointDescriptor;
+	runtime: RuntimeDescriptor;
+	wireModelId: string;
+	thinkingLevel: ThinkingLevel;
+}
+
 interface AgentRuntime {
 	agent: ReturnType<typeof createEngineAgent>["agent"];
-	providerId: string;
-	modelId: string;
+	endpointId: string;
+	runtimeId: string;
+	wireModelId: string;
 }
 
 function notConfiguredNotice(): string {
-	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.* block) to enable chat.`;
+	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.endpoint + orchestrator.model) to enable chat.`;
 }
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
-
-function envApiKeyName(providerId: string): string {
-	return `${providerId.replaceAll("-", "_").toUpperCase()}_API_KEY`;
-}
 
 function extractText(message: AgentMessage | undefined): string {
 	if (
@@ -265,10 +273,24 @@ function buildCompactionBridgeMessage(summary: string): AgentMessage {
 	} as AgentMessage;
 }
 
+function resolveApiKey(target: ChatLoopTarget, providers: ProvidersContract): string | undefined {
+	const { endpoint, runtime } = target;
+	if (runtime.auth === "api-key") {
+		const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+		if (envVar) {
+			const fromEnv = process.env[envVar]?.trim();
+			if (fromEnv && fromEnv.length > 0) return fromEnv;
+		}
+		const ref = endpoint.auth?.apiKeyRef ?? runtime.id;
+		const stored = providers.credentials.get(ref);
+		if (stored && stored.length > 0) return stored;
+		return undefined;
+	}
+	return LOCAL_API_KEY_FALLBACK;
+}
+
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
-	const getModel = deps.getModel ?? resolveModel;
-	const registerLocalProviders = deps.registerLocalProviders ?? seedLocalProviders;
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
 	let runtime: AgentRuntime | null = null;
@@ -303,68 +325,71 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emit({ type: "agent_end", messages: [message] });
 	};
 
-	const readTarget = (): {
-		providerId: string;
-		modelId: string;
-		endpointName: string | undefined;
-		endpointSpec: EndpointSpec | undefined;
-	} | null => {
+	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
-		const providerId = settings.orchestrator.provider?.trim();
-		const rawModelId = settings.orchestrator.model?.trim();
-		if (!providerId || !rawModelId) return null;
-
-		const endpointName = settings.orchestrator.endpoint?.trim();
-		let endpointSpec: EndpointSpec | undefined;
-		if (isLocalEngineId(providerId)) {
-			if (!endpointName) return null;
-			endpointSpec = settings.providers[providerId]?.endpoints?.[endpointName];
-			if (!endpointSpec) {
-				throw new Error(`[clio] orchestrator endpoint=${endpointName} not found under providers.${providerId}.endpoints.`);
-			}
-			registerLocalProviders({
-				[providerId]: { endpoints: { [endpointName]: endpointSpec } },
-			} as Partial<LocalProvidersSettings>);
+		const endpointId = settings.orchestrator.endpoint?.trim();
+		const wireModelId = settings.orchestrator.model?.trim();
+		if (!endpointId || !wireModelId) return null;
+		const endpoint = deps.providers.getEndpoint(endpointId);
+		if (!endpoint) {
+			throw new Error(`[clio] orchestrator endpoint='${endpointId}' not found in settings.endpoints`);
 		}
+		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
+		if (!runtimeDesc) {
+			throw new Error(`[clio] orchestrator runtime='${endpoint.runtime}' not registered`);
+		}
+		if (runtimeDesc.kind === "subprocess") {
+			throw new Error(
+				`[clio] endpoint '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets (workers.default), not as the orchestrator chat endpoint`,
+			);
+		}
+		return {
+			endpoint,
+			runtime: runtimeDesc,
+			wireModelId,
+			thinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+		};
+	};
 
-		const modelId = resolveLocalModelId(providerId, rawModelId, endpointName ?? undefined);
-
-		return { providerId, modelId, endpointName, endpointSpec };
+	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
+		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
+		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
+		return synth as unknown as Model<never>;
 	};
 
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
-		if (!deps.knownProviders().has(target.providerId)) {
+		if (!deps.knownEndpoints().has(target.endpoint.id)) {
 			throw new Error(
-				`[clio] orchestrator provider=${target.providerId} unknown. Run \`clio providers\` to see configured engines.`,
+				`[clio] orchestrator endpoint=${target.endpoint.id} unknown. Run \`clio providers\` to see configured endpoints.`,
 			);
 		}
-		if (runtime && runtime.providerId === target.providerId && runtime.modelId === target.modelId) {
+		if (
+			runtime &&
+			runtime.endpointId === target.endpoint.id &&
+			runtime.runtimeId === target.runtime.id &&
+			runtime.wireModelId === target.wireModelId
+		) {
 			return runtime;
 		}
 
-		const model = getModel(target.providerId, target.modelId);
+		const model = synthesizeModel(target);
 		const tools = resolveRuntimeTools(deps);
-		const thinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
 		// prompts contract is absent (tests, degraded boot).
+		const resolvedKey = resolveApiKey(target, deps.providers);
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
 				model,
-				thinkingLevel,
+				thinkingLevel: target.thinkingLevel,
 				tools,
 				messages: [],
 			},
-			getApiKey: async (provider) => {
-				if (target.endpointSpec?.api_key && target.endpointSpec.api_key.length > 0) {
-					return target.endpointSpec.api_key;
-				}
-				return process.env[envApiKeyName(provider)] ?? (target.endpointSpec ? LOCAL_API_KEY_FALLBACK : undefined);
-			},
+			getApiKey: async () => resolvedKey,
 		});
 
 		handle.agent.subscribe(async (event) => {
@@ -400,8 +425,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const tokens = readAssistantUsageTokens(event.messages);
 				if (tokens !== null) {
 					deps.observability.recordTokens(
-						target.providerId,
-						target.modelId,
+						target.endpoint.id,
+						target.wireModelId,
 						tokens,
 						readAssistantUsageCostUsd(event.messages),
 					);
@@ -411,8 +436,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		runtime = {
 			agent: handle.agent,
-			providerId: target.providerId,
-			modelId: target.modelId,
+			endpointId: target.endpoint.id,
+			runtimeId: target.runtime.id,
+			wireModelId: target.wireModelId,
 		};
 		return runtime;
 	};
@@ -506,8 +532,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		const dynamicInputs: DynamicInputs = {
-			provider: agentRuntime.providerId,
-			model: agentRuntime.modelId,
+			provider: agentRuntime.endpointId,
+			model: agentRuntime.wireModelId,
 			contextWindow,
 			thinkingBudget: settings.orchestrator.thinkingLevel ?? "off",
 			turnCount: 0,
@@ -603,7 +629,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// the threshold so /compact integration tests and live drills can
 			// force a run without driving real token usage. Compaction failures
 			// here are non-fatal: the user's turn still goes through, possibly
-			// oversized — the overflow-recovery path will catch that.
+			// oversized; the overflow-recovery path will catch that.
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
 			try {
 				await runAutoCompact(agentRuntime, forceNow);
@@ -615,8 +641,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!deps.session.current()) {
 					deps.session.create({
 						cwd: process.cwd(),
-						provider: agentRuntime.providerId,
-						model: agentRuntime.modelId,
+						endpoint: agentRuntime.endpointId,
+						model: agentRuntime.wireModelId,
 					});
 				}
 				const userTurn = deps.session.append({

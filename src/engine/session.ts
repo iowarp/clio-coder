@@ -40,7 +40,7 @@ export interface ClioSessionMeta {
 	createdAt: string;
 	endedAt: string | null;
 	model: string | null;
-	provider: string | null;
+	endpoint: string | null;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	clioVersion: string;
@@ -144,7 +144,7 @@ function newTurnId(): string {
 function buildMeta(input: {
 	cwd: string;
 	model?: string | null;
-	provider?: string | null;
+	endpoint?: string | null;
 }): ClioSessionMeta {
 	const resolvedCwd = resolve(input.cwd);
 	return {
@@ -154,7 +154,7 @@ function buildMeta(input: {
 		createdAt: new Date().toISOString(),
 		endedAt: null,
 		model: input.model ?? null,
-		provider: input.provider ?? null,
+		endpoint: input.endpoint ?? null,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		clioVersion: readClioVersion(),
@@ -254,7 +254,7 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 export function createSession(input: {
 	cwd: string;
 	model?: string | null;
-	provider?: string | null;
+	endpoint?: string | null;
 }): { meta: ClioSessionMeta; writer: ClioSessionWriter } {
 	const meta = buildMeta(input);
 	const paths = sessionPaths(meta);

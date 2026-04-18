@@ -26,7 +26,7 @@ export type {
 	ThinkingLevel,
 	ToolCallFormat,
 } from "./types/capability-flags.js";
-export type { KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
+export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export {
 	EMPTY_CAPABILITIES,
 	VALID_THINKING_LEVELS,

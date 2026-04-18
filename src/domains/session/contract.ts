@@ -45,7 +45,7 @@ export interface DeleteSessionOptions {
 export interface SessionContract {
 	current(): SessionMeta | null;
 	/** Create a new session for the given cwd. */
-	create(input?: { cwd?: string; model?: string; provider?: string }): SessionMeta;
+	create(input?: { cwd?: string; model?: string; endpoint?: string }): SessionMeta;
 	/** Append a turn to the current session. */
 	append(turn: TurnInput): ClioTurnRecord;
 	/**
