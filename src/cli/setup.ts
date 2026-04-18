@@ -1,202 +1,342 @@
-import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { Value } from "@sinclair/typebox/value";
-import chalk from "chalk";
 import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../core/config.js";
-import { DEFAULT_SETTINGS_YAML, type EndpointSpec } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
-import { SettingsSchema } from "../domains/config/schema.js";
-import type { LocalEngineId } from "../domains/providers/catalog.js";
-import type { EndpointProbeResult } from "../domains/providers/runtime-contract.js";
-import { llamacppAdapter } from "../domains/providers/runtimes/llamacpp.js";
-import { lmstudioAdapter } from "../domains/providers/runtimes/lmstudio.js";
-import { trimTrailingSlash } from "../domains/providers/runtimes/local-http.js";
-import { ollamaAdapter } from "../domains/providers/runtimes/ollama.js";
-import { openaiCompatAdapter } from "../domains/providers/runtimes/openai-compat.js";
-import { parseFlags, printError, printOk } from "./shared.js";
-
-type SetupPresetId = "mini" | "dynamo" | "ollama" | "openai-compat";
-
-interface SetupPreset {
-	id: SetupPresetId;
-	engine: LocalEngineId;
-	label: string;
-	description: string;
-	endpointName: string;
-	defaultUrl: string;
-}
-
-interface LocalProbeAdapter {
-	probeEndpoints(endpoints: Record<string, EndpointSpec>): Promise<EndpointProbeResult[]>;
-}
-
-const SETUP_PRESETS: readonly SetupPreset[] = [
-	{
-		id: "mini",
-		engine: "llamacpp",
-		label: "mini",
-		description: "llama.cpp on http://127.0.0.1:8080",
-		endpointName: "mini",
-		defaultUrl: "http://127.0.0.1:8080",
-	},
-	{
-		id: "dynamo",
-		engine: "lmstudio",
-		label: "dynamo",
-		description: "LM Studio on http://127.0.0.1:1234",
-		endpointName: "dynamo",
-		defaultUrl: "http://127.0.0.1:1234",
-	},
-	{
-		id: "ollama",
-		engine: "ollama",
-		label: "ollama",
-		description: "Ollama on http://127.0.0.1:11434",
-		endpointName: "local",
-		defaultUrl: "http://127.0.0.1:11434",
-	},
-	{
-		id: "openai-compat",
-		engine: "openai-compat",
-		label: "openai-compatible",
-		description: "a custom /v1 endpoint on http://127.0.0.1:8000",
-		endpointName: "local",
-		defaultUrl: "http://127.0.0.1:8000",
-	},
-] as const;
-
-const PRESET_BY_ID = new Map(SETUP_PRESETS.map((preset) => [preset.id, preset]));
-function presetForId(id: SetupPresetId): SetupPreset {
-	const preset = PRESET_BY_ID.get(id);
-	if (!preset) throw new Error(`missing setup preset ${id}`);
-	return preset;
-}
-const PRESET_BY_ENGINE = new Map<LocalEngineId, SetupPreset>([
-	["llamacpp", presetForId("mini")],
-	["lmstudio", presetForId("dynamo")],
-	["ollama", presetForId("ollama")],
-	["openai-compat", presetForId("openai-compat")],
-]);
-
-const LOCAL_ADAPTERS = {
-	llamacpp: llamacppAdapter as LocalProbeAdapter,
-	lmstudio: lmstudioAdapter as LocalProbeAdapter,
-	ollama: ollamaAdapter as LocalProbeAdapter,
-	"openai-compat": openaiCompatAdapter as LocalProbeAdapter,
-} satisfies Record<LocalEngineId, LocalProbeAdapter>;
+import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
+import { credentialsPresent, openCredentialStore } from "../domains/providers/credentials.js";
+import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
+import { printError, printOk } from "./shared.js";
 
 const HELP = `clio setup
 
 Usage:
-  clio setup
+  clio setup                       interactive wizard
+  clio setup --list                list registered runtimes
+  clio setup <runtime>             interactive wizard pre-filled with runtime
+  clio setup <runtime> --id <endpointId> [flags]
+  clio setup --remove <endpointId>
+  clio setup --rename <oldId> <newId>
 
-Guided setup boots configuration, probes local endpoints, and stores provider +
-model defaults for both interactive chat and workers.
+Non-interactive flags:
+  --id <endpointId>                endpoint id to register (required when non-interactive)
+  --url <host>                     endpoint base url (http(s):// or ws://)
+  --model <wireModelId>            default model id for this endpoint
+  --api-key-env <VAR>              read api key from this env var at call time
+  --api-key <literal>              store api key in credentials.yaml (keyed by runtime id)
+  --gateway                        mark the endpoint as a gateway
+  --set-orchestrator               point settings.orchestrator at this endpoint
+  --set-worker-default             point settings.workers.default at this endpoint
+  --context-window <N>             capability override
+  --reasoning <true|false>         capability override
 `;
 
-function schemaError(candidate: unknown): string {
-	const first = [...Value.Errors(SettingsSchema, candidate)][0];
-	return `${first?.path ?? "(root)"}: ${first?.message ?? "unknown schema error"}`;
+const DEFAULT_PORTS: Record<string, number> = {
+	llamacpp: 8080,
+	"llamacpp-anthropic": 8080,
+	"llamacpp-completion": 8080,
+	"llamacpp-embed": 8080,
+	"llamacpp-rerank": 8080,
+	lmstudio: 1234,
+	"lmstudio-native": 1234,
+	ollama: 11434,
+	"ollama-native": 11434,
+	vllm: 8000,
+	sglang: 30000,
+	tgi: 8080,
+	aphrodite: 2242,
+	tabbyapi: 5000,
+	"lemonade-anthropic": 8000,
+	lemonade: 8000,
+	"litellm-gateway": 4000,
+	"openai-compat": 8000,
+	koboldcpp: 5001,
+	mlc: 8000,
+	"mistral-rs": 8000,
+	localai: 8080,
+};
+
+interface ParsedArgs {
+	positional: string[];
+	help: boolean;
+	list: boolean;
+	remove?: string;
+	renameOld?: string;
+	renameNew?: string;
+	id?: string;
+	url?: string;
+	model?: string;
+	apiKeyEnv?: string;
+	apiKey?: string;
+	gateway: boolean;
+	setOrchestrator: boolean;
+	setWorkerDefault: boolean;
+	contextWindow?: number;
+	reasoning?: boolean;
 }
 
-function ensureSettingsValid(candidate: unknown): asserts candidate is ClioSettings {
-	if (Value.Check(SettingsSchema, candidate)) return;
-	throw new Error(schemaError(candidate));
+function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
+	const out: ParsedArgs = {
+		positional: [],
+		help: false,
+		list: false,
+		gateway: false,
+		setOrchestrator: false,
+		setWorkerDefault: false,
+	};
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i] as string;
+		const need = (): string => {
+			const v = argv[i + 1];
+			if (v === undefined) throw new Error(`${a} requires a value`);
+			i += 1;
+			return v;
+		};
+		switch (a) {
+			case "--help":
+			case "-h":
+				out.help = true;
+				break;
+			case "--list":
+				out.list = true;
+				break;
+			case "--remove":
+				out.remove = need();
+				break;
+			case "--rename":
+				out.renameOld = need();
+				out.renameNew = need();
+				break;
+			case "--id":
+				out.id = need();
+				break;
+			case "--url":
+				out.url = need();
+				break;
+			case "--model":
+				out.model = need();
+				break;
+			case "--api-key-env":
+				out.apiKeyEnv = need();
+				break;
+			case "--api-key":
+				out.apiKey = need();
+				break;
+			case "--gateway":
+				out.gateway = true;
+				break;
+			case "--set-orchestrator":
+				out.setOrchestrator = true;
+				break;
+			case "--set-worker-default":
+				out.setWorkerDefault = true;
+				break;
+			case "--context-window": {
+				const n = Number(need());
+				if (!Number.isFinite(n) || n <= 0) throw new Error("--context-window must be a positive number");
+				out.contextWindow = Math.floor(n);
+				break;
+			}
+			case "--reasoning": {
+				const v = need().toLowerCase();
+				if (v !== "true" && v !== "false") throw new Error("--reasoning must be true or false");
+				out.reasoning = v === "true";
+				break;
+			}
+			default:
+				if (a.startsWith("-")) throw new Error(`unknown flag: ${a}`);
+				out.positional.push(a);
+		}
+	}
+	return out;
 }
 
-function timestampSuffix(): string {
-	const now = new Date();
-	const year = String(now.getUTCFullYear());
-	const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-	const day = String(now.getUTCDate()).padStart(2, "0");
-	const hour = String(now.getUTCHours()).padStart(2, "0");
-	const minute = String(now.getUTCMinutes()).padStart(2, "0");
-	const second = String(now.getUTCSeconds()).padStart(2, "0");
-	return `${year}${month}${day}-${hour}${minute}${second}`;
+function ensureRegistryPopulated(): void {
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 }
 
-function normalizeEndpointValue(raw: string | undefined): string | undefined {
-	const trimmed = raw?.trim();
-	return trimmed && trimmed.length > 0 ? trimmed : undefined;
+function trimTrailing(url: string): string {
+	return url.endsWith("/") && url.length > 1 ? url.slice(0, -1) : url;
 }
 
-function normalizeEndpointUrl(input: string, defaultUrl: string): string {
+function normalizeUrl(input: string, runtimeId: string): string {
 	const trimmed = input.trim();
-	if (trimmed.length === 0) return trimTrailingSlash(defaultUrl);
+	if (trimmed.length === 0) return defaultUrlFor(runtimeId);
 	const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
 	const withScheme = hasScheme ? trimmed : `http://${trimmed}`;
 	try {
 		const parsed = new URL(withScheme);
-		if (!hasScheme && !parsed.port) {
-			const fallbackPort = new URL(defaultUrl).port;
-			if (fallbackPort) parsed.port = fallbackPort;
+		if (!hasScheme && !parsed.port && DEFAULT_PORTS[runtimeId]) {
+			parsed.port = String(DEFAULT_PORTS[runtimeId]);
 		}
-		return trimTrailingSlash(parsed.toString());
+		return trimTrailing(parsed.toString());
 	} catch {
-		return trimTrailingSlash(withScheme);
+		return trimTrailing(withScheme);
 	}
 }
 
-function endpointKey(engine: LocalEngineId, endpointName: string): string {
-	return `${engine}/${endpointName}`;
+function defaultUrlFor(runtimeId: string): string {
+	const port = DEFAULT_PORTS[runtimeId];
+	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
-function settingsEqual(a: ClioSettings, b: ClioSettings): boolean {
-	return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function uniqueEnabledRuntimes(existing: ReadonlyArray<string>, engine: LocalEngineId): string[] {
-	return Array.from(new Set(["native", ...existing, engine]));
-}
-
-function sanitizeProvider(_settings: Readonly<ClioSettings>, provider?: string): LocalEngineId | undefined {
-	return PRESET_BY_ENGINE.has(provider as LocalEngineId) ? (provider as LocalEngineId) : undefined;
-}
-
-function hasOrchestratorTarget(settings: Readonly<ClioSettings>): boolean {
-	const provider = settings.orchestrator.provider;
-	if (!provider) return false;
-	if (!sanitizeProvider(settings, provider)) return false;
-	return !!settings.orchestrator.endpoint;
-}
-
-function formatTargetFor(settings: Readonly<ClioSettings>, kind: "chat" | "worker"): string {
-	if (kind === "chat") {
-		const provider = settings.orchestrator.provider?.trim();
-		const endpoint = settings.orchestrator.endpoint?.trim();
-		const model = settings.orchestrator.model?.trim();
-		if (!provider || !endpoint) return "not configured";
-		const safeProvider = sanitizeProvider(settings, provider);
-		if (!safeProvider) return "not configured";
-		const url = settings.providers[safeProvider]?.endpoints?.[endpoint]?.url ?? "(not configured)";
-		return `${provider}/${endpoint}   ${trimTrailingSlash(url)}   ${model ?? "(not configured)"}`;
+function groupByKind(
+	runtimes: ReadonlyArray<RuntimeDescriptor>,
+): { cloud: RuntimeDescriptor[]; local: RuntimeDescriptor[]; subprocess: RuntimeDescriptor[] } {
+	const cloud: RuntimeDescriptor[] = [];
+	const local: RuntimeDescriptor[] = [];
+	const subprocess: RuntimeDescriptor[] = [];
+	for (const r of runtimes) {
+		if (r.kind === "subprocess") subprocess.push(r);
+		else if (r.auth === "api-key" && !r.probe) cloud.push(r);
+		else if (r.kind === "http" && r.probe) local.push(r);
+		else cloud.push(r);
 	}
-
-	const provider = settings.workers.default.provider?.trim();
-	const endpoint = settings.workers.default.endpoint?.trim();
-	const model = settings.workers.default.model?.trim();
-	if (!provider || !endpoint) return "not configured";
-	const safeProvider = sanitizeProvider(settings, provider);
-	if (!safeProvider) return "not configured";
-	const url = settings.providers[safeProvider]?.endpoints?.[endpoint]?.url ?? "(not configured)";
-	return `${provider}/${endpoint}   ${trimTrailingSlash(url)}   ${model ?? "(not configured)"}`;
+	const byId = (a: RuntimeDescriptor, b: RuntimeDescriptor): number => a.id.localeCompare(b.id);
+	cloud.sort(byId);
+	local.sort(byId);
+	subprocess.sort(byId);
+	return { cloud, local, subprocess };
 }
 
-function currentModelForEndpoint(
-	settings: Readonly<ClioSettings>,
-	preset: SetupPreset,
-	endpointName: string,
-): string | undefined {
-	const direct = normalizeEndpointValue(settings.providers[preset.engine]?.endpoints?.[endpointName]?.default_model);
-	if (direct) return direct;
-	if (settings.orchestrator.provider === preset.engine && settings.orchestrator.endpoint === endpointName) {
-		return normalizeEndpointValue(settings.orchestrator.model);
+function printRuntimeList(): void {
+	const { cloud, local, subprocess } = groupByKind(getRuntimeRegistry().list());
+	process.stdout.write("Cloud (api-key):\n");
+	for (const r of cloud) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
+	process.stdout.write("\nLocal HTTP:\n");
+	for (const r of local) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
+	process.stdout.write("\nSubprocess (CLI agents):\n");
+	for (const r of subprocess) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
+}
+
+function deriveEndpointId(runtimeId: string, existing: ReadonlyArray<EndpointDescriptor>): string {
+	const base = runtimeId;
+	const taken = new Set(existing.map((e) => e.id));
+	if (!taken.has(base)) return base;
+	for (let i = 2; i < 1000; i++) {
+		const candidate = `${base}-${i}`;
+		if (!taken.has(candidate)) return candidate;
 	}
-	if (settings.workers.default.provider === preset.engine && settings.workers.default.endpoint === endpointName) {
-		return normalizeEndpointValue(settings.workers.default.model);
+	return `${base}-${Date.now()}`;
+}
+
+function buildProbeContext(): ProbeContext {
+	return {
+		credentialsPresent: credentialsPresent(),
+		httpTimeoutMs: 5000,
+	};
+}
+
+async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: EndpointDescriptor): Promise<ProbeResult | null> {
+	if (typeof runtime.probe !== "function") return null;
+	try {
+		return await runtime.probe(endpoint, buildProbeContext());
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
-	return undefined;
+}
+
+async function runtimeProbeModels(runtime: RuntimeDescriptor, endpoint: EndpointDescriptor): Promise<string[]> {
+	if (typeof runtime.probeModels !== "function") return [];
+	try {
+		return await runtime.probeModels(endpoint, buildProbeContext());
+	} catch {
+		return [];
+	}
+}
+
+function applyEndpoint(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+	const idx = settings.endpoints.findIndex((e) => e.id === descriptor.id);
+	if (idx >= 0) settings.endpoints[idx] = descriptor;
+	else settings.endpoints.push(descriptor);
+}
+
+function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+	settings.orchestrator.endpoint = descriptor.id;
+	if (descriptor.defaultModel) settings.orchestrator.model = descriptor.defaultModel;
+}
+
+function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+	settings.workers.default.endpoint = descriptor.id;
+	if (descriptor.defaultModel) settings.workers.default.model = descriptor.defaultModel;
+}
+
+function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, probe: ProbeResult | null): void {
+	process.stdout.write(`\nsaved endpoint ${descriptor.id} (runtime=${descriptor.runtime})\n`);
+	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
+	if (descriptor.defaultModel) process.stdout.write(`  model      ${descriptor.defaultModel}\n`);
+	if (descriptor.auth?.apiKeyEnvVar) process.stdout.write(`  apiKeyEnv  ${descriptor.auth.apiKeyEnvVar}\n`);
+	if (descriptor.gateway) process.stdout.write("  gateway    true\n");
+	if (probe) {
+		const line = probe.ok
+			? `probe ok${probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : ""}${probe.serverVersion ? ` ${probe.serverVersion}` : ""}`
+			: `probe failed: ${probe.error ?? "unknown"}`;
+		process.stdout.write(`  ${line}\n`);
+	}
+	if (settings.orchestrator.endpoint === descriptor.id) process.stdout.write("  orchestrator target\n");
+	if (settings.workers.default.endpoint === descriptor.id) process.stdout.write("  worker default\n");
+	process.stdout.write(`\nsettings written to ${settingsPath()}\n`);
+}
+
+function buildDescriptor(
+	runtime: RuntimeDescriptor,
+	id: string,
+	parts: {
+		url?: string;
+		model?: string;
+		apiKeyEnv?: string;
+		gateway?: boolean;
+		contextWindow?: number;
+		reasoning?: boolean;
+	},
+): EndpointDescriptor {
+	const descriptor: EndpointDescriptor = { id, runtime: runtime.id };
+	if (parts.url) descriptor.url = parts.url;
+	if (parts.model) descriptor.defaultModel = parts.model;
+	const auth: NonNullable<EndpointDescriptor["auth"]> = {};
+	if (parts.apiKeyEnv) auth.apiKeyEnvVar = parts.apiKeyEnv;
+	if (Object.keys(auth).length > 0) descriptor.auth = auth;
+	if (parts.gateway) descriptor.gateway = true;
+	const caps: NonNullable<EndpointDescriptor["capabilities"]> = {};
+	if (parts.contextWindow !== undefined) caps.contextWindow = parts.contextWindow;
+	if (parts.reasoning !== undefined) caps.reasoning = parts.reasoning;
+	if (Object.keys(caps).length > 0) descriptor.capabilities = caps;
+	return descriptor;
+}
+
+async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): Promise<number> {
+	if (!args.id) {
+		printError("--id is required when passing flags non-interactively");
+		return 2;
+	}
+	const settings = readSettings();
+	const existing = settings.endpoints.find((e) => e.id === args.id);
+	if (existing && existing.runtime !== runtime.id) {
+		printError(`endpoint ${args.id} already exists with runtime ${existing.runtime}`);
+		return 2;
+	}
+	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
+	if (!url && runtime.kind === "http" && runtime.auth !== "api-key") {
+		url = defaultUrlFor(runtime.id);
+	}
+	const descriptor = buildDescriptor(runtime, args.id, {
+		...(url !== undefined ? { url } : {}),
+		...(args.model !== undefined ? { model: args.model } : existing?.defaultModel ? { model: existing.defaultModel } : {}),
+		...(args.apiKeyEnv !== undefined ? { apiKeyEnv: args.apiKeyEnv } : existing?.auth?.apiKeyEnvVar ? { apiKeyEnv: existing.auth.apiKeyEnvVar } : {}),
+		gateway: args.gateway || existing?.gateway === true,
+		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+	});
+	if (args.apiKey) openCredentialStore().set(runtime.id, args.apiKey);
+	applyEndpoint(settings, descriptor);
+	if (args.setOrchestrator) setOrchestratorPointer(settings, descriptor);
+	if (args.setWorkerDefault) setWorkerDefaultPointer(settings, descriptor);
+	writeSettings(settings);
+	const probe = await runtimeProbe(runtime, descriptor);
+	printSummary(settings, descriptor, probe);
+	printOk(`endpoint ${args.id} saved`);
+	return 0;
 }
 
 async function ask(
@@ -204,37 +344,14 @@ async function ask(
 	label: string,
 	defaultValue?: string,
 ): Promise<string | null> {
-	const suffix = defaultValue && defaultValue.length > 0 ? `${chalk.dim(`[${defaultValue}]`)} ` : "";
+	const suffix = defaultValue && defaultValue.length > 0 ? ` [${defaultValue}]` : "";
 	try {
-		const answer = await rl.question(`${label} ${suffix}`);
-		const trimmed = answer.trim();
-		if (trimmed.length === 0) return defaultValue ?? "";
-		if (trimmed.toLowerCase() === "q" || trimmed.toLowerCase() === "quit") return null;
-		return trimmed;
+		const answer = (await rl.question(`${label}${suffix}: `)).trim();
+		if (answer.length === 0) return defaultValue ?? "";
+		if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") return null;
+		return answer;
 	} catch {
 		return null;
-	}
-}
-
-function parseNumeric(input: string): number | null {
-	const value = Number(input);
-	if (!Number.isInteger(value)) return null;
-	return value;
-}
-
-async function askNumeric(
-	rl: ReturnType<typeof createInterface>,
-	label: string,
-	min: number,
-	max: number,
-	defaultValue: number,
-): Promise<number | null> {
-	while (true) {
-		const answer = await ask(rl, `${label}`, String(defaultValue));
-		if (answer === null) return null;
-		const numeric = parseNumeric(answer);
-		if (numeric !== null && numeric >= min && numeric <= max) return numeric;
-		printError(`invalid selection: ${answer}`);
 	}
 }
 
@@ -242,614 +359,270 @@ async function askYesNo(
 	rl: ReturnType<typeof createInterface>,
 	label: string,
 	defaultValue: boolean,
-): Promise<boolean | null> {
+): Promise<boolean> {
 	const marker = defaultValue ? "Y/n" : "y/N";
-	while (true) {
+	for (;;) {
 		const answer = await ask(rl, `${label} [${marker}]`);
-		if (answer === null) return null;
+		if (answer === null) return defaultValue;
 		if (answer.length === 0) return defaultValue;
 		const lc = answer.toLowerCase();
-		if (["y", "yes"].includes(lc)) return true;
-		if (["n", "no"].includes(lc)) return false;
-		printError(`invalid response: ${answer}`);
+		if (lc === "y" || lc === "yes") return true;
+		if (lc === "n" || lc === "no") return false;
+		process.stderr.write(`invalid response: ${answer}\n`);
 	}
 }
 
-async function loadSettingsWithRepair(rl: ReturnType<typeof createInterface>): Promise<ClioSettings> {
-	try {
-		const settings = readSettings();
-		ensureSettingsValid(settings);
-		return settings;
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		const path = settingsPath();
-		printError("settings.yaml is invalid", reason);
-		const answer = await ask(rl, `Back up ${path} and restore a clean template?`, "y");
-		if (!answer) return readSettings();
-		const backupPath = `${path}.bak-${timestampSuffix()}`;
-		renameSync(path, backupPath);
-		writeFileSync(path, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
-		printOk(`restored ${path} and kept the old file at ${backupPath}`);
-		const restored = readSettings();
-		ensureSettingsValid(restored);
-		return restored;
+async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
+	const registry = getRuntimeRegistry();
+	const all = registry.list();
+	const { cloud, local, subprocess } = groupByKind(all);
+	const ordered: RuntimeDescriptor[] = [...cloud, ...local, ...subprocess];
+	process.stdout.write("\nRegistered runtimes:\n");
+	process.stdout.write("  Cloud (api-key):\n");
+	for (const r of cloud) process.stdout.write(`    ${r.id}\n`);
+	process.stdout.write("  Local HTTP:\n");
+	for (const r of local) process.stdout.write(`    ${r.id}\n`);
+	process.stdout.write("  Subprocess (CLI agents):\n");
+	for (const r of subprocess) process.stdout.write(`    ${r.id}\n`);
+	for (;;) {
+		const answer = await ask(rl, "\nRuntime id");
+		if (answer === null) return null;
+		if (answer.length === 0) continue;
+		const match = ordered.find((r) => r.id === answer);
+		if (match) return match;
+		process.stderr.write(`unknown runtime id: ${answer}\n`);
 	}
 }
 
-async function probePresetEndpoint(preset: SetupPreset, spec: EndpointSpec): Promise<EndpointProbeResult> {
-	const adapter = LOCAL_ADAPTERS[preset.engine];
-	const started = Date.now();
-	try {
-		const [result] = await adapter.probeEndpoints({ [preset.endpointName]: spec });
-		if (!result) {
-			return {
-				name: preset.endpointName,
-				url: spec.url,
-				ok: false,
-				latencyMs: Date.now() - started,
-				error: "empty probe result",
-				models: [],
-			};
-		}
-		return {
-			...result,
-			name: preset.endpointName,
-			url: spec.url,
-			latencyMs: result.latencyMs ?? Date.now() - started,
-		};
-	} catch (err) {
-		return {
-			name: preset.endpointName,
-			url: spec.url,
-			ok: false,
-			latencyMs: Date.now() - started,
-			error: err instanceof Error ? err.message : String(err),
-			models: [],
-		};
-	}
-}
-
-function buildEngineCounts(settings: Readonly<ClioSettings>): string[] {
-	return SETUP_PRESETS.map((preset) => {
-		const count = Object.keys(settings.providers[preset.engine]?.endpoints ?? {}).length;
-		return `${preset.label} (${count})`;
-	});
-}
-
-function listConfiguredEndpoints(
-	settings: Readonly<ClioSettings>,
-): Array<{ preset: SetupPreset; endpointName: string; spec: EndpointSpec }> {
-	const rows: Array<{ preset: SetupPreset; endpointName: string; spec: EndpointSpec }> = [];
-	for (const preset of SETUP_PRESETS) {
-		for (const [name, spec] of Object.entries(settings.providers[preset.engine]?.endpoints ?? {})) {
-			rows.push({ preset, endpointName: name, spec: spec as EndpointSpec });
-		}
-	}
-	return rows;
-}
-
-function showStatusSummary(settings: Readonly<ClioSettings>, probeState: Map<string, EndpointProbeResult>): void {
-	process.stdout.write(`\nclio setup · settings ${settingsPath()}\n\n`);
-	process.stdout.write(`active chat    ${formatTargetFor(settings, "chat")}\n`);
-	process.stdout.write(`active worker  ${formatTargetFor(settings, "worker")}\n`);
-	process.stdout.write(
-		`safety         ${settings.safetyLevel}       budget  $${settings.budget.sessionCeilingUsd}/session       mode  ${settings.defaultMode}\n`,
-	);
-	process.stdout.write(`runtimes       ${(settings.runtimes.enabled ?? []).join(", ")}\n\n`);
-
-	const endpoints = listConfiguredEndpoints(settings);
-	process.stdout.write(`endpoints (${endpoints.length}):\n`);
-	if (endpoints.length === 0) {
-		process.stdout.write("  (none configured)\n\n");
-		return;
-	}
-	for (const endpoint of endpoints) {
-		const key = endpointKey(endpoint.preset.engine, endpoint.endpointName);
-		const probe = probeState.get(key);
-		let status = "not probed";
-		if (probe) {
-			status = probe.ok
-				? `OK · ${probe.models?.length ?? 0} model${(probe.models?.length ?? 0) === 1 ? "" : "s"} · ${probe.latencyMs ?? 0}ms`
-				: `fail · ${probe.error ?? "unknown"}`;
-		}
-		process.stdout.write(
-			`  ${endpoint.preset.engine}/${endpoint.endpointName}  ${trimTrailingSlash(endpoint.spec.url)}   [${status}]\n`,
-		);
-	}
-	process.stdout.write("\n");
-}
-
-function renderModelList(models: ReadonlyArray<string>): string {
-	if (models.length === 0) return "no models detected";
-	return models.map((model, index) => `  ${index + 1}. ${model}`).join("\n");
-}
-
-function maybeModel(target?: string | null): { model?: string } {
-	const value = normalizeEndpointValue(target ?? undefined);
-	if (!value) return {};
-	return { model: value };
-}
-
-function chooseEndpointName(rl: ReturnType<typeof createInterface>, preset: SetupPreset): Promise<string | null> {
-	return ask(rl, "Endpoint name", preset.endpointName);
-}
-
-async function actionAddOrEditEndpoint(
+async function runInteractive(
 	rl: ReturnType<typeof createInterface>,
-	settings: ClioSettings,
-	probeState: Map<string, EndpointProbeResult>,
-): Promise<boolean> {
-	process.stdout.write("\nLocal engines:\n");
-	const counts = buildEngineCounts(settings);
-	for (const [index, preset] of SETUP_PRESETS.entries()) {
-		process.stdout.write(`  ${index + 1}. ${preset.label.padEnd(18)} ${counts[index]}\n`);
+	preselectedRuntime: RuntimeDescriptor | null,
+	defaults: ParsedArgs,
+): Promise<number> {
+	const runtime = preselectedRuntime ?? (await pickRuntime(rl));
+	if (!runtime) {
+		printError("setup cancelled");
+		return 0;
 	}
-	const presetChoice = await askNumeric(rl, "Selection", 1, SETUP_PRESETS.length, 1);
-	if (presetChoice === null) return false;
-	const preset = SETUP_PRESETS[presetChoice - 1];
-	if (!preset) return true;
-
-	const existingEntries = Object.entries(settings.providers[preset.engine]?.endpoints ?? {});
-	process.stdout.write(`\nConfigured ${preset.engine} endpoints:\n`);
-	for (const [index, [name]] of existingEntries.entries()) {
-		process.stdout.write(`  ${index + 1}. ${name}\n`);
+	const settings = readSettings();
+	const suggestedId = defaults.id ?? deriveEndpointId(runtime.id, settings.endpoints);
+	const idInput = await ask(rl, "Endpoint id", suggestedId);
+	if (idInput === null || idInput.length === 0) {
+		printError("endpoint id is required");
+		return 2;
 	}
-	process.stdout.write(`  ${existingEntries.length + 1}. add new\n`);
-	const endpointChoice = await askNumeric(
-		rl,
-		"Selection",
-		existingEntries.length + 1,
-		existingEntries.length + 1,
-		existingEntries.length > 0 ? 1 : existingEntries.length + 1,
-	);
-	if (endpointChoice === null) return false;
+	const endpointId = idInput;
 
-	let endpointName = "";
-	let endpointSpec: EndpointSpec | null = null;
-	if (endpointChoice === existingEntries.length + 1) {
-		const inputName = await chooseEndpointName(rl, preset);
-		if (inputName === null) return false;
-		endpointName = inputName.trim().length > 0 ? inputName.trim() : preset.endpointName;
-	} else {
-		const picked = existingEntries[endpointChoice - 1];
-		if (!picked) return true;
-		endpointName = picked[0];
-		endpointSpec = picked[1] as EndpointSpec;
-	}
-
-	let model = "";
-	let probeResult: EndpointProbeResult | null = null;
-	let normalizedUrl = endpointSpec?.url ? normalizeEndpointUrl(endpointSpec.url, preset.defaultUrl) : "";
-	let useUrlPrompt = !endpointSpec?.url;
-
-	if (endpointSpec?.url) {
-		const silentProbe = await probePresetEndpoint({ ...preset, endpointName }, { ...endpointSpec, url: normalizedUrl });
-		if (silentProbe.ok) {
-			probeResult = silentProbe;
-			probeState.set(endpointKey(preset.engine, endpointName), silentProbe);
-			const preferred = currentModelForEndpoint(settings, preset, endpointName);
-			if (silentProbe.models && silentProbe.models.length > 0) {
-				model = preferred && silentProbe.models.includes(preferred) ? preferred : (silentProbe.models[0] ?? "");
-			} else {
-				model = preferred ?? "";
-			}
+	let url: string | undefined;
+	if (runtime.kind === "http") {
+		if (runtime.auth === "api-key" && !runtime.probe) {
+			const urlInput = await ask(rl, "Base URL (optional; leave blank for runtime default)", defaults.url ?? "");
+			if (urlInput !== null && urlInput.length > 0) url = normalizeUrl(urlInput, runtime.id);
 		} else {
-			process.stdout.write(chalk.yellow(`\nprobe failed: ${silentProbe.error ?? "unknown"}\n`));
-			const recovery = await askNumeric(rl, "1) retry URL 2) type model manually", 1, 2, 2);
-			if (recovery === null) return false;
-			if (recovery === 2) {
-				const manualModel = await ask(rl, "Model id (required; probe could not auto-detect one)", "");
-				if (manualModel === null) return false;
-				if (!manualModel.trim()) {
-					printError("model id is required");
-					return true;
-				}
-				model = manualModel.trim();
-				useUrlPrompt = false;
-			}
+			const urlInput = await ask(rl, "Endpoint URL", defaults.url ?? defaultUrlFor(runtime.id));
+			if (urlInput === null) return 0;
+			url = normalizeUrl(urlInput.length > 0 ? urlInput : defaultUrlFor(runtime.id), runtime.id);
 		}
 	}
 
-	while (useUrlPrompt) {
-		const answer = await ask(rl, "Endpoint URL", endpointSpec?.url ?? preset.defaultUrl);
-		if (answer === null) return false;
-		normalizedUrl = normalizeEndpointUrl(answer, preset.defaultUrl);
-		if (normalizedUrl !== answer.trim()) {
-			process.stdout.write(chalk.dim(`  using ${normalizedUrl}\n`));
-		}
-		probeResult = await probePresetEndpoint({ ...preset, endpointName }, { ...(endpointSpec ?? {}), url: normalizedUrl });
-		if (probeResult.ok) {
-			probeState.set(endpointKey(preset.engine, endpointName), probeResult);
-			useUrlPrompt = false;
-			break;
-		}
-		process.stdout.write(chalk.yellow(`\nprobe failed: ${probeResult.error ?? "not reachable"}\n`));
-		const recovery = await askNumeric(rl, "1) retry URL 2) type model manually", 1, 2, 1);
-		if (recovery === null) return false;
-		if (recovery === 2) {
-			const manualModel = await ask(rl, "Model id (required; probe could not auto-detect one)", "");
-			if (manualModel === null) return false;
-			if (!manualModel.trim()) {
-				printError("model id is required");
-				return true;
-			}
-			model = manualModel.trim();
-			useUrlPrompt = false;
-			break;
+	let apiKeyEnv: string | undefined;
+	let apiKeyLiteral: string | undefined;
+	if (runtime.auth === "api-key") {
+		process.stdout.write("\nAPI key source:\n  1. env var\n  2. stored literal (credentials.yaml)\n");
+		const choice = await ask(rl, "Selection", "1");
+		if (choice === "2") {
+			const literal = await ask(rl, "API key literal (stored in credentials.yaml, mode 0600)");
+			if (literal !== null && literal.length > 0) apiKeyLiteral = literal;
+		} else {
+			const envDefault = defaults.apiKeyEnv ?? runtime.credentialsEnvVar ?? "";
+			const envAnswer = await ask(rl, "Env var name", envDefault);
+			if (envAnswer !== null && envAnswer.length > 0) apiKeyEnv = envAnswer;
 		}
 	}
 
-	if (!model && probeResult?.ok && probeResult.models && probeResult.models.length > 0) {
-		process.stdout.write(`\nDetected models:\n${renderModelList(probeResult.models)}\n\n`);
-		const preferred = currentModelForEndpoint(settings, preset, endpointName);
-		const defaultChoice = preferred ? probeResult.models.indexOf(preferred) + 1 : 1;
-		const selected = await askNumeric(rl, "Selection", 1, probeResult.models.length, defaultChoice || 1);
-		if (selected === null) return false;
-		const picked = probeResult.models[selected - 1];
-		if (!picked) {
-			printError("model id is required");
-			return true;
-		}
-		model = picked;
-	}
-
-	if (!model) {
-		const manualModel = await ask(rl, "Model id", "");
-		if (manualModel === null) return false;
-		if (!manualModel.trim()) {
-			printError("model id is required");
-			return true;
-		}
-		model = manualModel.trim();
-	}
-
-	let apiKey: string | undefined;
-	if (preset.engine === "openai-compat") {
-		const input = await ask(rl, "API key (leave blank for none)", endpointSpec?.api_key ?? "");
-		if (input === null) return false;
-		if (input.trim()) apiKey = input.trim();
-	}
-
-	settings.providers[preset.engine].endpoints[endpointName] = {
-		...(endpointSpec ?? {}),
-		url: normalizedUrl,
-		...(apiKey ? { api_key: apiKey } : {}),
-		default_model: model,
-	};
-	settings.runtimes.enabled = uniqueEnabledRuntimes(settings.runtimes.enabled, preset.engine);
-
-	const firstUsable = !hasOrchestratorTarget(settings);
-	const useForChat = await askYesNo(rl, "use for chat target?", firstUsable);
-	if (useForChat === null) return false;
-	if (useForChat) {
-		settings.orchestrator = {
-			provider: preset.engine,
-			endpoint: endpointName,
-			...maybeModel(model),
-		};
-		settings.provider = {
-			...settings.provider,
-			active: preset.engine,
-			model,
-		};
-	}
-	const useForWorker = await askYesNo(rl, "use for worker target?", firstUsable);
-	if (useForWorker === null) return false;
-	if (useForWorker) {
-		settings.workers.default = {
-			provider: preset.engine,
-			endpoint: endpointName,
-			...maybeModel(model),
-		};
-	}
-	printOk(`updated ${preset.engine}/${endpointName}`);
-	return true;
-}
-
-function renderTargetChoices(entries: ReadonlyArray<{ preset: SetupPreset; endpointName: string }>): void {
-	for (const [index, entry] of entries.entries()) {
-		process.stdout.write(`  ${index + 1}. ${entry.preset.engine}/${entry.endpointName}\n`);
-	}
-}
-
-async function actionSwitchTarget(rl: ReturnType<typeof createInterface>, settings: ClioSettings): Promise<boolean> {
-	const entries = listConfiguredEndpoints(settings);
-	if (entries.length === 0) {
-		printError("No endpoints configured yet.");
-		return true;
-	}
-
-	process.stdout.write("\nAvailable endpoints:\n");
-	renderTargetChoices(entries);
-	const chatChoice = await askNumeric(rl, "Selection for chat", 1, entries.length, 1);
-	if (chatChoice === null) return false;
-	const chatTarget = entries[chatChoice - 1];
-	if (!chatTarget) return true;
-
-	process.stdout.write("\nWorker target:\n");
-	process.stdout.write("  0. same as chat\n");
-	renderTargetChoices(entries);
-	const workerChoice = await askNumeric(rl, "Selection", 0, entries.length, 0);
-	if (workerChoice === null) return false;
-	const workerTarget = workerChoice === 0 ? chatTarget : entries[workerChoice - 1];
-	if (!workerTarget) return true;
-
-	settings.orchestrator = {
-		provider: chatTarget.preset.engine,
-		endpoint: chatTarget.endpointName,
-		...maybeModel(chatTarget.spec.default_model),
-	};
-	settings.provider = {
-		...settings.provider,
-		active: chatTarget.preset.engine,
-		model: chatTarget.spec.default_model ?? settings.provider?.model ?? null,
-	};
-	settings.workers.default = {
-		provider: workerTarget.preset.engine,
-		endpoint: workerTarget.endpointName,
-		...maybeModel(workerTarget.spec.default_model),
-	};
-	return true;
-}
-
-async function actionProbeAll(
-	_rl: ReturnType<typeof createInterface>,
-	settings: Readonly<ClioSettings>,
-	probeState: Map<string, EndpointProbeResult>,
-): Promise<boolean> {
-	const endpoints = listConfiguredEndpoints(settings);
-	if (endpoints.length === 0) {
-		printError("No endpoints configured yet.");
-		return true;
-	}
-	process.stdout.write("\nProbing all configured endpoints\n");
-	for (const endpoint of endpoints) {
-		const result = await probePresetEndpoint(
-			{ ...endpoint.preset, endpointName: endpoint.endpointName },
-			{
-				...endpoint.spec,
-			},
-		);
-		const line = result.ok
-			? `OK · ${result.models?.length ?? 0} models · ${result.latencyMs ?? 0}ms`
-			: `fail · ${result.error ?? "unknown"}`;
-		process.stdout.write(
-			`  ${endpoint.preset.engine}/${endpoint.endpointName} ${trimTrailingSlash(endpoint.spec.url)} [${line}]\n`,
-		);
-		probeState.set(endpointKey(endpoint.preset.engine, endpoint.endpointName), result);
-	}
-	process.stdout.write("\n");
-	return true;
-}
-
-async function actionSafety(rl: ReturnType<typeof createInterface>, settings: ClioSettings): Promise<boolean> {
-	const options = [
-		{ value: "suggest", description: "ask for confirmation before edits" },
-		{ value: "auto-edit", description: "apply safe edits automatically" },
-		{ value: "full-auto", description: "apply edits without prompts" },
-	] as const;
-	process.stdout.write("\nChoose safety level:\n");
-	for (const [index, option] of options.entries()) {
-		const marker = option.value === settings.safetyLevel ? " *" : "";
-		process.stdout.write(`  ${index + 1}. ${option.value}  ${option.description}${marker}\n`);
-	}
-	const defaultIndex = Math.max(1, options.findIndex((option) => option.value === settings.safetyLevel) + 1);
-	const selected = await askNumeric(rl, "Selection", 1, options.length, defaultIndex);
-	if (selected === null) return false;
-	const picked = options[selected - 1];
-	if (!picked) return true;
-	settings.safetyLevel = picked.value;
-	return true;
-}
-
-async function actionBudget(rl: ReturnType<typeof createInterface>, settings: ClioSettings): Promise<boolean> {
-	while (true) {
-		const value = await ask(rl, "sessionCeilingUsd", String(settings.budget.sessionCeilingUsd));
-		if (value === null) return false;
-		const parsed = Number(value);
-		if (Number.isFinite(parsed)) {
-			settings.budget.sessionCeilingUsd = parsed;
-			break;
-		}
-		printError("sessionCeilingUsd must be a number");
-	}
-	while (true) {
-		const value = await ask(rl, "concurrency", String(settings.budget.concurrency));
-		if (value === null) return false;
-		if (value.toLowerCase() === "auto") {
-			settings.budget.concurrency = "auto";
-			break;
-		}
-		const parsed = Number(value);
-		if (Number.isInteger(parsed) && parsed > 0) {
-			settings.budget.concurrency = parsed;
-			break;
-		}
-		printError("concurrency must be 'auto' or a positive integer");
-	}
-	return true;
-}
-
-async function actionOpenSettings(rl: ReturnType<typeof createInterface>, settings: ClioSettings): Promise<boolean> {
-	const editor = process.env.EDITOR?.trim() || (process.platform === "win32" ? "notepad" : "vi");
-	const path = settingsPath();
-	const backupPath = `${path}.backup-${timestampSuffix()}`;
-	const previous = readFileSync(path, "utf8");
-	writeFileSync(backupPath, previous, { encoding: "utf8", mode: 0o644 });
-	const exitCode = await new Promise<number>((resolve, reject) => {
-		const child = spawn(editor, [path], { stdio: "inherit" });
-		child.once("error", reject);
-		child.once("close", (code) => resolve(code ?? 0));
+	let model: string | undefined = defaults.model;
+	const tentative = buildDescriptor(runtime, endpointId, {
+		...(url !== undefined ? { url } : {}),
+		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		gateway: defaults.gateway,
+		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
+		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
-	if (exitCode !== 0) {
-		printError(`editor exited with status ${exitCode}`);
-		return true;
-	}
-	try {
-		const next = readSettings();
-		ensureSettingsValid(next);
-		Object.assign(settings, next);
-		return true;
-	} catch (err) {
-		printError("settings.yaml failed validation", err instanceof Error ? err.message : String(err));
-		const restore = await askYesNo(rl, `restore backup from ${backupPath}?`, false);
-		if (!restore) return true;
-		writeFileSync(path, previous, { encoding: "utf8", mode: 0o644 });
-		const restored = readSettings();
-		Object.assign(settings, restored);
-		printOk(`restored ${path}`);
-		return true;
-	}
-}
 
-async function actionReset(
-	rl: ReturnType<typeof createInterface>,
-	settings: ClioSettings,
-	probeState: Map<string, EndpointProbeResult>,
-): Promise<boolean> {
-	const confirm = await ask(rl, 'type "reset" to confirm', "");
-	if (confirm === null) return false;
-	if (confirm !== "reset") {
-		printError("reset aborted");
-		return true;
-	}
-	const path = settingsPath();
-	const backupPath = `${path}.backup-${timestampSuffix()}`;
-	renameSync(path, backupPath);
-	writeFileSync(path, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
-	const updated = readSettings();
-	Object.assign(settings, updated);
-	probeState.clear();
-	printOk(`settings reset. backup written to ${backupPath}`);
-	return true;
-}
-
-async function promptSaveOnExit(rl: ReturnType<typeof createInterface>, settings: ClioSettings): Promise<void> {
-	const onDisk = readSettings();
-	if (settingsEqual(settings, onDisk)) {
-		return;
-	}
-	const shouldSave = await askYesNo(rl, "save changes before exit?", false);
-	if (!shouldSave) return;
-	await writeSettingsAtomically(settings);
-}
-
-async function writeSettingsAtomically(settings: ClioSettings): Promise<void> {
-	const path = settingsPath();
-	const backupPath = `${path}.backup-write-${timestampSuffix()}`;
-	let hadExisting = false;
-	if (existsSync(path)) {
-		hadExisting = true;
-		copyFileSync(path, backupPath);
-	}
-	try {
-		writeSettings(settings);
-	} catch (err) {
-		if (hadExisting) {
-			copyFileSync(backupPath, path);
+	if (!model && runtime.kind === "http") {
+		const discovered = await runtimeProbeModels(runtime, tentative);
+		if (discovered.length > 0) {
+			process.stdout.write("\nDiscovered models:\n");
+			for (const [i, id] of discovered.entries()) process.stdout.write(`  ${i + 1}. ${id}\n`);
+			const pick = await ask(rl, "Selection (blank to skip)", "1");
+			if (pick && pick.length > 0) {
+				const n = Number(pick);
+				if (Number.isInteger(n) && n >= 1 && n <= discovered.length) model = discovered[n - 1];
+			}
 		}
-		throw err;
+		if (!model) {
+			const manual = await ask(rl, "Default model id (blank to leave empty)", "");
+			if (manual && manual.length > 0) model = manual;
+		}
+	} else if (!model) {
+		const manual = await ask(rl, "Default model id (blank to leave empty)", "");
+		if (manual && manual.length > 0) model = manual;
 	}
+
+	const gatewayAnswer = defaults.gateway
+		? true
+		: await askYesNo(rl, "Mark as gateway?", false);
+
+	const descriptor = buildDescriptor(runtime, endpointId, {
+		...(url !== undefined ? { url } : {}),
+		...(model !== undefined ? { model } : {}),
+		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		gateway: gatewayAnswer,
+		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
+		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
+	});
+
+	if (apiKeyLiteral) openCredentialStore().set(runtime.id, apiKeyLiteral);
+
+	const probe = await runtimeProbe(runtime, descriptor);
+	if (probe) {
+		const line = probe.ok
+			? `probe ok${probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : ""}${probe.serverVersion ? ` ${probe.serverVersion}` : ""}`
+			: `probe failed: ${probe.error ?? "unknown"}`;
+		process.stdout.write(`\n${line}\n`);
+		if (!probe.ok) {
+			const keepAnyway = await askYesNo(rl, "save endpoint anyway?", true);
+			if (!keepAnyway) {
+				printError("aborted; settings not changed");
+				return 0;
+			}
+		}
+	}
+
+	const setOrchestrator = defaults.setOrchestrator
+		? true
+		: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.endpoint);
+	const setWorkerDefault = defaults.setWorkerDefault
+		? true
+		: await askYesNo(rl, "use as worker default?", !settings.workers.default.endpoint);
+
+	applyEndpoint(settings, descriptor);
+	if (setOrchestrator) setOrchestratorPointer(settings, descriptor);
+	if (setWorkerDefault) setWorkerDefaultPointer(settings, descriptor);
+	writeSettings(settings);
+
+	printSummary(settings, descriptor, probe);
+	printOk(`endpoint ${endpointId} saved`);
+	return 0;
+}
+
+function runRemove(id: string): number {
+	const settings = readSettings();
+	const before = settings.endpoints.length;
+	settings.endpoints = settings.endpoints.filter((e) => e.id !== id);
+	if (settings.endpoints.length === before) {
+		printError(`no endpoint with id ${id}`);
+		return 1;
+	}
+	if (settings.orchestrator.endpoint === id) {
+		settings.orchestrator.endpoint = null;
+		settings.orchestrator.model = null;
+	}
+	if (settings.workers.default.endpoint === id) {
+		settings.workers.default.endpoint = null;
+		settings.workers.default.model = null;
+	}
+	settings.scope = settings.scope.filter((entry) => {
+		const [head] = entry.split("/");
+		return head !== id;
+	});
+	writeSettings(settings);
+	printOk(`removed endpoint ${id}`);
+	return 0;
+}
+
+function runRename(oldId: string, newId: string): number {
+	if (oldId === newId) {
+		printError("old and new id are identical");
+		return 2;
+	}
+	const settings = readSettings();
+	if (settings.endpoints.some((e) => e.id === newId)) {
+		printError(`endpoint id already exists: ${newId}`);
+		return 2;
+	}
+	const target = settings.endpoints.find((e) => e.id === oldId);
+	if (!target) {
+		printError(`no endpoint with id ${oldId}`);
+		return 1;
+	}
+	target.id = newId;
+	if (settings.orchestrator.endpoint === oldId) settings.orchestrator.endpoint = newId;
+	if (settings.workers.default.endpoint === oldId) settings.workers.default.endpoint = newId;
+	settings.scope = settings.scope.map((entry) => {
+		const [head, ...rest] = entry.split("/");
+		if (head !== oldId) return entry;
+		return rest.length === 0 ? newId : `${newId}/${rest.join("/")}`;
+	});
+	writeSettings(settings);
+	printOk(`renamed ${oldId} to ${newId}`);
+	return 0;
 }
 
 export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<number> {
-	const { flags, positional } = parseFlags([...argv]);
-	if (flags.has("help") || flags.has("h")) {
-		process.stdout.write(HELP);
-		return 0;
-	}
-	if (positional.length > 0) {
-		printError("usage: clio setup");
+	let args: ParsedArgs;
+	try {
+		args = parseSetupArgs(argv);
+	} catch (err) {
+		printError(err instanceof Error ? err.message : String(err));
 		process.stdout.write(HELP);
 		return 2;
 	}
-
+	if (args.help) {
+		process.stdout.write(HELP);
+		return 0;
+	}
 	initializeClioHome();
+	ensureRegistryPopulated();
+
+	if (args.list) {
+		printRuntimeList();
+		return 0;
+	}
+	if (args.remove) return runRemove(args.remove);
+	if (args.renameOld && args.renameNew) return runRename(args.renameOld, args.renameNew);
+
+	const runtimeId = args.positional[0];
+	let runtime: RuntimeDescriptor | null = null;
+	if (runtimeId) {
+		runtime = getRuntimeRegistry().get(runtimeId);
+		if (!runtime) {
+			printError(`unknown runtime id: ${runtimeId}`);
+			process.stdout.write("run `clio setup --list` to see registered runtimes\n");
+			return 2;
+		}
+	}
+
+	const nonInteractive =
+		runtime !== null &&
+		(args.id !== undefined ||
+			args.url !== undefined ||
+			args.model !== undefined ||
+			args.apiKey !== undefined ||
+			args.apiKeyEnv !== undefined ||
+			args.gateway ||
+			args.setOrchestrator ||
+			args.setWorkerDefault ||
+			args.contextWindow !== undefined ||
+			args.reasoning !== undefined);
+
+	if (nonInteractive && runtime) return runNonInteractive(runtime, args);
+
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	const probeState = new Map<string, EndpointProbeResult>();
 	try {
-		const settings = await loadSettingsWithRepair(rl);
-		let autoAdvanceDone = false;
-		while (true) {
-			showStatusSummary(settings, probeState);
-			if (!hasOrchestratorTarget(settings) && !autoAdvanceDone) {
-				autoAdvanceDone = true;
-				const continueSession = await actionAddOrEditEndpoint(rl, settings, probeState);
-				if (!continueSession) {
-					printOk("setup cancelled");
-					return 0;
-				}
-				continue;
-			}
-
-			process.stdout.write("what do you want to do?\n");
-			process.stdout.write("  1. add or edit an endpoint\n");
-			process.stdout.write("  2. switch active chat/worker target\n");
-			process.stdout.write("  3. probe all endpoints\n");
-			process.stdout.write("  4. safety level (suggest / auto-edit / full-auto)\n");
-			process.stdout.write("  5. session budget\n");
-			process.stdout.write("  6. open settings.yaml in $EDITOR\n");
-			process.stdout.write("  7. reset everything (backs up current settings)\n");
-			process.stdout.write("  8. done\n\n");
-			const selection = await askNumeric(rl, "selection", 1, 8, 8);
-			if (selection === null) {
-				await promptSaveOnExit(rl, settings);
-				printOk("setup cancelled");
-				return 0;
-			}
-
-			if (selection === 8) {
-				const onDisk = readSettings();
-				if (!settingsEqual(settings, onDisk)) {
-					await writeSettingsAtomically(settings);
-					process.stdout.write("\nNext commands:\n");
-					process.stdout.write("  clio providers\n");
-					process.stdout.write("  clio\n");
-					process.stdout.write('  clio run scout "summarize the repo layout"\n');
-				} else {
-					printOk("no changes");
-				}
-				return 0;
-			}
-
-			let continueSession = true;
-			switch (selection) {
-				case 1:
-					continueSession = await actionAddOrEditEndpoint(rl, settings, probeState);
-					break;
-				case 2:
-					continueSession = await actionSwitchTarget(rl, settings);
-					break;
-				case 3:
-					continueSession = await actionProbeAll(rl, settings, probeState);
-					break;
-				case 4:
-					continueSession = await actionSafety(rl, settings);
-					break;
-				case 5:
-					continueSession = await actionBudget(rl, settings);
-					break;
-				case 6:
-					continueSession = await actionOpenSettings(rl, settings);
-					break;
-				case 7:
-					continueSession = await actionReset(rl, settings, probeState);
-					break;
-				default:
-					printError(`invalid selection ${selection}`);
-			}
-			if (!continueSession) {
-				printOk("setup cancelled");
-				return 0;
-			}
-		}
+		return await runInteractive(rl, runtime, args);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		if (message === "setup cancelled") {
-			printError("setup cancelled");
-			return 0;
-		}
-		printError(message);
+		printError(err instanceof Error ? err.message : String(err));
 		return 1;
 	} finally {
 		rl.close();
