@@ -16,7 +16,7 @@ import { chmodSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, re
 import { basename, dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
-import { PROVIDER_CATALOG } from "./catalog.js";
+import { getRuntimeRegistry } from "./registry.js";
 
 /**
  * Secret-grade atomic write. Opens the tmp file with an explicit 0o600 mode so
@@ -139,13 +139,16 @@ export function openCredentialStore(_opts?: { preferKeychain?: boolean }): Crede
 }
 
 /**
- * Returns the set of env-var names that providers should consider "present",
- * drawing from both `process.env` and the YAML credentials file. A provider
- * lacking a `credentialsEnvVar` (e.g. bedrock) contributes nothing here; its
- * availability is handled by discovery.
+ * Returns the set of env-var names that runtimes should consider "present",
+ * drawing from both `process.env` and the YAML credentials file. A runtime
+ * descriptor lacking a `credentialsEnvVar` (e.g. bedrock via AWS SDK)
+ * contributes nothing here; its availability is handled by the runtime's
+ * own auth path. Keyed by descriptor id so the credential store and the
+ * runtime registry agree on a single identifier.
  */
 export function credentialsPresent(): Set<string> {
 	const present = new Set<string>();
+	const registry = getRuntimeRegistry();
 
 	let shape: FileShape = emptyShape();
 	const path = credentialsPath();
@@ -157,15 +160,15 @@ export function credentialsPresent(): Set<string> {
 		}
 	}
 
-	for (const spec of PROVIDER_CATALOG) {
-		const envVar = spec.credentialsEnvVar;
+	for (const desc of registry.list()) {
+		const envVar = desc.credentialsEnvVar;
 		if (!envVar) continue;
 		const envVal = process.env[envVar]?.trim();
 		if (envVal && envVal.length > 0) {
 			present.add(envVar);
 			continue;
 		}
-		const entry = shape.entries[spec.id];
+		const entry = shape.entries[desc.id];
 		if (entry && typeof entry.key === "string" && entry.key.length > 0) {
 			present.add(envVar);
 		}
