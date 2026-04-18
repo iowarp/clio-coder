@@ -13,6 +13,7 @@ import {
 	parseSlashCommand,
 	routeInteractiveKey,
 } from "../../src/interactive/index.js";
+import { HOTKEYS, formatHotkeysLines } from "../../src/interactive/overlays/hotkeys.js";
 import { buildModelItems } from "../../src/interactive/overlays/model-selector.js";
 import { buildScopedModelItems } from "../../src/interactive/overlays/scoped-models.js";
 import { buildSessionItems } from "../../src/interactive/overlays/session-selector.js";
@@ -69,6 +70,7 @@ describe("slash-commands registry", () => {
 			"settings",
 			"resume",
 			"new",
+			"hotkeys",
 		]);
 		const owned = new Map<string, string>();
 		for (const entry of BUILTIN_SLASH_COMMANDS) {
@@ -114,6 +116,10 @@ describe("slash-commands registry", () => {
 
 	it("parses /new as the new kind", () => {
 		deepStrictEqual(parseSlashCommand("/new"), { kind: "new" });
+	});
+
+	it("parses /hotkeys as the hotkeys kind", () => {
+		deepStrictEqual(parseSlashCommand("/hotkeys"), { kind: "hotkeys" });
 	});
 });
 
@@ -376,6 +382,34 @@ describe("session-selector buildSessionItems", () => {
 
 	it("handles empty history", () => {
 		deepStrictEqual(buildSessionItems([]), []);
+	});
+});
+
+describe("hotkeys overlay", () => {
+	it("HOTKEYS lists every slash command exposed via the registry", () => {
+		const keysWithSlash = new Set(HOTKEYS.filter((h) => h.keys.startsWith("/")).map((h) => h.keys.split(" ")[0]));
+		for (const name of ["/help", "/hotkeys", "/model", "/scoped-models", "/settings", "/resume", "/new", "/thinking"]) {
+			ok(keysWithSlash.has(name), `hotkeys missing ${name}`);
+		}
+	});
+
+	it("HOTKEYS lists the Phase 11 keybindings", () => {
+		const keyBindings = new Set(HOTKEYS.filter((h) => !h.keys.startsWith("/")).map((h) => h.keys));
+		ok(keyBindings.has("Shift+Tab"));
+		ok(keyBindings.has("Alt+M"));
+		ok(keyBindings.has("Ctrl+L"));
+		ok(keyBindings.has("Ctrl+P / Shift+Ctrl+P"));
+		ok(keyBindings.has("Ctrl+B"));
+		ok(keyBindings.has("Ctrl+D"));
+		ok(keyBindings.has("Esc"));
+	});
+
+	it("formatHotkeysLines draws a framed table with scope headers", () => {
+		const lines = formatHotkeysLines(64);
+		ok(lines[0]?.startsWith("┌"));
+		ok(lines.at(-1)?.startsWith("└"));
+		ok(lines.some((l) => l.includes("GLOBAL")));
+		ok(lines.some((l) => l.includes("EDITOR")));
 	});
 });
 
