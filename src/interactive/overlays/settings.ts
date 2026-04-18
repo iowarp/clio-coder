@@ -22,14 +22,16 @@ const SETTINGS_THEME: SettingsListTheme = {
 };
 
 /**
- * Phase 11 exposes the subset of settings whose values are safe to cycle
- * inline. Free-text fields (orchestrator.provider/model, workers.default.*,
- * provider.scope) render for read-only reference because editing them in
- * place needs either a picker (/model, /scoped-models) or text input the
- * overlay does not yet host.
+ * Surface the endpoint-schema settings that are safe to inspect or cycle
+ * inline. Free-text fields (orchestrator.endpoint/model, workers.default.*,
+ * scope) render for read-only reference because editing them in place needs
+ * either a picker (/model, /scoped-models) or text input the overlay does
+ * not yet host.
  */
 export function buildSettingItems(settings: Readonly<ClioSettings>): SettingItem[] {
-	const scopeText = (settings.provider.scope ?? []).join(", ") || "(empty)";
+	const scopeList = settings.scope ?? [];
+	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
+	const endpointCount = settings.endpoints?.length ?? 0;
 	return [
 		{
 			id: "defaultMode",
@@ -53,28 +55,34 @@ export function buildSettingItems(settings: Readonly<ClioSettings>): SettingItem
 			description: "Reasoning budget for the chat loop.",
 		},
 		{
-			id: "orchestrator.provider",
-			label: "orchestrator.provider",
-			currentValue: settings.orchestrator.provider ?? "(unset)",
-			description: "Active provider. Edit via /model.",
+			id: "orchestrator.endpoint",
+			label: "orchestrator.endpoint",
+			currentValue: settings.orchestrator.endpoint ?? "(unset)",
+			description: "Active endpoint id. Edit via /model.",
 		},
 		{
 			id: "orchestrator.model",
 			label: "orchestrator.model",
 			currentValue: settings.orchestrator.model ?? "(unset)",
-			description: "Active model id. Edit via /model.",
+			description: "Active wire model id. Edit via /model.",
 		},
 		{
-			id: "workers.default.provider",
-			label: "workers.default.provider",
-			currentValue: settings.workers.default.provider ?? "(unset)",
-			description: "/run provider. Edit settings.yaml.",
+			id: "workers.default.endpoint",
+			label: "workers.default.endpoint",
+			currentValue: settings.workers.default.endpoint ?? "(unset)",
+			description: "/run endpoint id. Edit settings.yaml.",
 		},
 		{
 			id: "workers.default.model",
 			label: "workers.default.model",
 			currentValue: settings.workers.default.model ?? "(unset)",
-			description: "/run model id. Edit settings.yaml.",
+			description: "/run wire model id. Edit settings.yaml.",
+		},
+		{
+			id: "endpoints.count",
+			label: "endpoints",
+			currentValue: String(endpointCount),
+			description: "Configured endpoints. Edit settings.yaml or run /providers.",
 		},
 		{
 			id: "budget.sessionCeilingUsd",
@@ -83,8 +91,8 @@ export function buildSettingItems(settings: Readonly<ClioSettings>): SettingItem
 			description: "Per-session cost cap. Edit settings.yaml.",
 		},
 		{
-			id: "provider.scope",
-			label: "provider.scope",
+			id: "scope",
+			label: "scope",
 			currentValue: scopeText,
 			description: "Ctrl+P cycle set. Edit via /scoped-models.",
 		},

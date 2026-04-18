@@ -43,7 +43,7 @@ export interface RunIo {
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
 	io: RunIo;
-	workerDefault?: { provider?: string; model?: string; endpoint?: string } | undefined;
+	workerDefault?: { endpoint?: string; model?: string } | undefined;
 	/**
 	 * Optional bus for forwarding per-event worker output. When supplied,
 	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
@@ -55,14 +55,14 @@ export interface HandleRunDeps {
 
 /**
  * Dispatches /run through the dispatch contract and streams events to stdout.
- * Provider + model are resolved from `settings.workers.default`; when that
+ * Endpoint + model are resolved from `settings.workers.default`; when that
  * block is empty, we refuse to dispatch and print an actionable error instead.
  */
 export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
 	const { dispatch, io, workerDefault, bus } = deps;
-	if (!workerDefault?.provider) {
+	if (!workerDefault?.endpoint) {
 		io.stderr(
-			`[run] no provider configured. Edit ${settingsPath()} (workers.default) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
+			`[run] no endpoint configured. Edit ${settingsPath()} (workers.default.endpoint + workers.default.model) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
 		);
 		return;
 	}
@@ -70,7 +70,6 @@ export async function handleRun(agentId: string, task: string, deps: HandleRunDe
 		const handle = await dispatch.dispatch({
 			agentId,
 			task,
-			runtime: "native",
 		});
 		io.stdout(`\n[run] runId=${handle.runId}\n`);
 		for await (const event of handle.events) {
@@ -102,7 +101,7 @@ export interface SlashCommandContext {
 	bus: SafeEventBus;
 	dataDir: string;
 	/** Returns the current `workers.default` block, resolved fresh on every /run. */
-	workerDefault: () => { provider?: string; model?: string; endpoint?: string } | undefined;
+	workerDefault: () => { endpoint?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	openProviders: () => void;

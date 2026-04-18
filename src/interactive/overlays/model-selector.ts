@@ -1,7 +1,9 @@
 import type { ClioSettings } from "../../core/config.js";
-import { PROVIDER_CATALOG } from "../../domains/providers/catalog.js";
-import type { ProviderListEntry, ProvidersContract } from "../../domains/providers/contract.js";
-import { resolveModelScope } from "../../domains/providers/resolver.js";
+import type {
+	CapabilityFlags,
+	EndpointStatus,
+	ProvidersContract,
+} from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -11,7 +13,7 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 
-export const MODEL_OVERLAY_WIDTH = 78;
+export const MODEL_OVERLAY_WIDTH = 82;
 const VISIBLE_ROWS = 12;
 
 const IDENTITY = (s: string): string => s;
@@ -25,9 +27,8 @@ const MODEL_THEME: SelectListTheme = {
 };
 
 export interface ModelSelection {
-	providerId: string;
-	modelId: string;
-	endpoint?: string;
+	endpoint: string;
+	model: string;
 }
 
 export interface OpenModelOverlayDeps {
@@ -37,9 +38,8 @@ export interface OpenModelOverlayDeps {
 	onClose: () => void;
 }
 
-function healthGlyph(entry: ProviderListEntry | undefined): string {
-	if (!entry) return "·";
-	switch (entry.health.status) {
+function healthGlyph(status: EndpointStatus): string {
+	switch (status.health.status) {
 		case "healthy":
 			return "●";
 		case "degraded":
@@ -51,6 +51,40 @@ function healthGlyph(entry: ProviderListEntry | undefined): string {
 	}
 }
 
+export function capabilityBadges(caps: CapabilityFlags): string {
+	let badges = "";
+	if (caps.tools) badges += "T";
+	if (caps.reasoning) badges += "R";
+	if (caps.vision) badges += "V";
+	if (caps.embeddings) badges += "E";
+	if (caps.rerank) badges += "K";
+	if (caps.fim) badges += "F";
+	return badges.length > 0 ? badges : "-";
+}
+
+function contextWindowLabel(caps: CapabilityFlags): string {
+	if (caps.contextWindow <= 0) return "?ctx";
+	return `${Math.round(caps.contextWindow / 1000)}kctx`;
+}
+
+/**
+ * Enumerate the wire model ids to present for an endpoint. The order of
+ * preference below keeps the overlay predictable across live probes:
+ *   1. An explicit `endpoint.wireModels` list always wins.
+ *   2. Otherwise, if the probe discovered more than one model, show each.
+ *   3. Otherwise fall back to `endpoint.defaultModel`, then the first
+ *      discovered model, then an empty list for endpoints that have no
+ *      resolvable wire model id.
+ */
+export function modelsForEndpoint(status: EndpointStatus): string[] {
+	const wireModels = status.endpoint.wireModels ?? [];
+	if (wireModels.length > 0) return [...wireModels];
+	if (status.discoveredModels.length > 1) return [...status.discoveredModels];
+	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
+	if (status.discoveredModels.length === 1) return [status.discoveredModels[0] as string];
+	return [];
+}
+
 export interface ModelItemsResult {
 	items: SelectItem[];
 	/** Parallel to items. onSelect of items[i] resolves to refs[i]. */
@@ -58,55 +92,44 @@ export interface ModelItemsResult {
 }
 
 /**
- * Builds the grouped model list shown in the /model overlay. Each row carries
- * three markers: health from `providers.list()`, scope ★ from
- * `settings.provider.scope`, and price/context from the catalog. Local engines
- * (llamacpp, lmstudio, ollama, openai-compat) emit one row per configured
- * endpoint that has a `defaultModel` set; endpoints without a default model are
- * skipped because the selection needs both provider and model to persist.
+ * Build the endpoint-first model picker. Each configured endpoint renders one
+ * row per candidate wire model (see `modelsForEndpoint`). Endpoints without
+ * a resolvable wire model still render a single "no-model" row so users can
+ * see the endpoint exists and why it is not selectable. Scope stars come from
+ * `settings.scope`: both plain `endpointId` and `endpointId/wireModelId` refs
+ * match so a user can pin either granularity.
  */
 export function buildModelItems(deps: {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 }): ModelItemsResult {
 	const list = deps.providers.list();
-	const byId = new Map(list.map((entry) => [entry.id, entry]));
-	const scopeSet = new Set(
-		resolveModelScope(deps.settings.provider.scope ?? []).matches.map((ref) => `${ref.providerId}::${ref.modelId}`),
-	);
+	const scopeSet = new Set(deps.settings.scope ?? []);
 	const items: SelectItem[] = [];
 	const refs: ModelSelection[] = [];
-	for (const provider of PROVIDER_CATALOG) {
-		const listEntry = byId.get(provider.id);
-		const health = healthGlyph(listEntry);
-		if (provider.models.length === 0) {
-			const endpoints = listEntry?.endpoints ?? [];
-			for (const ep of endpoints) {
-				if (!ep.defaultModel) continue;
-				const key = `${provider.id}::${ep.defaultModel}`;
-				const scoped = scopeSet.has(key) ? "★" : " ";
-				items.push({
-					value: `${provider.id}/${ep.name}/${ep.defaultModel}`,
-					label: `${health}${scoped} ${provider.id}/${ep.name}  ${ep.defaultModel}`,
-					description: ep.probe?.ok ? `endpoint ok ${ep.url}` : `endpoint ${ep.probe?.error ?? "unprobed"}`,
-				});
-				refs.push({ providerId: provider.id, modelId: ep.defaultModel, endpoint: ep.name });
-			}
+	for (const status of list) {
+		const { endpoint, capabilities } = status;
+		const runtimeName = status.runtime?.displayName ?? endpoint.runtime;
+		const badges = capabilityBadges(capabilities);
+		const wireModels = modelsForEndpoint(status);
+		if (wireModels.length === 0) {
+			items.push({
+				value: endpoint.id,
+				label: `${healthGlyph(status)}  ${endpoint.id}  ${runtimeName}  —  ${badges}`,
+				description: status.reason,
+			});
+			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
 			continue;
 		}
-		for (const model of provider.models) {
-			const key = `${provider.id}::${model.id}`;
-			const scoped = scopeSet.has(key) ? "★" : " ";
-			const price =
-				model.pricePer1MInput !== undefined && model.pricePer1MOutput !== undefined
-					? ` $${model.pricePer1MInput}/${model.pricePer1MOutput}`
-					: "";
+		for (const wireModel of wireModels) {
+			const scopeHit = scopeSet.has(endpoint.id) || scopeSet.has(`${endpoint.id}/${wireModel}`);
+			const scopedMark = scopeHit ? "★" : " ";
 			items.push({
-				value: `${provider.id}/${model.id}`,
-				label: `${health}${scoped} ${provider.id}/${model.id}`,
-				description: `${Math.round(model.contextWindow / 1000)}k${price}`,
+				value: `${endpoint.id}/${wireModel}`,
+				label: `${healthGlyph(status)}${scopedMark} ${endpoint.id}  ${runtimeName}  ${wireModel}  ${badges}`,
+				description: `${contextWindowLabel(capabilities)}  ${status.reason}`,
 			});
-			refs.push({ providerId: provider.id, modelId: model.id });
+			refs.push({ endpoint: endpoint.id, model: wireModel });
 		}
 	}
 	return { items, refs };
@@ -128,17 +151,17 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	const { items, refs } = buildModelItems({ settings: deps.settings, providers: deps.providers });
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SelectList(items, visible, MODEL_THEME);
-	const activeProvider = deps.settings.orchestrator?.provider?.trim();
+	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim();
 	const activeModel = deps.settings.orchestrator?.model?.trim();
-	if (activeProvider && activeModel) {
-		const idx = refs.findIndex((r) => r.providerId === activeProvider && r.modelId === activeModel);
+	if (activeEndpoint && activeModel) {
+		const idx = refs.findIndex((r) => r.endpoint === activeEndpoint && r.model === activeModel);
 		if (idx >= 0) list.setSelectedIndex(idx);
 	}
 	list.onSelect = (item: SelectItem): void => {
 		const idx = items.findIndex((i) => i.value === item.value);
 		if (idx >= 0) {
 			const ref = refs[idx];
-			if (ref) deps.onSelect(ref);
+			if (ref && ref.model.length > 0) deps.onSelect(ref);
 		}
 		deps.onClose();
 	};

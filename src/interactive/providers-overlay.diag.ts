@@ -1,4 +1,5 @@
-import type { ProvidersContract } from "../domains/providers/contract.js";
+import type { EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
+import { EMPTY_CAPABILITIES } from "../domains/providers/index.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../engine/tui.js";
 import { visibleWidth } from "../engine/tui.js";
 import { shouldPassCtrlCToProcess } from "./index.js";
@@ -42,6 +43,37 @@ function createFakeTui(): TUI {
 	} as unknown as TUI;
 }
 
+function makeStatus(): EndpointStatus {
+	return {
+		endpoint: {
+			id: "primary-endpoint",
+			runtime: "llamacpp",
+			url: "http://localhost:8011/v1/very/long/path",
+		},
+		runtime: {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: EMPTY_CAPABILITIES,
+			synthesizeModel: () => {
+				throw new Error("fake");
+			},
+		},
+		available: false,
+		reason: "connection refused",
+		health: {
+			status: "down",
+			lastCheckAt: "2026-04-17T00:00:00.000Z",
+			lastError: "connection refused",
+			latencyMs: null,
+		},
+		capabilities: EMPTY_CAPABILITIES,
+		discoveredModels: [],
+	};
+}
+
 async function main(): Promise<void> {
 	check(
 		"providers-overlay:ctrl-c-passes-through-when-open",
@@ -59,37 +91,7 @@ async function main(): Promise<void> {
 		String(shouldPassCtrlCToProcess("\x1b[99;5:3u", "providers")),
 	);
 
-	const narrowLines = formatProvidersOverlayLines(
-		[
-			{
-				id: "openai-compat",
-				displayName: "OpenAI-Compatible Long Endpoint",
-				tier: "native",
-				available: true,
-				reason: "configured",
-				health: {
-					providerId: "openai-compat",
-					status: "healthy",
-					lastCheckAt: "2026-04-17T00:00:00.000Z",
-					lastError: null,
-					latencyMs: 12,
-				},
-				endpoints: [
-					{
-						name: "primary-endpoint",
-						url: "http://localhost:8011/v1/very/long/path",
-						probe: {
-							name: "primary-endpoint",
-							url: "http://localhost:8011/v1/very/long/path",
-							ok: false,
-							error: "connection refused",
-						},
-					},
-				],
-			},
-		],
-		{ contentWidth: 36 },
-	);
+	const narrowLines = formatProvidersOverlayLines([makeStatus()], { contentWidth: 36 });
 	check(
 		"providers-overlay:narrow-lines-stay-at-overlay-width",
 		narrowLines.every((line) => visibleWidth(line) === 40),
@@ -116,24 +118,23 @@ async function main(): Promise<void> {
 
 	try {
 		const live = createDeferred();
-		const endpoints = createDeferred();
 		let completeCalls = 0;
 		const providers: ProvidersContract = {
 			list: () => [],
-			getAdapter: () => null,
+			getEndpoint: () => null,
+			getRuntime: () => null,
 			probeAll: async () => {},
-			probeEndpoints: async () => {
-				await endpoints.promise;
-			},
 			probeAllLive: async () => {
 				await live.promise;
 			},
-			probeEndpointsLive: async () => {},
+			probeEndpoint: async () => null,
 			credentials: {
 				hasKey: () => false,
+				get: () => null,
 				set: () => {},
 				remove: () => {},
 			},
+			knowledgeBase: null,
 		};
 
 		const handle = openProvidersOverlay(createFakeTui(), providers, {
@@ -148,8 +149,6 @@ async function main(): Promise<void> {
 
 		live.resolve();
 		await live.promise;
-		endpoints.resolve();
-		await endpoints.promise;
 		await Promise.resolve();
 
 		check("providers-overlay:hide-aborts-completion", completeCalls === 0, String(completeCalls));
