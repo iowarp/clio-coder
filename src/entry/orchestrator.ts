@@ -152,6 +152,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		dispatch,
 		observability,
 		chat,
+		...(session ? { session } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
 		getOrchestratorModel: () => {

@@ -160,7 +160,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return trimmed === "/help" || trimmed.startsWith("/help ") ? { kind: "help" } : null;
 		},
 		handle(_command, ctx) {
-			ctx.io.stdout("\ncommands: /run <agent> <task>, /providers, /cost, /receipts, /receipt verify <id>, /help, /quit\n");
+			const rows = BUILTIN_SLASH_COMMANDS.map((entry) => `  /${entry.name.padEnd(16)} ${entry.description}`);
+			ctx.io.stdout(`\ncommands:\n${rows.join("\n")}\n\nRun /hotkeys for the full keyboard + slash-command reference.\n`);
 		},
 	},
 	{
