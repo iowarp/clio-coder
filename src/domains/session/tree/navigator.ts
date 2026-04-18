@@ -31,7 +31,7 @@ export interface TreeSnapshot {
 		createdAt: string;
 		endedAt: string | null;
 		model: string | null;
-		provider: string | null;
+		endpoint: string | null;
 		parentSessionId?: string | null;
 		parentTurnId?: string | null;
 	};
@@ -50,7 +50,7 @@ function pickMeta(meta: SessionMeta): TreeSnapshot["meta"] {
 		createdAt: meta.createdAt,
 		endedAt: meta.endedAt,
 		model: meta.model,
-		provider: meta.provider,
+		endpoint: meta.endpoint,
 	};
 	if (meta.parentSessionId !== undefined) out.parentSessionId = meta.parentSessionId;
 	if (meta.parentTurnId !== undefined) out.parentTurnId = meta.parentTurnId;

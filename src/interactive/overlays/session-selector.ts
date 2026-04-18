@@ -28,17 +28,17 @@ function shortenId(id: string): string {
 /**
  * Pure builder used by the /resume overlay. Renders one row per session:
  * a completion glyph (✓ for closed, ● for still open), the truncated id,
- * ISO-minute start time, and provider/model. The description carries cwd.
+ * ISO-minute start time, and endpoint/model. The description carries cwd.
  */
 export function buildSessionItems(sessions: ReadonlyArray<SessionMeta>): SelectItem[] {
 	return sessions.map((meta) => {
 		const started = meta.createdAt ? new Date(meta.createdAt).toISOString().slice(0, 16).replace("T", " ") : "?";
 		const ended = meta.endedAt ? "✓" : "●";
-		const provider = meta.provider ?? "-";
+		const endpoint = meta.endpoint ?? "-";
 		const model = meta.model ?? "-";
 		return {
 			value: meta.id,
-			label: `${ended} ${shortenId(meta.id)}  ${started}  ${provider}/${model}`,
+			label: `${ended} ${shortenId(meta.id)}  ${started}  ${endpoint}/${model}`,
 			description: meta.cwd ?? "",
 		};
 	});

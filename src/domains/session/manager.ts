@@ -33,12 +33,12 @@ export function newTurnId(): string {
 export function startSession(input: {
 	cwd: string;
 	model?: string | null;
-	provider?: string | null;
+	endpoint?: string | null;
 }): SessionManagerState {
 	const { meta, writer } = engineCreateSession({
 		cwd: input.cwd,
 		model: input.model ?? null,
-		provider: input.provider ?? null,
+		endpoint: input.endpoint ?? null,
 	});
 	return { meta: meta as SessionMeta, writer };
 }

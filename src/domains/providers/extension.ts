@@ -237,6 +237,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		credentials: {
 			hasKey: hasStoredCredential,
+			get(runtimeId) {
+				return credStore.get(runtimeId)?.key ?? null;
+			},
 			set(runtimeId, key) {
 				credStore.set(runtimeId, key);
 			},
@@ -244,6 +247,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				credStore.remove(runtimeId);
 			},
 		},
+		knowledgeBase: kb,
 	};
 
 	return { extension, contract };

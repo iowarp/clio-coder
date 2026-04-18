@@ -229,7 +229,8 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
-		knownProviders: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
+		providers,
+		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
