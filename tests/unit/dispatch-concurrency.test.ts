@@ -12,6 +12,13 @@ import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
+import type {
+	EndpointStatus,
+	ProvidersContract,
+	RuntimeDescriptor,
+} from "../../src/domains/providers/index.js";
+import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
+import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
@@ -68,8 +75,48 @@ function createSchedulingStub(limit: number): SchedulingStub {
 
 function stubContext(scheduling: SchedulingContract): DomainContext & { bus: ReturnType<typeof createSafeEventBus> } {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.workers.default.provider = "openai";
-	settings.workers.default.model = "gpt-4o";
+	const endpoint: EndpointDescriptor = {
+		id: "default",
+		runtime: "openai",
+		defaultModel: "gpt-4o",
+	};
+	settings.endpoints = [endpoint];
+	settings.workers.default.endpoint = endpoint.id;
+	settings.workers.default.model = endpoint.defaultModel ?? "gpt-4o";
+
+	const runtime: RuntimeDescriptor = {
+		id: "openai",
+		displayName: "OpenAI",
+		kind: "http",
+		apiFamily: "openai-completions",
+		auth: "api-key",
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
+		synthesizeModel: () => ({ id: endpoint.defaultModel, provider: "openai" }) as never,
+	};
+	const status: EndpointStatus = {
+		endpoint,
+		runtime,
+		available: true,
+		reason: "test",
+		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+		capabilities: { ...EMPTY_CAPABILITIES, chat: true },
+		discoveredModels: [],
+	};
+	const providers: ProvidersContract = {
+		list: () => [status],
+		getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+		getRuntime: (id) => (id === runtime.id ? runtime : null),
+		probeAll: async () => {},
+		probeAllLive: async () => {},
+		probeEndpoint: async () => status,
+		credentials: {
+			hasKey: () => false,
+			get: () => null,
+			set: () => {},
+			remove: () => {},
+		},
+		knowledgeBase: null,
+	};
 
 	const config: ConfigContract = {
 		get: () => settings,
@@ -114,6 +161,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		if (name === "agents") return agents;
 		if (name === "modes") return modes;
 		if (name === "scheduling") return scheduling;
+		if (name === "providers") return providers;
 		return undefined;
 	}) as DomainContext["getContract"];
 

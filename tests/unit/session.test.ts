@@ -17,11 +17,6 @@ import { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "../../src/domains
 import { migrateV1ToV2 } from "../../src/domains/session/migrations/v1-to-v2.js";
 import { resolveLabelMap } from "../../src/domains/session/tree/manager.js";
 import { buildTreeSnapshot, computeLeafId } from "../../src/domains/session/tree/navigator.js";
-import {
-	getLocalRegisteredModel,
-	registerLocalProviders,
-	resolveLocalModelId,
-} from "../../src/engine/local-model-registry.js";
 import type { ClioTurnRecord, SessionTreeNode } from "../../src/engine/session.js";
 
 function buildMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -32,7 +27,7 @@ function buildMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
 		createdAt: "2026-04-17T00:00:00.000Z",
 		endedAt: null,
 		model: null,
-		provider: null,
+		endpoint: null,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		clioVersion: "0.1.0-dev",
@@ -178,44 +173,6 @@ describe("session/migrations", () => {
 		const meta = buildMeta({ sessionFormatVersion: 1 });
 		migrateV1ToV2(meta);
 		strictEqual(meta.sessionFormatVersion, 2);
-	});
-});
-
-describe("session/local-model-resolution (Qwen3.6 fix)", () => {
-	it("resolveLocalModelId composes modelId@endpoint for the Qwen3.6 case", () => {
-		strictEqual(resolveLocalModelId("llamacpp", "Qwen3.6-35B-A3B-UD-Q4_K_XL", "mini"), "Qwen3.6-35B-A3B-UD-Q4_K_XL@mini");
-	});
-
-	it("resolveLocalModelId passes through when the id is already composed", () => {
-		strictEqual(
-			resolveLocalModelId("llamacpp", "Qwen3.6-35B-A3B-UD-Q4_K_XL@mini", "mini"),
-			"Qwen3.6-35B-A3B-UD-Q4_K_XL@mini",
-		);
-	});
-
-	it("registerLocalProviders + resolveLocalModelId yields a reasoning-capable Model for Qwen3.6", () => {
-		registerLocalProviders({
-			llamacpp: {
-				endpoints: {
-					mini: { default_model: "Qwen3.6-35B-A3B-UD-Q4_K_XL", url: "http://mini.local:8080" },
-				},
-			},
-		});
-		const lookupId = resolveLocalModelId("llamacpp", "Qwen3.6-35B-A3B-UD-Q4_K_XL", "mini");
-		strictEqual(lookupId, "Qwen3.6-35B-A3B-UD-Q4_K_XL@mini");
-		const model = getLocalRegisteredModel("llamacpp", lookupId);
-		ok(model, "expected registered Model for llamacpp/Qwen3.6-35B-A3B-UD-Q4_K_XL@mini");
-		// The llamacpp Qwen3 preset enables reasoning; this is the bug the
-		// pre-phase fix unblocked. Without the fix, getOrchestratorModel
-		// falls through to pi-ai's static catalog and supportsThinking returns
-		// false, locking /thinking at [off].
-		strictEqual(model?.reasoning, true);
-		strictEqual((model as { compat?: { thinkingFormat?: string } })?.compat?.thinkingFormat, "qwen-chat-template");
-	});
-
-	it("cloud providers never carry an endpoint in the composed id", () => {
-		strictEqual(resolveLocalModelId("anthropic", "claude-sonnet-4-6", "ignored"), "claude-sonnet-4-6");
-		strictEqual(resolveLocalModelId("openai", "gpt-5", undefined), "gpt-5");
 	});
 });
 
