@@ -2,21 +2,31 @@
  * Worker-subprocess tool resolver.
  *
  * Converts Clio `ToolSpec` registrations into pi-agent-core `AgentTool`
- * instances the worker Agent can execute. Mode-filtering uses the
- * `ToolIndex.listForMode` primitive so the worker never needs a live
- * ModesContract or SafetyContract; invocation safety at the worker layer is
- * the Agent's responsibility today, with the orchestrator-side admission
- * gate already enforced at dispatch time.
+ * instances the agent can execute. Every wrapper routes through a
+ * `ToolRegistry.invoke(...)` call so interactive and worker runs share the
+ * same safety + mode admission path instead of calling `spec.run(...)`
+ * directly.
  */
 
 import type { TSchema } from "@sinclair/typebox";
 import type { ToolName } from "../core/tool-names.js";
-import type { ModeName } from "../domains/modes/matrix.js";
+import type { ModesContract } from "../domains/modes/contract.js";
+import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
+import { classify as classifyAction } from "../domains/safety/action-classifier.js";
+import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import { formatRejection } from "../domains/safety/rejection-feedback.js";
+import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE, isSubset } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { type ToolSpec, createToolIndex } from "../tools/registry.js";
+import { type ToolRegistry, type ToolSpec, createRegistry } from "../tools/registry.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
-function toAgentTool(spec: ToolSpec): AgentTool<TSchema> {
+export interface ResolveAgentToolsInput {
+	registry: ToolRegistry;
+	allowedTools?: ReadonlyArray<ToolName>;
+	mode: ModeName;
+}
+
+function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema> {
 	return {
 		name: spec.name,
 		description: spec.description,
@@ -27,41 +37,90 @@ function toAgentTool(spec: ToolSpec): AgentTool<TSchema> {
 				string,
 				unknown
 			>;
-			const result = await spec.run(args);
-			if (result.kind === "ok") {
-				return {
-					content: [{ type: "text", text: result.output }],
-					details: { kind: "ok" },
-				};
+			const verdict = await registry.invoke({ tool: spec.name, args });
+			if (verdict.kind === "ok") {
+				if (verdict.result.kind === "ok") {
+					return {
+						content: [{ type: "text", text: verdict.result.output }],
+						details: { kind: "ok" },
+					};
+				}
+				throw new Error(verdict.result.message);
 			}
-			throw new Error(result.message);
+			throw new Error(verdict.reason);
 		},
 	};
 }
 
+function createWorkerModes(mode: ModeName): ModesContract {
+	const profile = MODE_MATRIX[mode];
+	return {
+		current: () => mode,
+		setMode: () => mode,
+		cycleNormal: () => mode,
+		visibleTools: () => profile.tools,
+		isToolVisible: (tool) => profile.tools.has(tool),
+		isActionAllowed: (action) => profile.allowedActions.has(action),
+		requestSuper: () => {},
+		confirmSuper: () => mode,
+	};
+}
+
+function createWorkerSafety(): SafetyContract {
+	return {
+		classify: (call) => classifyAction(call),
+		evaluate(call, mode) {
+			const classification = classifyAction(call);
+			if (classification.actionClass === "git_destructive") {
+				const rejection = formatRejection({
+					tool: call.tool,
+					actionClass: classification.actionClass,
+					reasons: classification.reasons,
+					...(mode ? { mode } : {}),
+				});
+				return { kind: "block", classification, rejection };
+			}
+			const decision: SafetyDecision = { kind: "allow", classification };
+			return decision;
+		},
+		observeLoop: (key) => ({ looping: false, key, count: 1 }),
+		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
+		isSubset,
+		audit: { recordCount: () => 0 },
+	};
+}
+
+export function createWorkerToolRegistry(mode: ModeName): ToolRegistry {
+	const registry = createRegistry({
+		safety: createWorkerSafety(),
+		modes: createWorkerModes(mode),
+	});
+	registerAllTools(registry);
+	return registry;
+}
+
 /**
- * Build the AgentTool array the worker Agent should expose. Caller supplies
- * the explicit `allowedTools` list (typically from the agent recipe) and the
- * active `mode`. The returned tool set is the intersection of:
- *   1. tools registered via registerAllTools()
+ * Build the AgentTool array the agent should expose. Caller supplies the
+ * registered tool set plus:
+ *
+ *   1. the explicit `allowedTools` list (typically from the agent recipe)
+ *   2. the active `mode`
+ *
+ * The returned tool set is the intersection of:
+ *   1. tools registered on the supplied registry
  *   2. tools whose allowedModes admits `mode`
  *   3. tools whose id appears in `allowedTools`
  *
- * When `allowedTools` is undefined, step 3 is skipped (mode-matrix fallback).
- * The intersection can legitimately be empty (e.g. write under advise); in
- * that case the worker boots with no tools and any tool call the model
- * attempts surfaces as a pi-agent-core "Tool X not found" error.
+ * When `allowedTools` is undefined, step 3 is skipped.
  */
-export function resolveAgentTools(allowedTools: ReadonlyArray<ToolName> | undefined, mode: ModeName): AgentTool[] {
-	const index = createToolIndex();
-	registerAllTools(index);
-	const modeIds = new Set(index.listForMode(mode));
-	const allowed = allowedTools ? new Set(allowedTools) : null;
+export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
+	const modeIds = new Set(input.registry.listForMode(input.mode));
+	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
 	const specs: ToolSpec[] = [];
 	for (const name of modeIds) {
 		if (allowed && !allowed.has(name)) continue;
-		const spec = index.get(name);
+		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);
 	}
-	return specs.map(toAgentTool) as unknown as AgentTool[];
+	return specs.map((spec) => toAgentTool(spec, input.registry)) as unknown as AgentTool[];
 }

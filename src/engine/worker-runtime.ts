@@ -17,7 +17,7 @@ import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import { getModel, registerFauxFromEnv, registerLocalProviders } from "./ai.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
-import { resolveAgentTools } from "./worker-tools.js";
+import { createWorkerToolRegistry, resolveAgentTools } from "./worker-tools.js";
 
 export type { EndpointSpec };
 
@@ -99,7 +99,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	seedWorkerLocalRegistry(input);
 	const model = input.providerId === "faux" && fauxModel ? fauxModel : getModel(input.providerId, input.modelId);
 	const mode: ModeName = input.mode ?? "default";
-	const tools = resolveAgentTools(input.allowedTools, mode);
+	const registry = createWorkerToolRegistry(mode);
+	const tools = resolveAgentTools({
+		registry,
+		mode,
+		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+	});
 	if (tools.length === 0 && (input.allowedTools?.length ?? 0) > 0) {
 		process.stderr.write(
 			`[worker] warning: no tools resolved for mode=${mode} allowed=[${(input.allowedTools ?? []).join(",")}]\n`,

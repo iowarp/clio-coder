@@ -19,6 +19,7 @@ import {
 } from "../engine/ai.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
 
 type AssistantDeltaEvent =
@@ -94,6 +95,12 @@ export interface CreateChatLoopDeps {
 	 * coalesce onto one summarization call.
 	 */
 	autoCompact?: (instructions?: string) => Promise<CompactResult | null>;
+	/**
+	 * Production tool admission path. When wired, every agent-facing tool runs
+	 * through `ToolRegistry.invoke(...)` so safety classification and mode
+	 * admission happen on the actual execution path.
+	 */
+	toolRegistry?: ToolRegistry;
 }
 
 interface AgentRuntime {
@@ -175,6 +182,15 @@ function fallbackIdentityPrompt(): string {
 
 function visibleToolSnapshot(modes: ModesContract): ToolName[] {
 	return Array.from(modes.visibleTools());
+}
+
+function resolveRuntimeTools(deps: CreateChatLoopDeps): ReturnType<typeof resolveAgentTools> {
+	if (!deps.toolRegistry) return [];
+	return resolveAgentTools({
+		registry: deps.toolRegistry,
+		allowedTools: visibleToolSnapshot(deps.modes),
+		mode: deps.modes.current(),
+	});
 }
 
 /**
@@ -279,7 +295,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 
 		const model = getModel(target.providerId, target.modelId);
-		const tools = resolveAgentTools(visibleToolSnapshot(deps.modes), deps.modes.current());
+		const tools = resolveRuntimeTools(deps);
 		const thinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
@@ -555,7 +571,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 
-			agentRuntime.agent.state.tools = resolveAgentTools(visibleToolSnapshot(deps.modes), deps.modes.current());
+			agentRuntime.agent.state.tools = resolveRuntimeTools(deps);
 
 			streaming = true;
 			try {

@@ -54,6 +54,7 @@ function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined)
 
 function pickWorkerScope(safety: SafetyContract, recipe: AgentRecipe | null): ScopeSpec {
 	if (recipe?.mode === "advise") return safety.scopes.readonly;
+	if (recipe?.mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
 }
 
@@ -170,7 +171,7 @@ export function createDispatchBundle(context: DomainContext): DomainBundle<Dispa
 		const recipeTools = recipe?.tools;
 		const allowedTools =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
-		const workerMode = currentMode;
+		const workerMode = recipe?.mode ?? currentMode;
 
 		const spec: WorkerSpec = {
 			systemPrompt,
