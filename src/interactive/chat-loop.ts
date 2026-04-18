@@ -205,18 +205,42 @@ function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number
 					usage?: {
 						input?: unknown;
 						output?: unknown;
+						cacheRead?: unknown;
+						cacheWrite?: unknown;
+						totalTokens?: unknown;
+						cost?: { total?: unknown };
 					};
 			  };
 		if (!message || typeof message !== "object") continue;
 		if (message.role !== "assistant") continue;
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
+		if (typeof usage.totalTokens === "number") return usage.totalTokens;
 		const input = typeof usage.input === "number" ? usage.input : 0;
 		const output = typeof usage.output === "number" ? usage.output : 0;
-		const total = input + output;
-		return total > 0 ? total : null;
+		const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+		const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+		return input + output + cacheRead + cacheWrite;
 	}
 	return null;
+}
+
+function readAssistantUsageCostUsd(messages: ReadonlyArray<AgentMessage>): number | undefined {
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const message = messages[i] as
+			| AgentMessage
+			| {
+					role?: unknown;
+					usage?: {
+						cost?: { total?: unknown };
+					};
+			  };
+		if (!message || typeof message !== "object") continue;
+		if (message.role !== "assistant") continue;
+		const total = message.usage?.cost?.total;
+		return typeof total === "number" ? total : undefined;
+	}
+	return undefined;
 }
 
 /**
@@ -375,7 +399,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (event.type === "agent_end" && deps.observability) {
 				const tokens = readAssistantUsageTokens(event.messages);
 				if (tokens !== null) {
-					deps.observability.recordTokens(target.providerId, target.modelId, tokens);
+					deps.observability.recordTokens(
+						target.providerId,
+						target.modelId,
+						tokens,
+						readAssistantUsageCostUsd(event.messages),
+					);
 				}
 			}
 		});

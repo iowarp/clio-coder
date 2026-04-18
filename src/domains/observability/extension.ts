@@ -77,9 +77,9 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		metrics: () => aggregateMetrics(telemetry.snapshot()),
 		sessionCost: () => cost.sessionTotal(),
 		costEntries: () => cost.entries(),
-		recordTokens(providerId, modelId, tokens) {
+		recordTokens(providerId, modelId, tokens, costUsd) {
 			telemetry.record("counter", "tokens.total", tokens);
-			cost.accumulate(providerId, modelId, tokens);
+			cost.accumulate(providerId, modelId, tokens, costUsd);
 		},
 	};
 
