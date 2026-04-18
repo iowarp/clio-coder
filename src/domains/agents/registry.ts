@@ -18,6 +18,12 @@ function parseStringArray(value: unknown): ReadonlyArray<string> | undefined {
 	return value.map((v) => String(v));
 }
 
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+function parseThinkingLevel(value: unknown): AgentRecipe["thinkingLevel"] {
+	if (typeof value !== "string") return undefined;
+	return THINKING_LEVELS.has(value) ? (value as AgentRecipe["thinkingLevel"]) : undefined;
+}
+
 export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRecipe> {
 	let entries: import("node:fs").Dirent[];
 	try {
@@ -56,7 +62,9 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		const skills = parseStringArray(frontmatter.skills);
 		if (skills) recipe.skills = skills;
 		if (typeof frontmatter.model === "string") recipe.model = frontmatter.model;
-		if (typeof frontmatter.provider === "string") recipe.provider = frontmatter.provider;
+		if (typeof frontmatter.endpoint === "string") recipe.endpoint = frontmatter.endpoint;
+		const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
+		if (thinking) recipe.thinkingLevel = thinking;
 		recipes.push(recipe);
 	}
 

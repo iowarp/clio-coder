@@ -5,20 +5,22 @@
  * on `ok` and gets either the typed spec or the list of reasons it failed.
  */
 
+export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export interface JobSpec {
 	agentId: string;
 	task: string;
-	runtime?: "native";
-	providerId?: string;
-	modelId?: string;
 	endpoint?: string;
+	model?: string;
+	thinkingLevel?: JobThinkingLevel;
+	requiredCapabilities?: ReadonlyArray<string>;
 	cwd?: string;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 
-const KNOWN_KEYS = new Set(["agentId", "task", "runtime", "providerId", "modelId", "endpoint", "cwd"]);
-const RUNTIME_VALUES = new Set(["native"]);
+const KNOWN_KEYS = new Set(["agentId", "task", "endpoint", "model", "thinkingLevel", "requiredCapabilities", "cwd"]);
+const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -47,29 +49,27 @@ export function validateJobSpec(spec: unknown): Validated {
 		errors.push("task must be a non-empty string");
 	}
 
-	if ("runtime" in spec && spec.runtime !== undefined) {
-		if (spec.runtime === "sdk" || spec.runtime === "cli") {
-			errors.push(`runtime=${spec.runtime} not supported in v0.1`);
-		} else if (typeof spec.runtime !== "string" || !RUNTIME_VALUES.has(spec.runtime)) {
-			errors.push("runtime must be one of: native");
-		}
-	}
-
-	if ("providerId" in spec && spec.providerId !== undefined) {
-		if (typeof spec.providerId !== "string" || spec.providerId.length === 0) {
-			errors.push("providerId must be a non-empty string");
-		}
-	}
-
-	if ("modelId" in spec && spec.modelId !== undefined) {
-		if (typeof spec.modelId !== "string" || spec.modelId.length === 0) {
-			errors.push("modelId must be a non-empty string");
-		}
-	}
-
 	if ("endpoint" in spec && spec.endpoint !== undefined) {
 		if (typeof spec.endpoint !== "string" || spec.endpoint.length === 0) {
 			errors.push("endpoint must be a non-empty string");
+		}
+	}
+
+	if ("model" in spec && spec.model !== undefined) {
+		if (typeof spec.model !== "string" || spec.model.length === 0) {
+			errors.push("model must be a non-empty string");
+		}
+	}
+
+	if ("thinkingLevel" in spec && spec.thinkingLevel !== undefined) {
+		if (typeof spec.thinkingLevel !== "string" || !VALID_THINKING.has(spec.thinkingLevel)) {
+			errors.push("thinkingLevel must be one of: off|minimal|low|medium|high|xhigh");
+		}
+	}
+
+	if ("requiredCapabilities" in spec && spec.requiredCapabilities !== undefined) {
+		if (!Array.isArray(spec.requiredCapabilities) || spec.requiredCapabilities.some((c) => typeof c !== "string")) {
+			errors.push("requiredCapabilities must be a string[]");
 		}
 	}
 
@@ -87,10 +87,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		agentId: agentId as string,
 		task: task as string,
 	};
-	if (typeof spec.runtime === "string") out.runtime = spec.runtime as Exclude<JobSpec["runtime"], undefined>;
-	if (typeof spec.providerId === "string") out.providerId = spec.providerId;
-	if (typeof spec.modelId === "string") out.modelId = spec.modelId;
 	if (typeof spec.endpoint === "string") out.endpoint = spec.endpoint;
+	if (typeof spec.model === "string") out.model = spec.model;
+	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;
+	if (Array.isArray(spec.requiredCapabilities)) {
+		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
+	}
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	return { ok: true, spec: out };
 }

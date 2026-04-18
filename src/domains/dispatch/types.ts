@@ -8,13 +8,16 @@
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
+export type RunKind = "http" | "subprocess";
+
 export interface RunEnvelope {
 	id: string;
 	agentId: string;
 	task: string;
-	providerId: string;
-	modelId: string;
-	runtime: "native" | "sdk" | "cli";
+	endpointId: string;
+	wireModelId: string;
+	runtimeId: string;
+	runtimeKind: RunKind;
 	startedAt: string;
 	endedAt: string | null;
 	status: RunStatus;
@@ -32,9 +35,10 @@ export interface RunReceipt {
 	runId: string;
 	agentId: string;
 	task: string;
-	providerId: string;
-	modelId: string;
-	runtime: "native" | "sdk" | "cli";
+	endpointId: string;
+	wireModelId: string;
+	runtimeId: string;
+	runtimeKind: RunKind;
 	startedAt: string;
 	endedAt: string;
 	exitCode: number;

@@ -1,42 +1,31 @@
 /**
- * Orchestrator-side subprocess spawner for the native worker (Phase 6 slice 3).
+ * Orchestrator-side subprocess spawner for the native worker.
  *
  * Spawns `dist/worker/entry.js` with its WorkerSpec written to stdin, consumes
  * NDJSON events line-by-line from stdout, and exposes them as an async iterator
- * so the dispatch domain (P6S5) and the clio run CLI (P6S6) can drive the
- * orchestrator-side state machine. Every event bumps `heartbeatAt.current` so
- * the heartbeat watchdog stays in sync with the live event stream.
+ * so the dispatch domain can drive the orchestrator-side state machine.
  *
- * Imports nothing from pi-mono and nothing from other domains; sits cleanly
- * behind the domain boundary.
+ * Post-W5 WorkerSpec carries a resolved EndpointDescriptor + runtime id +
+ * wireModelId instead of providerId/modelId. The worker subprocess re-hydrates
+ * the runtime descriptor from its own provider registry.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import type { EndpointSpec } from "../../engine/worker-runtime.js";
+import type { EndpointDescriptor } from "../providers/index.js";
 
 export interface WorkerSpec {
 	systemPrompt: string;
 	task: string;
-	providerId: string;
-	modelId: string;
+	endpoint: EndpointDescriptor;
+	runtimeId: string;
+	wireModelId: string;
 	sessionId?: string;
 	apiKey?: string;
-	runtime?: "native";
-	/** Tool ids the worker Agent is permitted to call. */
 	allowedTools?: ReadonlyArray<string>;
-	/** Mode matrix the worker runs under (default, advise, super). */
 	mode?: string;
-	/**
-	 * Local-engine endpoint name that pairs with `endpointSpec`. Present only
-	 * when `providerId` is one of llamacpp/lmstudio/ollama/openai-compat; the
-	 * worker uses both fields to seed its in-process local-model registry.
-	 */
-	endpointName?: string;
-	/** EndpointSpec for the single local endpoint the worker is dispatching to. */
-	endpointSpec?: EndpointSpec;
 }
 
 export interface SpawnedWorker {
@@ -69,9 +58,6 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 
 	const heartbeatAt = { current: Date.now() };
 
-	// Async iterator plumbing. Stdout lines are queued; consumers either get a
-	// resolved value immediately (pending queue) or park in `waiters` until a
-	// new line arrives. `end()` flushes remaining waiters with done=true.
 	const pending: unknown[] = [];
 	const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
 	let finished = false;
@@ -106,13 +92,11 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 			try {
 				child.kill("SIGKILL");
 			} catch {
-				// Some spawn errors occur before a process exists. The close handler
-				// still resolves the promise and finishes the event iterator.
+				// process may not exist yet
 			}
 		}
 	});
 
-	// Feed the spec to the worker once, then close its stdin so readSpecFromStdin resolves.
 	if (pid !== null && child.stdin) {
 		child.stdin.write(`${JSON.stringify(spec)}\n`);
 		child.stdin.end();
@@ -126,14 +110,11 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 			try {
 				push(JSON.parse(trimmed));
 			} catch {
-				// malformed line — drop silently; stderr carries operator diagnostics.
+				// malformed line; stderr carries diagnostics
 			}
 		});
 	}
 
-	// Drain stderr so the subprocess never blocks on a full pipe. Content is not
-	// surfaced here; worker diagnostics land in the parent's stderr via process inheritance
-	// patterns in later slices.
 	child.stderr?.on("data", () => {});
 
 	const events: AsyncIterableIterator<unknown> = {
@@ -176,14 +157,14 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		try {
 			child.kill("SIGTERM");
 		} catch {
-			// process may have exited between isAlive() and kill(); safe to ignore.
+			// exited between isAlive() and kill(); ignore
 		}
 		const killTimer = setTimeout(() => {
 			if (isAlive()) {
 				try {
 					child.kill("SIGKILL");
 				} catch {
-					// swallow; close handler still resolves the promise.
+					// swallow; close handler still resolves the promise
 				}
 			}
 		}, shutdownGraceMs);

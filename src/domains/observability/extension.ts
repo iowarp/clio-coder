@@ -14,8 +14,8 @@ import { createTelemetry } from "./telemetry.js";
 interface DispatchCostPayload {
 	runId: string;
 	exitCode: number;
-	providerId?: string;
-	modelId?: string;
+	endpointId?: string;
+	wireModelId?: string;
 	tokenCount?: number;
 	costUsd?: number;
 	durationMs?: number;
@@ -26,11 +26,11 @@ function recordDispatchCost(
 	cost: ReturnType<typeof createCostTracker>,
 	payload: DispatchCostPayload,
 ): void {
-	if (!payload.providerId || !payload.modelId || typeof payload.tokenCount !== "number") {
+	if (!payload.endpointId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
 		return;
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
-	cost.accumulate(payload.providerId, payload.modelId, payload.tokenCount, payload.costUsd);
+	cost.accumulate(payload.endpointId, payload.wireModelId, payload.tokenCount, payload.costUsd);
 }
 
 export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {

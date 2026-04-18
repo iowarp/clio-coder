@@ -1,45 +1,44 @@
 /**
- * Dispatch domain wire-up (Phase 6 slice 5).
+ * Dispatch domain wire-up (post-W5).
  *
- * Owns the run ledger, active-worker tracking, admission gate, and the bridge
- * between a worker subprocess and the orchestrator's bus. A call to dispatch()
- * validates the spec, resolves an agent recipe, admits against safety scopes,
- * spawns the native worker, creates a ledger run envelope, and returns the
- * consumer an event iterator + final-receipt promise. When the worker exits we
- * write the receipt, update the ledger, and fire dispatch.completed/failed.
- *
- * drain() tears down every in-flight worker; any run that has not already
- * completed lands in the ledger as "interrupted".
+ * Resolves a DispatchRequest to an EndpointDescriptor + RuntimeDescriptor +
+ * wire model id via the providers contract. Gates admission on safety
+ * scopes, concurrency, budget, and (new) capability flags. HTTP runtimes
+ * spawn the native worker subprocess; subprocess runtimes (claude-code-cli,
+ * codex-cli, gemini-cli) run the CLI agent inline through the engine's
+ * subprocess-runtime.
  */
 
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
-import { resolveLocalModelId } from "../../engine/ai.js";
-import type { EndpointSpec } from "../../engine/worker-runtime.js";
+import { startSubprocessWorkerRun } from "../../engine/subprocess-runtime.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
-import { type ProviderId, getModelSpec, isLocalEngineId } from "../providers/catalog.js";
+import type { EndpointDescriptor, ProvidersContract, RuntimeDescriptor } from "../providers/index.js";
+import type { CapabilityFlags, ThinkingLevel } from "../providers/index.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { type Ledger, openLedger } from "./state.js";
-import type { RunReceipt, RunStatus } from "./types.js";
+import type { RunKind, RunReceipt, RunStatus } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, type WorkerSpec, spawnNativeWorker } from "./worker-spawn.js";
 
 interface ActiveRun {
 	runId: string;
-	worker: SpawnedWorker;
+	abort: () => void;
+	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
-	providerId: string;
-	modelId: string;
-	runtime: "native" | "sdk" | "cli";
+	endpointId: string;
+	wireModelId: string;
+	runtimeId: string;
+	runtimeKind: RunKind;
 	agentId: string;
 	task: string;
 	cwd: string;
@@ -68,6 +67,82 @@ function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): st
 	return "";
 }
 
+interface ResolvedTarget {
+	endpoint: EndpointDescriptor;
+	runtime: RuntimeDescriptor;
+	wireModelId: string;
+	thinkingLevel: ThinkingLevel;
+	capabilities: CapabilityFlags | null;
+}
+
+function resolveDispatchTarget(
+	req: DispatchRequest,
+	recipe: AgentRecipe | null,
+	workerDefault: { endpoint: string | null; model: string | null; thinkingLevel: ThinkingLevel } | null,
+	providers: ProvidersContract,
+): ResolvedTarget {
+	const endpointId = req.endpoint ?? recipe?.endpoint ?? workerDefault?.endpoint ?? null;
+	if (!endpointId) {
+		throw new Error("dispatch: no endpoint configured (set workers.default.endpoint or pass --endpoint)");
+	}
+	const endpoint = providers.getEndpoint(endpointId);
+	if (!endpoint) throw new Error(`dispatch: endpoint '${endpointId}' not found`);
+	const runtime = providers.getRuntime(endpoint.runtime);
+	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
+	const wireModelId = req.model ?? recipe?.model ?? workerDefault?.model ?? endpoint.defaultModel;
+	if (!wireModelId) {
+		throw new Error(`dispatch: no model for endpoint '${endpointId}' (set workers.default.model or endpoint.defaultModel)`);
+	}
+	const thinkingLevel = (req.thinkingLevel ?? recipe?.thinkingLevel ?? workerDefault?.thinkingLevel ?? "off") as ThinkingLevel;
+	const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+	return {
+		endpoint,
+		runtime,
+		wireModelId,
+		thinkingLevel,
+		capabilities: status?.capabilities ?? null,
+	};
+}
+
+function enforceCapabilityGate(
+	endpointId: string,
+	capabilities: CapabilityFlags | null,
+	required: ReadonlyArray<string> | undefined,
+): void {
+	if (!required || required.length === 0) return;
+	if (!capabilities) {
+		throw new Error(`dispatch: admission denied — capability info unavailable for endpoint '${endpointId}'`);
+	}
+	const caps = capabilities as unknown as Record<string, unknown>;
+	for (const name of required) {
+		const value = caps[name];
+		if (value === undefined || value === false || value === 0 || value === "") {
+			throw new Error(`dispatch: admission denied — capability '${name}' not supported by endpoint '${endpointId}'`);
+		}
+	}
+}
+
+function resolvedApiKey(
+	endpoint: EndpointDescriptor,
+	runtime: RuntimeDescriptor,
+	providers: ProvidersContract,
+): string | undefined {
+	const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+	if (envVar) {
+		const fromEnv = process.env[envVar]?.trim();
+		if (fromEnv && fromEnv.length > 0) return fromEnv;
+	}
+	const ref = endpoint.auth?.apiKeyRef ?? runtime.id;
+	if (providers.credentials.hasKey(ref)) {
+		// The credential store does not expose raw values from the contract; the
+		// CLI agents that rely on stored keys read them through the runtime's own
+		// env-var contract at spawn time. Surface the presence to pi-ai via the
+		// env fallback so workers do not need the raw value threaded through.
+		return undefined;
+	}
+	return undefined;
+}
+
 export function createDispatchBundle(
 	context: DomainContext,
 	options?: DispatchBundleOptions,
@@ -75,17 +150,16 @@ export function createDispatchBundle(
 	const maybeSafety = context.getContract<SafetyContract>("safety");
 	const maybeAgents = context.getContract<AgentsContract>("agents");
 	const maybeModes = context.getContract<ModesContract>("modes");
+	const maybeProviders = context.getContract<ProvidersContract>("providers");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
 	if (!maybeModes) throw new Error("dispatch domain requires 'modes' contract");
+	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const modes: ModesContract = maybeModes;
+	const providers: ProvidersContract = maybeProviders;
 	const config = context.getContract<ConfigContract>("config");
-	// scheduling is optional: when present (production boot order) dispatch gates
-	// admission on the session budget ceiling. If absent (test harnesses that
-	// exercise dispatch without the scheduling domain) dispatch falls back to
-	// pre-gate behaviour.
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 
@@ -102,7 +176,6 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
-		// systemPrompt is a dispatch-only override; strip before validating the JobSpec.
 		const { systemPrompt: _sp, ...jobSpec } = req;
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {
@@ -136,63 +209,26 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: admission denied — ${verdict.reason}`);
 		}
 
-		const runtime = req.runtime ?? recipe?.runtime ?? "native";
-		if (runtime === "sdk" || runtime === "cli") {
-			throw new Error(`dispatch: runtime=${runtime} not supported in v0.1`);
-		}
-
 		const settings = config?.get();
-		const workerDefault = settings?.workers?.default;
-		const providerId = req.providerId ?? recipe?.provider ?? workerDefault?.provider;
-		if (!providerId) {
-			throw new Error(
-				"dispatch: no provider configured (set providers.<engine>.endpoints or run `clio run --provider <id> --model <id>`)",
-			);
-		}
-		const resolvedModelRaw = req.modelId ?? recipe?.model ?? workerDefault?.model;
-		if (!resolvedModelRaw) {
-			throw new Error("dispatch: no model configured (set workers.default.model or pass `--model <id>`)");
-		}
-		// For local engines, rewrite modelId to `${modelId}@${endpointName}` so the
-		// worker can resolve the correct endpoint via the pi-ai side-registry.
-		const endpointName = req.endpoint ?? workerDefault?.endpoint;
-		const modelId = resolveLocalModelId(providerId, resolvedModelRaw, endpointName ?? undefined);
-		// Resolve the EndpointSpec so the worker subprocess can seed its own
-		// local-model registry. Worker subprocesses boot fresh and never load
-		// settings.yaml; without this the worker's `getModel` lookup falls
-		// through to pi-ai's catalog, which does not know the local engine ids.
-		let endpointSpec: EndpointSpec | undefined;
-		if (isLocalEngineId(providerId) && endpointName) {
-			const providerKey = providerId as keyof NonNullable<typeof settings>["providers"];
-			const providerEndpoints = settings?.providers?.[providerKey]?.endpoints;
-			endpointSpec = providerEndpoints?.[endpointName];
-			if (!endpointSpec) {
-				throw new Error(`dispatch: endpoint "${endpointName}" not found under providers.${providerId}.endpoints`);
-			}
-		}
+		const workerDefault = settings?.workers?.default
+			? {
+					endpoint: settings.workers.default.endpoint ?? null,
+					model: settings.workers.default.model ?? null,
+					thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
+				}
+			: null;
+		const target = resolveDispatchTarget(req, recipe, workerDefault, providers);
+		enforceCapabilityGate(target.endpoint.id, target.capabilities, req.requiredCapabilities);
+
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
 
-		// Derive the worker's tool allowlist. Prefer the recipe's explicit tools
-		// list; otherwise expose every tool visible in the current mode matrix so
-		// the worker mirrors interactive expectations.
 		const recipeTools = recipe?.tools;
 		const allowedTools =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
 		const workerMode = recipe?.mode ?? currentMode;
-
-		const spec: WorkerSpec = {
-			systemPrompt,
-			task: req.task,
-			providerId,
-			modelId,
-			allowedTools,
-			mode: workerMode,
-		};
-		if (endpointName && endpointSpec) {
-			spec.endpointName = endpointName;
-			spec.endpointSpec = endpointSpec;
-		}
+		const apiKey = resolvedApiKey(target.endpoint, target.runtime, providers);
+		const runtimeKind: RunKind = target.runtime.kind;
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
@@ -210,17 +246,99 @@ export function createDispatchBundle(
 			}
 		}
 
-		let worker: SpawnedWorker;
-		try {
-			worker = spawnWorker(spec, { cwd });
-		} catch (error) {
-			releaseWorkerSlot();
-			throw error;
+		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
+		let pid: number | null = null;
+		let abort: () => void;
+		let workerEvents: AsyncIterable<unknown>;
+		let workerDone: Promise<{ exitCode: number | null }>;
+
+		if (runtimeKind === "http") {
+			const spec: WorkerSpec = {
+				systemPrompt,
+				task: req.task,
+				endpoint: target.endpoint,
+				runtimeId: target.runtime.id,
+				wireModelId: target.wireModelId,
+				allowedTools,
+				mode: workerMode,
+			};
+			if (apiKey) spec.apiKey = apiKey;
+			let worker: SpawnedWorker;
+			try {
+				worker = spawnWorker(spec, { cwd });
+			} catch (error) {
+				releaseWorkerSlot();
+				throw error;
+			}
+			pid = worker.pid;
+			abort = () => worker.abort();
+			workerEvents = worker.events;
+			workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
+		} else {
+			// subprocess kind: run inline inside the orchestrator process
+			const queue: unknown[] = [];
+			const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
+			let finished = false;
+			function push(value: unknown): void {
+				const w = waiters.shift();
+				if (w) {
+					w({ value, done: false });
+					return;
+				}
+				queue.push(value);
+			}
+			function end(): void {
+				if (finished) return;
+				finished = true;
+				while (waiters.length > 0) {
+					const w = waiters.shift();
+					if (w) w({ value: undefined, done: true });
+				}
+			}
+			const iterator: AsyncIterableIterator<unknown> = {
+				next(): Promise<IteratorResult<unknown>> {
+					if (queue.length > 0) {
+						const value = queue.shift();
+						return Promise.resolve({ value, done: false });
+					}
+					if (finished) return Promise.resolve({ value: undefined, done: true });
+					return new Promise<IteratorResult<unknown>>((resolve) => {
+						waiters.push(resolve);
+					});
+				},
+				return(): Promise<IteratorResult<unknown>> {
+					end();
+					return Promise.resolve({ value: undefined, done: true });
+				},
+				[Symbol.asyncIterator](): AsyncIterableIterator<unknown> {
+					return this;
+				},
+			};
+			const abortController = new AbortController();
+			const inputForSubprocess: Parameters<typeof startSubprocessWorkerRun>[0] = {
+				systemPrompt,
+				task: req.task,
+				endpoint: target.endpoint,
+				runtime: target.runtime,
+				wireModelId: target.wireModelId,
+				signal: abortController.signal,
+			};
+			if (apiKey) inputForSubprocess.apiKey = apiKey;
+			const handle = startSubprocessWorkerRun(inputForSubprocess, (event) => push(event));
+			pid = null;
+			abort = () => {
+				abortController.abort();
+				handle.abort();
+			};
+			workerEvents = iterator;
+			workerDone = handle.promise.then((r) => {
+				end();
+				return { exitCode: r.exitCode };
+			});
 		}
 
-		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
-			for await (const raw of worker.events) {
+			for await (const raw of workerEvents) {
 				const event = raw as {
 					type?: string;
 					message?: {
@@ -241,40 +359,45 @@ export function createDispatchBundle(
 		const envelope = ledgerRef.create({
 			agentId: req.agentId,
 			task: req.task,
-			providerId,
-			modelId,
-			runtime,
+			endpointId: target.endpoint.id,
+			wireModelId: target.wireModelId,
+			runtimeId: target.runtime.id,
+			runtimeKind,
 			sessionId: null,
 			cwd,
 		});
-		ledgerRef.update(envelope.id, { status: "running", pid: worker.pid });
+		ledgerRef.update(envelope.id, { status: "running", pid });
 
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
 			agentId: req.agentId,
-			providerId,
-			modelId,
-			runtime,
+			endpointId: target.endpoint.id,
+			wireModelId: target.wireModelId,
+			runtimeId: target.runtime.id,
+			runtimeKind,
 		});
 		context.bus.emit(BusChannels.DispatchStarted, {
 			runId: envelope.id,
 			agentId: req.agentId,
-			providerId,
-			modelId,
-			runtime,
-			pid: worker.pid,
+			endpointId: target.endpoint.id,
+			wireModelId: target.wireModelId,
+			runtimeId: target.runtime.id,
+			runtimeKind,
+			pid,
 		});
 
 		const startedAt = envelope.startedAt;
 
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
-			worker,
+			abort,
+			promise: workerDone.then(() => undefined),
 			recipe,
 			startedAt,
-			providerId,
-			modelId,
-			runtime,
+			endpointId: target.endpoint.id,
+			wireModelId: target.wireModelId,
+			runtimeId: target.runtime.id,
+			runtimeKind,
 			agentId: req.agentId,
 			task: req.task,
 			cwd,
@@ -284,23 +407,24 @@ export function createDispatchBundle(
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
-				const result = await worker.promise;
+				const result = await workerDone;
 				const receiptExitCode = result.exitCode ?? 1;
 				const endedAt = new Date().toISOString();
 				const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
-				const modelSpec = getModelSpec(providerId as ProviderId, modelId);
-				const costUsd = modelSpec
-					? (tokenMeter.inputTokens * (modelSpec.pricePer1MInput ?? 0)) / 1_000_000 +
-						(tokenMeter.outputTokens * (modelSpec.pricePer1MOutput ?? 0)) / 1_000_000
+				const pricing = target.endpoint.pricing;
+				const costUsd = pricing
+					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
+						(tokenMeter.outputTokens * pricing.output) / 1_000_000
 					: 0;
 				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
 				const receipt: RunReceipt = {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
-					providerId,
-					modelId,
-					runtime,
+					endpointId: target.endpoint.id,
+					wireModelId: target.wireModelId,
+					runtimeId: target.runtime.id,
+					runtimeKind,
 					startedAt,
 					endedAt,
 					exitCode: receiptExitCode,
@@ -326,9 +450,10 @@ export function createDispatchBundle(
 					context.bus.emit(BusChannels.DispatchCompleted, {
 						runId: envelope.id,
 						agentId: req.agentId,
-						providerId,
-						modelId,
-						runtime,
+						endpointId: target.endpoint.id,
+						wireModelId: target.wireModelId,
+						runtimeId: target.runtime.id,
+						runtimeKind,
 						tokenCount: receipt.tokenCount,
 						costUsd: receipt.costUsd,
 						durationMs,
@@ -338,9 +463,10 @@ export function createDispatchBundle(
 					context.bus.emit(BusChannels.DispatchFailed, {
 						runId: envelope.id,
 						agentId: req.agentId,
-						providerId,
-						modelId,
-						runtime,
+						endpointId: target.endpoint.id,
+						wireModelId: target.wireModelId,
+						runtimeId: target.runtime.id,
+						runtimeKind,
 						tokenCount: receipt.tokenCount,
 						costUsd: receipt.costUsd,
 						durationMs,
@@ -378,9 +504,9 @@ export function createDispatchBundle(
 		for (const run of runs) {
 			run.aborted = true;
 			try {
-				run.worker.abort();
+				run.abort();
 			} catch {
-				// best-effort; if abort fails the promise still resolves on child close.
+				// best-effort; promise still resolves on child close
 			}
 		}
 		await Promise.allSettled(runs.map((r) => r.finalPromise));
@@ -402,9 +528,9 @@ export function createDispatchBundle(
 			if (!run) return;
 			run.aborted = true;
 			try {
-				run.worker.abort();
+				run.abort();
 			} catch {
-				// child may already be gone; ignore.
+				// child may already be gone
 			}
 		},
 		drain,
