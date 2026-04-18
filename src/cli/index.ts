@@ -2,7 +2,7 @@ import { runAgentsCommand } from "./agents.js";
 import { runClioCommand } from "./clio.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runInstallCommand } from "./install.js";
-import { runListModelsCommand } from "./list-models-command.js";
+import { runListModelsCommand } from "./list-models.js";
 import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
 import { runSetupCommand } from "./setup.js";
@@ -13,16 +13,17 @@ import { runVersionCommand } from "./version.js";
 const HELP = `clio. IOWarp orchestrator coding-agent
 
 Usage:
-  clio                  start interactive mode
-  clio --version, -v    print version info
-  clio doctor           run environment diagnostics
-  clio setup               guided provider and model setup
-  clio install          bootstrap Clio config/data/cache directories
-  clio upgrade          upgrade clio and run pending state migrations
-  clio providers        list configured providers
-  clio agents           list discovered agent recipes
-  clio run <agent> <task>  run an agent headlessly (NDJSON)
-  clio --help, -h       this message
+  clio                      start interactive mode
+  clio --version, -v        print version info
+  clio doctor               run environment diagnostics
+  clio setup [runtime]      register or manage endpoints
+  clio install              bootstrap Clio config/data/cache directories
+  clio upgrade              upgrade clio and run pending state migrations
+  clio providers            list endpoint status, health, capabilities
+  clio list-models          list discovered models per endpoint
+  clio agents               list discovered agent recipes
+  clio run <task>           dispatch a one-shot worker job
+  clio --help, -h           this message
 `;
 
 async function main(argv: string[]): Promise<number> {
@@ -32,8 +33,6 @@ async function main(argv: string[]): Promise<number> {
 		return 0;
 	}
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
-	const listExit = runListModelsCommand(argv);
-	if (listExit !== null) return listExit;
 
 	const subcommand = positional[0];
 	if (!subcommand) return runClioCommand();
@@ -41,6 +40,8 @@ async function main(argv: string[]): Promise<number> {
 	switch (subcommand) {
 		case "providers":
 			return runProvidersCommand(argv.slice(1));
+		case "list-models":
+			return runListModelsCommand(argv.slice(1));
 		case "agents":
 			return runAgentsCommand(argv.slice(1));
 		case "run":

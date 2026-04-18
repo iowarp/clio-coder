@@ -1,54 +1,109 @@
 import chalk from "chalk";
+import { loadDomains } from "../core/domain-loader.js";
+import { ConfigDomainModule } from "../domains/config/index.js";
+import { ensureInstalled } from "../domains/lifecycle/index.js";
+import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
+import { ProvidersDomainModule } from "../domains/providers/index.js";
 
-import { PROVIDER_CATALOG, type ProviderSpec } from "../domains/providers/catalog.js";
-import { resolveModelPattern } from "../domains/providers/resolver.js";
-
-export interface ListModelsOptions {
-	search?: string;
-	stdout?: (line: string) => void;
+interface ModelRow {
+	endpointId: string;
+	runtimeId: string;
+	modelId: string;
+	caps: string;
 }
 
-export function listModels(options: ListModelsOptions = {}): number {
-	const write = options.stdout ?? ((line: string) => process.stdout.write(`${line}\n`));
-	const search = (options.search ?? "").trim();
-	if (search.length === 0) {
-		for (const provider of PROVIDER_CATALOG) {
-			writeProviderBlock(provider, write);
-		}
-		return 0;
-	}
-	const { matches, diagnostic } = resolveModelPattern(search, { fuzzy: true });
-	if (matches.length === 0) {
-		process.stderr.write(`${chalk.red("no matches")}: ${diagnostic ?? search}\n`);
+export async function runListModelsCommand(args: ReadonlyArray<string>): Promise<number> {
+	const asJson = args.includes("--json");
+	const probe = args.includes("--probe");
+	const filterIdx = args.indexOf("--endpoint");
+	const filter = filterIdx >= 0 ? args[filterIdx + 1] : undefined;
+
+	ensureInstalled();
+	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
+	const providers = loaded.getContract<ProvidersContract>("providers");
+	if (!providers) {
+		process.stderr.write("providers: domain not loaded\n");
+		await loaded.stop();
 		return 1;
 	}
-	const byProvider = new Map<string, string[]>();
-	for (const ref of matches) {
-		const bucket = byProvider.get(ref.providerId) ?? [];
-		bucket.push(ref.modelId);
-		byProvider.set(ref.providerId, bucket);
+	if (probe) {
+		try {
+			await providers.probeAllLive();
+		} catch (err) {
+			process.stderr.write(`list-models: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		}
 	}
-	for (const [providerId, models] of byProvider) {
-		write(chalk.bold(providerId));
-		for (const id of models) write(`  ${id}`);
+	const entries = providers.list();
+	const filtered = filter ? entries.filter((e) => e.endpoint.id === filter) : entries;
+	const rows = collectRows(filtered);
+
+	if (asJson) {
+		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+	} else {
+		renderRows(rows);
 	}
+	await loaded.stop();
 	return 0;
 }
 
-function writeProviderBlock(provider: ProviderSpec, write: (line: string) => void): void {
-	write(chalk.bold(`${provider.id} (${provider.tier})`));
-	if (provider.models.length === 0) {
-		write(chalk.dim("  (no baked models; configure endpoints in settings.yaml)"));
+function collectRows(entries: ReadonlyArray<EndpointStatus>): ModelRow[] {
+	const rows: ModelRow[] = [];
+	for (const status of entries) {
+		const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
+		const caps = capabilityBadges(status);
+		const discovered = status.discoveredModels.length > 0 ? status.discoveredModels : fallbackModels(status);
+		if (discovered.length === 0) {
+			rows.push({
+				endpointId: status.endpoint.id,
+				runtimeId,
+				modelId: "(no models)",
+				caps,
+			});
+			continue;
+		}
+		for (const modelId of discovered) {
+			rows.push({ endpointId: status.endpoint.id, runtimeId, modelId, caps });
+		}
+	}
+	return rows;
+}
+
+function fallbackModels(status: EndpointStatus): string[] {
+	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
+	const wire = status.endpoint.wireModels;
+	if (wire && wire.length > 0) return [...wire];
+	return [];
+}
+
+function capabilityBadges(status: EndpointStatus): string {
+	const c = status.capabilities;
+	const badge = (on: boolean, letter: string): string => (on ? letter : "-");
+	return [
+		badge(c.chat, "C"),
+		badge(c.tools, "T"),
+		badge(c.reasoning, "R"),
+		badge(c.vision, "V"),
+		badge(c.embeddings, "E"),
+		badge(c.rerank, "K"),
+		badge(c.fim, "F"),
+	].join("");
+}
+
+function renderRows(rows: ReadonlyArray<ModelRow>): void {
+	if (rows.length === 0) {
+		process.stdout.write("no endpoints configured. run `clio setup` to register one.\n");
 		return;
 	}
-	for (const model of provider.models) {
-		const ctx = `${Math.round(model.contextWindow / 1000)}k`;
-		const thinking = model.thinkingCapable ? "thinking" : "";
-		const price =
-			model.pricePer1MInput !== undefined && model.pricePer1MOutput !== undefined
-				? `$${model.pricePer1MInput}/${model.pricePer1MOutput} per 1M`
-				: "";
-		const labels = [ctx, thinking, price].filter(Boolean).join("  ");
-		write(`  ${model.id.padEnd(32)} ${chalk.dim(labels)}`);
+	const widths: ReadonlyArray<number> = [16, 18, 42, 8];
+	const header = ["endpoint", "runtime", "model", "caps"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
+	process.stdout.write(`${chalk.bold(header.trimEnd())}\n`);
+	for (const row of rows) {
+		const line = [
+			row.endpointId.padEnd(widths[0] ?? 0),
+			row.runtimeId.padEnd(widths[1] ?? 0),
+			row.modelId.padEnd(widths[2] ?? 0),
+			row.caps.padEnd(widths[3] ?? 0),
+		].join("");
+		process.stdout.write(`${line.trimEnd()}\n`);
 	}
 }
