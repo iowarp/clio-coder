@@ -150,4 +150,21 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.kill();
 		}
 	});
+
+	it("/hotkeys opens the reference, Esc closes", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/hotkeys\r");
+			// The scope headers (GLOBAL / EDITOR) are unique to the hotkeys overlay.
+			await p.expect(/GLOBAL|EDITOR/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
 });
