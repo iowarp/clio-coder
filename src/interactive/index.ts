@@ -16,6 +16,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
@@ -118,7 +119,8 @@ export type OverlayState =
 	| "model"
 	| "scoped-models"
 	| "settings"
-	| "resume";
+	| "resume"
+	| "hotkeys";
 
 export interface KeyBindingDeps {
 	cycleMode: () => void;
@@ -173,6 +175,10 @@ export interface ResumeOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface HotkeysOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -183,7 +189,8 @@ export interface OverlayKeyDeps
 		ModelOverlayKeyDeps,
 		ScopedModelsOverlayKeyDeps,
 		SettingsOverlayKeyDeps,
-		ResumeOverlayKeyDeps {
+		ResumeOverlayKeyDeps,
+		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -342,6 +349,18 @@ export function routeResumeOverlayKey(data: string, deps: ResumeOverlayKeyDeps):
 	return false;
 }
 
+/**
+ * Pure overlay key router for the /hotkeys overlay. Esc closes; everything
+ * else is swallowed so arrow keys cannot disturb the banner-style render.
+ */
+export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
 /** Ctrl+C must still raise SIGINT while any overlay is open. */
 export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
 	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
@@ -390,6 +409,9 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "resume") {
 		// SelectList owns arrows and Enter; route only Esc here.
 		return routeResumeOverlayKey(data, deps);
+	}
+	if (overlayState === "hotkeys") {
+		return routeHotkeysOverlayKey(data, deps);
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
@@ -456,6 +478,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openSettings: () => openSettingsOverlayState(),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
+		openHotkeys: () => openHotkeysOverlayState(),
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
 			chatPanel.appendUser(text);
@@ -657,6 +680,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		deps.onNewSession();
 		chatPanel.reset();
 		footer.refresh();
+		tui.requestRender();
+	};
+
+	const openHotkeysOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "hotkeys";
+		overlayHandle = openHotkeysOverlay(tui);
 		tui.requestRender();
 	};
 
