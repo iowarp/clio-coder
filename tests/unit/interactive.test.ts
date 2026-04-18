@@ -15,6 +15,7 @@ import {
 } from "../../src/interactive/index.js";
 import { buildModelItems } from "../../src/interactive/overlays/model-selector.js";
 import { buildScopedModelItems } from "../../src/interactive/overlays/scoped-models.js";
+import { buildSessionItems } from "../../src/interactive/overlays/session-selector.js";
 import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
 
 function makeProviders(list: ProviderListEntry[]): ProvidersContract {
@@ -66,6 +67,8 @@ describe("slash-commands registry", () => {
 			"model",
 			"scoped-models",
 			"settings",
+			"resume",
+			"new",
 		]);
 		const owned = new Map<string, string>();
 		for (const entry of BUILTIN_SLASH_COMMANDS) {
@@ -103,6 +106,14 @@ describe("slash-commands registry", () => {
 
 	it("parses /settings as the settings kind", () => {
 		deepStrictEqual(parseSlashCommand("/settings"), { kind: "settings" });
+	});
+
+	it("parses /resume as the resume kind", () => {
+		deepStrictEqual(parseSlashCommand("/resume"), { kind: "resume" });
+	});
+
+	it("parses /new as the new kind", () => {
+		deepStrictEqual(parseSlashCommand("/new"), { kind: "new" });
 	});
 });
 
@@ -323,6 +334,48 @@ describe("settings overlay", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		applySettingChange(settings, "orchestrator.provider", "openai");
 		strictEqual(settings.orchestrator.provider, undefined);
+	});
+});
+
+describe("session-selector buildSessionItems", () => {
+	const base = {
+		cwd: "/tmp/test",
+		cwdHash: "deadbeef",
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.0.0-test",
+		piMonoVersion: "0.0.0-test",
+		platform: "linux",
+		nodeVersion: "v24.0.0",
+	} as const;
+
+	it("renders ✓ for ended sessions and ● for still-open ones", () => {
+		const items = buildSessionItems([
+			{
+				...base,
+				id: "s-ended-1234",
+				createdAt: "2026-04-17T10:00:00.000Z",
+				endedAt: "2026-04-17T11:00:00.000Z",
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+			},
+			{
+				...base,
+				id: "s-open-5678",
+				createdAt: "2026-04-17T12:00:00.000Z",
+				endedAt: null,
+				provider: null,
+				model: null,
+			},
+		]);
+		strictEqual(items.length, 2);
+		ok(items[0]?.label.startsWith("✓"), `expected ✓ glyph, got ${items[0]?.label}`);
+		ok(items[1]?.label.startsWith("●"), `expected ● glyph, got ${items[1]?.label}`);
+		ok(items[0]?.value === "s-ended-1234");
+	});
+
+	it("handles empty history", () => {
+		deepStrictEqual(buildSessionItems([]), []);
 	});
 });
 

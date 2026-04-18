@@ -117,4 +117,37 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.kill();
 		}
 	});
+
+	it("/resume opens the session picker (possibly empty), Esc closes", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/resume\r");
+			// The overlay may render an empty list (fresh scratch home) or a single
+			// row that we just created. Give the TUI time to paint either way, then
+			// send Esc to close whichever state we ended up in.
+			await new Promise((r) => setTimeout(r, 400));
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/new rotates the session and exits clean on /quit", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/new\r");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
 });
