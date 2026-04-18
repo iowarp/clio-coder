@@ -26,7 +26,7 @@ import type { ProvidersContract } from "../domains/providers/index.js";
 import { VALID_THINKING_LEVELS, resolveModelPattern, resolveModelScope } from "../domains/providers/resolver.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
-import { compact } from "../domains/session/compaction/compact.js";
+import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { fromLegacyTurn } from "../domains/session/entries.js";
 import type { SessionEntry } from "../domains/session/entries.js";
@@ -136,6 +136,52 @@ function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 }
 
 /**
+ * Shared compaction flow used by both the `/compact` slash-command handler
+ * and the chat-loop auto-trigger (slice 12d). Throws on configuration errors
+ * that warrant user feedback (no session, no model); returns null on
+ * no-op cases (no entries yet, no cut crossed) so the caller can decide
+ * whether to stay silent (auto-path) or print a status line (manual path).
+ *
+ * On success, writes the compactionSummary entry via `session.appendEntry`
+ * and returns the CompactResult the chat-loop needs to swap its in-memory
+ * AgentMessage list.
+ */
+async function runCompactionFlow(
+	session: SessionContract,
+	settings: ClioSettings,
+	instructions?: string,
+): Promise<CompactResult | null> {
+	const meta = session.current();
+	if (!meta) {
+		throw new Error("no current session to compact; start one with /new or /resume first");
+	}
+	const resolved = resolveCompactionModel(settings);
+	if (!resolved) {
+		throw new Error("no model configured; set orchestrator.model or compaction.model");
+	}
+	const apiKey = resolveCompactionApiKey(resolved.providerId, resolved.endpointSpec);
+	const entries = readSessionEntriesForCompact(meta.id);
+	if (entries.length === 0) return null;
+
+	const result = await compact({
+		entries,
+		model: resolved.model,
+		...(apiKey !== undefined ? { apiKey } : {}),
+		...(instructions !== undefined ? { instructions } : {}),
+	});
+	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
+
+	session.appendEntry({
+		kind: "compactionSummary",
+		parentTurnId: result.firstKeptTurnId ?? null,
+		summary: result.summary,
+		tokensBefore: result.tokensBefore,
+		firstKeptTurnId: result.firstKeptTurnId ?? "",
+	});
+	return result;
+}
+
+/**
  * Ctrl+P / Shift+Ctrl+P step the orchestrator target through the resolved
  * `provider.scope` set. A no-op when scope is empty or resolves to nothing, so
  * unconfigured users feel no phantom behavior.
@@ -235,6 +281,25 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		modes,
 		knownProviders: () => new Set(providers.list().map((entry) => entry.id)),
 		...(session ? { session } : {}),
+		...(session
+			? {
+					readSessionEntries: (): ReadonlyArray<SessionEntry> => {
+						const meta = session.current();
+						if (!meta) return [];
+						return readSessionEntriesForCompact(meta.id);
+					},
+					autoCompact: async (instructions?: string): Promise<CompactResult | null> => {
+						try {
+							return await runCompactionFlow(session, config?.get() ?? readSettings(), instructions);
+						} catch {
+							// Auto-path is silent on configuration errors so the
+							// chat-loop does not spam the user on every turn.
+							// /compact still surfaces the error for manual runs.
+							return null;
+						}
+					},
+				}
+			: {}),
 	});
 	await startInteractive({
 		bus,
@@ -311,48 +376,23 @@ export async function bootOrchestrator(): Promise<BootResult> {
 						}
 					},
 					onCompact: async (instructions) => {
-						const meta = session.current();
-						if (!meta) {
-							process.stderr.write("[/compact] no current session to compact; start one with /new or /resume first\n");
-							return;
+						try {
+							const result = await runCompactionFlow(session, config?.get() ?? readSettings(), instructions);
+							if (result === null) {
+								process.stdout.write("[/compact] nothing to compact; session is empty or no cut crossed\n");
+								return;
+							}
+							process.stdout.write(
+								`${renderCompactionSummaryLine({
+									messagesSummarized: result.messagesSummarized,
+									summaryChars: result.summary.length,
+									tokensBefore: result.tokensBefore,
+									isSplitTurn: result.isSplitTurn,
+								})}\n`,
+							);
+						} catch (err) {
+							process.stderr.write(`[/compact] ${err instanceof Error ? err.message : String(err)}\n`);
 						}
-						const settings = config?.get() ?? readSettings();
-						const resolved = resolveCompactionModel(settings);
-						if (!resolved) {
-							process.stderr.write("[/compact] no model configured; set orchestrator.model or compaction.model\n");
-							return;
-						}
-						const apiKey = resolveCompactionApiKey(resolved.providerId, resolved.endpointSpec);
-						const entries = readSessionEntriesForCompact(meta.id);
-						if (entries.length === 0) {
-							process.stderr.write("[/compact] session has no entries yet; nothing to summarize\n");
-							return;
-						}
-						const result = await compact({
-							entries,
-							model: resolved.model,
-							...(apiKey !== undefined ? { apiKey } : {}),
-							...(instructions !== undefined ? { instructions } : {}),
-						});
-						if (result.messagesSummarized === 0 || result.summary.length === 0) {
-							process.stdout.write("[/compact] no entries crossed the cut point; skipping\n");
-							return;
-						}
-						session.appendEntry({
-							kind: "compactionSummary",
-							parentTurnId: result.firstKeptTurnId ?? null,
-							summary: result.summary,
-							tokensBefore: result.tokensBefore,
-							firstKeptTurnId: result.firstKeptTurnId ?? "",
-						});
-						process.stdout.write(
-							`${renderCompactionSummaryLine({
-								messagesSummarized: result.messagesSummarized,
-								summaryChars: result.summary.length,
-								tokensBefore: result.tokensBefore,
-								isSplitTurn: result.isSplitTurn,
-							})}\n`,
-						);
 					},
 				}
 			: {}),
