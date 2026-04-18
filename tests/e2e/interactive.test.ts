@@ -1,4 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, spawnClioPty } from "../harness/pty.js";
 import { runCli } from "../harness/spawn.js";
@@ -158,6 +160,51 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.send("/hotkeys\r");
 			// The scope headers (GLOBAL / EDITOR) are unique to the hotkeys overlay.
 			await p.expect(/GLOBAL|EDITOR/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/thinking shows the full level set when orchestrator is a Qwen3 local model", async () => {
+		// Phase 12a pre-phase fix (see docs/superpowers/plans/...-phase-12-...).
+		// Before the resolveLocalModelId composition, getOrchestratorModel
+		// looked up the bare id, missed the local-engine registry, threw, and
+		// clamped the /thinking overlay to [off]. With the fix, boot registers
+		// Qwen3.6-35B-A3B@mini with reasoning=true via the llamacpp preset;
+		// /thinking renders every level the model supports.
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir, "scratch env must set CLIO_CONFIG_DIR");
+		writeFileSync(
+			join(configDir, "settings.yaml"),
+			[
+				"providers:",
+				"  llamacpp:",
+				"    endpoints:",
+				"      mini:",
+				"        url: http://mini.local:8080",
+				"        default_model: Qwen3.6-35B-A3B",
+				"orchestrator:",
+				"  provider: llamacpp",
+				"  model: Qwen3.6-35B-A3B",
+				"  endpoint: mini",
+				"  thinkingLevel: medium",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/thinking\r");
+			// low / medium / high never render when the overlay clamps to [off];
+			// seeing any of them proves the local-engine lookup now succeeds.
+			await p.expect(/medium|low|high/, 10_000);
 			p.send("\x1b");
 			await new Promise((r) => setTimeout(r, 300));
 			p.send("/quit\r");
