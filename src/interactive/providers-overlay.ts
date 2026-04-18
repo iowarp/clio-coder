@@ -1,10 +1,6 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type {
-	CapabilityFlags,
-	EndpointStatus,
-	ProvidersContract,
-} from "../domains/providers/index.js";
+import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
 import { Box, type Component, Loader, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
@@ -95,7 +91,8 @@ function formatDiscoveredRow(status: EndpointStatus): string {
 	const ids = status.discoveredModels;
 	if (ids.length === 0) return "    models: (no probe yet)";
 	const preview = ids.slice(0, PROVIDERS_OVERLAY_DISCOVERED_PREVIEW).join(", ");
-	const suffix = ids.length > PROVIDERS_OVERLAY_DISCOVERED_PREVIEW ? ` (+${ids.length - PROVIDERS_OVERLAY_DISCOVERED_PREVIEW})` : "";
+	const suffix =
+		ids.length > PROVIDERS_OVERLAY_DISCOVERED_PREVIEW ? ` (+${ids.length - PROVIDERS_OVERLAY_DISCOVERED_PREVIEW})` : "";
 	return `    models: ${preview}${suffix}`;
 }
 
@@ -133,7 +130,9 @@ export function formatProvidersOverlayLines(
 }
 
 class ProvidersOverlayView implements Component {
-	constructor(private getState: () => { statuses: ReadonlyArray<EndpointStatus>; error: string | null; selectedId: string | null }) {}
+	constructor(
+		private getState: () => { statuses: ReadonlyArray<EndpointStatus>; error: string | null; selectedId: string | null },
+	) {}
 
 	render(width: number): string[] {
 		if (width <= 4) {

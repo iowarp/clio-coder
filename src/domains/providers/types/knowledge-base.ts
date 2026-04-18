@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -45,9 +45,7 @@ export class FileKnowledgeBase implements KnowledgeBase {
 			const raw = readFileSync(join(this.dir, entry.name), "utf8");
 			const parsed = parseYaml(raw);
 			if (!Array.isArray(parsed)) {
-				throw new Error(
-					`knowledge base file ${entry.name} must be a YAML list of KnowledgeBaseEntry`,
-				);
+				throw new Error(`knowledge base file ${entry.name} must be a YAML list of KnowledgeBaseEntry`);
 			}
 			for (const item of parsed) {
 				next.push(normalizeEntry(item, entry.name));
@@ -100,11 +98,7 @@ function normalizeEntry(raw: unknown, file: string): KnowledgeBaseEntry {
 		capabilities: capabilities as Partial<CapabilityFlags>,
 	};
 	if (candidate.quirks !== undefined) {
-		if (
-			typeof candidate.quirks !== "object" ||
-			candidate.quirks === null ||
-			Array.isArray(candidate.quirks)
-		) {
+		if (typeof candidate.quirks !== "object" || candidate.quirks === null || Array.isArray(candidate.quirks)) {
 			throw new Error(`knowledge base file ${file}: entry '${family}' quirks must be an object`);
 		}
 		entry.quirks = candidate.quirks as Record<string, unknown>;

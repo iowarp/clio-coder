@@ -3,17 +3,9 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import { probeHttp } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
-import type {
-	CompleteOptions,
-	CompletionChunk,
-	InfillOptions,
-} from "../../types/inference.js";
+import type { CompleteOptions, CompletionChunk, InfillOptions } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
 import { probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
 
@@ -48,12 +40,7 @@ function parseChunk(raw: RawCompletionChunk): CompletionChunk {
 		content: typeof raw.content === "string" ? raw.content : "",
 		stop: raw.stop === true,
 	};
-	if (
-		raw.stop_type === "eos" ||
-		raw.stop_type === "limit" ||
-		raw.stop_type === "word" ||
-		raw.stop_type === "none"
-	) {
+	if (raw.stop_type === "eos" || raw.stop_type === "limit" || raw.stop_type === "word" || raw.stop_type === "none") {
 		chunk.stop_type = raw.stop_type;
 	}
 	if (typeof raw.tokens_predicted === "number") chunk.tokens_predicted = raw.tokens_predicted;
@@ -61,9 +48,7 @@ function parseChunk(raw: RawCompletionChunk): CompletionChunk {
 	return chunk;
 }
 
-async function* streamSse(
-	body: ReadableStream<Uint8Array>,
-): AsyncGenerator<CompletionChunk> {
+async function* streamSse(body: ReadableStream<Uint8Array>): AsyncGenerator<CompletionChunk> {
 	const reader = body.getReader();
 	const decoder = new TextDecoder("utf-8");
 	let buffered = "";
@@ -150,9 +135,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
-		const health = await (ctx.signal
-			? probeHttp({ ...healthOpts, signal: ctx.signal })
-			: probeHttp(healthOpts));
+		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const props = await probeLlamaCppProps(base, ctx);
 		const enriched: ProbeResult = { ...health };
@@ -165,11 +148,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,
@@ -180,19 +159,13 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 			baseUrlForEndpoint: withV1,
 		});
 	},
-	async *complete(
-		endpoint: EndpointDescriptor,
-		opts: CompleteOptions,
-	): AsyncIterable<CompletionChunk> {
+	async *complete(endpoint: EndpointDescriptor, opts: CompleteOptions): AsyncIterable<CompletionChunk> {
 		const base = endpointUrl(endpoint);
 		if (!base) throw new Error("endpoint has no url");
 		const body = await postStream(`${base}/completion`, buildCompleteBody(opts), opts.signal);
 		for await (const chunk of streamSse(body)) yield chunk;
 	},
-	async *infill(
-		endpoint: EndpointDescriptor,
-		opts: InfillOptions,
-	): AsyncIterable<CompletionChunk> {
+	async *infill(endpoint: EndpointDescriptor, opts: InfillOptions): AsyncIterable<CompletionChunk> {
 		const base = endpointUrl(endpoint);
 		if (!base) throw new Error("endpoint has no url");
 		const body = await postStream(`${base}/infill`, buildInfillBody(opts), opts.signal);

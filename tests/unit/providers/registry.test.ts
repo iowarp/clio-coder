@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import {
-	createRuntimeRegistry,
-	getRuntimeRegistry,
-} from "../../../src/domains/providers/registry.js";
+import { createRuntimeRegistry, getRuntimeRegistry } from "../../../src/domains/providers/registry.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
 

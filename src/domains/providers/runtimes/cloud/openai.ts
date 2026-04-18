@@ -1,10 +1,10 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 
+import { mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { RuntimeDescriptor } from "../../types/runtime-descriptor.js";
-import { mergeCapabilities } from "../../capabilities.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -28,11 +28,7 @@ const openaiRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "OPENAI_API_KEY",
 	defaultCapabilities,
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const caps = mergeCapabilities(
 			defaultCapabilities,
 			kb?.entry.capabilities ?? null,

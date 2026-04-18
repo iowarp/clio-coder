@@ -4,19 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
+import type { ClioSettings } from "../../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../../src/core/defaults.js";
 import type { DomainContext } from "../../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../../src/core/event-bus.js";
 import { resetXdgCache } from "../../../src/core/xdg.js";
 import type { ConfigContract } from "../../../src/domains/config/contract.js";
 import { createProvidersBundle } from "../../../src/domains/providers/extension.js";
-import {
-	createRuntimeRegistry,
-	getRuntimeRegistry,
-} from "../../../src/domains/providers/registry.js";
+import { getRuntimeRegistry } from "../../../src/domains/providers/registry.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
-import { DEFAULT_SETTINGS } from "../../../src/core/defaults.js";
-import type { ClioSettings } from "../../../src/core/config.js";
 
 const ORIGINAL_ENV = { ...process.env };
 

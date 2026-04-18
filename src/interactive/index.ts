@@ -1041,7 +1041,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			cycleThinking: () => {
 				const settings = deps.getSettings?.();
-				const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
+				const available = settings
+					? resolveAvailableThinkingLevels(deps.providers, settings)
+					: (["off"] as ThinkingLevel[]);
 				if (available.length === 1 && available[0] === "off") {
 					footer.refresh();
 					tui.requestRender();

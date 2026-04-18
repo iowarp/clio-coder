@@ -4,11 +4,7 @@ import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
 import { probeLlamaCppProps } from "../common/probe-helpers.js";
 
@@ -45,9 +41,7 @@ const llamacppOpenaiRuntime: RuntimeDescriptor = {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const probeOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
-		const health = await (ctx.signal
-			? probeHttp({ ...probeOpts, signal: ctx.signal })
-			: probeHttp(probeOpts));
+		const health = await (ctx.signal ? probeHttp({ ...probeOpts, signal: ctx.signal }) : probeHttp(probeOpts));
 		if (!health.ok) return health;
 		const props = await probeLlamaCppProps(base, ctx);
 		const enriched: ProbeResult = { ...health };
@@ -67,11 +61,7 @@ const llamacppOpenaiRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.id === "string" ? row.id : null))
 			.filter((id): id is string => id !== null);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

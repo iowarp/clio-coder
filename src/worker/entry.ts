@@ -13,7 +13,7 @@ import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
+import { type WorkerRunInput, startWorkerRun } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 

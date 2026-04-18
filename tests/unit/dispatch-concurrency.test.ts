@@ -12,11 +12,7 @@ import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
-import type {
-	EndpointStatus,
-	ProvidersContract,
-	RuntimeDescriptor,
-} from "../../src/domains/providers/index.js";
+import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";

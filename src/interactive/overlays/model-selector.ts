@@ -1,9 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
-import type {
-	CapabilityFlags,
-	EndpointStatus,
-	ProvidersContract,
-} from "../../domains/providers/index.js";
+import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,

@@ -42,9 +42,7 @@ function loadKnowledgeBase(): KnowledgeBase {
 		if (!existsSync(dir)) return new NullKnowledgeBase();
 		return new FileKnowledgeBase(dir);
 	} catch (err) {
-		process.stderr.write(
-			`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`,
-		);
+		process.stderr.write(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
 		return new NullKnowledgeBase();
 	}
 }

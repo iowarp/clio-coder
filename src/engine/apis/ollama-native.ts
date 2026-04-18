@@ -16,9 +16,9 @@ import type {
 	ToolCall,
 } from "@mariozechner/pi-ai";
 import {
-	Ollama,
 	type ChatRequest,
 	type ChatResponse,
+	Ollama,
 	type Message as OllamaMessage,
 	type Options as OllamaOptions,
 	type Tool as OllamaTool,
@@ -104,10 +104,7 @@ function buildRequest(
 	return req;
 }
 
-function mapStopReason(
-	reason: string | undefined,
-	hadToolCall: boolean,
-): AssistantMessage["stopReason"] {
+function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
 	if (hadToolCall) return "toolUse";
 	if (reason === "length") return "length";
 	return "stop";
@@ -120,11 +117,7 @@ function asDoneReason(
 	return "stop";
 }
 
-function emitToolCall(
-	raw: OllamaToolCall,
-	output: AssistantMessage,
-	stream: AssistantMessageEventStream,
-): void {
+function emitToolCall(raw: OllamaToolCall, output: AssistantMessage, stream: AssistantMessageEventStream): void {
 	const args =
 		raw.function?.arguments && typeof raw.function.arguments === "object"
 			? (raw.function.arguments as Record<string, unknown>)
@@ -265,6 +258,5 @@ function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions
 export const ollamaNativeApiProvider: ApiProvider<"ollama-native"> = {
 	api: "ollama-native",
 	stream: (model, context, options) => runStream(model, context, options),
-	streamSimple: (model, context, options?: SimpleStreamOptions) =>
-		runStream(model, context, stripReasoning(options)),
+	streamSimple: (model, context, options?: SimpleStreamOptions) => runStream(model, context, stripReasoning(options)),
 };

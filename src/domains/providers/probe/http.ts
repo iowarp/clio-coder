@@ -31,9 +31,7 @@ export async function probeHttp(opts: HttpProbeOptions): Promise<ProbeResult> {
 	};
 }
 
-export async function probeJson<T = unknown>(
-	opts: JsonProbeOptions,
-): Promise<JsonProbeResult<T>> {
+export async function probeJson<T = unknown>(opts: JsonProbeOptions): Promise<JsonProbeResult<T>> {
 	const { response, latencyMs, error } = await runFetch(opts);
 	if (response === null) return { ok: false, error: error ?? "unknown transport error", latencyMs };
 	const method = opts.method ?? "GET";

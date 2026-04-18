@@ -6,30 +6,6 @@ import { type Static, Type } from "@sinclair/typebox";
  * Static type export downstream.
  */
 
-const ThinkingFormatSchema = Type.Union([
-	Type.Literal("qwen"),
-	Type.Literal("qwen-chat-template"),
-	Type.Literal("openrouter"),
-	Type.Literal("zai"),
-]);
-
-const EndpointSpecSchema = Type.Object({
-	url: Type.String({ minLength: 1 }),
-	default_model: Type.Optional(Type.String()),
-	api_key: Type.Optional(Type.String()),
-	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-	reasoning: Type.Optional(Type.Boolean()),
-	thinking_format: Type.Optional(ThinkingFormatSchema),
-	context_window: Type.Optional(Type.Integer({ minimum: 1 })),
-	max_tokens: Type.Optional(Type.Integer({ minimum: 1 })),
-	supports_images: Type.Optional(Type.Boolean()),
-	compat: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-});
-
-const LocalProviderSchema = Type.Object({
-	endpoints: Type.Record(Type.String(), EndpointSpecSchema),
-});
-
 const ThinkingLevelSchema = Type.Union([
 	Type.Literal("off"),
 	Type.Literal("minimal"),
@@ -39,11 +15,84 @@ const ThinkingLevelSchema = Type.Union([
 	Type.Literal("xhigh"),
 ]);
 
+const ToolCallFormatSchema = Type.Union([
+	Type.Literal("openai"),
+	Type.Literal("anthropic"),
+	Type.Literal("hermes"),
+	Type.Literal("llama3-json"),
+	Type.Literal("mistral"),
+	Type.Literal("qwen"),
+	Type.Literal("xml"),
+]);
+
+const ThinkingFormatSchema = Type.Union([
+	Type.Literal("qwen-chat-template"),
+	Type.Literal("openrouter"),
+	Type.Literal("zai"),
+	Type.Literal("anthropic-extended"),
+	Type.Literal("deepseek-r1"),
+]);
+
+const StructuredOutputsSchema = Type.Union([
+	Type.Literal("json-schema"),
+	Type.Literal("gbnf"),
+	Type.Literal("xgrammar"),
+	Type.Literal("none"),
+]);
+
+/**
+ * Partial<CapabilityFlags>. Endpoint-level overrides layer on top of the
+ * runtime's defaults; all keys are optional so an endpoint can carry only the
+ * fields it actually pins.
+ */
+const EndpointCapabilitiesSchema = Type.Partial(
+	Type.Object({
+		chat: Type.Boolean(),
+		tools: Type.Boolean(),
+		toolCallFormat: ToolCallFormatSchema,
+		reasoning: Type.Boolean(),
+		thinkingFormat: ThinkingFormatSchema,
+		structuredOutputs: StructuredOutputsSchema,
+		vision: Type.Boolean(),
+		audio: Type.Boolean(),
+		embeddings: Type.Boolean(),
+		rerank: Type.Boolean(),
+		fim: Type.Boolean(),
+		contextWindow: Type.Integer({ minimum: 0 }),
+		maxTokens: Type.Integer({ minimum: 0 }),
+	}),
+);
+
+const EndpointPricingSchema = Type.Object({
+	input: Type.Number({ minimum: 0 }),
+	output: Type.Number({ minimum: 0 }),
+	cacheRead: Type.Optional(Type.Number({ minimum: 0 })),
+	cacheWrite: Type.Optional(Type.Number({ minimum: 0 })),
+});
+
+const EndpointAuthSchema = Type.Object({
+	apiKeyEnvVar: Type.Optional(Type.String({ minLength: 1 })),
+	apiKeyRef: Type.Optional(Type.String({ minLength: 1 })),
+	oauthProfile: Type.Optional(Type.String({ minLength: 1 })),
+	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+const EndpointDescriptorSchema = Type.Object({
+	id: Type.String({ minLength: 1 }),
+	runtime: Type.String({ minLength: 1 }),
+	url: Type.Optional(Type.String({ minLength: 1 })),
+	auth: Type.Optional(EndpointAuthSchema),
+	defaultModel: Type.Optional(Type.String({ minLength: 1 })),
+	wireModels: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+	capabilities: Type.Optional(EndpointCapabilitiesSchema),
+	gateway: Type.Optional(Type.Boolean()),
+	pricing: Type.Optional(EndpointPricingSchema),
+});
+
 const WorkerTargetSchema = Type.Object({
-	provider: Type.Optional(Type.String({ minLength: 1 })),
-	endpoint: Type.Optional(Type.String()),
-	model: Type.Optional(Type.String()),
-	thinkingLevel: Type.Optional(ThinkingLevelSchema),
+	endpoint: Type.Union([Type.String(), Type.Null()]),
+	model: Type.Union([Type.String(), Type.Null()]),
+	thinkingLevel: ThinkingLevelSchema,
 });
 
 /**
@@ -64,43 +113,22 @@ export const SettingsSchema = Type.Object({
 	identity: Type.String({ minLength: 1 }),
 	defaultMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	safetyLevel: Type.Union([Type.Literal("suggest"), Type.Literal("auto-edit"), Type.Literal("full-auto")]),
-	provider: Type.Object({
-		active: Type.Union([Type.String(), Type.Null()]),
-		model: Type.Union([Type.String(), Type.Null()]),
-		scope: Type.Optional(Type.Array(Type.String())),
+	endpoints: Type.Array(EndpointDescriptorSchema),
+	orchestrator: WorkerTargetSchema,
+	workers: Type.Object({
+		default: WorkerTargetSchema,
 	}),
-	providers: Type.Optional(
-		Type.Object({
-			llamacpp: Type.Optional(LocalProviderSchema),
-			lmstudio: Type.Optional(LocalProviderSchema),
-			ollama: Type.Optional(LocalProviderSchema),
-			"openai-compat": Type.Optional(LocalProviderSchema),
-		}),
-	),
-	orchestrator: Type.Optional(WorkerTargetSchema),
-	workers: Type.Optional(
-		Type.Object({
-			default: Type.Optional(WorkerTargetSchema),
-		}),
-	),
+	scope: Type.Array(Type.String()),
 	budget: Type.Object({
 		sessionCeilingUsd: Type.Number({ minimum: 0 }),
 		concurrency: Type.Union([Type.Literal("auto"), Type.Number({ minimum: 1 })]),
-	}),
-	runtimes: Type.Object({
-		enabled: Type.Array(Type.String()),
 	}),
 	theme: Type.String(),
 	keybindings: Type.Record(Type.String(), Type.String()),
 	state: Type.Object({
 		lastMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	}),
-	intelligence: Type.Optional(
-		Type.Object({
-			enabled: Type.Boolean(),
-		}),
-	),
-	compaction: Type.Optional(CompactionSchema),
+	compaction: CompactionSchema,
 });
 
 export type ValidatedSettings = Static<typeof SettingsSchema>;

@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
@@ -45,9 +45,7 @@ beforeEach(async () => {
 				};
 				const message: Record<string, unknown> = { role: "assistant", content: c.text ?? "" };
 				if (c.toolCall) {
-					message.tool_calls = [
-						{ function: { name: c.toolCall.name, arguments: c.toolCall.arguments } },
-					];
+					message.tool_calls = [{ function: { name: c.toolCall.name, arguments: c.toolCall.arguments } }];
 				}
 				payload.message = message;
 				if (c.done) {
@@ -116,9 +114,7 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 			{ done: true, done_reason: "stop" },
 		];
 		const stream = ollamaNativeApiProvider.stream(makeModel(), makeContext(), undefined);
-		const types = await collect(
-			stream as AsyncIterable<{ type: string } & Record<string, unknown>>,
-		);
+		const types = await collect(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
 		strictEqual(types[0], "start");
 		strictEqual(types[1], "text_start");
 		const deltas = types.filter((t) => t === "text_delta");
@@ -138,9 +134,7 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 			},
 		];
 		const stream = ollamaNativeApiProvider.stream(makeModel(), makeContext(), undefined);
-		const types = await collect(
-			stream as AsyncIterable<{ type: string } & Record<string, unknown>>,
-		);
+		const types = await collect(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
 		ok(types.includes("toolcall_start"));
 		ok(types.includes("toolcall_delta"));
 		ok(types.includes("toolcall_end"));

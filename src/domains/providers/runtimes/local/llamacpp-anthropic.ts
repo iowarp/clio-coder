@@ -4,11 +4,7 @@ import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withAsIs } from "../common/local-synth.js";
 import { probeLlamaCppProps } from "../common/probe-helpers.js";
 
@@ -45,18 +41,14 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 		const base = url(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
-		const health = await (ctx.signal
-			? probeHttp({ ...healthOpts, signal: ctx.signal })
-			: probeHttp(healthOpts));
+		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const headOpts = {
 			url: `${base}/v1/messages`,
 			method: "HEAD" as const,
 			timeoutMs: ctx.httpTimeoutMs,
 		};
-		const head = await (ctx.signal
-			? probeHttp({ ...headOpts, signal: ctx.signal })
-			: probeHttp(headOpts));
+		const head = await (ctx.signal ? probeHttp({ ...headOpts, signal: ctx.signal }) : probeHttp(headOpts));
 		if (!head.ok) return head;
 		const props = await probeLlamaCppProps(base, ctx);
 		const enriched: ProbeResult = { ...head };
@@ -76,11 +68,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.id === "string" ? row.id : null))
 			.filter((id): id is string => id !== null);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

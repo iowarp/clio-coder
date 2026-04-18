@@ -5,11 +5,7 @@ import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { EmbedResult } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type {
-	ProbeContext,
-	ProbeResult,
-	RuntimeDescriptor,
-} from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
 import { probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
 
@@ -90,9 +86,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
-		const health = await (ctx.signal
-			? probeHttp({ ...healthOpts, signal: ctx.signal })
-			: probeHttp(healthOpts));
+		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const probeResponse = await fetch(`${base}/embedding`, {
 			method: "POST",
@@ -117,11 +111,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(
-		endpoint: EndpointDescriptor,
-		wireModelId: string,
-		kb: KnowledgeBaseHit | null,
-	): Model<Api> {
+	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,
@@ -132,11 +122,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 			baseUrlForEndpoint: withV1,
 		});
 	},
-	async embed(
-		endpoint: EndpointDescriptor,
-		input: string | string[],
-		ctx: ProbeContext,
-	): Promise<EmbedResult> {
+	async embed(endpoint: EndpointDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult> {
 		const base = endpointUrl(endpoint);
 		if (!base) throw new Error("endpoint has no url");
 		const modelId = endpoint.defaultModel ?? "default";
@@ -150,8 +136,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 			const rows = oai.data.data;
 			const sorted = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 			const vectors = sorted.map((row) => row.embedding ?? []);
-			const tokens =
-				oai.data.usage?.total_tokens ?? oai.data.usage?.prompt_tokens ?? undefined;
+			const tokens = oai.data.usage?.total_tokens ?? oai.data.usage?.prompt_tokens ?? undefined;
 			const dim = vectors[0]?.length ?? 0;
 			const result: EmbedResult = {
 				vectors,
