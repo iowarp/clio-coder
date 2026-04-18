@@ -5,8 +5,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
-import { type ThinkingLevel, getAvailableThinkingLevels } from "../domains/providers/resolver.js";
+import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
@@ -25,7 +24,11 @@ import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSettingsOverlay } from "./overlays/settings.js";
-import { openThinkingOverlay, readThinkingLevel } from "./overlays/thinking-selector.js";
+import {
+	openThinkingOverlay,
+	readThinkingLevel,
+	resolveAvailableThinkingLevels,
+} from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
@@ -698,7 +701,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "providers";
-		overlayHandle = openProvidersOverlay(tui, deps.providers);
+		overlayHandle = openProvidersOverlay(tui, deps.providers, { bus: deps.bus });
 		tui.requestRender();
 	};
 
@@ -724,7 +727,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "thinking";
 		const settings = deps.getSettings?.();
 		const current = settings ? readThinkingLevel(settings) : "off";
-		const available = getAvailableThinkingLevels(deps.getOrchestratorModel?.());
+		const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
 		overlayHandle = openThinkingOverlay(tui, {
 			current,
 			available,
@@ -760,6 +763,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (!settings) return;
 		overlayState = "scoped-models";
 		overlayHandle = openScopedOverlay(tui, {
+			providers: deps.providers,
 			currentScope: extractScopeFromSettings(settings),
 			onCommit: (next) => {
 				deps.onSetScope?.(next);
@@ -1044,7 +1048,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				tui.requestRender();
 			},
 			cycleThinking: () => {
-				const available = getAvailableThinkingLevels(deps.getOrchestratorModel?.());
+				const settings = deps.getSettings?.();
+				const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
 				if (available.length === 1 && available[0] === "off") {
 					footer.refresh();
 					tui.requestRender();

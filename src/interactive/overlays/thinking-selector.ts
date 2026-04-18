@@ -1,5 +1,9 @@
 import type { ClioSettings } from "../../core/config.js";
-import type { ThinkingLevel } from "../../domains/providers/resolver.js";
+import {
+	type ProvidersContract,
+	type ThinkingLevel,
+	availableThinkingLevels,
+} from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -37,8 +41,6 @@ export interface OpenThinkingOverlayDeps {
 	onClose: () => void;
 }
 
-// pi-tui Box has no input handling; forward keystrokes to the SelectList
-// child so Up/Down/Enter/Esc reach it while the overlay owns focus.
 class ThinkingOverlayBox extends Box {
 	constructor(private readonly list: SelectList) {
 		super(1, 0);
@@ -53,7 +55,7 @@ export function buildThinkingItems(current: ThinkingLevel, available: readonly T
 	return available.map((lvl) => ({
 		value: lvl,
 		label: `${lvl === current ? "●" : " "} ${lvl}`,
-		description: DESCRIPTIONS[lvl],
+		description: DESCRIPTIONS[lvl] ?? "",
 	}));
 }
 
@@ -74,7 +76,24 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 	return tui.showOverlay(box, { anchor: "center", width: THINKING_OVERLAY_WIDTH });
 }
 
-/** Pure resolver used by chat-loop + footer + settings writer. */
+/** Current thinking level persisted under settings.orchestrator.thinkingLevel. */
 export function readThinkingLevel(settings: Readonly<ClioSettings>): ThinkingLevel {
 	return settings.orchestrator.thinkingLevel ?? "off";
+}
+
+/**
+ * Thinking levels permitted for the active orchestrator endpoint. Looks up the
+ * endpoint's merged `CapabilityFlags` via `providers.list()` and gates the list
+ * through `availableThinkingLevels`. Unknown or unconfigured endpoints return
+ * `["off"]` so the overlay degrades to a no-op single-option picker.
+ */
+export function resolveAvailableThinkingLevels(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): ReadonlyArray<ThinkingLevel> {
+	const endpointId = settings.orchestrator.endpoint?.trim();
+	if (!endpointId) return ["off"];
+	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
+	if (!status) return ["off"];
+	return availableThinkingLevels(status.capabilities);
 }

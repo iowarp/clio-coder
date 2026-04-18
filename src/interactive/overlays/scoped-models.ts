@@ -1,6 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
-import { PROVIDER_CATALOG } from "../../domains/providers/catalog.js";
-import { resolveModelScope } from "../../domains/providers/resolver.js";
+import type { ProvidersContract } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -9,6 +8,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { modelsForEndpoint } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
 const VISIBLE_ROWS = 12;
@@ -23,24 +23,36 @@ const SCOPED_THEME: SelectListTheme = {
 	noMatch: IDENTITY,
 };
 
+export interface ScopedItemsInput {
+	providers: ProvidersContract;
+	currentScope: ReadonlyArray<string>;
+}
+
 /**
- * Builds one SelectItem per static catalog (provider, model) pair. Local-engine
- * rows are intentionally omitted; patterns for local engines must be typed
- * manually in settings.yaml because endpoints are user-configured.
+ * Build the /scoped-models checklist. Each configured endpoint renders:
+ *   - one `endpointId` row (endpoint-level scope, keeps `.model` on cycle)
+ *   - one `endpointId/wireModelId` row per candidate wire model so users
+ *     can pin a specific model inside the cycle set.
+ * Rows pre-check the entries already present in `currentScope`. Globs are
+ * gone; every entry is a literal string match.
  */
-export function buildScopedModelItems(currentScope: ReadonlyArray<string>): SelectItem[] {
-	const activeResolved = new Set(
-		resolveModelScope(currentScope).matches.map((ref) => `${ref.providerId}::${ref.modelId}`),
-	);
+export function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
+	const active = new Set(input.currentScope);
 	const items: SelectItem[] = [];
-	for (const provider of PROVIDER_CATALOG) {
-		for (const model of provider.models) {
-			const key = `${provider.id}::${model.id}`;
-			const selected = activeResolved.has(key);
+	for (const status of input.providers.list()) {
+		const ep = status.endpoint;
+		const epKey = ep.id;
+		items.push({
+			value: epKey,
+			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${epKey}`,
+			description: "endpoint-level scope",
+		});
+		for (const wireModel of modelsForEndpoint(status)) {
+			const key = `${ep.id}/${wireModel}`;
 			items.push({
-				value: `${provider.id}/${model.id}`,
-				label: `${selected ? "[x]" : "[ ]"} ${provider.id}/${model.id}`,
-				description: model.thinkingCapable ? "thinking" : "",
+				value: key,
+				label: `${active.has(key) ? "[x]" : "[ ]"} ${key}`,
+				description: "endpoint/model scope",
 			});
 		}
 	}
@@ -48,6 +60,7 @@ export function buildScopedModelItems(currentScope: ReadonlyArray<string>): Sele
 }
 
 export interface OpenScopedOverlayDeps {
+	providers: ProvidersContract;
 	currentScope: ReadonlyArray<string>;
 	onCommit: (nextScope: string[]) => void;
 	onClose: () => void;
@@ -96,10 +109,8 @@ class ScopedOverlayBox extends Box {
 }
 
 export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): OverlayHandle {
-	const items = buildScopedModelItems(deps.currentScope);
-	const selected = new Set(
-		resolveModelScope(deps.currentScope).matches.map((ref) => `${ref.providerId}/${ref.modelId}`),
-	);
+	const items = buildScopedModelItems({ providers: deps.providers, currentScope: deps.currentScope });
+	const selected = new Set<string>(deps.currentScope);
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SelectList(items, visible, SCOPED_THEME);
 	list.onCancel = (): void => {
@@ -111,5 +122,5 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 }
 
 export function extractScopeFromSettings(settings: Readonly<ClioSettings>): string[] {
-	return [...(settings.provider.scope ?? [])];
+	return [...(settings.scope ?? [])];
 }
