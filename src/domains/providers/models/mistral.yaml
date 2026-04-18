@@ -1,0 +1,56 @@
+# Source: https://huggingface.co/mistralai (Mistral Large 2, Codestral, Ministral cards).
+# Context windows: Mistral Large 2 serves 128K; Codestral-22B is 32K native, 256K extended;
+# Ministral-3B and Ministral-8B serve 128K per their HF cards.
+- family: mistral-large
+  matchPatterns:
+    - mistral-large
+    - mistral-large-2
+    - mistral-large-latest
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: mistral
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192
+
+- family: codestral
+  matchPatterns:
+    - codestral
+    - codestral-22b
+    - codestral-2
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: mistral
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: true
+    contextWindow: 32768
+    maxTokens: 8192
+
+- family: ministral
+  matchPatterns:
+    - ministral
+    - ministral-3b
+    - ministral-8b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: mistral
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192

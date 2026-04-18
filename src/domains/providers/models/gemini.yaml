@@ -1,0 +1,37 @@
+# Source: https://ai.google.dev/gemini-api/docs/models (Gemini 2.5 Pro and Flash cards).
+# Gemini 2.5 Pro advertises 2M tokens input; 2.5 Flash serves 1M. Both expose thinking budget.
+- family: gemini-2.5-pro
+  matchPatterns:
+    - gemini-2.5-pro
+    - gemini-2-5-pro
+    - gemini-pro-2.5
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    vision: true
+    audio: true
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 2000000
+    maxTokens: 8192
+
+- family: gemini-2.5-flash
+  matchPatterns:
+    - gemini-2.5-flash
+    - gemini-2-5-flash
+    - gemini-flash-2.5
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    vision: true
+    audio: true
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 1000000
+    maxTokens: 8192

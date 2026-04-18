@@ -1,0 +1,45 @@
+# Source: https://huggingface.co/Qwen (Qwen3 collection) and https://qwenlm.github.io/blog/qwen3/
+# Context windows via the Qwen3 model cards (262,144 tokens for Qwen3 Dense and Qwen3-Coder).
+# Vision capability only applies to Qwen3-VL variants per https://huggingface.co/Qwen/Qwen3-VL-7B.
+- family: qwen3
+  matchPatterns:
+    - qwen3
+    - qwen-3
+    - qwen3-7b
+    - qwen3-14b
+    - qwen3-32b
+    - qwen3-72b
+    - qwen3-coder
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 8192
+  quirks:
+    lmstudioEnableThinkingMisroute: "LM Studio forwards chat_template_kwargs.enable_thinking as chat_template_kwargs top-level; clio must set the flag explicitly."
+
+- family: qwen3-vl
+  matchPatterns:
+    - qwen3-vl
+    - qwen-3-vl
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 8192
