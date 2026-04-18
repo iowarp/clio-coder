@@ -193,6 +193,22 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			writeSettings(current);
 		},
 		writeSettings: (next) => writeSettings(next),
+		...(session
+			? {
+					onResumeSession: (sessionId) => {
+						try {
+							session.resume(sessionId);
+						} catch (err) {
+							process.stderr.write(
+								`[/resume] failed to resume ${sessionId}: ${err instanceof Error ? err.message : String(err)}\n`,
+							);
+						}
+					},
+					onNewSession: () => {
+						session.create({ cwd: process.cwd() });
+					},
+				}
+			: {}),
 		onCycleScopedModelForward: () => cycleScoped("forward"),
 		onCycleScopedModelBackward: () => cycleScoped("backward"),
 		onShutdown: async () => {
