@@ -2,6 +2,7 @@ import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { EndpointSpec, LocalProvidersSettings } from "../core/defaults.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
+import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { isLocalEngineId } from "../domains/providers/catalog.js";
@@ -95,6 +96,8 @@ export interface CreateChatLoopDeps {
 	 * coalesce onto one summarization call.
 	 */
 	autoCompact?: (instructions?: string) => Promise<CompactResult | null>;
+	/** Optional observability sink for orchestrator chat token usage. */
+	observability?: ObservabilityContract;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
 	 * through `ToolRegistry.invoke(...)` so safety classification and mode
@@ -191,6 +194,29 @@ function resolveRuntimeTools(deps: CreateChatLoopDeps): ReturnType<typeof resolv
 		allowedTools: visibleToolSnapshot(deps.modes),
 		mode: deps.modes.current(),
 	});
+}
+
+function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number | null {
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const message = messages[i] as
+			| AgentMessage
+			| {
+					role?: unknown;
+					usage?: {
+						input?: unknown;
+						output?: unknown;
+					};
+			  };
+		if (!message || typeof message !== "object") continue;
+		if (message.role !== "assistant") continue;
+		const usage = message.usage;
+		if (!usage || typeof usage !== "object") continue;
+		const input = typeof usage.input === "number" ? usage.input : 0;
+		const output = typeof usage.output === "number" ? usage.output : 0;
+		const total = input + output;
+		return total > 0 ? total : null;
+	}
+	return null;
 }
 
 /**
@@ -345,6 +371,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (event.type === "message_end") {
 				appendAssistantTurn(event.message);
+			}
+			if (event.type === "agent_end" && deps.observability) {
+				const tokens = readAssistantUsageTokens(event.messages);
+				if (tokens !== null) {
+					deps.observability.recordTokens(target.providerId, target.modelId, tokens);
+				}
 			}
 		});
 

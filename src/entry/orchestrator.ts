@@ -280,6 +280,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
 		knownProviders: () => new Set(providers.list().map((entry) => entry.id)),
+		observability,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		...(session
