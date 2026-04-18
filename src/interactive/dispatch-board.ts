@@ -1,16 +1,16 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { RunStatus } from "../domains/dispatch/types.js";
+import type { RunKind, RunStatus } from "../domains/dispatch/types.js";
 
-export type DispatchBoardRuntime = "native" | "sdk" | "cli";
 export type DispatchBoardStatus = Extract<RunStatus, "running" | "completed" | "failed"> | "aborted" | "enqueued";
 
 export interface DispatchBoardRow {
 	runId: string;
 	agentId: string;
-	runtime: DispatchBoardRuntime;
-	providerId: string;
-	modelId: string;
+	runtimeKind: RunKind;
+	runtimeId: string;
+	endpointId: string;
+	wireModelId: string;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
 	tokenCount: number;
@@ -28,9 +28,10 @@ interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
 interface DispatchEventBase {
 	runId?: unknown;
 	agentId?: unknown;
-	providerId?: unknown;
-	modelId?: unknown;
-	runtime?: unknown;
+	endpointId?: unknown;
+	wireModelId?: unknown;
+	runtimeId?: unknown;
+	runtimeKind?: unknown;
 }
 
 interface DispatchTerminalPayload extends DispatchEventBase {
@@ -64,8 +65,8 @@ interface AssistantMessageShape {
 }
 
 const AGENT_WIDTH = 10;
-const RUNTIME_WIDTH = 7;
-const PROVIDER_MODEL_WIDTH = 24;
+const RUNTIME_WIDTH = 10;
+const ENDPOINT_MODEL_WIDTH = 28;
 const STATUS_WIDTH = 9;
 const ELAPSED_WIDTH = 9;
 const TOKENS_WIDTH = 10;
@@ -103,7 +104,7 @@ function buildHeaderLine(): string {
 	return buildContentLine([
 		leftCell("agent", AGENT_WIDTH),
 		leftCell("runtime", RUNTIME_WIDTH),
-		leftCell("provider/model", PROVIDER_MODEL_WIDTH),
+		leftCell("endpoint/model", ENDPOINT_MODEL_WIDTH),
 		leftCell("status", STATUS_WIDTH),
 		rightCell("elapsed", ELAPSED_WIDTH),
 		rightCell("tokens", TOKENS_WIDTH),
@@ -115,7 +116,7 @@ function buildSeparatorLine(): string {
 	return buildContentLine([
 		"-".repeat(AGENT_WIDTH),
 		"-".repeat(RUNTIME_WIDTH),
-		"-".repeat(PROVIDER_MODEL_WIDTH),
+		"-".repeat(ENDPOINT_MODEL_WIDTH),
 		"-".repeat(STATUS_WIDTH),
 		"-".repeat(ELAPSED_WIDTH),
 		"-".repeat(TOKENS_WIDTH),
@@ -150,15 +151,15 @@ function formatUsd(value: number): string {
 	return `$${Math.max(0, value).toFixed(6)}`;
 }
 
-function providerModel(row: DispatchBoardRow): string {
-	return `${row.providerId}/${row.modelId}`;
+function endpointModelCell(row: DispatchBoardRow): string {
+	return `${row.endpointId}/${row.wireModelId}`;
 }
 
 function renderRowContent(row: DispatchBoardRow): string {
 	return buildContentLine([
 		leftCell(row.agentId, AGENT_WIDTH),
-		leftCell(row.runtime, RUNTIME_WIDTH),
-		leftCell(providerModel(row), PROVIDER_MODEL_WIDTH),
+		leftCell(`${row.runtimeKind}:${row.runtimeId}`, RUNTIME_WIDTH),
+		leftCell(endpointModelCell(row), ENDPOINT_MODEL_WIDTH),
 		leftCell(row.status, STATUS_WIDTH),
 		rightCell(formatElapsedMs(row.elapsedMs), ELAPSED_WIDTH),
 		rightCell(formatTokenCount(row.tokenCount), TOKENS_WIDTH),
@@ -174,9 +175,9 @@ function parseText(value: unknown, fallback: string): string {
 	return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
-function parseRuntime(value: unknown): DispatchBoardRuntime {
-	if (value === "native" || value === "sdk" || value === "cli") return value;
-	return "native";
+function parseRuntimeKind(value: unknown): RunKind {
+	if (value === "http" || value === "subprocess") return value;
+	return "http";
 }
 
 function parseFiniteNumber(value: unknown, fallback: number): number {
@@ -215,9 +216,10 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 	return {
 		runId: entry.runId,
 		agentId: entry.agentId,
-		runtime: entry.runtime,
-		providerId: entry.providerId,
-		modelId: entry.modelId,
+		runtimeKind: entry.runtimeKind,
+		runtimeId: entry.runtimeId,
+		endpointId: entry.endpointId,
+		wireModelId: entry.wireModelId,
 		status: entry.status,
 		elapsedMs: resolveElapsedMs(entry, now),
 		tokenCount: entry.tokenCount,
@@ -273,9 +275,10 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
-			runtime: parseRuntime(raw.runtime ?? previous?.runtime),
-			providerId: parseText(raw.providerId, previous?.providerId ?? "-"),
-			modelId: parseText(raw.modelId, previous?.modelId ?? "-"),
+			runtimeKind: parseRuntimeKind(raw.runtimeKind ?? previous?.runtimeKind),
+			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
+			endpointId: parseText(raw.endpointId, previous?.endpointId ?? "-"),
+			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
 			status,
 			tokenCount: previous?.tokenCount ?? 0,
 			costUsd: previous?.costUsd ?? 0,

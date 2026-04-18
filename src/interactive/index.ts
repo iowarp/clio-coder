@@ -9,7 +9,6 @@ import type { ProvidersContract, ThinkingLevel } from "../domains/providers/inde
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
-import type { Model } from "../engine/types.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -73,12 +72,6 @@ export interface InteractiveDeps {
 	 * first-available entry.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
-	/**
-	 * Resolver for the active orchestrator model. Used to clamp the /thinking
-	 * overlay and Shift+Tab cycle to model capability and to drive the footer's
-	 * `◆ <level>` reasoning suffix.
-	 */
-	getOrchestratorModel?: () => Model<never> | undefined;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
 	/** Persist a thinking level chosen in the /thinking overlay. */
@@ -552,7 +545,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		...(deps.getOrchestratorModel ? { getOrchestratorModel: deps.getOrchestratorModel } : {}),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
