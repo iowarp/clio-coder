@@ -5,7 +5,11 @@ import type { ModesContract } from "../domains/modes/contract.js";
 import { isLocalEngineId } from "../domains/providers/catalog.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createEngineAgent } from "../engine/agent.js";
-import { getModel as resolveModel, registerLocalProviders as seedLocalProviders } from "../engine/ai.js";
+import {
+	resolveLocalModelId,
+	getModel as resolveModel,
+	registerLocalProviders as seedLocalProviders,
+} from "../engine/ai.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 
@@ -173,10 +177,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} as Partial<LocalProvidersSettings>);
 		}
 
-		const modelId =
-			isLocalEngineId(providerId) && endpointName && !rawModelId.includes("@")
-				? `${rawModelId}@${endpointName}`
-				: rawModelId;
+		const modelId = resolveLocalModelId(providerId, rawModelId, endpointName ?? undefined);
 
 		return { providerId, modelId, endpointName, endpointSpec };
 	};
