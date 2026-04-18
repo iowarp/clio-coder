@@ -6,6 +6,11 @@ import {
 	getProviderSpec,
 	isLocalEngineId,
 } from "../../src/domains/providers/catalog.js";
+import {
+	ContextOverflowError,
+	isContextOverflowError,
+	toContextOverflowError,
+} from "../../src/domains/providers/errors.js";
 import { match } from "../../src/domains/providers/matcher.js";
 import {
 	VALID_THINKING_LEVELS,
@@ -135,5 +140,74 @@ describe("engine/local-model-registry/resolveLocalModelId", () => {
 		strictEqual(lookupId, "Q@mini");
 		const model = getLocalRegisteredModel("llamacpp", lookupId);
 		ok(model, "expected registered Model for llamacpp/Q@mini");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// providers/errors — ContextOverflowError discriminator (slice 12d)
+// ---------------------------------------------------------------------------
+
+describe("providers/errors ContextOverflowError", () => {
+	it("carries the literal kind discriminator for structural guards", () => {
+		const err = new ContextOverflowError("too big");
+		strictEqual(err.kind, "context-overflow");
+		ok(isContextOverflowError(err));
+	});
+
+	it("isContextOverflowError matches plain objects carrying the kind tag", () => {
+		ok(isContextOverflowError({ kind: "context-overflow", message: "ok" }));
+		strictEqual(isContextOverflowError({ kind: "other" }), false);
+		strictEqual(isContextOverflowError(null), false);
+		strictEqual(isContextOverflowError("string error"), false);
+	});
+});
+
+describe("providers/errors toContextOverflowError heuristic", () => {
+	it("matches OpenAI context_length_exceeded variants", () => {
+		const cases = [
+			"This model's maximum context length is 128000 tokens.",
+			"Error: context_length_exceeded — messages exceed context length",
+			"context length exceeded, 200000 tokens requested",
+		];
+		for (const message of cases) {
+			const wrapped = toContextOverflowError(new Error(message));
+			ok(wrapped, `expected match for: ${message}`);
+			strictEqual(wrapped.message, message);
+		}
+	});
+
+	it("matches Anthropic prompt-is-too-long phrasing", () => {
+		const wrapped = toContextOverflowError(new Error("prompt is too long: 205000 tokens > 200000"));
+		ok(wrapped);
+		strictEqual(wrapped.kind, "context-overflow");
+	});
+
+	it("matches llama.cpp and Groq context-window variants", () => {
+		ok(toContextOverflowError(new Error("the context window was exceeded (65536 > 32768)")));
+		ok(toContextOverflowError(new Error("tokens exceed the context_window of this model")));
+	});
+
+	it("matches request-too-large phrasing", () => {
+		ok(toContextOverflowError(new Error("request is too large, reduce prompt size")));
+		ok(toContextOverflowError(new Error("Request too large: 500000 bytes")));
+	});
+
+	it("returns null for unrelated errors so callers surface the original", () => {
+		strictEqual(toContextOverflowError(new Error("rate limit exceeded")), null);
+		strictEqual(toContextOverflowError(new Error("401 unauthorized")), null);
+		strictEqual(toContextOverflowError(null), null);
+		strictEqual(toContextOverflowError(undefined), null);
+	});
+
+	it("handles string and plain-object error shapes", () => {
+		ok(toContextOverflowError("maximum context length is 8192 tokens"));
+		ok(toContextOverflowError({ message: "prompt is too long" }));
+		strictEqual(toContextOverflowError({ message: 123 }), null);
+	});
+
+	it("passes through an already-typed ContextOverflowError", () => {
+		const original = new ContextOverflowError("prior");
+		const round = toContextOverflowError(original);
+		strictEqual(round, original);
 	});
 });
