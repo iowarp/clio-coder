@@ -1,0 +1,33 @@
+- family: qwen3
+  matchPatterns:
+    - qwen3
+    - qwen3-72b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 8192
+
+- family: qwen-coder
+  matchPatterns:
+    - qwen-coder
+    - qwen3-coder
+  capabilities:
+    chat: true
+    tools: true
+    reasoning: false
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: true
+    contextWindow: 262144
+    maxTokens: 8192
