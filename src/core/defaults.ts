@@ -4,37 +4,16 @@
  * exist. Users edit the file directly or through TUI overlays.
  */
 
-export type ThinkingFormat = "qwen" | "qwen-chat-template" | "openrouter" | "zai";
+import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 
-export interface EndpointSpec {
-	url: string;
-	default_model?: string;
-	api_key?: string;
-	headers?: Record<string, string>;
-	reasoning?: boolean;
-	thinking_format?: ThinkingFormat;
-	context_window?: number;
-	max_tokens?: number;
-	supports_images?: boolean;
-	compat?: Record<string, unknown>;
-}
+export type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 
-export interface LocalProviderConfig {
-	endpoints: Record<string, EndpointSpec>;
-}
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
-export interface WorkerTargetConfig {
-	provider?: string;
-	endpoint?: string;
-	model?: string;
-	thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-}
-
-export interface LocalProvidersSettings {
-	llamacpp: LocalProviderConfig;
-	lmstudio: LocalProviderConfig;
-	ollama: LocalProviderConfig;
-	"openai-compat": LocalProviderConfig;
+export interface WorkerTarget {
+	endpoint: string | null;
+	model: string | null;
+	thinkingLevel: ThinkingLevel;
 }
 
 /**
@@ -67,27 +46,23 @@ export const DEFAULT_SETTINGS = {
 	identity: "clio",
 	defaultMode: "default" as "default" | "advise" | "super",
 	safetyLevel: "auto-edit" as "suggest" | "auto-edit" | "full-auto",
-	provider: {
-		active: null as string | null,
+	endpoints: [] as EndpointDescriptor[],
+	orchestrator: {
+		endpoint: null as string | null,
 		model: null as string | null,
-		scope: [] as string[],
+		thinkingLevel: "off" as ThinkingLevel,
 	},
-	providers: {
-		llamacpp: { endpoints: {} },
-		lmstudio: { endpoints: {} },
-		ollama: { endpoints: {} },
-		"openai-compat": { endpoints: {} },
-	} as LocalProvidersSettings,
-	orchestrator: {} as WorkerTargetConfig,
 	workers: {
-		default: {} as WorkerTargetConfig,
+		default: {
+			endpoint: null as string | null,
+			model: null as string | null,
+			thinkingLevel: "off" as ThinkingLevel,
+		} as WorkerTarget,
 	},
+	scope: [] as string[],
 	budget: {
 		sessionCeilingUsd: 5,
 		concurrency: "auto" as "auto" | number,
-	},
-	runtimes: {
-		enabled: ["native"] as string[],
 	},
 	theme: "default",
 	keybindings: {} as Record<string, string>,
@@ -127,105 +102,61 @@ export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first ins
 #   1. Run: clio setup
 #   2. Verify the endpoint: clio providers
 #   3. Start chat: clio
-#   4. Later switch to LM Studio: clio setup dynamo
 
 version: 1
 identity: clio
 defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
-# Active provider and model for the orchestrator loop. Leave null until
-# you configure a provider and model below.
-#
-# scope is an ordered list of model patterns used by Ctrl+P cycling inside
-# the TUI. Patterns accept plain ids, provider/id, globs (anthropic/*,
-# *sonnet*), and :thinking suffixes (gpt-5:high). Leave [] to disable the
-# cycle. Edit interactively with /scoped-models.
-provider:
-  active: null
+# Inference endpoints. Each entry becomes a selectable target for the
+# orchestrator (chat) and for workers (dispatch). Add entries via \`clio setup\`
+# or hand-edit. \`runtime\` must match an id registered in the runtime registry
+# (cloud SDKs, local HTTP engines, CLI agents, or third-party plugins under
+# ~/.clio/runtimes/).
+endpoints: []
+# Example:
+# endpoints:
+#   - id: anthropic-prod
+#     runtime: anthropic
+#     auth:
+#       apiKeyEnvVar: ANTHROPIC_API_KEY
+#   - id: mini
+#     runtime: llamacpp
+#     url: http://192.168.86.141:8080
+#     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
+#     capabilities:
+#       contextWindow: 262144
+#       reasoning: true
+#   - id: litellm
+#     runtime: litellm-gateway
+#     url: http://127.0.0.1:4000
+#     gateway: true
+#     auth:
+#       apiKeyEnvVar: LITELLM_MASTER_KEY
+
+# Orchestrator target for the interactive loop. \`endpoint\` refers to
+# endpoints[].id; \`model\` is the wire model id to request.
+# thinkingLevel valid values: off | minimal | low | medium | high | xhigh.
+orchestrator:
+  endpoint: null
   model: null
-  scope: []
+  thinkingLevel: off
 
-# Local inference engines. Each entry under endpoints becomes a selectable
-# target. The default guided path is clio setup, but the commented examples
-# below remain as a manual reference.
-providers:
-  llamacpp:
-    endpoints: {}
-    # Example: llama.cpp on the local machine.
-    # Replace endpoints: {} above with the block below.
-    # Replace the host and port with the values you pass to llama-server.
-    # clio-example:start provider=llamacpp endpoint=mini
-    # endpoints:
-    #   mini:
-    #     url: http://127.0.0.1:8080
-    #     default_model: Qwen3.6-35B-A3B-UD-Q4_K_XL
-    #     # api_key: llama-no-auth
-    #     context_window: 262144
-    #     max_tokens: 16384
-    # clio-example:end provider=llamacpp endpoint=mini
-
-  lmstudio:
-    endpoints: {}
-    # Example: LM Studio on the local machine.
-    # Replace endpoints: {} above with the block below.
-    # Point at the LM Studio server on :1234 with the model loaded.
-    # clio-example:start provider=lmstudio endpoint=dynamo
-    # endpoints:
-    #   dynamo:
-    #     url: http://127.0.0.1:1234
-    #     default_model: qwen3.6-35b-a3b
-    #     # api_key: lm-studio
-    #     context_window: 262144
-    #     max_tokens: 16384
-    # clio-example:end provider=lmstudio endpoint=dynamo
-
-  ollama:
-    endpoints: {}
-
-  openai-compat:
-    endpoints: {}
-
-# Orchestrator target override. Leave empty to use the active provider.
-# thinkingLevel controls reasoning depth for models that support it.
-# Valid values: off | minimal | low | medium | high | xhigh.
-orchestrator: {
-  # Example: pin the orchestrator loop to the llamacpp mini endpoint above.
-  # Uncomment the lines below after you uncomment the matching
-  # provider.endpoints.mini example.
-  # clio-example:start block=orchestrator
-  # provider: llamacpp,
-  # endpoint: mini,
-  # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
-  # clio-example:end block=orchestrator
-  # Add thinkingLevel: high (or any level above) to enable reasoning tokens.
-}
-
-# Per-worker target overrides. default applies to every worker spec that
-# does not declare its own target block.
+# Worker targets for dispatch. \`default\` applies when a recipe or request
+# does not specify its own override.
 workers:
-  default: {
-    # Example: route /run and clio run at the same llamacpp mini endpoint.
-    # Uncomment the lines below after you uncomment the matching
-    # provider.endpoints.mini example.
-    # clio-example:start block=workers
-    # provider: llamacpp,
-    # endpoint: mini,
-    # model: Qwen3.6-35B-A3B-UD-Q4_K_XL,
-    # clio-example:end block=workers
-    # Add thinkingLevel: medium (or another level) to tune worker reasoning.
-  }
+  default:
+    endpoint: null
+    model: null
+    thinkingLevel: off
+
+# Ctrl+P cycling order: plain endpoint ids or "endpoint/model" refs.
+scope: []
 
 # Session budget guardrails.
 budget:
   sessionCeilingUsd: 5
   concurrency: auto           # auto or a positive integer
-
-# Runtimes Clio will load. native is always available. clio setup appends the
-# selected local engine here automatically.
-runtimes:
-  enabled:
-    - native
 
 theme: default
 keybindings: {}
@@ -240,8 +171,7 @@ state:
 #                assistant turn before trimming.
 #   auto         master switch. true ⇒ the chat loop may compact on threshold;
 #                false disables the pre-request trigger (manual /compact still
-#                works). Slice 12d lands the auto trigger; in 12c this flag is
-#                persisted for forward compatibility.
+#                works).
 #   model        optional pattern (e.g. openai/gpt-5-mini) for a dedicated
 #                summarization model. Absent ⇒ the engine uses the orchestrator
 #                target.

@@ -23,17 +23,35 @@ export interface ConfigDiff {
 
 const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "safetyLevel", "defaultMode", "state.lastMode"]);
 
-const NEXT_TURN_FIELDS = new Set<string>(["provider.model", "budget.sessionCeilingUsd"]);
+const NEXT_TURN_FIELDS = new Set<string>([
+	"endpoints",
+	"orchestrator.endpoint",
+	"orchestrator.model",
+	"orchestrator.thinkingLevel",
+	"workers.default.endpoint",
+	"workers.default.model",
+	"workers.default.thinkingLevel",
+	"scope",
+	"budget.sessionCeilingUsd",
+]);
 
-const RESTART_REQUIRED_FIELDS = new Set<string>(["provider.active", "runtimes.enabled", "budget.concurrency"]);
+const RESTART_REQUIRED_FIELDS = new Set<string>(["budget.concurrency"]);
+
+function matchesPrefix(path: string, fields: Set<string>): boolean {
+	if (fields.has(path)) return true;
+	for (const field of fields) {
+		if (path.startsWith(`${field}.`)) return true;
+	}
+	return false;
+}
 
 export function diffSettings(prev: ClioSettings, next: ClioSettings): ConfigDiff {
 	const changed = collectChangedPaths(prev, next);
 	const diff: ConfigDiff = { hotReload: [], nextTurn: [], restartRequired: [] };
 	for (const p of changed) {
-		if (HOT_RELOAD_FIELDS.has(p)) diff.hotReload.push(p);
-		else if (NEXT_TURN_FIELDS.has(p)) diff.nextTurn.push(p);
-		else if (RESTART_REQUIRED_FIELDS.has(p)) diff.restartRequired.push(p);
+		if (matchesPrefix(p, HOT_RELOAD_FIELDS)) diff.hotReload.push(p);
+		else if (matchesPrefix(p, NEXT_TURN_FIELDS)) diff.nextTurn.push(p);
+		else if (matchesPrefix(p, RESTART_REQUIRED_FIELDS)) diff.restartRequired.push(p);
 		else {
 			// Unknown field falls back to restartRequired to fail closed.
 			diff.restartRequired.push(p);
