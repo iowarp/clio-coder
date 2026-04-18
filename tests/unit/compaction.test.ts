@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { AutoCompactionTrigger, shouldCompact } from "../../src/domains/session/compaction/auto.js";
 import {
 	collectEntriesForBranchSummary,
 	prepareBranchEntries,
@@ -446,5 +447,98 @@ describe("interactive/renderers/compaction-summary renderCompactionSummaryLine",
 			isSplitTurn: true,
 		});
 		ok(line.endsWith("(split turn)]"));
+	});
+});
+
+// ---------------------------------------------------------------------------
+// auto.ts — shouldCompact + AutoCompactionTrigger (slice 12d)
+// ---------------------------------------------------------------------------
+
+describe("session/compaction/auto shouldCompact", () => {
+	it("returns false when contextWindow is zero or missing", () => {
+		strictEqual(shouldCompact(100_000, 0.8, 0), false);
+		strictEqual(shouldCompact(100_000, 0.8, Number.NaN), false);
+	});
+
+	it("returns false when threshold is zero or negative", () => {
+		strictEqual(shouldCompact(100_000, 0, 200_000), false);
+		strictEqual(shouldCompact(100_000, -0.5, 200_000), false);
+	});
+
+	it("returns true when contextTokens equals threshold * contextWindow", () => {
+		// 0.8 * 200000 = 160000; equal means trip.
+		strictEqual(shouldCompact(160_000, 0.8, 200_000), true);
+	});
+
+	it("returns true when contextTokens exceeds threshold * contextWindow", () => {
+		strictEqual(shouldCompact(180_000, 0.8, 200_000), true);
+	});
+
+	it("returns false well below the threshold", () => {
+		strictEqual(shouldCompact(10_000, 0.8, 200_000), false);
+	});
+
+	it("clamps threshold above 1 to 1 (defensive against bad settings)", () => {
+		// With threshold=2 and contextWindow=200k, the effective limit is the
+		// contextWindow itself; anything below it should not trip.
+		strictEqual(shouldCompact(180_000, 2, 200_000), false);
+		strictEqual(shouldCompact(200_000, 2, 200_000), true);
+	});
+});
+
+describe("session/compaction/auto AutoCompactionTrigger", () => {
+	it("runs the task once and returns its result", async () => {
+		const trigger = new AutoCompactionTrigger<string>();
+		let calls = 0;
+		const result = await trigger.fire(async () => {
+			calls++;
+			return "ok";
+		});
+		strictEqual(result, "ok");
+		strictEqual(calls, 1);
+	});
+
+	it("debounces concurrent fires onto the same in-flight promise", async () => {
+		const trigger = new AutoCompactionTrigger<number>();
+		let calls = 0;
+		let resolveTask: (n: number) => void = () => {};
+		const first = trigger.fire(
+			() =>
+				new Promise<number>((resolve) => {
+					calls++;
+					resolveTask = resolve;
+				}),
+		);
+		const second = trigger.fire(async () => {
+			calls++;
+			return 99;
+		});
+		strictEqual(trigger.isBusy(), true);
+		// Resolve the first task; both promises should resolve to the same value.
+		resolveTask(42);
+		const [a, b] = await Promise.all([first, second]);
+		strictEqual(a, 42);
+		strictEqual(b, 42);
+		// Only the first task body ran; the second fire saw an in-flight Promise.
+		strictEqual(calls, 1);
+		strictEqual(trigger.isBusy(), false);
+	});
+
+	it("clears the in-flight slot after the task rejects so the next fire runs fresh", async () => {
+		const trigger = new AutoCompactionTrigger<string>();
+		let calls = 0;
+		await trigger
+			.fire(async () => {
+				calls++;
+				throw new Error("boom");
+			})
+			.catch(() => {});
+		strictEqual(trigger.isBusy(), false);
+		const second = await trigger.fire(async () => {
+			calls++;
+			return "recovered";
+		});
+		strictEqual(second, "recovered");
+		strictEqual(calls, 2);
 	});
 });
