@@ -5,12 +5,13 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ToolName } from "../../src/core/tool-names.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { ModeName } from "../../src/domains/modes/matrix.js";
+import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { CompileForTurnInput, PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../src/engine/session.js";
-import type { AgentEvent, AgentMessage, AgentState, Model } from "../../src/engine/types.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import type { AgentEvent, AgentMessage, AgentState, Model, Usage } from "../../src/engine/types.js";
+import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 
 // ---------------------------------------------------------------------------
 // Stub builders
@@ -96,6 +97,7 @@ interface FakeAgent {
 	abort(): void;
 	sessionId?: string;
 	promptCalls: string[];
+	responseUsage?: Usage;
 	/** When set, the NEXT prompt() call simulates pi-agent-core's overflow surface. */
 	queueFailure?: { errorMessage: string };
 }
@@ -145,6 +147,19 @@ function fakeAgent(initial: Partial<FakeAgent["state"]> = {}): FakeAgent {
 			const assistantMsg: AgentMessage = {
 				role: "assistant",
 				content: [{ type: "text", text: "ack" }],
+				api: "openai-responses",
+				provider: "anthropic",
+				model: "claude-sonnet-4-6",
+				usage:
+					self.responseUsage ??
+					({
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					} as Usage),
 				stopReason: "stop",
 				timestamp: Date.now(),
 			} as AgentMessage;
@@ -236,6 +251,33 @@ function recordingSession(): RecordingSession {
 		close: async () => {},
 	};
 	return { contract, appends, meta };
+}
+
+interface RecordingObservability {
+	contract: ObservabilityContract;
+	calls: Array<{ providerId: string; modelId: string; tokens: number }>;
+}
+
+function recordingObservability(): RecordingObservability {
+	const calls: RecordingObservability["calls"] = [];
+	return {
+		contract: {
+			telemetry: () => ({ counters: {}, histograms: {} }),
+			metrics: () => ({
+				dispatchesCompleted: 0,
+				dispatchesFailed: 0,
+				safetyClassifications: 0,
+				totalTokens: 0,
+				histograms: {},
+			}),
+			sessionCost: () => 0,
+			costEntries: () => [],
+			recordTokens(providerId, modelId, tokens) {
+				calls.push({ providerId, modelId, tokens });
+			},
+		},
+		calls,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +437,49 @@ describe("interactive/chat-loop prompt compilation", () => {
 		});
 		await chat.submit("hi");
 		ok(agent.state.systemPrompt.toLowerCase().includes("clio"));
+	});
+});
+
+describe("interactive/chat-loop observability", () => {
+	it("records orchestrator usage from the terminal assistant message on agent_end", async () => {
+		const modes = stubModes("default");
+		const agent = fakeAgent();
+		agent.responseUsage = {
+			input: 120,
+			output: 45,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 165,
+			cost: { input: 0.00036, output: 0.000675, cacheRead: 0, cacheWrite: 0, total: 0.001035 },
+		};
+		const observability = recordingObservability();
+		const chat = createChatLoop({
+			getSettings: () => buildSettings(),
+			modes,
+			knownProviders: () => new Set(["anthropic"]),
+			getModel: () => stubModel(),
+			registerLocalProviders: () => {},
+			observability: observability.contract,
+			createAgent: (opts) => {
+				if (opts?.initialState) {
+					Object.assign(agent.state, opts.initialState);
+				}
+				return {
+					agent: agent as unknown as ReturnType<typeof import("../../src/engine/agent.js").createEngineAgent>["agent"],
+					state: () => agent.state as unknown as AgentState,
+				};
+			},
+		});
+
+		await chat.submit("hello");
+
+		deepStrictEqual(observability.calls, [
+			{
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-6",
+				tokens: 165,
+			},
+		]);
 	});
 });
 
@@ -587,5 +672,3 @@ describe("interactive/chat-loop compact method (slice 12.5b bug 4)", () => {
 		);
 	});
 });
-
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
