@@ -5,6 +5,7 @@ import type { ProviderListEntry, ProvidersContract } from "../../src/domains/pro
 import { scopedSegment } from "../../src/interactive/footer-panel.js";
 import {
 	ALT_M,
+	ALT_T,
 	BUILTIN_SLASH_COMMANDS,
 	CTRL_L,
 	CTRL_P,
@@ -14,6 +15,7 @@ import {
 	routeInteractiveKey,
 } from "../../src/interactive/index.js";
 import { HOTKEYS, formatHotkeysLines } from "../../src/interactive/overlays/hotkeys.js";
+import { buildMessagePickerRows, payloadPreview, rowsToItems } from "../../src/interactive/overlays/message-picker.js";
 import { buildModelItems } from "../../src/interactive/overlays/model-selector.js";
 import { buildScopedModelItems } from "../../src/interactive/overlays/scoped-models.js";
 import { buildSessionItems } from "../../src/interactive/overlays/session-selector.js";
@@ -216,6 +218,124 @@ describe("routeInteractiveKey", () => {
 		strictEqual(consumed, true);
 		strictEqual(back, 1);
 		strictEqual(fwd, 0);
+	});
+
+	it("Alt+T triggers openTree only", () => {
+		let tree = 0;
+		let thinking = 0;
+		const consumed = routeInteractiveKey(ALT_T, {
+			...noopDeps,
+			openTree: () => {
+				tree += 1;
+			},
+			cycleThinking: () => {
+				thinking += 1;
+			},
+		});
+		strictEqual(consumed, true);
+		strictEqual(tree, 1);
+		strictEqual(thinking, 0);
+	});
+});
+
+describe("message-picker buildMessagePickerRows", () => {
+	const makeTurn = (
+		id: string,
+		kind: "user" | "assistant",
+		payload: unknown,
+		at = "2026-04-17T12:00:00.000Z",
+	): { id: string; parentId: string | null; at: string; kind: "user" | "assistant"; payload: unknown } => ({
+		id,
+		parentId: null,
+		at,
+		kind,
+		payload,
+	});
+
+	it("returns one row per assistant turn and drops user turns", () => {
+		const rows = buildMessagePickerRows([
+			makeTurn("u1", "user", { text: "hello" }),
+			makeTurn("a1", "assistant", { text: "hi there" }),
+			makeTurn("u2", "user", { text: "another" }),
+			makeTurn("a2", "assistant", { text: "pong" }),
+		]);
+		strictEqual(rows.length, 2);
+		strictEqual(
+			rows.every((r) => r.turnId.startsWith("a")),
+			true,
+		);
+	});
+
+	it("orders rows most-recent first", () => {
+		const rows = buildMessagePickerRows([
+			makeTurn("a1", "assistant", { text: "first" }, "2026-04-17T10:00:00.000Z"),
+			makeTurn("a2", "assistant", { text: "second" }, "2026-04-17T11:00:00.000Z"),
+			makeTurn("a3", "assistant", { text: "third" }, "2026-04-17T12:00:00.000Z"),
+		]);
+		deepStrictEqual(
+			rows.map((r) => r.turnId),
+			["a3", "a2", "a1"],
+		);
+	});
+
+	it("truncates the preview to the first line with an ellipsis past the width budget", () => {
+		const long = "a".repeat(100);
+		const rows = buildMessagePickerRows([makeTurn("a1", "assistant", { text: `${long}\nsecond line` })]);
+		const preview = rows[0]?.preview ?? "";
+		ok(preview.endsWith("…"), `expected ellipsis, got ${JSON.stringify(preview)}`);
+		ok(!preview.includes("second line"), "second line must not appear");
+		ok(preview.length <= 60, "preview must fit in PREVIEW_WIDTH");
+	});
+
+	it("renders (no text) when the payload has no extractable string", () => {
+		const rows = buildMessagePickerRows([makeTurn("a1", "assistant", {})]);
+		strictEqual(rows[0]?.preview, "(no text)");
+	});
+
+	it("rowsToItems shapes each row into a SelectItem with shortId and ISO-minute stamp", () => {
+		const items = rowsToItems([
+			{
+				turnId: "00000000-abcd-7000-8000-aaaaaaaaaaaa",
+				shortId: "00000000",
+				at: "2026-04-17T12:34:56.789Z",
+				preview: "hello",
+			},
+		]);
+		strictEqual(items.length, 1);
+		const item = items[0];
+		strictEqual(item?.value, "00000000-abcd-7000-8000-aaaaaaaaaaaa");
+		ok(item?.label.includes("00000000"), "label must include short id");
+		ok(item?.label.includes("hello"), "label must include preview");
+		strictEqual(item?.description, "2026-04-17 12:34");
+	});
+});
+
+describe("message-picker payloadPreview", () => {
+	it("returns a raw string payload unchanged", () => {
+		strictEqual(payloadPreview("direct text"), "direct text");
+	});
+
+	it("extracts payload.text when available", () => {
+		strictEqual(payloadPreview({ text: "from text field" }), "from text field");
+	});
+
+	it("extracts the first text block from a pi-ai content array", () => {
+		strictEqual(
+			payloadPreview({
+				content: [
+					{ type: "tool_use", id: "x" },
+					{ type: "text", text: "from content array" },
+				],
+			}),
+			"from content array",
+		);
+	});
+
+	it("returns empty string for unrecognized shapes", () => {
+		strictEqual(payloadPreview(null), "");
+		strictEqual(payloadPreview(undefined), "");
+		strictEqual(payloadPreview(42), "");
+		strictEqual(payloadPreview({ other: "field" }), "");
 	});
 });
 

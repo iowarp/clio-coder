@@ -170,6 +170,43 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("/tree opens the navigator, Esc closes", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/tree\r");
+			// A fresh scratch home has no current session; the overlay either
+			// shows the empty-state line or the navigator header. Both paths
+			// prove the slash-command dispatched through to the overlay state
+			// machine; if routing were broken the PTY would sit on the editor
+			// prompt.
+			await p.expect(/no sessions yet|session contract unavailable|\[Esc]/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/fork without a current session prints the no-op message", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/fork\r");
+			// The handler short-circuits with an actionable stderr line rather
+			// than opening an empty picker.
+			await p.expect(/\[\/fork]\s+no current session/, 10_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("/thinking shows the full level set when orchestrator is a Qwen3 local model", async () => {
 		// Phase 12a pre-phase fix (see docs/superpowers/plans/...-phase-12-...).
 		// Before the resolveLocalModelId composition, getOrchestratorModel
