@@ -47,7 +47,16 @@ export interface ClioSessionMeta {
 	piMonoVersion: string;
 	platform: string;
 	nodeVersion: string;
+	/**
+	 * v2 on every new session. v1 files on disk omit the field; readers
+	 * treat missing as 1 and run the migration chain in
+	 * src/domains/session/migrations on resume. Bumped by a future
+	 * migration when the entry-union vocabulary changes again.
+	 */
+	sessionFormatVersion?: number;
 }
+
+export const CURRENT_SESSION_FORMAT_VERSION = 2;
 
 export interface ClioTurnRecord {
 	id: string;
@@ -74,6 +83,13 @@ export interface ClioSessionFile {
 
 export interface ClioSessionWriter {
 	append(turn: ClioTurnRecord): void;
+	/**
+	 * Write a pre-composed rich session entry as a JSON line. Unlike
+	 * `append`, this does not project into the tree. Callers that need a
+	 * tree node pass one via `treeNode`; Phase 12a leaves non-message
+	 * entries off the tree and revisits in 12b when /fork lands.
+	 */
+	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void;
 	persistTree(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -145,6 +161,7 @@ function buildMeta(input: {
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
 		nodeVersion: process.version,
+		sessionFormatVersion: CURRENT_SESSION_FORMAT_VERSION,
 	};
 }
 
@@ -204,6 +221,13 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 				at: turn.at,
 				kind: turn.kind,
 			});
+		},
+		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
+			if (closed || fd === null) throw new Error("session writer closed");
+			const line = `${JSON.stringify(entry)}\n`;
+			writeSync(fd, line);
+			fsyncSync(fd);
+			if (opts?.treeNode) tree.push(opts.treeNode);
 		},
 		async persistTree(): Promise<void> {
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
