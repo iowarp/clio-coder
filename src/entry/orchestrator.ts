@@ -262,15 +262,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		...(session ? { session } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
-		getOrchestratorModel: () => {
-			const settings = config?.get() ?? readSettings();
-			const endpointId = settings.orchestrator?.endpoint ?? null;
-			const wireModelId = settings.orchestrator?.model ?? null;
-			if (!endpointId || !wireModelId) return undefined;
-			const endpoint = providers.getEndpoint(endpointId);
-			if (!endpoint) return undefined;
-			return synthesizeOrchestratorModel(providers, endpoint, wireModelId) ?? undefined;
-		},
 		...(config
 			? {
 					getWorkerDefault: () => {

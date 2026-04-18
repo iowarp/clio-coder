@@ -20,7 +20,8 @@ export const RECEIPTS_OVERLAY_HINT = "[Up/Down] /receipt verify <id> [Esc]";
 
 const SHORT_ID_LEN = 8;
 const AGENT_COL_WIDTH = 10;
-const MODEL_COL_WIDTH = 18;
+const ENDPOINT_COL_WIDTH = 12;
+const MODEL_COL_WIDTH = 16;
 const EXIT_COL_WIDTH = 5;
 const TOKENS_COL_WIDTH = 9;
 const RECEIPT_SUFFIX_WIDTH = 22;
@@ -70,10 +71,11 @@ function truncateReceiptLabel(text: string, maxWidth: number): string {
 export function formatReceiptRow(env: RunEnvelope): string {
 	const id = fitLeft(shortRunId(env.id), SHORT_ID_LEN);
 	const agent = fitLeft(env.agentId || "-", AGENT_COL_WIDTH);
-	const model = fitLeft(env.modelId || "-", MODEL_COL_WIDTH);
+	const endpoint = fitLeft(env.endpointId || "-", ENDPOINT_COL_WIDTH);
+	const model = fitLeft(env.wireModelId || "-", MODEL_COL_WIDTH);
 	const exit = fitLeft(env.exitCode === null ? "e=?" : `e=${env.exitCode}`, EXIT_COL_WIDTH);
 	const tokens = formatReceiptTokens(env.tokenCount).padStart(TOKENS_COL_WIDTH);
-	return `${id} ${agent} ${model} ${exit} ${tokens} ${formatReceiptUsd(env.costUsd)}`;
+	return `${id} ${agent} ${endpoint} ${model} ${exit} ${tokens} ${formatReceiptUsd(env.costUsd)}`;
 }
 
 export function buildReceiptItems(envelopes: ReadonlyArray<RunEnvelope>): SelectItem[] {
@@ -138,9 +140,10 @@ const RECEIPT_REQUIRED_KEYS = [
 	"runId",
 	"agentId",
 	"task",
-	"providerId",
-	"modelId",
-	"runtime",
+	"endpointId",
+	"wireModelId",
+	"runtimeId",
+	"runtimeKind",
 	"startedAt",
 	"endedAt",
 	"exitCode",
@@ -211,14 +214,17 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (!isNonEmptyString(r.task)) {
 		return { ok: false, reason: `task invalid: ${String(r.task)}` };
 	}
-	if (!isNonEmptyString(r.providerId)) {
-		return { ok: false, reason: `providerId invalid: ${String(r.providerId)}` };
+	if (!isNonEmptyString(r.endpointId)) {
+		return { ok: false, reason: `endpointId invalid: ${String(r.endpointId)}` };
 	}
-	if (!isNonEmptyString(r.modelId)) {
-		return { ok: false, reason: `modelId invalid: ${String(r.modelId)}` };
+	if (!isNonEmptyString(r.wireModelId)) {
+		return { ok: false, reason: `wireModelId invalid: ${String(r.wireModelId)}` };
 	}
-	if (r.runtime !== "native" && r.runtime !== "sdk" && r.runtime !== "cli") {
-		return { ok: false, reason: `runtime invalid: ${String(r.runtime)}` };
+	if (!isNonEmptyString(r.runtimeId)) {
+		return { ok: false, reason: `runtimeId invalid: ${String(r.runtimeId)}` };
+	}
+	if (r.runtimeKind !== "http" && r.runtimeKind !== "subprocess") {
+		return { ok: false, reason: `runtimeKind invalid: ${String(r.runtimeKind)}` };
 	}
 	const exitCode = r.exitCode;
 	if (typeof exitCode !== "number" || !(exitCode === 0 || exitCode === 1 || exitCode === 2)) {
