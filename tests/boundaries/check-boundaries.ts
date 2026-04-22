@@ -181,11 +181,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 					);
 					return;
 				}
-				if (
-					isWithin(resolved, domainsRoot) &&
-					!typeOnly &&
-					!isWithin(resolved, providersDomainRoot)
-				) {
+				if (isWithin(resolved, domainsRoot) && !typeOnly && !isWithin(resolved, providersDomainRoot)) {
 					violations.push(
 						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (harness may only value-import src/core, src/tools/registry.ts, and node)`,
 					);
