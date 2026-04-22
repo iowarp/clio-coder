@@ -31,7 +31,10 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 			// touch read.ts (safe: change only a comment)
 			const patched = original.replace("export const readTool", "/* hot-reload smoke test */\nexport const readTool");
 			writeFileSync(readToolPath, patched);
-			await pty.expect(/read\.ts/, 5000);
+			// Match the success glyph to ensure the hot-swap actually landed; a
+			// bare `read\.ts` match would also catch the `⚠ read.ts: ...` failure
+			// banner and false-pass.
+			await pty.expect(/⚡\s+read\.ts\s+\(\d+ms\)/, 5000);
 			// Now trigger a restart prompt via an engine-boundary file.
 			const sessionTouch = join(REPO_ROOT, "src", "engine", "types.ts");
 			const engineOriginal = readFileSync(sessionTouch, "utf8");
