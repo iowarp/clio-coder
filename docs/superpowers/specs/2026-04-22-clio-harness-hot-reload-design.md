@@ -199,9 +199,10 @@ Transient states (`hot-ready`, `hot-failed`) auto-clear after 3s to `idle`. Pers
 
 Added to `src/interactive/index.ts` input routing:
 
-- When the harness state is `restart-required` **and** the editor is not focused / not capturing (no input in progress), a bare `R` or `r` calls `harness.restart()`.
-- Escape does nothing (state persists). The user can also edit more files; each change merges into the `restart-required` file list.
-- If the editor has focus and user types `r`, it goes to the editor normally. The restart keystroke only fires when the chat editor is empty or unfocused. Explicit unfocus: briefing shows users already have `Ctrl+D` to quit, so this is a safe low-effort gesture.
+- When the harness state is `restart-required`, `Ctrl+R` calls `harness.restart()`.
+- Other states ignore `Ctrl+R`.
+- The bare-R approach in the earlier draft would conflict with the always-focused editor. `Ctrl+R` matches the existing chord-binding convention (Ctrl+D quit, Ctrl+B dispatch board, Ctrl+L model selector).
+- If the user wants to cancel the prompt, they can keep editing. The restart state persists until a new boot, and further file changes merge into the same state.
 
 ### 8.3 Banner message
 

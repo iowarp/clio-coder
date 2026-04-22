@@ -2,6 +2,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { type CapabilityFlags, type ProvidersContract, availableThinkingLevels } from "../domains/providers/index.js";
 import { Text } from "../engine/tui.js";
+import type { HarnessSnapshot } from "../harness/state.js";
 
 const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";
@@ -12,6 +13,7 @@ export interface FooterDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
+	getHarnessState?: () => HarnessSnapshot;
 }
 
 export interface FooterPanel {
@@ -61,6 +63,27 @@ export function scopedSegment(settings: Readonly<ClioSettings>): string | null {
 	return `scoped:${n}/${scope.length}`;
 }
 
+const HARNESS_GLYPHS = {
+	hot: "⚡",
+	warn: "⚠",
+	restart: "⟳",
+	worker: "⟲",
+} as const;
+
+export function formatHarnessIndicator(state: HarnessSnapshot): string | null {
+	if (state.kind === "idle") return null;
+	if (state.kind === "hot-ready") return `${HARNESS_GLYPHS.hot} ${state.message}`;
+	if (state.kind === "hot-failed") return `${HARNESS_GLYPHS.warn} ${state.message}`;
+	if (state.kind === "worker-pending") {
+		const plural = state.count === 1 ? "" : "s";
+		return `${HARNESS_GLYPHS.worker} worker refresh on next dispatch (${state.count} file${plural})`;
+	}
+	const first = state.files[0];
+	const extra = state.files.length > 1 ? ` +${state.files.length - 1}` : "";
+	const name = first ? first.split("/").slice(-2).join("/") : "unknown";
+	return `${HARNESS_GLYPHS.restart} restart required (${name}${extra}). press Ctrl+R`;
+}
+
 export function buildFooter(deps: FooterDeps): FooterPanel {
 	const view = new Text("");
 	const refresh = (): void => {
@@ -89,7 +112,12 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 			}
 		}
 
-		view.setText(`clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}`);
+		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}`;
+		if (deps.getHarnessState) {
+			const indicator = formatHarnessIndicator(deps.getHarnessState());
+			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;
+		}
+		view.setText(text);
 		view.invalidate();
 	};
 	refresh();

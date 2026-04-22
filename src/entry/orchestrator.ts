@@ -399,6 +399,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			: {}),
 		onCycleScopedModelForward: () => cycleScoped("forward"),
 		onCycleScopedModelBackward: () => cycleScoped("backward"),
+		...(harness ? { harness } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},
