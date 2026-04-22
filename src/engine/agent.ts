@@ -1,5 +1,5 @@
 /**
- * Thin wrapper over @mariozechner/pi-agent-core 0.67.4's Agent class.
+ * Thin wrapper over @mariozechner/pi-agent-core 0.68.1's Agent class.
  *
  * pi-agent-core's Agent owns its own state (exposed via `agent.state`). There is no
  * separate state factory. AgentOptions drives the construction; the state is derived

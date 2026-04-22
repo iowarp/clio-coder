@@ -1,10 +1,32 @@
-# pi-mono 0.67.4 engine-boundary audit
+# pi-mono 0.68.1 engine-boundary audit
 
 Status: frozen for Clio v0.1. Update this file only on a deliberate pi-mono version bump.
 
-Scope: every symbol the Clio engine layer (`src/engine/**`) may re-export. Names and signatures are copied verbatim from pi-mono 0.67.4 sources. Any Clio consumer that needs a symbol not listed here must bump pi-mono AND extend this document in the same commit.
+Scope: every symbol the Clio engine layer (`src/engine/**`) may re-export. Names and signatures are copied verbatim from pi-mono 0.68.1 sources. Any Clio consumer that needs a symbol not listed here must bump pi-mono AND extend this document in the same commit.
 
-## @mariozechner/pi-agent-core@0.67.4
+## Delta since 0.67.4
+
+Everything below is additive; no exports were removed or renamed between 0.67.4 and 0.68.1 on the surface Clio consumes.
+
+- **pi-agent-core**
+  - New optional field `AgentOptions.onResponse?` plus matching `Agent.onResponse?` instance field forwarded to the underlying stream options so callers can inspect provider HTTP status and headers after each response.
+  - New optional field `AgentTool.executionMode?: ToolExecutionMode` overrides the loop-level execution mode per tool.
+  - Parallel tool execution now emits `tool_execution_end` in tool-completion order; tool-result message artifacts are still emitted in assistant source order. See Lifecycle notes below.
+  - `afterToolCall` hook throws in parallel mode are converted to error tool results instead of aborting the batch (0.67.67).
+- **pi-ai**
+  - `KnownProvider` gains `"fireworks"` (Fireworks AI via Anthropic-compatible Messages API; `FIREWORKS_API_KEY`).
+  - New type re-exports from the package index: `BedrockThinkingDisplay`, `AnthropicEffort`, `AnthropicThinkingDisplay`.
+  - `AnthropicOptions` gains `effort?: AnthropicEffort` and `thinkingDisplay?: AnthropicThinkingDisplay`. `BedrockOptions` gains `thinkingDisplay?: BedrockThinkingDisplay`. Both default to `"summarized"`; set `"omitted"` to skip thinking streaming.
+  - `StreamOptions` gains `onResponse?: (response, model) => void | Promise<void>`. The `ProviderResponse` type is not re-exported; Clio consumers that need it can recover the parameter type via `Parameters<StreamOptions["onResponse"]>`.
+  - `OpenAICompletionsCompat` gains `cacheControlFormat?: "anthropic"` and `sendSessionAffinityHeaders?: boolean` for Anthropic-style prompt caching and session-affinity routing on OpenAI-compatible backends.
+  - Anthropic SSE parsing is now owned by pi-ai (replaces SDK JSON.parse). Behavior is unchanged for Clio's worker path; the deprecated `fine-grained-tool-streaming` beta header is dropped in favor of per-tool `eager_input_streaming`.
+- **pi-tui**
+  - New re-exports from the package index: `LoaderIndicatorOptions` (type), `hyperlink` (fn), `setCapabilities` (fn, test-only override of the capability cache).
+  - `Loader` gains an optional `indicator?: LoaderIndicatorOptions` constructor arg and `setIndicator(indicator?)` method.
+  - `SlashCommand` gains optional `argumentHint?: string` rendered in the autocomplete dropdown before the description.
+  - `detectCapabilities()` now defaults `hyperlinks: false` for unknown terminals and under tmux/screen.
+
+## @mariozechner/pi-agent-core@0.68.1
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index re-exports from `./agent.js`, `./agent-loop.js`, `./proxy.js`, and `./types.js`.
 
@@ -17,7 +39,7 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `get steeringMode(): "all" | "one-at-a-time"` / `set steeringMode(mode)`
   - `get followUpMode(): "all" | "one-at-a-time"` / `set followUpMode(mode)`
   - `get signal(): AbortSignal | undefined`. Returns the active run's signal.
-  - Public fields (assignable after construction): `convertToLlm`, `transformContext?`, `streamFn: StreamFn`, `getApiKey?`, `onPayload?`, `beforeToolCall?`, `afterToolCall?`, `sessionId?`, `thinkingBudgets?`, `transport: Transport`, `maxRetryDelayMs?`, `toolExecution: ToolExecutionMode`.
+  - Public fields (assignable after construction): `convertToLlm`, `transformContext?`, `streamFn: StreamFn`, `getApiKey?`, `onPayload?`, `onResponse?`, `beforeToolCall?`, `afterToolCall?`, `sessionId?`, `thinkingBudgets?`, `transport: Transport`, `maxRetryDelayMs?`, `toolExecution: ToolExecutionMode`.
   - `subscribe(listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void): () => void`. Returns an unsubscribe fn.
   - `steer(message: AgentMessage): void`
   - `followUp(message: AgentMessage): void`
@@ -73,6 +95,7 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `streamFn?: StreamFn`
   - `getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined`
   - `onPayload?: SimpleStreamOptions["onPayload"]`
+  - `onResponse?: SimpleStreamOptions["onResponse"]`
   - `beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>`
   - `afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>`
   - `steeringMode?: "all" | "one-at-a-time"`
@@ -84,7 +107,7 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
   - `toolExecution?: ToolExecutionMode`
 - `interface AgentToolResult<T> { content: (TextContent | ImageContent)[]; details: T; }`
 - `type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;`
-- `interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> { label: string; prepareArguments?: (args: unknown) => Static<TParameters>; execute: (toolCallId: string, params: Static<TParameters>, signal?: AbortSignal, onUpdate?: AgentToolUpdateCallback<TDetails>) => Promise<AgentToolResult<TDetails>>; }`
+- `interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> { label: string; prepareArguments?: (args: unknown) => Static<TParameters>; execute: (toolCallId: string, params: Static<TParameters>, signal?: AbortSignal, onUpdate?: AgentToolUpdateCallback<TDetails>) => Promise<AgentToolResult<TDetails>>; executionMode?: ToolExecutionMode; }`. `executionMode` is a per-tool override of the loop-level default.
 - `interface AgentContext { systemPrompt: string; messages: AgentMessage[]; tools?: AgentTool<any>[]; }`
 - `type AgentEvent = { type: "agent_start" } | { type: "agent_end"; messages: AgentMessage[] } | { type: "turn_start" } | { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] } | { type: "message_start"; message: AgentMessage } | { type: "message_update"; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent } | { type: "message_end"; message: AgentMessage } | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any } | { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any } | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };`
 
@@ -93,9 +116,9 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
 - `Agent.prompt()` and `Agent.continue()` start exactly one active run. A second call while a run is active throws. Use `steer()` (inject before the next assistant turn finishes) or `followUp()` (inject only after the agent would otherwise stop).
 - `Agent.subscribe()` listeners are awaited in subscription order during event delivery and share the active-run abort signal. `agent_end` is the final emitted event but `waitForIdle()` does not resolve until those listeners settle and `finishRun()` clears runtime state.
 - `Agent.abort()` triggers the underlying `AbortController`. The loop encodes failures as an `AssistantMessage` with `stopReason: "aborted"` (or `"error"`) and pushes a synthetic `agent_end`.
-- Tools run in `toolExecution: "parallel"` (default) or `"sequential"`. Hooks: `beforeToolCall` can block with `{ block: true, reason }`; `afterToolCall` can override `content`, `details`, or `isError` field-by-field (no deep merge).
+- Tools run in `toolExecution: "parallel"` (default) or `"sequential"`, overridable per tool via `AgentTool.executionMode`. Hooks: `beforeToolCall` can block with `{ block: true, reason }`; `afterToolCall` can override `content`, `details`, or `isError` field-by-field (no deep merge). In parallel mode, `tool_execution_end` is emitted as soon as each tool is finalized (completion order); the tool-result message artifacts appended to the transcript are still ordered by assistant source position. `afterToolCall` hook throws in parallel mode are converted into error tool results and do not abort the batch.
 
-## @mariozechner/pi-ai@0.67.4
+## @mariozechner/pi-ai@0.68.1
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/ai/src/`. The index re-exports from `api-registry.js`, `env-api-keys.js`, `models.js`, `providers/faux.js`, `providers/register-builtins.js`, `stream.js`, `types.js`, `utils/event-stream.js`, `utils/json-parse.js`, `utils/overflow.js`, `utils/typebox-helpers.js`, `utils/validation.js`, plus several provider-specific option types.
 
@@ -165,13 +188,13 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 
 - `type KnownApi` = union of `"openai-completions" | "mistral-conversations" | "openai-responses" | "azure-openai-responses" | "openai-codex-responses" | "anthropic-messages" | "bedrock-converse-stream" | "google-generative-ai" | "google-gemini-cli" | "google-vertex"`.
 - `type Api = KnownApi | (string & {})`
-- `type KnownProvider` = union of `"amazon-bedrock" | "anthropic" | "google" | "google-gemini-cli" | "google-antigravity" | "google-vertex" | "openai" | "azure-openai-responses" | "openai-codex" | "github-copilot" | "xai" | "groq" | "cerebras" | "openrouter" | "vercel-ai-gateway" | "zai" | "mistral" | "minimax" | "minimax-cn" | "huggingface" | "opencode" | "opencode-go" | "kimi-coding"`.
+- `type KnownProvider` = union of `"amazon-bedrock" | "anthropic" | "google" | "google-gemini-cli" | "google-antigravity" | "google-vertex" | "openai" | "azure-openai-responses" | "openai-codex" | "github-copilot" | "xai" | "groq" | "cerebras" | "openrouter" | "vercel-ai-gateway" | "zai" | "mistral" | "minimax" | "minimax-cn" | "huggingface" | "fireworks" | "opencode" | "opencode-go" | "kimi-coding"`.
 - `type Provider = KnownProvider | string`
 - `type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh"` (note: no `"off"` here; see pi-agent-core's distinct `ThinkingLevel`).
 - `interface ThinkingBudgets { minimal?: number; low?: number; medium?: number; high?: number; }`
 - `type CacheRetention = "none" | "short" | "long"`
 - `type Transport = "sse" | "websocket" | "auto"`
-- `interface StreamOptions { temperature?; maxTokens?; signal?: AbortSignal; apiKey?; transport?; cacheRetention?; sessionId?; onPayload?; headers?; maxRetryDelayMs?; metadata?; }`
+- `interface StreamOptions { temperature?; maxTokens?; signal?: AbortSignal; apiKey?; transport?; cacheRetention?; sessionId?; onPayload?; onResponse?: (response, model) => void | Promise<void>; headers?; maxRetryDelayMs?; metadata?; }`. `ProviderResponse` (the first callback arg) is not re-exported; recover it via `Parameters<NonNullable<StreamOptions["onResponse"]>>[0]` if needed.
 - `type ProviderStreamOptions = StreamOptions & Record<string, unknown>`
 - `interface SimpleStreamOptions extends StreamOptions { reasoning?: ThinkingLevel; thinkingBudgets?: ThinkingBudgets; }`
 - `type StreamFunction<TApi extends Api = Api, TOptions extends StreamOptions = StreamOptions> = (model: Model<TApi>, context: Context, options?: TOptions) => AssistantMessageEventStream`
@@ -189,7 +212,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 - `interface Tool<TParameters extends TSchema = TSchema> { name: string; description: string; parameters: TParameters; }`
 - `interface Context { systemPrompt?: string; messages: Message[]; tools?: Tool[]; }`
 - `type AssistantMessageEvent` is a discriminated union (`start`, `text_start/delta/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`, `done`, `error`) with every payload carrying `partial: AssistantMessage`.
-- `interface OpenAICompletionsCompat { supportsStore?; supportsDeveloperRole?; supportsReasoningEffort?; reasoningEffortMap?; supportsUsageInStreaming?; maxTokensField?; requiresToolResultName?; requiresAssistantAfterToolResult?; requiresThinkingAsText?; thinkingFormat?; openRouterRouting?; vercelGatewayRouting?; zaiToolStream?; supportsStrictMode?; }`. The `thinkingFormat` field accepts the pi-ai enum values `"openai" | "openrouter" | "zai" | "qwen" | "qwen-chat-template"`; Clio's local-model registry sets it to `"qwen-chat-template"` for Qwen-family endpoints so thinking-content pass-through works end-to-end.
+- `interface OpenAICompletionsCompat { supportsStore?; supportsDeveloperRole?; supportsReasoningEffort?; reasoningEffortMap?; supportsUsageInStreaming?; maxTokensField?; requiresToolResultName?; requiresAssistantAfterToolResult?; requiresThinkingAsText?; thinkingFormat?; cacheControlFormat?: "anthropic"; sendSessionAffinityHeaders?: boolean; openRouterRouting?; vercelGatewayRouting?; zaiToolStream?; supportsStrictMode?; }`. The `thinkingFormat` field accepts the pi-ai enum values `"openai" | "openrouter" | "zai" | "qwen" | "qwen-chat-template"`; Clio's local-model registry sets it to `"qwen-chat-template"` for Qwen-family endpoints so thinking-content pass-through works end-to-end. `cacheControlFormat: "anthropic"` enables Anthropic-style prompt caching markers on the system prompt, last tool definition, and last user/assistant text content when routing Qwen/Fireworks-style backends through the OpenAI-completions API. `sendSessionAffinityHeaders: true` emits aligned `session_id`, `x-client-request-id`, and `x-session-affinity` headers from `sessionId` for cache-affinity routing.
 - `interface OpenAIResponsesCompat {}`
 - `interface OpenRouterRouting { allow_fallbacks?; require_parameters?; data_collection?; zdr?; enforce_distillable_text?; order?; only?; ignore?; quantizations?; sort?; max_price?; preferred_min_throughput?; preferred_max_latency?; }`
 - `interface VercelGatewayRouting { only?: string[]; order?: string[]; }`
@@ -213,7 +236,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 ### Env and provider options
 
 - `getEnvApiKey(provider: KnownProvider | string): string | undefined` (from `env-api-keys.ts`). Returns `"<authenticated>"` sentinel for Bedrock/Vertex when credentials are resolvable without an explicit key.
-- Provider-specific option types re-exported as `type` only: `BedrockOptions`, `AnthropicOptions`, `AzureOpenAIResponsesOptions`, `GoogleOptions`, `GoogleGeminiCliOptions`, `GoogleThinkingLevel`, `GoogleVertexOptions`, `MistralOptions`, `OpenAICodexResponsesOptions`, `OpenAICompletionsOptions`, `OpenAIResponsesOptions`.
+- Provider-specific option types re-exported as `type` only: `BedrockOptions`, `BedrockThinkingDisplay`, `AnthropicOptions`, `AnthropicEffort`, `AnthropicThinkingDisplay`, `AzureOpenAIResponsesOptions`, `GoogleOptions`, `GoogleGeminiCliOptions`, `GoogleThinkingLevel`, `GoogleVertexOptions`, `MistralOptions`, `OpenAICodexResponsesOptions`, `OpenAICompletionsOptions`, `OpenAIResponsesOptions`. `AnthropicOptions` carries `effort?: AnthropicEffort` (`"low" | "medium" | "high" | "xhigh" | "max"`) and `thinkingDisplay?: AnthropicThinkingDisplay` (`"summarized" | "omitted"`, default `"summarized"`). `BedrockOptions` carries the same `thinkingDisplay` field.
 - OAuth type re-exports: `OAuthAuthInfo`, `OAuthCredentials`, `OAuthLoginCallbacks`, `OAuthPrompt`, `OAuthProvider`, `OAuthProviderId`, `OAuthProviderInfo`, `OAuthProviderInterface` (all `type` re-exports from `utils/oauth/types.js`).
 - Typebox re-exports: `Type` (value), `Static`, `TSchema` (types).
 
@@ -223,7 +246,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 - Order of registration is not meaningful; lookups go through `getApiProvider(model.api)`.
 - To swap Bedrock out (e.g., offline builds), call `setBedrockProviderModule(...)` before the first bedrock stream call. To reset from scratch, call `clearApiProviders()` then `registerBuiltInApiProviders()` (or `resetApiProviders()` which does both).
 
-## @mariozechner/pi-tui@0.67.4
+## @mariozechner/pi-tui@0.68.1
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/tui/src/`. Index re-exports are listed below grouped by module.
 
@@ -257,7 +280,8 @@ All components implement `Component`; Editor and Input additionally implement `F
   - `interface ImageOptions { maxWidthCells?; maxHeightCells?; filename?; imageId?; }`
   - `interface ImageTheme { fallbackColor: (str) => string; }`
 - `Input` (from `components/input.ts`) is a single-line input. Zero-arg constructor. Public fields: `focused: boolean`, `onSubmit?: (value: string) => void`, `onEscape?: () => void`. Accessors `getValue()` / `setValue()`.
-- `Loader` (from `components/loader.ts`) `extends Text`. `new Loader(ui: TUI, spinnerColorFn, messageColorFn, message = "Loading...")`. Methods `start()`, `stop()`, `setMessage(message)`.
+- `Loader` (from `components/loader.ts`) `extends Text`. `new Loader(ui: TUI, spinnerColorFn, messageColorFn, message = "Loading...", indicator?: LoaderIndicatorOptions)`. Methods `start()`, `stop()`, `setMessage(message)`, `setIndicator(indicator?)`.
+  - `interface LoaderIndicatorOptions` controls the animated indicator frames and interval. Pass an object with custom frames, use a static frame, or pass `{ frames: [] }` to hide the indicator entirely.
 - `Markdown` (from `components/markdown.ts`) renders markdown. `new Markdown(text: string, paddingX: number, paddingY: number, theme: MarkdownTheme, defaultTextStyle?: DefaultTextStyle)`.
   - `interface DefaultTextStyle { color?; bgColor?; bold?; italic?; strikethrough?; underline?; }`
   - `interface MarkdownTheme { heading; link; linkUrl; code; codeBlock; codeBlockBorder; quote; quoteBorder; hr; listBullet; bold; italic; strikethrough; underline; highlightCode?; codeBlockIndent?; }`
@@ -283,7 +307,7 @@ All components implement `Component`; Editor and Input additionally implement `F
 - `interface AutocompleteItem`
 - `interface AutocompleteSuggestions`
 - `interface AutocompleteProvider`
-- `interface SlashCommand`
+- `interface SlashCommand` (now carries optional `argumentHint?: string` rendered before the description in the autocomplete dropdown)
 - `class CombinedAutocompleteProvider implements AutocompleteProvider`
 
 ### Fuzzy matching (from `fuzzy.ts`)
@@ -331,7 +355,7 @@ All components implement `Component`; Editor and Input additionally implement `F
 ### Terminal image utilities (from `terminal-image.ts`)
 
 - Types: `ImageProtocol`, `TerminalCapabilities`, `CellDimensions`, `ImageDimensions`, `ImageRenderOptions`.
-- Functions: `allocateImageId`, `calculateImageRows`, `deleteAllKittyImages`, `deleteKittyImage`, `detectCapabilities`, `encodeITerm2`, `encodeKitty`, `getCapabilities`, `getCellDimensions`, `getGifDimensions`, `getImageDimensions`, `getJpegDimensions`, `getPngDimensions`, `getWebpDimensions`, `imageFallback`, `renderImage`, `resetCapabilitiesCache`, `setCellDimensions`.
+- Functions: `allocateImageId`, `calculateImageRows`, `deleteAllKittyImages`, `deleteKittyImage`, `detectCapabilities`, `encodeITerm2`, `encodeKitty`, `getCapabilities`, `getCellDimensions`, `getGifDimensions`, `getImageDimensions`, `getJpegDimensions`, `getPngDimensions`, `getWebpDimensions`, `hyperlink`, `imageFallback`, `renderImage`, `resetCapabilitiesCache`, `setCapabilities`, `setCellDimensions`. `hyperlink(text, url)` emits OSC 8 hyperlink escape sequences when `detectCapabilities().hyperlinks` is true (which is off by default for unknown terminals and under tmux/screen since 0.67.6). `setCapabilities(...)` overrides the cached capabilities for tests.
 
 ### Width and wrap utilities (from `utils.ts`)
 
