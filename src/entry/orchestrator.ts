@@ -9,7 +9,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
-import { clioCacheDir, clioDataDir } from "../core/xdg.js";
+import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -305,9 +305,14 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		if (!repoRoot) {
 			process.stderr.write("clio: CLIO_SELF_DEV=1 but no repo checkout found; hot-reload disabled.\n");
 		} else {
+			// Compile hot modules under the repo's node_modules so Node resolves
+			// bare imports (e.g. @sinclair/typebox) via the repo's installed deps.
+			// An XDG cache path would be outside any node_modules tree and break
+			// bare-specifier resolution.
+			const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
 			harness = startHarness({
 				repoRoot,
-				cacheRoot: clioCacheDir(),
+				cacheRoot: hotCacheRoot,
 				toolRegistry,
 				bus,
 				allowedModesByName,
