@@ -44,7 +44,8 @@ Every path under the repo lands in exactly one of four classes. This matrix is t
 | `src/cli/**` | restart | argv parsed at boot; the running process holds the pre-change parse. |
 | `src/interactive/**` | restart | Statically imported from `interactive/index.ts`; no indirection in v0. |
 | `tests/**`, `docs/**`, any `*.md`, any `*.mdx` | ignore | No runtime impact. |
-| `package.json`, `package-lock.json`, `tsconfig*.json`, `tsup.config.ts`, `biome.json`, `.gitignore`, `.github/**` | restart | Build graph, CI, or dep shift. |
+| `package.json`, `package-lock.json`, `tsconfig*.json`, `tsup.config.ts`, `biome.json`, `.gitignore` | restart | Build graph or dep shift. |
+| `.github/**` | ignore | CI config runs externally; no runtime impact. |
 | `dist/**`, `node_modules/**`, `.git/**`, anything outside `src/` and root config | ignore | Not source-of-truth. |
 | Anything under `src/harness/**` | restart | Changing hot-reload code while hot-reload is active is a footgun. Prompt a restart. |
 

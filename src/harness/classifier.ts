@@ -40,6 +40,9 @@ export function classifyChange(absPath: string, repoRoot: string): ClassifyResul
 	if (rel.startsWith("dist/") || rel.startsWith("node_modules/") || rel.startsWith(".git/")) {
 		return { class: "ignore", reason: "generated or vendored path" };
 	}
+	if (rel.startsWith(".github/")) {
+		return { class: "ignore", reason: "CI config does not affect the running process" };
+	}
 	if (rel.startsWith("tests/") || rel.startsWith("docs/")) {
 		return { class: "ignore", reason: "tests/docs do not affect runtime" };
 	}
