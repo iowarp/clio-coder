@@ -43,17 +43,34 @@ describe("classifyChange", () => {
 	it("ignore: absolute path outside repo", () => {
 		strictEqual(classifyChange("/tmp/other/file.ts", REPO).class, "ignore");
 	});
-	it("returns a non-empty reason for every class", () => {
+	it("ignore: .github/workflows/ci.yml", () =>
+		strictEqual(classify(".github/workflows/ci.yml").class, "ignore"));
+	it("returns a non-empty reason for every classified cohort", () => {
 		const paths = [
-			"src/tools/read.ts",
-			"src/domains/session/extension.ts",
-			"src/worker/entry.ts",
-			"docs/README.md",
+			"src/tools/read.ts",                      // hot
+			"src/tools/registry.ts",                  // restart (tool exclusion)
+			"src/tools/README.md",                    // ignore (markdown)
+			"src/engine/agent.ts",                    // restart (engine)
+			"src/core/config.ts",                     // restart (core)
+			"src/domains/session/extension.ts",       // restart (domain)
+			"src/worker/entry.ts",                    // worker-next-dispatch
+			"src/interactive/overlays/model.ts",      // restart (interactive)
+			"src/entry/orchestrator.ts",              // restart (entry)
+			"src/cli/clio.ts",                        // restart (cli)
+			"src/harness/classifier.ts",              // restart (harness self)
+			"src/unknown-subtree/foo.ts",             // restart (unknown src)
+			"tests/unit/foo.test.ts",                 // ignore (tests)
+			"docs/README.md",                         // ignore (docs)
+			"package.json",                           // restart (root config)
+			"dist/cli/index.js",                      // ignore (dist)
+			"node_modules/foo/index.js",              // ignore (node_modules)
+			".git/HEAD",                              // ignore (.git)
+			".github/workflows/ci.yml",               // ignore (.github)
 		];
 		for (const p of paths) {
 			const result = classify(p);
-			strictEqual(typeof result.reason, "string");
-			deepStrictEqual(result.reason.length > 0, true);
+			strictEqual(typeof result.reason, "string", `reason not a string for ${p}`);
+			deepStrictEqual(result.reason.length > 0, true, `empty reason for ${p}`);
 		}
 	});
 });
