@@ -106,6 +106,8 @@ export interface InteractiveDeps {
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
 	onCycleScopedModelBackward?: () => void;
+	/** Hot-reload harness handle. When present, the footer shows an indicator line and Ctrl+R triggers restart. */
+	harness?: import("../harness/index.js").HarnessHandle;
 	onShutdown: () => Promise<void>;
 }
 
@@ -114,6 +116,7 @@ export const CTRL_D = "\x04";
 export const CTRL_B = "\x02";
 export const CTRL_L = "\x0c";
 export const CTRL_P = "\x10";
+export const CTRL_R = "\x12";
 // pi-coding-agent emits Shift+Ctrl+P as the CSI-u sequence for key 80 with the
 // shift+ctrl modifiers. Terminals in kitty-protocol mode deliver this literally;
 // legacy terminals without CSI-u will not fire this binding, by design — fall
@@ -541,10 +544,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const banner = defaultBanner();
 	const chatPanel = createChatPanel();
+	const harness = deps.harness;
 	const footer = buildFooter({
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -634,6 +639,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	tui.addChild(root);
 	tui.setFocus(editor);
 	tui.start();
+
+	let harnessFooterTimer: NodeJS.Timeout | null = null;
+	if (harness) {
+		harnessFooterTimer = setInterval(() => {
+			footer.refresh();
+			tui.requestRender();
+		}, 500);
+		harnessFooterTimer.unref?.();
+	}
 
 	let resolveRun: (code: number) => void = () => {};
 	const run = new Promise<number>((resolve) => {
@@ -962,6 +976,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		clearInterval(keepAlive);
+		if (harnessFooterTimer) clearInterval(harnessFooterTimer);
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
@@ -1031,6 +1046,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "closed" && data === ESC && deps.chat.isStreaming()) {
 			deps.chat.cancel();
 			return { consume: true };
+		}
+
+		if (harness) {
+			const snap = harness.state.snapshot();
+			if (snap.kind === "restart-required" && data === CTRL_R) {
+				void harness.restart();
+				return { consume: true };
+			}
 		}
 
 		const consumed = routeInteractiveKey(data, {
