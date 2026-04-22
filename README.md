@@ -20,7 +20,7 @@
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/badge/npm-coming%20soon-lightgrey?style=flat-square" /></a>
   <a href="https://iowarp.ai"><img alt="IOWarp CLIO" src="https://img.shields.io/badge/IOWarp-CLIO-00d4db?style=flat-square" /></a>
-  <a href="https://github.com/mariozechner"><img alt="pi-mono" src="https://img.shields.io/badge/pi--mono-0.67.4-241131?style=flat-square" /></a>
+  <a href="https://github.com/mariozechner"><img alt="pi-mono" src="https://img.shields.io/badge/pi--mono-0.68.1-241131?style=flat-square" /></a>
 </p>
 
 ---
@@ -290,7 +290,7 @@ Three hard invariants are enforced at build time by [`scripts/check-boundaries.t
 2. `src/worker/**` never imports `src/domains/**`.
 3. Cross-domain traffic goes through `SafeEventBus`.
 
-Full design: [docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md). Engine boundary detail: [docs/architecture/pi-mono-boundary-0.67.4.md](docs/architecture/pi-mono-boundary-0.67.4.md).
+Full design: [docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md). Engine boundary detail: [docs/architecture/pi-mono-boundary-0.68.1.md](docs/architecture/pi-mono-boundary-0.68.1.md).
 
 ---
 

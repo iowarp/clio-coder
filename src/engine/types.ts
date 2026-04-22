@@ -1,6 +1,6 @@
 /**
- * Re-exports of pi-mono 0.67.4 types consumed by Clio. Frozen against
- * docs/architecture/pi-mono-boundary-0.67.4.md.
+ * Re-exports of pi-mono 0.68.1 types consumed by Clio. Frozen against
+ * docs/architecture/pi-mono-boundary-0.68.1.md.
  *
  * Importing pi-* types from anywhere else in the codebase violates the engine boundary.
  * Add new re-exports here when domains need additional pi types, and update the audit

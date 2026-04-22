@@ -445,7 +445,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Inspect the agent's state after `agent.prompt` resolves. pi-agent-core
-	 * 0.67.4's `handleRunFailure` records the upstream error on the assistant
+	 * 0.68.1's `handleRunFailure` records the upstream error on the assistant
 	 * message (stopReason="error", errorMessage="<text>") and on
 	 * `state.errorMessage`, then resolves the prompt() Promise normally.
 	 * Returns a ContextOverflowError when either surface matches the heuristic
@@ -663,7 +663,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			try {
 				await agentRuntime.agent.prompt(text);
-				// pi-agent-core 0.67.4 does NOT throw on provider failures:
+				// pi-agent-core 0.68.1 does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
 				// state.errorMessage, emits agent_end, and resolves normally.

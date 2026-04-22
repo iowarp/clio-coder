@@ -48,7 +48,7 @@ function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
   ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
-  ${chalk.dim(`v${clio} · pi-mono 0.67.4 · ready`)}
+  ${chalk.dim(`v${clio} · pi-mono 0.68.1 · ready`)}
 `;
 }
 
