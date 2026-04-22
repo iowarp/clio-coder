@@ -28,6 +28,12 @@ export const BusChannels = {
 	ShutdownDrained: "shutdown.drained",
 	ShutdownTerminated: "shutdown.terminated",
 	ShutdownPersisted: "shutdown.persisted",
+	HarnessWatcherStarted: "harness.watcher.started",
+	HarnessFileChanged: "harness.file.changed",
+	HarnessHotreloadSucceeded: "harness.hotreload.succeeded",
+	HarnessHotreloadFailed: "harness.hotreload.failed",
+	HarnessRestartRequired: "harness.restart.required",
+	HarnessRestartTriggered: "harness.restart.triggered",
 } as const;
 
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
