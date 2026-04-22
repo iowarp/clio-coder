@@ -128,6 +128,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const workerRoot = path.join(srcRoot, "worker");
 	const domainsRoot = path.join(srcRoot, "domains");
 	const providersDomainRoot = path.join(domainsRoot, "providers");
+	const harnessRoot = path.join(srcRoot, "harness");
 
 	const violations: string[] = [];
 
@@ -139,6 +140,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const inEngine = isWithin(filePath, engineRoot);
 		const inWorker = isWithin(filePath, workerRoot);
 		const fromDomain = domainOf(filePath, domainsRoot);
+		const inHarness = isWithin(filePath, harnessRoot);
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
 			if (specifier.startsWith("@mariozechner/pi-")) {
@@ -169,6 +171,37 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 					violations.push(
 						`rule3: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} reaches into src/domains/${toDomain}/extension.ts; use the contract exported from src/domains/${toDomain}/index.ts instead`,
 					);
+				}
+			}
+
+			if (inHarness) {
+				if (isWithin(resolved, path.join(srcRoot, "engine")) && !typeOnly) {
+					violations.push(
+						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/engine (harness must not import pi-mono engine)`,
+					);
+					return;
+				}
+				if (
+					isWithin(resolved, domainsRoot) &&
+					!typeOnly &&
+					!isWithin(resolved, providersDomainRoot)
+				) {
+					violations.push(
+						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (harness may only value-import src/core, src/tools/registry.ts, and node)`,
+					);
+					return;
+				}
+				if (isWithin(resolved, path.join(srcRoot, "interactive")) && !typeOnly) {
+					violations.push(
+						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/interactive (harness must not reach into the TUI layer)`,
+					);
+					return;
+				}
+				if (isWithin(resolved, path.join(srcRoot, "worker")) && !typeOnly) {
+					violations.push(
+						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/worker (harness is orchestrator-only)`,
+					);
+					return;
 				}
 			}
 		};
