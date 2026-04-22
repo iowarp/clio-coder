@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
@@ -6,7 +9,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioCacheDir, clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -34,6 +37,7 @@ import type { SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
+import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -161,6 +165,24 @@ function cycleScoped(direction: "forward" | "backward"): void {
 	writeSettings(current);
 }
 
+function resolveRepoRoot(): string | null {
+	try {
+		const here = dirname(fileURLToPath(import.meta.url));
+		let cursor = here;
+		for (let i = 0; i < 8; i++) {
+			if (existsSync(join(cursor, "package.json")) && existsSync(join(cursor, "src"))) {
+				return cursor;
+			}
+			const parent = dirname(cursor);
+			if (parent === cursor) break;
+			cursor = parent;
+		}
+	} catch {
+		// fall through
+	}
+	return null;
+}
+
 export async function bootOrchestrator(): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const bus = getSharedBus();
@@ -201,6 +223,9 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	timer.mark("session_start fired");
 
 	process.stdout.write(buildBanner());
+	if (process.env.CLIO_SELF_DEV === "1") {
+		process.stdout.write(`  ${chalk.magenta("CLIO_SELF_DEV=1 · hot-reload on src/tools/*.ts · watching src/")}\n`);
+	}
 	if (process.env.CLIO_TIMING === "1") {
 		process.stdout.write(`${timer.report()}\n`);
 	}
@@ -226,9 +251,27 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const toolRegistry = createRegistry({ safety, modes });
 	registerAllTools(toolRegistry);
 
+	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
+	for (const spec of toolRegistry.listAll()) {
+		if (spec.allowedModes) allowedModesByName.set(spec.name, spec.allowedModes);
+	}
+
 	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
+
+	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
+	if (resumeId && session) {
+		try {
+			session.resume(resumeId);
+		} catch (err) {
+			process.stderr.write(
+				`clio: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
+	}
+	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
+
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
@@ -255,6 +298,30 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			: {}),
 		toolRegistry,
 	});
+
+	let harness: HarnessHandle | null = null;
+	if (process.env.CLIO_SELF_DEV === "1") {
+		const repoRoot = resolveRepoRoot();
+		if (!repoRoot) {
+			process.stderr.write("clio: CLIO_SELF_DEV=1 but no repo checkout found; hot-reload disabled.\n");
+		} else {
+			harness = startHarness({
+				repoRoot,
+				cacheRoot: clioCacheDir(),
+				toolRegistry,
+				bus,
+				allowedModesByName,
+				getSessionId: () => session?.current()?.id ?? null,
+				shutdown: async (code?: number) => {
+					await termination.shutdown(code ?? 0);
+				},
+			});
+			termination.onDrain(() => {
+				harness?.stop();
+			});
+		}
+	}
+
 	await startInteractive({
 		bus,
 		modes,

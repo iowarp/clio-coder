@@ -265,6 +265,7 @@ No `scripts/diag-*.ts` — the briefing explicitly bans that pattern.
 - Dev-mode worker spawn via `tsx src/worker/entry.ts`. The classifier already flags worker changes; upgrading the spawn path is a follow-up.
 - `clio --resume <id>` CLI flag. The `CLIO_RESUME_SESSION_ID` env contract makes it trivial; out of scope for this PR.
 - Windows parity. `fs.watch` recursive on Windows has historical quirks; users of `CLIO_SELF_DEV=1` are expected to be on Linux/macOS/WSL.
+- Conservative allowedModes default for hot-added new tool files (not present at boot). Currently such tools register with the raw spec value, which means undefined (visible everywhere). Low risk for the intended inner-loop workflow where developers edit existing tools.
 
 ## 13. Success criterion
 
