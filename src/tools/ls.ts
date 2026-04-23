@@ -22,6 +22,7 @@ export const lsTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const rootArg = typeof args.path === "string" ? args.path : process.cwd();
 		const root = path.resolve(rootArg);

@@ -104,6 +104,7 @@ export const globTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const patternArg = typeof args.pattern === "string" ? args.pattern : null;
 		if (!patternArg) {
