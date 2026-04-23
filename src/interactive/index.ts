@@ -15,7 +15,16 @@ import {
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import { Editor, isKeyRelease, matchesKey, ProcessTerminal, type SelectItem, Text, TUI } from "../engine/tui.js";
+import {
+	createAgentProgress,
+	Editor,
+	isKeyRelease,
+	matchesKey,
+	ProcessTerminal,
+	type SelectItem,
+	Text,
+	TUI,
+} from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -627,6 +636,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		requestRender: () => tui.requestRender(),
 	});
 	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
+	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.69.0
+	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
+	// are idempotent and unit-testable.
+	const agentProgress = createAgentProgress(terminal);
+	const unsubscribeProgress = deps.chat.onEvent((event) => {
+		if (event.type === "agent_start") agentProgress.start();
+		else if (event.type === "agent_end") agentProgress.stop();
+	});
 
 	const slashCtx: SlashCommandContext = {
 		io,
@@ -1254,6 +1271,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
+		unsubscribeProgress();
+		agentProgress.stop();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
 			tui.stop();

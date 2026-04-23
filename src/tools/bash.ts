@@ -48,6 +48,7 @@ export const bashTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "execute",
+	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
 		if (typeof args.command !== "string" || args.command.length === 0) {
 			return { kind: "error", message: "bash: missing command argument" };

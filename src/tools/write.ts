@@ -16,6 +16,7 @@ export const writeTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "write",
+	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
 		const pathArg =
 			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;

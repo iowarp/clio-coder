@@ -27,7 +27,7 @@ export interface ResolveAgentToolsInput {
 }
 
 function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema> {
-	return {
+	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
 		parameters: spec.parameters,
@@ -40,16 +40,24 @@ function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema>
 			const verdict = await registry.invoke({ tool: spec.name, args });
 			if (verdict.kind === "ok") {
 				if (verdict.result.kind === "ok") {
-					return {
+					const result: AgentToolResult<{ kind: "ok" }> = {
 						content: [{ type: "text", text: verdict.result.output }],
 						details: { kind: "ok" },
 					};
+					if (verdict.result.terminate === true) {
+						result.terminate = true;
+					}
+					return result;
 				}
 				throw new Error(verdict.result.message);
 			}
 			throw new Error(verdict.reason);
 		},
 	};
+	if (spec.executionMode) {
+		tool.executionMode = spec.executionMode;
+	}
+	return tool;
 }
 
 function createWorkerModes(mode: ModeName): ModesContract {

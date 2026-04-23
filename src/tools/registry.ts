@@ -13,6 +13,15 @@ import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.
  * loop in Phase 4) surfaces the rejection message back to the model.
  */
 
+/**
+ * Per-tool execution mode override forwarded to pi-agent-core's
+ * `AgentTool.executionMode`. Parallel tools may run concurrently with other
+ * parallel tool calls; sequential tools run one at a time and prevent any
+ * other tool in the batch from running in parallel with them. Leaving this
+ * undefined defers to the agent loop's global `toolExecution` setting.
+ */
+export type ToolExecutionMode = "sequential" | "parallel";
+
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
@@ -31,11 +40,31 @@ export interface ToolSpec {
 	 * `invoke` rejects with `not_visible` for any mode outside this list.
 	 */
 	allowedModes?: ReadonlyArray<ModeName>;
+	/**
+	 * Per-tool execution mode. Read-only tools set `"parallel"` so the model
+	 * can batch scans; mutating or filesystem-racing tools set `"sequential"`
+	 * so two `bash` or `edit` calls in the same batch never run concurrently.
+	 */
+	executionMode?: ToolExecutionMode;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>): Promise<ToolResult>;
 }
 
-export type ToolResult = { kind: "ok"; output: string } | { kind: "error"; message: string };
+export type ToolResult =
+	| {
+			kind: "ok";
+			output: string;
+			/**
+			 * Early-termination hint propagated to pi-agent-core's
+			 * `AgentToolResult.terminate`. When every finalized tool result in
+			 * the current batch sets this to true, the agent loop stops without
+			 * a follow-up LLM call. Used by terminal advise-mode writers
+			 * (write_plan, write_review) where writing the artifact is the
+			 * whole turn.
+			 */
+			terminate?: boolean;
+	  }
+	| { kind: "error"; message: string };
 
 export interface RegistryDeps {
 	safety: SafetyContract;

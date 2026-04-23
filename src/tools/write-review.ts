@@ -17,6 +17,7 @@ export const writeReviewTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "write",
+	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
 		const rawPath = typeof args.path === "string" ? args.path : ALLOWED_BASENAME;
 		const content = typeof args.content === "string" ? args.content : "";
@@ -34,9 +35,14 @@ export const writeReviewTool: ToolSpec = {
 		}
 		try {
 			writeFileSync(expected, content, "utf8");
+			// write_review is advise-mode only (see src/tools/bootstrap.ts).
+			// Writing REVIEW.md is the whole turn; set `terminate: true` so
+			// pi-agent-core skips the follow-up LLM call that would otherwise
+			// summarize what was just written.
 			return {
 				kind: "ok",
 				output: `wrote ${Buffer.byteLength(content, "utf8")}B to ${ALLOWED_BASENAME}`,
+				terminate: true,
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

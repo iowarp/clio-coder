@@ -13,6 +13,7 @@ export const readTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const pathArg =
 			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;

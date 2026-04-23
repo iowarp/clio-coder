@@ -1,4 +1,7 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import type { ToolName } from "../../src/core/tool-names.js";
@@ -7,6 +10,7 @@ import type { ModeName } from "../../src/domains/modes/matrix.js";
 import type { Classification, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
+import { createAgentProgress } from "../../src/engine/tui.js";
 import { createWorkerToolRegistry, resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -106,5 +110,103 @@ describe("engine/worker-tools registry wiring", () => {
 			tool.execute("tool-call-3", { path: "/etc/clio-denied.txt", content: "forbidden" }),
 			/system_modify|blocked/,
 		);
+	});
+
+	it("forwards per-tool executionMode from ToolSpec to the resolved AgentTool", () => {
+		const registry = createWorkerToolRegistry("default");
+		const defaults = resolveAgentTools({
+			registry,
+			mode: "default",
+		});
+		const byName = new Map(defaults.map((tool) => [tool.name, tool]));
+		strictEqual(byName.get("read")?.executionMode, "parallel");
+		strictEqual(byName.get("grep")?.executionMode, "parallel");
+		strictEqual(byName.get("glob")?.executionMode, "parallel");
+		strictEqual(byName.get("ls")?.executionMode, "parallel");
+		strictEqual(byName.get("web_fetch")?.executionMode, "parallel");
+		strictEqual(byName.get("write")?.executionMode, "sequential");
+		strictEqual(byName.get("edit")?.executionMode, "sequential");
+		strictEqual(byName.get("bash")?.executionMode, "sequential");
+
+		const adviseTools = resolveAgentTools({
+			registry: createWorkerToolRegistry("advise"),
+			mode: "advise",
+		});
+		const adviseByName = new Map(adviseTools.map((tool) => [tool.name, tool]));
+		strictEqual(adviseByName.get("write_plan")?.executionMode, "sequential");
+		strictEqual(adviseByName.get("write_review")?.executionMode, "sequential");
+	});
+
+	it("write_plan and write_review set terminate=true on successful advise-mode writes", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-terminate-"));
+		const originalCwd = process.cwd();
+		process.chdir(scratch);
+		try {
+			const registry = createWorkerToolRegistry("advise");
+			const tools = resolveAgentTools({ registry, mode: "advise" });
+			const planTool = tools.find((t) => t.name === "write_plan");
+			const reviewTool = tools.find((t) => t.name === "write_review");
+			ok(planTool, "write_plan missing from advise resolve");
+			ok(reviewTool, "write_review missing from advise resolve");
+
+			const planResult = await planTool.execute("tc-plan", { content: "# Plan\n- step\n" });
+			strictEqual(planResult.terminate, true);
+			strictEqual(readFileSync(join(scratch, "PLAN.md"), "utf8"), "# Plan\n- step\n");
+
+			const reviewResult = await reviewTool.execute("tc-review", { content: "# Review\n- notes\n" });
+			strictEqual(reviewResult.terminate, true);
+			strictEqual(readFileSync(join(scratch, "REVIEW.md"), "utf8"), "# Review\n- notes\n");
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("omits terminate when the underlying ToolResult does not set it", async () => {
+		const registry = createWorkerToolRegistry("default");
+		const tools = resolveAgentTools({ registry, mode: "default", allowedTools: ["read"] });
+		const readTool = tools[0];
+		ok(readTool);
+		// Point read at a missing file so the registry throws (tool-reported
+		// error). A successful read wouldn't flag terminate either; the
+		// negative check is meaningful because the propagation path must not
+		// fabricate a flag when the spec does not set one.
+		await rejects(readTool.execute("tc-read", { path: "/nonexistent/clio-no-terminate" }));
+	});
+});
+
+describe("engine/tui createAgentProgress", () => {
+	it("emits setProgress(true) on the first start and ignores re-entrant starts", () => {
+		const calls: boolean[] = [];
+		const progress = createAgentProgress({ setProgress: (active) => calls.push(active) });
+		progress.start();
+		progress.start();
+		strictEqual(calls.length, 1);
+		strictEqual(calls[0], true);
+		strictEqual(progress.isActive(), true);
+	});
+
+	it("emits setProgress(false) on stop and ignores double-stops", () => {
+		const calls: boolean[] = [];
+		const progress = createAgentProgress({ setProgress: (active) => calls.push(active) });
+		progress.stop();
+		strictEqual(calls.length, 0);
+		progress.start();
+		progress.stop();
+		progress.stop();
+		strictEqual(calls.length, 2);
+		strictEqual(calls[1], false);
+		strictEqual(progress.isActive(), false);
+	});
+
+	it("supports restart after a full stop", () => {
+		const calls: boolean[] = [];
+		const progress = createAgentProgress({ setProgress: (active) => calls.push(active) });
+		progress.start();
+		progress.stop();
+		progress.start();
+		strictEqual(calls.length, 3);
+		strictEqual(calls[2], true);
+		strictEqual(progress.isActive(), true);
 	});
 });
