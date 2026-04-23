@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { type ProvidersContract, type ThinkingLevel, availableThinkingLevels } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -28,10 +29,20 @@ const SETTINGS_THEME: SettingsListTheme = {
  * either a picker (/model, /scoped-models) or text input the overlay does
  * not yet host.
  */
-export function buildSettingItems(settings: Readonly<ClioSettings>): SettingItem[] {
+export function buildSettingItems(
+	settings: Readonly<ClioSettings>,
+	options?: { providers?: ProvidersContract },
+): SettingItem[] {
 	const scopeList = settings.scope ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
 	const endpointCount = settings.endpoints?.length ?? 0;
+	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
+	const availableThinking = status
+		? availableThinkingLevels(status.capabilities, {
+				runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+				...(settings.orchestrator.model ? { modelId: settings.orchestrator.model } : {}),
+			})
+		: (["off"] as ReadonlyArray<ThinkingLevel>);
 	return [
 		{
 			id: "defaultMode",
@@ -51,7 +62,7 @@ export function buildSettingItems(settings: Readonly<ClioSettings>): SettingItem
 			id: "orchestrator.thinkingLevel",
 			label: "orchestrator.thinkingLevel",
 			currentValue: settings.orchestrator.thinkingLevel ?? "off",
-			values: ["off", "minimal", "low", "medium", "high", "xhigh"],
+			values: Array.from(availableThinking),
 			description: "Reasoning budget for the chat loop.",
 		},
 		{
@@ -128,6 +139,7 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 
 export interface OpenSettingsOverlayDeps {
 	getSettings: () => Readonly<ClioSettings>;
+	providers?: ProvidersContract;
 	writeSettings: (next: ClioSettings) => void;
 	onClose: () => void;
 }
@@ -143,7 +155,7 @@ class SettingsOverlayBox extends Box {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): OverlayHandle {
-	const items = buildSettingItems(deps.getSettings());
+	const items = buildSettingItems(deps.getSettings(), deps.providers ? { providers: deps.providers } : undefined);
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SettingsList(
 		items,

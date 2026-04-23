@@ -96,6 +96,20 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("Ctrl-C twice shuts down the tui", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("\x03");
+			await new Promise((r) => setTimeout(r, 100));
+			p.send("\x03");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("/model opens the picker, Esc closes, /quit exits clean", async () => {
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
 		ok(configDir);
@@ -116,6 +130,41 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/models opens the picker, Esc closes, /quit exits clean", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		writeEndpointFixture(configDir);
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/models\r");
+			await p.expect(/anthropic-prod/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/connect opens the provider selector, Esc closes, /quit exits clean", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/connect\r");
+			await p.expect(/openai-codex/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
 		} finally {
 			p.kill();
 		}

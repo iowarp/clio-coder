@@ -25,6 +25,7 @@ interface WorkerSpec {
 	wireModelId: string;
 	sessionId?: string;
 	apiKey?: string;
+	thinkingLevel?: WorkerRunInput["thinkingLevel"];
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
 }
@@ -53,6 +54,7 @@ async function main(): Promise<number> {
 	};
 	if (spec.sessionId) input.sessionId = spec.sessionId;
 	if (spec.apiKey) input.apiKey = spec.apiKey;
+	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.allowedTools !== undefined) {
 		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
 	} else {

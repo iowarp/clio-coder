@@ -1,3 +1,4 @@
+import { exec } from "node:child_process";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -5,10 +6,16 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
-import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
+import {
+	type ProvidersContract,
+	type ThinkingLevel,
+	getRuntimeRegistry,
+	listProviderSupportEntries,
+	resolveProviderReference,
+} from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import { Editor, ProcessTerminal, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import { Editor, ProcessTerminal, type SelectItem, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -16,6 +23,8 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { buildLayout, defaultBanner } from "./layout.js";
+import { openAuthDialog } from "./overlays/auth-dialog.js";
+import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
@@ -117,6 +126,7 @@ export const CTRL_B = "\x02";
 export const CTRL_L = "\x0c";
 export const CTRL_P = "\x10";
 export const CTRL_R = "\x12";
+export const CTRL_C_DOUBLE_TAP_MS = 500;
 // pi-coding-agent emits Shift+Ctrl+P as the CSI-u sequence for key 80 with the
 // shift+ctrl modifiers. Terminals in kitty-protocol mode deliver this literally;
 // legacy terminals without CSI-u will not fire this binding, by design — fall
@@ -132,6 +142,7 @@ export type OverlayState =
 	| "super-confirm"
 	| "dispatch-board"
 	| "providers"
+	| "auth"
 	| "cost"
 	| "receipts"
 	| "thinking"
@@ -167,6 +178,10 @@ export interface DispatchBoardOverlayKeyDeps {
 }
 
 export interface ProvidersOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
+export interface AuthOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
@@ -218,6 +233,7 @@ export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
+		AuthOverlayKeyDeps,
 		CostOverlayKeyDeps,
 		ReceiptsOverlayKeyDeps,
 		ThinkingOverlayKeyDeps,
@@ -230,6 +246,30 @@ export interface OverlayKeyDeps
 		CwdFallbackOverlayKeyDeps,
 		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
+}
+
+export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";
+
+export interface CtrlCActionDeps {
+	overlayState: OverlayState;
+	streaming: boolean;
+	editorText: string;
+	lastCtrlCAt: number;
+	now: number;
+}
+
+export function isCtrlCKey(data: string): boolean {
+	return matchesKey(data, "ctrl+c") && !isKeyRelease(data);
+}
+
+export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
+	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= CTRL_C_DOUBLE_TAP_MS) {
+		return "shutdown";
+	}
+	if (deps.streaming) return "cancel-stream";
+	if (deps.overlayState !== "closed") return "close-overlay";
+	if (deps.editorText.length > 0) return "clear-editor";
+	return "arm-shutdown";
 }
 
 /** Pure key router: returns true when the input was consumed. */
@@ -302,6 +342,15 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 
 /** Pure overlay key router for the /providers overlay. Esc closes; everything else is swallowed. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
+/** Pure overlay key router for auth overlays. Esc closes; input handles Enter itself. */
+export function routeAuthOverlayKey(data: string, deps: AuthOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
 		return true;
@@ -466,15 +515,9 @@ export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps
 	return false;
 }
 
-/** Ctrl+C must still raise SIGINT while any overlay is open. */
-export function shouldPassCtrlCToProcess(data: string, overlayState: OverlayState): boolean {
-	return overlayState !== "closed" && matchesKey(data, "ctrl+c") && !isKeyRelease(data);
-}
-
 /** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
 export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
 	if (overlayState === "closed") return false;
-	if (shouldPassCtrlCToProcess(data, overlayState)) return false;
 	if (data === CTRL_D) {
 		deps.requestShutdown();
 		return true;
@@ -486,6 +529,9 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "providers") {
 		routeProvidersOverlayKey(data, deps);
 		return true;
+	}
+	if (overlayState === "auth") {
+		return routeAuthOverlayKey(data, deps);
 	}
 	if (overlayState === "cost") {
 		routeCostOverlayKey(data, deps);
@@ -550,6 +596,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
+		getStreaming: () => deps.chat.isStreaming(),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -591,6 +638,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			void shutdown();
 		},
 		openProviders: () => openProvidersOverlayState(),
+		openConnect: (target) => openConnectOverlayState(target),
+		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
@@ -640,14 +689,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	tui.setFocus(editor);
 	tui.start();
 
-	let harnessFooterTimer: NodeJS.Timeout | null = null;
-	if (harness) {
-		harnessFooterTimer = setInterval(() => {
-			footer.refresh();
-			tui.requestRender();
-		}, 500);
-		harnessFooterTimer.unref?.();
-	}
+	let footerTicker: NodeJS.Timeout | null = null;
+	footerTicker = setInterval(() => {
+		const harnessActive = harness ? harness.state.snapshot().kind !== "idle" : false;
+		if (!deps.chat.isStreaming() && !harnessActive) return;
+		footer.refresh();
+		tui.requestRender();
+	}, 120);
+	footerTicker.unref?.();
 
 	let resolveRun: (code: number) => void = () => {};
 	const run = new Promise<number>((resolve) => {
@@ -661,8 +710,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	let overlayState: OverlayState = "closed";
 	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
+	let authDialogDismiss: (() => void) | null = null;
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
+	let lastCtrlCAt = 0;
+	process.removeAllListeners("SIGINT");
 
 	const renderDispatchBoard = (): void => {
 		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"));
@@ -686,10 +738,224 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
+		if (overlayState === "auth") {
+			authDialogDismiss?.();
+			authDialogDismiss = null;
+		}
 		overlayState = "closed";
 		stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
+		tui.requestRender();
+	};
+
+	const cancelActiveRun = (): void => {
+		deps.chat.cancel();
+		footer.refresh();
+		tui.requestRender();
+	};
+
+	const maybeOpenExternalUrl = (url: string): void => {
+		const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+		exec(`${opener} "${url.replace(/"/g, '\\"')}"`, () => {
+			// Best effort only.
+		});
+	};
+
+	const resolveAuthReference = (target: string) => {
+		const settings = deps.getSettings?.();
+		if (!settings) return null;
+		return resolveProviderReference(
+			target,
+			settings,
+			(runtimeId) => deps.providers.getRuntime(runtimeId) ?? getRuntimeRegistry().get(runtimeId),
+		);
+	};
+
+	const performDisconnect = (target: string): void => {
+		const resolved = resolveAuthReference(target);
+		if (!resolved) {
+			io.stderr(`[/disconnect] unknown provider or endpoint: ${target}\n`);
+			return;
+		}
+		const status = deps.providers.auth.statusForTarget(
+			resolved.endpoint ?? { id: "", runtime: resolved.runtime.id },
+			resolved.runtime,
+		);
+		if (!status.available) {
+			io.stderr(`[/disconnect] no stored credential for ${resolved.authTarget.providerId}\n`);
+			return;
+		}
+		if (status.source === "environment") {
+			io.stderr(
+				`[/disconnect] ${resolved.authTarget.providerId} uses ${status.detail ?? "environment"}; clear the env var to disconnect\n`,
+			);
+			return;
+		}
+		if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
+			io.stderr(`[/disconnect] cannot disconnect ${resolved.authTarget.providerId} from source ${status.source}\n`);
+			return;
+		}
+		deps.providers.auth.logout(resolved.authTarget.providerId);
+		footer.refresh();
+		tui.requestRender();
+	};
+
+	const openConnectFlowState = (target: string): void => {
+		if (overlayState !== "closed") return;
+		const resolved = resolveAuthReference(target);
+		if (!resolved) {
+			io.stderr(`[/connect] unknown provider or endpoint: ${target}\n`);
+			return;
+		}
+		if (resolved.runtime.auth !== "oauth" && resolved.runtime.auth !== "api-key") {
+			io.stderr(`[/connect] runtime ${resolved.runtime.id} is not connectable from the TUI\n`);
+			return;
+		}
+		overlayState = "auth";
+		if (resolved.runtime.auth === "api-key") {
+			const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+			overlayHandle = dialog.handle;
+			authDialogDismiss = dialog.controller.dismiss;
+			dialog.controller.setLines([
+				`Provider: ${resolved.authTarget.providerId}`,
+				"Store an API key in credentials.yaml for this provider.",
+			]);
+			void (async () => {
+				try {
+					const apiKey = (await dialog.controller.prompt("API key")).trim();
+					if (apiKey.length === 0) throw new Error("empty API key");
+					deps.providers.auth.setApiKey(resolved.authTarget.providerId, apiKey);
+					authDialogDismiss = null;
+					closeOverlay();
+					footer.refresh();
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					if (message !== "dismissed" && message !== "cancelled") {
+						io.stderr(`[/connect] ${message}\n`);
+					}
+					authDialogDismiss = null;
+					closeOverlay();
+				}
+			})();
+			tui.requestRender();
+			return;
+		}
+		const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+		overlayHandle = dialog.handle;
+		authDialogDismiss = dialog.controller.dismiss;
+		dialog.controller.setLines([`Provider: ${resolved.authTarget.providerId}`, "Starting OAuth flow..."]);
+		void (async () => {
+			let manualCodeTimer: NodeJS.Timeout | null = null;
+			try {
+				await deps.providers.auth.login(resolved.authTarget.providerId, {
+					onAuth: ({ url, instructions }) => {
+						dialog.controller.setLines(
+							[
+								`Open: ${url}`,
+								instructions ?? "Complete sign-in in your browser.",
+								"Waiting for the browser callback. A manual code prompt will appear if needed.",
+							].filter(Boolean),
+						);
+						maybeOpenExternalUrl(url);
+					},
+					onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
+					onManualCodeInput: async () =>
+						await new Promise<string>((resolve, reject) => {
+							manualCodeTimer = setTimeout(() => {
+								manualCodeTimer = null;
+								dialog.controller
+									.prompt("Verification code")
+									.then((value) => resolve(value.trim()))
+									.catch(reject);
+							}, 10_000);
+							manualCodeTimer.unref?.();
+						}),
+					onProgress: (message) => {
+						dialog.controller.appendLine(message);
+					},
+				});
+				authDialogDismiss = null;
+				closeOverlay();
+				footer.refresh();
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				if (message !== "dismissed" && message !== "cancelled") {
+					io.stderr(`[/connect] ${message}\n`);
+				}
+				authDialogDismiss = null;
+				closeOverlay();
+			} finally {
+				if (manualCodeTimer) {
+					clearTimeout(manualCodeTimer);
+				}
+			}
+		})();
+		tui.requestRender();
+	};
+
+	const openConnectOverlayState = (target?: string): void => {
+		if (target) {
+			openConnectFlowState(target);
+			return;
+		}
+		if (overlayState !== "closed") return;
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
+			.filter((entry) => entry.connectable)
+			.map((entry) => {
+				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
+				const status = runtime ? deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime) : null;
+				return {
+					value: entry.runtimeId,
+					label: `${entry.runtimeId}  ${entry.label}`,
+					description: status?.available ? `${status.source}` : entry.summary,
+				};
+			});
+		overlayState = "auth";
+		overlayHandle = openAuthSelectorOverlay(tui, {
+			items,
+			onSelect: (value) => {
+				closeOverlay();
+				queueMicrotask(() => openConnectFlowState(value));
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openDisconnectOverlayState = (target?: string): void => {
+		if (target) {
+			performDisconnect(target);
+			return;
+		}
+		if (overlayState !== "closed") return;
+		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
+			.filter((entry) => {
+				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
+				if (!runtime) return false;
+				const status = deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime);
+				return status.source === "stored-api-key" || status.source === "stored-oauth";
+			})
+			.map((entry) => ({
+				value: entry.runtimeId,
+				label: `${entry.runtimeId}  ${entry.label}`,
+				description: "disconnect stored credential",
+			}));
+		if (items.length === 0) {
+			io.stderr("[/disconnect] no stored provider credentials\n");
+			return;
+		}
+		overlayState = "auth";
+		overlayHandle = openAuthSelectorOverlay(tui, {
+			items,
+			onSelect: (value) => {
+				closeOverlay();
+				queueMicrotask(() => performDisconnect(value));
+			},
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 
@@ -788,6 +1054,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		const writeSettingsOut = deps.writeSettings;
 		overlayHandle = openSettingsOverlay(tui, {
 			getSettings,
+			providers: deps.providers,
 			writeSettings: (next) => {
 				writeSettingsOut(next);
 				footer.refresh();
@@ -975,8 +1242,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const shutdown = async (): Promise<void> => {
 		if (shuttingDown) return;
 		shuttingDown = true;
+		process.off("SIGINT", handleCtrlC);
 		clearInterval(keepAlive);
-		if (harnessFooterTimer) clearInterval(harnessFooterTimer);
+		if (footerTicker) clearInterval(footerTicker);
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
@@ -989,6 +1257,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		await deps.onShutdown();
 		resolveRun(0);
 	};
+
+	const handleCtrlC = (): void => {
+		const action = resolveCtrlCAction({
+			overlayState,
+			streaming: deps.chat.isStreaming(),
+			editorText: editor.getText(),
+			lastCtrlCAt,
+			now: Date.now(),
+		});
+		if (action === "shutdown") {
+			lastCtrlCAt = 0;
+			void shutdown();
+			return;
+		}
+		lastCtrlCAt = Date.now();
+		if (action === "cancel-stream") {
+			cancelActiveRun();
+			return;
+		}
+		if (action === "close-overlay") {
+			closeOverlay();
+			return;
+		}
+		if (action === "clear-editor") {
+			editor.setText("");
+			tui.requestRender();
+		}
+	};
+	process.on("SIGINT", handleCtrlC);
 
 	const dispatchBoardRenderUnsubscribers = [
 		deps.bus.on(BusChannels.DispatchEnqueued, () => {
@@ -1019,8 +1316,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	];
 
 	tui.addInputListener((data: string) => {
-		if (shouldPassCtrlCToProcess(data, overlayState)) {
-			process.kill(process.pid, "SIGINT");
+		if (isCtrlCKey(data)) {
+			handleCtrlC();
+			return { consume: true };
+		}
+		if (data === ESC && deps.chat.isStreaming()) {
+			cancelActiveRun();
 			return { consume: true };
 		}
 
@@ -1041,10 +1342,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 		});
 		if (overlayConsumed) {
-			return { consume: true };
-		}
-		if (overlayState === "closed" && data === ESC && deps.chat.isStreaming()) {
-			deps.chat.cancel();
 			return { consume: true };
 		}
 

@@ -14,6 +14,7 @@ export interface FooterDeps {
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
 	getHarnessState?: () => HarnessSnapshot;
+	getStreaming?: () => boolean;
 }
 
 export interface FooterPanel {
@@ -24,6 +25,7 @@ export interface FooterPanel {
 interface OrchestratorTarget {
 	endpointId: string;
 	wireModelId: string;
+	runtimeId: string;
 	healthStatus: "healthy" | "degraded" | "unknown" | "down";
 	capabilities: CapabilityFlags | null;
 }
@@ -39,6 +41,7 @@ function resolveOrchestratorTarget(
 	return {
 		endpointId,
 		wireModelId,
+		runtimeId: status?.runtime?.id ?? status?.endpoint.runtime ?? "",
 		healthStatus: status?.health.status ?? "unknown",
 		capabilities: status?.capabilities ?? null,
 	};
@@ -70,6 +73,8 @@ const HARNESS_GLYPHS = {
 	worker: "⟲",
 } as const;
 
+const STREAMING_FRAMES = ["|", "/", "-", "\\"] as const;
+
 export function formatHarnessIndicator(state: HarnessSnapshot): string | null {
 	if (state.kind === "idle") return null;
 	if (state.kind === "hot-ready") return `${HARNESS_GLYPHS.hot} ${state.message}`;
@@ -86,6 +91,7 @@ export function formatHarnessIndicator(state: HarnessSnapshot): string | null {
 
 export function buildFooter(deps: FooterDeps): FooterPanel {
 	const view = new Text("");
+	let streamingFrame = 0;
 	const refresh = (): void => {
 		const mode = deps.modes.current().toLowerCase();
 		const settings = deps.getSettings?.();
@@ -104,7 +110,10 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 
 		let suffix = "";
 		if (target?.capabilities) {
-			const available = availableThinkingLevels(target.capabilities);
+			const available = availableThinkingLevels(target.capabilities, {
+				runtimeId: target.runtimeId,
+				modelId: target.wireModelId,
+			});
 			if (available.length > 1) {
 				const level = settings?.orchestrator?.thinkingLevel ?? "off";
 				const piece = `${SEP}${GLYPH} ${level}`;
@@ -112,7 +121,17 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 			}
 		}
 
-		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}`;
+		const streaming = deps.getStreaming?.() ?? false;
+		const streamingPart = streaming
+			? `${SEP}${STREAMING_FRAMES[streamingFrame % STREAMING_FRAMES.length]} responding`
+			: "";
+		if (streaming) {
+			streamingFrame = (streamingFrame + 1) % STREAMING_FRAMES.length;
+		} else {
+			streamingFrame = 0;
+		}
+
+		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${streamingPart}`;
 		if (deps.getHarnessState) {
 			const indicator = formatHarnessIndicator(deps.getHarnessState());
 			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;

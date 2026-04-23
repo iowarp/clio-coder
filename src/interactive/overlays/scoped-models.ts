@@ -41,17 +41,18 @@ export function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
 	const items: SelectItem[] = [];
 	for (const status of input.providers.list()) {
 		const ep = status.endpoint;
+		const runtimeName = status.runtime?.displayName ?? ep.runtime;
 		const epKey = ep.id;
 		items.push({
 			value: epKey,
-			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${epKey}`,
+			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${runtimeName}  ${epKey}`,
 			description: "endpoint-level scope",
 		});
 		for (const wireModel of modelsForEndpoint(status)) {
 			const key = `${ep.id}/${wireModel}`;
 			items.push({
 				value: key,
-				label: `${active.has(key) ? "[x]" : "[ ]"} ${key}`,
+				label: `${active.has(key) ? "[x]" : "[ ]"} ${runtimeName}  ${ep.id}/${wireModel}`,
 				description: "endpoint/model scope",
 			});
 		}
@@ -83,7 +84,7 @@ class ScopedOverlayBox extends Box {
 	private rebuildLabels(): void {
 		for (const item of this.items) {
 			const sel = this.selected.has(item.value);
-			const rest = item.value;
+			const rest = item.label.replace(/^\[(x| )\]\s+/, "");
 			item.label = `${sel ? "[x]" : "[ ]"} ${rest}`;
 		}
 	}

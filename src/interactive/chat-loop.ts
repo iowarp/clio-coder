@@ -17,6 +17,7 @@ import { calculateContextTokens } from "../domains/session/compaction/tokens.js"
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -273,22 +274,6 @@ function buildCompactionBridgeMessage(summary: string): AgentMessage {
 	} as AgentMessage;
 }
 
-function resolveApiKey(target: ChatLoopTarget, providers: ProvidersContract): string | undefined {
-	const { endpoint, runtime } = target;
-	if (runtime.auth === "api-key") {
-		const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
-		if (envVar) {
-			const fromEnv = process.env[envVar]?.trim();
-			if (fromEnv && fromEnv.length > 0) return fromEnv;
-		}
-		const ref = endpoint.auth?.apiKeyRef ?? runtime.id;
-		const stored = providers.credentials.get(ref);
-		if (stored && stored.length > 0) return stored;
-		return undefined;
-	}
-	return LOCAL_API_KEY_FALLBACK;
-}
-
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
@@ -296,6 +281,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let runtime: AgentRuntime | null = null;
 	let lastTurnId: string | null = null;
 	let streaming = false;
+	let currentThinkingLevel: ThinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 	// Hash of the prompt compiled for the in-flight turn. User + assistant
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
@@ -380,7 +366,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
 		// prompts contract is absent (tests, degraded boot).
-		const resolvedKey = resolveApiKey(target, deps.providers);
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -389,7 +374,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				tools,
 				messages: [],
 			},
-			getApiKey: async () => resolvedKey,
+			onPayload: async (payload, currentModel) =>
+				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
+			getApiKey: async () => {
+				if (target.runtime.auth !== "api-key" && target.runtime.auth !== "oauth") {
+					return LOCAL_API_KEY_FALLBACK;
+				}
+				const resolved = await deps.providers.auth.resolveForTarget(target.endpoint, target.runtime);
+				return resolved.apiKey;
+			},
 		});
 
 		handle.agent.subscribe(async (event) => {
@@ -659,6 +652,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			agentRuntime.agent.state.tools = resolveRuntimeTools(deps);
+			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 
 			streaming = true;
 			try {

@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../../domains/providers/index.js";
+import { listKnownModelsForRuntime } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -76,6 +77,12 @@ export function modelsForEndpoint(status: EndpointStatus): string[] {
 	const wireModels = status.endpoint.wireModels ?? [];
 	if (wireModels.length > 0) return [...wireModels];
 	if (status.discoveredModels.length > 1) return [...status.discoveredModels];
+	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
+	if (knownModels.length > 0) {
+		return Array.from(
+			new Set([status.endpoint.defaultModel, ...knownModels].filter((value): value is string => Boolean(value))),
+		);
+	}
 	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
 	if (status.discoveredModels.length === 1) return [status.discoveredModels[0] as string];
 	return [];
@@ -99,7 +106,17 @@ export function buildModelItems(deps: {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 }): ModelItemsResult {
-	const list = deps.providers.list();
+	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim() ?? "";
+	const list = [...deps.providers.list()].sort((a, b) => {
+		const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
+		const bActive = b.endpoint.id === activeEndpoint ? 0 : 1;
+		return (
+			aActive - bActive ||
+			(a.available === b.available ? 0 : a.available ? -1 : 1) ||
+			(a.runtime?.displayName ?? a.endpoint.runtime).localeCompare(b.runtime?.displayName ?? b.endpoint.runtime) ||
+			a.endpoint.id.localeCompare(b.endpoint.id)
+		);
+	});
 	const scopeSet = new Set(deps.settings.scope ?? []);
 	const items: SelectItem[] = [];
 	const refs: ModelSelection[] = [];
@@ -108,11 +125,22 @@ export function buildModelItems(deps: {
 		const runtimeName = status.runtime?.displayName ?? endpoint.runtime;
 		const badges = capabilityBadges(capabilities);
 		const wireModels = modelsForEndpoint(status);
+		const authText = status.runtime
+			? (() => {
+					const auth = deps.providers.auth.statusForTarget(
+						status.endpoint,
+						status.runtime as NonNullable<typeof status.runtime>,
+					);
+					if (!auth.available) return "disconnected";
+					if (auth.source === "environment") return auth.detail ? `env:${auth.detail}` : "environment";
+					return auth.source.replace("stored-", "");
+				})()
+			: "unknown";
 		if (wireModels.length === 0) {
 			items.push({
 				value: endpoint.id,
-				label: `${healthGlyph(status)}  ${endpoint.id}  ${runtimeName}  —  ${badges}`,
-				description: status.reason,
+				label: `${healthGlyph(status)}  ${runtimeName}  —  ${badges}`,
+				description: `endpoint=${endpoint.id}  auth=${authText}  ${status.reason}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
 			continue;
@@ -122,8 +150,8 @@ export function buildModelItems(deps: {
 			const scopedMark = scopeHit ? "★" : " ";
 			items.push({
 				value: `${endpoint.id}/${wireModel}`,
-				label: `${healthGlyph(status)}${scopedMark} ${endpoint.id}  ${runtimeName}  ${wireModel}  ${badges}`,
-				description: `${contextWindowLabel(capabilities)}  ${status.reason}`,
+				label: `${healthGlyph(status)}${scopedMark} ${runtimeName}  ${wireModel}  ${badges}`,
+				description: `endpoint=${endpoint.id}  auth=${authText}  ${contextWindowLabel(capabilities)}  ${status.reason}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: wireModel });
 		}

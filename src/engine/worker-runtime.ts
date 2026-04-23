@@ -13,13 +13,14 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
-import type { EndpointDescriptor, RuntimeDescriptor } from "../domains/providers/index.js";
+import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import { registerFauxFromEnv } from "./ai.js";
+import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import { createWorkerToolRegistry, resolveAgentTools } from "./worker-tools.js";
@@ -32,6 +33,7 @@ export interface WorkerRunInput {
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	apiKey?: string;
+	thinkingLevel?: ThinkingLevel;
 	/** Tool ids the agent is allowed to use. Defaults to the mode matrix. */
 	allowedTools?: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
@@ -90,16 +92,6 @@ function getKnowledgeBase(): KnowledgeBase {
 	return kbSingleton;
 }
 
-function resolveApiKey(input: WorkerRunInput): string | undefined {
-	if (input.apiKey && input.apiKey.length > 0) return input.apiKey;
-	const envVar = input.endpoint.auth?.apiKeyEnvVar ?? input.runtime.credentialsEnvVar;
-	if (envVar) {
-		const fromEnv = process.env[envVar];
-		if (fromEnv && fromEnv.length > 0) return fromEnv;
-	}
-	return undefined;
-}
-
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -140,19 +132,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		);
 	}
 
-	const resolvedKey = resolveApiKey(input);
 	const options: AgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
 			model,
-			thinkingLevel: "off",
+			thinkingLevel: input.thinkingLevel ?? "off",
 			tools,
 			messages: [],
 		},
-		getApiKey: async (provider: string) => {
-			if (resolvedKey !== undefined) return resolvedKey;
-			return process.env[`${provider.toUpperCase()}_API_KEY`];
-		},
+		onPayload: async (payload, currentModel) =>
+			patchReasoningSummaryPayload(payload, currentModel as Model<never>, input.thinkingLevel ?? "off"),
+		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;
 
