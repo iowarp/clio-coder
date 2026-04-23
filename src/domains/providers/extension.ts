@@ -8,9 +8,10 @@ import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders } from "../../engine/apis/index.js";
 import type { ConfigContract } from "../config/contract.js";
 
+import { openAuthStorage, resolveAuthTarget } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
-import { credentialsPresent, openCredentialStore } from "./credentials.js";
+import { credentialsPresent } from "./credentials.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
@@ -54,20 +55,13 @@ function emptyHealth(): EndpointHealth {
 function availabilityFor(
 	desc: RuntimeDescriptor,
 	endpoint: EndpointDescriptor,
-	hasStoredCredential: (runtimeId: string) => boolean,
+	authStatusFor: (endpoint: EndpointDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
-	if (desc.auth === "api-key") {
-		const envVar = endpoint.auth?.apiKeyEnvVar ?? desc.credentialsEnvVar;
-		if (envVar) {
-			const fromEnv = process.env[envVar]?.trim();
-			if (fromEnv && fromEnv.length > 0) return { available: true, reason: `env:${envVar}` };
-		}
-		const ref = endpoint.auth?.apiKeyRef ?? desc.id;
-		if (hasStoredCredential(ref)) return { available: true, reason: `store:${ref}` };
-		return {
-			available: false,
-			reason: envVar ? `missing credential (${envVar} or store:${ref})` : `missing credential store:${ref}`,
-		};
+	if (desc.kind === "subprocess") {
+		return { available: true, reason: desc.auth };
+	}
+	if (desc.auth === "api-key" || desc.auth === "oauth") {
+		return authStatusFor(endpoint, desc);
 	}
 	return { available: true, reason: desc.auth };
 }
@@ -89,7 +83,7 @@ function capabilitiesFor(
 
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
-	const credStore = openCredentialStore();
+	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
 	const statuses = new Map<string, EndpointStatus>();
 
@@ -99,8 +93,30 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return readSettings();
 	}
 
-	function hasStoredCredential(runtimeId: string): boolean {
-		return credStore.get(runtimeId) !== null;
+	function authStatusFor(
+		endpoint: EndpointDescriptor,
+		runtime: RuntimeDescriptor,
+	): { available: boolean; reason: string } {
+		const target = resolveAuthTarget(endpoint, runtime);
+		const status = authStore.statusForTarget(target, { includeFallback: false });
+		if (status.available) {
+			switch (status.source) {
+				case "runtime-override":
+					return { available: true, reason: `override:${target.providerId}` };
+				case "stored-api-key":
+					return { available: true, reason: `store:api_key:${target.providerId}` };
+				case "stored-oauth":
+					return { available: true, reason: `store:oauth:${target.providerId}` };
+				case "environment":
+					return { available: true, reason: status.detail ? `env:${status.detail}` : `env:${target.providerId}` };
+				case "fallback":
+					return { available: true, reason: `fallback:${target.providerId}` };
+				default:
+					return { available: true, reason: target.providerId };
+			}
+		}
+		const envHint = target.explicitEnvVar ? `${target.explicitEnvVar} or ` : "";
+		return { available: false, reason: `missing auth (${envHint}store:${target.providerId})` };
 	}
 
 	function buildStatus(
@@ -120,7 +136,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				discoveredModels: previous?.discoveredModels ?? [],
 			};
 		}
-		const availability = availabilityFor(desc, endpoint, hasStoredCredential);
+		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
 		const discoveredModels = probe?.models ?? previous?.discoveredModels ?? [];
 		const healthy = probe !== null ? probe.ok : null;
@@ -234,15 +250,48 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return probeEndpointInternal(endpoint, true);
 		},
 		credentials: {
-			hasKey: hasStoredCredential,
-			get(runtimeId) {
-				return credStore.get(runtimeId)?.key ?? null;
+			hasKey(providerId) {
+				const stored = authStore.get(providerId);
+				return stored?.type === "api_key";
 			},
-			set(runtimeId, key) {
-				credStore.set(runtimeId, key);
+			get(providerId) {
+				const stored = authStore.get(providerId);
+				return stored?.type === "api_key" ? stored.key : null;
 			},
-			remove(runtimeId) {
-				credStore.remove(runtimeId);
+			set(providerId, key) {
+				authStore.setApiKey(providerId, key);
+			},
+			remove(providerId) {
+				authStore.remove(providerId);
+			},
+		},
+		auth: {
+			statusForTarget(endpoint, runtime) {
+				return authStore.statusForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
+			},
+			resolveForTarget(endpoint, runtime) {
+				return authStore.resolveForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
+			},
+			getStored(providerId) {
+				return authStore.get(providerId) ?? null;
+			},
+			listStored() {
+				return authStore.listStored();
+			},
+			setApiKey(providerId, key) {
+				authStore.setApiKey(providerId, key);
+			},
+			remove(providerId) {
+				authStore.remove(providerId);
+			},
+			login(providerId, callbacks) {
+				return authStore.login(providerId, callbacks);
+			},
+			logout(providerId) {
+				authStore.logout(providerId);
+			},
+			getOAuthProviders() {
+				return authStore.getOAuthProviders();
 			},
 		},
 		knowledgeBase: kb,

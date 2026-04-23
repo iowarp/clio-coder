@@ -1,3 +1,5 @@
+import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
+import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
@@ -56,15 +58,31 @@ export interface ProvidersContract {
 	probeEndpoint(id: string): Promise<EndpointStatus | null>;
 
 	/**
-	 * Credential store access. Keyed by runtime descriptor id so the endpoint
-	 * `auth.apiKeyRef` field resolves to the same slot the credentials domain
-	 * manages.
+	 * Shared auth access for both API keys and OAuth credentials. Provider ids
+	 * default to runtime ids, with endpoint-level overrides through
+	 * `auth.apiKeyRef` / `auth.oauthProfile`.
+	 */
+	auth: {
+		statusForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): AuthStatus;
+		resolveForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
+		getStored(providerId: string): AuthCredential | null;
+		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;
+		setApiKey(providerId: string, key: string): void;
+		remove(providerId: string): void;
+		login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void>;
+		logout(providerId: string): void;
+		getOAuthProviders(): ReadonlyArray<{ id: string; name: string }>;
+	};
+
+	/**
+	 * Legacy API-key-only shim kept for setup and older call sites while
+	 * everything migrates to `auth`.
 	 */
 	credentials: {
-		hasKey(runtimeId: string): boolean;
-		get(runtimeId: string): string | null;
-		set(runtimeId: string, key: string): void;
-		remove(runtimeId: string): void;
+		hasKey(providerId: string): boolean;
+		get(providerId: string): string | null;
+		set(providerId: string, key: string): void;
+		remove(providerId: string): void;
 	};
 
 	/**

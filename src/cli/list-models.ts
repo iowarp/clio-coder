@@ -3,7 +3,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureInstalled } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { ProvidersDomainModule, listKnownModelsForRuntime } from "../domains/providers/index.js";
 
 interface ModelRow {
 	endpointId: string;
@@ -17,6 +17,7 @@ export async function runListModelsCommand(args: ReadonlyArray<string>): Promise
 	const probe = args.includes("--probe");
 	const filterIdx = args.indexOf("--endpoint");
 	const filter = filterIdx >= 0 ? args[filterIdx + 1] : undefined;
+	const search = args.find((arg, index) => index !== filterIdx + 1 && !arg.startsWith("--"));
 
 	ensureInstalled();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
@@ -35,7 +36,7 @@ export async function runListModelsCommand(args: ReadonlyArray<string>): Promise
 	}
 	const entries = providers.list();
 	const filtered = filter ? entries.filter((e) => e.endpoint.id === filter) : entries;
-	const rows = collectRows(filtered);
+	const rows = collectRows(filtered).filter((row) => matchesSearch(row, search));
 
 	if (asJson) {
 		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
@@ -69,9 +70,13 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>): ModelRow[] {
 }
 
 function fallbackModels(status: EndpointStatus): string[] {
-	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
 	const wire = status.endpoint.wireModels;
 	if (wire && wire.length > 0) return [...wire];
+	if (status.runtime) {
+		const known = listKnownModelsForRuntime(status.runtime.id);
+		if (known.length > 0) return known;
+	}
+	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
 	return [];
 }
 
@@ -106,4 +111,14 @@ function renderRows(rows: ReadonlyArray<ModelRow>): void {
 		].join("");
 		process.stdout.write(`${line.trimEnd()}\n`);
 	}
+}
+
+function matchesSearch(row: ModelRow, search: string | undefined): boolean {
+	if (!search) return true;
+	const needle = search.toLowerCase();
+	return (
+		row.endpointId.toLowerCase().includes(needle) ||
+		row.runtimeId.toLowerCase().includes(needle) ||
+		row.modelId.toLowerCase().includes(needle)
+	);
 }

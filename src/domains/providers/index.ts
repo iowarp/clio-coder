@@ -10,6 +10,14 @@ export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 
 export { ProvidersManifest } from "./manifest.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
+export type {
+	ApiKeyCredential,
+	AuthCredential,
+	AuthResolution,
+	AuthStatus,
+	AuthTarget,
+	OAuthCredential,
+} from "./auth/index.js";
 export type { EndpointAuth, EndpointDescriptor, EndpointPricing } from "./types/endpoint-descriptor.js";
 export type {
 	ProbeContext,
@@ -32,5 +40,19 @@ export {
 	VALID_THINKING_LEVELS,
 	availableThinkingLevels,
 } from "./types/capability-flags.js";
+export { createMemoryAuthStorage, openAuthStorage, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
 export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
 export { mergeCapabilities } from "./capabilities.js";
+export {
+	buildProviderSupportEntry,
+	compareProviderSupportEntries,
+	configuredEndpointsForRuntime,
+	defaultModelForRuntime,
+	listKnownModelsForRuntime,
+	listProviderSupportEntries,
+	resolveProviderReference,
+	supportGroupLabel,
+	type ProviderSupportEntry,
+	type ProviderSupportGroup,
+	type ResolvedProviderReference,
+} from "./support.js";

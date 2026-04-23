@@ -1,11 +1,24 @@
+import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
-import { credentialsPresent, openCredentialStore } from "../domains/providers/credentials.js";
+import { openAuthStorage } from "../domains/providers/auth/index.js";
+import { credentialsPresent } from "../domains/providers/credentials.js";
+import {
+	type ProviderSupportEntry,
+	buildProviderSupportEntry,
+	configuredEndpointsForRuntime,
+	defaultModelForRuntime,
+	listKnownModelsForRuntime,
+	listProviderSupportEntries,
+	resolveRuntimeAuthTarget,
+	supportGroupLabel,
+} from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
+import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio setup
@@ -13,13 +26,13 @@ const HELP = `clio setup
 Usage:
   clio setup                       interactive wizard
   clio setup --list                list registered runtimes
-  clio setup <runtime>             interactive wizard pre-filled with runtime
-  clio setup <runtime> --id <endpointId> [flags]
+  clio setup --id <endpointId> [flags] --runtime <runtimeId>
   clio setup --remove <endpointId>
   clio setup --rename <oldId> <newId>
 
 Non-interactive flags:
   --id <endpointId>                endpoint id to register (required when non-interactive)
+  --runtime <runtimeId>            runtime to use when registering non-interactively
   --url <host>                     endpoint base url (http(s):// or ws://)
   --model <wireModelId>            default model id for this endpoint
   --api-key-env <VAR>              read api key from this env var at call time
@@ -64,6 +77,7 @@ interface ParsedArgs {
 	renameOld?: string;
 	renameNew?: string;
 	id?: string;
+	runtime?: string;
 	url?: string;
 	model?: string;
 	apiKeyEnv?: string;
@@ -109,6 +123,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--id":
 				out.id = need();
+				break;
+			case "--runtime":
+				out.runtime = need();
 				break;
 			case "--url":
 				out.url = need();
@@ -181,35 +198,42 @@ function defaultUrlFor(runtimeId: string): string {
 	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
-function groupByKind(runtimes: ReadonlyArray<RuntimeDescriptor>): {
-	cloud: RuntimeDescriptor[];
-	local: RuntimeDescriptor[];
-	subprocess: RuntimeDescriptor[];
-} {
-	const cloud: RuntimeDescriptor[] = [];
-	const local: RuntimeDescriptor[] = [];
-	const subprocess: RuntimeDescriptor[] = [];
-	for (const r of runtimes) {
-		if (r.kind === "subprocess") subprocess.push(r);
-		else if (r.auth === "api-key" && !r.probe) cloud.push(r);
-		else if (r.kind === "http" && r.probe) local.push(r);
-		else cloud.push(r);
-	}
-	const byId = (a: RuntimeDescriptor, b: RuntimeDescriptor): number => a.id.localeCompare(b.id);
-	cloud.sort(byId);
-	local.sort(byId);
-	subprocess.sort(byId);
-	return { cloud, local, subprocess };
-}
-
 function printRuntimeList(): void {
-	const { cloud, local, subprocess } = groupByKind(getRuntimeRegistry().list());
-	process.stdout.write("Cloud (api-key):\n");
-	for (const r of cloud) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
-	process.stdout.write("\nLocal HTTP:\n");
-	for (const r of local) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
-	process.stdout.write("\nSubprocess (CLI agents):\n");
-	for (const r of subprocess) process.stdout.write(`  ${r.id.padEnd(22)} ${r.displayName}\n`);
+	const settings = readSettings();
+	const auth = openAuthStorage();
+	let lastGroup: ProviderSupportEntry["group"] | null = null;
+	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list())) {
+		if (entry.group !== lastGroup) {
+			if (lastGroup !== null) process.stdout.write("\n");
+			lastGroup = entry.group;
+			process.stdout.write(`${supportGroupLabel(entry.group)}:\n`);
+		}
+		const runtime = getRuntimeRegistry().get(entry.runtimeId);
+		const endpointCount = configuredEndpointsForRuntime(settings, entry.runtimeId).length;
+		const status =
+			runtime && entry.connectable
+				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
+				: null;
+		const authLabel =
+			runtime?.auth === "oauth"
+				? status?.available
+					? "connected"
+					: "connect"
+				: runtime?.auth === "api-key"
+					? status?.available
+						? "credential"
+						: "needs-key"
+					: runtime?.kind === "subprocess"
+						? "cli"
+						: (runtime?.auth ?? "none");
+		const modelLabel =
+			entry.modelHints.length > 0
+				? entry.modelHints.slice(0, 2).join(", ")
+				: (defaultModelForRuntime(entry.runtimeId) ?? "-");
+		process.stdout.write(
+			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} endpoints=${String(endpointCount).padEnd(3)} models=${modelLabel}\n`,
+		);
+	}
 }
 
 function deriveEndpointId(runtimeId: string, existing: ReadonlyArray<EndpointDescriptor>): string {
@@ -287,7 +311,10 @@ function buildDescriptor(
 	parts: {
 		url?: string;
 		model?: string;
+		wireModels?: string[];
 		apiKeyEnv?: string;
+		apiKeyRef?: string;
+		oauthProfile?: string;
 		gateway?: boolean;
 		contextWindow?: number;
 		reasoning?: boolean;
@@ -295,10 +322,19 @@ function buildDescriptor(
 ): EndpointDescriptor {
 	const descriptor: EndpointDescriptor = { id, runtime: runtime.id };
 	if (parts.url) descriptor.url = parts.url;
+	const wireModels =
+		parts.wireModels?.filter((value, index, all) => value.trim().length > 0 && all.indexOf(value) === index) ?? [];
 	if (parts.model) descriptor.defaultModel = parts.model;
+	else {
+		const firstWireModel = wireModels[0];
+		if (firstWireModel) descriptor.defaultModel = firstWireModel;
+	}
 	const auth: NonNullable<EndpointDescriptor["auth"]> = {};
 	if (parts.apiKeyEnv) auth.apiKeyEnvVar = parts.apiKeyEnv;
+	if (parts.apiKeyRef) auth.apiKeyRef = parts.apiKeyRef;
+	if (parts.oauthProfile) auth.oauthProfile = parts.oauthProfile;
 	if (Object.keys(auth).length > 0) descriptor.auth = auth;
+	if (wireModels.length > 0) descriptor.wireModels = wireModels;
 	if (parts.gateway) descriptor.gateway = true;
 	const caps: NonNullable<EndpointDescriptor["capabilities"]> = {};
 	if (parts.contextWindow !== undefined) caps.contextWindow = parts.contextWindow;
@@ -307,44 +343,126 @@ function buildDescriptor(
 	return descriptor;
 }
 
+function describeAuthStatus(runtime: RuntimeDescriptor): string {
+	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
+	if (!status.available) return "not connected";
+	if (status.source === "environment") return `environment${status.detail ? ` (${status.detail})` : ""}`;
+	if (status.source === "stored-api-key") return "stored api key";
+	if (status.source === "stored-oauth") return "stored oauth";
+	return status.source;
+}
+
+async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime: RuntimeDescriptor): Promise<boolean> {
+	const auth = openAuthStorage();
+	const manualCodeInput = createDelayedManualCodeInput(
+		rl,
+		"Paste verification code if browser callback does not complete automatically: ",
+	);
+	try {
+		await auth.login(runtime.id, {
+			onAuth: ({ url, instructions }) => {
+				process.stdout.write(`\nOpen: ${url}\n`);
+				if (instructions) process.stdout.write(`${instructions}\n`);
+				process.stdout.write("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
+			},
+			onPrompt: async (prompt) => {
+				const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
+				return prompt.allowEmpty ? answer : answer.trim();
+			},
+			onManualCodeInput: manualCodeInput.onManualCodeInput,
+			onProgress: (message) => {
+				process.stderr.write(`${message}\n`);
+			},
+		});
+		printOk(`connected ${runtime.id}`);
+		return true;
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return false;
+	} finally {
+		manualCodeInput.cancel();
+	}
+}
+
+async function resolveSupportedWireModels(
+	runtime: RuntimeDescriptor,
+	endpoint: EndpointDescriptor,
+	existing?: EndpointDescriptor,
+): Promise<string[]> {
+	const known = listKnownModelsForRuntime(runtime.id);
+	if (known.length > 0) return known;
+	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, endpoint) : [];
+	if (discovered.length > 0) return discovered;
+	return existing?.wireModels ? [...existing.wireModels] : [];
+}
+
 async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): Promise<number> {
 	if (!args.id) {
 		printError("--id is required when passing flags non-interactively");
 		return 2;
 	}
 	const settings = readSettings();
+	const auth = openAuthStorage();
+	const support = buildProviderSupportEntry(runtime);
 	const existing = settings.endpoints.find((e) => e.id === args.id);
 	if (existing && existing.runtime !== runtime.id) {
 		printError(`endpoint ${args.id} already exists with runtime ${existing.runtime}`);
 		return 2;
 	}
 	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
-	if (!url && runtime.kind === "http" && runtime.auth !== "api-key") {
+	if (!url && support.supportsCustomUrl) {
 		url = defaultUrlFor(runtime.id);
 	}
-	const descriptor = buildDescriptor(runtime, args.id, {
+	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
+	const apiKeyEnv = args.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar;
+	const apiKeyRef =
+		runtime.auth === "api-key" && (args.apiKey || existing?.auth?.apiKeyRef || authStatus.source === "stored-api-key")
+			? runtime.id
+			: undefined;
+	const oauthProfile = runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.id) : undefined;
+	const seed = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
 		...(args.model !== undefined
 			? { model: args.model }
 			: existing?.defaultModel
 				? { model: existing.defaultModel }
-				: {}),
-		...(args.apiKeyEnv !== undefined
-			? { apiKeyEnv: args.apiKeyEnv }
-			: existing?.auth?.apiKeyEnvVar
-				? { apiKeyEnv: existing.auth.apiKeyEnvVar }
-				: {}),
+				: support.defaultModel
+					? { model: support.defaultModel }
+					: {}),
+		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: args.gateway || existing?.gateway === true,
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
-	if (args.apiKey) openCredentialStore().set(runtime.id, args.apiKey);
+	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
+	const descriptor = buildDescriptor(runtime, args.id, {
+		...(url !== undefined ? { url } : {}),
+		...((args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0])
+			? { model: args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0] }
+			: {}),
+		...(wireModels.length > 0 ? { wireModels } : {}),
+		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+		...(oauthProfile !== undefined ? { oauthProfile } : {}),
+		gateway: args.gateway || existing?.gateway === true,
+		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+	});
+	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
 	applyEndpoint(settings, descriptor);
 	if (args.setOrchestrator) setOrchestratorPointer(settings, descriptor);
 	if (args.setWorkerDefault) setWorkerDefaultPointer(settings, descriptor);
 	writeSettings(settings);
 	const probe = await runtimeProbe(runtime, descriptor);
 	printSummary(settings, descriptor, probe);
+	if (
+		runtime.auth === "oauth" &&
+		!auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }).available
+	) {
+		process.stdout.write(`note: connect ${runtime.id} with \`clio connect ${runtime.id}\` before using this endpoint\n`);
+	}
 	printOk(`endpoint ${args.id} saved`);
 	return 0;
 }
@@ -384,21 +502,29 @@ async function askYesNo(
 
 async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
 	const registry = getRuntimeRegistry();
-	const all = registry.list();
-	const { cloud, local, subprocess } = groupByKind(all);
-	const ordered: RuntimeDescriptor[] = [...cloud, ...local, ...subprocess];
-	process.stdout.write("\nRegistered runtimes:\n");
-	process.stdout.write("  Cloud (api-key):\n");
-	for (const r of cloud) process.stdout.write(`    ${r.id}\n`);
-	process.stdout.write("  Local HTTP:\n");
-	for (const r of local) process.stdout.write(`    ${r.id}\n`);
-	process.stdout.write("  Subprocess (CLI agents):\n");
-	for (const r of subprocess) process.stdout.write(`    ${r.id}\n`);
+	const entries = listProviderSupportEntries(registry.list());
+	process.stdout.write("\nSupported runtimes:\n");
+	let lastGroup: ProviderSupportEntry["group"] | null = null;
+	for (const [index, entry] of entries.entries()) {
+		if (entry.group !== lastGroup) {
+			lastGroup = entry.group;
+			process.stdout.write(`  ${supportGroupLabel(entry.group)}:\n`);
+		}
+		process.stdout.write(`    ${String(index + 1).padStart(2)}. ${entry.runtimeId.padEnd(22)} ${entry.summary}\n`);
+	}
 	for (;;) {
-		const answer = await ask(rl, "\nRuntime id");
+		const answer = await ask(rl, "\nSelection (number or runtime id)", entries[0]?.runtimeId ?? "");
 		if (answer === null) return null;
 		if (answer.length === 0) continue;
-		const match = ordered.find((r) => r.id === answer);
+		const numeric = Number(answer);
+		if (Number.isInteger(numeric) && numeric >= 1 && numeric <= entries.length) {
+			const picked = entries[numeric - 1];
+			if (picked) {
+				const runtime = registry.get(picked.runtimeId);
+				if (runtime) return runtime;
+			}
+		}
+		const match = registry.get(answer);
 		if (match) return match;
 		process.stderr.write(`unknown runtime id: ${answer}\n`);
 	}
@@ -414,8 +540,26 @@ async function runInteractive(
 		printError("setup cancelled");
 		return 0;
 	}
+	const auth = openAuthStorage();
 	const settings = readSettings();
-	const suggestedId = defaults.id ?? deriveEndpointId(runtime.id, settings.endpoints);
+	const support = buildProviderSupportEntry(runtime);
+	const existingForRuntime = configuredEndpointsForRuntime(settings, runtime.id);
+	const existing =
+		(defaults.id ? settings.endpoints.find((entry) => entry.id === defaults.id && entry.runtime === runtime.id) : null) ??
+		existingForRuntime[0] ??
+		null;
+	if (existingForRuntime.length > 0) {
+		process.stdout.write(`\nExisting endpoints for ${runtime.id}:\n`);
+		for (const endpoint of existingForRuntime) {
+			process.stdout.write(`  - ${endpoint.id}${endpoint.defaultModel ? ` (${endpoint.defaultModel})` : ""}\n`);
+		}
+	}
+	process.stdout.write(`\nSelected runtime: ${runtime.id} (${support.summary})\n`);
+	process.stdout.write(`Connection: ${describeAuthStatus(runtime)}\n`);
+	if (support.modelHints.length > 0) {
+		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
+	}
+	const suggestedId = defaults.id ?? existing?.id ?? deriveEndpointId(runtime.id, settings.endpoints);
 	const idInput = await ask(rl, "Endpoint id", suggestedId);
 	if (idInput === null || idInput.length === 0) {
 		printError("endpoint id is required");
@@ -423,74 +567,119 @@ async function runInteractive(
 	}
 	const endpointId = idInput;
 
-	let url: string | undefined;
-	if (runtime.kind === "http") {
-		if (runtime.auth === "api-key" && !runtime.probe) {
-			const urlInput = await ask(rl, "Base URL (optional; leave blank for runtime default)", defaults.url ?? "");
-			if (urlInput !== null && urlInput.length > 0) url = normalizeUrl(urlInput, runtime.id);
-		} else {
-			const urlInput = await ask(rl, "Endpoint URL", defaults.url ?? defaultUrlFor(runtime.id));
-			if (urlInput === null) return 0;
-			url = normalizeUrl(urlInput.length > 0 ? urlInput : defaultUrlFor(runtime.id), runtime.id);
-		}
+	let url: string | undefined = existing?.url;
+	if (support.supportsCustomUrl) {
+		const urlDefault = defaults.url ?? existing?.url ?? defaultUrlFor(runtime.id);
+		const urlInput = await ask(
+			rl,
+			support.group === "local-http" ? "Endpoint URL" : "Base URL override (blank for runtime default)",
+			urlDefault,
+		);
+		if (urlInput === null) return 0;
+		if (urlInput.length > 0) url = normalizeUrl(urlInput, runtime.id);
+	} else if (defaults.url) {
+		url = normalizeUrl(defaults.url, runtime.id);
 	}
 
 	let apiKeyEnv: string | undefined;
 	let apiKeyLiteral: string | undefined;
+	let apiKeyRef: string | undefined = existing?.auth?.apiKeyRef;
+	let oauthProfile: string | undefined =
+		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.id) : undefined;
+	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (runtime.auth === "api-key") {
-		process.stdout.write("\nAPI key source:\n  1. env var\n  2. stored literal (credentials.yaml)\n");
-		const choice = await ask(rl, "Selection", "1");
-		if (choice === "2") {
+		const defaultSource =
+			authStatus.source === "stored-api-key"
+				? "keep"
+				: authStatus.source === "environment" || existing?.auth?.apiKeyEnvVar
+					? "env"
+					: "stored";
+		const choice = await ask(rl, "Credential source [env|stored|keep|skip]", defaultSource);
+		if (choice === null) return 0;
+		const normalized = choice.trim().toLowerCase();
+		if (normalized === "stored") {
 			const literal = await ask(rl, "API key literal (stored in credentials.yaml, mode 0600)");
-			if (literal !== null && literal.length > 0) apiKeyLiteral = literal;
-		} else {
-			const envDefault = defaults.apiKeyEnv ?? runtime.credentialsEnvVar ?? "";
+			if (literal !== null && literal.length > 0) {
+				apiKeyLiteral = literal;
+				apiKeyRef = runtime.id;
+			}
+		} else if (normalized === "env") {
+			const envDefault = defaults.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar ?? "";
 			const envAnswer = await ask(rl, "Env var name", envDefault);
-			if (envAnswer !== null && envAnswer.length > 0) apiKeyEnv = envAnswer;
+			if (envAnswer === null) return 0;
+			if (envAnswer.length > 0) apiKeyEnv = envAnswer;
+			apiKeyRef = undefined;
+		} else if (normalized === "keep") {
+			apiKeyEnv =
+				existing?.auth?.apiKeyEnvVar ?? (authStatus.source === "environment" ? runtime.credentialsEnvVar : undefined);
+			apiKeyRef = existing?.auth?.apiKeyRef ?? (authStatus.source === "stored-api-key" ? runtime.id : undefined);
+		} else {
+			apiKeyEnv = undefined;
+			apiKeyRef = undefined;
 		}
+	}
+	if (runtime.auth === "oauth") {
+		const connectNow = authStatus.available
+			? await askYesNo(rl, `Reconnect ${runtime.displayName}?`, false)
+			: await askYesNo(rl, `Connect ${runtime.displayName} now?`, true);
+		if (connectNow) {
+			const connected = await loginOAuthRuntime(rl, runtime);
+			if (!connected) return 1;
+		}
+		oauthProfile = runtime.id;
 	}
 
 	let model: string | undefined = defaults.model;
+	let wireModels: string[] = existing?.wireModels ? [...existing.wireModels] : [];
 	const tentative = buildDescriptor(runtime, endpointId, {
 		...(url !== undefined ? { url } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: defaults.gateway,
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
 
-	if (!model && runtime.kind === "http") {
-		const discovered = await runtimeProbeModels(runtime, tentative);
-		if (discovered.length > 0) {
-			process.stdout.write("\nDiscovered models:\n");
-			for (const [i, id] of discovered.entries()) process.stdout.write(`  ${i + 1}. ${id}\n`);
-			const pick = await ask(rl, "Selection (blank to skip)", "1");
-			if (pick && pick.length > 0) {
-				const n = Number(pick);
-				if (Number.isInteger(n) && n >= 1 && n <= discovered.length) model = discovered[n - 1];
-			}
+	if (runtime.kind === "http") {
+		wireModels = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
+	}
+	model = model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0];
+	if (wireModels.length > 0) {
+		process.stdout.write("\nSelectable models:\n");
+		for (const [index, wireModel] of wireModels.entries()) {
+			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
-		if (!model) {
-			const manual = await ask(rl, "Default model id (blank to leave empty)", "");
-			if (manual && manual.length > 0) model = manual;
+		const pick = await ask(rl, "Default model (number or id)", model ?? "");
+		if (pick === null) return 0;
+		if (pick.length > 0) {
+			const numeric = Number(pick);
+			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= wireModels.length) {
+				model = wireModels[numeric - 1];
+			} else {
+				model = pick;
+			}
 		}
 	} else if (!model) {
 		const manual = await ask(rl, "Default model id (blank to leave empty)", "");
 		if (manual && manual.length > 0) model = manual;
 	}
 
-	const gatewayAnswer = defaults.gateway ? true : await askYesNo(rl, "Mark as gateway?", false);
+	const gatewayDefault = defaults.gateway || existing?.gateway === true;
+	const gatewayAnswer = gatewayDefault ? true : await askYesNo(rl, "Mark as gateway?", false);
 
 	const descriptor = buildDescriptor(runtime, endpointId, {
 		...(url !== undefined ? { url } : {}),
 		...(model !== undefined ? { model } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+		...(oauthProfile !== undefined ? { oauthProfile } : {}),
+		...(wireModels.length > 0 ? { wireModels } : {}),
 		gateway: gatewayAnswer,
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
-
-	if (apiKeyLiteral) openCredentialStore().set(runtime.id, apiKeyLiteral);
+	if (apiKeyLiteral) auth.setApiKey(runtime.id, apiKeyLiteral);
 
 	const probe = await runtimeProbe(runtime, descriptor);
 	if (probe) {
@@ -600,7 +789,14 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 	if (args.remove) return runRemove(args.remove);
 	if (args.renameOld && args.renameNew) return runRename(args.renameOld, args.renameNew);
 
-	const runtimeId = args.positional[0];
+	if (args.positional.length > 0) {
+		printError(
+			"`clio setup` no longer accepts a positional runtime. Use `clio connect <provider>` and then `clio setup`, or `clio setup --runtime <runtimeId> ...`.",
+		);
+		return 2;
+	}
+
+	const runtimeId = args.runtime;
 	let runtime: RuntimeDescriptor | null = null;
 	if (runtimeId) {
 		runtime = getRuntimeRegistry().get(runtimeId);
@@ -610,7 +806,6 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 			return 2;
 		}
 	}
-
 	const nonInteractive =
 		runtime !== null &&
 		(args.id !== undefined ||
@@ -626,7 +821,7 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 
 	if (nonInteractive && runtime) return runNonInteractive(runtime, args);
 
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	const rl = createInterface({ input, output });
 	try {
 		return await runInteractive(rl, runtime, args);
 	} catch (err) {
