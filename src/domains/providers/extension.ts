@@ -320,6 +320,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			getOAuthProviders() {
 				return authStore.getOAuthProviders();
 			},
+			setRuntimeOverrideForTarget(endpoint, runtime, key) {
+				const target = resolveAuthTarget(endpoint, runtime);
+				authStore.setRuntimeOverride(target.providerId, key);
+			},
+			clearRuntimeOverrideForTarget(endpoint, runtime) {
+				const target = resolveAuthTarget(endpoint, runtime);
+				authStore.clearRuntimeOverride(target.providerId);
+			},
 		},
 		knowledgeBase: kb,
 	};

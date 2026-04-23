@@ -26,14 +26,14 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 | 14 | Extensions System | Not started | **0%** — `src/domains/extensions/` does not exist |
 | 15 | Package Manager | Not started | **0%** — `src/domains/packages/` does not exist |
 | 16 | RPC + Print + JSON modes | Not started | **0%** — no `src/cli/modes/`, no SDK barrel |
-| 17 | Auth & OAuth | Mostly done | **~85%** — auth split landed (storage/backend-file/backend-memory/api-key/oauth/index), `auth-dialog` and `auth-selector` overlays wired, `/login`+`/logout`+`/connect`+`/disconnect` slash commands live, `clio auth`/`login`/`logout` subcommands shipped; only the top-level `--api-key <key>` startup flag remains |
+| 17 | Auth & OAuth | Done | **100%** — auth split landed (storage/backend-file/backend-memory/api-key/oauth/index), `auth-dialog` and `auth-selector` overlays wired, `/login`+`/logout`+`/connect`+`/disconnect` slash commands live, `clio auth`/`login`/`logout` subcommands shipped, top-level `clio --api-key <key>` startup flag plumbed through orchestrator + `clio run` |
 | 18 | Keybindings (user-configurable) | Not started | **~10%** — 9 keybindings hardcoded in `src/interactive/index.ts`; no manager, no schema, no user overrides |
 | 19 | Rich Components | Not started | **~5%** — only `renderers/compaction-summary.ts` exists; no diff, no bash-execution, no tool-execution renderer |
 | 20 | Input Polish | Not started | **0%** — editor is basic; no `!`/`@` syntax, no paste-image, no `$EDITOR` round-trip |
 | 21 | Export / Import / Share | Not started | **0%** — no export-html renderer, no share, no import |
 | 22 | Retry, Diagnostics, Telemetry, Final Polish | Not started | **~5%** — basic in-memory telemetry counters only |
 
-**Overall port completion (all 12 phases, file-count weighted): roughly 22%.** The session/compaction subsystem, the TUI selector suite, and the auth split now carry the bulk of the signal; every other port phase remains unstarted or skeletal.
+**Overall port completion (all 12 phases, file-count weighted): roughly 23%.** The session/compaction subsystem, the TUI selector suite, and the now-complete auth phase carry the bulk of the signal; every other port phase remains unstarted or skeletal.
 
 ## What pi-mono 0.69.0 unlocked
 
@@ -213,7 +213,7 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | OAuth selector overlay | `src/interactive/overlays/auth-selector.ts` | ✅ | 51 LOC; clio chose `auth-selector.ts` over the plan's `oauth-selector.ts` name |
 | `/login`, `/logout` slash commands | `src/interactive/slash-commands.ts` | ✅ | `/login` and `/connect` route to the connect flow; `/logout` and `/disconnect` route to the disconnect flow; both accept an optional provider/endpoint argument |
 | `clio auth` / `clio login` / `clio logout` subcommands | `src/cli/{auth,login,logout,oauth-manual-input}.ts` | ➕ | Beyond-plan: 57 + 193 + 111 + 73 LOC giving a non-interactive auth surface (`clio auth list/status`, `clio login [target]`, `clio logout [target]`) |
-| `--api-key <key>` startup flag | `src/cli/args.ts` | 🟡 | `clio setup --api-key <literal>` stores api keys in credentials.yaml today; the top-level startup flag the plan calls for still requires the missing `src/cli/args.ts` parser |
+| `--api-key <key>` startup flag | `src/cli/index.ts` + `src/entry/orchestrator.ts` + `src/cli/run.ts` | ✅ | Pre-parsed via `extractApiKeyFlag()` in `src/cli/shared.ts`, threaded into `bootOrchestrator(options)` and `runClioRun(args, options)`. After providers domain loads, `providers.auth.setRuntimeOverrideForTarget()` installs an in-process key for the active endpoint's resolved providerId. Persists nothing; `AuthStorage.runtimeOverrides` short-circuits `resolveApiKey()` so chat-loop and dispatch both honor the override. `clio --help` documents the flag; orphan use without an active endpoint warns and exits 0. |
 
 ### Phase 18 — Keybindings (user-configurable) — ~10%
 

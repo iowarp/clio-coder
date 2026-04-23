@@ -1,6 +1,6 @@
-import { bootOrchestrator } from "../entry/orchestrator.js";
+import { type BootOptions, bootOrchestrator } from "../entry/orchestrator.js";
 
-export async function runClioCommand(): Promise<number> {
+export async function runClioCommand(options: BootOptions = {}): Promise<number> {
 	// Bare `clio` (no subcommand) boots interactive mode implicitly, but only
 	// when stdin is a real TTY. Piped or /dev/null stdin (used by verify.ts,
 	// CI runners, and non-interactive scripts) should fall through to the
@@ -9,6 +9,6 @@ export async function runClioCommand(): Promise<number> {
 	if (process.env.CLIO_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_INTERACTIVE = "1";
 	}
-	const result = await bootOrchestrator();
+	const result = await bootOrchestrator(options);
 	return result.exitCode;
 }

@@ -1,3 +1,4 @@
+import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -8,6 +9,7 @@ import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ensureInstalled, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
+import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
@@ -69,7 +71,7 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 	return out;
 }
 
-export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
+export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?: string } = {}): Promise<number> {
 	const parsed = parseArgs(args);
 	if (parsed === null) {
 		process.stderr.write(USAGE);
@@ -98,6 +100,25 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		process.stderr.write("dispatch domain unavailable\n");
 		await loaded.stop();
 		return 1;
+	}
+
+	if (options.apiKey) {
+		const providers = loaded.getContract<ProvidersContract>("providers");
+		if (!providers) {
+			process.stderr.write("clio run: --api-key supplied but providers domain unavailable\n");
+			await loaded.stop();
+			return 1;
+		}
+		const settings = readSettings();
+		const targetEndpointId = parsed.endpoint ?? settings.workers?.default?.endpoint ?? settings.orchestrator?.endpoint;
+		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
+		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
+		if (!endpoint || !runtime) {
+			process.stderr.write("clio run: --api-key supplied but no endpoint resolved; pass --endpoint <id>\n");
+			await loaded.stop();
+			return 2;
+		}
+		providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
 	}
 
 	const dispatchReq: DispatchRequest = {

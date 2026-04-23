@@ -107,6 +107,8 @@ describe("dispatch auth resolution", () => {
 				login: async () => {},
 				logout: () => {},
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: {
 				hasKey: () => false,
