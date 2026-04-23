@@ -1,5 +1,5 @@
 import { ok, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -43,6 +43,25 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 		);
 		const kb = new FileKnowledgeBase(scratch);
 		strictEqual(kb.entries().length, 2);
+	});
+
+	it("walks nested cloud-models and local-models directories", () => {
+		mkdirSync(join(scratch, "cloud-models"));
+		mkdirSync(join(scratch, "local-models"));
+		writeFileSync(
+			join(scratch, "cloud-models", "claude.yaml"),
+			["- family: claude", "  matchPatterns: [claude]", "  capabilities:", "    chat: true", ""].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(scratch, "local-models", "qwen.yaml"),
+			["- family: qwen", "  matchPatterns: [qwen]", "  capabilities:", "    reasoning: true", ""].join("\n"),
+			"utf8",
+		);
+		const kb = new FileKnowledgeBase(scratch);
+		strictEqual(kb.entries().length, 2);
+		strictEqual(kb.lookup("claude-opus")?.entry.family, "claude");
+		strictEqual(kb.lookup("qwen3-72b")?.entry.family, "qwen");
 	});
 
 	it("raises a helpful error when a YAML file is not a list of entries", () => {
