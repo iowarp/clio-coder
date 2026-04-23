@@ -215,9 +215,38 @@ function resolveRuntimeTools(deps: CreateChatLoopDeps): ReturnType<typeof resolv
 	});
 }
 
-function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number | null {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as
+interface RunUsageSummary {
+	tokens: number;
+	costUsd: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	hadUsage: boolean;
+}
+
+/**
+ * Sum per-call usage across every assistant message in a single agent run.
+ * pi-ai emits one `AssistantMessage` per API call, each carrying its own
+ * `Usage` object; a multi-turn tool-calling loop produces several assistant
+ * messages. Earlier versions of this function walked the list from the tail
+ * and returned the first match, which silently dropped every intermediate
+ * API call from the cost tally. Summing instead matches what the provider
+ * actually billed and keeps the `/cost` overlay and footer counters
+ * aligned across tool-heavy runs.
+ */
+export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
+	const summary: RunUsageSummary = {
+		tokens: 0,
+		costUsd: 0,
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		hadUsage: false,
+	};
+	for (const raw of messages) {
+		const message = raw as
 			| AgentMessage
 			| {
 					role?: unknown;
@@ -234,32 +263,24 @@ function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number
 		if (message.role !== "assistant") continue;
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
-		if (typeof usage.totalTokens === "number") return usage.totalTokens;
+		summary.hadUsage = true;
 		const input = typeof usage.input === "number" ? usage.input : 0;
 		const output = typeof usage.output === "number" ? usage.output : 0;
 		const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 		const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-		return input + output + cacheRead + cacheWrite;
+		summary.input += input;
+		summary.output += output;
+		summary.cacheRead += cacheRead;
+		summary.cacheWrite += cacheWrite;
+		if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) {
+			summary.tokens += usage.totalTokens;
+		} else {
+			summary.tokens += input + output + cacheRead + cacheWrite;
+		}
+		const total = usage.cost?.total;
+		if (typeof total === "number") summary.costUsd += total;
 	}
-	return null;
-}
-
-function readAssistantUsageCostUsd(messages: ReadonlyArray<AgentMessage>): number | undefined {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as
-			| AgentMessage
-			| {
-					role?: unknown;
-					usage?: {
-						cost?: { total?: unknown };
-					};
-			  };
-		if (!message || typeof message !== "object") continue;
-		if (message.role !== "assistant") continue;
-		const total = message.usage?.cost?.total;
-		return typeof total === "number" ? total : undefined;
-	}
-	return undefined;
+	return summary;
 }
 
 /**
@@ -425,14 +446,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				appendAssistantTurn(event.message);
 			}
 			if (event.type === "agent_end" && deps.observability) {
-				const tokens = readAssistantUsageTokens(event.messages);
-				if (tokens !== null) {
-					deps.observability.recordTokens(
-						target.endpoint.id,
-						target.wireModelId,
-						tokens,
-						readAssistantUsageCostUsd(event.messages),
-					);
+				const summary = sumRunUsage(event.messages);
+				if (summary.hadUsage) {
+					deps.observability.recordTokens(target.endpoint.id, target.wireModelId, summary.tokens, summary.costUsd, {
+						input: summary.input,
+						output: summary.output,
+						cacheRead: summary.cacheRead,
+						cacheWrite: summary.cacheWrite,
+						totalTokens: summary.tokens,
+					});
 				}
 			}
 		});
