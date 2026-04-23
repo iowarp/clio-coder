@@ -180,6 +180,117 @@ describe("chat-panel active entry update", () => {
 		panel.reset();
 		strictEqual(strip(panel.render(80).join("\n")).trim(), "");
 	});
+
+	// Row 43 of the TUI rubric flagged that fenced code blocks, bulleted
+	// lists, and inline backticks arrived as raw markdown in the chat pane.
+	// After slice H1, finalized assistant text (the common post-streaming
+	// state on `message_end`) is piped through pi-tui's Markdown renderer.
+	// Tests assert structural markers instead of exact ANSI so they stay
+	// resilient to theme tweaks and terminal-width wrapping.
+	it("renders fenced code blocks with indented body on finalized assistant text", () => {
+		const panel = createChatPanel();
+		panel.appendUser("show me code");
+		const source = "Here's the code:\n\n```js\nfoo();\nbar();\n```\n\nDone.";
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: source, partialText: source });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: source }] } as never,
+		});
+		const lines = panel.render(80).map(strip);
+		const joined = lines.join("\n");
+		ok(joined.includes("clio: Here's the code:"), `missing pre-fence narration: ${joined}`);
+		ok(
+			lines.some((line) => line.trimEnd() === "```js"),
+			`fence open missing or malformed: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			lines.some((line) => line.startsWith("  foo();")),
+			`code body must be indented with 2 spaces: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			lines.some((line) => line.startsWith("  bar();")),
+			`second code line must be indented: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			lines.some((line) => line.trimEnd() === "```"),
+			`fence close missing: ${JSON.stringify(lines)}`,
+		);
+		ok(joined.includes("Done."), `trailing narration missing: ${joined}`);
+	});
+
+	it("renders bulleted lists with bullet glyphs, not the raw `*` source", () => {
+		// Models frequently emit `*` for bullets; pi-tui normalizes both `-`
+		// and `*` to `- ` in the rendered output. The visible transcript must
+		// therefore NOT contain the literal `* alpha` source line.
+		const panel = createChatPanel();
+		panel.appendUser("list items");
+		const source = "Items:\n\n* alpha\n* beta\n* gamma";
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: source, partialText: source });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: source }] } as never,
+		});
+		const lines = panel.render(80).map(strip);
+		const joined = lines.join("\n");
+		ok(joined.includes("clio: Items:"), `missing list preamble: ${joined}`);
+		ok(
+			lines.some((line) => line.startsWith("- alpha")),
+			`alpha bullet missing or un-normalized: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			lines.some((line) => line.startsWith("- beta")),
+			`beta bullet missing: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			lines.some((line) => line.startsWith("- gamma")),
+			`gamma bullet missing: ${JSON.stringify(lines)}`,
+		);
+		ok(!joined.includes("* alpha"), `raw asterisk bullet leaked into rendered output: ${joined}`);
+	});
+
+	it("renders inline code without literal backticks", () => {
+		const panel = createChatPanel();
+		panel.appendUser("talk about foo");
+		const source = "use `foo` and `bar` here";
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: source, partialText: source });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: source }] } as never,
+		});
+		const joined = strip(panel.render(80).join("\n"));
+		ok(joined.includes("use foo and bar here"), `inline code must render without backticks: ${joined}`);
+		ok(!joined.includes("`foo`"), `literal inline-code delimiters leaked: ${joined}`);
+		ok(!joined.includes("`bar`"), `literal inline-code delimiters leaked: ${joined}`);
+	});
+
+	it("leaves streaming text (pre-message_end) as plain lines to avoid partial-markdown garbage", () => {
+		// Streaming deltas arrive char-by-char; half-typed fences and bullets
+		// would render as broken markdown if we piped deltas through the
+		// Markdown renderer. Until `message_end` canonicalizes the segment,
+		// text is rendered literally so users see exactly what the model is
+		// emitting. The visible literal markers below confirm the plain path.
+		const panel = createChatPanel();
+		panel.appendUser("stream me");
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "```j", partialText: "```j" });
+		const joined = strip(panel.render(80).join("\n"));
+		ok(joined.includes("```j"), `streaming text must surface the raw prefix: ${joined}`);
+	});
 });
 
 describe("createCoalescingChatRenderer", () => {
