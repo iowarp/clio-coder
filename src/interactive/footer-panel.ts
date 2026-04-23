@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
+import type { UsageBreakdown } from "../domains/observability/index.js";
 import {
 	availableThinkingLevels,
 	type CapabilityFlags,
@@ -13,6 +14,8 @@ const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";
 const SEP = " \u00b7 ";
 const GLYPH = "\u25c6";
+const ARROW_UP = "\u2191";
+const ARROW_DOWN = "\u2193";
 
 export interface FooterDeps {
 	modes: ModesContract;
@@ -20,6 +23,49 @@ export interface FooterDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getHarnessState?: () => HarnessSnapshot;
 	getStreaming?: () => boolean;
+	/**
+	 * Running session-level token totals. Drives the input/output footer
+	 * segment. Invoked on every refresh so late-arriving `message_end` usage
+	 * is picked up without state plumbing inside the footer. Omitted in
+	 * tests and degraded boots where observability is unavailable; the
+	 * footer then hides the token segment entirely.
+	 */
+	getSessionTokens?: () => UsageBreakdown;
+}
+
+/**
+ * Render a token count with a single-letter magnitude suffix so the footer
+ * stays short on long-running sessions. Values under 1,000 render as the
+ * raw integer; 1,000-999,999 render with a `k` suffix and one decimal when
+ * that digit is non-zero; 1,000,000+ uses `M`.
+ */
+export function formatFooterTokens(n: number): string {
+	if (!Number.isFinite(n) || n <= 0) return "0";
+	const value = Math.round(n);
+	if (value < 1000) return value.toString();
+	if (value < 1_000_000) {
+		const scaled = value / 1000;
+		const fixed = scaled.toFixed(1);
+		return fixed.endsWith(".0") ? `${fixed.slice(0, -2)}k` : `${fixed}k`;
+	}
+	const scaled = value / 1_000_000;
+	const fixed = scaled.toFixed(1);
+	return fixed.endsWith(".0") ? `${fixed.slice(0, -2)}M` : `${fixed}M`;
+}
+
+/**
+ * Build the token-counter footer segment. Returns `null` when no usage has
+ * landed yet so the footer stays uncluttered at session start. Cache-read
+ * tokens are omitted here to keep the line scannable; the `/cost` overlay
+ * exposes the full breakdown.
+ */
+export function tokensSegment(usage: UsageBreakdown | null | undefined): string | null {
+	if (!usage) return null;
+	const input = Math.max(0, usage.input ?? 0);
+	const output = Math.max(0, usage.output ?? 0);
+	const total = Math.max(0, usage.totalTokens ?? input + output);
+	if (input + output + total === 0) return null;
+	return `${ARROW_UP}${formatFooterTokens(input)} ${ARROW_DOWN}${formatFooterTokens(output)}`;
 }
 
 export interface FooterPanel {
@@ -136,7 +182,14 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 			streamingFrame = 0;
 		}
 
-		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${streamingPart}`;
+		// Token counters (input/output). Rendered right of the thinking-level
+		// segment and left of the streaming indicator so the running totals
+		// stay visible while a response is in flight. The segment disappears
+		// entirely when no usage has landed yet (first boot / fresh session).
+		const tokens = deps.getSessionTokens ? tokensSegment(deps.getSessionTokens()) : null;
+		const tokensPart = tokens ? `${SEP}${tokens}` : "";
+
+		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
 		if (deps.getHarnessState) {
 			const indicator = formatHarnessIndicator(deps.getHarnessState());
 			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;

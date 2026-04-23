@@ -284,6 +284,7 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | Structured diagnostics | `src/core/diagnostics.ts` | ❌ | Today uses `console.error` |
 | Install-telemetry ping | `src/domains/lifecycle/telemetry.ts` | ❌ | |
 | In-memory counters/histograms | `src/domains/observability/telemetry.ts` | 🟡 | 46 LOC; counters + histograms + snapshot/reset; not the install-ping the plan describes |
+| Live footer token counters + accurate `/cost` math | `src/interactive/footer-panel.ts`, `src/interactive/cost-overlay.ts`, `src/domains/observability/cost.ts` | ✅ | Slice H3: footer renders `↑input ↓output`; `sumRunUsage` in `chat-loop.ts` sums every assistant message's `Usage` so multi-turn tool runs no longer undercount; `CostEntry` carries input/output/cache breakdown; `ObservabilityContract.sessionTokens()` surfaces aggregated totals |
 | Tools-manager (fd/rg under agentDir/bin) | `src/domains/lifecycle/tools-manager.ts` | ❌ | |
 | `clio install`/`upgrade`/`doctor` diagnostic panels | `src/cli/{install,upgrade,doctor}.ts` | 🟡 | All three subcommands exist but panels are thin |
 | `CLIO_STARTUP_BENCHMARK` env | `src/entry/orchestrator.ts` | ❌ | |

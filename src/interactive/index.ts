@@ -631,6 +631,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
 		getStreaming: () => deps.chat.isStreaming(),
+		getSessionTokens: () => deps.observability.sessionTokens(),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -668,6 +669,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const unsubscribeProgress = deps.chat.onEvent((event) => {
 		if (event.type === "agent_start") agentProgress.start();
 		else if (event.type === "agent_end") agentProgress.stop();
+	});
+	// Repaint the footer whenever an assistant message completes so the
+	// running `in:/out:` token counters reflect the latest usage. The
+	// existing 120ms ticker only refreshes while streaming, which means the
+	// final frame after a turn ends would otherwise be stale.
+	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
+		if (event.type !== "message_end" && event.type !== "agent_end") return;
+		footer.refresh();
+		tui.requestRender();
 	});
 
 	const slashCtx: SlashCommandContext = {
@@ -1372,6 +1382,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
 		unsubscribeProgress();
+		unsubscribeFooterTokens();
 		unsubscribeSuperRequired();
 		agentProgress.stop();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
