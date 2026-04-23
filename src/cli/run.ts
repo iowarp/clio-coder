@@ -5,7 +5,7 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureInstalled, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";

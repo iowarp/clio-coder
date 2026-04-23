@@ -14,7 +14,6 @@ import {
 	type LLMTool,
 	LMStudioClient,
 } from "@lmstudio/sdk";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import type {
 	ApiProvider,
 	AssistantMessage,
@@ -29,6 +28,7 @@ import type {
 	Tool,
 	ToolCall,
 } from "@mariozechner/pi-ai";
+import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 
 function normalizeBaseUrl(url: string): string {
 	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;

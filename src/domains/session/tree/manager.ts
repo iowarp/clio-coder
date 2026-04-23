@@ -1,7 +1,7 @@
 import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type SessionTreeNode, atomicWrite, openSession, sessionPaths } from "../../../engine/session.js";
-import { type SessionEntry, type SessionInfoEntry, isSessionEntry } from "../entries.js";
+import { atomicWrite, openSession, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import { isSessionEntry, type SessionEntry, type SessionInfoEntry } from "../entries.js";
 
 /**
  * Domain-level tree-file helpers. Operates directly on the on-disk artifacts

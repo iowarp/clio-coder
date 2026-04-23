@@ -1,12 +1,28 @@
-# pi-mono 0.68.1 engine-boundary audit
+# pi-mono 0.69.0 engine-boundary audit
 
 Status: frozen for Clio v0.1. Update this file only on a deliberate pi-mono version bump.
 
-Scope: every symbol the Clio engine layer (`src/engine/**`) may re-export. Names and signatures are copied verbatim from pi-mono 0.68.1 sources. Any Clio consumer that needs a symbol not listed here must bump pi-mono AND extend this document in the same commit.
+Scope: every symbol the Clio engine layer (`src/engine/**`) may re-export. Names and signatures are copied verbatim from pi-mono 0.69.0 sources. Any Clio consumer that needs a symbol not listed here must bump pi-mono AND extend this document in the same commit.
 
-## Delta since 0.67.4
+## Delta since 0.68.1
 
-Everything below is additive; no exports were removed or renamed between 0.67.4 and 0.68.1 on the surface Clio consumes.
+One breaking dependency change; everything else is additive. No pi-mono exports Clio consumes were removed or renamed at the package boundary.
+
+- **typebox migration (BREAKING for Clio code that touches schemas).** `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core` now depend on `typebox@^1.1.24` instead of `@sinclair/typebox@^0.34`. The pi-ai index still re-exports `Type` (value), `Static`, `TSchema`. Migration applied:
+  - `package.json` and every `src/`/`tests/` import site now reads `"typebox"` instead of `"@sinclair/typebox"`. Subpath import: `@sinclair/typebox/value` → `typebox/value`.
+  - `Value.Errors(schema, value)` returns `TLocalizedValidationError[]` (a `TValidationError` intersected with `{ message: string }`). The error path field renamed: old `path` (JSON pointer) is now `instancePath`. `src/domains/config/extension.ts` updated to read `.instancePath`.
+  - Tool-argument validation now runs on TypeBox's built-in validator instead of AJV, so eval-restricted runtimes (Cloudflare Workers, etc.) no longer silently skip validation. No behavior change in Clio's worker path; coercion edge cases for tools that round-trip schemas through plain JSON should be retested if they surface.
+- **pi-agent-core**
+  - `AgentToolResult<T>` gains optional `terminate?: boolean`. When every finalized tool result in a batch sets `terminate: true`, the loop skips the automatic follow-up LLM call and ends the turn. Purely additive; existing literals are unaffected. `AfterToolCallResult.terminate?: boolean` lets `afterToolCall` hooks override the per-call hint.
+- **pi-ai**
+  - `google-gemini-cli` built-in model discovery now includes `gemini-3.1-flash-lite-preview`.
+  - `transformMessages()` synthesizes missing trailing tool-result messages for transcripts ending in unresolved assistant tool calls during direct low-level history replay.
+- **pi-tui**
+  - `Terminal` interface gains `setProgress(active: boolean): void` (OSC 9;4 indeterminate progress indicator). Implemented by `ProcessTerminal`. If Clio ever re-implements `Terminal`, the new method is required.
+  - `AutocompleteProvider` gains optional `shouldTriggerFileCompletion?(...)`; `#` is now a natural autocomplete trigger alongside `@` for stacked extension wrappers.
+  - `@` autocomplete fuzzy search now follows symlinked directories.
+
+## Delta 0.67.4 → 0.68.1 (kept for reference)
 
 - **pi-agent-core**
   - New optional field `AgentOptions.onResponse?` plus matching `Agent.onResponse?` instance field forwarded to the underlying stream options so callers can inspect provider HTTP status and headers after each response.
@@ -26,7 +42,7 @@ Everything below is additive; no exports were removed or renamed between 0.67.4 
   - `SlashCommand` gains optional `argumentHint?: string` rendered in the autocomplete dropdown before the description.
   - `detectCapabilities()` now defaults `hyperlinks: false` for unknown terminals and under tmux/screen.
 
-## @mariozechner/pi-agent-core@0.68.1
+## @mariozechner/pi-agent-core@0.69.0
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index re-exports from `./agent.js`, `./agent-loop.js`, `./proxy.js`, and `./types.js`.
 
@@ -118,11 +134,11 @@ Package source root: `/home/akougkas/tools/pi-mono/packages/agent/src/`. Index r
 - `Agent.abort()` triggers the underlying `AbortController`. The loop encodes failures as an `AssistantMessage` with `stopReason: "aborted"` (or `"error"`) and pushes a synthetic `agent_end`.
 - Tools run in `toolExecution: "parallel"` (default) or `"sequential"`, overridable per tool via `AgentTool.executionMode`. Hooks: `beforeToolCall` can block with `{ block: true, reason }`; `afterToolCall` can override `content`, `details`, or `isError` field-by-field (no deep merge). In parallel mode, `tool_execution_end` is emitted as soon as each tool is finalized (completion order); the tool-result message artifacts appended to the transcript are still ordered by assistant source position. `afterToolCall` hook throws in parallel mode are converted into error tool results and do not abort the batch.
 
-## @mariozechner/pi-ai@0.68.1
+## @mariozechner/pi-ai@0.69.0
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/ai/src/`. The index re-exports from `api-registry.js`, `env-api-keys.js`, `models.js`, `providers/faux.js`, `providers/register-builtins.js`, `stream.js`, `types.js`, `utils/event-stream.js`, `utils/json-parse.js`, `utils/overflow.js`, `utils/typebox-helpers.js`, `utils/validation.js`, plus several provider-specific option types.
 
-The index also re-exports `Type` (value) and the `Static`, `TSchema` types from `@sinclair/typebox`.
+The index also re-exports `Type` (value) and the `Static`, `TSchema` types from `typebox`.
 
 ### Functions (stream + registry)
 
@@ -246,7 +262,7 @@ There is no `getProviders`/`getModel`/`getModels` in `api-registry.ts`. Those li
 - Order of registration is not meaningful; lookups go through `getApiProvider(model.api)`.
 - To swap Bedrock out (e.g., offline builds), call `setBedrockProviderModule(...)` before the first bedrock stream call. To reset from scratch, call `clearApiProviders()` then `registerBuiltInApiProviders()` (or `resetApiProviders()` which does both).
 
-## @mariozechner/pi-tui@0.68.1
+## @mariozechner/pi-tui@0.69.0
 
 Package source root: `/home/akougkas/tools/pi-mono/packages/tui/src/`. Index re-exports are listed below grouped by module.
 

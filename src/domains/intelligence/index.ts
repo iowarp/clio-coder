@@ -7,5 +7,5 @@ export const IntelligenceDomainModule: DomainModule = {
 	createExtension: createIntelligenceBundle,
 };
 
-export { IntelligenceManifest } from "./manifest.js";
 export type { IntelligenceContract, IntentEvent, IntentKind, IntentObservation } from "./contracts.js";
+export { IntelligenceManifest } from "./manifest.js";

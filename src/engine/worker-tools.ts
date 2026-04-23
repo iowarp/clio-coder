@@ -8,16 +8,16 @@
  * directly.
  */
 
-import type { TSchema } from "@sinclair/typebox";
+import type { TSchema } from "typebox";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { formatRejection } from "../domains/safety/rejection-feedback.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE, isSubset } from "../domains/safety/scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { type ToolRegistry, type ToolSpec, createRegistry } from "../tools/registry.js";
+import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
 export interface ResolveAgentToolsInput {

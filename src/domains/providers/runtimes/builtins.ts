@@ -16,14 +16,9 @@ import bedrock from "./cloud/bedrock.js";
 import google from "./cloud/google.js";
 import groq from "./cloud/groq.js";
 import mistral from "./cloud/mistral.js";
-import openaiCodex from "./cloud/openai-codex.js";
 import openai from "./cloud/openai.js";
+import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
-
-import claudeCodeCli from "./subprocess/claude-code-cli.js";
-import codexCli from "./subprocess/codex-cli.js";
-import geminiCli from "./subprocess/gemini-cli.js";
-
 import aphrodite from "./local/aphrodite.js";
 import koboldcpp from "./local/koboldcpp.js";
 import lemonadeAnthropic from "./local/lemonade-anthropic.js";
@@ -34,8 +29,8 @@ import llamacppCompletion from "./local/llamacpp-completion.js";
 import llamacppEmbed from "./local/llamacpp-embed.js";
 import llamacppOpenai from "./local/llamacpp-openai.js";
 import llamacppRerank from "./local/llamacpp-rerank.js";
-import lmstudioNative from "./local/lmstudio-native.js";
 import lmstudio from "./local/lmstudio.js";
+import lmstudioNative from "./local/lmstudio-native.js";
 import localai from "./local/localai.js";
 import mistralRs from "./local/mistral-rs.js";
 import mlc from "./local/mlc.js";
@@ -46,6 +41,9 @@ import sglang from "./local/sglang.js";
 import tabbyapi from "./local/tabbyapi.js";
 import tgi from "./local/tgi.js";
 import vllm from "./local/vllm.js";
+import claudeCodeCli from "./subprocess/claude-code-cli.js";
+import codexCli from "./subprocess/codex-cli.js";
+import geminiCli from "./subprocess/gemini-cli.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	anthropic,

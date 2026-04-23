@@ -210,7 +210,7 @@ When `CLIO_SELF_DEV=1` is active, the boot banner gets one extra line:
 
 ```
   ◆ clio  IOWarp orchestrator coding-agent
-  v0.1.0-dev · pi-mono 0.68.1 · ready
+  v0.1.0-dev · pi-mono 0.69.0 · ready
   CLIO_SELF_DEV=1 · hot-reload on src/tools/*.ts · watching src/
 ```
 

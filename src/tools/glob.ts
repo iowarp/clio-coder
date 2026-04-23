@@ -1,6 +1,6 @@
-import { type Stats, lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, type Stats } from "node:fs";
 import path from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -16,7 +16,7 @@ function escapeRegexChar(ch: string): string {
 }
 
 function escapeClassChar(ch: string): string {
-	return /[\\\]\^-]/.test(ch) ? `\\${ch}` : ch;
+	return /[\\\]^-]/.test(ch) ? `\\${ch}` : ch;
 }
 
 export function normalizeGlobInput(input: string): string {

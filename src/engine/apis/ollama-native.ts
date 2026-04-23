@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import type {
 	ApiProvider,
 	AssistantMessage,
@@ -15,6 +13,7 @@ import type {
 	Tool,
 	ToolCall,
 } from "@mariozechner/pi-ai";
+import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import {
 	type ChatRequest,
 	type ChatResponse,

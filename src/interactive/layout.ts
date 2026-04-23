@@ -1,5 +1,5 @@
-import { Container, Text } from "../engine/tui.js";
 import type { Component } from "../engine/tui.js";
+import { Container, Text } from "../engine/tui.js";
 
 export interface LayoutParts {
 	banner: Text;

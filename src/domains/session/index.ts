@@ -7,7 +7,6 @@ export const SessionDomainModule: DomainModule = {
 	createExtension: createSessionBundle,
 };
 
-export { SessionManifest } from "./manifest.js";
 export type {
 	ClioSessionMetaExtension,
 	DeleteSessionOptions,
@@ -16,14 +15,9 @@ export type {
 	SessionMeta,
 	TurnInput,
 } from "./contract.js";
-export {
-	SESSION_ENTRY_KINDS,
-	fromLegacyTurn,
-	isSessionEntry,
-} from "./entries.js";
 export type {
-	BashExecutionEntry,
 	BaseSessionEntry,
+	BashExecutionEntry,
 	BranchSummaryEntry,
 	CompactionSummaryEntry,
 	CustomEntry,
@@ -36,6 +30,12 @@ export type {
 	SessionInfoEntry,
 	ThinkingLevelChangeEntry,
 } from "./entries.js";
+export {
+	fromLegacyTurn,
+	isSessionEntry,
+	SESSION_ENTRY_KINDS,
+} from "./entries.js";
+export { SessionManifest } from "./manifest.js";
 export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import

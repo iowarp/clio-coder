@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { ToolName } from "../../src/core/tool-names.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { ModeName } from "../../src/domains/modes/matrix.js";
@@ -8,7 +8,7 @@ import type { Classification, ClassifierCall } from "../../src/domains/safety/ac
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
 import { createWorkerToolRegistry, resolveAgentTools } from "../../src/engine/worker-tools.js";
-import { type ToolRegistry, type ToolSpec, createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 function makeModes(
 	initial: ModeName,

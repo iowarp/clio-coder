@@ -5,12 +5,12 @@ import { initializeClioHome } from "../core/init.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
 import {
-	type ProviderSupportEntry,
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
+	type ProviderSupportEntry,
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
 } from "../domains/providers/index.js";

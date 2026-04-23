@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 

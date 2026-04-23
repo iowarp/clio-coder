@@ -9,7 +9,7 @@
  *   - Conservative by design: over-estimating trips compaction earlier,
  *     never later. Missing a trigger and hitting provider overflow is
  *     expensive; running a compaction on 80k when actual was 95k is cheap.
- *   - pi-coding-agent ships it at scale through 0.68.1, so we adopt the
+ *   - pi-coding-agent ships it at scale through 0.69.0, so we adopt the
  *     known ceiling rather than introduce a new numeric contract.
  *   - Exact per-provider counts (Anthropic /count_tokens, tiktoken) are
  *     parked. The `TokenEstimator` interface below keeps them a drop-in

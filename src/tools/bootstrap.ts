@@ -7,9 +7,9 @@ import { lsTool } from "./ls.js";
 import { readTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
 import { webFetchTool } from "./web-fetch.js";
+import { writeTool } from "./write.js";
 import { writePlanTool } from "./write-plan.js";
 import { writeReviewTool } from "./write-review.js";
-import { writeTool } from "./write.js";
 
 /**
  * Registers every tool on the supplied registry with its admissible mode set.

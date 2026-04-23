@@ -7,6 +7,6 @@ export const ModesDomainModule: DomainModule = {
 	createExtension: createModesBundle,
 };
 
+export type { ModesContract } from "./contract.js";
 export { ModesManifest } from "./manifest.js";
 export { ALL_MODES, MODE_MATRIX, type ModeName } from "./matrix.js";
-export type { ModesContract } from "./contract.js";

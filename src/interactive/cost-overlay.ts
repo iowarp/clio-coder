@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
-import { type OverlayHandle, type TUI, Text, truncateToWidth } from "../engine/tui.js";
+import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
 
 const DEFAULT_CONTENT_WIDTH = 70;
 const TITLE_PREFIX = "─ Session cost";

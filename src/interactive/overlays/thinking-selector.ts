@@ -1,9 +1,9 @@
 import type { ClioSettings } from "../../core/config.js";
 import {
-	type ProvidersContract,
-	type ThinkingLevel,
 	availableThinkingLevels,
+	type ProvidersContract,
 	resolveModelCapabilities,
+	type ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
 	Box,
