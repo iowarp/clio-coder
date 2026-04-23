@@ -51,9 +51,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	"codex-cli": "Codex CLI",
 	"gemini-cli": "Gemini CLI",
 	"ollama-native": "Ollama native API",
-	ollama: "Ollama OpenAI-compatible API",
 	"lmstudio-native": "LM Studio native API",
-	lmstudio: "LM Studio OpenAI-compatible API",
 };
 
 function groupPriority(group: ProviderSupportGroup): number {

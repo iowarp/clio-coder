@@ -19,27 +19,16 @@ import mistral from "./cloud/mistral.js";
 import openai from "./cloud/openai.js";
 import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
-import aphrodite from "./local/aphrodite.js";
-import koboldcpp from "./local/koboldcpp.js";
 import lemonadeAnthropic from "./local/lemonade-anthropic.js";
 import lemonadeOpenai from "./local/lemonade-openai.js";
-import litellmGateway from "./local/litellm-gateway.js";
 import llamacppAnthropic from "./local/llamacpp-anthropic.js";
 import llamacppCompletion from "./local/llamacpp-completion.js";
 import llamacppEmbed from "./local/llamacpp-embed.js";
-import llamacppOpenai from "./local/llamacpp-openai.js";
 import llamacppRerank from "./local/llamacpp-rerank.js";
-import lmstudio from "./local/lmstudio.js";
 import lmstudioNative from "./local/lmstudio-native.js";
-import localai from "./local/localai.js";
-import mistralRs from "./local/mistral-rs.js";
-import mlc from "./local/mlc.js";
 import ollamaNative from "./local/ollama-native.js";
-import ollamaOpenai from "./local/ollama-openai.js";
 import openaiCompat from "./local/openai-compat.js";
 import sglang from "./local/sglang.js";
-import tabbyapi from "./local/tabbyapi.js";
-import tgi from "./local/tgi.js";
 import vllm from "./local/vllm.js";
 import claudeCodeCli from "./subprocess/claude-code-cli.js";
 import codexCli from "./subprocess/codex-cli.js";
@@ -57,27 +46,16 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	claudeCodeCli,
 	codexCli,
 	geminiCli,
-	aphrodite,
-	koboldcpp,
 	lemonadeAnthropic,
 	lemonadeOpenai,
-	litellmGateway,
 	llamacppAnthropic,
 	llamacppCompletion,
 	llamacppEmbed,
-	llamacppOpenai,
 	llamacppRerank,
-	lmstudio,
 	lmstudioNative,
-	localai,
-	mistralRs,
-	mlc,
 	ollamaNative,
-	ollamaOpenai,
 	openaiCompat,
 	sglang,
-	tabbyapi,
-	tgi,
 	vllm,
 ];
 

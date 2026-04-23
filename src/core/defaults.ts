@@ -126,18 +126,12 @@ endpoints: []
 #     auth:
 #       apiKeyEnvVar: ANTHROPIC_API_KEY
 #   - id: mini
-#     runtime: llamacpp
+#     runtime: llamacpp-anthropic
 #     url: http://192.168.86.141:8080
 #     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
 #     capabilities:
 #       contextWindow: 262144
 #       reasoning: true
-#   - id: litellm
-#     runtime: litellm-gateway
-#     url: http://127.0.0.1:4000
-#     gateway: true
-#     auth:
-#       apiKeyEnvVar: LITELLM_MASTER_KEY
 
 # Optional npm packages that export clioRuntimes: RuntimeDescriptor[].
 runtimePlugins: []

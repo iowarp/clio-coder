@@ -45,28 +45,17 @@ Non-interactive flags:
 `;
 
 const DEFAULT_PORTS: Record<string, number> = {
-	llamacpp: 8080,
 	"llamacpp-anthropic": 8080,
 	"llamacpp-completion": 8080,
 	"llamacpp-embed": 8080,
 	"llamacpp-rerank": 8080,
-	lmstudio: 1234,
 	"lmstudio-native": 1234,
-	ollama: 11434,
 	"ollama-native": 11434,
 	vllm: 8000,
 	sglang: 30000,
-	tgi: 8080,
-	aphrodite: 2242,
-	tabbyapi: 5000,
 	"lemonade-anthropic": 8000,
 	lemonade: 8000,
-	"litellm-gateway": 4000,
 	"openai-compat": 8000,
-	koboldcpp: 5001,
-	mlc: 8000,
-	"mistral-rs": 8000,
-	localai: 8080,
 };
 
 interface ParsedArgs {
