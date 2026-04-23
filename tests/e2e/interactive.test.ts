@@ -159,10 +159,10 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			baseSettingsYaml({
 				endpoints: [
 					"  - id: mini",
-					"    runtime: llamacpp",
+					"    runtime: openai-compat",
 					"    url: http://127.0.0.1:8080",
 					"    auth:",
-					"      apiKeyRef: llamacpp",
+					"      apiKeyRef: openai-compat",
 					"    defaultModel: gemma-4-26B-A4B-it-Q4_K_M",
 					"    wireModels:",
 					"      - Qwen3.6-35B-A3B-UD-Q4_K_XL",
@@ -451,7 +451,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			baseSettingsYaml({
 				endpoints: [
 					"  - id: mini",
-					"    runtime: llamacpp-openai",
+					"    runtime: openai-compat",
 					"    url: http://mini.local:8080",
 					"    defaultModel: Qwen3.6-35B-A3B",
 					"    capabilities:",
