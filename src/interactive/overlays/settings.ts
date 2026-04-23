@@ -129,9 +129,12 @@ function formatKeybindingsSummary(manager?: ClioKeybindingManager): string {
 	if (!manager) return "(unavailable)";
 	const overrides = manager.overrideCount();
 	const conflicts = manager.getConflicts().length;
-	if (overrides === 0 && conflicts === 0) return "defaults (no overrides)";
-	if (conflicts === 0) return `${overrides} override${overrides === 1 ? "" : "s"}`;
-	return `${overrides} override${overrides === 1 ? "" : "s"}, ${conflicts} conflict${conflicts === 1 ? "" : "s"}`;
+	const invalid = manager.invalidCount();
+	if (overrides === 0 && conflicts === 0 && invalid === 0) return "defaults (no overrides)";
+	const parts = [`${overrides} override${overrides === 1 ? "" : "s"}`];
+	parts.push(`${invalid} invalid`);
+	parts.push(`${conflicts} conflict${conflicts === 1 ? "" : "s"}`);
+	return parts.join(", ");
 }
 
 /**

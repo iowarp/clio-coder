@@ -5,7 +5,12 @@ import {
 	CLIO_APP_KEYBINDINGS,
 	CLIO_KEYBINDINGS,
 } from "../../src/domains/config/keybindings.js";
-import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
+import {
+	createKeybindingManagerForTesting,
+	formatInvalidKeybindingNotice,
+	isValidKeyId,
+	validateKeybindings,
+} from "../../src/interactive/keybinding-manager.js";
 
 describe("domains/config/keybindings schema", () => {
 	it("every Clio action declares at least one default key", () => {
@@ -138,5 +143,64 @@ describe("interactive/keybinding-manager overrides + conflicts", () => {
 		const a = createKeybindingManagerForTesting().hotkeyEntries();
 		const b = createKeybindingManagerForTesting().hotkeyEntries();
 		deepStrictEqual(a, b);
+	});
+});
+
+describe("interactive/keybinding-manager validation", () => {
+	it("isValidKeyId accepts single letters, digits, symbols, and special keys", () => {
+		for (const id of ["a", "z", "0", "9", "escape", "tab", "pageUp", "f10", "-", "]"]) {
+			strictEqual(isValidKeyId(id), true, `expected ${id} to validate`);
+		}
+	});
+
+	it("isValidKeyId accepts modifier combinations (case-insensitive)", () => {
+		for (const id of ["ctrl+d", "alt+t", "shift+tab", "ctrl+shift+p", "Ctrl+Alt+X"]) {
+			strictEqual(isValidKeyId(id), true, `expected ${id} to validate`);
+		}
+	});
+
+	it("isValidKeyId rejects unmappable identifiers", () => {
+		for (const id of ["banana", "ctrl+banana", "ctrl+ctrl+a", "", "++", "ctrl+"]) {
+			strictEqual(isValidKeyId(id), false, `expected ${id} to be rejected`);
+		}
+	});
+
+	it("validateKeybindings splits a raw block into valid + invalid buckets", () => {
+		const { valid, invalid } = validateKeybindings({
+			"clio.exit": "banana",
+			"clio.session.tree": "alt+t",
+			"clio.dispatchBoard.toggle": ["ctrl+b", "wasabi"],
+		});
+		deepStrictEqual(valid["clio.session.tree"], "alt+t");
+		deepStrictEqual(valid["clio.dispatchBoard.toggle"], ["ctrl+b"]);
+		strictEqual("clio.exit" in valid, false, "invalid string override must be dropped");
+		const flat = invalid.flatMap((entry) => entry.keys.map((key) => `${entry.id}=${key}`));
+		ok(flat.includes("clio.exit=banana"));
+		ok(flat.includes("clio.dispatchBoard.toggle=wasabi"));
+	});
+
+	it("invalid overrides do not silently replace the default binding", () => {
+		const manager = createKeybindingManagerForTesting({ "clio.exit": "banana" });
+		// Ctrl+D still fires exit because the invalid override was dropped.
+		strictEqual(manager.matches("\x04", "clio.exit"), true);
+		strictEqual(manager.overrideCount(), 0);
+		strictEqual(manager.invalidCount(), 1);
+		const invalid = manager.invalidBindings();
+		strictEqual(invalid.length, 1);
+		strictEqual(invalid[0]?.id, "clio.exit");
+		deepStrictEqual([...(invalid[0]?.keys ?? [])], ["banana"]);
+	});
+
+	it("formatInvalidKeybindingNotice renders a single actionable stderr line", () => {
+		const notice = formatInvalidKeybindingNotice([
+			{ id: "clio.exit", keys: ["banana"] },
+			{ id: "clio.session.tree", keys: ["wasabi"] },
+		]);
+		ok(notice.startsWith("clio: 2 invalid keybindings"), notice);
+		ok(notice.includes(`clio.exit="banana"`), notice);
+		ok(notice.includes(`clio.session.tree="wasabi"`), notice);
+		ok(notice.includes("settings.yaml"), notice);
+		ok(notice.includes("clio doctor"), notice);
+		ok(notice.endsWith("\n"));
 	});
 });

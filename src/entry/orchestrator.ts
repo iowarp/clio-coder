@@ -44,6 +44,7 @@ import type { Model } from "../engine/types.js";
 import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
+import { formatInvalidKeybindingNotice, validateKeybindings } from "../interactive/keybinding-manager.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry } from "../tools/registry.js";
 
@@ -325,6 +326,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
+
+	const invalidBindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {}).invalid;
+	if (invalidBindings.length > 0) {
+		process.stderr.write(formatInvalidKeybindingNotice(invalidBindings));
+	}
 	const persistSettings = (next: ClioSettings): void => {
 		if (config?.set) {
 			config.set(next);
