@@ -84,8 +84,10 @@ async function main(argv: string[]): Promise<number> {
 }
 
 main(process.argv.slice(2))
-	.then((code) => process.exit(code))
+	.then((code) => {
+		process.exitCode = code;
+	})
 	.catch((err) => {
 		printError(err instanceof Error ? err.message : String(err));
-		process.exit(1);
+		process.exitCode = 1;
 	});

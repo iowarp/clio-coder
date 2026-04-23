@@ -9,11 +9,10 @@
  * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
+import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
@@ -84,8 +83,8 @@ let kbSingleton: KnowledgeBase | null = null;
 function getKnowledgeBase(): KnowledgeBase {
 	if (kbSingleton) return kbSingleton;
 	try {
-		const dir = fileURLToPath(new URL("../domains/providers/models/", import.meta.url));
-		kbSingleton = existsSync(dir) ? new FileKnowledgeBase(dir) : new NullKnowledgeBase();
+		const dir = resolveProvidersModelsDir(import.meta.url);
+		kbSingleton = dir ? new FileKnowledgeBase(dir) : new NullKnowledgeBase();
 	} catch {
 		kbSingleton = new NullKnowledgeBase();
 	}

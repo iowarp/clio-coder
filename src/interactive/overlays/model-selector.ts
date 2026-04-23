@@ -1,11 +1,12 @@
 import type { ClioSettings } from "../../core/config.js";
 import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../../domains/providers/index.js";
-import { listKnownModelsForRuntime } from "../../domains/providers/index.js";
+import { listKnownModelsForRuntime, resolveModelCapabilities } from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
+	type SelectListLayoutOptions,
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
@@ -21,6 +22,12 @@ const MODEL_THEME: SelectListTheme = {
 	description: IDENTITY,
 	scrollInfo: IDENTITY,
 	noMatch: IDENTITY,
+};
+
+const MODEL_LAYOUT: SelectListLayoutOptions = {
+	minPrimaryColumnWidth: 40,
+	maxPrimaryColumnWidth: 60,
+	truncatePrimary: ({ text, maxWidth }) => truncateModelLabel(text, maxWidth),
 };
 
 export interface ModelSelection {
@@ -64,6 +71,27 @@ function contextWindowLabel(caps: CapabilityFlags): string {
 	return `${Math.round(caps.contextWindow / 1000)}kctx`;
 }
 
+function uniqueModels(ids: ReadonlyArray<string>): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const id of ids) {
+		const trimmed = id.trim();
+		if (trimmed.length === 0 || seen.has(trimmed)) continue;
+		seen.add(trimmed);
+		out.push(trimmed);
+	}
+	return out;
+}
+
+function truncateModelLabel(text: string, maxWidth: number): string {
+	if (maxWidth <= 0 || text.length <= maxWidth) return text;
+	if (maxWidth <= 8) return text.slice(0, maxWidth);
+	const suffixWidth = Math.min(14, Math.max(6, Math.floor(maxWidth / 3)));
+	const prefixWidth = maxWidth - suffixWidth - 1;
+	if (prefixWidth <= 0) return text.slice(0, maxWidth);
+	return `${text.slice(0, prefixWidth)}…${text.slice(-suffixWidth)}`;
+}
+
 /**
  * Enumerate the wire model ids to present for an endpoint. The order of
  * preference below keeps the overlay predictable across live probes:
@@ -74,17 +102,16 @@ function contextWindowLabel(caps: CapabilityFlags): string {
  *      resolvable wire model id.
  */
 export function modelsForEndpoint(status: EndpointStatus): string[] {
-	const wireModels = status.endpoint.wireModels ?? [];
-	if (wireModels.length > 0) return [...wireModels];
-	if (status.discoveredModels.length > 1) return [...status.discoveredModels];
+	const wireModels = uniqueModels(status.endpoint.wireModels ?? []);
+	if (wireModels.length > 0) return wireModels;
+	if (status.discoveredModels.length > 0) {
+		return uniqueModels([status.endpoint.defaultModel ?? "", ...status.discoveredModels]);
+	}
 	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
 	if (knownModels.length > 0) {
-		return Array.from(
-			new Set([status.endpoint.defaultModel, ...knownModels].filter((value): value is string => Boolean(value))),
-		);
+		return uniqueModels([status.endpoint.defaultModel ?? "", ...knownModels]);
 	}
 	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
-	if (status.discoveredModels.length === 1) return [status.discoveredModels[0] as string];
 	return [];
 }
 
@@ -121,9 +148,8 @@ export function buildModelItems(deps: {
 	const items: SelectItem[] = [];
 	const refs: ModelSelection[] = [];
 	for (const status of list) {
-		const { endpoint, capabilities } = status;
+		const { endpoint } = status;
 		const runtimeName = status.runtime?.displayName ?? endpoint.runtime;
-		const badges = capabilityBadges(capabilities);
 		const wireModels = modelsForEndpoint(status);
 		const authText = status.runtime
 			? (() => {
@@ -133,25 +159,28 @@ export function buildModelItems(deps: {
 					);
 					if (!auth.available) return "disconnected";
 					if (auth.source === "environment") return auth.detail ? `env:${auth.detail}` : "environment";
-					return auth.source.replace("stored-", "");
+					return auth.source;
 				})()
 			: "unknown";
 		if (wireModels.length === 0) {
 			items.push({
 				value: endpoint.id,
-				label: `${healthGlyph(status)}  ${runtimeName}  —  ${badges}`,
+				label: `${healthGlyph(status)}  ${runtimeName}`,
 				description: `endpoint=${endpoint.id}  auth=${authText}  ${status.reason}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
 			continue;
 		}
 		for (const wireModel of wireModels) {
+			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase);
+			const badges = capabilityBadges(rowCaps);
 			const scopeHit = scopeSet.has(endpoint.id) || scopeSet.has(`${endpoint.id}/${wireModel}`);
 			const scopedMark = scopeHit ? "★" : " ";
+			const stateText = status.available ? "" : `  ${status.reason}`;
 			items.push({
 				value: `${endpoint.id}/${wireModel}`,
-				label: `${healthGlyph(status)}${scopedMark} ${runtimeName}  ${wireModel}  ${badges}`,
-				description: `endpoint=${endpoint.id}  auth=${authText}  ${contextWindowLabel(capabilities)}  ${status.reason}`,
+				label: `${healthGlyph(status)}${scopedMark} ${wireModel}`,
+				description: `${contextWindowLabel(rowCaps)}  ${badges}  ${runtimeName}  endpoint=${endpoint.id}  auth=${authText}${stateText}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: wireModel });
 		}
@@ -174,7 +203,7 @@ class ModelOverlayBox extends Box {
 export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayHandle {
 	const { items, refs } = buildModelItems({ settings: deps.settings, providers: deps.providers });
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
-	const list = new SelectList(items, visible, MODEL_THEME);
+	const list = new SelectList(items, visible, MODEL_THEME, MODEL_LAYOUT);
 	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim();
 	const activeModel = deps.settings.orchestrator?.model?.trim();
 	if (activeEndpoint && activeModel) {

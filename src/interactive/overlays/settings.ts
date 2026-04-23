@@ -1,5 +1,10 @@
 import type { ClioSettings } from "../../core/config.js";
-import { type ProvidersContract, type ThinkingLevel, availableThinkingLevels } from "../../domains/providers/index.js";
+import {
+	type ProvidersContract,
+	type ThinkingLevel,
+	availableThinkingLevels,
+	resolveModelCapabilities,
+} from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -38,10 +43,13 @@ export function buildSettingItems(
 	const endpointCount = settings.endpoints?.length ?? 0;
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
-		? availableThinkingLevels(status.capabilities, {
-				runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-				...(settings.orchestrator.model ? { modelId: settings.orchestrator.model } : {}),
-			})
+		? availableThinkingLevels(
+				resolveModelCapabilities(status, settings.orchestrator.model, options?.providers?.knowledgeBase ?? null),
+				{
+					runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+					...(settings.orchestrator.model ? { modelId: settings.orchestrator.model } : {}),
+				},
+			)
 		: (["off"] as ReadonlyArray<ThinkingLevel>);
 	return [
 		{
@@ -162,7 +170,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 		visible,
 		SETTINGS_THEME,
 		(id: string, value: string) => {
-			const current = deps.getSettings();
+			const current = structuredClone(deps.getSettings());
 			applySettingChange(current, id, value);
 			deps.writeSettings(current);
 			list.updateValue(id, value);

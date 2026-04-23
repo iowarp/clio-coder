@@ -1,5 +1,10 @@
 import type { ClioSettings } from "../../core/config.js";
-import { type ProvidersContract, type ThinkingLevel, availableThinkingLevels } from "../../domains/providers/index.js";
+import {
+	type ProvidersContract,
+	type ThinkingLevel,
+	availableThinkingLevels,
+	resolveModelCapabilities,
+} from "../../domains/providers/index.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -92,7 +97,7 @@ export function resolveAvailableThinkingLevels(
 	if (!endpointId) return ["off"];
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
 	if (!status) return ["off"];
-	return availableThinkingLevels(status.capabilities, {
+	return availableThinkingLevels(resolveModelCapabilities(status, wireModelId, providers.knowledgeBase), {
 		runtimeId: status.runtime?.id ?? status.endpoint.runtime,
 		...(wireModelId ? { modelId: wireModelId } : {}),
 	});

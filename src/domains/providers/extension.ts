@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -12,6 +9,7 @@ import { openAuthStorage, resolveAuthTarget } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
+import { resolveProvidersModelsDir } from "./knowledge-base-path.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
@@ -39,8 +37,8 @@ class NullKnowledgeBase implements KnowledgeBase {
 
 function loadKnowledgeBase(): KnowledgeBase {
 	try {
-		const dir = fileURLToPath(new URL("./models/", import.meta.url));
-		if (!existsSync(dir)) return new NullKnowledgeBase();
+		const dir = resolveProvidersModelsDir(import.meta.url);
+		if (!dir) return new NullKnowledgeBase();
 		return new FileKnowledgeBase(dir);
 	} catch (err) {
 		process.stderr.write(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -81,11 +79,24 @@ function capabilitiesFor(
 	);
 }
 
+function uniqueModels(ids: ReadonlyArray<string>): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const id of ids) {
+		const trimmed = id.trim();
+		if (trimmed.length === 0 || seen.has(trimmed)) continue;
+		seen.add(trimmed);
+		out.push(trimmed);
+	}
+	return out;
+}
+
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
 	const statuses = new Map<string, EndpointStatus>();
+	const unsubscribeConfigListeners: Array<() => void> = [];
 
 	function readConfig(): ClioSettings {
 		const config = context.getContract<ConfigContract>("config");
@@ -133,12 +144,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				reason: "unknown runtime",
 				health: previous?.health ?? emptyHealth(),
 				capabilities: previous?.capabilities ?? EMPTY_CAPABILITIES,
+				probeCapabilities: previous?.probeCapabilities ?? null,
 				discoveredModels: previous?.discoveredModels ?? [],
 			};
 		}
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
-		const discoveredModels = probe?.models ?? previous?.discoveredModels ?? [];
+		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
+		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? []);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
 			probe === null
@@ -158,6 +171,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			reason,
 			health,
 			capabilities,
+			probeCapabilities,
 			discoveredModels,
 		};
 	}
@@ -227,6 +241,19 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			const settings = readConfig();
 			await loadPluginRuntimes(registry, settings);
 			await probeAll();
+			const config = context.getContract<ConfigContract>("config");
+			if (config) {
+				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const) {
+					unsubscribeConfigListeners.push(
+						config.onChange(kind, () => {
+							void probeAll();
+						}),
+					);
+				}
+			}
+		},
+		async stop() {
+			for (const unsubscribe of unsubscribeConfigListeners.splice(0)) unsubscribe();
 		},
 	};
 

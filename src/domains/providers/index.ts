@@ -43,6 +43,7 @@ export {
 export { createMemoryAuthStorage, openAuthStorage, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
 export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
 export { mergeCapabilities } from "./capabilities.js";
+export { resolveModelCapabilities } from "./model-capabilities.js";
 export {
 	buildProviderSupportEntry,
 	compareProviderSupportEntries,
