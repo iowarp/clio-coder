@@ -589,6 +589,14 @@ export function routeOverlayKey(
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
 	}
+	// Dispatch-board branch (fall-through). The overlay has no focused
+	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
+	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
+	// and Esc still closes via routeDispatchBoardOverlayKey.
+	if (matches(data, "clio.dispatchBoard.toggle")) {
+		deps.closeOverlay();
+		return true;
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }

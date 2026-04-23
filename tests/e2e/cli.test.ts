@@ -1,6 +1,30 @@
 import { match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
+
+function seedEndpoints(configDir: string): void {
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	const patched = yaml.replace(
+		/^endpoints:.*$/m,
+		[
+			"endpoints:",
+			"  - id: test-openai",
+			"    runtime: openai",
+			"    wireModels:",
+			"      - gpt-4o",
+			"      - gpt-4o-mini",
+			"  - id: test-anthropic",
+			"    runtime: anthropic",
+			"    wireModels:",
+			"      - claude-opus-4-6",
+			"      - claude-sonnet-4-5",
+		].join("\n"),
+	);
+	writeFileSync(p, patched, "utf8");
+}
 
 describe("clio cli e2e", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
@@ -62,5 +86,52 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout);
 		ok(Array.isArray(parsed) && parsed.length > 0, "expected at least one builtin agent");
+	});
+
+	it("list-models --json returns every wire model across endpoints", async () => {
+		await runCli(["install"], { env: scratch.env });
+		seedEndpoints(join(scratch.dir, "config"));
+		const result = await runCli(["list-models", "--json"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0);
+		const rows = JSON.parse(result.stdout) as Array<{ endpointId: string; modelId: string }>;
+		strictEqual(rows.length, 4);
+		ok(rows.some((r) => r.modelId === "gpt-4o"));
+		ok(rows.some((r) => r.modelId === "claude-opus-4-6"));
+	});
+
+	it("list-models <search> positional filter keeps only rows whose endpoint/runtime/model contains the term", async () => {
+		await runCli(["install"], { env: scratch.env });
+		seedEndpoints(join(scratch.dir, "config"));
+		const result = await runCli(["list-models", "gpt", "--json"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0);
+		const rows = JSON.parse(result.stdout) as Array<{ modelId: string }>;
+		strictEqual(rows.length, 2, `expected 2 gpt rows, got ${rows.length}`);
+		ok(rows.every((r) => r.modelId.includes("gpt")));
+	});
+
+	it("list-models --endpoint <id> filter keeps only that endpoint's rows", async () => {
+		await runCli(["install"], { env: scratch.env });
+		seedEndpoints(join(scratch.dir, "config"));
+		const result = await runCli(["list-models", "--endpoint", "test-anthropic", "--json"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		const rows = JSON.parse(result.stdout) as Array<{ endpointId: string }>;
+		strictEqual(rows.length, 2);
+		ok(rows.every((r) => r.endpointId === "test-anthropic"));
+	});
+
+	it("list-models --endpoint <id> <search> combines both filters", async () => {
+		await runCli(["install"], { env: scratch.env });
+		seedEndpoints(join(scratch.dir, "config"));
+		const result = await runCli(["list-models", "--endpoint", "test-openai", "mini", "--json"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		const rows = JSON.parse(result.stdout) as Array<{ endpointId: string; modelId: string }>;
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.modelId, "gpt-4o-mini");
 	});
 });

@@ -17,7 +17,12 @@ export async function runListModelsCommand(args: ReadonlyArray<string>): Promise
 	const probe = args.includes("--probe");
 	const filterIdx = args.indexOf("--endpoint");
 	const filter = filterIdx >= 0 ? args[filterIdx + 1] : undefined;
-	const search = args.find((arg, index) => index !== filterIdx + 1 && !arg.startsWith("--"));
+	// When `--endpoint` is absent the "value slot" index is -1 so the skip
+	// predicate leaves every positional eligible. The previous `index !==
+	// filterIdx + 1` variant computed index !== 0 in this case, silently
+	// dropping the positional `<search>` arg when it was the only positional.
+	const filterValueIdx = filterIdx >= 0 ? filterIdx + 1 : -1;
+	const search = args.find((arg, index) => index !== filterValueIdx && !arg.startsWith("--"));
 
 	ensureInstalled();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
