@@ -1,26 +1,44 @@
 import { type Component, Text } from "../engine/tui.js";
 import type { ChatLoopEvent } from "./chat-loop.js";
 
-const ANSI_DIM_ITALIC = "\u001b[2;3m";
-const ANSI_RESET = "\u001b[0m";
 const TOOL_PREVIEW_LIMIT = 96;
 
-type TranscriptEntry =
-	| { role: "user"; text: string }
-	| {
-			role: "assistant";
-			text: string;
-			thinking: string;
-			tools: ToolLine[];
-			pending: boolean;
-	  };
-
-type ToolLine = {
+/**
+ * An assistant turn is a sequence of text and tool segments interleaved in
+ * pi-agent-core event order. pi-agent-core emits: `message_start` →
+ * `text_delta`+ → `message_end` → `tool_execution_*` → (next) `message_start`
+ * → `text_delta`+ → `message_end`, so tool calls always sit BETWEEN the
+ * assistant's pre-tool narration and the post-tool summary. Storing a flat
+ * `text` buffer + `tools[]` array (pre-refactor) collapsed that order: all
+ * text across the turn concatenated into one line with every tool block
+ * appended at the end. The segment list preserves the stream order instead.
+ */
+type TextSegment = { kind: "text"; text: string };
+type ToolSegment = {
+	kind: "tool";
 	id: string;
 	name: string;
 	args: unknown;
 	preview: string;
 };
+type AssistantSegment = TextSegment | ToolSegment;
+
+type TranscriptEntry =
+	| { role: "user"; text: string }
+	| {
+			role: "assistant";
+			segments: AssistantSegment[];
+			/**
+			 * Raw thinking content from `thinking_delta` events. Intentionally
+			 * NOT rendered into the visible chat stream: leaking the model's
+			 * chain-of-thought alongside the real response disorients users and
+			 * was flagged in Row 47 of the TUI rubric. Kept on the entry so
+			 * downstream surfaces (future `/think` viewer, session replay) can
+			 * still recover it.
+			 */
+			thinking: string;
+			pending: boolean;
+	  };
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
@@ -79,24 +97,36 @@ function extractAssistantThinking(message: unknown): string {
 		.join("");
 }
 
+function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
+	for (const seg of entry.segments) {
+		if (seg.kind === "tool") return true;
+		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
+	}
+	return false;
+}
+
 function renderEntryLines(entry: TranscriptEntry): string[] {
 	if (entry.role === "user") {
 		return [`you: ${entry.text}`];
 	}
 	const lines: string[] = [];
-	const thinking = entry.thinking.trim();
-	if (thinking.length > 0) {
-		lines.push(`${ANSI_DIM_ITALIC}${thinking}${ANSI_RESET}`);
+	let labeled = false;
+	for (const seg of entry.segments) {
+		if (seg.kind === "text") {
+			const body = seg.text;
+			if (body.length === 0) continue;
+			if (!labeled) {
+				lines.push(`clio: ${body}`);
+				labeled = true;
+			} else {
+				lines.push(body);
+			}
+			continue;
+		}
+		lines.push(`  tool: ${seg.name}(${previewValue(seg.args, 48)}) → ${seg.preview}`);
 	}
-	const body =
-		entry.text.trim().length > 0
-			? entry.text
-			: entry.pending && entry.tools.length === 0 && thinking.length === 0
-				? "[working]"
-				: "";
-	lines.push(`clio: ${body}`);
-	for (const tool of entry.tools) {
-		lines.push(`  tool: ${tool.name}(${previewValue(tool.args, 48)}) → ${tool.preview}`);
+	if (!labeled && !hasVisibleOutput(entry)) {
+		lines.push(entry.pending ? "clio: [working]" : "clio: ");
 	}
 	return lines;
 }
@@ -134,13 +164,40 @@ export function createChatPanel(): ChatPanel {
 		if (last && last.role === "assistant") return last;
 		const entry: Extract<TranscriptEntry, { role: "assistant" }> = {
 			role: "assistant",
-			text: "",
+			segments: [],
 			thinking: "",
-			tools: [],
 			pending: false,
 		};
 		transcript.push(entry);
 		return entry;
+	};
+
+	const appendTextDelta = (entry: Extract<TranscriptEntry, { role: "assistant" }>, delta: string): void => {
+		if (delta.length === 0) return;
+		const tail = entry.segments[entry.segments.length - 1];
+		if (tail && tail.kind === "text") {
+			tail.text += delta;
+			return;
+		}
+		entry.segments.push({ kind: "text", text: delta });
+	};
+
+	/**
+	 * Canonicalize a streamed text segment from a completed assistant message.
+	 * When streaming produced a prefix of the final text (the common case),
+	 * the tail segment is overwritten. When the message arrived fully formed
+	 * with no deltas (non-streaming test path, synthetic notices), a fresh
+	 * text segment is appended after any tool segments that may have landed
+	 * in this turn already.
+	 */
+	const canonicalizeMessageText = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
+		if (text.length === 0) return;
+		const tail = entry.segments[entry.segments.length - 1];
+		if (tail?.kind === "text" && text.startsWith(tail.text)) {
+			tail.text = text;
+			return;
+		}
+		entry.segments.push({ kind: "text", text });
 	};
 
 	return {
@@ -157,11 +214,12 @@ export function createChatPanel(): ChatPanel {
 			if (event.type === "text_delta") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
-				assistant.text += event.delta;
+				appendTextDelta(assistant, event.delta);
 				sync();
 				return;
 			}
 			if (event.type === "thinking_delta") {
+				// Capture for downstream consumers but never render inline.
 				const assistant = ensureAssistant();
 				assistant.pending = true;
 				assistant.thinking += event.delta;
@@ -176,7 +234,8 @@ export function createChatPanel(): ChatPanel {
 			if (event.type === "tool_execution_start") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
-				assistant.tools.push({
+				assistant.segments.push({
+					kind: "tool",
 					id: event.toolCallId,
 					name: event.toolName,
 					args: event.args,
@@ -187,14 +246,18 @@ export function createChatPanel(): ChatPanel {
 			}
 			if (event.type === "tool_execution_update") {
 				const assistant = ensureAssistant();
-				const tool = assistant.tools.find((item) => item.id === event.toolCallId);
+				const tool = assistant.segments.find(
+					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
+				);
 				if (tool) tool.preview = previewValue(event.partialResult);
 				sync();
 				return;
 			}
 			if (event.type === "tool_execution_end") {
 				const assistant = ensureAssistant();
-				const tool = assistant.tools.find((item) => item.id === event.toolCallId);
+				const tool = assistant.segments.find(
+					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
+				);
 				if (tool) tool.preview = previewValue(event.result);
 				sync();
 				return;
@@ -204,9 +267,8 @@ export function createChatPanel(): ChatPanel {
 				const thinking = extractAssistantThinking(event.message);
 				if (text.length === 0 && thinking.length === 0) return;
 				const assistant = ensureAssistant();
-				assistant.pending = false;
 				if (thinking.length > 0) assistant.thinking = thinking;
-				if (text.length > 0) assistant.text = text;
+				canonicalizeMessageText(assistant, text);
 				sync();
 				return;
 			}

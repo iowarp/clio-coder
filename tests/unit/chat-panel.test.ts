@@ -26,14 +26,122 @@ describe("chat-panel active entry update", () => {
 		ok(text.includes("clio: hello"), `expected accumulated assistant line, got: ${text}`);
 	});
 
-	it("accumulates thinking_delta separately from text", () => {
+	it("filters thinking_delta out of the visible chat stream", () => {
+		// pi-agent-core emits thinking_delta for the model's chain-of-thought.
+		// Clio captures it (so downstream surfaces like /think can inspect it)
+		// but MUST NOT inline it into the user-visible turn: leaking raw model
+		// reasoning (e.g. "We need to summarize the file.") alongside the real
+		// assistant response is disorienting and is what Row 47 of the TUI
+		// rubric flagged as a bug.
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "ponder", partialThinking: "ponder" });
 		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "ing", partialThinking: "pondering" });
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "answer", partialText: "answer" });
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("pondering"), `expected accumulated thinking, got: ${text}`);
+		ok(!text.includes("pondering"), `thinking leaked into visible stream: ${text}`);
+		ok(!text.includes("ponder"), `thinking leaked into visible stream: ${text}`);
 		ok(text.includes("clio: answer"), `expected assistant text, got: ${text}`);
+	});
+
+	it("renders tool calls in turn order relative to assistant text", () => {
+		// pi-agent-core emits: message_start → text_delta(A) → message_end(A)
+		// → tool_execution_start/end → new message_start → text_delta(B) →
+		// message_end(B). The chat panel must interleave these so the tool
+		// call appears BETWEEN the pre-tool text and the post-tool summary,
+		// not appended after the full response.
+		const panel = createChatPanel();
+		panel.appendUser("summarize src/engine/tui.ts");
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "I'll read the file.",
+			partialText: "I'll read the file.",
+		});
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "I'll read the file." }] } as never,
+		});
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "read",
+			args: { path: "src/engine/tui.ts" },
+		});
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "read",
+			result: "/** Tiny terminal helpers. */",
+			isError: false,
+		});
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "The file is a small TUI helper module.",
+			partialText: "The file is a small TUI helper module.",
+		});
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "The file is a small TUI helper module." }],
+			} as never,
+		});
+		panel.applyEvent({ type: "agent_end", messages: [] });
+
+		const text = strip(panel.render(80).join("\n"));
+		const preToolIdx = text.indexOf("I'll read the file.");
+		const toolIdx = text.indexOf("tool: read");
+		const postToolIdx = text.indexOf("The file is a small TUI helper module.");
+		ok(preToolIdx >= 0, `missing pre-tool text: ${text}`);
+		ok(toolIdx > preToolIdx, `tool call must follow pre-tool text: ${text}`);
+		ok(
+			postToolIdx > toolIdx,
+			`post-tool summary must follow tool call, got order pre=${preToolIdx} tool=${toolIdx} post=${postToolIdx}: ${text}`,
+		);
+	});
+
+	it("renders tool call inline even when only post-tool text is emitted", () => {
+		// Some models skip the pre-tool narration. In that case the tool
+		// block is the first rendered segment and the post-tool summary
+		// follows it; there must be no stray placeholder or `clio:` prefix
+		// duplicated between them.
+		const panel = createChatPanel();
+		panel.appendUser("read it");
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-2",
+			toolName: "read",
+			args: { path: "x" },
+		});
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-2",
+			toolName: "read",
+			result: "file body",
+			isError: false,
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "Summary here.", partialText: "Summary here." });
+		panel.applyEvent({ type: "agent_end", messages: [] });
+
+		const text = strip(panel.render(80).join("\n"));
+		const toolIdx = text.indexOf("tool: read");
+		const summaryIdx = text.indexOf("Summary here.");
+		ok(toolIdx >= 0, `missing tool line: ${text}`);
+		ok(summaryIdx > toolIdx, `post-tool summary must follow tool call: ${text}`);
+		ok(!text.includes("clio: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
 	it("shows a working placeholder after assistant message_start before first token", () => {
