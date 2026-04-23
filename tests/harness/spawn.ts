@@ -1,5 +1,5 @@
 import { type SpawnOptions, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,29 +24,48 @@ export function runCli(args: ReadonlyArray<string>, opts: RunOptions = {}): Prom
 	const spawnOpts: SpawnOptions = {
 		cwd: opts.cwd ?? REPO_ROOT,
 		env: { ...process.env, ...(opts.env ?? {}) },
-		stdio: ["pipe", "pipe", "pipe"],
 	};
 	const timeoutMs = opts.timeoutMs ?? 15_000;
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, ...args], spawnOpts);
-		let stdout = "";
-		let stderr = "";
+		const captureDir = mkdtempSync(join(tmpdir(), "clio-runcli-"));
+		const stdoutPath = join(captureDir, "stdout.txt");
+		const stderrPath = join(captureDir, "stderr.txt");
+		const stdoutFd = openSync(stdoutPath, "w");
+		const stderrFd = openSync(stderrPath, "w");
+		const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
+			...spawnOpts,
+			stdio: ["pipe", stdoutFd, stderrFd],
+		});
+		let closedFds = false;
+		const closeFds = (): void => {
+			if (closedFds) return;
+			closedFds = true;
+			closeSync(stdoutFd);
+			closeSync(stderrFd);
+		};
+		const cleanup = (): void => {
+			try {
+				rmSync(captureDir, { recursive: true, force: true });
+			} catch {
+				// best-effort
+			}
+		};
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			reject(new Error(`runCli timeout after ${timeoutMs}ms: ${args.join(" ")}`));
 		}, timeoutMs);
-		child.stdout?.on("data", (chunk: Buffer) => {
-			stdout += chunk.toString("utf8");
-		});
-		child.stderr?.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString("utf8");
-		});
 		child.on("error", (err) => {
 			clearTimeout(timer);
+			closeFds();
+			cleanup();
 			reject(err);
 		});
 		child.on("close", (code, signal) => {
 			clearTimeout(timer);
+			closeFds();
+			const stdout = readFileSync(stdoutPath, "utf8");
+			const stderr = readFileSync(stderrPath, "utf8");
+			cleanup();
 			resolve({ code, signal, stdout, stderr });
 		});
 		if (opts.input !== undefined) {

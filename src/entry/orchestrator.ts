@@ -26,7 +26,11 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
-import { VALID_THINKING_LEVELS, availableThinkingLevels } from "../domains/providers/index.js";
+import {
+	VALID_THINKING_LEVELS,
+	availableThinkingLevels,
+	resolveModelCapabilities,
+} from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -191,13 +195,17 @@ export function advanceScopedTarget(
 	return { endpoint, model: endpointDescriptor?.defaultModel ?? null };
 }
 
-function cycleScoped(direction: "forward" | "backward"): void {
-	const current = readSettings();
+function cycleScoped(
+	direction: "forward" | "backward",
+	readCurrent: () => Readonly<ClioSettings> = readSettings,
+	persist: (next: ClioSettings) => void = writeSettings,
+): void {
+	const current = structuredClone(readCurrent());
 	const next = advanceScopedTarget(current, direction);
 	if (!next) return;
 	current.orchestrator.endpoint = next.endpoint;
 	current.orchestrator.model = next.model;
-	writeSettings(current);
+	persist(current);
 }
 
 function resolveRepoRoot(): string | null {
@@ -294,6 +302,19 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
+	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
+	const persistSettings = (next: ClioSettings): void => {
+		if (config?.set) {
+			config.set(next);
+			return;
+		}
+		writeSettings(next);
+	};
+	const updateSettings = (mutate: (current: ClioSettings) => void): void => {
+		const current = getCurrentSettings();
+		mutate(current);
+		persistSettings(current);
+	};
 
 	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
 	if (resumeId && session) {
@@ -386,34 +407,35 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			: {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		onSetThinkingLevel: (level) => {
-			const current = readSettings();
-			current.orchestrator.thinkingLevel = level;
-			writeSettings(current);
+			updateSettings((current) => {
+				current.orchestrator.thinkingLevel = level;
+			});
 		},
 		onCycleThinking: () => {
-			const current = readSettings();
+			const current = getCurrentSettings();
 			const status = providers.list().find((entry) => entry.endpoint.id === current.orchestrator.endpoint);
 			const available = status
-				? availableThinkingLevels(status.capabilities, {
+				? availableThinkingLevels(resolveModelCapabilities(status, current.orchestrator.model, providers.knowledgeBase), {
 						runtimeId: status.runtime?.id ?? status.endpoint.runtime,
 						...(current.orchestrator.model ? { modelId: current.orchestrator.model } : {}),
 					})
 				: (["off"] as ThinkingLevel[]);
-			current.orchestrator.thinkingLevel = advanceThinkingLevel(current.orchestrator.thinkingLevel ?? "off", available);
-			writeSettings(current);
+			updateSettings((next) => {
+				next.orchestrator.thinkingLevel = advanceThinkingLevel(next.orchestrator.thinkingLevel ?? "off", available);
+			});
 		},
 		onSelectModel: ({ endpoint, model }) => {
-			const current = readSettings();
-			current.orchestrator.endpoint = endpoint;
-			current.orchestrator.model = model;
-			writeSettings(current);
+			updateSettings((current) => {
+				current.orchestrator.endpoint = endpoint;
+				current.orchestrator.model = model;
+			});
 		},
 		onSetScope: (scope) => {
-			const current = readSettings();
-			current.scope = Array.from(scope);
-			writeSettings(current);
+			updateSettings((current) => {
+				current.scope = Array.from(scope);
+			});
 		},
-		writeSettings: (next) => writeSettings(next),
+		writeSettings: (next) => persistSettings(next),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {
@@ -442,8 +464,8 @@ export async function bootOrchestrator(): Promise<BootResult> {
 					},
 				}
 			: {}),
-		onCycleScopedModelForward: () => cycleScoped("forward"),
-		onCycleScopedModelBackward: () => cycleScoped("backward"),
+		onCycleScopedModelForward: () => cycleScoped("forward", getCurrentSettings, persistSettings),
+		onCycleScopedModelBackward: () => cycleScoped("backward", getCurrentSettings, persistSettings),
 		...(harness ? { harness } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);

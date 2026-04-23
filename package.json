@@ -20,6 +20,7 @@
 	"files": [
 		"dist",
 		"src/domains/agents/builtins/**",
+		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
 		"README.md",
 		"LICENSE",

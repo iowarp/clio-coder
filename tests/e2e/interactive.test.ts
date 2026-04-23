@@ -154,6 +154,79 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("/model shows llama.cpp wire model ids and model-specific context windows", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		writeSettings(
+			configDir,
+			baseSettingsYaml({
+				endpoints: [
+					"  - id: mini",
+					"    runtime: llamacpp",
+					"    url: http://127.0.0.1:8080",
+					"    auth:",
+					"      apiKeyRef: llamacpp",
+					"    defaultModel: gemma-4-26B-A4B-it-Q4_K_M",
+					"    wireModels:",
+					"      - Qwen3.6-35B-A3B-UD-Q4_K_XL",
+					"      - gemma-4-26B-A4B-it-Q4_K_M",
+				].join("\n"),
+				orchestrator: ["  endpoint: mini", "  model: gemma-4-26B-A4B-it-Q4_K_M", "  thinkingLevel: off"].join("\n"),
+			}),
+		);
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/model\r");
+			await p.expect(/Qwen3\.6-35B-A3B-UD-Q4_K_XL/, 10_000);
+			await p.expect(/262kctx/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("model selection is immediately active when reopening the picker", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		writeSettings(
+			configDir,
+			baseSettingsYaml({
+				endpoints: [
+					"  - id: openai-codex",
+					"    runtime: openai-codex",
+					"    defaultModel: gpt-5.4",
+					"    wireModels:",
+					"      - gpt-5.4",
+					"      - gpt-5.4-mini",
+				].join("\n"),
+				orchestrator: ["  endpoint: openai-codex", "  model: gpt-5.4", "  thinkingLevel: low"].join("\n"),
+			}),
+		);
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+IOWarp/, 15_000);
+			p.send("/model\r");
+			await p.expect(/→ .*gpt-5\.4/, 10_000);
+			p.send("\x1b[B");
+			p.send("\r");
+			await new Promise((r) => setTimeout(r, 25));
+			p.send("/model\r");
+			await p.expect(/→ .*gpt-5\.4-mini/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("/connect opens the provider selector, Esc closes, /quit exits clean", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {

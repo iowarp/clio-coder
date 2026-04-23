@@ -7,6 +7,7 @@ import type { ChangeKind, ConfigDiff } from "./classify.js";
  */
 export interface ConfigContract {
 	get(): Readonly<ClioSettings>;
+	set?(next: ClioSettings): void;
 	onChange(
 		kind: ChangeKind,
 		listener: (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void,

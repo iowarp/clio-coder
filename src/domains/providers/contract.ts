@@ -31,6 +31,8 @@ export interface EndpointStatus {
 	health: EndpointHealth;
 	/** Merged: defaults + knowledge base + probe + user override. */
 	capabilities: CapabilityFlags;
+	/** Probe-only capabilities preserved separately for per-model synthesis in the UI. */
+	probeCapabilities?: Partial<CapabilityFlags> | null;
 	/** Ids returned by the last successful probeModels() call. */
 	discoveredModels: ReadonlyArray<string>;
 }

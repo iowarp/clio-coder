@@ -1,6 +1,11 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
-import { type CapabilityFlags, type ProvidersContract, availableThinkingLevels } from "../domains/providers/index.js";
+import {
+	type CapabilityFlags,
+	type ProvidersContract,
+	availableThinkingLevels,
+	resolveModelCapabilities,
+} from "../domains/providers/index.js";
 import { Text } from "../engine/tui.js";
 import type { HarnessSnapshot } from "../harness/state.js";
 
@@ -43,7 +48,7 @@ function resolveOrchestratorTarget(
 		wireModelId,
 		runtimeId: status?.runtime?.id ?? status?.endpoint.runtime ?? "",
 		healthStatus: status?.health.status ?? "unknown",
-		capabilities: status?.capabilities ?? null,
+		capabilities: status ? resolveModelCapabilities(status, wireModelId, providers.knowledgeBase) : null,
 	};
 }
 

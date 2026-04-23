@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -136,8 +136,119 @@ describe("interactive/model-selector", () => {
 			result.refs.map((ref) => `${ref.endpoint}/${ref.model}`),
 			["openai/gpt-5.4", "openai/gpt-5.4-mini", "local/qwq-local"],
 		);
-		ok(result.items[0]?.label.includes("OpenAI Codex") ?? false);
+		ok(result.items[0]?.label.includes("gpt-5.4") ?? false);
 		ok(result.items[1]?.label.includes("★") ?? false);
+		ok(result.items[0]?.description?.includes("OpenAI Codex") ?? false);
 		ok(result.items[0]?.description?.includes("endpoint=openai") ?? false);
+	});
+
+	it("resolves per-row knowledge-base capabilities for wire models instead of the endpoint default model", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "mini";
+		settings.orchestrator.model = "gemma-4-26B-A4B-it-Q4_K_M";
+		const providers: ProvidersContract = {
+			list: () => [
+				{
+					endpoint: {
+						id: "mini",
+						runtime: "llamacpp",
+						defaultModel: "gemma-4-26B-A4B-it-Q4_K_M",
+						wireModels: ["Qwen3.6-35B-A3B-UD-Q4_K_XL", "gemma-4-26B-A4B-it-Q4_K_M"],
+					},
+					runtime: {
+						id: "llamacpp",
+						displayName: "llama.cpp (OpenAI-compat)",
+						kind: "http",
+						apiFamily: "openai-completions",
+						auth: "api-key",
+						defaultCapabilities: {
+							...EMPTY_CAPABILITIES,
+							chat: true,
+							tools: true,
+							contextWindow: 8192,
+							maxTokens: 4096,
+						},
+						synthesizeModel: () => {
+							throw new Error("unused");
+						},
+					},
+					available: true,
+					reason: "store:api_key:llamacpp",
+					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 10 },
+					capabilities: {
+						...EMPTY_CAPABILITIES,
+						chat: true,
+						tools: true,
+						contextWindow: 8192,
+						maxTokens: 4096,
+					},
+					probeCapabilities: null,
+					discoveredModels: [],
+				},
+			],
+			getEndpoint: () => null,
+			getRuntime: () => null,
+			probeAll: async () => undefined,
+			probeAllLive: async () => undefined,
+			probeEndpoint: async () => null,
+			auth: {
+				statusForTarget: () => ({
+					providerId: "llamacpp",
+					available: true,
+					credentialType: "api_key",
+					source: "stored-api-key",
+					detail: "llamacpp",
+				}),
+				resolveForTarget: async () => {
+					throw new Error("unused");
+				},
+				getStored: () => null,
+				listStored: () => [],
+				setApiKey: () => undefined,
+				remove: () => undefined,
+				login: async () => undefined,
+				logout: () => undefined,
+				getOAuthProviders: () => [],
+			},
+			credentials: {
+				hasKey: () => true,
+				get: () => "llamacpp",
+				set: () => undefined,
+				remove: () => undefined,
+			},
+			knowledgeBase: {
+				lookup: (modelId) =>
+					modelId.includes("Qwen3.6")
+						? {
+								entry: {
+									family: "qwen3",
+									matchPatterns: ["qwen3"],
+									capabilities: {
+										chat: true,
+										tools: true,
+										reasoning: true,
+										vision: false,
+										audio: false,
+										embeddings: false,
+										rerank: false,
+										fim: false,
+										contextWindow: 262144,
+										maxTokens: 8192,
+									},
+								},
+								matchKind: "family",
+							}
+						: null,
+				entries: () => [],
+			},
+		};
+
+		const result = buildModelItems({ settings, providers });
+		strictEqual(result.items.length, 2);
+		ok(result.items[0]?.label.includes("Qwen3.6-35B-A3B-UD-Q4_K_XL") ?? false);
+		ok(result.items[0]?.description?.includes("262kctx") ?? false);
+		ok(result.items[0]?.description?.includes("R") ?? false);
+		ok(result.items[1]?.label.includes("gemma-4-26B-A4B-it-Q4_K_M") ?? false);
+		ok(result.items[1]?.description?.includes("8kctx") ?? false);
 	});
 });

@@ -1,6 +1,6 @@
 import { Value } from "@sinclair/typebox/value";
 import { BusChannels } from "../../core/bus-events.js";
-import { type ClioSettings, readSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -78,6 +78,18 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		get() {
 			if (!snapshot) throw new Error("config domain not started");
 			return snapshot;
+		},
+		set(next) {
+			if (!snapshot) throw new Error("config domain not started");
+			const previous = snapshot;
+			writeSettings(next);
+			const normalized = readSettings();
+			validate(normalized);
+			snapshot = normalized;
+			const diff = diffSettings(previous, normalized);
+			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
+			if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: normalized });
+			if (diff.restartRequired.length > 0) dispatch("restartRequired", { diff, settings: normalized });
 		},
 		onChange(kind, listener) {
 			listeners.get(kind)?.add(listener);
