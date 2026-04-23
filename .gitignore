@@ -17,3 +17,6 @@ scripts/orch/
 NEXT-SESSION.md
 CODEX.md
 CLAUDE.md
+
+# Session-local test rubric driven during exploratory TUI testing.
+docs/superpowers/TEST-RUBRIC.md

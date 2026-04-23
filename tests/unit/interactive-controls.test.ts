@@ -1,6 +1,13 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CTRL_C_DOUBLE_TAP_MS, type CtrlCAction, resolveCtrlCAction } from "../../src/interactive/index.js";
+import type { ClioKeybinding } from "../../src/domains/config/keybindings.js";
+import {
+	CTRL_C_DOUBLE_TAP_MS,
+	type CtrlCAction,
+	type OverlayKeyDeps,
+	resolveCtrlCAction,
+	routeOverlayKey,
+} from "../../src/interactive/index.js";
 
 function classify(overrides: Partial<Parameters<typeof resolveCtrlCAction>[0]> = {}): CtrlCAction {
 	return resolveCtrlCAction({
@@ -53,5 +60,57 @@ describe("interactive ctrl+c controls", () => {
 			}),
 			"arm-shutdown",
 		);
+	});
+});
+
+describe("routeOverlayKey dispatch-board toggle", () => {
+	const DISPATCH_TOGGLE = "\x02"; // ctrl+b
+
+	function buildDeps(): { deps: OverlayKeyDeps; closed: { count: number }; shutdown: { count: number } } {
+		const closed = { count: 0 };
+		const shutdown = { count: 0 };
+		const deps: OverlayKeyDeps = {
+			cancelSuper: () => {},
+			confirmSuper: () => {},
+			now: () => 0,
+			closeOverlay: () => {
+				closed.count += 1;
+			},
+			requestShutdown: () => {
+				shutdown.count += 1;
+			},
+		};
+		return { deps, closed, shutdown };
+	}
+
+	function matchesFactory(id: ClioKeybinding, data: string): (d: string, i: ClioKeybinding) => boolean {
+		return (d, i) => i === id && d === data;
+	}
+
+	it("closes the dispatch board when the toggle key is pressed while the overlay is open", () => {
+		const { deps, closed, shutdown } = buildDeps();
+		const matches = matchesFactory("clio.dispatchBoard.toggle", DISPATCH_TOGGLE);
+		const consumed = routeOverlayKey(DISPATCH_TOGGLE, "dispatch-board", deps, matches);
+		strictEqual(consumed, true);
+		strictEqual(closed.count, 1);
+		strictEqual(shutdown.count, 0);
+	});
+
+	it("still routes Esc through the existing dispatch-board branch (closeOverlay called once)", () => {
+		const { deps, closed } = buildDeps();
+		const matches = matchesFactory("clio.dispatchBoard.toggle", DISPATCH_TOGGLE);
+		const consumed = routeOverlayKey("\x1b", "dispatch-board", deps, matches);
+		strictEqual(consumed, true);
+		strictEqual(closed.count, 1);
+	});
+
+	it("exit keybinding still wins over dispatch-board toggle", () => {
+		const { deps, shutdown } = buildDeps();
+		// Simulate a matcher where data matches both exit and toggle; exit is
+		// checked first in routeOverlayKey, so shutdown wins.
+		const matches = (_data: string, id: ClioKeybinding) => id === "clio.exit";
+		const consumed = routeOverlayKey(DISPATCH_TOGGLE, "dispatch-board", deps, matches);
+		strictEqual(consumed, true);
+		strictEqual(shutdown.count, 1);
 	});
 });
