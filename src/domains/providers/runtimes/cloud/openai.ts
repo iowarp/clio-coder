@@ -24,6 +24,7 @@ const openaiRuntime: RuntimeDescriptor = {
 	id: "openai",
 	displayName: "OpenAI",
 	kind: "http",
+	tier: "cloud",
 	apiFamily: "openai-responses",
 	auth: "api-key",
 	credentialsEnvVar: "OPENAI_API_KEY",

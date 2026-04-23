@@ -39,6 +39,7 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 	id: "llamacpp-rerank",
 	displayName: "llama.cpp (rerank)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	defaultCapabilities,

@@ -25,6 +25,7 @@ const lemonadeAnthropicRuntime: RuntimeDescriptor = {
 	id: "lemonade-anthropic",
 	displayName: "Lemonade (Anthropic-compat)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "anthropic-messages",
 	auth: "api-key",
 	defaultCapabilities,

@@ -24,6 +24,7 @@ const openrouterRuntime: RuntimeDescriptor = {
 	id: "openrouter",
 	displayName: "OpenRouter",
 	kind: "http",
+	tier: "cloud",
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "OPENROUTER_API_KEY",

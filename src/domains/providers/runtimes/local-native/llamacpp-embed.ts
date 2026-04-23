@@ -79,6 +79,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 	id: "llamacpp-embed",
 	displayName: "llama.cpp (embeddings)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	defaultCapabilities,

@@ -6,6 +6,7 @@ import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, Rera
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 
 export type RuntimeKind = "http" | "subprocess";
+export type RuntimeTier = "protocol" | "cloud" | "local-native" | "cli-stub";
 
 export type RuntimeApiFamily =
 	| "openai-completions"
@@ -47,6 +48,7 @@ export interface RuntimeDescriptor {
 	id: string;
 	displayName: string;
 	kind: RuntimeKind;
+	tier?: RuntimeTier;
 	apiFamily: RuntimeApiFamily;
 	auth: RuntimeAuth;
 	credentialsEnvVar?: string;

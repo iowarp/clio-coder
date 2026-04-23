@@ -28,6 +28,7 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	id: "claude-code-cli",
 	displayName: "Claude Code CLI",
 	kind: "subprocess",
+	tier: "cli-stub",
 	apiFamily: "subprocess-claude-code",
 	auth: "oauth",
 	defaultCapabilities,
