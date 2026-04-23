@@ -10,6 +10,7 @@ import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
 import { runSetupCommand } from "./setup.js";
 import { parseFlags, printError } from "./shared.js";
+import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
 
@@ -21,6 +22,7 @@ Usage:
   clio doctor               run environment diagnostics
   clio setup                create, edit, or remove endpoints
   clio install              bootstrap Clio config/data/cache directories
+  clio uninstall            remove or reset Clio state directories
   clio upgrade              upgrade clio and run pending state migrations
   clio providers            list endpoint status, health, capabilities
   clio list-models          list discovered models per endpoint
@@ -68,6 +70,8 @@ async function main(argv: string[]): Promise<number> {
 			return runSetupCommand(argv.slice(1));
 		case "install":
 			return runInstallCommand();
+		case "uninstall":
+			return runUninstallCommand(argv.slice(1));
 		case "upgrade":
 			return runUpgradeCommand(argv.slice(1));
 		case "version":
