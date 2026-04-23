@@ -15,3 +15,5 @@ scripts/orch/
 
 # Local session handoff notes (not shipped; regenerated per session).
 NEXT-SESSION.md
+CODEX.md
+CLAUDE.md
