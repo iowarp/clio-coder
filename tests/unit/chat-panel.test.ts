@@ -36,6 +36,16 @@ describe("chat-panel active entry update", () => {
 		ok(text.includes("clio: answer"), `expected assistant text, got: ${text}`);
 	});
 
+	it("shows a working placeholder after assistant message_start before first token", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
+		const text = strip(panel.render(80).join("\n"));
+		ok(text.includes("clio: [working]"), `expected working placeholder, got: ${text}`);
+	});
+
 	it("renders prior user + assistant entries unchanged after a new user turn", () => {
 		const panel = createChatPanel();
 		panel.appendUser("first");

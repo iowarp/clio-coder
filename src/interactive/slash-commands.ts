@@ -16,6 +16,8 @@ export type SlashCommand =
 	| { kind: "run"; agentId: string; task: string }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
+	| { kind: "connect"; target?: string }
+	| { kind: "disconnect"; target?: string }
 	| { kind: "cost" }
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
@@ -105,6 +107,8 @@ export interface SlashCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	openProviders: () => void;
+	openConnect: (target?: string) => void;
+	openDisconnect: (target?: string) => void;
 	openCost: () => void;
 	openReceipts: () => void;
 	openThinking: () => void;
@@ -220,6 +224,48 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "connect",
+		description: "Connect a provider or endpoint",
+		kinds: ["connect"],
+		match(trimmed) {
+			if (trimmed === "/connect" || trimmed === "/login") return { kind: "connect" };
+			if (trimmed.startsWith("/connect ")) {
+				const target = trimmed.slice("/connect ".length).trim();
+				return { kind: "connect", ...(target.length > 0 ? { target } : {}) };
+			}
+			if (trimmed.startsWith("/login ")) {
+				const target = trimmed.slice("/login ".length).trim();
+				return { kind: "connect", ...(target.length > 0 ? { target } : {}) };
+			}
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "connect") return;
+			ctx.openConnect(command.target);
+		},
+	},
+	{
+		name: "disconnect",
+		description: "Disconnect a provider or endpoint",
+		kinds: ["disconnect"],
+		match(trimmed) {
+			if (trimmed === "/disconnect" || trimmed === "/logout") return { kind: "disconnect" };
+			if (trimmed.startsWith("/disconnect ")) {
+				const target = trimmed.slice("/disconnect ".length).trim();
+				return { kind: "disconnect", ...(target.length > 0 ? { target } : {}) };
+			}
+			if (trimmed.startsWith("/logout ")) {
+				const target = trimmed.slice("/logout ".length).trim();
+				return { kind: "disconnect", ...(target.length > 0 ? { target } : {}) };
+			}
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "disconnect") return;
+			ctx.openDisconnect(command.target);
+		},
+	},
+	{
 		name: "cost",
 		description: "Open cost overlay",
 		kinds: ["cost"],
@@ -286,7 +332,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Select orchestrator model",
 		kinds: ["model"],
 		match(trimmed) {
-			return trimmed === "/model" ? { kind: "model" } : null;
+			return trimmed === "/model" || trimmed === "/models" ? { kind: "model" } : null;
 		},
 		handle(_command, ctx) {
 			ctx.openModel();

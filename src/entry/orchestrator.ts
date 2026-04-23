@@ -25,8 +25,8 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
-import type { EndpointDescriptor, ProvidersContract } from "../domains/providers/index.js";
-import { VALID_THINKING_LEVELS } from "../domains/providers/index.js";
+import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
+import { VALID_THINKING_LEVELS, availableThinkingLevels } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -70,14 +70,23 @@ function resolveEndpoint(
 	return providers.getEndpoint(endpointId);
 }
 
-function resolveApiKeyForEndpoint(endpoint: EndpointDescriptor, providers: ProvidersContract): string | undefined {
+export function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
+	const levels = available.length > 0 ? available : VALID_THINKING_LEVELS;
+	if (!levels.includes(current)) return levels[0] ?? "off";
+	const normalized = current;
+	const idx = levels.indexOf(normalized);
+	return levels[(idx + 1) % levels.length] ?? "off";
+}
+
+async function resolveApiKeyForEndpoint(
+	endpoint: EndpointDescriptor,
+	providers: ProvidersContract,
+): Promise<string | undefined> {
 	const runtime = providers.getRuntime(endpoint.runtime);
-	const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime?.credentialsEnvVar;
-	if (envVar) {
-		const fromEnv = process.env[envVar]?.trim();
-		if (fromEnv && fromEnv.length > 0) return fromEnv;
-	}
-	return undefined;
+	if (!runtime) return undefined;
+	if (runtime.auth !== "api-key" && runtime.auth !== "oauth") return undefined;
+	const resolved = await providers.auth.resolveForTarget(endpoint, runtime);
+	return resolved.apiKey;
 }
 
 function synthesizeOrchestratorModel(
@@ -94,7 +103,10 @@ function synthesizeOrchestratorModel(
 	}
 }
 
-function resolveCompactionModel(settings: ClioSettings, providers: ProvidersContract): CompactionResolution | null {
+async function resolveCompactionModel(
+	settings: ClioSettings,
+	providers: ProvidersContract,
+): Promise<CompactionResolution | null> {
 	const endpointId = settings.orchestrator?.endpoint ?? null;
 	const wireModelId = settings.orchestrator?.model ?? null;
 	if (!endpointId || !wireModelId) return null;
@@ -102,7 +114,7 @@ function resolveCompactionModel(settings: ClioSettings, providers: ProvidersCont
 	if (!endpoint) return null;
 	const model = synthesizeOrchestratorModel(providers, endpoint, wireModelId);
 	if (!model) return null;
-	const apiKey = resolveApiKeyForEndpoint(endpoint, providers);
+	const apiKey = await resolveApiKeyForEndpoint(endpoint, providers);
 	const resolution: CompactionResolution = { model, endpointId };
 	if (apiKey !== undefined) resolution.apiKey = apiKey;
 	return resolution;
@@ -123,7 +135,7 @@ async function runCompactionFlow(
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
-	const resolved = resolveCompactionModel(settings, providers);
+	const resolved = await resolveCompactionModel(settings, providers);
 	if (!resolved) {
 		throw new Error("no model configured; set orchestrator.endpoint + orchestrator.model");
 	}
@@ -150,18 +162,41 @@ async function runCompactionFlow(
 
 /**
  * Ctrl+P / Shift+Ctrl+P step the orchestrator through the `scope` list of
- * endpoint ids. Absent scope is a no-op so unconfigured users feel nothing.
+ * endpoint ids or endpoint/model refs. Absent scope is a no-op so unconfigured
+ * users feel nothing.
  */
-function cycleScoped(direction: "forward" | "backward"): void {
-	const current = readSettings();
-	const scope = current.scope ?? [];
-	if (scope.length === 0) return;
-	const active = current.orchestrator.endpoint ?? "";
-	const idx = scope.findIndex((id) => id === active);
+export function advanceScopedTarget(
+	settings: Readonly<ClioSettings>,
+	direction: "forward" | "backward",
+): { endpoint: string; model: string | null } | null {
+	const scope = settings.scope ?? [];
+	if (scope.length === 0) return null;
+	const activeEndpoint = settings.orchestrator.endpoint ?? "";
+	const activeModel = settings.orchestrator.model ?? "";
+	const activeCombinedRef =
+		activeEndpoint.length > 0 && activeModel.length > 0 ? `${activeEndpoint}/${activeModel}` : "";
+	const idx = scope.findIndex((entry) => entry === activeCombinedRef || entry === activeEndpoint);
 	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : scope.length - 1);
 	const next = scope[base % scope.length];
+	if (!next) return null;
+	const [endpoint, ...modelParts] = next.split("/");
+	if (!endpoint) return null;
+	if (modelParts.length > 0) {
+		return { endpoint, model: modelParts.join("/") };
+	}
+	if (activeEndpoint === endpoint) {
+		return { endpoint, model: activeModel || null };
+	}
+	const endpointDescriptor = settings.endpoints.find((entry) => entry.id === endpoint);
+	return { endpoint, model: endpointDescriptor?.defaultModel ?? null };
+}
+
+function cycleScoped(direction: "forward" | "backward"): void {
+	const current = readSettings();
+	const next = advanceScopedTarget(current, direction);
 	if (!next) return;
-	current.orchestrator.endpoint = next;
+	current.orchestrator.endpoint = next.endpoint;
+	current.orchestrator.model = next.model;
 	writeSettings(current);
 }
 
@@ -357,9 +392,14 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		},
 		onCycleThinking: () => {
 			const current = readSettings();
-			const idx = VALID_THINKING_LEVELS.indexOf(current.orchestrator.thinkingLevel ?? "off");
-			const next = VALID_THINKING_LEVELS[(idx + 1) % VALID_THINKING_LEVELS.length] ?? "off";
-			current.orchestrator.thinkingLevel = next;
+			const status = providers.list().find((entry) => entry.endpoint.id === current.orchestrator.endpoint);
+			const available = status
+				? availableThinkingLevels(status.capabilities, {
+						runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+						...(current.orchestrator.model ? { modelId: current.orchestrator.model } : {}),
+					})
+				: (["off"] as ThinkingLevel[]);
+			current.orchestrator.thinkingLevel = advanceThinkingLevel(current.orchestrator.thinkingLevel ?? "off", available);
 			writeSettings(current);
 		},
 		onSelectModel: ({ endpoint, model }) => {

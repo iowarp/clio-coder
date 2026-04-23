@@ -12,6 +12,7 @@ type TranscriptEntry =
 			text: string;
 			thinking: string;
 			tools: ToolLine[];
+			pending: boolean;
 	  };
 
 type ToolLine = {
@@ -87,7 +88,13 @@ function renderEntryLines(entry: TranscriptEntry): string[] {
 	if (thinking.length > 0) {
 		lines.push(`${ANSI_DIM_ITALIC}${thinking}${ANSI_RESET}`);
 	}
-	lines.push(`clio: ${entry.text.trim().length > 0 ? entry.text : ""}`);
+	const body =
+		entry.text.trim().length > 0
+			? entry.text
+			: entry.pending && entry.tools.length === 0 && thinking.length === 0
+				? "[working]"
+				: "";
+	lines.push(`clio: ${body}`);
 	for (const tool of entry.tools) {
 		lines.push(`  tool: ${tool.name}(${previewValue(tool.args, 48)}) → ${tool.preview}`);
 	}
@@ -130,6 +137,7 @@ export function createChatPanel(): ChatPanel {
 			text: "",
 			thinking: "",
 			tools: [],
+			pending: false,
 		};
 		transcript.push(entry);
 		return entry;
@@ -147,17 +155,28 @@ export function createChatPanel(): ChatPanel {
 		},
 		applyEvent(event: ChatLoopEvent): void {
 			if (event.type === "text_delta") {
-				ensureAssistant().text += event.delta;
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				assistant.text += event.delta;
 				sync();
 				return;
 			}
 			if (event.type === "thinking_delta") {
-				ensureAssistant().thinking += event.delta;
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				assistant.thinking += event.delta;
+				sync();
+				return;
+			}
+			if (event.type === "message_start" && event.message.role === "assistant") {
+				ensureAssistant().pending = true;
 				sync();
 				return;
 			}
 			if (event.type === "tool_execution_start") {
-				ensureAssistant().tools.push({
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				assistant.tools.push({
 					id: event.toolCallId,
 					name: event.toolName,
 					args: event.args,
@@ -185,9 +204,18 @@ export function createChatPanel(): ChatPanel {
 				const thinking = extractAssistantThinking(event.message);
 				if (text.length === 0 && thinking.length === 0) return;
 				const assistant = ensureAssistant();
+				assistant.pending = false;
 				if (thinking.length > 0) assistant.thinking = thinking;
 				if (text.length > 0) assistant.text = text;
 				sync();
+				return;
+			}
+			if (event.type === "agent_end") {
+				const assistant = transcript[transcript.length - 1];
+				if (assistant && assistant.role === "assistant" && assistant.pending) {
+					assistant.pending = false;
+					sync();
+				}
 			}
 		},
 		render(width: number): string[] {

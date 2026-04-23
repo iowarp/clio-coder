@@ -88,8 +88,12 @@ export function resolveAvailableThinkingLevels(
 	settings: Readonly<ClioSettings>,
 ): ReadonlyArray<ThinkingLevel> {
 	const endpointId = settings.orchestrator.endpoint?.trim();
+	const wireModelId = settings.orchestrator.model?.trim();
 	if (!endpointId) return ["off"];
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
 	if (!status) return ["off"];
-	return availableThinkingLevels(status.capabilities);
+	return availableThinkingLevels(status.capabilities, {
+		runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+		...(wireModelId ? { modelId: wireModelId } : {}),
+	});
 }

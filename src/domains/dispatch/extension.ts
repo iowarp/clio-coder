@@ -247,6 +247,7 @@ export function createDispatchBundle(
 				endpoint: target.endpoint,
 				runtimeId: target.runtime.id,
 				wireModelId: target.wireModelId,
+				thinkingLevel: target.thinkingLevel,
 				allowedTools,
 				mode: workerMode,
 			};

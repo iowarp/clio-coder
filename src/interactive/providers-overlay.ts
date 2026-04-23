@@ -68,6 +68,10 @@ function formatHealthRow(status: EndpointStatus): string {
 	return `    health: ${healthTag(status)}  latency: ${latencyTag(status)}`;
 }
 
+function formatAuthRow(authText: string): string {
+	return `    auth: ${authText}`;
+}
+
 function formatCapabilitiesRow(caps: CapabilityFlags): string {
 	const ctx = caps.contextWindow > 0 ? `${caps.contextWindow}ctx` : "?ctx";
 	const max = caps.maxTokens > 0 ? `${caps.maxTokens}max` : "?max";
@@ -102,7 +106,12 @@ function resolveContentWidth(contentWidth?: number): number {
 
 export function formatProvidersOverlayLines(
 	statuses: ReadonlyArray<EndpointStatus>,
-	options?: { error?: string | null; selectedId?: string | null; contentWidth?: number },
+	options?: {
+		error?: string | null;
+		selectedId?: string | null;
+		contentWidth?: number;
+		authByEndpoint?: ReadonlyMap<string, string>;
+	},
 ): string[] {
 	const contentWidth = resolveContentWidth(options?.contentWidth);
 	const lines: string[] = [topBorder(contentWidth)];
@@ -118,6 +127,7 @@ export function formatProvidersOverlayLines(
 			lines.push(padContent(`${marker}${formatHeaderRow(status)}`, contentWidth));
 			lines.push(padContent(formatLocationRow(status), contentWidth));
 			lines.push(padContent(formatHealthRow(status), contentWidth));
+			lines.push(padContent(formatAuthRow(options?.authByEndpoint?.get(status.endpoint.id) ?? "-"), contentWidth));
 			lines.push(padContent(formatCapabilitiesRow(status.capabilities), contentWidth));
 			lines.push(padContent(formatReasonRow(status), contentWidth));
 			lines.push(padContent(formatDiscoveredRow(status), contentWidth));
@@ -131,18 +141,24 @@ export function formatProvidersOverlayLines(
 
 class ProvidersOverlayView implements Component {
 	constructor(
-		private getState: () => { statuses: ReadonlyArray<EndpointStatus>; error: string | null; selectedId: string | null },
+		private getState: () => {
+			statuses: ReadonlyArray<EndpointStatus>;
+			error: string | null;
+			selectedId: string | null;
+			authByEndpoint: ReadonlyMap<string, string>;
+		},
 	) {}
 
 	render(width: number): string[] {
 		if (width <= 4) {
 			return [truncateToWidth("Providers", width, "", true)];
 		}
-		const { statuses, error, selectedId } = this.getState();
+		const { statuses, error, selectedId, authByEndpoint } = this.getState();
 		return formatProvidersOverlayLines(statuses, {
 			error,
 			selectedId,
 			contentWidth: width - 4,
+			authByEndpoint,
 		});
 	}
 
@@ -168,8 +184,33 @@ export function openProvidersOverlay(
 	let statuses: ReadonlyArray<EndpointStatus> = providers.list();
 	let error: string | null = null;
 	let selectedId: string | null = statuses[0]?.endpoint.id ?? null;
+	const buildAuthMap = (): ReadonlyMap<string, string> => {
+		const out = new Map<string, string>();
+		for (const status of statuses) {
+			if (!status.runtime) {
+				out.set(status.endpoint.id, "unknown-runtime");
+				continue;
+			}
+			if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") {
+				out.set(status.endpoint.id, status.runtime.auth);
+				continue;
+			}
+			const auth = providers.auth.statusForTarget(status.endpoint, status.runtime);
+			if (!auth.available) {
+				out.set(status.endpoint.id, "disconnected");
+				continue;
+			}
+			if (auth.source === "environment") {
+				out.set(status.endpoint.id, auth.detail ? `env:${auth.detail}` : "environment");
+				continue;
+			}
+			out.set(status.endpoint.id, auth.source);
+		}
+		return out;
+	};
+	let authByEndpoint = buildAuthMap();
 
-	const view = new ProvidersOverlayView(() => ({ statuses, error, selectedId }));
+	const view = new ProvidersOverlayView(() => ({ statuses, error, selectedId, authByEndpoint }));
 	const box = new ProvidersOverlayOverlay(view, {
 		nextSelection: (direction) => {
 			if (statuses.length === 0) return;
@@ -219,6 +260,7 @@ export function openProvidersOverlay(
 	const unsubscribeHealth = options?.bus?.on(BusChannels.ProviderHealth, () => {
 		if (lifecycle.signal.aborted) return;
 		statuses = providers.list();
+		authByEndpoint = buildAuthMap();
 		tui.requestRender();
 	});
 
@@ -227,6 +269,7 @@ export function openProvidersOverlay(
 		loader.stop();
 		box.clear();
 		statuses = providers.list();
+		authByEndpoint = buildAuthMap();
 		error = nextError;
 		if (selectedId && !statuses.some((s) => s.endpoint.id === selectedId)) {
 			selectedId = statuses[0]?.endpoint.id ?? null;

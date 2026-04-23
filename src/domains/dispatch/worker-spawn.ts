@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { EndpointDescriptor } from "../providers/index.js";
+import type { ThinkingLevel } from "../providers/index.js";
 
 export interface WorkerSpec {
 	systemPrompt: string;
@@ -24,6 +25,7 @@ export interface WorkerSpec {
 	wireModelId: string;
 	sessionId?: string;
 	apiKey?: string;
+	thinkingLevel?: ThinkingLevel;
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
 }

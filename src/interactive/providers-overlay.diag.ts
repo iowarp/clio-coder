@@ -2,7 +2,7 @@ import type { EndpointStatus, ProvidersContract } from "../domains/providers/ind
 import { EMPTY_CAPABILITIES } from "../domains/providers/index.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../engine/tui.js";
 import { visibleWidth } from "../engine/tui.js";
-import { shouldPassCtrlCToProcess } from "./index.js";
+import { CTRL_C_DOUBLE_TAP_MS, resolveCtrlCAction } from "./index.js";
 import { formatProvidersOverlayLines, openProvidersOverlay } from "./providers-overlay.js";
 
 const failures: string[] = [];
@@ -76,19 +76,42 @@ function makeStatus(): EndpointStatus {
 
 async function main(): Promise<void> {
 	check(
-		"providers-overlay:ctrl-c-passes-through-when-open",
-		shouldPassCtrlCToProcess("\x03", "providers") === true,
-		String(shouldPassCtrlCToProcess("\x03", "providers")),
+		"providers-overlay:ctrl-c-closes-overlay-first",
+		resolveCtrlCAction({
+			overlayState: "providers",
+			streaming: false,
+			editorText: "",
+			lastCtrlCAt: 0,
+			now: 1_000,
+		}) === "close-overlay",
+		String(
+			resolveCtrlCAction({
+				overlayState: "providers",
+				streaming: false,
+				editorText: "",
+				lastCtrlCAt: 0,
+				now: 1_000,
+			}),
+		),
 	);
 	check(
-		"providers-overlay:ctrl-c-does-not-pass-through-when-closed",
-		shouldPassCtrlCToProcess("\x03", "closed") === false,
-		String(shouldPassCtrlCToProcess("\x03", "closed")),
-	);
-	check(
-		"providers-overlay:ctrl-c-release-does-not-retrigger-sigint",
-		shouldPassCtrlCToProcess("\x1b[99;5:3u", "providers") === false,
-		String(shouldPassCtrlCToProcess("\x1b[99;5:3u", "providers")),
+		"providers-overlay:ctrl-c-double-tap-escalates-to-shutdown",
+		resolveCtrlCAction({
+			overlayState: "closed",
+			streaming: false,
+			editorText: "",
+			lastCtrlCAt: 1_000,
+			now: 1_000 + CTRL_C_DOUBLE_TAP_MS - 1,
+		}) === "shutdown",
+		String(
+			resolveCtrlCAction({
+				overlayState: "closed",
+				streaming: false,
+				editorText: "",
+				lastCtrlCAt: 1_000,
+				now: 1_000 + CTRL_C_DOUBLE_TAP_MS - 1,
+			}),
+		),
 	);
 
 	const narrowLines = formatProvidersOverlayLines([makeStatus()], { contentWidth: 36 });
@@ -130,14 +153,14 @@ async function main(): Promise<void> {
 			probeEndpoint: async () => null,
 			auth: {
 				statusForTarget: () => ({
-					providerId: "synthetic",
+					providerId: "diag",
 					available: false,
 					credentialType: null,
 					source: "none",
 					detail: null,
 				}),
 				resolveForTarget: async () => ({
-					providerId: "synthetic",
+					providerId: "diag",
 					available: false,
 					credentialType: null,
 					source: "none",
