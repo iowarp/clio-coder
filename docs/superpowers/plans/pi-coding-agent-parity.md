@@ -27,7 +27,7 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 | 15 | Package Manager | Not started | **0%** — `src/domains/packages/` does not exist |
 | 16 | RPC + Print + JSON modes | Not started | **0%** — no `src/cli/modes/`, no SDK barrel |
 | 17 | Auth & OAuth | Done | **100%** — auth split landed (storage/backend-file/backend-memory/api-key/oauth/index), `auth-dialog` and `auth-selector` overlays wired, `/login`+`/logout`+`/connect`+`/disconnect` slash commands live, `clio auth`/`login`/`logout` subcommands shipped, top-level `clio --api-key <key>` startup flag plumbed through orchestrator + `clio run` |
-| 18 | Keybindings (user-configurable) | Not started | **~10%** — 9 keybindings hardcoded in `src/interactive/index.ts`; no manager, no schema, no user overrides |
+| 18 | Keybindings (user-configurable) | Mostly done | **~70%** — `src/domains/config/keybindings.ts` declares CLIO_KEYBINDINGS merged with TUI_KEYBINDINGS; `src/interactive/keybinding-manager.ts` wraps pi-tui's `KeybindingsManager`, installs it as the global, and exposes `matches/getKeys/getConflicts/hotkeyEntries/overrideCount`; `routeInteractiveKey` + `routeOverlayKey` + harness Ctrl+R now route through the manager; `/hotkeys` derives its GLOBAL section from the resolved bindings; `/settings` shows the overrides/conflicts summary row. Remaining: inline keybinding editor overlay (Phase 19/20 adjacent) and kitty-vs-legacy platform fallbacks. |
 | 19 | Rich Components | Not started | **~5%** — only `renderers/compaction-summary.ts` exists; no diff, no bash-execution, no tool-execution renderer |
 | 20 | Input Polish | Not started | **0%** — editor is basic; no `!`/`@` syntax, no paste-image, no `$EDITOR` round-trip |
 | 21 | Export / Import / Share | Not started | **0%** — no export-html renderer, no share, no import |
@@ -83,7 +83,7 @@ These are pi-mono symbols that Clio either re-exports through `src/engine/` and 
 
 | Symbol | Re-exported? | Current use | Suggested wiring |
 |---|---|---|---|
-| `KeybindingsManager` + `getKeybindings()` / `setKeybindings()` + `TUI_KEYBINDINGS` | all re-exported via `engine/tui.ts:25` | **none** — Clio still hardcodes 9 bindings via `matchesKey()` in `src/interactive/index.ts` | This is the single biggest dormant surface. Wiring `KeybindingsManager` as the spine for Phase 18 collapses ~half of Phase 18's work. The manager already supports declaration-merge for app-specific bindings; clio just needs the `AppKeybindings` schema (`src/domains/config/keybindings.ts`) and a `setKeybindings()` call at boot. |
+| `KeybindingsManager` + `getKeybindings()` / `setKeybindings()` + `TUI_KEYBINDINGS` | all re-exported via `engine/tui.ts` | ✅ Wired. `src/domains/config/keybindings.ts` declares `ClioAppKeybindings` via declaration-merge and exports `CLIO_KEYBINDINGS` (TUI defaults + 10 Clio app ids). `src/interactive/keybinding-manager.ts` constructs the manager from settings and installs it globally via `setKeybindings`. `routeInteractiveKey`/`routeOverlayKey`/harness Ctrl+R all consume `manager.matches`. | n/a |
 | `SlashCommand.argumentHint` | not re-exported (we use our own `SlashCommand` type in `src/interactive/slash-commands.ts`) | none | Either adopt pi-tui's `SlashCommand` type and feed our handlers through pi-tui's autocomplete provider (cleaner, gets us free fuzzy matching), or mirror `argumentHint` on our local type so `/run`, `/receipt verify <id>`, `/edit <session>` show their argument syntax in the dropdown. |
 | `CombinedAutocompleteProvider` | not re-exported | none | Required scaffolding for stacking `@file` + `#tag` + slash-command completers when Phase 13 (skills/resources) or Phase 14 (extensions) lands. Add to `engine/tui.ts` re-exports preemptively. |
 | `Loader.setIndicator()` + `LoaderIndicatorOptions` | not re-exported | only the default Loader is used at `src/interactive/providers-overlay.ts:253` | Custom frames per long-running operation (probing models, compacting, dispatching subagent) make the TUI feel snappier and give the user a hint about what's happening. Cheap win. |
@@ -216,16 +216,19 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | `clio auth` / `clio login` / `clio logout` subcommands | `src/cli/{auth,login,logout,oauth-manual-input}.ts` | ➕ | Beyond-plan: 57 + 193 + 111 + 73 LOC giving a non-interactive auth surface (`clio auth list/status`, `clio login [target]`, `clio logout [target]`) |
 | `--api-key <key>` startup flag | `src/cli/index.ts` + `src/entry/orchestrator.ts` + `src/cli/run.ts` | ✅ | Pre-parsed via `extractApiKeyFlag()` in `src/cli/shared.ts`, threaded into `bootOrchestrator(options)` and `runClioRun(args, options)`. After providers domain loads, `providers.auth.setRuntimeOverrideForTarget()` installs an in-process key for the active endpoint's resolved providerId. Persists nothing; `AuthStorage.runtimeOverrides` short-circuits `resolveApiKey()` so chat-loop and dispatch both honor the override. `clio --help` documents the flag; orphan use without an active endpoint warns and exits 0. |
 
-### Phase 18 — Keybindings (user-configurable) — ~10%
+### Phase 18 — Keybindings (user-configurable) — ~70%
 
 | Plan item | Expected path | Status | Evidence |
 |---|---|---|---|
-| `AppKeybindings` schema (27 bindings) | `src/domains/config/keybindings.ts` | ❌ | Not created. `src/domains/config/schema.ts` carries keybindings as an untyped `Record<string, string>`. |
-| Manager wrapping pi-tui's `KeybindingsManager` | `src/interactive/keybinding-manager.ts` | ❌ | Not created. `src/engine/tui.ts` re-exports `TUI_KEYBINDINGS` but nothing consumes it. |
-| `/hotkeys` read-only overlay | `src/interactive/overlays/hotkeys.ts` | ✅ | Exists, but populated from hardcoded list, not resolver |
-| Platform-specific handling (Kitty, Zellij, tmux, Windows) | `src/interactive/keybinding-manager.ts` | ❌ | |
-| Settings overlay keybindings section | `src/interactive/overlays/settings.ts` | ❌ | |
-| Default keybindings | `src/interactive/index.ts` | 🟡 | 9 bindings hardcoded via `matchesKey` in `routeInteractiveKey` (`Shift+Tab`, `Ctrl+D`, `Ctrl+B`, `Ctrl+L`, `Ctrl+P`, `Shift+Ctrl+P`, `Alt+S`, `Alt+M`, `Alt+T`) |
+| `AppKeybindings` schema | `src/domains/config/keybindings.ts` | ✅ | `ClioAppKeybindings` declaration-merges with pi-tui's `Keybindings`; `CLIO_APP_KEYBINDINGS` declares 10 app ids (thinking.cycle, mode.cycle, exit, super.request, session.tree, dispatchBoard.toggle, model.select, model.cycleForward, model.cycleBackward, harness.restart); `CLIO_KEYBINDINGS` merges them with `TUI_KEYBINDINGS`. |
+| Manager wrapping pi-tui's `KeybindingsManager` | `src/interactive/keybinding-manager.ts` | ✅ | `createKeybindingManager(settings)` constructs a pi-tui `KeybindingsManager`, calls `setKeybindings(manager)` so editor/select components honor overrides, and exposes `matches/getKeys/getDescription/getConflicts/overrideCount/hotkeyEntries`. `createKeybindingManagerForTesting` is the pure test hook. |
+| Settings schema + loader accept string \| string[] | `src/domains/config/schema.ts`, `src/core/config.ts` | ✅ | `SettingsSchema.keybindings` is `Record<string, string \| string[]>`; `parseSettings` normalizes legacy single-string entries and preserves arrays. |
+| `routeInteractiveKey` consumes the manager | `src/interactive/index.ts` | ✅ | `KeyBindingDeps.matches(data, id)` injected at `startInteractive`; every prior raw-byte comparison (`data === CTRL_L` etc.) replaced with `manager.matches(data, "clio.model.select")` etc. `routeOverlayKey` and the harness Ctrl+R handler also thread through the manager. The unused raw-byte constants were removed. |
+| `/hotkeys` derived from manager | `src/interactive/overlays/hotkeys.ts` | ✅ | `buildHotkeyEntries(manager)` renders the GLOBAL section from `manager.hotkeyEntries()`; slash-command rows stay static. User overrides show up live. |
+| Settings overlay keybindings diagnostic | `src/interactive/overlays/settings.ts` | ✅ | Single read-only row `keybindings: <N overrides>, <M conflicts>` pointing users at `/hotkeys`. No inline editor (deferred to Phase 19/20 adjacent UI work). |
+| Conflict detection | `src/interactive/keybinding-manager.ts` | ✅ | `getConflicts()` re-exposes pi-tui's duplicate-user-binding diagnostic; `/settings` row shows the count, `tests/unit/keybindings.test.ts` covers it. |
+| Platform-specific handling (Kitty, Zellij, tmux, Windows) | `src/interactive/keybinding-manager.ts` | ❌ | Clio inherits pi-tui's key-detection capabilities; no Clio-specific platform fallbacks. Legacy terminals without CSI-u cannot fire `shift+ctrl+p` (documented in the binding's comment). |
+| Inline keybinding editor overlay | future | ❌ | Users edit `settings.yaml` > `keybindings` today. |
 
 ### Phase 19 — Rich Components — ~5%
 

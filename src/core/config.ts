@@ -531,11 +531,30 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	if (theme) settings.theme = theme;
 
 	if (isPlainObject(raw.keybindings)) {
-		settings.keybindings = Object.fromEntries(
-			Object.entries(raw.keybindings)
-				.map(([key, value]) => [trimString(key), trimString(value)] as const)
-				.filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1])),
-		);
+		// pi-tui's KeybindingsConfig accepts `KeyId | KeyId[]`. Legacy Clio
+		// settings persisted only strings; accept both shapes, drop empty or
+		// non-string entries, and preserve arrays verbatim so a user can bind
+		// two keystrokes to one action (`shift+tab: ["shift+tab","alt+t"]`).
+		const next: Record<string, string | string[]> = {};
+		for (const [rawKey, rawValue] of Object.entries(raw.keybindings)) {
+			const id = trimString(rawKey);
+			if (!id) continue;
+			if (typeof rawValue === "string") {
+				const v = trimString(rawValue);
+				if (v) next[id] = v;
+				continue;
+			}
+			if (Array.isArray(rawValue)) {
+				const arr: string[] = [];
+				for (const entry of rawValue) {
+					if (typeof entry !== "string") continue;
+					const trimmed = trimString(entry);
+					if (trimmed) arr.push(trimmed);
+				}
+				if (arr.length > 0) next[id] = arr;
+			}
+		}
+		settings.keybindings = next;
 	}
 
 	if (isPlainObject(raw.state)) {

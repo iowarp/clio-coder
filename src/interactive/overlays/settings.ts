@@ -13,6 +13,7 @@ import {
 	type SettingsListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import type { ClioKeybindingManager } from "../keybinding-manager.js";
 
 export const SETTINGS_OVERLAY_WIDTH = 84;
 const VISIBLE_ROWS = 12;
@@ -36,7 +37,7 @@ const SETTINGS_THEME: SettingsListTheme = {
  */
 export function buildSettingItems(
 	settings: Readonly<ClioSettings>,
-	options?: { providers?: ProvidersContract },
+	options?: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager },
 ): SettingItem[] {
 	const scopeList = settings.scope ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
@@ -115,7 +116,22 @@ export function buildSettingItems(
 			currentValue: scopeText,
 			description: "Ctrl+P cycle set. Edit via /scoped-models.",
 		},
+		{
+			id: "keybindings",
+			label: "keybindings",
+			currentValue: formatKeybindingsSummary(options?.keybindings),
+			description: "Open /hotkeys to see bindings; edit settings.yaml > keybindings to override.",
+		},
 	];
+}
+
+function formatKeybindingsSummary(manager?: ClioKeybindingManager): string {
+	if (!manager) return "(unavailable)";
+	const overrides = manager.overrideCount();
+	const conflicts = manager.getConflicts().length;
+	if (overrides === 0 && conflicts === 0) return "defaults (no overrides)";
+	if (conflicts === 0) return `${overrides} override${overrides === 1 ? "" : "s"}`;
+	return `${overrides} override${overrides === 1 ? "" : "s"}, ${conflicts} conflict${conflicts === 1 ? "" : "s"}`;
 }
 
 /**
@@ -148,6 +164,7 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 export interface OpenSettingsOverlayDeps {
 	getSettings: () => Readonly<ClioSettings>;
 	providers?: ProvidersContract;
+	keybindings?: ClioKeybindingManager;
 	writeSettings: (next: ClioSettings) => void;
 	onClose: () => void;
 }
@@ -163,7 +180,10 @@ class SettingsOverlayBox extends Box {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): OverlayHandle {
-	const items = buildSettingItems(deps.getSettings(), deps.providers ? { providers: deps.providers } : undefined);
+	const buildOptions: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager } = {};
+	if (deps.providers) buildOptions.providers = deps.providers;
+	if (deps.keybindings) buildOptions.keybindings = deps.keybindings;
+	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SettingsList(
 		items,
