@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { visibleWidth } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
@@ -273,6 +274,35 @@ describe("chat-panel active entry update", () => {
 		ok(joined.includes("use foo and bar here"), `inline code must render without backticks: ${joined}`);
 		ok(!joined.includes("`foo`"), `literal inline-code delimiters leaked: ${joined}`);
 		ok(!joined.includes("`bar`"), `literal inline-code delimiters leaked: ${joined}`);
+	});
+
+	it("never emits a line wider than the requested render width, even with the clio: prefix", () => {
+		// Regression guard. pi-tui's Markdown renderer right-pads every line to
+		// the requested width so background colors extend edge-to-edge. Before
+		// this fix, renderEntryLines prepended the 6-char "clio: " tag to the
+		// already-padded first line, producing a visible width of `width + 6`.
+		// TUI.doRender asserts every rendered line fits `width` and throws
+		// `Rendered line N exceeds terminal width (W > width)`, which killed
+		// the TUI before /compact's no-session notice could surface (observed
+		// on tests/e2e/interactive.test.ts at width=120; reproduced here at
+		// width=40 with a notice-length string that markdown pads to full
+		// width).
+		const panel = createChatPanel();
+		const width = 40;
+		const notice = "[/compact] no current session to compact";
+		strictEqual(notice.length, width, "precondition: notice must equal width before prefixing");
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: notice }] } as never,
+		});
+		const lines = panel.render(width);
+		for (const line of lines) {
+			ok(visibleWidth(line) <= width, `line exceeds width (${visibleWidth(line)} > ${width}): ${JSON.stringify(line)}`);
+		}
+		ok(
+			strip(lines.join("\n")).includes("clio: [/compact] no current session"),
+			`expected clio-labeled notice, got: ${JSON.stringify(lines.map(strip))}`,
+		);
 	});
 
 	it("leaves streaming text (pre-message_end) as plain lines to avoid partial-markdown garbage", () => {
