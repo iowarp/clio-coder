@@ -1,5 +1,5 @@
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import { makeOpenAICompatRuntime } from "../common/local-factory.js";
+import { makeOpenAICompatRuntime } from "../protocol/openai-compat.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -20,6 +20,7 @@ export default makeOpenAICompatRuntime({
 	displayName: "vLLM",
 	provider: "vllm",
 	auth: "api-key",
+	tier: "local-native",
 	defaultCapabilities,
 	healthPath: "/health",
 });

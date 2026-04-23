@@ -1,9 +1,10 @@
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import { makeOpenAICompatRuntime } from "../common/local-factory.js";
+import { makeOpenAICompatRuntime } from "../protocol/openai-compat.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
-	tools: false,
+	tools: true,
+	toolCallFormat: "openai",
 	reasoning: false,
 	vision: false,
 	audio: false,
@@ -15,9 +16,10 @@ const defaultCapabilities: CapabilityFlags = {
 };
 
 export default makeOpenAICompatRuntime({
-	id: "openai-compat",
-	displayName: "Generic OpenAI-compatible",
-	provider: "openai-compat",
+	id: "sglang",
+	displayName: "SGLang",
+	provider: "sglang",
 	auth: "api-key",
+	tier: "local-native",
 	defaultCapabilities,
 });

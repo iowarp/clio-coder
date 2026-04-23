@@ -26,6 +26,7 @@ const VALID_API_FAMILIES = new Set<string>([
 
 const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "none"]);
 const VALID_KINDS = new Set<string>(["http", "subprocess"]);
+const VALID_TIERS = new Set<string>(["protocol", "cloud", "local-native", "cli-stub"]);
 
 function describeDescriptor(desc: RuntimeDescriptor): string {
 	return `${desc.id} (${desc.kind}/${desc.apiFamily})`;
@@ -49,6 +50,7 @@ describe("providers/runtimes built-in descriptors", () => {
 			ok(desc.displayName.length > 0, `${label}: displayName must be non-empty`);
 
 			ok(VALID_KINDS.has(desc.kind), `${label}: invalid kind '${desc.kind}'`);
+			ok(desc.tier !== undefined && VALID_TIERS.has(desc.tier), `${label}: invalid tier '${String(desc.tier)}'`);
 			ok(VALID_API_FAMILIES.has(desc.apiFamily), `${label}: invalid apiFamily '${desc.apiFamily}'`);
 			ok(VALID_AUTH.has(desc.auth), `${label}: invalid auth '${desc.auth}'`);
 

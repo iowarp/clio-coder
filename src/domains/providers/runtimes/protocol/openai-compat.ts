@@ -9,20 +9,44 @@ import type {
 	RuntimeApiFamily,
 	RuntimeAuth,
 	RuntimeDescriptor,
+	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
-import { endpointBase, synthLocalModel, withAsIs, withV1 } from "./local-synth.js";
-import { probeOpenAIModels, probeUrl } from "./probe-helpers.js";
+import { endpointBase, synthLocalModel, withAsIs, withV1 } from "../common/local-synth.js";
+import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
 export interface OpenAICompatSpec {
 	id: string;
 	displayName: string;
 	provider: string;
 	auth: RuntimeAuth;
+	tier: RuntimeTier;
 	defaultCapabilities: CapabilityFlags;
 	healthPath?: string;
 	modelsPath?: string;
 	apiFamily?: RuntimeApiFamily;
 	baseUrlStyle?: "v1" | "asIs";
+}
+
+export interface OpenAICompatSynthesisInput {
+	endpoint: EndpointDescriptor;
+	wireModelId: string;
+	kb: KnowledgeBaseHit | null;
+	defaultCapabilities: CapabilityFlags;
+	apiFamily?: RuntimeApiFamily;
+	provider: string;
+	baseUrlForEndpoint?: (endpointUrl: string) => string;
+}
+
+export function synthesizeOpenAICompatModel(input: OpenAICompatSynthesisInput): Model<Api> {
+	return synthLocalModel({
+		endpoint: input.endpoint,
+		wireModelId: input.wireModelId,
+		kb: input.kb,
+		defaultCapabilities: input.defaultCapabilities,
+		apiFamily: input.apiFamily ?? "openai-completions",
+		provider: input.provider,
+		baseUrlForEndpoint: input.baseUrlForEndpoint ?? withV1,
+	});
 }
 
 export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescriptor {
@@ -34,6 +58,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		id: spec.id,
 		displayName: spec.displayName,
 		kind: "http",
+		tier: spec.tier,
 		apiFamily,
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
@@ -49,7 +74,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			return probeOpenAIModels(base, ctx);
 		},
 		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
-			return synthLocalModel({
+			return synthesizeOpenAICompatModel({
 				endpoint,
 				wireModelId,
 				kb,
@@ -61,3 +86,25 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		},
 	};
 }
+
+const defaultCapabilities: CapabilityFlags = {
+	chat: true,
+	tools: false,
+	reasoning: false,
+	vision: false,
+	audio: false,
+	embeddings: false,
+	rerank: false,
+	fim: false,
+	contextWindow: 8192,
+	maxTokens: 4096,
+};
+
+export default makeOpenAICompatRuntime({
+	id: "openai-compat",
+	displayName: "Generic OpenAI-compatible",
+	provider: "openai-compat",
+	auth: "api-key",
+	tier: "protocol",
+	defaultCapabilities,
+});

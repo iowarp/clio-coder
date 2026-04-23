@@ -128,6 +128,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 	id: "llamacpp-completion",
 	displayName: "llama.cpp (completion / infill)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	defaultCapabilities,

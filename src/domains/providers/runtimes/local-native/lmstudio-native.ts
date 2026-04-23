@@ -78,6 +78,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 	id: "lmstudio-native",
 	displayName: "LM Studio (native SDK)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "lmstudio-native",
 	auth: "api-key",
 	defaultCapabilities,

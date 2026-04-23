@@ -29,6 +29,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	id: "ollama-native",
 	displayName: "Ollama (native)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "ollama-native",
 	auth: "none",
 	defaultCapabilities,

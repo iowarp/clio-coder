@@ -14,25 +14,26 @@ const defaultCapabilities: CapabilityFlags = {
 	tools: true,
 	toolCallFormat: "openai",
 	reasoning: true,
-	vision: false,
+	vision: true,
 	audio: false,
 	embeddings: false,
 	rerank: false,
 	fim: false,
-	contextWindow: 272000,
-	maxTokens: 16384,
+	contextWindow: 1000000,
+	maxTokens: 8192,
 };
 
-const codexRuntime: RuntimeDescriptor = {
-	id: "codex-cli",
-	displayName: "Codex CLI",
+const geminiRuntime: RuntimeDescriptor = {
+	id: "gemini-cli",
+	displayName: "Gemini CLI",
 	kind: "subprocess",
-	apiFamily: "subprocess-codex",
+	tier: "cli-stub",
+	apiFamily: "subprocess-gemini",
 	auth: "oauth",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const started = performance.now();
-		const result = await probeBinaryVersion(spawn, "codex", ctx);
+		const result = await probeBinaryVersion(spawn, "gemini", ctx);
 		const latencyMs = Math.round(performance.now() - started);
 		if (result.ok) {
 			const res: ProbeResult = { ok: true, latencyMs };
@@ -47,11 +48,11 @@ const codexRuntime: RuntimeDescriptor = {
 		const stub = {
 			id: wireModelId,
 			name: `${endpoint.id}`,
-			api: "subprocess-codex",
-			provider: "openai",
+			api: "subprocess-gemini",
+			provider: "google",
 			baseUrl: "",
 			reasoning: defaultCapabilities.reasoning,
-			input: ["text"] as ("text" | "image")[],
+			input: ["text", "image"] as ("text" | "image")[],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: defaultCapabilities.contextWindow,
 			maxTokens: defaultCapabilities.maxTokens,
@@ -60,4 +61,4 @@ const codexRuntime: RuntimeDescriptor = {
 	},
 };
 
-export default codexRuntime;
+export default geminiRuntime;

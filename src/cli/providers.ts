@@ -5,9 +5,11 @@ import { ensureInstalled } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
+import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 
-const HEADER: ReadonlyArray<string> = ["id", "runtime", "auth", "url", "model", "health", "caps", "notes"];
-const WIDTHS: ReadonlyArray<number> = [14, 18, 18, 28, 26, 10, 8, 28];
+const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
+const WIDTHS: ReadonlyArray<number> = [14, 14, 18, 18, 28, 26, 10, 8, 28];
+type ProviderOutputTier = RuntimeTier | "unknown";
 
 export async function runProvidersCommand(args: ReadonlyArray<string>): Promise<number> {
 	const asJson = args.includes("--json");
@@ -34,7 +36,7 @@ export async function runProvidersCommand(args: ReadonlyArray<string>): Promise<
 	const filtered = filter ? entries.filter((e) => e.endpoint.id === filter) : entries;
 
 	if (asJson) {
-		process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify(filtered.map(serializeStatus), null, 2)}\n`);
 	} else if (filtered.length === 0) {
 		process.stdout.write("no endpoints configured. run `clio setup` to register one.\n");
 	} else {
@@ -51,8 +53,16 @@ function pad(value: string, width: number): string {
 
 function renderTable(providers: ProvidersContract, entries: ReadonlyArray<EndpointStatus>): void {
 	const headerLine = HEADER.map((h, i) => pad(h, WIDTHS[i] ?? 0)).join("");
-	process.stdout.write(`${chalk.bold(headerLine.trimEnd())}\n`);
-	for (const status of entries) process.stdout.write(`${formatRow(providers, status)}\n`);
+	let currentTier: ProviderOutputTier | null = null;
+	for (const status of [...entries].sort(compareStatusByTier)) {
+		const tier = statusTier(status);
+		if (tier !== currentTier) {
+			currentTier = tier;
+			process.stdout.write(`${chalk.bold(tierLabel(tier))}\n`);
+			process.stdout.write(`${chalk.bold(headerLine.trimEnd())}\n`);
+		}
+		process.stdout.write(`${formatRow(providers, status)}\n`);
+	}
 }
 
 function formatRow(providers: ProvidersContract, status: EndpointStatus): string {
@@ -60,14 +70,15 @@ function formatRow(providers: ProvidersContract, status: EndpointStatus): string
 	const ep = status.endpoint;
 	const w = (i: number): number => WIDTHS[i] ?? 0;
 	const id = pad(ep.id, w(0));
-	const runtimeCell = pad(runtime ? runtime.id : ep.runtime, w(1));
-	const authCell = pad(formatAuth(providers, status), w(2));
-	const urlCell = pad(formatUrl(status), w(3));
-	const modelCell = pad(ep.defaultModel ?? "-", w(4));
-	const healthCell = pad(colorHealth(status.health.status), w(5) + healthPadSlack(status.health.status));
-	const capsCell = pad(capabilityBadges(status.capabilities), w(6));
-	const notesCell = formatNotes(status).padEnd(w(7));
-	return `${id}${runtimeCell}${authCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
+	const tierCell = pad(statusTier(status), w(1));
+	const runtimeCell = pad(runtime ? runtime.id : ep.runtime, w(2));
+	const authCell = pad(formatAuth(providers, status), w(3));
+	const urlCell = pad(formatUrl(status), w(4));
+	const modelCell = pad(ep.defaultModel ?? "-", w(5));
+	const healthCell = pad(colorHealth(status.health.status), w(6) + healthPadSlack(status.health.status));
+	const capsCell = pad(capabilityBadges(status.capabilities), w(7));
+	const notesCell = formatNotes(status).padEnd(w(8));
+	return `${id}${tierCell}${runtimeCell}${authCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
 }
 
 function healthPadSlack(status: EndpointStatus["health"]["status"]): number {
@@ -132,4 +143,50 @@ function formatNotes(status: EndpointStatus): string {
 	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
 	if (!status.available && status.reason) parts.push(status.reason);
 	return parts.join(" ");
+}
+
+function statusTier(status: EndpointStatus): ProviderOutputTier {
+	return status.runtime?.tier ?? "unknown";
+}
+
+function tierLabel(tier: ProviderOutputTier): string {
+	switch (tier) {
+		case "protocol":
+			return "Protocol";
+		case "cloud":
+			return "Cloud";
+		case "local-native":
+			return "Local native";
+		case "cli-stub":
+			return "CLI stubs";
+		case "unknown":
+			return "Unknown";
+	}
+}
+
+function tierRank(tier: ProviderOutputTier): number {
+	switch (tier) {
+		case "protocol":
+			return 0;
+		case "cloud":
+			return 1;
+		case "local-native":
+			return 2;
+		case "cli-stub":
+			return 3;
+		case "unknown":
+			return 4;
+	}
+}
+
+function compareStatusByTier(a: EndpointStatus, b: EndpointStatus): number {
+	return (
+		tierRank(statusTier(a)) - tierRank(statusTier(b)) ||
+		a.endpoint.id.localeCompare(b.endpoint.id) ||
+		a.endpoint.runtime.localeCompare(b.endpoint.runtime)
+	);
+}
+
+function serializeStatus(status: EndpointStatus): EndpointStatus & { tier: ProviderOutputTier } {
+	return { ...status, tier: statusTier(status) };
 }

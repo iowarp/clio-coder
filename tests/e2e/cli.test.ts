@@ -74,10 +74,15 @@ describe("clio cli e2e", { concurrency: false }, () => {
 
 	it("providers --json --no-probe returns an array", async () => {
 		await runCli(["install"], { env: scratch.env });
+		seedEndpoints(join(scratch.dir, "config"));
 		const result = await runCli(["providers", "--json", "--no-probe"], { env: scratch.env, timeoutMs: 20_000 });
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout);
 		ok(Array.isArray(parsed), "providers --json should emit an array");
+		ok(
+			parsed.every((row) => row.tier === "cloud"),
+			"seeded cloud endpoints should include a top-level tier",
+		);
 	});
 
 	it("agents --json lists built-in recipes", async () => {

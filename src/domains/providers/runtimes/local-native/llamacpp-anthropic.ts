@@ -34,6 +34,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 	id: "llamacpp-anthropic",
 	displayName: "llama.cpp (Anthropic-compat)",
 	kind: "http",
+	tier: "local-native",
 	apiFamily: "anthropic-messages",
 	auth: "api-key",
 	defaultCapabilities,
