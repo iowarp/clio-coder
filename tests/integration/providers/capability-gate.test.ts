@@ -130,6 +130,7 @@ function setupHarness(toolsSupported: boolean): Harness {
 		isActionAllowed: () => true,
 		requestSuper: () => {},
 		confirmSuper: () => "super",
+		elevatedModeFor: () => null,
 	};
 	const bus = createSafeEventBus();
 	const context: DomainContext = {

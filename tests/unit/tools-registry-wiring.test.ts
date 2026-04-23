@@ -28,6 +28,7 @@ function makeModes(
 		isActionAllowed: (action) => allowAction(action),
 		requestSuper: () => {},
 		confirmSuper: () => initial,
+		elevatedModeFor: () => null,
 	};
 }
 

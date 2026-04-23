@@ -26,6 +26,7 @@ import {
 	Text,
 	TUI,
 } from "../engine/tui.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -77,6 +78,14 @@ export interface InteractiveDeps {
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
+	/**
+	 * Shared tool registry. When wired, the super overlay opens automatically
+	 * whenever a tool call is parked waiting for super admission, and the
+	 * confirm / cancel overlay handlers drive `resumeParkedCalls` /
+	 * `cancelParkedCalls` so blocked bash batches run (or reject cleanly)
+	 * after the mode transition rather than stalling indefinitely.
+	 */
+	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
 	/** XDG data dir (clioDataDir()). `/receipt verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
@@ -776,6 +785,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
+		const leaving = overlayState;
 		if (overlayState === "auth") {
 			authDialogDismiss?.();
 			authDialogDismiss = null;
@@ -784,6 +794,25 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
+		// Centralize the parked-call lifecycle here so every super-overlay
+		// dismissal (Enter, Esc, Ctrl+C, shutdown) drives the registry to a
+		// terminal verdict. `modes.confirmSuper` flips the mode before the
+		// confirm handler calls closeOverlay, so a post-close mode of "super"
+		// means the user confirmed; anything else means they cancelled.
+		if (leaving === "super-confirm" && deps.toolRegistry) {
+			if (deps.modes.current() === "super") {
+				void deps.toolRegistry.resumeParkedCalls();
+			} else {
+				deps.toolRegistry.cancelParkedCalls("super mode confirmation cancelled");
+			}
+		}
+		// If a parked call arrived while an unrelated overlay was open, the
+		// onSuperRequired listener's attempt to open the super overlay was a
+		// no-op. Re-check on every overlay close so the user sees the
+		// confirmation prompt as soon as the competing overlay dismisses.
+		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+			openSuperOverlay("tool");
+		}
 		tui.requestRender();
 	};
 
@@ -997,9 +1026,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openSuperOverlay = (): void => {
+	const openSuperOverlay = (requestedBy: string = "keybind"): void => {
 		if (overlayState !== "closed") return;
-		deps.modes.requestSuper("keybind");
+		deps.modes.requestSuper(requestedBy);
 		overlayState = "super-confirm";
 		overlayHandle = tui.showOverlay(superOverlay, {
 			anchor: "center",
@@ -1007,6 +1036,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 		tui.requestRender();
 	};
+
+	// Subscribe to registry parking so the super overlay opens automatically
+	// whenever a tool call (typically a privileged bash batch) stalls waiting
+	// for super admission. The resume/cancel handlers on the overlay drive the
+	// registry back to a terminal verdict so pi-agent-core sees either a real
+	// result or a clean rejection instead of a hung promise.
+	const unsubscribeSuperRequired =
+		deps.toolRegistry?.onSuperRequired(() => {
+			if (overlayState === "super-confirm") return;
+			openSuperOverlay("tool");
+		}) ?? (() => {});
 
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
@@ -1288,6 +1328,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
 		unsubscribeProgress();
+		unsubscribeSuperRequired();
 		agentProgress.stop();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
@@ -1295,6 +1336,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		} catch {
 			// TUI may already be stopped; swallow.
 		}
+		// Drain the parked queue so any worker or agent loop still holding
+		// a pending tool-execution promise sees a terminal verdict rather
+		// than a promise that never settles across process exit.
+		deps.toolRegistry?.cancelParkedCalls("clio shutting down");
 		await deps.onShutdown();
 		resolveRun(0);
 	};

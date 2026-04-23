@@ -89,9 +89,36 @@ export interface ToolRegistry {
 	listForMode(mode: ModeName): ReadonlyArray<ToolName>;
 	/**
 	 * Admission point. Classifies, evaluates safety, and either runs or
-	 * returns a rejection. Never throws on safety rejections.
+	 * returns a rejection. Never throws on safety rejections. When the
+	 * injected `modes.elevatedModeFor(action)` reports an elevation target
+	 * and the current mode denies the action, the returned promise stays
+	 * pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
 	 */
 	invoke(call: ClassifierCall): Promise<RegistryVerdict>;
+	/**
+	 * True while at least one call awaits mode elevation. The interactive
+	 * layer reads this from `closeOverlay()` to re-open the super overlay
+	 * whenever an unrelated overlay closes with a parked call still pending.
+	 */
+	hasParkedCalls(): boolean;
+	/**
+	 * Re-run admission for every parked call against the current mode. Calls
+	 * admitted on retry execute and their original promise resolves with the
+	 * result. Calls still blocked only by the mode gate stay parked.
+	 */
+	resumeParkedCalls(): Promise<void>;
+	/**
+	 * Resolve every parked call with a `blocked` verdict carrying `reason`.
+	 * Used when the super overlay is cancelled so the agent loop sees a
+	 * clean rejection instead of an indefinitely pending tool call.
+	 */
+	cancelParkedCalls(reason: string): void;
+	/**
+	 * Subscribe to the signal fired when a call is parked awaiting super
+	 * confirmation. The interactive layer wires this to open the super
+	 * overlay. Returns an unsubscribe handle.
+	 */
+	onSuperRequired(listener: (call: ClassifierCall) => void): () => void;
 }
 
 export type RegistryVerdict =
@@ -99,8 +126,82 @@ export type RegistryVerdict =
 	| { kind: "blocked"; reason: string; decision: SafetyDecision }
 	| { kind: "not_visible"; reason: string };
 
+interface ParkedCall {
+	call: ClassifierCall;
+	decision: SafetyDecision;
+	resolve: (verdict: RegistryVerdict) => void;
+}
+
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
+	const parked: ParkedCall[] = [];
+	const superListeners = new Set<(call: ClassifierCall) => void>();
+
+	const runSpec = async (spec: ToolSpec, call: ClassifierCall, decision: SafetyDecision): Promise<RegistryVerdict> => {
+		try {
+			const result = await spec.run(call.args ?? {});
+			return { kind: "ok", result, decision };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return { kind: "ok", result: { kind: "error", message }, decision };
+		}
+	};
+
+	type AdmitOutcome =
+		| { kind: "terminal"; verdict: RegistryVerdict }
+		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
+		| { kind: "park"; decision: SafetyDecision };
+
+	const admit = (call: ClassifierCall): AdmitOutcome => {
+		const spec = tools.get(call.tool as ToolName);
+		if (!spec) {
+			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
+		}
+		const visible = deps.modes.visibleTools();
+		if (!visible.has(spec.name)) {
+			return {
+				kind: "terminal",
+				verdict: { kind: "not_visible", reason: `tool ${spec.name} not in current mode's allowlist` },
+			};
+		}
+		const currentMode = deps.modes.current();
+		if (spec.allowedModes && !spec.allowedModes.includes(currentMode)) {
+			return {
+				kind: "terminal",
+				verdict: { kind: "not_visible", reason: `tool ${spec.name} not allowed in mode ${currentMode}` },
+			};
+		}
+		const decision = deps.safety.evaluate(call, currentMode);
+		if (decision.kind === "block") {
+			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		}
+		const actionClass = decision.classification.actionClass;
+		if (!deps.modes.isActionAllowed(actionClass)) {
+			if (deps.modes.elevatedModeFor(actionClass) !== null) {
+				return { kind: "park", decision };
+			}
+			return {
+				kind: "terminal",
+				verdict: {
+					kind: "blocked",
+					reason: `action ${actionClass} not allowed in mode ${currentMode}`,
+					decision,
+				},
+			};
+		}
+		return { kind: "execute", spec, decision };
+	};
+
+	const notifySuperRequired = (call: ClassifierCall): void => {
+		for (const listener of superListeners) {
+			try {
+				listener(call);
+			} catch {
+				// Listener errors never abort admission; they are surfaced via
+				// whatever observability the caller wires up.
+			}
+		}
+	};
 
 	return {
 		register(spec) {
@@ -117,39 +218,43 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return Array.from(tools.values()).filter((t) => visible.has(t.name));
 		},
 		async invoke(call) {
-			const spec = tools.get(call.tool as ToolName);
-			if (!spec) {
-				return { kind: "not_visible", reason: `tool not registered: ${call.tool}` };
+			const outcome = admit(call);
+			if (outcome.kind === "terminal") return outcome.verdict;
+			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision);
+			return new Promise<RegistryVerdict>((resolve) => {
+				parked.push({ call, decision: outcome.decision, resolve });
+				notifySuperRequired(call);
+			});
+		},
+		hasParkedCalls: () => parked.length > 0,
+		async resumeParkedCalls() {
+			if (parked.length === 0) return;
+			const pending = parked.splice(0, parked.length);
+			for (const entry of pending) {
+				const outcome = admit(entry.call);
+				if (outcome.kind === "park") {
+					parked.push(entry);
+					continue;
+				}
+				if (outcome.kind === "terminal") {
+					entry.resolve(outcome.verdict);
+					continue;
+				}
+				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision));
 			}
-			const visible = deps.modes.visibleTools();
-			if (!visible.has(spec.name)) {
-				return { kind: "not_visible", reason: `tool ${spec.name} not in current mode's allowlist` };
+		},
+		cancelParkedCalls(reason) {
+			if (parked.length === 0) return;
+			const pending = parked.splice(0, parked.length);
+			for (const entry of pending) {
+				entry.resolve({ kind: "blocked", reason, decision: entry.decision });
 			}
-			const currentMode = deps.modes.current();
-			if (spec.allowedModes && !spec.allowedModes.includes(currentMode)) {
-				return {
-					kind: "not_visible",
-					reason: `tool ${spec.name} not allowed in mode ${currentMode}`,
-				};
-			}
-			const decision = deps.safety.evaluate(call, currentMode);
-			if (decision.kind === "block") {
-				return { kind: "blocked", reason: decision.rejection.short, decision };
-			}
-			if (!deps.modes.isActionAllowed(decision.classification.actionClass)) {
-				return {
-					kind: "blocked",
-					reason: `action ${decision.classification.actionClass} not allowed in mode ${currentMode}`,
-					decision,
-				};
-			}
-			try {
-				const result = await spec.run(call.args ?? {});
-				return { kind: "ok", result, decision };
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return { kind: "ok", result: { kind: "error", message }, decision };
-			}
+		},
+		onSuperRequired(listener) {
+			superListeners.add(listener);
+			return () => {
+				superListeners.delete(listener);
+			};
 		},
 	};
 }

@@ -71,6 +71,12 @@ export function createModesBundle(context: DomainContext): DomainBundle<ModesCon
 			pending = null;
 			return state.set("super", "confirmed");
 		},
+		elevatedModeFor: (action) => {
+			const current = state.get();
+			if (current === "super") return null;
+			if (MODE_MATRIX.super.allowedActions.has(action)) return "super";
+			return null;
+		},
 	};
 
 	return { extension, contract };

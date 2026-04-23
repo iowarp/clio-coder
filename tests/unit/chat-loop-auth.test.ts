@@ -89,6 +89,7 @@ describe("interactive/chat-loop auth resolution", () => {
 				isActionAllowed: () => true,
 				requestSuper: () => {},
 				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
 			},
 			providers,
 			knownEndpoints: () => new Set([endpoint.id]),
