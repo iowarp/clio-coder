@@ -20,7 +20,7 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 
 | Phase | Area | Status | Coverage |
 |---|---|---|---|
-| 11 | TUI Selector Suite | Mostly done | **70%** — 6/8 overlays landed, list-models search positional wired, provider resolver + dedicated session fuzzy picker still missing |
+| 11 | TUI Selector Suite | Mostly done | **80%** — 7/8 overlays landed (incl. session fuzzy picker), list-models search positional wired, provider resolver still missing |
 | 12 | Session Richness & Compaction | Mostly done | **75%** — entries, tree, fork, compaction, cwd-fallback present; retry + HTML export + share missing |
 | 13 | Resources (skills, prompts, themes, context files) | Not started | **0%** — `src/domains/resources/` does not exist |
 | 14 | Extensions System | Not started | **0%** — `src/domains/extensions/` does not exist |
@@ -115,7 +115,7 @@ When the next port phase starts, these structural deltas matter: Phase 16 RPC wo
 | Thinking selector | `src/interactive/overlays/thinking-selector.ts` | ✅ | 95 LOC; cycle/toggle; `Shift+Tab` wired |
 | Settings overlay | `src/interactive/overlays/settings.ts` | ✅ | 163 LOC; categorized sections |
 | Session selector (`/resume`) | `src/interactive/overlays/session-selector.ts` | ✅ | 77 LOC; cwd/model/endpoint rendering |
-| Session-selector fuzzy search | `src/interactive/overlays/session-selector-search.ts` | ❌ | File absent; SelectList may filter internally but dedicated fuzzy picker missing |
+| Session-selector fuzzy search | `src/interactive/overlays/session-selector-search.ts` | ✅ | 25 LOC pure filter using pi-tui's `fuzzyFilter` over id + endpoint/model + cwd; `session-selector.ts` overlay embeds an `Input` field that live-rebuilds the candidate `SelectList` on each keystroke. Arrow keys + Enter route to the list, all other keys feed the filter, and Esc closes the overlay. |
 | Message picker (fork source) | `src/interactive/overlays/message-picker.ts` | ✅ | 139 LOC; assistant turns, most-recent first |
 | Hotkeys overlay (preview) | `src/interactive/overlays/hotkeys.ts` | ✅ | Read-only key↔action map |
 | `clio --list-models [search]` | `src/cli/list-models.ts` | ✅ | 110 LOC; supports `--json`, `--probe`, `--endpoint` filter, and the plan-defined `search` positional |
