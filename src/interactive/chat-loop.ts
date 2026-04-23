@@ -4,6 +4,7 @@ import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
+import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type {
 	EndpointDescriptor,
@@ -113,6 +114,8 @@ export interface CreateChatLoopDeps {
 	autoCompact?: (instructions?: string) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
+	/** Optional prompt supplement installed when Clio is editing its own repository. */
+	selfDevPrompt?: string;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
 	 * through `ToolRegistry.invoke(...)` so safety classification and mode
@@ -570,9 +573,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				overrideMode: deps.modes.current(),
 				safetyLevel,
 			});
-			agentRuntime.agent.state.systemPrompt = result.text;
-			currentTurnHash = result.renderedPromptHash;
-			return result;
+			if (!deps.selfDevPrompt) {
+				agentRuntime.agent.state.systemPrompt = result.text;
+				currentTurnHash = result.renderedPromptHash;
+				return result;
+			}
+			const text = `${result.text}\n\n${deps.selfDevPrompt}`;
+			const renderedPromptHash = sha256(text);
+			agentRuntime.agent.state.systemPrompt = text;
+			currentTurnHash = renderedPromptHash;
+			return { ...result, text, renderedPromptHash };
 		} catch (err) {
 			currentTurnHash = null;
 			emitNotice(

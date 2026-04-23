@@ -18,6 +18,7 @@ const HELP = `clio. IOWarp orchestrator coding-agent
 
 Usage:
   clio                      start interactive mode
+  clio --dev                start self-development mode for this checkout
   clio --version, -v        print version info
   clio --api-key <key>      override the active endpoint's api key for this run
   clio doctor               run environment diagnostics
@@ -45,8 +46,13 @@ async function main(argv: string[]): Promise<number> {
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
 
 	const subcommand = positional[0];
-	const subArgs = rest.slice(1);
-	const bootOptions = apiKey === undefined ? {} : { apiKey };
+	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
+	const subArgs = subcommandIndex === -1 ? [] : rest.slice(subcommandIndex + 1);
+	const dev = flags.has("dev");
+	const bootOptions = {
+		...(apiKey === undefined ? {} : { apiKey }),
+		...(dev ? { dev: true } : {}),
+	};
 	if (!subcommand) return runClioCommand(bootOptions);
 
 	switch (subcommand) {
