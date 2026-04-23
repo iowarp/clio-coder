@@ -133,7 +133,7 @@ When the next port phase starts, these structural deltas matter: Phase 16 RPC wo
 | Fork operation | `src/domains/session/tree/fork.ts` | ✅ | 50 LOC; `forkFromState`, parent-pointer enrichment |
 | Compaction orchestrator | `src/domains/session/compaction/compact.ts` | ✅ | 217 LOC; CUT_POINT + SUMMARY flow |
 | Branch summary | `src/domains/session/compaction/branch-summary.ts` | ✅ | 147 LOC; `serializeConversation`, 2000-char tool-result truncation |
-| Cut-point picker | `src/domains/session/compaction/cut-point.ts` | ✅ | 143 LOC; tool_result guard preserved |
+| Cut-point picker | `src/domains/session/compaction/cut-point.ts` | ✅ | 143 LOC; tool_result guard preserved; sub-threshold fallback lands the cut on the newest turn start so manual `/compact` summarizes older turns on populated small sessions |
 | Token estimation | `src/domains/session/compaction/tokens.ts` | ✅ | 179 LOC; `getLastAssistantUsage` helper |
 | Missing-cwd fallback | `src/domains/session/cwd-fallback.ts` | ✅ | 66 LOC; 3-way probe result |
 | Retry settings + countdown | `src/domains/session/retry.ts` | ❌ | Compact-and-retry hinted at in dispatch comments; no dedicated module |
