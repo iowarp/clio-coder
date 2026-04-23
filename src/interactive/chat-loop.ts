@@ -55,6 +55,16 @@ export interface ChatLoop {
 	 * notice so the `/compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
+	/**
+	 * Drop the chat-loop's in-memory state after a session switch (/resume,
+	 * /fork, /new) so the next `submit` threads a clean lineage and the LLM
+	 * does not see pre-switch context. `leafTurnId` is the id the next user
+	 * turn should parent under: the resumed session's leaf for /resume, or
+	 * null when a fresh branch begins (/fork, /new). Also clears the runtime
+	 * agent's `state.messages` when a runtime exists; a no-op on leafTurnId
+	 * and messages when the runtime has not been built yet.
+	 */
+	resetForSession(leafTurnId: string | null): void;
 }
 
 export interface CreateChatLoopDeps {
@@ -695,6 +705,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		isStreaming(): boolean {
 			return streaming;
+		},
+		resetForSession(leafTurnId: string | null): void {
+			lastTurnId = leafTurnId;
+			currentTurnHash = null;
+			if (runtime) {
+				runtime.agent.state.messages = [];
+			}
 		},
 		async compact(instructions?: string): Promise<void> {
 			// Session check runs BEFORE orchestrator-configuration so a fresh
