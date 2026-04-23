@@ -20,20 +20,20 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 
 | Phase | Area | Status | Coverage |
 |---|---|---|---|
-| 11 | TUI Selector Suite | In progress | **65%** — 6/8 overlays landed, resolver + list-models partial |
+| 11 | TUI Selector Suite | Mostly done | **70%** — 6/8 overlays landed, list-models search positional wired, provider resolver + dedicated session fuzzy picker still missing |
 | 12 | Session Richness & Compaction | Mostly done | **75%** — entries, tree, fork, compaction, cwd-fallback present; retry + HTML export + share missing |
 | 13 | Resources (skills, prompts, themes, context files) | Not started | **0%** — `src/domains/resources/` does not exist |
 | 14 | Extensions System | Not started | **0%** — `src/domains/extensions/` does not exist |
 | 15 | Package Manager | Not started | **0%** — `src/domains/packages/` does not exist |
 | 16 | RPC + Print + JSON modes | Not started | **0%** — no `src/cli/modes/`, no SDK barrel |
-| 17 | Auth & OAuth | Early | **30%** — `credentials.ts` is production-grade but monolithic; OAuth flows, resolver, login dialog missing |
+| 17 | Auth & OAuth | Mostly done | **~85%** — auth split landed (storage/backend-file/backend-memory/api-key/oauth/index), `auth-dialog` and `auth-selector` overlays wired, `/login`+`/logout`+`/connect`+`/disconnect` slash commands live, `clio auth`/`login`/`logout` subcommands shipped; only the top-level `--api-key <key>` startup flag remains |
 | 18 | Keybindings (user-configurable) | Not started | **~10%** — 9 keybindings hardcoded in `src/interactive/index.ts`; no manager, no schema, no user overrides |
 | 19 | Rich Components | Not started | **~5%** — only `renderers/compaction-summary.ts` exists; no diff, no bash-execution, no tool-execution renderer |
 | 20 | Input Polish | Not started | **0%** — editor is basic; no `!`/`@` syntax, no paste-image, no `$EDITOR` round-trip |
 | 21 | Export / Import / Share | Not started | **0%** — no export-html renderer, no share, no import |
 | 22 | Retry, Diagnostics, Telemetry, Final Polish | Not started | **~5%** — basic in-memory telemetry counters only |
 
-**Overall port completion (all 12 phases, file-count weighted): roughly 20%.** The session/compaction subsystem and the TUI selector suite carry most of the signal; every other port phase is essentially unstarted.
+**Overall port completion (all 12 phases, file-count weighted): roughly 22%.** The session/compaction subsystem, the TUI selector suite, and the auth split now carry the bulk of the signal; every other port phase remains unstarted or skeletal.
 
 ## What pi-mono 0.69.0 unlocked
 
@@ -93,17 +93,6 @@ These are pi-mono symbols that Clio either re-exports through `src/engine/` and 
 | `SettingsList.submenu` | re-exported via type | unused in `settings-overlay.ts` | The current settings overlay is a flat list. Submenus would let us nest the keybindings editor (Phase 18), the per-endpoint thinking config, and the safety-mode allowlist editor without inflating the top level. |
 | `addInputListener()` / `removeInputListener()` | re-exported via `TUI` | unused | Lets a future Phase 14 extension intercept raw input before component handling (e.g. for vim-mode or a custom key recorder). Keep documented. |
 
-## Updated Phase 17 ledger note
-
-The ledger row "OAuth flows | ❌ | No OAuth code anywhere" is **stale**. Since this doc was written, `src/domains/providers/auth/` has grown to six modules (826 LOC total): `storage.ts` (524 LOC AuthStorage contract), `backend-file.ts` (194 LOC mode-0600 yaml), `backend-memory.ts` (17 LOC), `api-key.ts` (25 LOC env-var resolver), `oauth.ts` (36 LOC engine wrapper), and `index.ts` (30 LOC barrel). The engine side (`src/engine/oauth.ts`) re-exports `OAuthProviderId`, `OAuthCredentials`, `OAuthLoginCallbacks`, `OAuthProviderInterface` plus login helpers. Phase 17 is closer to **65%**, not 30%. What's still missing:
-
-- Login dialog overlay (`src/interactive/overlays/login-dialog.ts`)
-- OAuth selector overlay (`src/interactive/overlays/oauth-selector.ts`)
-- `/login` and `/logout` slash commands
-- `--api-key <key>` CLI flag
-
-Refresh the executive-summary row and the per-phase table when this audit is next regenerated.
-
 ## Structural deltas from the plan baseline (v0.1.0-rc1 @ `ab37e13` → current)
 
 Sessions since the spine was written moved Clio forward in ways that touch parity math but are not part of the pi-coding-agent port:
@@ -129,7 +118,7 @@ When the next port phase starts, these structural deltas matter: Phase 16 RPC wo
 | Session-selector fuzzy search | `src/interactive/overlays/session-selector-search.ts` | ❌ | File absent; SelectList may filter internally but dedicated fuzzy picker missing |
 | Message picker (fork source) | `src/interactive/overlays/message-picker.ts` | ✅ | 139 LOC; assistant turns, most-recent first |
 | Hotkeys overlay (preview) | `src/interactive/overlays/hotkeys.ts` | ✅ | Read-only key↔action map |
-| `clio --list-models [search]` | `src/cli/list-models.ts` | 🟡 | 110 LOC; supports `--json`, `--probe`, `--endpoint` filter; plan-defined `search` positional missing |
+| `clio --list-models [search]` | `src/cli/list-models.ts` | ✅ | 110 LOC; supports `--json`, `--probe`, `--endpoint` filter, and the plan-defined `search` positional |
 | Provider resolver (glob, fuzzy, `:thinking`) | `src/domains/providers/resolver.ts` | ❌ | No resolver module; endpoint resolution lives in dispatch/providers extension, keyed by id |
 
 ### Phase 12 — Session Richness & Compaction — 75%
@@ -211,19 +200,20 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | Initial message composer | `src/cli/initial-message.ts` | ❌ |
 | `--print`, `-p`, `--mode <text\|json\|rpc>` flags | `src/cli/args.ts` | ❌ |
 
-### Phase 17 — Auth & OAuth — 30%
+### Phase 17 — Auth & OAuth — ~85%
 
 | Plan item | Expected path | Status | Evidence |
 |---|---|---|---|
-| AuthStorage contract | `src/domains/providers/auth/storage.ts` | ❌ | Contract absent |
-| File backend (credentials.yaml 0600) | `src/domains/providers/auth/backend-file.ts` | 🟡 | Logic lives monolithically in `src/domains/providers/credentials.ts` (178 LOC: atomic YAML write, mode 0600, keychain scaffold, env-var detection). Backend split missing. |
-| Memory backend | `src/domains/providers/auth/backend-memory.ts` | ❌ | Not implemented |
-| OAuth flows | `src/domains/providers/auth/oauth.ts` | ❌ | No OAuth code anywhere |
-| API-key resolver | `src/domains/providers/auth/api-key.ts` | ❌ | Env-var resolution currently inline in credentials.ts |
-| Login dialog overlay | `src/interactive/overlays/login-dialog.ts` | ❌ | |
-| OAuth selector overlay | `src/interactive/overlays/oauth-selector.ts` | ❌ | |
-| `/login`, `/logout` slash commands | `src/interactive/slash-commands.ts` | ❌ | |
-| `--api-key <key>` flag | `src/cli/args.ts` | ❌ | |
+| AuthStorage contract | `src/domains/providers/auth/storage.ts` | ✅ | 524 LOC; provider-keyed credentials, fallback resolver, atomic persistence |
+| File backend (credentials.yaml 0600) | `src/domains/providers/auth/backend-file.ts` | ✅ | 194 LOC; mode-0600 YAML writer split out of the legacy `credentials.ts` |
+| Memory backend | `src/domains/providers/auth/backend-memory.ts` | ✅ | 17 LOC; in-process Map for tests and ephemeral runs |
+| OAuth flows | `src/domains/providers/auth/oauth.ts` | ✅ | 36 LOC engine wrapper; `src/engine/oauth.ts` re-exports `OAuthProviderId`, `OAuthCredentials`, `OAuthLoginCallbacks`, `OAuthProviderInterface`, login helpers |
+| API-key resolver | `src/domains/providers/auth/api-key.ts` | ✅ | 25 LOC env-var resolver consumed by storage and CLI |
+| Login dialog overlay | `src/interactive/overlays/auth-dialog.ts` | ✅ | 128 LOC; clio chose `auth-dialog.ts` over the plan's `login-dialog.ts` name |
+| OAuth selector overlay | `src/interactive/overlays/auth-selector.ts` | ✅ | 51 LOC; clio chose `auth-selector.ts` over the plan's `oauth-selector.ts` name |
+| `/login`, `/logout` slash commands | `src/interactive/slash-commands.ts` | ✅ | `/login` and `/connect` route to the connect flow; `/logout` and `/disconnect` route to the disconnect flow; both accept an optional provider/endpoint argument |
+| `clio auth` / `clio login` / `clio logout` subcommands | `src/cli/{auth,login,logout,oauth-manual-input}.ts` | ➕ | Beyond-plan: 57 + 193 + 111 + 73 LOC giving a non-interactive auth surface (`clio auth list/status`, `clio login [target]`, `clio logout [target]`) |
+| `--api-key <key>` startup flag | `src/cli/args.ts` | 🟡 | `clio setup --api-key <literal>` stores api keys in credentials.yaml today; the top-level startup flag the plan calls for still requires the missing `src/cli/args.ts` parser |
 
 ### Phase 18 — Keybindings (user-configurable) — ~10%
 
@@ -308,15 +298,14 @@ These are structural pieces that show up in many phases and are currently absent
 
 ## What parity means in practice
 
-Phases 11 and 12 are the only port phases that are materially advanced. Everything else is blocked on at least one of:
+Phases 11, 12, and 17 are the port phases that are materially advanced. Everything else is blocked on at least one of:
 
 - the flag parser (`src/cli/args.ts`),
 - the three new domains (`resources`, `extensions`, `packages`),
-- the auth split (`src/domains/providers/auth/**`),
 - the keybinding manager (`src/interactive/keybinding-manager.ts`),
 - the renderer tree (`src/interactive/renderers/**` + `src/interactive/components/**`).
 
-Phase 16 (RPC/print/JSON) and Phase 21 (export/import/share) are net-new surface. The rest of the work is re-homing pi-coding-agent features under Clio's 13-domain layout with the three hard invariants intact.
+Phase 16 (RPC/print/JSON) and Phase 21 (export/import/share) are net-new surface. The rest of the work is re-homing pi-coding-agent features under Clio's 12-domain layout with the three hard invariants intact.
 
 ## Execution notes
 
