@@ -21,14 +21,14 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 | Phase | Area | Status | Coverage |
 |---|---|---|---|
 | 11 | TUI Selector Suite | Done | **100%** — 8/8 overlays landed (incl. session fuzzy picker), list-models search positional wired, provider resolver now adapted to Clio's endpoint+wireModel model and exposed via `/model <pattern>` |
-| 12 | Session Richness & Compaction | Mostly done | **75%** — entries, tree, fork, compaction, cwd-fallback present; retry + HTML export + share missing |
+| 12 | Session Richness & Compaction | Done | **~95%.** Entries, tree, fork, compaction, cwd-fallback, retry settings + countdown, and branch/compaction-summary renderers all present. HTML export + share tracked under Phase 21. |
 | 13 | Resources (skills, prompts, themes, context files) | Not started | **0%** — `src/domains/resources/` does not exist |
 | 14 | Extensions System | Not started | **0%** — `src/domains/extensions/` does not exist |
 | 15 | Package Manager | Not started | **0%** — `src/domains/packages/` does not exist |
 | 16 | RPC + Print + JSON modes | Not started | **0%** — no `src/cli/modes/`, no SDK barrel |
 | 17 | Auth & OAuth | Done | **100%** — auth split landed (storage/backend-file/backend-memory/api-key/oauth/index), `auth-dialog` and `auth-selector` overlays wired, `/login`+`/logout`+`/connect`+`/disconnect` slash commands live, `clio auth`/`login`/`logout` subcommands shipped, top-level `clio --api-key <key>` startup flag plumbed through orchestrator + `clio run` |
 | 18 | Keybindings (user-configurable) | Mostly done | **~70%** — `src/domains/config/keybindings.ts` declares CLIO_KEYBINDINGS merged with TUI_KEYBINDINGS; `src/interactive/keybinding-manager.ts` wraps pi-tui's `KeybindingsManager`, installs it as the global, and exposes `matches/getKeys/getConflicts/hotkeyEntries/overrideCount`; `routeInteractiveKey` + `routeOverlayKey` + harness Ctrl+R now route through the manager; `/hotkeys` derives its GLOBAL section from the resolved bindings; `/settings` shows the overrides/conflicts summary row. Remaining: inline keybinding editor overlay (Phase 19/20 adjacent) and kitty-vs-legacy platform fallbacks. |
-| 19 | Rich Components | Not started | **~5%** — only `renderers/compaction-summary.ts` exists; no diff, no bash-execution, no tool-execution renderer |
+| 19 | Rich Components | Not started | **~10%.** `renderers/compaction-summary.ts` and `renderers/branch-summary.ts` land under Phase 12. No diff, no bash-execution, no tool-execution renderer yet. |
 | 20 | Input Polish | Not started | **0%** — editor is basic; no `!`/`@` syntax, no paste-image, no `$EDITOR` round-trip |
 | 21 | Export / Import / Share | Not started | **0%** — no export-html renderer, no share, no import |
 | 22 | Retry, Diagnostics, Telemetry, Final Polish | Not started | **~5%** — basic in-memory telemetry counters only |
@@ -136,10 +136,10 @@ When the next port phase starts, these structural deltas matter: Phase 16 RPC wo
 | Cut-point picker | `src/domains/session/compaction/cut-point.ts` | ✅ | 143 LOC; tool_result guard preserved; sub-threshold fallback lands the cut on the newest turn start so manual `/compact` summarizes older turns on populated small sessions |
 | Token estimation | `src/domains/session/compaction/tokens.ts` | ✅ | 179 LOC; `getLastAssistantUsage` helper |
 | Missing-cwd fallback | `src/domains/session/cwd-fallback.ts` | ✅ | 66 LOC; 3-way probe result |
-| Retry settings + countdown | `src/domains/session/retry.ts` | ❌ | Compact-and-retry hinted at in dispatch comments; no dedicated module |
+| Retry settings + countdown | `src/domains/session/retry.ts` | ✅ | Pure module: `RetrySettings` (enabled/maxRetries/baseDelayMs/maxDelayMs) with `DEFAULT_RETRY_SETTINGS`, `isRetryableErrorMessage` heuristic ported from pi-mono's `_isRetryableError` regex, `computeRetryDelayMs` (exponential backoff clamped to `maxDelayMs`), and `createRetryCountdown` (1s-resolution controller with injectable timer/clock, synchronous first tick, cancel path). Chat-loop wiring for auto-retry lands later under Phase 22; the module is ready to consume. |
 | Tree selector (`/tree`) | `src/interactive/overlays/tree-selector.ts` | ✅ | 353 LOC; submodes (browse, edit-label, confirm-delete); `shift+t` timestamps; `e`/`d` deletions |
-| Branch-summary renderer | `src/interactive/renderers/branch-summary.ts` | ❌ | Missing |
-| Compaction-summary renderer | `src/interactive/renderers/compaction-summary.ts` | ✅ | Minimal placeholder |
+| Branch-summary renderer | `src/interactive/renderers/branch-summary.ts` | ✅ | Pure `(entry, width) -> string[]`: `renderBranchSummaryEntry` emits a `[branch summary]` header plus a two-space-indented Markdown body; `renderBranchSummaryHeader` stands alone for placeholder replays. Width-aware body render clamps to `width - BODY_INDENT.length` so the indent never pushes content past the pane edge. |
+| Compaction-summary renderer | `src/interactive/renderers/compaction-summary.ts` | ✅ | Extended the prior one-line helper with `renderCompactionSummaryEntry` + `renderCompactionSummaryHeader`. Header carries `~<tokensBefore> tokens before, cont. at turn <firstKeptTurnId>` with locale-grouped digits; body is Markdown-rendered and indented identically to the branch-summary block. `renderCompactionSummaryLine` still feeds chat-loop's post-compaction notice unchanged. |
 | Messages union (BashExecution, Custom, BranchSummary, CompactionSummary) | `src/domains/session/entries.ts` | ✅ | Covered by entry union above |
 
 ### Phase 13 — Resources — 0%
@@ -230,7 +230,7 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | Platform-specific handling (Kitty, Zellij, tmux, Windows) | `src/interactive/keybinding-manager.ts` | ❌ | Clio inherits pi-tui's key-detection capabilities; no Clio-specific platform fallbacks. Legacy terminals without CSI-u cannot fire `shift+ctrl+p` (documented in the binding's comment). |
 | Inline keybinding editor overlay | future | ❌ | Users edit `settings.yaml` > `keybindings` today. |
 
-### Phase 19 — Rich Components — ~5%
+### Phase 19 — Rich Components — ~10%
 
 | Plan item | Expected path | Status | Evidence |
 |---|---|---|---|
@@ -241,8 +241,8 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | Diff renderer | `src/interactive/renderers/diff.ts` | ❌ | |
 | Edit-tool diff preview | `src/tools/edit-diff.ts` | ❌ | |
 | Bash-execution renderer | `src/interactive/renderers/bash-execution.ts` | ❌ | |
-| Branch-summary renderer | `src/interactive/renderers/branch-summary.ts` | ❌ | |
-| Compaction-summary renderer | `src/interactive/renderers/compaction-summary.ts` | ✅ | Minimal placeholder |
+| Branch-summary renderer | `src/interactive/renderers/branch-summary.ts` | ✅ | Landed under Phase 12 (see row above) |
+| Compaction-summary renderer | `src/interactive/renderers/compaction-summary.ts` | ✅ | Full entry renderer + legacy one-liner; landed under Phase 12 |
 | Custom-message renderer | `src/interactive/renderers/custom-message.ts` | ❌ | |
 | Skill-invocation renderer | `src/interactive/renderers/skill-invocation.ts` | ❌ | |
 | Bordered loader, dynamic border, visual truncate, countdown timer | `src/interactive/components/` | ❌ | `src/interactive/components/` does not exist |
@@ -276,11 +276,11 @@ Every expected path is missing. `src/domains/resources/` does not exist. No `ass
 | Share via gist | `src/domains/session/share.ts` | ❌ |
 | `/copy`, `/name`, `/changelog` | `src/interactive/slash-commands.ts` | ❌ |
 
-### Phase 22 — Retry, Diagnostics, Telemetry, Final Polish — ~5%
+### Phase 22 — Retry, Diagnostics, Telemetry, Final Polish — ~10%
 
 | Plan item | Expected path | Status | Evidence |
 |---|---|---|---|
-| Retry settings module | `src/domains/session/retry.ts` | ❌ | |
+| Retry settings module | `src/domains/session/retry.ts` | ✅ | Landed under Phase 12 (see row above). Chat-loop wiring for auto-retry on transient agent errors is the remaining Phase 22 scope. |
 | Structured diagnostics | `src/core/diagnostics.ts` | ❌ | Today uses `console.error` |
 | Install-telemetry ping | `src/domains/lifecycle/telemetry.ts` | ❌ | |
 | In-memory counters/histograms | `src/domains/observability/telemetry.ts` | 🟡 | 46 LOC; counters + histograms + snapshot/reset; not the install-ping the plan describes |
