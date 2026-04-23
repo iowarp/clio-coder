@@ -1,4 +1,4 @@
-import { ok } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,13 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 	});
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
+	});
+
+	it("clio --dev enables the self-development banner", async () => {
+		const result = await runCli(["--dev"], { env: { CLIO_HOME: home }, timeoutMs: 15_000 });
+		strictEqual(result.code, 0);
+		ok(result.stdout.includes("--dev | CLIO_SELF_DEV=1"), result.stdout);
+		ok(result.stdout.includes("watching src/"), result.stdout);
 	});
 
 	it("banner shows CLIO_SELF_DEV line and footer flips to restart-required on engine edit", async () => {

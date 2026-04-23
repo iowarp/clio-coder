@@ -1,11 +1,10 @@
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { buildSelfDevPrompt, resolveSelfDevMode } from "../core/self-dev.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -47,6 +46,7 @@ import { startInteractive } from "../interactive/index.js";
 import { formatInvalidKeybindingNotice, validateKeybindings } from "../interactive/keybinding-manager.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry } from "../tools/registry.js";
+import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -56,6 +56,8 @@ export interface BootResult {
 export interface BootOptions {
 	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
 	apiKey?: string;
+	/** Enable Clio self-development mode for the current process. */
+	dev?: boolean;
 }
 
 function buildBanner(): string {
@@ -214,26 +216,9 @@ function cycleScoped(
 	persist(current);
 }
 
-function resolveRepoRoot(): string | null {
-	try {
-		const here = dirname(fileURLToPath(import.meta.url));
-		let cursor = here;
-		for (let i = 0; i < 8; i++) {
-			if (existsSync(join(cursor, "package.json")) && existsSync(join(cursor, "src"))) {
-				return cursor;
-			}
-			const parent = dirname(cursor);
-			if (parent === cursor) break;
-			cursor = parent;
-		}
-	} catch {
-		// fall through
-	}
-	return null;
-}
-
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
+	const selfDev = resolveSelfDevMode({ cliDev: options.dev === true });
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	installBusTracer();
@@ -272,8 +257,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	timer.mark("session_start fired");
 
 	process.stdout.write(buildBanner());
-	if (process.env.CLIO_SELF_DEV === "1") {
-		process.stdout.write(`  ${chalk.magenta("CLIO_SELF_DEV=1 · hot-reload on src/tools/*.ts · watching src/")}\n`);
+	if (selfDev) {
+		process.stdout.write(
+			`  ${chalk.magenta(`${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`)}\n`,
+		);
 	}
 	if (process.env.CLIO_TIMING === "1") {
 		process.stdout.write(`${timer.report()}\n`);
@@ -317,6 +304,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	const toolRegistry = createRegistry({ safety, modes });
 	registerAllTools(toolRegistry);
+	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
 	for (const spec of toolRegistry.listAll()) {
@@ -362,6 +350,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
+		...(selfDev ? { selfDevPrompt: buildSelfDevPrompt(selfDev) } : {}),
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		...(session
@@ -384,31 +373,27 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 
 	let harness: HarnessHandle | null = null;
-	if (process.env.CLIO_SELF_DEV === "1") {
-		const repoRoot = resolveRepoRoot();
-		if (!repoRoot) {
-			process.stderr.write("clio: CLIO_SELF_DEV=1 but no repo checkout found; hot-reload disabled.\n");
-		} else {
-			// Compile hot modules under the repo's node_modules so Node resolves
-			// bare imports (e.g. typebox) via the repo's installed deps.
-			// An XDG cache path would be outside any node_modules tree and break
-			// bare-specifier resolution.
-			const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
-			harness = startHarness({
-				repoRoot,
-				cacheRoot: hotCacheRoot,
-				toolRegistry,
-				bus,
-				allowedModesByName,
-				getSessionId: () => session?.current()?.id ?? null,
-				shutdown: async (code?: number) => {
-					await termination.shutdown(code ?? 0);
-				},
-			});
-			termination.onDrain(() => {
-				harness?.stop();
-			});
-		}
+	if (selfDev) {
+		const repoRoot = selfDev.repoRoot;
+		// Compile hot modules under the repo's node_modules so Node resolves
+		// bare imports (e.g. typebox) via the repo's installed deps. An XDG
+		// cache path would be outside any node_modules tree and break
+		// bare-specifier resolution.
+		const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
+		harness = startHarness({
+			repoRoot,
+			cacheRoot: hotCacheRoot,
+			toolRegistry,
+			bus,
+			allowedModesByName,
+			getSessionId: () => session?.current()?.id ?? null,
+			shutdown: async (code?: number) => {
+				await termination.shutdown(code ?? 0);
+			},
+		});
+		termination.onDrain(() => {
+			harness?.stop();
+		});
 	}
 
 	await startInteractive({

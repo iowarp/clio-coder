@@ -1,0 +1,48 @@
+import { evaluateSelfDevBashCommand, evaluateSelfDevWritePath, type SelfDevMode } from "../core/self-dev.js";
+import { ToolNames } from "../core/tool-names.js";
+import type { ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
+
+function pathArg(args: Record<string, unknown>): string | null {
+	return typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
+}
+
+function appendRestartNotice(result: ToolResult, relativePath: string): ToolResult {
+	if (result.kind !== "ok") return result;
+	const notice = `self-dev: ${relativePath} touches src/engine; restart Clio before trusting the running process`;
+	return { ...result, output: result.output.length > 0 ? `${result.output}\n${notice}` : notice };
+}
+
+function wrapPathMutator(spec: ToolSpec, mode: SelfDevMode): ToolSpec {
+	return {
+		...spec,
+		async run(args): Promise<ToolResult> {
+			const target = pathArg(args);
+			if (!target) return spec.run(args);
+			const decision = evaluateSelfDevWritePath(mode, target);
+			if (!decision.allowed) return { kind: "error", message: decision.reason };
+			const result = await spec.run(args);
+			return decision.restartRequired ? appendRestartNotice(result, decision.relativePath) : result;
+		},
+	};
+}
+
+function wrapBash(spec: ToolSpec): ToolSpec {
+	return {
+		...spec,
+		async run(args): Promise<ToolResult> {
+			const command = typeof args.command === "string" ? args.command : "";
+			const blocked = evaluateSelfDevBashCommand(command);
+			if (blocked) return { kind: "error", message: blocked };
+			return spec.run(args);
+		},
+	};
+}
+
+export function applySelfDevToolGuards(registry: ToolRegistry, mode: SelfDevMode): void {
+	const write = registry.get(ToolNames.Write);
+	if (write) registry.register(wrapPathMutator(write, mode));
+	const edit = registry.get(ToolNames.Edit);
+	if (edit) registry.register(wrapPathMutator(edit, mode));
+	const bash = registry.get(ToolNames.Bash);
+	if (bash) registry.register(wrapBash(bash));
+}
