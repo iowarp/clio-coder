@@ -173,6 +173,8 @@ async function main(): Promise<void> {
 				login: async () => {},
 				logout: () => {},
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: {
 				hasKey: () => false,

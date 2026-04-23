@@ -86,6 +86,8 @@ function setupHarness(toolsSupported: boolean): Harness {
 			login: async () => {},
 			logout: () => {},
 			getOAuthProviders: () => [],
+			setRuntimeOverrideForTarget: () => {},
+			clearRuntimeOverrideForTarget: () => {},
 		},
 		credentials: {
 			hasKey: () => false,

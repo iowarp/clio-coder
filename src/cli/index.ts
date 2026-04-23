@@ -9,7 +9,7 @@ import { runDisconnectCommand } from "./logout.js";
 import { runProvidersCommand } from "./providers.js";
 import { runClioRun } from "./run.js";
 import { runSetupCommand } from "./setup.js";
-import { parseFlags, printError } from "./shared.js";
+import { extractApiKeyFlag, parseFlags, printError } from "./shared.js";
 import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
@@ -19,6 +19,7 @@ const HELP = `clio. IOWarp orchestrator coding-agent
 Usage:
   clio                      start interactive mode
   clio --version, -v        print version info
+  clio --api-key <key>      override the active endpoint's api key for this run
   clio doctor               run environment diagnostics
   clio setup                create, edit, or remove endpoints
   clio install              bootstrap Clio config/data/cache directories
@@ -35,7 +36,8 @@ Usage:
 `;
 
 async function main(argv: string[]): Promise<number> {
-	const { flags, positional } = parseFlags(argv);
+	const { apiKey, rest } = extractApiKeyFlag(argv);
+	const { flags, positional } = parseFlags(rest);
 	if (flags.has("help") || flags.has("h")) {
 		process.stdout.write(HELP);
 		return 0;
@@ -43,37 +45,39 @@ async function main(argv: string[]): Promise<number> {
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
 
 	const subcommand = positional[0];
-	if (!subcommand) return runClioCommand();
+	const subArgs = rest.slice(1);
+	const bootOptions = apiKey === undefined ? {} : { apiKey };
+	if (!subcommand) return runClioCommand(bootOptions);
 
 	switch (subcommand) {
 		case "providers":
-			return runProvidersCommand(argv.slice(1));
+			return runProvidersCommand(subArgs);
 		case "list-models":
-			return runListModelsCommand(argv.slice(1));
+			return runListModelsCommand(subArgs);
 		case "connect":
-			return runConnectCommand(argv.slice(1));
+			return runConnectCommand(subArgs);
 		case "disconnect":
-			return runDisconnectCommand(argv.slice(1));
+			return runDisconnectCommand(subArgs);
 		case "login":
-			return runConnectCommand(argv.slice(1));
+			return runConnectCommand(subArgs);
 		case "logout":
-			return runDisconnectCommand(argv.slice(1));
+			return runDisconnectCommand(subArgs);
 		case "auth":
-			return runAuthCommand(argv.slice(1));
+			return runAuthCommand(subArgs);
 		case "agents":
-			return runAgentsCommand(argv.slice(1));
+			return runAgentsCommand(subArgs);
 		case "run":
-			return runClioRun(argv.slice(1));
+			return runClioRun(subArgs, bootOptions);
 		case "doctor":
 			return runDoctorCommand();
 		case "setup":
-			return runSetupCommand(argv.slice(1));
+			return runSetupCommand(subArgs);
 		case "install":
 			return runInstallCommand();
 		case "uninstall":
-			return runUninstallCommand(argv.slice(1));
+			return runUninstallCommand(subArgs);
 		case "upgrade":
-			return runUpgradeCommand(argv.slice(1));
+			return runUpgradeCommand(subArgs);
 		case "version":
 			return runVersionCommand();
 		default:

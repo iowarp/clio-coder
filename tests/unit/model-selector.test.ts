@@ -121,6 +121,8 @@ describe("interactive/model-selector", () => {
 				login: async () => undefined,
 				logout: () => undefined,
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => undefined,
+				clearRuntimeOverrideForTarget: () => undefined,
 			},
 			credentials: {
 				hasKey: () => false,
@@ -209,6 +211,8 @@ describe("interactive/model-selector", () => {
 				login: async () => undefined,
 				logout: () => undefined,
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => undefined,
+				clearRuntimeOverrideForTarget: () => undefined,
 			},
 			credentials: {
 				hasKey: () => true,

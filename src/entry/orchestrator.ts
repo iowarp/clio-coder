@@ -52,6 +52,11 @@ export interface BootResult {
 	bootTimeMs: number;
 }
 
+export interface BootOptions {
+	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
+	apiKey?: string;
+}
+
 function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
@@ -226,7 +231,7 @@ function resolveRepoRoot(): string | null {
 	return null;
 }
 
-export async function bootOrchestrator(): Promise<BootResult> {
+export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
@@ -273,6 +278,25 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		process.stdout.write(`${timer.report()}\n`);
 	}
 
+	const config = result.getContract<ConfigContract>("config");
+	const providers = result.getContract<ProvidersContract>("providers");
+
+	if (options.apiKey) {
+		if (!providers) {
+			process.stderr.write("clio: --api-key supplied but providers domain unavailable; ignoring.\n");
+		} else {
+			const settingsNow = config?.get() ?? readSettings();
+			const activeEndpointId = settingsNow.orchestrator?.endpoint;
+			const endpoint = resolveEndpoint(providers, activeEndpointId);
+			const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
+			if (endpoint && runtime) {
+				providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
+			} else {
+				process.stderr.write("clio: --api-key supplied but no active orchestrator endpoint is configured; ignoring.\n");
+			}
+		}
+	}
+
 	const runInteractive = process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
 	if (!runInteractive) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
@@ -281,7 +305,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 
 	const modes = result.getContract<ModesContract>("modes");
-	const providers = result.getContract<ProvidersContract>("providers");
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
 	if (!modes || !providers || !dispatch || !observability || !safety) {
@@ -299,7 +322,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		if (spec.allowedModes) allowedModesByName.set(spec.name, spec.allowedModes);
 	}
 
-	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());

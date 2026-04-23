@@ -127,6 +127,8 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 			login: async () => {},
 			logout: () => {},
 			getOAuthProviders: () => [],
+			setRuntimeOverrideForTarget: () => {},
+			clearRuntimeOverrideForTarget: () => {},
 		},
 		credentials: {
 			hasKey: () => false,
