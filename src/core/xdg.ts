@@ -60,27 +60,35 @@ function clioHomeOrNull(): string | null {
 	return envOrNull("CLIO_HOME");
 }
 
+export function resolveClioDirs(): { data: string; cache: string; config: string } {
+	const overrideData =
+		envOrNull("CLIO_DATA_DIR") ?? (clioHomeOrNull() ? join(clioHomeOrNull() as string, "data") : null);
+	const overrideCache =
+		envOrNull("CLIO_CACHE_DIR") ?? (clioHomeOrNull() ? join(clioHomeOrNull() as string, "cache") : null);
+	const overrideConfig = envOrNull("CLIO_CONFIG_DIR") ?? (clioHomeOrNull() ? (clioHomeOrNull() as string) : null);
+	const defaults = platformDefaults();
+	return {
+		data: overrideData ?? defaults.data,
+		cache: overrideCache ?? defaults.cache,
+		config: overrideConfig ?? defaults.config,
+	};
+}
+
 export function clioDataDir(): string {
 	if (cachedDataDir) return cachedDataDir;
-	const override = envOrNull("CLIO_DATA_DIR") ?? (clioHomeOrNull() ? join(clioHomeOrNull() as string, "data") : null);
-	const resolved = override ?? platformDefaults().data;
-	cachedDataDir = ensureDir(resolved);
+	cachedDataDir = ensureDir(resolveClioDirs().data);
 	return cachedDataDir;
 }
 
 export function clioCacheDir(): string {
 	if (cachedCacheDir) return cachedCacheDir;
-	const override = envOrNull("CLIO_CACHE_DIR") ?? (clioHomeOrNull() ? join(clioHomeOrNull() as string, "cache") : null);
-	const resolved = override ?? platformDefaults().cache;
-	cachedCacheDir = ensureDir(resolved);
+	cachedCacheDir = ensureDir(resolveClioDirs().cache);
 	return cachedCacheDir;
 }
 
 export function clioConfigDir(): string {
 	if (cachedConfigDir) return cachedConfigDir;
-	const override = envOrNull("CLIO_CONFIG_DIR") ?? (clioHomeOrNull() ? (clioHomeOrNull() as string) : null);
-	const resolved = override ?? platformDefaults().config;
-	cachedConfigDir = ensureDir(resolved);
+	cachedConfigDir = ensureDir(resolveClioDirs().config);
 	return cachedConfigDir;
 }
 
