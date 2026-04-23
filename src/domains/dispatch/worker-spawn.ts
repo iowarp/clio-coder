@@ -44,7 +44,14 @@ export interface SpawnOptions {
 	shutdownGraceMs?: number;
 }
 
-const DEFAULT_SHUTDOWN_GRACE_MS = 3000;
+/**
+ * SIGTERM→SIGKILL window on worker abort. Kept tight so TUI exit with an
+ * in-flight worker still returns the shell prompt in well under a second.
+ * A cooperative child exits on SIGTERM within this window; a stuck one
+ * gets SIGKILL. Callers that need a longer graceful window (e.g. user-
+ * initiated cancel with output flush) pass `shutdownGraceMs` explicitly.
+ */
+const DEFAULT_SHUTDOWN_GRACE_MS = 500;
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
