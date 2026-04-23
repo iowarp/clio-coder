@@ -146,6 +146,7 @@ describe("dispatch auth resolution", () => {
 			isActionAllowed: () => true,
 			requestSuper: () => {},
 			confirmSuper: () => "super",
+			elevatedModeFor: () => null,
 		};
 		const context: DomainContext = {
 			bus: createSafeEventBus(),

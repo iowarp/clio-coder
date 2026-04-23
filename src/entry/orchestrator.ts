@@ -412,6 +412,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		observability,
 		chat,
+		toolRegistry,
 		...(session ? { session } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),

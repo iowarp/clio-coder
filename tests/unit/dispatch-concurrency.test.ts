@@ -173,6 +173,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		isActionAllowed: () => true,
 		requestSuper: () => {},
 		confirmSuper: () => "super",
+		elevatedModeFor: () => null,
 	};
 
 	const bus = createSafeEventBus();

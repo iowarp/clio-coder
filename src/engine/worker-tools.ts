@@ -71,6 +71,10 @@ function createWorkerModes(mode: ModeName): ModesContract {
 		isActionAllowed: (action) => profile.allowedActions.has(action),
 		requestSuper: () => {},
 		confirmSuper: () => mode,
+		// Workers have no Alt+S pathway; parking requires interactive
+		// confirmation. Returning null forces the registry to reject
+		// mode-gate blocks synchronously.
+		elevatedModeFor: () => null,
 	};
 }
 
