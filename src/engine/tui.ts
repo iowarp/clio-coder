@@ -6,6 +6,7 @@
 
 export type {
 	Component,
+	DefaultTextStyle,
 	EditorOptions,
 	EditorTheme,
 	Keybinding,
@@ -15,6 +16,7 @@ export type {
 	Keybindings,
 	KeybindingsConfig,
 	KeyId,
+	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
 	SelectItem,
@@ -91,4 +93,5 @@ export {
 	TUI_KEYBINDINGS,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
