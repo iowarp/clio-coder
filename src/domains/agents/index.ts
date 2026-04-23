@@ -7,8 +7,8 @@ export const AgentsDomainModule: DomainModule = {
 	createExtension: createAgentsBundle,
 };
 
-export { AgentsManifest } from "./manifest.js";
 export type { AgentsContract } from "./contract.js";
-export type { AgentRecipe, RecipeSource } from "./recipe.js";
-export { parseFleet } from "./fleet-parser.js";
 export type { Fleet, FleetStep } from "./fleet-parser.js";
+export { parseFleet } from "./fleet-parser.js";
+export { AgentsManifest } from "./manifest.js";
+export type { AgentRecipe, RecipeSource } from "./recipe.js";

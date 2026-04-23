@@ -1,4 +1,4 @@
-import { type SafeEventBus, createSafeEventBus } from "./event-bus.js";
+import { createSafeEventBus, type SafeEventBus } from "./event-bus.js";
 
 let sharedBus: SafeEventBus | null = null;
 

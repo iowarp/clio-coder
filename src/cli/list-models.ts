@@ -3,7 +3,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureInstalled } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { ProvidersDomainModule, listKnownModelsForRuntime } from "../domains/providers/index.js";
+import { listKnownModelsForRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 
 interface ModelRow {
 	endpointId: string;

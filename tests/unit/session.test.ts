@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
-	SESSION_ENTRY_KINDS,
-	type SessionEntry,
 	fromLegacyTurn,
 	isSessionEntry,
+	SESSION_ENTRY_KINDS,
+	type SessionEntry,
 } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";

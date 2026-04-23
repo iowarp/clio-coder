@@ -1,4 +1,4 @@
-import { Box, Input, type OverlayHandle, type TUI, Text } from "../../engine/tui.js";
+import { Box, Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
 

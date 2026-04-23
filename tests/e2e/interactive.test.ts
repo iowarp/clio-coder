@@ -9,10 +9,7 @@ function writeSettings(configDir: string, yaml: string): void {
 	writeFileSync(join(configDir, "settings.yaml"), yaml, "utf8");
 }
 
-function baseSettingsYaml(body: {
-	endpoints: string;
-	orchestrator: string;
-}): string {
+function baseSettingsYaml(body: { endpoints: string; orchestrator: string }): string {
 	return [
 		"version: 1",
 		"identity: clio",

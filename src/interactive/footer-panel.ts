@@ -1,9 +1,9 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import {
+	availableThinkingLevels,
 	type CapabilityFlags,
 	type ProvidersContract,
-	availableThinkingLevels,
 	resolveModelCapabilities,
 } from "../domains/providers/index.js";
 import { Text } from "../engine/tui.js";

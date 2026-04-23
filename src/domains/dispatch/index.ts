@@ -7,7 +7,7 @@ export const DispatchDomainModule: DomainModule = {
 	createExtension: createDispatchBundle,
 };
 
-export { DispatchManifest } from "./manifest.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
+export { DispatchManifest } from "./manifest.js";
 export type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
 export type { JobSpec } from "./validation.js";

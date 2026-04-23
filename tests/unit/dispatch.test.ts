@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { admit } from "../../src/domains/dispatch/admission.js";
 import { createBackoff, nextDelay, reset } from "../../src/domains/dispatch/backoff.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("dispatch/validation", () => {
 	it("accepts minimal spec", () => {

@@ -7,7 +7,7 @@ export const SchedulingDomainModule: DomainModule = {
 	createExtension: createSchedulingBundle,
 };
 
-export { SchedulingManifest } from "./manifest.js";
-export type { SchedulingContract } from "./contract.js";
 export type { BudgetVerdict } from "./budget.js";
 export type { ClusterNode } from "./cluster.js";
+export type { SchedulingContract } from "./contract.js";
+export { SchedulingManifest } from "./manifest.js";

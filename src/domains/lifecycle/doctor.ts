@@ -1,4 +1,4 @@
-import { constants, accessSync, existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { settingsPath } from "../../core/config.js";

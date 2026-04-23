@@ -17,8 +17,13 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
-import type { EndpointDescriptor, ProvidersContract, RuntimeDescriptor } from "../providers/index.js";
-import type { CapabilityFlags, ThinkingLevel } from "../providers/index.js";
+import type {
+	CapabilityFlags,
+	EndpointDescriptor,
+	ProvidersContract,
+	RuntimeDescriptor,
+	ThinkingLevel,
+} from "../providers/index.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
@@ -27,7 +32,7 @@ import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { type Ledger, openLedger } from "./state.js";
 import type { RunKind, RunReceipt, RunStatus } from "./types.js";
 import { validateJobSpec } from "./validation.js";
-import { type SpawnedWorker, type WorkerSpec, spawnNativeWorker } from "./worker-spawn.js";
+import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface ActiveRun {
 	runId: string;

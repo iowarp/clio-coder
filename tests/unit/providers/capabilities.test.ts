@@ -2,12 +2,12 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { mergeCapabilities } from "../../../src/domains/providers/capabilities.js";
+import type { CapabilityFlags } from "../../../src/domains/providers/types/capability-flags.js";
 import {
+	availableThinkingLevels,
 	EMPTY_CAPABILITIES,
 	VALID_THINKING_LEVELS,
-	availableThinkingLevels,
 } from "../../../src/domains/providers/types/capability-flags.js";
-import type { CapabilityFlags } from "../../../src/domains/providers/types/capability-flags.js";
 
 function base(overrides: Partial<CapabilityFlags> = {}): CapabilityFlags {
 	return { ...EMPTY_CAPABILITIES, chat: true, ...overrides };

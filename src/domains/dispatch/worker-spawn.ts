@@ -14,8 +14,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import type { EndpointDescriptor } from "../providers/index.js";
-import type { ThinkingLevel } from "../providers/index.js";
+import type { EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
 
 export interface WorkerSpec {
 	systemPrompt: string;

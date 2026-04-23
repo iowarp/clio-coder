@@ -7,5 +7,5 @@ export const SafetyDomainModule: DomainModule = {
 	createExtension: createSafetyBundle,
 };
 
-export { SafetyManifest } from "./manifest.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
+export { SafetyManifest } from "./manifest.js";

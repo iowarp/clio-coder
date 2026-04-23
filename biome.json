@@ -1,6 +1,6 @@
 {
-	"$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
-	"organizeImports": { "enabled": true },
+	"$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab",
@@ -33,6 +33,6 @@
 		}
 	},
 	"files": {
-		"ignore": ["dist", "node_modules", "*.log"]
+		"includes": ["**", "!**/dist", "!**/node_modules", "!**/*.log"]
 	}
 }

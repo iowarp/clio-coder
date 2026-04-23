@@ -7,7 +7,7 @@ export const ConfigDomainModule: DomainModule = {
 	createExtension: createConfigBundle,
 };
 
+export { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
+export type { ConfigContract } from "./contract.js";
 export { ConfigManifest } from "./manifest.js";
 export { SettingsSchema, type ValidatedSettings } from "./schema.js";
-export type { ConfigContract } from "./contract.js";
-export { diffSettings, type ChangeKind, type ConfigDiff } from "./classify.js";

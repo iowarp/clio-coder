@@ -7,15 +7,15 @@ import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
-	type ProvidersContract,
-	type ThinkingLevel,
 	getRuntimeRegistry,
 	listProviderSupportEntries,
+	type ProvidersContract,
 	resolveProviderReference,
+	type ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import { Editor, ProcessTerminal, type SelectItem, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import { Editor, isKeyRelease, matchesKey, ProcessTerminal, type SelectItem, Text, TUI } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -40,7 +40,7 @@ import {
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
-import { type RunIo, type SlashCommandContext, dispatchSlashCommand, parseSlashCommand } from "./slash-commands.js";
+import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -49,14 +49,14 @@ import { renderSuperOverlayLines } from "./super-overlay.js";
 export {
 	BUILTIN_SLASH_COMMANDS,
 	type BuiltinSlashCommand,
+	dispatchSlashCommand,
 	type HandleRunDeps,
+	handleRun,
+	parseSlashCommand,
 	type RunIo,
 	type SlashCommand,
 	type SlashCommandContext,
 	type SlashCommandKind,
-	dispatchSlashCommand,
-	handleRun,
-	parseSlashCommand,
 } from "./slash-commands.js";
 
 export interface InteractiveDeps {

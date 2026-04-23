@@ -11,12 +11,12 @@
 
 import {
 	type AssistantMessage,
-	type KnownProvider,
-	type Model,
 	fauxAssistantMessage,
 	fauxToolCall,
 	getModels,
 	getProviders,
+	type KnownProvider,
+	type Model,
 	getModel as piGetModel,
 	stream as piStream,
 	registerBuiltInApiProviders,

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";

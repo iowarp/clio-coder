@@ -4,9 +4,9 @@ import { classify as classifyCall } from "./action-classifier.js";
 import { type AuditRecord, type AuditWriter, buildAuditRecord, openAuditWriter } from "./audit.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { type DamageControlRuleset, loadDefaultRuleset, match as matchRule } from "./damage-control.js";
-import { type LoopDetectorState, createLoopState, observe as observeLoop } from "./loop-detector.js";
+import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { formatRejection } from "./rejection-feedback.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE, isSubset } from "./scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "./scope.js";
 
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let writer: AuditWriter | null = null;

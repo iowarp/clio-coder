@@ -2,9 +2,9 @@ import { readSettings } from "../core/config.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import {
 	EMPTY_CAPABILITIES,
+	listProviderSupportEntries,
 	type ProviderSupportEntry,
 	type ResolvedProviderReference,
-	listProviderSupportEntries,
 	resolveProviderReference,
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,

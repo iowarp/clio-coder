@@ -16,23 +16,23 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
-import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureInstalled, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	VALID_THINKING_LEVELS,
 	availableThinkingLevels,
+	ProvidersDomainModule,
 	resolveModelCapabilities,
+	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
-import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
+import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
@@ -56,7 +56,7 @@ function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
   ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
-  ${chalk.dim(`v${clio} · pi-mono 0.68.1 · ready`)}
+  ${chalk.dim(`v${clio} · pi-mono 0.69.0 · ready`)}
 `;
 }
 
@@ -362,7 +362,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 			process.stderr.write("clio: CLIO_SELF_DEV=1 but no repo checkout found; hot-reload disabled.\n");
 		} else {
 			// Compile hot modules under the repo's node_modules so Node resolves
-			// bare imports (e.g. @sinclair/typebox) via the repo's installed deps.
+			// bare imports (e.g. typebox) via the repo's installed deps.
 			// An XDG cache path would be outside any node_modules tree and break
 			// bare-specifier resolution.
 			const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");

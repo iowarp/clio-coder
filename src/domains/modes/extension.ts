@@ -2,7 +2,7 @@ import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ModesContract, SuperModeConfirmation } from "./contract.js";
-import { MODE_MATRIX, type ModeName, isActionAllowed, isToolVisible } from "./matrix.js";
+import { isActionAllowed, isToolVisible, MODE_MATRIX, type ModeName } from "./matrix.js";
 import { createModeState, parseModeName } from "./state.js";
 
 type SettingsWithState = ClioSettings & { state?: { lastMode?: string } };

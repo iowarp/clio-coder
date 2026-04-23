@@ -9,8 +9,8 @@ import {
 	SelectList,
 	type SelectListLayoutOptions,
 	type SelectListTheme,
-	type TUI,
 	Text,
+	type TUI,
 	truncateToWidth,
 } from "../engine/tui.js";
 

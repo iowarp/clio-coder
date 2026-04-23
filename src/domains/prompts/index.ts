@@ -7,5 +7,5 @@ export const PromptsDomainModule: DomainModule = {
 	createExtension: createPromptsBundle,
 };
 
+export type { CompileForTurnInput, PromptsContract } from "./contract.js";
 export { PromptsManifest } from "./manifest.js";
-export type { PromptsContract, CompileForTurnInput } from "./contract.js";
