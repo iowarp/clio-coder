@@ -22,6 +22,8 @@ export {
 	CancellableLoader,
 	Container,
 	Editor,
+	fuzzyFilter,
+	fuzzyMatch,
 	Image,
 	Input,
 	isKeyRelease,
