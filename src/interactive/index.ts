@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
@@ -31,6 +32,7 @@ import { createCoalescingChatRenderer } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
+import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
@@ -129,21 +131,7 @@ export interface InteractiveDeps {
 	onShutdown: () => Promise<void>;
 }
 
-export const SHIFT_TAB = "\x1b[Z";
-export const CTRL_D = "\x04";
-export const CTRL_B = "\x02";
-export const CTRL_L = "\x0c";
-export const CTRL_P = "\x10";
-export const CTRL_R = "\x12";
 export const CTRL_C_DOUBLE_TAP_MS = 500;
-// pi-coding-agent emits Shift+Ctrl+P as the CSI-u sequence for key 80 with the
-// shift+ctrl modifiers. Terminals in kitty-protocol mode deliver this literally;
-// legacy terminals without CSI-u will not fire this binding, by design — fall
-// back to /scoped-models to reach the scope in that environment.
-export const SHIFT_CTRL_P = "\x1b[80;6u";
-export const ALT_S = "\x1bs";
-export const ALT_M = "\x1bm";
-export const ALT_T = "\x1bt";
 export const ENTER = "\r";
 export const ESC = "\x1b";
 export type OverlayState =
@@ -165,6 +153,12 @@ export type OverlayState =
 	| "hotkeys";
 
 export interface KeyBindingDeps {
+	/**
+	 * Keybinding lookup injected by startInteractive. Defaults come from
+	 * CLIO_KEYBINDINGS; user overrides from settings.keybindings. Tests may
+	 * substitute a narrower matcher via createKeybindingManagerForTesting.
+	 */
+	matches: (data: string, id: ClioKeybinding) => boolean;
 	cycleMode: () => void;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
@@ -283,41 +277,44 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 
 /** Pure key router: returns true when the input was consumed. */
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
-	if (data === ALT_S) {
+	if (deps.matches(data, "clio.super.request")) {
 		deps.requestSuper();
 		return true;
 	}
-	if (data === SHIFT_TAB) {
+	if (deps.matches(data, "clio.thinking.cycle")) {
 		deps.cycleThinking();
 		return true;
 	}
-	if (data === ALT_M) {
+	if (deps.matches(data, "clio.mode.cycle")) {
 		deps.cycleMode();
 		return true;
 	}
-	if (data === ALT_T) {
+	if (deps.matches(data, "clio.session.tree")) {
 		deps.openTree();
 		return true;
 	}
-	if (data === CTRL_B) {
+	if (deps.matches(data, "clio.dispatchBoard.toggle")) {
 		deps.toggleDispatchBoard();
 		return true;
 	}
-	if (data === CTRL_L) {
+	if (deps.matches(data, "clio.model.select")) {
 		deps.openModelSelector();
 		return true;
 	}
-	if (data === SHIFT_CTRL_P) {
-		// Match before CTRL_P so the longer sequence wins. SHIFT_CTRL_P starts
-		// with \x1b, CTRL_P is a single \x10 byte, so the two do not prefix-match.
+	// Match shift+ctrl+p before ctrl+p so the longer sequence wins. In the
+	// default bindings these do not prefix-match each other anyway (the
+	// first starts with \x1b via CSI-u, the second is a single \x10 byte),
+	// but the order still matters if a user rebinds ctrl+p to an escape
+	// sequence that shift+ctrl+p shares a prefix with.
+	if (deps.matches(data, "clio.model.cycleBackward")) {
 		deps.cycleScopedModelBackward();
 		return true;
 	}
-	if (data === CTRL_P) {
+	if (deps.matches(data, "clio.model.cycleForward")) {
 		deps.cycleScopedModelForward();
 		return true;
 	}
-	if (data === CTRL_D) {
+	if (deps.matches(data, "clio.exit")) {
 		deps.requestShutdown();
 		return true;
 	}
@@ -524,10 +521,15 @@ export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps
 	return false;
 }
 
-/** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
-export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
+/** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
+export function routeOverlayKey(
+	data: string,
+	overlayState: OverlayState,
+	deps: OverlayKeyDeps,
+	matches: (data: string, id: ClioKeybinding) => boolean,
+): boolean {
 	if (overlayState === "closed") return false;
-	if (data === CTRL_D) {
+	if (matches(data, "clio.exit")) {
 		deps.requestShutdown();
 		return true;
 	}
@@ -596,6 +598,11 @@ const IDENTITY = (s: string): string => s;
 export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const terminal = new ProcessTerminal();
 	const tui = new TUI(terminal);
+
+	// Build the runtime keybinding manager from the current settings snapshot.
+	// This also installs the manager as pi-tui's global (via setKeybindings)
+	// so editor/select components honor overrides without explicit plumbing.
+	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
 
 	const banner = defaultBanner();
 	const chatPanel = createChatPanel();
@@ -1078,6 +1085,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openSettingsOverlay(tui, {
 			getSettings,
 			providers: deps.providers,
+			keybindings,
 			writeSettings: (next) => {
 				writeSettingsOut(next);
 				footer.refresh();
@@ -1242,7 +1250,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openHotkeysOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "hotkeys";
-		overlayHandle = openHotkeysOverlay(tui);
+		overlayHandle = openHotkeysOverlay(tui, keybindings);
 		tui.requestRender();
 	};
 
@@ -1350,35 +1358,41 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
-		const overlayConsumed = routeOverlayKey(data, overlayState, {
-			cancelSuper: () => {
-				closeOverlay();
+		const overlayConsumed = routeOverlayKey(
+			data,
+			overlayState,
+			{
+				cancelSuper: () => {
+					closeOverlay();
+				},
+				confirmSuper: (conf) => {
+					deps.modes.confirmSuper(conf);
+					closeOverlay();
+					footer.refresh();
+					tui.requestRender();
+				},
+				now: () => Date.now(),
+				closeOverlay,
+				requestShutdown: () => {
+					void shutdown();
+				},
 			},
-			confirmSuper: (conf) => {
-				deps.modes.confirmSuper(conf);
-				closeOverlay();
-				footer.refresh();
-				tui.requestRender();
-			},
-			now: () => Date.now(),
-			closeOverlay,
-			requestShutdown: () => {
-				void shutdown();
-			},
-		});
+			(input, id) => keybindings.matches(input, id),
+		);
 		if (overlayConsumed) {
 			return { consume: true };
 		}
 
 		if (harness) {
 			const snap = harness.state.snapshot();
-			if (snap.kind === "restart-required" && data === CTRL_R) {
+			if (snap.kind === "restart-required" && keybindings.matches(data, "clio.harness.restart")) {
 				void harness.restart();
 				return { consume: true };
 			}
 		}
 
 		const consumed = routeInteractiveKey(data, {
+			matches: (input, id) => keybindings.matches(input, id),
 			cycleMode: () => {
 				deps.modes.cycleNormal();
 				footer.refresh();

@@ -66,7 +66,11 @@ export const DEFAULT_SETTINGS = {
 		concurrency: "auto" as "auto" | number,
 	},
 	theme: "default",
-	keybindings: {} as Record<string, string>,
+	// User keybinding overrides. Each id maps to a single KeyId string or a
+	// list of KeyIds. The interactive keybinding manager reads this table
+	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
+	// keybindings.ts).
+	keybindings: {} as Record<string, string | string[]>,
 	state: {
 		lastMode: "default" as "default" | "advise" | "super",
 	},
