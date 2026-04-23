@@ -644,6 +644,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
+		providers: deps.providers,
+		applyModelRef: (ref) => {
+			deps.onSelectModel?.({ endpoint: ref.endpoint, model: ref.model });
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
+			tui.requestRender();
+		},
 		openScopedModels: () => openScopedModelsOverlayState(),
 		openSettings: () => openSettingsOverlayState(),
 		openResume: () => openResumeOverlayState(),

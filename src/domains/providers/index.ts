@@ -23,6 +23,12 @@ export { ProvidersManifest } from "./manifest.js";
 export { resolveModelCapabilities } from "./model-capabilities.js";
 export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
 export {
+	type ResolvedModelRef,
+	type ResolveModelResult,
+	resolveModelReference,
+	splitThinkingSuffix,
+} from "./resolver.js";
+export {
 	buildProviderSupportEntry,
 	compareProviderSupportEntries,
 	configuredEndpointsForRuntime,

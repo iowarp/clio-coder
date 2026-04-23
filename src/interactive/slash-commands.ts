@@ -2,6 +2,8 @@ import { BusChannels } from "../core/bus-events.js";
 import { settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
+import { resolveModelReference } from "../domains/providers/index.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -24,6 +26,7 @@ export type SlashCommand =
 	| { kind: "receipt-usage" }
 	| { kind: "thinking" }
 	| { kind: "model" }
+	| { kind: "model-set"; pattern: string }
 	| { kind: "scoped-models" }
 	| { kind: "settings" }
 	| { kind: "resume" }
@@ -113,6 +116,10 @@ export interface SlashCommandContext {
 	openReceipts: () => void;
 	openThinking: () => void;
 	openModel: () => void;
+	/** Live providers contract used by `/model <pattern>` to resolve directly. */
+	providers: ProvidersContract;
+	/** Apply a resolved model reference to settings (and optionally thinking level). */
+	applyModelRef: (ref: ResolvedModelRef) => void;
 	openScopedModels: () => void;
 	openSettings: () => void;
 	openResume: () => void;
@@ -329,13 +336,35 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "model",
-		description: "Select orchestrator model",
-		kinds: ["model"],
+		description: "Select orchestrator model — bare opens the picker; `/model <pattern>[:thinking]` resolves directly",
+		kinds: ["model", "model-set"],
 		match(trimmed) {
-			return trimmed === "/model" || trimmed === "/models" ? { kind: "model" } : null;
+			if (trimmed === "/model" || trimmed === "/models") return { kind: "model" };
+			if (trimmed.startsWith("/model ")) {
+				const pattern = trimmed.slice("/model ".length).trim();
+				if (pattern.length > 0) return { kind: "model-set", pattern };
+			}
+			if (trimmed.startsWith("/models ")) {
+				const pattern = trimmed.slice("/models ".length).trim();
+				if (pattern.length > 0) return { kind: "model-set", pattern };
+			}
+			return null;
 		},
-		handle(_command, ctx) {
-			ctx.openModel();
+		handle(command, ctx) {
+			if (command.kind === "model") {
+				ctx.openModel();
+				return;
+			}
+			if (command.kind !== "model-set") return;
+			const result = resolveModelReference(command.pattern, ctx.providers);
+			if (!result.ref) {
+				ctx.io.stderr(`[/model] ${result.error ?? `no match for "${command.pattern}"`}\n`);
+				return;
+			}
+			if (result.warning) ctx.io.stdout(`[/model] ${result.warning}\n`);
+			ctx.applyModelRef(result.ref);
+			const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
+			ctx.io.stdout(`[/model] active: ${result.ref.endpoint}/${result.ref.model}${suffix}\n`);
 		},
 	},
 	{
