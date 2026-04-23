@@ -16,6 +16,7 @@ import {
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
+import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
 	Editor,
@@ -29,7 +30,7 @@ import {
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
-import { createCoalescingChatRenderer } from "./chat-renderer.js";
+import { createCoalescingChatRenderer, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
@@ -1156,7 +1157,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			session: sessionContract,
 			onResume: (sessionId) => {
 				deps.onResumeSession?.(sessionId);
+				// Replay the resumed session's on-disk turns into the chat
+				// panel so the user sees their prior transcript, and reset
+				// chat-loop's lastTurnId + agent.state.messages so the next
+				// submit parents onto the resumed leaf rather than inheriting
+				// whatever state the previous session left behind. Row 51
+				// regression fix.
+				try {
+					const turns = openSession(sessionId).turns();
+					chatPanel.reset();
+					rehydrateChatPanelFromTurns(chatPanel, turns);
+					const leafTurnId = turns.length > 0 ? (turns[turns.length - 1]?.id ?? null) : null;
+					deps.chat.resetForSession(leafTurnId);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
+				}
 				footer.refresh();
+				tui.requestRender();
 			},
 			onClose: () => {
 				closeOverlay();
@@ -1224,6 +1242,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openMessagePickerOverlay(tui, {
 			session: sessionContract,
 			onFork: (parentTurnId) => {
+				// Capture the parent session id BEFORE fork swaps the
+				// contract's current pointer; the pre-fork transcript lives
+				// on the parent session's current.jsonl, and we need it for
+				// replay into the new branch's chat panel.
+				const parentSessionId = sessionContract.current()?.id ?? null;
 				try {
 					if (deps.onForkSession) {
 						deps.onForkSession(parentTurnId);
@@ -1231,11 +1254,27 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						sessionContract.fork(parentTurnId);
 					}
 					chatPanel.reset();
+					if (parentSessionId) {
+						try {
+							const parentTurns = openSession(parentSessionId).turns();
+							rehydrateChatPanelFromTurns(chatPanel, parentTurns, { uptoTurnId: parentTurnId });
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
+						}
+					}
+					// The new branch starts a fresh tree (tree.json is empty on
+					// the fork; the parent-pointer lives on meta.json), so the
+					// next user turn must parent to null. Row 52 regression
+					// fix also relies on clearing agent.state.messages so the
+					// post-fork submit does not ship the pre-fork conversation.
+					deps.chat.resetForSession(null);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/fork] fork failed: ${msg}\n`);
 				}
 				footer.refresh();
+				tui.requestRender();
 			},
 			onClose: () => closeOverlay(),
 		});
@@ -1249,6 +1288,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		deps.onNewSession();
 		chatPanel.reset();
+		// Same pre-switch cleanup as /resume and /fork: without this, the
+		// chat-loop closure keeps the prior session's lastTurnId and the
+		// agent's state.messages, so the first submit on the new session
+		// would reach back into context that the user believes was dropped.
+		deps.chat.resetForSession(null);
 		footer.refresh();
 		tui.requestRender();
 	};
