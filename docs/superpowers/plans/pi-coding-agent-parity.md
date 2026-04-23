@@ -20,7 +20,7 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 
 | Phase | Area | Status | Coverage |
 |---|---|---|---|
-| 11 | TUI Selector Suite | Mostly done | **80%** — 7/8 overlays landed (incl. session fuzzy picker), list-models search positional wired, provider resolver still missing |
+| 11 | TUI Selector Suite | Done | **100%** — 8/8 overlays landed (incl. session fuzzy picker), list-models search positional wired, provider resolver now adapted to Clio's endpoint+wireModel model and exposed via `/model <pattern>` |
 | 12 | Session Richness & Compaction | Mostly done | **75%** — entries, tree, fork, compaction, cwd-fallback present; retry + HTML export + share missing |
 | 13 | Resources (skills, prompts, themes, context files) | Not started | **0%** — `src/domains/resources/` does not exist |
 | 14 | Extensions System | Not started | **0%** — `src/domains/extensions/` does not exist |
@@ -33,7 +33,7 @@ Percentages per phase are file-count based (present + partial×0.5) / total. The
 | 21 | Export / Import / Share | Not started | **0%** — no export-html renderer, no share, no import |
 | 22 | Retry, Diagnostics, Telemetry, Final Polish | Not started | **~5%** — basic in-memory telemetry counters only |
 
-**Overall port completion (all 12 phases, file-count weighted): roughly 23%.** The session/compaction subsystem, the TUI selector suite, and the now-complete auth phase carry the bulk of the signal; every other port phase remains unstarted or skeletal.
+**Overall port completion (all 12 phases, file-count weighted): roughly 25%.** Phase 11 (TUI selector suite), Phase 12 (session/compaction), and Phase 17 (auth) carry the bulk of the signal; every other port phase remains unstarted or skeletal.
 
 ## What pi-mono 0.69.0 unlocked
 
@@ -119,7 +119,7 @@ When the next port phase starts, these structural deltas matter: Phase 16 RPC wo
 | Message picker (fork source) | `src/interactive/overlays/message-picker.ts` | ✅ | 139 LOC; assistant turns, most-recent first |
 | Hotkeys overlay (preview) | `src/interactive/overlays/hotkeys.ts` | ✅ | Read-only key↔action map |
 | `clio --list-models [search]` | `src/cli/list-models.ts` | ✅ | 110 LOC; supports `--json`, `--probe`, `--endpoint` filter, and the plan-defined `search` positional |
-| Provider resolver (glob, fuzzy, `:thinking`) | `src/domains/providers/resolver.ts` | ❌ | No resolver module; endpoint resolution lives in dispatch/providers extension, keyed by id |
+| Provider resolver (glob, fuzzy, `:thinking`) | `src/domains/providers/resolver.ts` | ✅ | Pure function `resolveModelReference(pattern, providers)` adapted to Clio's endpoint+wireModel catalog. Order: exact `endpoint/model`, glob (`*`/`?`/`[…]`) over `endpoint/model` and bare `model`, exact bare model id, case-insensitive substring. Trailing `:low/medium/high/xhigh/minimal/off` is parsed off and surfaced on the returned ref. Wired into the `/model <pattern>` slash command which applies the ref via the existing `onSelectModel`+`onSetThinkingLevel` callbacks; bare `/model` still opens the picker. |
 
 ### Phase 12 — Session Richness & Compaction — 75%
 
@@ -298,7 +298,7 @@ These are structural pieces that show up in many phases and are currently absent
 
 ## What parity means in practice
 
-Phases 11, 12, and 17 are the port phases that are materially advanced. Everything else is blocked on at least one of:
+Phases 11 and 17 are complete; Phase 12 is materially advanced. Everything else is blocked on at least one of:
 
 - the flag parser (`src/cli/args.ts`),
 - the three new domains (`resources`, `extensions`, `packages`),
