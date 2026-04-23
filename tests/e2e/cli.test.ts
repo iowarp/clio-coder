@@ -122,6 +122,26 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		ok(rows.every((r) => r.endpointId === "test-anthropic"));
 	});
 
+	it("--api-key with no active orchestrator endpoint warns on stderr and exits 0", async () => {
+		await runCli(["install"], { env: scratch.env });
+		const result = await runCli(["--api-key", "OVERRIDE-sk-flag"], {
+			env: scratch.env,
+			timeoutMs: 15_000,
+		});
+		strictEqual(result.code, 0);
+		match(result.stderr, /--api-key supplied but no active orchestrator endpoint is configured/);
+	});
+
+	it("clio run --api-key with no resolvable endpoint exits 2 with a stderr hint", async () => {
+		await runCli(["install"], { env: scratch.env });
+		const result = await runCli(["--api-key", "OVERRIDE-sk-flag", "run", "hello"], {
+			env: scratch.env,
+			timeoutMs: 15_000,
+		});
+		strictEqual(result.code, 2);
+		match(result.stderr, /--api-key supplied but no endpoint resolved/);
+	});
+
 	it("list-models --endpoint <id> <search> combines both filters", async () => {
 		await runCli(["install"], { env: scratch.env });
 		seedEndpoints(join(scratch.dir, "config"));
