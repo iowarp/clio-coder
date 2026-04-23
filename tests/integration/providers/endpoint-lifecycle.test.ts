@@ -10,6 +10,7 @@ import type { DomainContext } from "../../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../../src/core/event-bus.js";
 import { resetXdgCache } from "../../../src/core/xdg.js";
 import type { ConfigContract } from "../../../src/domains/config/contract.js";
+import { openAuthStorage } from "../../../src/domains/providers/auth/index.js";
 import { createProvidersBundle } from "../../../src/domains/providers/extension.js";
 import { getRuntimeRegistry } from "../../../src/domains/providers/registry.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
@@ -121,7 +122,39 @@ describe("providers domain endpoint lifecycle", () => {
 		const entry = bundle.contract.list()[0];
 		ok(entry);
 		strictEqual(entry.available, false);
-		ok(entry.reason.includes("missing credential"));
+		ok(entry.reason.includes("missing auth"));
+	});
+
+	it("list() reflects oauth-backed http endpoints as available when an oauth credential is stored", async () => {
+		const settings = syntheticSettings();
+		settings.endpoints = [
+			{
+				id: "synthetic-oauth",
+				runtime: "synthetic-oauth",
+				url: "https://chatgpt.com/backend-api",
+				defaultModel: "gpt-5.4",
+			},
+		];
+		const registry = getRuntimeRegistry();
+		registry.register({
+			...syntheticRuntime(),
+			id: "synthetic-oauth",
+			displayName: "Synthetic OAuth",
+			auth: "oauth",
+		});
+		openAuthStorage().set("synthetic-oauth", {
+			type: "oauth",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			updatedAt: new Date().toISOString(),
+		});
+		const bundle = createProvidersBundle(stubContext(settings));
+		await bundle.contract.probeAll();
+		const entry = bundle.contract.list()[0];
+		ok(entry);
+		strictEqual(entry.available, true);
+		strictEqual(entry.reason, "store:oauth:synthetic-oauth");
 	});
 
 	it("getEndpoint returns the descriptor for known ids and null for unknown", () => {

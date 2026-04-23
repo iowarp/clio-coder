@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS = {
 	defaultMode: "default" as "default" | "advise" | "super",
 	safetyLevel: "auto-edit" as "suggest" | "auto-edit" | "full-auto",
 	endpoints: [] as EndpointDescriptor[],
+	runtimePlugins: [] as string[],
 	orchestrator: {
 		endpoint: null as string | null,
 		model: null as string | null,
@@ -133,6 +134,9 @@ endpoints: []
 #     gateway: true
 #     auth:
 #       apiKeyEnvVar: LITELLM_MASTER_KEY
+
+# Optional npm packages that export clioRuntimes: RuntimeDescriptor[].
+runtimePlugins: []
 
 # Orchestrator target for the interactive loop. \`endpoint\` refers to
 # endpoints[].id; \`model\` is the wire model id to request.

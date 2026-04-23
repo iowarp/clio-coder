@@ -128,6 +128,29 @@ async function main(): Promise<void> {
 				await live.promise;
 			},
 			probeEndpoint: async () => null,
+			auth: {
+				statusForTarget: () => ({
+					providerId: "synthetic",
+					available: false,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				}),
+				resolveForTarget: async () => ({
+					providerId: "synthetic",
+					available: false,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				}),
+				getStored: () => null,
+				listStored: () => [],
+				setApiKey: () => {},
+				remove: () => {},
+				login: async () => {},
+				logout: () => {},
+				getOAuthProviders: () => [],
+			},
 			credentials: {
 				hasKey: () => false,
 				get: () => null,

@@ -31,6 +31,7 @@ const ThinkingFormatSchema = Type.Union([
 	Type.Literal("zai"),
 	Type.Literal("anthropic-extended"),
 	Type.Literal("deepseek-r1"),
+	Type.Literal("openai-codex"),
 ]);
 
 const StructuredOutputsSchema = Type.Union([
@@ -114,6 +115,7 @@ export const SettingsSchema = Type.Object({
 	defaultMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	safetyLevel: Type.Union([Type.Literal("suggest"), Type.Literal("auto-edit"), Type.Literal("full-auto")]),
 	endpoints: Type.Array(EndpointDescriptorSchema),
+	runtimePlugins: Type.Array(Type.String({ minLength: 1 })),
 	orchestrator: WorkerTargetSchema,
 	workers: Type.Object({
 		default: WorkerTargetSchema,

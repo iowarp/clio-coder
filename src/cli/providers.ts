@@ -6,8 +6,8 @@ import type { EndpointStatus, ProvidersContract } from "../domains/providers/con
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 
-const HEADER: ReadonlyArray<string> = ["id", "runtime", "url", "model", "health", "caps", "notes"];
-const WIDTHS: ReadonlyArray<number> = [14, 18, 34, 32, 10, 8, 32];
+const HEADER: ReadonlyArray<string> = ["id", "runtime", "auth", "url", "model", "health", "caps", "notes"];
+const WIDTHS: ReadonlyArray<number> = [14, 18, 18, 28, 26, 10, 8, 28];
 
 export async function runProvidersCommand(args: ReadonlyArray<string>): Promise<number> {
 	const asJson = args.includes("--json");
@@ -38,7 +38,7 @@ export async function runProvidersCommand(args: ReadonlyArray<string>): Promise<
 	} else if (filtered.length === 0) {
 		process.stdout.write("no endpoints configured. run `clio setup` to register one.\n");
 	} else {
-		renderTable(filtered);
+		renderTable(providers, filtered);
 	}
 	await loaded.stop();
 	return 0;
@@ -49,24 +49,25 @@ function pad(value: string, width: number): string {
 	return value.padEnd(width);
 }
 
-function renderTable(entries: ReadonlyArray<EndpointStatus>): void {
+function renderTable(providers: ProvidersContract, entries: ReadonlyArray<EndpointStatus>): void {
 	const headerLine = HEADER.map((h, i) => pad(h, WIDTHS[i] ?? 0)).join("");
 	process.stdout.write(`${chalk.bold(headerLine.trimEnd())}\n`);
-	for (const status of entries) process.stdout.write(`${formatRow(status)}\n`);
+	for (const status of entries) process.stdout.write(`${formatRow(providers, status)}\n`);
 }
 
-function formatRow(status: EndpointStatus): string {
+function formatRow(providers: ProvidersContract, status: EndpointStatus): string {
 	const runtime = status.runtime;
 	const ep = status.endpoint;
 	const w = (i: number): number => WIDTHS[i] ?? 0;
 	const id = pad(ep.id, w(0));
 	const runtimeCell = pad(runtime ? runtime.id : ep.runtime, w(1));
-	const urlCell = pad(formatUrl(status), w(2));
-	const modelCell = pad(ep.defaultModel ?? "-", w(3));
-	const healthCell = pad(colorHealth(status.health.status), w(4) + healthPadSlack(status.health.status));
-	const capsCell = pad(capabilityBadges(status.capabilities), w(5));
-	const notesCell = formatNotes(status).padEnd(w(6));
-	return `${id}${runtimeCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
+	const authCell = pad(formatAuth(providers, status), w(2));
+	const urlCell = pad(formatUrl(status), w(3));
+	const modelCell = pad(ep.defaultModel ?? "-", w(4));
+	const healthCell = pad(colorHealth(status.health.status), w(5) + healthPadSlack(status.health.status));
+	const capsCell = pad(capabilityBadges(status.capabilities), w(6));
+	const notesCell = formatNotes(status).padEnd(w(7));
+	return `${id}${runtimeCell}${authCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
 }
 
 function healthPadSlack(status: EndpointStatus["health"]["status"]): number {
@@ -100,6 +101,15 @@ function formatUrl(status: EndpointStatus): string {
 	if (runtime?.kind === "subprocess") return "(subprocess)";
 	if (status.endpoint.url) return status.endpoint.url;
 	return "(built-in)";
+}
+
+function formatAuth(providers: ProvidersContract, status: EndpointStatus): string {
+	if (!status.runtime) return "-";
+	if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") return status.runtime.auth;
+	const auth = providers.auth.statusForTarget(status.endpoint, status.runtime);
+	if (!auth.available) return "disconnected";
+	if (auth.source === "environment") return auth.detail ? `env:${auth.detail}` : "environment";
+	return auth.source.replace("stored-", "");
 }
 
 function capabilityBadges(caps: CapabilityFlags): string {

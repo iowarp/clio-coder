@@ -16,6 +16,7 @@ import bedrock from "./cloud/bedrock.js";
 import google from "./cloud/google.js";
 import groq from "./cloud/groq.js";
 import mistral from "./cloud/mistral.js";
+import openaiCodex from "./cloud/openai-codex.js";
 import openai from "./cloud/openai.js";
 import openrouter from "./cloud/openrouter.js";
 
@@ -53,6 +54,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	groq,
 	mistral,
 	openai,
+	openaiCodex,
 	openrouter,
 	claudeCodeCli,
 	codexCli,

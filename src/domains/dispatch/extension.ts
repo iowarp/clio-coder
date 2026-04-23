@@ -127,27 +127,6 @@ function enforceCapabilityGate(
 	}
 }
 
-function resolvedApiKey(
-	endpoint: EndpointDescriptor,
-	runtime: RuntimeDescriptor,
-	providers: ProvidersContract,
-): string | undefined {
-	const envVar = endpoint.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
-	if (envVar) {
-		const fromEnv = process.env[envVar]?.trim();
-		if (fromEnv && fromEnv.length > 0) return fromEnv;
-	}
-	const ref = endpoint.auth?.apiKeyRef ?? runtime.id;
-	if (providers.credentials.hasKey(ref)) {
-		// The credential store does not expose raw values from the contract; the
-		// CLI agents that rely on stored keys read them through the runtime's own
-		// env-var contract at spawn time. Surface the presence to pi-ai via the
-		// env fallback so workers do not need the raw value threaded through.
-		return undefined;
-	}
-	return undefined;
-}
-
 export function createDispatchBundle(
 	context: DomainContext,
 	options?: DispatchBundleOptions,
@@ -232,7 +211,11 @@ export function createDispatchBundle(
 		const allowedTools =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
 		const workerMode = recipe?.mode ?? currentMode;
-		const apiKey = resolvedApiKey(target.endpoint, target.runtime, providers);
+		const auth =
+			target.runtime.auth === "api-key" || target.runtime.auth === "oauth"
+				? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
+				: null;
+		const apiKey = auth?.apiKey;
 		const runtimeKind: RunKind = target.runtime.kind;
 
 		let workerSlotHeld = false;
