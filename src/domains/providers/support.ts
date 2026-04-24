@@ -109,6 +109,11 @@ export function defaultModelForRuntime(runtimeId: string): string | undefined {
 	return listKnownModelsForRuntime(runtimeId)[0];
 }
 
+export function defaultWorkerModelForRuntime(runtimeId: string): string | undefined {
+	if (runtimeId === "openai-codex") return "gpt-5.4-mini";
+	return defaultModelForRuntime(runtimeId);
+}
+
 export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderSupportEntry {
 	const modelHints = listKnownModelsForRuntime(runtime.id);
 	const defaultModel = defaultModelForRuntime(runtime.id);

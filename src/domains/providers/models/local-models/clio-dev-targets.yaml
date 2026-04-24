@@ -1,0 +1,126 @@
+# Sources:
+# https://huggingface.co/Qwen/Qwen3.5-35B-A3B
+# https://huggingface.co/Qwen/Qwen3.6-35B-A3B
+# https://huggingface.co/Qwen/Qwen3.6-27B
+# https://huggingface.co/google/gemma-4-26B-A4B
+# https://huggingface.co/nvidia/Nemotron-Cascade-2-30B-A3B
+#
+# This knowledge base is intentionally narrow. It describes only the local
+# models used for Clio self-development and leaves cloud GPT models to pi-ai's
+# native OpenAI and openai-codex catalogs.
+- family: qwen3.5-35b-a3b
+  matchPatterns:
+    - qwen3.5-35b-a3b
+    - qwen3_5-35b-a3b
+    - qwen3-5-35b-a3b
+    - qwen3.5-35b
+    - qwen3.5-35b-a3b-ud
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    serving: "Prefer an OpenAI-compatible endpoint with qwen3 reasoning and qwen3_coder tool parsing enabled."
+
+- family: qwen3.6-35b-a3b
+  matchPatterns:
+    - qwen3.6-35b-a3b
+    - qwen3_6-35b-a3b
+    - qwen3-6-35b-a3b
+    - qwen3.6-35b
+    - qwen3.6-35b-a3b-ud
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    serving: "Official card recommends at least 128K context for thinking quality. Use 262K when memory allows."
+
+- family: qwen3.6-27b
+  matchPatterns:
+    - qwen3.6-27b
+    - qwen3_6-27b
+    - qwen3-6-27b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    serving: "Official card recommends preserving thinking context in iterative development workflows."
+
+- family: gemma4-26b-a4b
+  matchPatterns:
+    - gemma-4-26b-a4b
+    - gemma4-26b-a4b
+    - gemma-4-26b-a4b-it
+    - gemma4-26b-a4b-it
+    - gemma-4-26b-a4b-it-q4
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    thinkingControl: "Gemma 4 exposes thinking through chat template enable_thinking support."
+
+- family: nemotron-cascade-2-30b-a3b
+  matchPatterns:
+    - nemotron-cascade-2
+    - nemotron-cascade-2-30b-a3b
+    - nemotron-cascade2
+    - nemotron-cascade-2-30b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    serving: "NVIDIA card recommends vLLM with nemotron_v3 reasoning and qwen3_coder tool parsing."

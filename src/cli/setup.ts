@@ -8,6 +8,7 @@ import {
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
+	defaultWorkerModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -41,6 +42,7 @@ Non-interactive flags:
   --set-orchestrator               point settings.orchestrator at this endpoint
   --set-worker-default             point settings.workers.default at this endpoint
   --context-window <N>             capability override
+  --max-tokens <N>                 output token capability override
   --reasoning <true|false>         capability override
 `;
 
@@ -75,6 +77,7 @@ interface ParsedArgs {
 	setOrchestrator: boolean;
 	setWorkerDefault: boolean;
 	contextWindow?: number;
+	maxTokens?: number;
 	reasoning?: boolean;
 }
 
@@ -141,6 +144,12 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				const n = Number(need());
 				if (!Number.isFinite(n) || n <= 0) throw new Error("--context-window must be a positive number");
 				out.contextWindow = Math.floor(n);
+				break;
+			}
+			case "--max-tokens": {
+				const n = Number(need());
+				if (!Number.isFinite(n) || n <= 0) throw new Error("--max-tokens must be a positive number");
+				out.maxTokens = Math.floor(n);
 				break;
 			}
 			case "--reasoning": {
@@ -272,9 +281,18 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDesc
 	if (descriptor.defaultModel) settings.orchestrator.model = descriptor.defaultModel;
 }
 
+function workerDefaultModelForDescriptor(descriptor: EndpointDescriptor): string | undefined {
+	const runtimeDefault = defaultWorkerModelForRuntime(descriptor.runtime);
+	if (runtimeDefault && (!descriptor.wireModels || descriptor.wireModels.includes(runtimeDefault))) {
+		return runtimeDefault;
+	}
+	return descriptor.defaultModel;
+}
+
 function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor): void {
 	settings.workers.default.endpoint = descriptor.id;
-	if (descriptor.defaultModel) settings.workers.default.model = descriptor.defaultModel;
+	const workerModel = workerDefaultModelForDescriptor(descriptor);
+	if (workerModel) settings.workers.default.model = workerModel;
 }
 
 function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, probe: ProbeResult | null): void {
@@ -306,6 +324,7 @@ function buildDescriptor(
 		oauthProfile?: string;
 		gateway?: boolean;
 		contextWindow?: number;
+		maxTokens?: number;
 		reasoning?: boolean;
 	},
 ): EndpointDescriptor {
@@ -327,6 +346,7 @@ function buildDescriptor(
 	if (parts.gateway) descriptor.gateway = true;
 	const caps: NonNullable<EndpointDescriptor["capabilities"]> = {};
 	if (parts.contextWindow !== undefined) caps.contextWindow = parts.contextWindow;
+	if (parts.maxTokens !== undefined) caps.maxTokens = parts.maxTokens;
 	if (parts.reasoning !== undefined) caps.reasoning = parts.reasoning;
 	if (Object.keys(caps).length > 0) descriptor.capabilities = caps;
 	return descriptor;
@@ -423,6 +443,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: args.gateway || existing?.gateway === true,
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
@@ -437,6 +458,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: args.gateway || existing?.gateway === true,
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
@@ -627,6 +649,7 @@ async function runInteractive(
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: defaults.gateway,
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
+		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
 
@@ -666,6 +689,7 @@ async function runInteractive(
 		...(wireModels.length > 0 ? { wireModels } : {}),
 		gateway: gatewayAnswer,
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
+		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
 	if (apiKeyLiteral) auth.setApiKey(runtime.id, apiKeyLiteral);
@@ -806,6 +830,7 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 			args.setOrchestrator ||
 			args.setWorkerDefault ||
 			args.contextWindow !== undefined ||
+			args.maxTokens !== undefined ||
 			args.reasoning !== undefined);
 
 	if (nonInteractive && runtime) return runNonInteractive(runtime, args);

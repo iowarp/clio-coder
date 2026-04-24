@@ -119,18 +119,37 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 # (cloud SDKs, local HTTP engines, CLI agents, or third-party plugins under
 # ~/.clio/runtimes/).
 endpoints: []
-# Example:
+# Recommended self-development layout:
+#   clio setup --runtime openai-codex --id codex-pro --set-orchestrator --set-worker-default
+#   clio setup --runtime openai-compat --id mini --url http://mini:8080 --model Qwen3.6-35B-A3B-UD-Q4_K_XL --context-window 262144 --max-tokens 65536 --reasoning true
+#   clio setup --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
+#
+# Example endpoints:
 # endpoints:
-#   - id: anthropic-prod
-#     runtime: anthropic
+#   - id: codex-pro
+#     runtime: openai-codex
+#     defaultModel: gpt-5.4
 #     auth:
-#       apiKeyEnvVar: ANTHROPIC_API_KEY
+#       oauthProfile: openai-codex
+#     wireModels:
+#       - gpt-5.4
+#       - gpt-5.4-mini
 #   - id: mini
-#     runtime: llamacpp-anthropic
-#     url: http://192.168.86.141:8080
+#     runtime: openai-compat
+#     url: http://mini:8080
 #     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
 #     capabilities:
 #       contextWindow: 262144
+#       maxTokens: 65536
+#       reasoning: true
+#       thinkingFormat: qwen-chat-template
+#   - id: dynamo
+#     runtime: lmstudio-native
+#     url: http://dynamo:1234
+#     defaultModel: gemma-4-26B-A4B-it-Q4_K_M
+#     capabilities:
+#       contextWindow: 262144
+#       maxTokens: 65536
 #       reasoning: true
 
 # Optional npm packages that export clioRuntimes: RuntimeDescriptor[].
