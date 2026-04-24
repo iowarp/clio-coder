@@ -119,6 +119,7 @@ export const SettingsSchema = Type.Object({
 	orchestrator: WorkerTargetSchema,
 	workers: Type.Object({
 		default: WorkerTargetSchema,
+		profiles: Type.Record(Type.String({ minLength: 1 }), WorkerTargetSchema),
 	}),
 	scope: Type.Array(Type.String()),
 	budget: Type.Object({

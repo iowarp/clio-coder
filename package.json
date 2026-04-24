@@ -49,6 +49,7 @@
 		"test": "node --import tsx --test 'tests/unit/**/*.test.ts' 'tests/integration/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
 		"test:e2e": "npm run build && node --import tsx --test 'tests/e2e/**/*.test.ts'",
 		"ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run test:e2e",
+		"smoke:workers:live": "node scripts/live-worker-smoke.mjs",
 		"hooks:install": "bash scripts/install-hooks.sh",
 		"prepublishOnly": "npm run typecheck && npm run lint && npm run build && node scripts/check-dist.mjs"
 	},

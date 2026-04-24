@@ -25,6 +25,7 @@ Usage:
   clio targets              list configured targets, health, auth, and capabilities
   clio targets add          add a target interactively or via flags
   clio targets use <id>     set chat and worker defaults to a target
+  clio targets worker       set a named worker profile
   clio targets remove <id>  remove a target
   clio targets rename <old> <new>
   clio models [search]      list models for configured targets

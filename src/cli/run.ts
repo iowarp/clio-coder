@@ -15,11 +15,13 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
+	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 interface ParsedArgs {
+	workerProfile?: string;
+	workerRuntime?: string;
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
@@ -43,7 +45,15 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 		if (a === "--help" || a === "-h") {
 			return null;
 		}
-		if (a === "--target") {
+		if (a === "--worker-profile" || a === "--worker") {
+			const v = need();
+			if (v === null) return null;
+			out.workerProfile = v;
+		} else if (a === "--worker-runtime" || a === "--runtime") {
+			const v = need();
+			if (v === null) return null;
+			out.workerRuntime = v;
+		} else if (a === "--target") {
 			const v = need();
 			if (v === null) return null;
 			out.target = v;
@@ -115,7 +125,21 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 			return 1;
 		}
 		const settings = readSettings();
-		const targetEndpointId = parsed.target ?? settings.workers?.default?.endpoint ?? settings.orchestrator?.endpoint;
+		const profileEndpointId = parsed.workerProfile
+			? settings.workers?.profiles?.[parsed.workerProfile]?.endpoint
+			: undefined;
+		const runtimeByEndpoint = new Map(settings.endpoints.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
+		const runtimeEndpointId = parsed.workerRuntime
+			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
+					(profile) => profile?.endpoint && runtimeByEndpoint.get(profile.endpoint) === parsed.workerRuntime,
+				)?.endpoint
+			: undefined;
+		const targetEndpointId =
+			parsed.target ??
+			profileEndpointId ??
+			runtimeEndpointId ??
+			settings.workers?.default?.endpoint ??
+			settings.orchestrator?.endpoint;
 		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
 		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
 		if (!endpoint || !runtime) {
@@ -130,6 +154,8 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 		agentId: parsed.agentId ?? "scout",
 		task: parsed.task,
 	};
+	if (parsed.workerProfile) dispatchReq.workerProfile = parsed.workerProfile;
+	if (parsed.workerRuntime) dispatchReq.workerRuntime = parsed.workerRuntime;
 	if (parsed.target) dispatchReq.endpoint = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;

@@ -129,6 +129,122 @@ describe("cli configure and targets", () => {
 		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["codex-pro", "gpt-5.4-mini"]);
 	});
 
+	it("targets worker sets a named worker profile", async () => {
+		await runConfigureCommand(["--runtime", "openai-codex", "--id", "codex-pro", "--model", "gpt-5.4"]);
+		const code = await runTargetsCommand([
+			"worker",
+			"codex-mini",
+			"codex-pro",
+			"--model",
+			"gpt-5.4-mini",
+			"--thinking",
+			"low",
+		]);
+		strictEqual(code, 0);
+		const settings = readSettings();
+		deepStrictEqual(settings.workers.profiles["codex-mini"], {
+			endpoint: "codex-pro",
+			model: "gpt-5.4-mini",
+			thinkingLevel: "low",
+		});
+	});
+
+	it("configures the interactive multi-worker profile pool", async () => {
+		strictEqual(
+			await runConfigureCommand([
+				"--runtime",
+				"openai-codex",
+				"--id",
+				"codex-pro",
+				"--model",
+				"gpt-5.4",
+				"--set-orchestrator",
+				"--set-worker-default",
+				"--worker-profile",
+				"codex-mini",
+				"--worker-profile-model",
+				"gpt-5.4-mini",
+			]),
+			0,
+		);
+		strictEqual(
+			await runConfigureCommand([
+				"--runtime",
+				"claude-code-sdk",
+				"--id",
+				"claude-sdk-opus",
+				"--model",
+				"claude-opus-4-7",
+				"--worker-profile",
+				"claude-opus",
+			]),
+			0,
+		);
+		strictEqual(
+			await runConfigureCommand([
+				"--runtime",
+				"copilot-cli",
+				"--id",
+				"copilot-sonnet",
+				"--model",
+				"claude-sonnet-4.6",
+				"--worker-profile",
+				"copilot-sonnet",
+			]),
+			0,
+		);
+		strictEqual(
+			await runConfigureCommand([
+				"--runtime",
+				"gemini-cli",
+				"--id",
+				"gemini-flash",
+				"--model",
+				"gemini-3-flash-preview",
+				"--worker-profile",
+				"gemini-flash",
+			]),
+			0,
+		);
+
+		const settings = readSettings();
+		deepStrictEqual([settings.orchestrator.endpoint, settings.orchestrator.model], ["codex-pro", "gpt-5.4"]);
+		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["codex-pro", "gpt-5.4"]);
+		deepStrictEqual(settings.workers.profiles["codex-mini"], {
+			endpoint: "codex-pro",
+			model: "gpt-5.4-mini",
+			thinkingLevel: "off",
+		});
+		deepStrictEqual(settings.workers.profiles["claude-opus"], {
+			endpoint: "claude-sdk-opus",
+			model: "claude-opus-4-7",
+			thinkingLevel: "off",
+		});
+		deepStrictEqual(settings.workers.profiles["copilot-sonnet"], {
+			endpoint: "copilot-sonnet",
+			model: "claude-sonnet-4.6",
+			thinkingLevel: "off",
+		});
+		deepStrictEqual(settings.workers.profiles["gemini-flash"], {
+			endpoint: "gemini-flash",
+			model: "gemini-3-flash-preview",
+			thinkingLevel: "off",
+		});
+
+		const out = await captureOutput(() => runTargetsCommand(["workers", "--json"]));
+		strictEqual(out.result, 0);
+		const rows = JSON.parse(out.stdout) as Array<{ name: string; target: string; model: string }>;
+		deepStrictEqual(
+			rows.map((row) => [row.name, row.target, row.model]),
+			[
+				["codex-mini", "codex-pro", "gpt-5.4-mini"],
+				["claude-opus", "claude-sdk-opus", "claude-opus-4-7"],
+				["copilot-sonnet", "copilot-sonnet", "claude-sonnet-4.6"],
+				["gemini-flash", "gemini-flash", "gemini-3-flash-preview"],
+			],
+		);
+	});
+
 	it("keeps the selected OpenRouter model as the worker default", async () => {
 		const model = "nvidia/nemotron-3-super-120b-a12b:free";
 		const code = await runConfigureCommand([

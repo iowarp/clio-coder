@@ -30,7 +30,7 @@ const copilotRuntime: RuntimeDescriptor = {
 	tier: "cli-silver",
 	apiFamily: "subprocess-copilot",
 	auth: "cli",
-	knownModels: ["gpt-5.4", "gpt-5.4-mini", "claude-sonnet-4-6"],
+	knownModels: ["gpt-5.4", "gpt-5.4-mini", "claude-sonnet-4.6", "claude-opus-4.7"],
 	binaryName: "copilot",
 	defaultBinaryPath: "/home/akougkas/.nvm/versions/node/v24.9.0/bin/copilot",
 	headlessCommand: "copilot --prompt <prompt> --model <model> --output-format json",

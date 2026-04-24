@@ -16,6 +16,8 @@ export interface WorkerTarget {
 	thinkingLevel: ThinkingLevel;
 }
 
+export type WorkerProfiles = Record<string, WorkerTarget>;
+
 /**
  * Compaction controls the session domain reads at runtime. Ships as Phase 12
  * slice 12c. The structural type lives here so core/defaults.ts stays free
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS = {
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
+		profiles: {} as WorkerProfiles,
 	},
 	scope: [] as string[],
 	budget: {
@@ -120,7 +123,10 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 # ~/.clio/runtimes/).
 targets: []
 # Recommended self-development layout:
-#   clio targets add --runtime openai-codex --id codex-pro --set-orchestrator --set-worker-default
+#   clio configure --runtime openai-codex --id codex-pro --model gpt-5.4 --set-orchestrator --set-worker-default --worker-profile codex-mini --worker-profile-model gpt-5.4-mini
+#   clio configure --runtime claude-code-sdk --id claude-sdk-opus --model claude-opus-4-7 --worker-profile claude-opus
+#   clio configure --runtime copilot-cli --id copilot-sonnet --model claude-sonnet-4.6 --worker-profile copilot-sonnet
+#   clio configure --runtime gemini-cli --id gemini-flash --model gemini-3-flash-preview --worker-profile gemini-flash
 #   clio targets add --runtime openai-compat --id mini --url http://mini:8080 --model Qwen3.6-35B-A3B-UD-Q4_K_XL --context-window 262144 --max-tokens 65536 --reasoning true
 #   clio targets add --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
 #
@@ -163,13 +169,19 @@ orchestrator:
   model: null
   thinkingLevel: off
 
-# Worker target for dispatch. \`default\` applies when a recipe or request
-# does not specify its own override.
+# Worker targets for dispatch. \`default\` preserves the legacy behavior when a
+# recipe or request does not specify an override. \`profiles\` are named worker
+# choices that /run and clio run can select explicitly or by required capability.
 workers:
   default:
     target: null
     model: null
     thinkingLevel: off
+  profiles: {}
+  # codex-mini:
+  #   target: codex-pro
+  #   model: gpt-5.4-mini
+  #   thinkingLevel: off
 
 # Ctrl+P cycling order: plain target ids or "target/model" refs.
 scope: []

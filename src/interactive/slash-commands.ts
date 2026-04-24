@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
-import { settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 
@@ -15,7 +15,7 @@ import { resolveModelReference } from "../domains/providers/index.js";
 export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
-	| { kind: "run"; agentId: string; task: string }
+	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
 	| { kind: "connect"; target?: string }
@@ -45,6 +45,15 @@ export interface RunIo {
 	stderr: (s: string) => void;
 }
 
+export interface RunCommandOptions {
+	workerProfile?: string;
+	workerRuntime?: string;
+	endpoint?: string;
+	model?: string;
+	thinkingLevel?: JobThinkingLevel;
+	requiredCapabilities?: string[];
+}
+
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
 	io: RunIo;
@@ -60,22 +69,30 @@ export interface HandleRunDeps {
 
 /**
  * Dispatches /run through the dispatch contract and streams events to stdout.
- * Target + model are resolved from `settings.workers.default`; when that
- * block is empty, we refuse to dispatch and print an actionable error instead.
+ * Target + model are resolved by the dispatch domain from request overrides,
+ * worker profiles, recipe hints, and `settings.workers.default`.
  */
-export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
-	const { dispatch, io, workerDefault, bus } = deps;
-	if (!workerDefault?.endpoint) {
-		io.stderr(
-			`[run] no worker target configured. Edit ${settingsPath()} (workers.default.target + workers.default.model) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
-		);
-		return;
-	}
+export async function handleRun(
+	agentId: string,
+	task: string,
+	deps: HandleRunDeps,
+	options: RunCommandOptions = {},
+): Promise<void> {
+	const { dispatch, io, bus } = deps;
 	try {
-		const handle = await dispatch.dispatch({
+		const request = {
 			agentId,
 			task,
-		});
+			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
+			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
+			...(options.endpoint ? { endpoint: options.endpoint } : {}),
+			...(options.model ? { model: options.model } : {}),
+			...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+			...(options.requiredCapabilities && options.requiredCapabilities.length > 0
+				? { requiredCapabilities: options.requiredCapabilities }
+				: {}),
+		};
+		const handle = await dispatch.dispatch(request);
 		io.stdout(`\n[run] runId=${handle.runId}\n`);
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
@@ -93,6 +110,61 @@ export async function handleRun(agentId: string, task: string, deps: HandleRunDe
 		const msg = err instanceof Error ? err.message : String(err);
 		io.stderr(`[run] failed: ${msg}\n`);
 	}
+}
+
+const VALID_RUN_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function parseRunCommand(rest: string): SlashCommand {
+	const parts = rest.split(/\s+/).filter(Boolean);
+	const options: RunCommandOptions = {};
+	const requiredCapabilities: string[] = [];
+	let i = 0;
+	const need = (): string | null => {
+		const value = parts[i + 1];
+		if (!value) return null;
+		i += 1;
+		return value;
+	};
+	while (i < parts.length) {
+		const part = parts[i];
+		if (!part?.startsWith("--")) break;
+		if (part === "--worker-profile" || part === "--worker") {
+			const value = need();
+			if (!value) return { kind: "run-usage" };
+			options.workerProfile = value;
+		} else if (part === "--worker-runtime" || part === "--runtime") {
+			const value = need();
+			if (!value) return { kind: "run-usage" };
+			options.workerRuntime = value;
+		} else if (part === "--target") {
+			const value = need();
+			if (!value) return { kind: "run-usage" };
+			options.endpoint = value;
+		} else if (part === "--model") {
+			const value = need();
+			if (!value) return { kind: "run-usage" };
+			options.model = value;
+		} else if (part === "--thinking") {
+			const value = need();
+			if (!value || !VALID_RUN_THINKING.has(value as JobThinkingLevel)) return { kind: "run-usage" };
+			options.thinkingLevel = value as JobThinkingLevel;
+		} else if (part === "--require") {
+			const value = need();
+			if (!value) return { kind: "run-usage" };
+			requiredCapabilities.push(value);
+		} else {
+			return { kind: "run-usage" };
+		}
+		i += 1;
+	}
+	const agentId = parts[i];
+	const task = parts
+		.slice(i + 1)
+		.join(" ")
+		.trim();
+	if (!agentId || !task) return { kind: "run-usage" };
+	if (requiredCapabilities.length > 0) options.requiredCapabilities = requiredCapabilities;
+	return { kind: "run", agentId, task, options };
 }
 
 /**
@@ -188,33 +260,36 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "run",
-		description: "Dispatch a run to the configured worker",
+		description: "Dispatch a run to a worker",
 		kinds: ["run", "run-usage"],
 		match(trimmed) {
 			if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
 			if (trimmed.startsWith("/run ")) {
-				const rest = trimmed.slice(5).trim();
-				const [agentId, ...taskParts] = rest.split(/\s+/);
-				const task = taskParts.join(" ").trim();
-				if (!agentId || !task) return { kind: "run-usage" };
-				return { kind: "run", agentId, task };
+				return parseRunCommand(trimmed.slice(5).trim());
 			}
 			return null;
 		},
 		handle(command, ctx) {
 			if (command.kind === "run-usage") {
-				ctx.io.stdout("\nusage: /run <agent> <task>\n");
+				ctx.io.stdout(
+					"\nusage: /run [--worker <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--require <cap>] <agent> <task>\n",
+				);
 				return;
 			}
 			if (command.kind !== "run") return;
-			const { agentId, task } = command;
+			const { agentId, task, options } = command;
 			void (async () => {
-				await handleRun(agentId, task, {
-					dispatch: ctx.dispatch,
-					io: ctx.io,
-					workerDefault: ctx.workerDefault(),
-					bus: ctx.bus,
-				});
+				await handleRun(
+					agentId,
+					task,
+					{
+						dispatch: ctx.dispatch,
+						io: ctx.io,
+						workerDefault: ctx.workerDefault(),
+						bus: ctx.bus,
+					},
+					options,
+				);
 				ctx.render();
 			})();
 		},
