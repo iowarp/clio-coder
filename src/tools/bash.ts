@@ -6,6 +6,13 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const TRUNCATION_MARKER = "\n[output truncated]\n";
+const CLIO_CONTROL_ENV_KEYS = [
+	"CLIO_DEV",
+	"CLIO_SELF_DEV",
+	"CLIO_INTERACTIVE",
+	"CLIO_PHASE1_INTERACTIVE",
+	"CLIO_RESUME_SESSION_ID",
+] as const;
 
 function truncate(text: string): string {
 	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
@@ -17,12 +24,20 @@ interface ExecOutcome {
 	stderr: string;
 }
 
+function buildToolEnv(): NodeJS.ProcessEnv {
+	const env = { ...process.env };
+	for (const key of CLIO_CONTROL_ENV_KEYS) {
+		Reflect.deleteProperty(env, key);
+	}
+	return env;
+}
+
 function execBash(command: string, cwd: string | undefined, timeout: number): Promise<ExecOutcome> {
 	return new Promise((resolve) => {
 		execFile(
 			"/bin/bash",
 			["-lc", command],
-			{ cwd, timeout, maxBuffer: MAX_OUTPUT_BYTES * 2, encoding: "utf8" },
+			{ cwd, timeout, maxBuffer: MAX_OUTPUT_BYTES * 2, encoding: "utf8", env: buildToolEnv() },
 			(error, stdout, stderr) => {
 				resolve({
 					error: error as NodeJS.ErrnoException | null,
@@ -73,4 +88,4 @@ export const bashTool: ToolSpec = {
 	},
 };
 
-export { truncateUtf8 };
+export { buildToolEnv, truncateUtf8 };
