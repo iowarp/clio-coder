@@ -31,19 +31,20 @@
 3. [First run](#first-run)
 4. [CLI commands](#cli-commands)
 5. [Slash commands](#slash-commands)
-6. [Keybindings](#keybindings)
-7. [Configuration](#configuration)
-8. [Targets and runtimes](#targets-and-runtimes)
-9. [Runtimes](#runtimes)
-10. [Agents](#agents)
-11. [Safety model](#safety-model)
-12. [Receipts and cost](#receipts-and-cost)
-13. [Architecture at a glance](#architecture-at-a-glance)
-14. [Development](#development)
-15. [Governance](#governance)
-16. [Roadmap](#roadmap)
-17. [Lineage and credits](#lineage-and-credits)
-18. [License](#license)
+6. [Sessions and context](#sessions-and-context)
+7. [Keybindings](#keybindings)
+8. [Configuration](#configuration)
+9. [Targets and runtimes](#targets-and-runtimes)
+10. [Runtimes](#runtimes)
+11. [Agents](#agents)
+12. [Safety model](#safety-model)
+13. [Receipts and cost](#receipts-and-cost)
+14. [Architecture at a glance](#architecture-at-a-glance)
+15. [Development](#development)
+16. [Governance](#governance)
+17. [Roadmap](#roadmap)
+18. [Lineage and credits](#lineage-and-credits)
+19. [License](#license)
 
 ---
 
@@ -157,6 +158,28 @@ Available inside the interactive TUI.
 | `/quit` | Exit the TUI cleanly. |
 
 Parser source: [`src/interactive/`](src/interactive/).
+
+---
+
+## Sessions and context
+
+Interactive sessions persist under `<dataDir>/sessions/` as append-only JSONL
+plus tree metadata. `/resume` reloads the selected session, replays the
+entry-aware transcript, and rebuilds the next-turn context from the same
+entries. `/fork` starts a new branch from the selected parent turn, shows the
+parent transcript up to that point, and seeds the next model call with that
+parent-prefix context while the new branch records fresh turns.
+
+Replay renders user and assistant messages, branch and compaction summaries,
+system and checkpoint notes, bash execution entries, custom display entries,
+and persisted tool call/result entries when those entries exist in the
+session log. Live tool activity is still rendered during the current run; full
+tool output replay depends on the corresponding tool entries being present.
+
+Compaction can run manually with `/compact [instructions]` or automatically
+when `compaction.auto` is enabled and the estimated context crosses
+`compaction.threshold`. `/settings` exposes those two live controls; advanced
+compaction overrides remain direct `settings.yaml` fields.
 
 ---
 

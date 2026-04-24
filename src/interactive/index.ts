@@ -30,7 +30,11 @@ import {
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
-import { createCoalescingChatRenderer, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
+import {
+	buildReplayAgentMessagesFromTurns,
+	createCoalescingChatRenderer,
+	rehydrateChatPanelFromTurns,
+} from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
@@ -1223,8 +1227,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					const turns = openSession(sessionId).turns();
 					chatPanel.reset();
 					rehydrateChatPanelFromTurns(chatPanel, turns);
-					const leafTurnId = turns.length > 0 ? (turns[turns.length - 1]?.id ?? null) : null;
-					deps.chat.resetForSession(leafTurnId);
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+					const leafTurnId = sessionContract.tree(sessionId).leafId;
+					deps.chat.resetForSession(leafTurnId, replayMessages);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
@@ -1270,6 +1275,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			onSwitchBranch: (sessionId) => {
 				try {
 					sessionContract.switchBranch(sessionId);
+					const turns = openSession(sessionId).turns();
+					chatPanel.reset();
+					rehydrateChatPanelFromTurns(chatPanel, turns);
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+					const leafTurnId = sessionContract.tree(sessionId).leafId;
+					deps.chat.resetForSession(leafTurnId, replayMessages);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/tree] switchBranch failed: ${msg}\n`);
@@ -1314,17 +1325,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						try {
 							const parentTurns = openSession(parentSessionId).turns();
 							rehydrateChatPanelFromTurns(chatPanel, parentTurns, { uptoTurnId: parentTurnId });
+							const replayMessages = buildReplayAgentMessagesFromTurns(parentTurns, { uptoTurnId: parentTurnId });
+							deps.chat.resetForSession(null, replayMessages);
 						} catch (err) {
 							const msg = err instanceof Error ? err.message : String(err);
 							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
+							deps.chat.resetForSession(null);
 						}
 					}
 					// The new branch starts a fresh tree (tree.json is empty on
 					// the fork; the parent-pointer lives on meta.json), so the
-					// next user turn must parent to null. Row 52 regression
-					// fix also relies on clearing agent.state.messages so the
-					// post-fork submit does not ship the pre-fork conversation.
-					deps.chat.resetForSession(null);
+					// next user turn must parent to null. When replay succeeds,
+					// resetForSession still seeds the provider context from the
+					// selected parent prefix so the visible fork transcript and
+					// model memory agree.
+					if (!parentSessionId) deps.chat.resetForSession(null);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/fork] fork failed: ${msg}\n`);

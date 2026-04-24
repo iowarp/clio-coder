@@ -47,6 +47,7 @@ export function buildSettingItems(
 		profileEntries.length === 0
 			? "(none)"
 			: profileEntries.map(([name, profile]) => `${name}->${profile.endpoint ?? "(unset)"}`).join(", ");
+	const compaction = settings.compaction;
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
 		? availableThinkingLevels(
@@ -128,12 +129,30 @@ export function buildSettingItems(
 			description: "Ctrl+P cycle set. Edit via /scoped-models.",
 		},
 		{
+			id: "compaction.auto",
+			label: "compaction.auto",
+			currentValue: String(compaction.auto),
+			values: ["true", "false"],
+			description: "Auto-compact before a turn when context crosses threshold.",
+		},
+		{
+			id: "compaction.threshold",
+			label: "compaction.threshold",
+			currentValue: formatThreshold(compaction.threshold),
+			values: ["0.6", "0.7", "0.8", "0.9", "0.95"],
+			description: "Fraction of context window that triggers auto-compaction.",
+		},
+		{
 			id: "keybindings",
 			label: "keybindings",
 			currentValue: formatKeybindingsSummary(options?.keybindings),
 			description: "Open /hotkeys to see bindings; edit settings.yaml > keybindings to override.",
 		},
 	];
+}
+
+function formatThreshold(value: number): string {
+	return Number.isFinite(value) ? String(value) : "0.8";
 }
 
 function formatKeybindingsSummary(manager?: ClioKeybindingManager): string {
@@ -172,6 +191,14 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				settings.orchestrator.thinkingLevel = value;
 			}
 			return;
+		case "compaction.auto":
+			if (value === "true" || value === "false") settings.compaction.auto = value === "true";
+			return;
+		case "compaction.threshold": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.threshold = parsed;
+			return;
+		}
 	}
 }
 

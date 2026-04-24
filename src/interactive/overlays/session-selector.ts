@@ -39,10 +39,12 @@ export function buildSessionItems(sessions: ReadonlyArray<SessionMeta>): SelectI
 		const ended = meta.endedAt ? "✓" : "●";
 		const endpoint = meta.endpoint ?? "-";
 		const model = meta.model ?? "-";
+		const name = meta.name ? `  ${meta.name}` : "";
+		const labels = meta.labels && meta.labels.length > 0 ? `  labels: ${meta.labels.join(", ")}` : "";
 		return {
 			value: meta.id,
-			label: `${ended} ${shortenId(meta.id)}  ${started}  ${endpoint}/${model}`,
-			description: meta.cwd ?? "",
+			label: `${ended} ${shortenId(meta.id)}${name}  ${started}  ${endpoint}/${model}`,
+			description: `${meta.cwd ?? ""}${labels}`,
 		};
 	});
 }

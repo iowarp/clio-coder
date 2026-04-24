@@ -1,5 +1,6 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ClioKeybinding } from "../../src/domains/config/keybindings.js";
 import {
 	CTRL_C_DOUBLE_TAP_MS,
@@ -8,6 +9,7 @@ import {
 	resolveCtrlCAction,
 	routeOverlayKey,
 } from "../../src/interactive/index.js";
+import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
 
 function classify(overrides: Partial<Parameters<typeof resolveCtrlCAction>[0]> = {}): CtrlCAction {
 	return resolveCtrlCAction({
@@ -112,5 +114,24 @@ describe("routeOverlayKey dispatch-board toggle", () => {
 		const consumed = routeOverlayKey(DISPATCH_TOGGLE, "dispatch-board", deps, matches);
 		strictEqual(consumed, true);
 		strictEqual(shutdown.count, 1);
+	});
+});
+
+describe("settings overlay compaction controls", () => {
+	it("surfaces and applies live compaction controls", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const items = buildSettingItems(settings);
+		const auto = items.find((item) => item.id === "compaction.auto");
+		const threshold = items.find((item) => item.id === "compaction.threshold");
+
+		ok(auto, "compaction.auto row should be visible");
+		ok(threshold, "compaction.threshold row should be visible");
+		strictEqual(auto.currentValue, "true");
+		strictEqual(threshold.currentValue, "0.8");
+
+		applySettingChange(settings, "compaction.auto", "false");
+		applySettingChange(settings, "compaction.threshold", "0.9");
+		strictEqual(settings.compaction.auto, false);
+		strictEqual(settings.compaction.threshold, 0.9);
 	});
 });

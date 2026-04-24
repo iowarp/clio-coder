@@ -13,6 +13,10 @@ export type ClioSessionMetaExtension = {
 	parentTurnId?: string | null;
 	lastCheckpointAt?: string | null;
 	lastCheckpointReason?: string | null;
+	/** Latest display name discovered from sessionInfo entries. */
+	name?: string;
+	/** Latest non-empty turn labels discovered from sessionInfo entries. */
+	labels?: string[];
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;

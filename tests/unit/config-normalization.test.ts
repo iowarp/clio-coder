@@ -2,6 +2,8 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { normalizeSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { diffSettings } from "../../src/domains/config/classify.js";
 
 describe("core/config normalizeSettings", () => {
 	it("normalizes target config and repairs stale pointers", () => {
@@ -57,5 +59,16 @@ describe("core/config normalizeSettings", () => {
 		});
 		deepStrictEqual(normalized.runtimePlugins, ["example-runtime"]);
 		deepStrictEqual(normalized.scope, ["codex-pro", "codex-pro/gpt-5.4-mini"]);
+	});
+
+	it("classifies compaction setting changes as next-turn updates", () => {
+		const prev = structuredClone(DEFAULT_SETTINGS);
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.compaction.auto = false;
+		next.compaction.threshold = 0.9;
+		const diff = diffSettings(prev, next);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.restartRequired, []);
+		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
 	});
 });

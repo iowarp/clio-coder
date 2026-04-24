@@ -1,8 +1,13 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { ClioTurnRecord } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import {
+	buildReplayAgentMessagesFromTurns,
+	rehydrateChatPanelFromTurns,
+	selectReplayEntries,
+} from "../../src/interactive/chat-renderer.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
 function strip(s: string): string {
@@ -54,16 +59,13 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(!text.includes("reply2"), `post-fork content leaked: ${text}`);
 	});
 
-	it("skips tool_call, tool_result, system, and checkpoint turns", () => {
-		// The first rehydrate pass handles message turns only. Tool previews
-		// rehydrate in a later slice once entry storage carries enough data to
-		// reconstruct the paired start/end events.
+	it("renders tool_call, tool_result, system, and checkpoint turns", () => {
 		const panel = createChatPanel();
 		const turns: ClioTurnRecord[] = [
 			mkTurn({ id: "u1", kind: "user", payload: { text: "hi" } }),
 			mkTurn({ id: "s1", kind: "system", payload: { text: "system boot" } }),
-			mkTurn({ id: "t1", kind: "tool_call", payload: { name: "ls" } }),
-			mkTurn({ id: "tr1", kind: "tool_result", payload: { out: "x" } }),
+			mkTurn({ id: "t1", kind: "tool_call", payload: { id: "call-1", name: "ls", args: { path: "." } } }),
+			mkTurn({ id: "tr1", kind: "tool_result", payload: { toolCallId: "call-1", out: "x" } }),
 			mkTurn({ id: "c1", kind: "checkpoint", payload: { reason: "manual" } }),
 			mkTurn({ id: "a1", kind: "assistant", payload: { text: "done" } }),
 		];
@@ -71,8 +73,10 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const text = strip(panel.render(80).join("\n"));
 		ok(text.includes("you: hi"), text);
 		ok(text.includes("clio: done"), text);
-		ok(!text.includes("system boot"), `system turn leaked: ${text}`);
-		ok(!text.includes("ls"), `tool_call leaked: ${text}`);
+		ok(text.includes("system: system boot"), text);
+		ok(text.includes("tool: ls"), text);
+		ok(text.includes("→ x") || text.includes("-> x"), text);
+		ok(text.includes("[checkpoint]"), text);
 	});
 
 	it("accepts bare-string payloads and {content:[{type:text}]} shapes", () => {
@@ -101,5 +105,110 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const text = strip(panel.render(80).join("\n"));
 		ok(text.includes("you: real"), text);
 		strictEqual((text.match(/you:/g) ?? []).length, 1, `extra user lines in:\n${text}`);
+	});
+
+	it("renders branch and compaction summary entries and keeps the compacted suffix", () => {
+		const panel = createChatPanel();
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				role: "user",
+				payload: { text: "old prompt" },
+			},
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp: "2026-04-23T00:00:01.000Z",
+				role: "assistant",
+				payload: { text: "old answer" },
+			},
+			{
+				kind: "message",
+				turnId: "u2",
+				parentTurnId: "a1",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				role: "user",
+				payload: { text: "kept prompt" },
+			},
+			{
+				kind: "branchSummary",
+				turnId: "b1",
+				parentTurnId: "u2",
+				timestamp: "2026-04-23T00:00:03.000Z",
+				fromTurnId: "fork-source",
+				summary: "Inherited branch work.",
+			},
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: "u2",
+				timestamp: "2026-04-23T00:00:04.000Z",
+				summary: "Old prompt and answer were compacted.",
+				tokensBefore: 1234,
+				firstKeptTurnId: "u2",
+			},
+			{
+				kind: "message",
+				turnId: "a2",
+				parentTurnId: "c1",
+				timestamp: "2026-04-23T00:00:05.000Z",
+				role: "assistant",
+				payload: { text: "after compaction" },
+			},
+		];
+		rehydrateChatPanelFromTurns(panel, entries);
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("[compaction summary]"), text);
+		ok(text.includes("Old prompt and answer were compacted."), text);
+		ok(text.includes("you: kept prompt"), text);
+		ok(text.includes("[branch summary]"), text);
+		ok(text.includes("Inherited branch work."), text);
+		ok(text.includes("clio: after compaction"), text);
+		ok(!text.includes("you: old prompt"), `pre-compaction prefix leaked:\n${text}`);
+
+		const selected = selectReplayEntries(entries).map((entry) => entry.turnId);
+		strictEqual(selected.join(","), "c1,u2,b1,a2");
+	});
+
+	it("builds replay agent messages from entry-aware replay selection", () => {
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				role: "user",
+				payload: { text: "hidden old prompt" },
+			},
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: "u1",
+				timestamp: "2026-04-23T00:00:01.000Z",
+				summary: "Use the summary instead.",
+				tokensBefore: 999,
+				firstKeptTurnId: "missing-kept",
+			},
+			{
+				kind: "bashExecution",
+				turnId: "b1",
+				parentTurnId: "c1",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				command: "npm test",
+				output: "ok",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+			},
+		];
+		const messages = buildReplayAgentMessagesFromTurns(entries);
+		const serialized = JSON.stringify(messages);
+		ok(serialized.includes("Use the summary instead."), serialized);
+		ok(serialized.includes("Ran `npm test`"), serialized);
+		ok(!serialized.includes("hidden old prompt"), serialized);
 	});
 });

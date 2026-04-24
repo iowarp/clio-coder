@@ -333,6 +333,7 @@ describe("createCoalescingChatRenderer", () => {
 		const applied: ChatLoopEvent[] = [];
 		const fakePanel = {
 			appendUser: () => {},
+			appendReplayBlock: () => {},
 			reset: () => {},
 			applyEvent: (event: ChatLoopEvent) => {
 				applied.push(event);

@@ -58,15 +58,12 @@ export interface ChatLoop {
 	 */
 	compact(instructions?: string): Promise<void>;
 	/**
-	 * Drop the chat-loop's in-memory state after a session switch (/resume,
-	 * /fork, /new) so the next `submit` threads a clean lineage and the LLM
-	 * does not see pre-switch context. `leafTurnId` is the id the next user
-	 * turn should parent under: the resumed session's leaf for /resume, or
-	 * null when a fresh branch begins (/fork, /new). Also clears the runtime
-	 * agent's `state.messages` when a runtime exists; a no-op on leafTurnId
-	 * and messages when the runtime has not been built yet.
+	 * Drop or replace the chat-loop's in-memory state after a session switch
+	 * (/resume, /fork, /new). `leafTurnId` is the id the next user turn
+	 * should parent under. `replayMessages` is the provider context rebuilt
+	 * from the selected session entries; omit it for a fresh session.
 	 */
-	resetForSession(leafTurnId: string | null): void;
+	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 }
 
 export interface CreateChatLoopDeps {
@@ -317,6 +314,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let lastTurnId: string | null = null;
 	let streaming = false;
 	let currentThinkingLevel: ThinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
+	let replayedContextMessages: AgentMessage[] = [];
 	// Hash of the prompt compiled for the in-flight turn. User + assistant
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
@@ -401,13 +399,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
 		// prompts contract is absent (tests, degraded boot).
+		const priorMessages = runtime ? [...runtime.agent.state.messages] : [...replayedContextMessages];
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
 				model,
 				thinkingLevel: target.thinkingLevel,
 				tools,
-				messages: [],
+				messages: priorMessages,
 			},
 			onPayload: async (payload, currentModel) =>
 				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
@@ -739,11 +738,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		isStreaming(): boolean {
 			return streaming;
 		},
-		resetForSession(leafTurnId: string | null): void {
+		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
+			replayedContextMessages = replayMessages ? [...replayMessages] : [];
 			if (runtime) {
-				runtime.agent.state.messages = [];
+				runtime.agent.state.messages = [...replayedContextMessages];
 			}
 		},
 		async compact(instructions?: string): Promise<void> {

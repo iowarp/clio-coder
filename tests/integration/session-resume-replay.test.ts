@@ -19,7 +19,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract } from "../../src/domains/session/index.js";
 import { openSession } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
 function strip(s: string): string {
@@ -94,5 +94,46 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		ok(text.includes("clio: four"), `first assistant turn missing:\n${text}`);
 		ok(text.includes("you: thanks"), `second user turn missing:\n${text}`);
 		ok(text.includes("clio: you are welcome"), `second assistant turn missing:\n${text}`);
+	});
+
+	it("replays compaction summaries and derives the resumed leaf from tree state", async () => {
+		const meta = contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "old context" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "old answer" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "kept question" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "kept answer" } });
+		contract.appendEntry({
+			kind: "compactionSummary",
+			parentTurnId: u2.id,
+			summary: "Old context and answer were summarized.",
+			tokensBefore: 2048,
+			firstKeptTurnId: u2.id,
+		});
+		contract.appendEntry({
+			kind: "sessionInfo",
+			parentTurnId: null,
+			name: "resume replay fixture",
+		});
+		await contract.checkpoint("test");
+		await contract.close();
+
+		contract.resume(meta.id);
+		const turns = openSession(meta.id).turns();
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, turns);
+		const text = strip(panel.render(96).join("\n"));
+
+		ok(text.includes("[compaction summary]"), `summary block missing:\n${text}`);
+		ok(text.includes("Old context and answer were summarized."), text);
+		ok(text.includes("you: kept question"), text);
+		ok(text.includes("clio: kept answer"), text);
+		ok(!text.includes("you: old context"), `pre-compaction prefix leaked:\n${text}`);
+
+		const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+		const serialized = JSON.stringify(replayMessages);
+		ok(serialized.includes("Old context and answer were summarized."), serialized);
+		ok(serialized.includes("kept question"), serialized);
+		ok(!serialized.includes("old context"), serialized);
+		strictEqual(contract.tree(meta.id).leafId, a2.id, "trailing sessionInfo must not become the resume leaf");
 	});
 });

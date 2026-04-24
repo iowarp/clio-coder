@@ -21,7 +21,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract } from "../../src/domains/session/index.js";
 import { openSession } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
 function strip(s: string): string {
@@ -107,5 +107,35 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		ok(text.includes("clio: reply2"), `fork-point assistant missing:\n${text}`);
 		ok(!text.includes("third"), `post-fork user turn leaked:\n${text}`);
 		ok(!text.includes("reply3"), `post-fork assistant turn leaked:\n${text}`);
+	});
+
+	it("fork replay preserves branch summaries and seeds parent-prefix context", () => {
+		const parent = contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "first" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "reply1" } });
+		contract.appendEntry({
+			kind: "branchSummary",
+			parentTurnId: a1.id,
+			fromTurnId: "abandoned-turn",
+			summary: "The abandoned branch edited src/app.ts.",
+		});
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "second" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "reply2" } });
+
+		const forked = contract.fork(a2.id);
+		strictEqual(forked.parentSessionId, parent.id);
+
+		const parentTurns = openSession(parent.id).turns();
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, parentTurns, { uptoTurnId: a2.id });
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("[branch summary]"), text);
+		ok(text.includes("The abandoned branch edited src/app.ts."), text);
+		ok(text.includes("you: second"), text);
+
+		const replayMessages = buildReplayAgentMessagesFromTurns(parentTurns, { uptoTurnId: a2.id });
+		const serialized = JSON.stringify(replayMessages);
+		ok(serialized.includes("abandoned branch edited src/app.ts"), serialized);
+		ok(serialized.includes("second"), serialized);
 	});
 });
