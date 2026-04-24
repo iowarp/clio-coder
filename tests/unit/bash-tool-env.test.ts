@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { bashTool, buildToolEnv } from "../../src/tools/bash.js";
 
@@ -81,5 +81,24 @@ describe("bash tool environment", () => {
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
+	});
+
+	it("escalates aborted commands that ignore sigterm", async () => {
+		const controller = new AbortController();
+		const startedAt = Date.now();
+		const started = bashTool.run(
+			{
+				command: 'trap "" TERM; sleep 5',
+				timeout_ms: 10_000,
+			},
+			{ signal: controller.signal },
+		);
+		setTimeout(() => controller.abort(), 20);
+		const result = await started;
+		const elapsedMs = Date.now() - startedAt;
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
+		ok(elapsedMs < 6500, `expected abort escalation within 6.5s, got ${elapsedMs}ms`);
 	});
 });

@@ -45,6 +45,8 @@ function execBash(
 		let timedOut = false;
 		let settled = false;
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
+		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
+		let killSent = false;
 		let stdout = "";
 		let stderr = "";
 		let outputBytes = 0;
@@ -56,18 +58,32 @@ function execBash(
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
-		const killChild = (): void => {
-			if (child.killed) return;
+		const clearKillGraceTimer = (): void => {
+			if (!killGraceTimer) return;
+			clearTimeout(killGraceTimer);
+			killGraceTimer = null;
+		};
+
+		const sendSignal = (signalName: NodeJS.Signals): void => {
 			const pid = child.pid;
 			if (pid && process.platform !== "win32") {
 				try {
-					process.kill(-pid, "SIGTERM");
+					process.kill(-pid, signalName);
 					return;
 				} catch {
 					// Fall through to killing the shell process directly.
 				}
 			}
-			child.kill("SIGTERM");
+			child.kill(signalName);
+		};
+
+		const killChild = (): void => {
+			if (killSent) return;
+			killSent = true;
+			sendSignal("SIGTERM");
+			killGraceTimer = setTimeout(() => {
+				sendSignal("SIGKILL");
+			}, 5000);
 		};
 
 		function onAbort(): void {
@@ -104,6 +120,7 @@ function execBash(
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			clearKillGraceTimer();
 			signal?.removeEventListener("abort", onAbort);
 			resolve({ error: error as NodeJS.ErrnoException, stdout, stderr, aborted, timedOut });
 		});
@@ -111,6 +128,7 @@ function execBash(
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			clearKillGraceTimer();
 			signal?.removeEventListener("abort", onAbort);
 			const error =
 				code === 0 && signalName === null
