@@ -27,8 +27,10 @@ npm run ci
 
 ## Non-Negotiable Boundaries
 
-- Only `src/engine/**` imports pi-mono packages.
-- `src/worker/**` does not import `src/domains/**`.
+- Only `src/engine/**` value-imports pi-mono packages.
+- `src/worker/**` value-imports only the worker-safe provider runtime
+  rehydration modules under `src/domains/providers/**`; all other domain
+  imports from workers must be type-only.
 - Cross-domain communication goes through `SafeEventBus`.
 - Do not edit generated `dist/`, `node_modules/`, secrets, or local scratch
   files.

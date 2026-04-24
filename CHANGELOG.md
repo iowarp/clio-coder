@@ -7,8 +7,16 @@ Keep a Changelog.
 
 ### Fixed
 
+- CLI-backed subprocess runtimes now dispatch through the native worker entry
+  instead of running inline in the orchestrator process.
+- Out-of-tree SDK runtime plugins now pass runtime descriptor validation and
+  rehydrate correctly inside native worker subprocesses.
 - `/receipt verify <runId>` now verifies a SHA-256 integrity field against the
   persisted run ledger entry instead of accepting schema-valid receipt JSON.
+- Dispatch heartbeats now promote stale/dead worker states into run state and
+  the live dispatch board instead of leaving silent workers marked running.
+- `npm run check:boundaries` now exists for the boundary command documented in
+  contributor guidance.
 
 ## 0.1.0-exp — 2026-04-24
 
