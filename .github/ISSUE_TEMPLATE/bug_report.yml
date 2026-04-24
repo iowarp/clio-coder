@@ -1,0 +1,36 @@
+name: Bug report
+description: Report reproducible Clio Coder behavior.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduce
+      description: Minimal commands, config shape, or session steps.
+      placeholder: |
+        npm run ci
+        clio targets
+        clio run --agent scout "..."
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, package version, target/runtime.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste only relevant logs. Remove secrets.
+      render: text
