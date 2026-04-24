@@ -39,7 +39,7 @@ export function createPromptsBundle(context: DomainContext): DomainBundle<Prompt
 		compileForTurn(input: CompileForTurnInput) {
 			if (!table) throw new Error("prompts domain not started");
 			if (table.byId.size === 0) {
-				throw new Error("prompts: no fragments loaded — check startup logs");
+				throw new Error("prompts: no fragments loaded, check startup logs");
 			}
 			const modesContract = modes();
 			const configContract = config();

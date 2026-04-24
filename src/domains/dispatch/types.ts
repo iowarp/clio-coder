@@ -3,7 +3,7 @@
  *
  * RunEnvelope is the live record kept in the ledger (runs.json). RunReceipt is
  * the per-run artifact written under receipts/<runId>.json on completion. Both
- * are pure data — no class methods, no engine refs.
+ * are pure data: no class methods, no engine refs.
  */
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";

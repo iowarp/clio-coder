@@ -8,7 +8,7 @@
  *      Each package must export a `clioRuntimes: RuntimeDescriptor[]` array.
  *
  * Missing directories, import failures, and descriptor conflicts are logged
- * to stderr but never throw — the providers domain still boots with whatever
+ * to stderr but never throw. The providers domain still boots with whatever
  * subset loaded cleanly.
  */
 

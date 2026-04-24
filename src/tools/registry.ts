@@ -28,7 +28,7 @@ export interface ToolSpec {
 	/**
 	 * TypeBox schema advertised to the model so it knows which named
 	 * parameters the tool accepts. Must be a Type.Object(...). Runtime
-	 * validation still happens inside `run()` — the schema is advisory
+	 * validation still happens inside `run()`, so the schema is advisory
 	 * to the model, not an enforcement boundary.
 	 */
 	parameters: TSchema;

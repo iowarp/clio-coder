@@ -63,8 +63,8 @@ export interface BootOptions {
 function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
-  ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
-  ${chalk.dim(`v${clio} · pi-mono 0.69.0 · ready`)}
+  ${chalk.cyan("◆ clio")}  Clio Coder
+  ${chalk.dim(`v${clio} · supervised repository work · ready`)}
 `;
 }
 

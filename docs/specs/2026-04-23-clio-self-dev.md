@@ -1,22 +1,22 @@
-# Clio Self Development Mode
+# Clio Coder Self-Development Mode
 
 Date: 2026-04-23
 Status: shipped behavior spec
 
 ## Goal
 
-Clio can run under user supervision while editing the Clio Coder repository. A user enables this path with `clio --dev`, `CLIO_DEV=1`, or the legacy `CLIO_SELF_DEV=1` harness flag.
+Clio Coder can run under user supervision while editing its own repository. A user enables this path with `clio --dev`, `CLIO_DEV=1`, or the legacy `CLIO_SELF_DEV=1` harness flag.
 
 ## Boot Behavior
 
-1. Dev mode resolves the Clio repository root from the current checkout.
+1. Dev mode resolves the Clio Coder repository root from the current checkout.
 2. Dev mode sets `CLIO_SELF_DEV=1` for the current process so the hot reload harness remains active.
 3. The banner prints the activation source and the repository root.
-4. The chat loop appends a self-development prompt supplement to the normal Clio prompt.
+4. The chat loop appends a self-development prompt supplement to the normal Clio Coder prompt.
 
 ## Prompt Contract
 
-The self-development prompt tells Clio:
+The self-development prompt tells the agent:
 
 1. Its current working directory is the Clio Coder repository.
 2. It may read and edit its own source under user supervision.
@@ -28,7 +28,7 @@ The self-development prompt tells Clio:
 
 ## Runtime Guards
 
-When dev mode is active, Clio wraps mutating tools with self-development checks:
+When dev mode is active, Clio Coder wraps mutating tools with self-development checks:
 
 1. `write` and `edit` only write inside the repository root.
 2. `write` and `edit` block `tests/fixtures/`.
@@ -37,11 +37,11 @@ When dev mode is active, Clio wraps mutating tools with self-development checks:
 5. `write` and `edit` block `src/` writes on protected branches such as `main` and `master`.
 6. `bash` blocks `git push`, git force flags, `git reset --hard`, `git clean` with force, and destructive checkout syntax.
 
-The guard is intentionally conservative. A user can still perform blocked operations outside Clio after reviewing the situation.
+The guard is intentionally conservative. A user can still perform blocked operations outside Clio Coder after reviewing the situation.
 
 ## OpenAI Path
 
-OpenAI support already exists through the `openai-codex` runtime. It is a cloud runtime, uses OAuth, targets `openai-codex-responses`, and exposes ChatGPT subscription models through pi-ai. Existing tests cover `gpt-5.4` and `gpt-5.4-mini` as selectable models.
+OpenAI support already exists through the `openai-codex` runtime. It is a cloud runtime, uses OAuth, targets `openai-codex-responses`, and exposes ChatGPT subscription models through the model runtime catalog. Existing tests cover `gpt-5.4` and `gpt-5.4-mini` as selectable models.
 
 The recommended self-development stack is:
 

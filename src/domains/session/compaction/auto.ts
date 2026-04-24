@@ -9,7 +9,7 @@
  *
  * Ported from pi-coding-agent's runtime compaction gate. Kept deliberately
  * small so the chat-loop can call it on the hot path without new allocations
- * per turn. No I/O here — the caller injects the work via `fire(task)`.
+ * per turn. No I/O here. The caller injects the work via `fire(task)`.
  */
 
 /**
@@ -50,7 +50,7 @@ export class AutoCompactionTrigger<T> {
 
 	/**
 	 * Run `task` unless one is already in flight. Returns the Promise the
-	 * task is running under — callers always get the eventual result of the
+	 * task is running under. Callers always get the eventual result of the
 	 * first task, never a second call. Rejections clear the slot so a later
 	 * fire can start fresh.
 	 */

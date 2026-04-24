@@ -121,13 +121,13 @@ function enforceCapabilityGate(
 ): void {
 	if (!required || required.length === 0) return;
 	if (!capabilities) {
-		throw new Error(`dispatch: admission denied — capability info unavailable for endpoint '${endpointId}'`);
+		throw new Error(`dispatch: admission denied: capability info unavailable for endpoint '${endpointId}'`);
 	}
 	const caps = capabilities as unknown as Record<string, unknown>;
 	for (const name of required) {
 		const value = caps[name];
 		if (value === undefined || value === false || value === 0 || value === "") {
-			throw new Error(`dispatch: admission denied — capability '${name}' not supported by endpoint '${endpointId}'`);
+			throw new Error(`dispatch: admission denied: capability '${name}' not supported by endpoint '${endpointId}'`);
 		}
 	}
 }
@@ -168,14 +168,14 @@ export function createDispatchBundle(
 		const { systemPrompt: _sp, ...jobSpec } = req;
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {
-			throw new Error(`dispatch: invalid spec — ${validated.errors.join("; ")}`);
+			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
 			if (preflight.verdict === "over" || preflight.verdict === "at") {
 				throw new Error(
-					`dispatch: admission denied — budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
+					`dispatch: admission denied: budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
 				);
 			}
 		}
@@ -195,7 +195,7 @@ export function createDispatchBundle(
 			safety.isSubset,
 		);
 		if (!verdict.admitted) {
-			throw new Error(`dispatch: admission denied — ${verdict.reason}`);
+			throw new Error(`dispatch: admission denied: ${verdict.reason}`);
 		}
 
 		const settings = config?.get();
@@ -234,7 +234,7 @@ export function createDispatchBundle(
 			workerSlotHeld = scheduling.tryAcquireWorker();
 			if (!workerSlotHeld) {
 				throw new Error(
-					`dispatch: admission denied — concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
+					`dispatch: admission denied: concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
 				);
 			}
 		}

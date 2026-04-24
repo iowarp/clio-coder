@@ -126,7 +126,7 @@ function extractUsage(payload: unknown): Usage | undefined {
 /**
  * Walk entries from newest to oldest, returning the first assistant message
  * whose payload carries a valid usage block. Aborted/error assistant turns
- * are skipped — their usage is not meaningful for context accounting.
+ * are skipped because their usage is not meaningful for context accounting.
  */
 export function getLastAssistantUsage(entries: ReadonlyArray<SessionEntry>): Usage | undefined {
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -150,7 +150,7 @@ function findLastAssistantUsageIndex(entries: ReadonlyArray<SessionEntry>): numb
 /**
  * Total context tokens for the supplied entry list. When `lastUsage` is
  * provided (or derivable from the entries), uses its totalTokens as the
- * anchor and only estimates the entries that followed it — this matches
+ * anchor and only estimates the entries that followed it. This matches
  * pi-coding-agent's `estimateContextTokens` behavior and keeps the number
  * accurate for sessions whose most recent assistant turn carried real
  * provider usage data.
@@ -172,7 +172,7 @@ export function calculateContextTokens(entries: ReadonlyArray<SessionEntry>, las
 	return total;
 }
 
-/** Default estimator — chars/4. Future `/count_tokens` estimators drop in here. */
+/** Default estimator: chars/4. Future `/count_tokens` estimators drop in here. */
 export const charsOverFourEstimator: TokenEstimator = {
 	estimateEntry: estimateTokens,
 	calculateContextTokens,

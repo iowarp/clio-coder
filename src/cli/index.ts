@@ -14,39 +14,42 @@ import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
 
-const HELP = `clio. IOWarp orchestrator coding-agent
+const HELP = `Clio Coder command line
+
+AI coding harness for supervised repository work.
 
 Usage:
-  clio                      start interactive mode
+  clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
-  clio --version, -v        print version info
-  clio --api-key <key>      override the active endpoint's api key for this run
+  clio --version, -v        print the clio version
+  clio --api-key <key>      override the active endpoint API key for this run
   clio doctor               run environment diagnostics
-  clio setup                create, edit, or remove endpoints
-  clio install              bootstrap Clio config/data/cache directories
-  clio uninstall            remove or reset Clio state directories
-  clio upgrade              upgrade clio and run pending state migrations
-  clio providers            list endpoint status, health, capabilities
+  clio setup                add, edit, remove, rename, or retarget endpoints
+  clio install              bootstrap Clio Coder config, data, and cache
+  clio uninstall            remove or reset Clio Coder state directories
+  clio upgrade              upgrade clio and run pending migrations
+  clio providers            list endpoint status, health, and capabilities
   clio list-models          list discovered models per endpoint
   clio connect [target]     connect a provider or endpoint (OAuth or API key)
   clio disconnect <target>  disconnect stored credentials for a provider or endpoint
   clio auth [list|status]   list supported providers or show connection status
   clio agents               list discovered agent recipes
-  clio run <task>           dispatch a one-shot worker job
+  clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
 `;
 
 async function main(argv: string[]): Promise<number> {
 	const { apiKey, rest } = extractApiKeyFlag(argv);
 	const { flags, positional } = parseFlags(rest);
-	if (flags.has("help") || flags.has("h")) {
+	const subcommand = positional[0];
+	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
+	const firstArg = rest[0];
+	if (firstArg === "--help" || firstArg === "-h" || ((flags.has("help") || flags.has("h")) && !subcommand)) {
 		process.stdout.write(HELP);
 		return 0;
 	}
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
 
-	const subcommand = positional[0];
-	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
 	const subArgs = subcommandIndex === -1 ? [] : rest.slice(subcommandIndex + 1);
 	const dev = flags.has("dev");
 	const bootOptions = {
