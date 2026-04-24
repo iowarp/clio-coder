@@ -256,7 +256,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 				if (context) context.capturedPlans.push(extractPlanText(input));
 				return {
 					behavior: "deny",
-					message: "Plan captured by Clio; refusing automatic plan exit in the v0.2 worker adapter.",
+					message: "Plan captured by Clio; refusing automatic plan exit in the worker adapter.",
 					interrupt: true,
 				};
 			}
@@ -265,7 +265,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 			}
 			return {
 				behavior: "deny",
-				message: `Clio v0.2 denied native Claude Code permission request for ${toolName}; interactive approvals are not wired yet.`,
+				message: `Clio denied native Claude Code permission request for ${toolName}; interactive approvals are not wired yet.`,
 			};
 		};
 	}
@@ -573,7 +573,7 @@ function buildClaudeQueryOptions(
 		includePartialMessages: true,
 		persistSession: true,
 		agentProgressSummaries: true,
-		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "clio-coder/0.2" },
+		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "clio-coder/0.1" },
 		systemPrompt:
 			input.systemPrompt.trim().length > 0
 				? { type: "preset", preset: "claude_code", append: input.systemPrompt }

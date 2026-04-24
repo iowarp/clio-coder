@@ -1,129 +1,60 @@
 # Changelog
 
-All notable changes to Clio Coder are tracked here.
+All notable changes to Clio Coder are tracked here. Format loosely follows
+Keep a Changelog.
 
-No public release has shipped yet. Treat every entry below as pre-release
-development history until `0.1.0` is tagged.
+## 0.1.0-exp — 2026-04-24
 
-Format: compact Keep a Changelog style, with source ranges included so agents
-can audit the git history without expanding every commit.
+First public release. Experimental. Expect moving surfaces; pin the tag if
+you need a stable target.
 
-## Unreleased
+### What ships
 
-Target: `0.1.0-exp`
+- **Interactive TUI.** Terminal chat with target and model controls, session
+  navigation, resume/fork, markdown-rendered replies, configurable
+  keybindings, a searchable resume picker, scoped-model cycling, a
+  live-updating dispatch board, and receipts/cost overlays.
+- **CLI lifecycle.** `clio`, `clio configure`, `clio targets`, `clio models`,
+  `clio auth`, `clio doctor`, `clio reset`, `clio uninstall`, `clio agents`,
+  `clio run`, `clio upgrade`, `clio --version`.
+- **Target-first configuration.** Local HTTP engines, cloud APIs,
+  OAuth/subscription runtimes, and CLI-backed runtimes all live in
+  `targets[]`; `orchestrator` and `workers` point at those ids. Known and
+  discovered models are surfaced through `clio models` and the TUI model
+  selector.
+- **Runtime coverage.** Native subprocess worker; protocol adapters for
+  openai-compat, llamacpp, Ollama, vLLM, SGLang, LM Studio, Lemonade;
+  cloud adapters for Anthropic, OpenAI, Google, Groq, Mistral, OpenRouter,
+  Bedrock; OAuth path for openai-codex (ChatGPT Plus/Pro via Codex);
+  CLI-backed runtimes for Codex CLI, Claude Code CLI, Gemini CLI, Copilot
+  CLI, OpenCode CLI; and a Claude Agent SDK worker path.
+- **Seven builtin agents.** `scout`, `planner`, `researcher`, `reviewer`,
+  `delegate`, `context-builder`, `worker`. Plain Markdown specs with
+  frontmatter in `src/domains/agents/builtins/`.
+- **Dispatch and workers.** `clio run` spawns OS-isolated worker
+  subprocesses with NDJSON IPC and heartbeats. Named worker profiles
+  let the interactive session fan out across multiple runtimes.
+- **Self-development mode.** Hot-reload and restart-required signals for
+  developers editing Clio from inside Clio, with shell environment isolation
+  and tool guards.
+- **Receipts and audit.** Every run writes a receipt under
+  `<dataDir>/receipts/<runId>.json` with token counts, USD cost, and a hash
+  of the event ledger. `/receipt verify <runId>` re-hashes on demand.
+- **Safety model.** Three modes (`default`, `advise`, `super`) gate tool
+  visibility at the registry. Hardcoded Bash kill-switches live in
+  `damage-control-rules.yaml`.
+- **State layout.** XDG-aware, with `CLIO_HOME` plus `CLIO_CONFIG_DIR` /
+  `CLIO_DATA_DIR` / `CLIO_CACHE_DIR` overrides for sandboxed installs.
 
-Source range: `main..v0.2/parity` (`747f71c..9c59275`) as of 2026-04-24.
+### Known limits
 
-### Added
-
-- Interactive worker profiles for non-interactive dispatch and `/run`, with
-  per-profile target, model, thinking, and permission settings.
-- CLI-backed runtimes for Codex CLI, Claude Code CLI, Gemini CLI, OpenCode CLI,
-  Copilot CLI, plus a Claude Agent SDK worker path.
-- `clio targets`, `clio models`, `clio auth`, `clio configure`, `clio reset`,
-  and `clio uninstall` as the current lifecycle surface.
-- Self-development mode with hot-reload/restart signals, shell environment
-  isolation, and tool guards for editing Clio Coder from inside Clio Coder.
-- Session retry helpers, branch summary rendering, compaction summary
-  rendering, resume/fork replay coverage, and populated-session compaction
-  detection.
-- Configurable TUI keybindings, searchable resume picker, markdown chat
-  rendering, live token counters, and corrected cost overlay math.
-- Model reference resolver and `/model <pattern>` selection path.
-- Protocol/runtime tier split for cloud, local-native, protocol, and CLI-stub
-  providers.
-- Local development model knowledge base for Clio self-dev targets.
-
-### Changed
-
-- Runtime catalog upgraded to pi-mono `0.69.0`.
-- Provider model knowledge was narrowed to the active development catalog.
-- CLI lifecycle naming moved from install/setup/providers/list-models toward
-  configure/targets/models/auth.
-- Documentation was pruned from long phase plans toward current status,
-  specs, and source-of-truth repo files.
-- Shutdown now caps domain stop time to avoid TUI exit stalls.
-
-### Fixed
-
-- API key overrides are scoped to the active endpoint.
-- Super-confirmed bash dispatch now routes through tool-registry parking.
-- Chat panel resume/fork rehydrates consistently and resets active loops.
-- TUI tool calls render in turn order and filter thinking text.
-- Tree delete errors and keybinding validation are user-facing and tested.
-- List-models search filtering and dispatch-board closing behavior were
-  corrected.
-- Bash child processes no longer inherit unsafe local runtime environment.
-
-### Removed
-
-- Dead local runtime descriptors and legacy provider command files.
-- Large transient phase/design docs from tracked source. Use current docs and
-  git history for audit context.
+- Windows is best-effort until a later release.
+- The self-dev harness is a developer convenience, not a polished public
+  surface.
+- Some runtime slots (remote fan-out, broader MCP) are scaffolded but not
+  admitted by dispatch yet.
 
 ### Verification
 
-- Current gate: `npm run ci`.
-- Additional live smoke: `npm run smoke:workers:live` when local/CLI runtimes
-  are configured.
-
-## 0.1.0-dev History
-
-No `0.1.0` tag has been released. This section records the pre-release base
-that `main` currently points at (`747f71c`).
-
-### Phase 11 TUI selector suite
-
-- Added `/thinking`, `/model`, `/scoped-models`, `/settings`, `/resume`,
-  `/new`, and `/hotkeys`.
-- Added footer scope/reasoning segments and a single slash-command registry.
-- Added unit and pty e2e coverage for selector overlays and keybindings.
-
-### Phase 10 Observability and scheduling
-
-- Added observability metrics, session cost accounting, budget verdicts,
-  concurrency gates, and disabled-by-default intelligence scaffolding.
-
-### Phase 9 Interactive TUI scaffold
-
-- Added the first interactive terminal UI, footer, editor, mode routing, and
-  shutdown handling.
-
-### Phase 8 Provider adapters
-
-- Added Claude SDK subprocess adapter with graceful fallback.
-
-### Phase 7 CLI adapter fleet
-
-- Added CLI adapter stubs and capability tiers.
-
-### Phase 6 Dispatch and native worker
-
-- Added `clio run`, native worker subprocess, NDJSON events, heartbeat,
-  receipts, ledger persistence, validation, backoff, and worker tests.
-
-### Phase 5 Core tools
-
-- Added read/write/edit/bash/search/web/plan/review tools with mode gating and
-  registry metadata.
-
-### Phase 4 Providers and agents
-
-- Added provider catalog, credential storage, provider health, agent recipes,
-  and builtin agent discovery.
-
-### Phase 3 Prompts and session
-
-- Added prompt fragments, prompt compiler, session JSONL, checkpoints, and
-  hot-reload support.
-
-### Phase 2 Safety and modes
-
-- Added safety classifier, mode matrix, damage-control rules, audit logging,
-  and super-mode confirmation.
-
-### Phase 1 Foundation
-
-- Added config/lifecycle domains, CLI dispatcher, engine boundary wrappers,
-  XDG-aware bootstrap, event bus, bus tracing, pre-commit hooks, CI, and
-  boundary checks.
+- `npm run ci` gates typecheck, lint, unit/integration/boundary tests,
+  production build, and e2e spawn + pty tests.

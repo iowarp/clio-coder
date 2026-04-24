@@ -30,7 +30,7 @@ function buildMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
 		endpoint: null,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
-		clioVersion: "0.2.0-dev",
+		clioVersion: "0.1.0-exp",
 		piMonoVersion: "0.68.1",
 		platform: "linux",
 		nodeVersion: "v20.0.0",

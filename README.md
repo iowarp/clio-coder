@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.0--dev-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--exp-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -51,7 +51,7 @@
 
 Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
-Status: **v0.1.0-exp**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows.
+Status: **v0.1.0-exp** — an experimental first release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows. Pin to the tag if you need a stable target.
 
 Recent focus in this dev cycle:
 
@@ -66,7 +66,7 @@ Recent focus in this dev cycle:
 
 Prerequisites: Node.js `>=20`.
 
-### From source (current path for v0.2)
+### From source
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
@@ -311,10 +311,8 @@ Three hard invariants are enforced by the boundary tests in [`tests/boundaries/c
 2. `src/worker/**` never imports `src/domains/**`.
 3. Cross-domain traffic goes through `SafeEventBus`.
 
-Current project status lives in [`STATUS.md`](STATUS.md). Contributor and
-review rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-[`GOVERNANCE.md`](GOVERNANCE.md). Agent-specific operating rules live in
-[`AGENTS.md`](AGENTS.md).
+Contributor and review rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Agent-specific operating rules live in [`AGENTS.md`](AGENTS.md).
 
 ---
 
@@ -337,20 +335,9 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ---
 
-## Governance
-
-Clio Coder is led by Anthony Kougkas (`@akougkas`) for IOWarp, iowarp.ai,
-and Gnosis Research Center. The project has no public release yet.
-
-Pull requests into `main` require CI and maintainer review. See
-[`GOVERNANCE.md`](GOVERNANCE.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), and
-[`CHANGELOG.md`](CHANGELOG.md) before proposing non-trivial work.
-
----
-
 ## Roadmap
 
-- **v0.2 (current)**: target-first config, interactive TUI, receipts and cost ledger, auth/configure flows, model and session controls, dispatchable workers, and early self-dev harness support.
+- **v0.1.0-exp (current)**: experimental release. Target-first config, interactive TUI, receipts and cost ledger, auth and configure flows, model and session controls, dispatchable workers, and an early self-dev harness. Expect moving parts; pin the tag if you need stability.
 - **Next**: broader runtime hardening, MCP support, richer agent library, and deeper developer ergonomics.
 - **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
 
