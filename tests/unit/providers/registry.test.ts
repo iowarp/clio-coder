@@ -61,12 +61,21 @@ describe("providers/registry createRuntimeRegistry", () => {
 
 describe("providers/registry loadFromDir", () => {
 	let scratch: string;
+	let stderrWrites: string[];
+	let originalWrite: typeof process.stderr.write;
 
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-registry-"));
+		stderrWrites = [];
+		originalWrite = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: unknown) => {
+			stderrWrites.push(typeof chunk === "string" ? chunk : String(chunk));
+			return true;
+		}) as typeof process.stderr.write;
 	});
 
 	afterEach(() => {
+		process.stderr.write = originalWrite;
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
@@ -82,6 +91,65 @@ describe("providers/registry loadFromDir", () => {
 		writeFileSync(filePath, "");
 		const loaded = await registry.loadFromDir(filePath);
 		deepStrictEqual(Array.from(loaded), []);
+	});
+
+	it("loads out-of-tree SDK runtime descriptors", async () => {
+		const registry = createRuntimeRegistry();
+		const pluginPath = join(scratch, "sdk-plugin.js");
+		writeFileSync(
+			pluginPath,
+			`
+const caps = { chat: true, tools: false, reasoning: false, vision: false, audio: false, embeddings: false, rerank: false, fim: false, contextWindow: 1024, maxTokens: 128 };
+export default {
+  id: "out-of-tree-sdk",
+  displayName: "Out Of Tree SDK",
+  kind: "sdk",
+  tier: "sdk",
+  apiFamily: "example-sdk",
+  auth: "none",
+  defaultCapabilities: caps,
+  synthesizeModel() {
+    return { id: "model", provider: "example-sdk" };
+  },
+};
+`,
+			"utf8",
+		);
+
+		const loaded = await registry.loadFromDir(scratch);
+
+		deepStrictEqual(Array.from(loaded), ["out-of-tree-sdk"]);
+		strictEqual(registry.get("out-of-tree-sdk")?.kind, "sdk");
+		deepStrictEqual(stderrWrites, []);
+	});
+
+	it("logs a field-specific reason for invalid descriptor kind", async () => {
+		const registry = createRuntimeRegistry();
+		const pluginPath = join(scratch, "invalid-plugin.js");
+		writeFileSync(
+			pluginPath,
+			`
+export default {
+  id: "bad-runtime",
+  displayName: "Bad Runtime",
+  kind: "socket",
+  apiFamily: "example-sdk",
+  auth: "none",
+  defaultCapabilities: {},
+  synthesizeModel() {
+    return { id: "model", provider: "bad" };
+  },
+};
+`,
+			"utf8",
+		);
+
+		const loaded = await registry.loadFromDir(scratch);
+
+		deepStrictEqual(Array.from(loaded), []);
+		const joined = stderrWrites.join("");
+		ok(joined.includes("invalid default-export RuntimeDescriptor"), joined);
+		ok(joined.includes("kind must be one of http, subprocess, sdk"), joined);
 	});
 });
 

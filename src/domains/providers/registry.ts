@@ -71,13 +71,16 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		}
 		const loaded: string[] = [];
 		for (const candidate of exported) {
-			if (!isRuntimeDescriptor(candidate)) {
-				process.stderr.write(`[providers] runtime package ${packageName} exported an invalid descriptor\n`);
+			const validation = validateRuntimeDescriptor(candidate);
+			if (!validation.ok) {
+				process.stderr.write(
+					`[providers] runtime package ${packageName} exported an invalid descriptor: ${validation.reason}\n`,
+				);
 				continue;
 			}
 			try {
-				register(candidate);
-				loaded.push(candidate.id);
+				register(validation.descriptor);
+				loaded.push(validation.descriptor.id);
 			} catch (err) {
 				process.stderr.write(`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`);
 			}
@@ -104,26 +107,54 @@ async function importDescriptor(file: string, href: string): Promise<RuntimeDesc
 		return null;
 	}
 	const candidate = (mod as { default?: unknown }).default;
-	if (!isRuntimeDescriptor(candidate)) {
-		process.stderr.write(`[providers] runtime plugin ${file} has no valid default-export RuntimeDescriptor\n`);
+	const validation = validateRuntimeDescriptor(candidate);
+	if (!validation.ok) {
+		process.stderr.write(
+			`[providers] runtime plugin ${file} has invalid default-export RuntimeDescriptor: ${validation.reason}\n`,
+		);
 		return null;
 	}
-	return candidate;
+	return validation.descriptor;
 }
 
-function isRuntimeDescriptor(value: unknown): value is RuntimeDescriptor {
-	if (typeof value !== "object" || value === null) return false;
+type RuntimeDescriptorValidation = { ok: true; descriptor: RuntimeDescriptor } | { ok: false; reason: string };
+
+function validateRuntimeDescriptor(value: unknown): RuntimeDescriptorValidation {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { ok: false, reason: "descriptor must be an object" };
+	}
 	const v = value as Record<string, unknown>;
-	return (
-		typeof v.id === "string" &&
-		typeof v.displayName === "string" &&
-		(v.kind === "http" || v.kind === "subprocess") &&
-		typeof v.apiFamily === "string" &&
-		typeof v.auth === "string" &&
-		typeof v.defaultCapabilities === "object" &&
-		v.defaultCapabilities !== null &&
-		typeof v.synthesizeModel === "function"
-	);
+	if (typeof v.id !== "string" || v.id.trim().length === 0) {
+		return { ok: false, reason: "id must be a non-empty string" };
+	}
+	if (typeof v.displayName !== "string" || v.displayName.trim().length === 0) {
+		return { ok: false, reason: "displayName must be a non-empty string" };
+	}
+	if (v.kind !== "http" && v.kind !== "subprocess" && v.kind !== "sdk") {
+		return { ok: false, reason: "kind must be one of http, subprocess, sdk" };
+	}
+	if (typeof v.apiFamily !== "string" || v.apiFamily.trim().length === 0) {
+		return { ok: false, reason: "apiFamily must be a non-empty string" };
+	}
+	if (typeof v.auth !== "string" || v.auth.trim().length === 0) {
+		return { ok: false, reason: "auth must be a non-empty string" };
+	}
+	if (
+		typeof v.defaultCapabilities !== "object" ||
+		v.defaultCapabilities === null ||
+		Array.isArray(v.defaultCapabilities)
+	) {
+		return { ok: false, reason: "defaultCapabilities must be an object" };
+	}
+	if (typeof v.synthesizeModel !== "function") {
+		return { ok: false, reason: "synthesizeModel must be a function" };
+	}
+	for (const field of ["probe", "probeModels", "complete", "infill", "embed", "rerank"]) {
+		if (v[field] !== undefined && typeof v[field] !== "function") {
+			return { ok: false, reason: `${field} must be a function when present` };
+		}
+	}
+	return { ok: true, descriptor: value as RuntimeDescriptor };
 }
 
 function describeError(err: unknown): string {
