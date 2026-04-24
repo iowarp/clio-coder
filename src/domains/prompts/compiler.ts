@@ -5,6 +5,7 @@ export interface CompileInputs {
 	identity: string;
 	mode: string;
 	safety: string;
+	context?: string;
 	providers: string;
 	session: string;
 	dynamicInputs: DynamicInputs;
@@ -16,6 +17,7 @@ export interface DynamicInputs {
 	contextWindow?: number | null;
 	thinkingBudget?: string | null;
 	sessionNotes?: string;
+	contextFiles?: string;
 	turnCount?: number;
 	clioVersion?: string;
 	piMonoVersion?: string;
@@ -42,6 +44,7 @@ const allowedPlaceholders: ReadonlySet<keyof DynamicInputs> = new Set<keyof Dyna
 	"contextWindow",
 	"thinkingBudget",
 	"sessionNotes",
+	"contextFiles",
 	"turnCount",
 	"clioVersion",
 	"piMonoVersion",
@@ -103,19 +106,27 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const identity = lookupFragment(table, inputs.identity, "identity");
 	const mode = lookupFragment(table, inputs.mode, "mode");
 	const safety = lookupFragment(table, inputs.safety, "safety");
+	const context =
+		inputs.context && inputs.dynamicInputs.contextFiles?.trim() ? lookupFragment(table, inputs.context, "context") : null;
 	const providers = lookupFragment(table, inputs.providers, "providers");
 	const session = lookupFragment(table, inputs.session, "session");
 
 	requireStatic(identity, "identity");
 	requireStatic(mode, "mode");
 	requireStatic(safety, "safety");
+	if (context) requireDynamic(context, "context");
 	requireDynamic(providers, "providers");
 	requireDynamic(session, "session");
 
+	const contextRendered = context ? renderDynamic(context, inputs.dynamicInputs) : "";
 	const providersRendered = renderDynamic(providers, inputs.dynamicInputs);
 	const sessionRendered = renderDynamic(session, inputs.dynamicInputs);
 
-	const text = [identity.body, mode.body, safety.body, providersRendered, sessionRendered].join("\n\n");
+	const dynamicParts =
+		contextRendered.length > 0
+			? [contextRendered, providersRendered, sessionRendered]
+			: [providersRendered, sessionRendered];
+	const text = [identity.body, mode.body, safety.body, ...dynamicParts].join("\n\n");
 
 	const staticComposition = {
 		fragments: [identity, mode, safety].map((f) => ({
@@ -127,7 +138,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const staticCompositionHash = sha256(canonicalJson(staticComposition));
 	const renderedPromptHash = sha256(text);
 
-	const fragmentManifest: FragmentManifestEntry[] = [identity, mode, safety, providers, session].map((f) => ({
+	const manifestFragments = context
+		? [identity, mode, safety, context, providers, session]
+		: [identity, mode, safety, providers, session];
+	const fragmentManifest: FragmentManifestEntry[] = manifestFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,
 		contentHash: f.contentHash,

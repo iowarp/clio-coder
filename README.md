@@ -177,6 +177,14 @@ session log. Interactive tool activity is written as durable tool call/result
 entries, so tool work remains visible after resume and fork; full output replay
 still depends on the corresponding durable entries being present.
 
+Before each interactive turn, Clio loads project context files from the current
+working directory upward to the filesystem root. The first supported names are
+`AGENTS.md` and `CODEX.md`; parent files are injected before child files, and
+`AGENTS.md` is injected before `CODEX.md` within the same directory. Missing or
+unreadable files are ignored. Broader resources such as skills, prompt
+templates, themes, packages, extensions, and a `--no-context-files` flag are
+intentionally deferred.
+
 Compaction can run manually with `/compact [instructions]` or automatically
 when `compaction.auto` is enabled and the estimated context crosses
 `compaction.threshold`. `/settings` exposes those two live controls; advanced

@@ -5,6 +5,7 @@ export interface CompileForTurnInput {
 	dynamicInputs: DynamicInputs;
 	overrideMode?: ModeName;
 	safetyLevel?: string;
+	cwd?: string;
 }
 
 export interface PromptsContract {

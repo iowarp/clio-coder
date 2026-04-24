@@ -8,6 +8,7 @@ const allowedTemplateVars = new Set([
 	"contextWindow",
 	"thinkingBudget",
 	"sessionNotes",
+	"contextFiles",
 	"turnCount",
 	"clioVersion",
 	"piMonoVersion",

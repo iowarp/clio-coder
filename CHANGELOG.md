@@ -5,6 +5,12 @@ Keep a Changelog.
 
 ## 0.1.1 — Unreleased
 
+### Added
+
+- Interactive prompt compilation now loads project context files from the
+  current working directory upward. `AGENTS.md` and `CODEX.md` are injected in
+  deterministic parent-to-child order when present.
+
 ### Fixed
 
 - Session resume, fork, and tree-switch replay now read the rich session entry

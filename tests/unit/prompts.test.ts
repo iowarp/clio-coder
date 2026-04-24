@@ -1,5 +1,12 @@
 import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import { compile } from "../../src/domains/prompts/compiler.js";
+import { loadProjectContextFiles, renderProjectContextFiles } from "../../src/domains/prompts/context-files.js";
+import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 
@@ -89,5 +96,129 @@ describe("prompts/fragments identity.clio anti-leak content", () => {
 		const a = loadFragments();
 		const b = loadFragments();
 		strictEqual(a.byId.get("identity.clio")?.contentHash, b.byId.get("identity.clio")?.contentHash);
+	});
+});
+
+describe("prompts/context-files", () => {
+	it("returns an empty list when no known context files exist", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-empty-"));
+		try {
+			const files = loadProjectContextFiles({ cwd: scratch });
+			strictEqual(files.length, 0);
+			strictEqual(renderProjectContextFiles(files, scratch), "");
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("loads AGENTS.md before CODEX.md and parent files before child files", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-order-"));
+		try {
+			const repo = join(scratch, "repo");
+			const app = join(repo, "packages", "app");
+			const src = join(app, "src");
+			mkdirSync(src, { recursive: true });
+			writeFileSync(join(repo, "AGENTS.md"), "root agents", "utf8");
+			writeFileSync(join(repo, "CODEX.md"), "root codex", "utf8");
+			writeFileSync(join(app, "AGENTS.md"), "app agents", "utf8");
+
+			const files = loadProjectContextFiles({ cwd: src });
+			strictEqual(files.map((file) => file.content).join("|"), "root agents|root codex|app agents");
+
+			const rendered = renderProjectContextFiles(files, src);
+			ok(rendered.indexOf("root agents") < rendered.indexOf("root codex"), rendered);
+			ok(rendered.indexOf("root codex") < rendered.indexOf("app agents"), rendered);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps parent-child duplicate basenames but de-dupes exact paths", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-dedupe-"));
+		try {
+			const child = join(scratch, "child");
+			mkdirSync(child, { recursive: true });
+			writeFileSync(join(scratch, "AGENTS.md"), "root agents", "utf8");
+			writeFileSync(join(child, "AGENTS.md"), "child agents", "utf8");
+
+			const files = loadProjectContextFiles({ cwd: child, fileNames: ["AGENTS.md", "AGENTS.md"] });
+			strictEqual(files.length, 2);
+			strictEqual(files.map((file) => file.content).join("|"), "root agents|child agents");
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("prompts/compiler context files", () => {
+	it("omits the context fragment when no context files are supplied", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: {},
+		});
+
+		strictEqual(result.text.includes("# Project context"), false);
+		strictEqual(
+			result.fragmentManifest.some((entry) => entry.id === "context.files"),
+			false,
+		);
+	});
+
+	it("injects context files in a deterministic prompt position", () => {
+		const noContext = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: {},
+		});
+		const withContext = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			context: "context.files",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: { contextFiles: "## AGENTS.md\n\nRepo rules" },
+		});
+
+		ok(withContext.text.includes("# Project context"), withContext.text);
+		ok(withContext.text.includes("Repo rules"), withContext.text);
+		ok(withContext.text.indexOf("# Project context") < withContext.text.indexOf("# Provider runtime"), withContext.text);
+		ok(withContext.fragmentManifest.some((entry) => entry.id === "context.files"));
+		notStrictEqual(withContext.renderedPromptHash, noContext.renderedPromptHash);
+	});
+
+	it("prompt extension loads context files from the supplied cwd", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-extension-"));
+		try {
+			writeFileSync(join(scratch, "AGENTS.md"), "extension-loaded agents", "utf8");
+			const bundle = createPromptsBundle({
+				bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
+				getContract: () => undefined,
+			});
+			await bundle.extension.start?.();
+			const result = bundle.contract.compileForTurn({
+				cwd: scratch,
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					contextWindow: 1024,
+					thinkingBudget: "off",
+					turnCount: 1,
+				},
+				overrideMode: "default",
+				safetyLevel: "auto-edit",
+			});
+			ok(result.text.includes("extension-loaded agents"), result.text);
+			ok(result.fragmentManifest.some((entry) => entry.id === "context.files"));
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 });
