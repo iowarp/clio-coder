@@ -12,7 +12,7 @@ coding agents working in this repository.
 ## Repo Facts
 
 - Package: `@iowarp/clio-coder`
-- Version: `0.1.0-exp`
+- Version: `0.1.1`
 
 
 ## Default Commands

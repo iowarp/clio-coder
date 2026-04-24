@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--exp-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.1-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -52,10 +52,13 @@
 
 Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
-Status: **v0.1.0-exp** — an experimental first release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows. Pin to the tag if you need a stable target.
+Status: **v0.1.1** — an experimental patch release. Useful for active development and local experimentation, with improved durable session replay and deterministic project context loading. Pin to the tag if you need a stable target.
 
 Recent focus in this dev cycle:
 
+- durable, entry-aware transcript replay for resume, fork, summaries, bash,
+  and tool activity
+- deterministic project context loading from `AGENTS.md` and `CODEX.md`
 - target-oriented auth and configuration flows across the CLI and interactive UI
 - target controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
 - safer uninstall and reset flows for wiping or reseeding local state
@@ -373,8 +376,9 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ## Roadmap
 
-- **v0.1.0-exp (current)**: experimental release. Target-first config, interactive TUI, receipts and cost ledger, auth and configure flows, model and session controls, dispatchable workers, and an early self-dev harness. Expect moving parts; pin the tag if you need stability.
-- **Next**: broader runtime hardening, MCP support, richer agent library, and deeper developer ergonomics.
+- **v0.1.1 (current)**: experimental patch release. Durable transcript replay now preserves rich session entries across resume and fork, and interactive prompts load deterministic `AGENTS.md`/`CODEX.md` project context.
+- **v0.1.0-exp**: experimental first release. Target-first config, interactive TUI, receipts and cost ledger, auth and configure flows, model and session controls, dispatchable workers, and an early self-dev harness.
+- **Next**: broader runtime hardening, MCP support, richer agent library, deeper developer ergonomics, and more complete context/resource loading.
 - **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
 
 ---

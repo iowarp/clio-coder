@@ -3,7 +3,7 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## 0.1.1 — Unreleased
+## 0.1.1 — 2026-04-24
 
 ### Added
 
