@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { admit } from "../../src/domains/dispatch/admission.js";
 import { createBackoff, nextDelay, reset } from "../../src/domains/dispatch/backoff.js";
+import { classifyHeartbeat } from "../../src/domains/dispatch/heartbeat.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
 
@@ -119,5 +120,15 @@ describe("dispatch/backoff", () => {
 		const state = reset({ baseMs: 50 });
 		strictEqual(state.attempts, 0);
 		strictEqual(state.nextDelayMs, 50);
+	});
+});
+
+describe("dispatch/heartbeat", () => {
+	it("classifies heartbeats across alive, stale, and dead windows", () => {
+		const spec = { windowMs: 1000, graceMs: 2000 };
+		strictEqual(classifyHeartbeat(10_000, 11_000, spec), "alive");
+		strictEqual(classifyHeartbeat(10_000, 11_001, spec), "stale");
+		strictEqual(classifyHeartbeat(10_000, 13_000, spec), "stale");
+		strictEqual(classifyHeartbeat(10_000, 13_001, spec), "dead");
 	});
 });
