@@ -244,7 +244,7 @@ function runWorker(args: ReadonlyArray<string>): number {
 	const target = settings.endpoints.find((entry) => entry.id === parsed.targetId);
 	if (!target) {
 		printError(`no target with id ${parsed.targetId}`);
-		return 1;
+		return 2;
 	}
 	const existing = settings.workers.profiles[parsed.name];
 	settings.workers.profiles[parsed.name] = {

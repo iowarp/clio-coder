@@ -37,6 +37,7 @@ Non-interactive flags:
   --model <wireModelId>            default model id for this target
   --orchestrator-model <id>        model to use when setting chat default
   --worker-model <id>              model to use when setting worker default
+                                   (mutually exclusive with --worker-profile)
   --worker-profile <name>          save this target as a named worker profile
   --worker-profile-model <id>      model to use for --worker-profile
   --api-key-env <VAR>              read API key from this env var at call time
@@ -473,6 +474,12 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError("--worker-profile must be non-empty");
 		return 2;
 	}
+	if (args.workerProfile !== undefined && args.workerModel !== undefined) {
+		printError(
+			"--worker-model and --worker-profile conflict; use --worker-profile-model for the profile, or drop --worker-profile to set the worker default",
+		);
+		return 2;
+	}
 	const settings = readSettings();
 	const auth = openAuthStorage();
 	const support = buildProviderSupportEntry(runtime);
@@ -537,7 +544,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			settings,
 			args.workerProfile,
 			descriptor,
-			args.workerProfileModel ?? args.workerModel ?? descriptor.defaultModel ?? null,
+			args.workerProfileModel ?? descriptor.defaultModel ?? null,
 		);
 	}
 	writeSettings(settings);

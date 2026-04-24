@@ -42,6 +42,11 @@ export function buildSettingItems(
 	const scopeList = settings.scope ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
 	const endpointCount = settings.endpoints?.length ?? 0;
+	const profileEntries = Object.entries(settings.workers?.profiles ?? {});
+	const profileSummary =
+		profileEntries.length === 0
+			? "(none)"
+			: profileEntries.map(([name, profile]) => `${name}->${profile.endpoint ?? "(unset)"}`).join(", ");
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
 		? availableThinkingLevels(
@@ -97,6 +102,12 @@ export function buildSettingItems(
 			label: "workers.default.model",
 			currentValue: settings.workers.default.model ?? "(unset)",
 			description: "/run wire model id. Edit settings.yaml.",
+		},
+		{
+			id: "workers.profiles",
+			label: "workers.profiles",
+			currentValue: `${profileEntries.length} (${profileSummary})`,
+			description: "Named worker profiles. Edit via clio targets worker or settings.yaml.",
 		},
 		{
 			id: "endpoints.count",
