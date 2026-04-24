@@ -23,7 +23,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unl
 import { dirname, join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
+import { withReceiptIntegrity } from "./receipt-integrity.js";
+import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 
 const MAX_RUNS_DEFAULT = 1000;
 
@@ -50,7 +51,7 @@ export interface Ledger {
 	update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null;
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
-	recordReceipt(id: string, receipt: RunReceipt): void;
+	recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt;
 	persist(): Promise<void>;
 	reload(): void;
 }
@@ -305,14 +306,20 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			return Object.freeze(filtered.map((envelope) => cloneEnvelope(envelope)));
 		},
 
-		recordReceipt(id: string, receipt: RunReceipt): void {
+		recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt {
 			const target = receiptPathFor(id);
-			atomicWrite(target, JSON.stringify(receipt, null, 2));
 			const idx = findIndex(id);
-			if (idx !== -1) {
-				const current = runs[idx];
-				if (current) runs[idx] = { ...current, receiptPath: target };
+			if (idx === -1) {
+				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
 			}
+			const current = runs[idx];
+			if (!current) {
+				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
+			}
+			const receiptWithIntegrity = withReceiptIntegrity(receipt, current);
+			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
+			runs[idx] = { ...current, receiptPath: target };
+			return receiptWithIntegrity;
 		},
 
 		async persist(): Promise<void> {

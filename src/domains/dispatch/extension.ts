@@ -31,7 +31,7 @@ import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { type Ledger, openLedger } from "./state.js";
-import type { RunKind, RunReceipt, RunStatus } from "./types.js";
+import type { RunKind, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
@@ -501,7 +501,7 @@ export function createDispatchBundle(
 					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
 					: 0;
 				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
-				const receipt: RunReceipt = {
+				const receiptDraft: RunReceiptDraft = {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -523,8 +523,8 @@ export function createDispatchBundle(
 					toolCalls: 0,
 					sessionId: null,
 				};
-				ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode });
-				ledgerRef.recordReceipt(envelope.id, receipt);
+				ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode, tokenCount, costUsd });
+				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				const startMs = Date.parse(receipt.startedAt);
