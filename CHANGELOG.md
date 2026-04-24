@@ -3,6 +3,23 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## 0.1.2 — Unreleased
+
+### Added
+
+- Interactive chat now retries transient provider and stream failures using
+  session retry settings. Retry boundaries, cancellation, exhaustion, and
+  recovery are visible in the transcript and persisted for resume/fork replay.
+- Tool and bash transcript lines now show clearer running/success/error status,
+  with bash command previews in live and replayed transcripts.
+
+### Fixed
+
+- Retrying a transient failure now continues from the existing user turn instead
+  of adding a duplicate user message to model context.
+- Cancelling an interactive run now also cancels a pending retry countdown and
+  forwards abort signals into bash tool subprocesses.
+
 ## 0.1.1 — 2026-04-24
 
 ### Added

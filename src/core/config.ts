@@ -616,6 +616,23 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 		if (systemPrompt) settings.compaction.systemPrompt = systemPrompt;
 	}
 
+	if (isPlainObject(raw.retry)) {
+		if (typeof raw.retry.enabled === "boolean") settings.retry.enabled = raw.retry.enabled;
+		if (typeof raw.retry.maxRetries === "number" && Number.isFinite(raw.retry.maxRetries) && raw.retry.maxRetries >= 0) {
+			settings.retry.maxRetries = Math.floor(raw.retry.maxRetries);
+		}
+		if (
+			typeof raw.retry.baseDelayMs === "number" &&
+			Number.isFinite(raw.retry.baseDelayMs) &&
+			raw.retry.baseDelayMs >= 0
+		) {
+			settings.retry.baseDelayMs = Math.floor(raw.retry.baseDelayMs);
+		}
+		if (typeof raw.retry.maxDelayMs === "number" && Number.isFinite(raw.retry.maxDelayMs) && raw.retry.maxDelayMs >= 0) {
+			settings.retry.maxDelayMs = Math.floor(raw.retry.maxDelayMs);
+		}
+	}
+
 	return settings;
 }
 

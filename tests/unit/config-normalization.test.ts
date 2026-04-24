@@ -71,4 +71,27 @@ describe("core/config normalizeSettings", () => {
 		deepStrictEqual(diff.restartRequired, []);
 		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
 	});
+
+	it("normalizes retry settings and classifies them as next-turn updates", () => {
+		const normalized = normalizeSettings({
+			retry: {
+				enabled: false,
+				maxRetries: 2.8,
+				baseDelayMs: 100,
+				maxDelayMs: 1000,
+			},
+		});
+		strictEqual(normalized.retry.enabled, false);
+		strictEqual(normalized.retry.maxRetries, 2);
+		strictEqual(normalized.retry.baseDelayMs, 100);
+		strictEqual(normalized.retry.maxDelayMs, 1000);
+
+		const prev = structuredClone(DEFAULT_SETTINGS);
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.retry.enabled = false;
+		const diff = diffSettings(prev, next);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.restartRequired, []);
+		deepStrictEqual(diff.nextTurn, ["retry.enabled"]);
+	});
 });

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -22,6 +22,8 @@ interface ExecOutcome {
 	error: NodeJS.ErrnoException | null;
 	stdout: string;
 	stderr: string;
+	aborted: boolean;
+	timedOut: boolean;
 }
 
 function buildToolEnv(): NodeJS.ProcessEnv {
@@ -32,20 +34,95 @@ function buildToolEnv(): NodeJS.ProcessEnv {
 	return env;
 }
 
-function execBash(command: string, cwd: string | undefined, timeout: number): Promise<ExecOutcome> {
+function execBash(
+	command: string,
+	cwd: string | undefined,
+	timeout: number,
+	signal?: AbortSignal,
+): Promise<ExecOutcome> {
 	return new Promise((resolve) => {
-		execFile(
-			"/bin/bash",
-			["-lc", command],
-			{ cwd, timeout, maxBuffer: MAX_OUTPUT_BYTES * 2, encoding: "utf8", env: buildToolEnv() },
-			(error, stdout, stderr) => {
-				resolve({
-					error: error as NodeJS.ErrnoException | null,
-					stdout: stdout ?? "",
-					stderr: stderr ?? "",
-				});
-			},
-		);
+		let aborted = false;
+		let timedOut = false;
+		let settled = false;
+		let timeoutId: ReturnType<typeof setTimeout> | null = null;
+		let stdout = "";
+		let stderr = "";
+		let outputBytes = 0;
+
+		const child = spawn("/bin/bash", ["-lc", command], {
+			cwd,
+			env: buildToolEnv(),
+			detached: process.platform !== "win32",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+
+		const killChild = (): void => {
+			if (child.killed) return;
+			const pid = child.pid;
+			if (pid && process.platform !== "win32") {
+				try {
+					process.kill(-pid, "SIGTERM");
+					return;
+				} catch {
+					// Fall through to killing the shell process directly.
+				}
+			}
+			child.kill("SIGTERM");
+		};
+
+		function onAbort(): void {
+			aborted = true;
+			killChild();
+		}
+
+		if (timeout > 0) {
+			timeoutId = setTimeout(() => {
+				timedOut = true;
+				killChild();
+			}, timeout);
+		}
+
+		if (signal?.aborted) {
+			onAbort();
+		} else {
+			signal?.addEventListener("abort", onAbort, { once: true });
+		}
+
+		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
+			outputBytes += chunk.byteLength;
+			if (outputBytes > MAX_OUTPUT_BYTES * 2) {
+				killChild();
+				return;
+			}
+			if (target === "stdout") stdout += chunk.toString("utf8");
+			else stderr += chunk.toString("utf8");
+		};
+
+		child.stdout?.on("data", (chunk: Buffer) => appendChunk("stdout", chunk));
+		child.stderr?.on("data", (chunk: Buffer) => appendChunk("stderr", chunk));
+		child.on("error", (error) => {
+			if (settled) return;
+			settled = true;
+			if (timeoutId) clearTimeout(timeoutId);
+			signal?.removeEventListener("abort", onAbort);
+			resolve({ error: error as NodeJS.ErrnoException, stdout, stderr, aborted, timedOut });
+		});
+		child.on("close", (code, signalName) => {
+			if (settled) return;
+			settled = true;
+			if (timeoutId) clearTimeout(timeoutId);
+			signal?.removeEventListener("abort", onAbort);
+			const error =
+				code === 0 && signalName === null
+					? null
+					: ({
+							name: "Error",
+							message: signalName ? `command terminated by ${signalName}` : `command exited with code ${code ?? "?"}`,
+							code: code ?? undefined,
+							signal: signalName ?? undefined,
+						} as NodeJS.ErrnoException);
+			resolve({ error, stdout, stderr, aborted, timedOut });
+		});
 	});
 }
 
@@ -64,14 +141,20 @@ export const bashTool: ToolSpec = {
 	),
 	baseActionClass: "execute",
 	executionMode: "sequential",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		if (typeof args.command !== "string" || args.command.length === 0) {
 			return { kind: "error", message: "bash: missing command argument" };
 		}
 		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 60_000;
 		try {
-			const { error, stdout, stderr } = await execBash(args.command, cwd, timeout);
+			const { error, stdout, stderr, aborted, timedOut } = await execBash(args.command, cwd, timeout, options?.signal);
+			if (aborted) {
+				return { kind: "error", message: "bash: command aborted" };
+			}
+			if (timedOut) {
+				return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
+			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
 				const tail = stderr.length > 0 ? stderr : stdout;

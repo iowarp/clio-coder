@@ -18,6 +18,14 @@ import type { CompactResult } from "../domains/session/compaction/compact.js";
 import { calculateContextTokens } from "../domains/session/compaction/tokens.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
+import {
+	computeRetryDelayMs,
+	createRetryCountdown,
+	DEFAULT_RETRY_SETTINGS,
+	isRetryableErrorMessage,
+	type RetryCountdownHandle,
+	type RetrySettings,
+} from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
@@ -39,7 +47,23 @@ type AssistantDeltaEvent =
 			partialThinking: string;
 	  };
 
-export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent;
+export type RetryStatusPhase = "scheduled" | "waiting" | "retrying" | "cancelled" | "exhausted" | "recovered";
+
+export interface RetryStatusPayload {
+	phase: RetryStatusPhase;
+	attempt: number;
+	maxAttempts: number;
+	errorMessage?: string;
+	delayMs?: number;
+	seconds?: number;
+}
+
+export interface RetryStatusEvent {
+	type: "retry_status";
+	status: RetryStatusPayload;
+}
+
+export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent;
 
 export interface ChatLoop {
 	submit(text: string): Promise<void>;
@@ -179,6 +203,34 @@ function extractThinking(message: AgentMessage | undefined): string {
 		.join("");
 }
 
+interface TerminalAssistantFailure {
+	stopReason: "error" | "aborted";
+	errorMessage: string;
+	message?: AgentMessage;
+}
+
+function terminalFailureFromAssistantMessage(message: AgentMessage | undefined): TerminalAssistantFailure | null {
+	if (
+		!message ||
+		typeof message !== "object" ||
+		message === null ||
+		!("role" in message) ||
+		message.role !== "assistant"
+	) {
+		return null;
+	}
+	const stopReason = (message as { stopReason?: unknown }).stopReason;
+	if (stopReason !== "error" && stopReason !== "aborted") return null;
+	const rawError = (message as { errorMessage?: unknown }).errorMessage;
+	const errorMessage =
+		typeof rawError === "string" && rawError.length > 0
+			? rawError
+			: stopReason === "aborted"
+				? "request aborted"
+				: "provider returned an error";
+	return { stopReason, errorMessage, message };
+}
+
 function noticeMessage(text: string): AgentMessage {
 	return {
 		role: "assistant",
@@ -315,6 +367,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let streaming = false;
 	let currentThinkingLevel: ThinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 	let replayedContextMessages: AgentMessage[] = [];
+	let retryCountdown: RetryCountdownHandle | null = null;
+	const persistedAssistantMessages = new WeakSet<object>();
 	// Hash of the prompt compiled for the in-flight turn. User + assistant
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
@@ -328,11 +382,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
 		const text = extractText(message).trim();
-		if (!deps.session || text.length === 0) return;
+		const failure = terminalFailureFromAssistantMessage(message);
+		if (!deps.session || (text.length === 0 && !failure)) return;
+		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
+		const payload: Record<string, unknown> = { text };
+		if (failure) {
+			payload.stopReason = failure.stopReason;
+			payload.errorMessage = failure.errorMessage;
+		}
 		const turn = deps.session.append({
 			kind: "assistant",
 			parentId: lastTurnId,
-			payload: { text },
+			payload,
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = turn.id;
@@ -371,6 +432,100 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const message = noticeMessage(text);
 		emit({ type: "message_end", message });
 		emit({ type: "agent_end", messages: [message] });
+	};
+
+	const retrySettings = (): RetrySettings => {
+		const raw = deps.getSettings().retry as Partial<RetrySettings> | undefined;
+		return {
+			enabled: raw?.enabled ?? DEFAULT_RETRY_SETTINGS.enabled,
+			maxRetries:
+				typeof raw?.maxRetries === "number" && Number.isFinite(raw.maxRetries)
+					? Math.max(0, Math.floor(raw.maxRetries))
+					: DEFAULT_RETRY_SETTINGS.maxRetries,
+			baseDelayMs:
+				typeof raw?.baseDelayMs === "number" && Number.isFinite(raw.baseDelayMs)
+					? Math.max(0, Math.floor(raw.baseDelayMs))
+					: DEFAULT_RETRY_SETTINGS.baseDelayMs,
+			maxDelayMs:
+				typeof raw?.maxDelayMs === "number" && Number.isFinite(raw.maxDelayMs)
+					? Math.max(0, Math.floor(raw.maxDelayMs))
+					: DEFAULT_RETRY_SETTINGS.maxDelayMs,
+		};
+	};
+
+	const emitRetryStatus = (status: RetryStatusPayload): void => {
+		emit({ type: "retry_status", status });
+	};
+
+	const appendRetryStatus = (status: RetryStatusPayload): void => {
+		if (!deps.session?.current()) return;
+		deps.session.appendEntry({
+			kind: "custom",
+			parentTurnId: lastTurnId,
+			customType: "retryStatus",
+			display: true,
+			data: status,
+		});
+	};
+
+	const recordRetryStatus = (status: RetryStatusPayload, durable = true): void => {
+		if (durable) appendRetryStatus(status);
+		emitRetryStatus(status);
+	};
+
+	const ensureFailureVisibleAndPersisted = (failure: TerminalAssistantFailure): void => {
+		const message = failure.message;
+		if (!message || typeof message !== "object" || persistedAssistantMessages.has(message as object)) return;
+		appendAssistantTurn(message);
+		emit({ type: "message_end", message });
+	};
+
+	const detectTerminalFailureFromState = (
+		agent: ReturnType<typeof createEngineAgent>["agent"],
+	): TerminalAssistantFailure | null => {
+		const msgs = agent.state.messages;
+		const tail = Array.isArray(msgs) ? msgs[msgs.length - 1] : undefined;
+		const failure = terminalFailureFromAssistantMessage(tail);
+		if (failure) return failure;
+		return null;
+	};
+
+	const pruneFailedAssistantFromContext = (agent: ReturnType<typeof createEngineAgent>["agent"]): void => {
+		const messages = agent.state.messages;
+		const tail = Array.isArray(messages) ? messages[messages.length - 1] : undefined;
+		if (!terminalFailureFromAssistantMessage(tail)) return;
+		agent.state.messages = messages.slice(0, -1);
+	};
+
+	const waitForRetryCountdown = async (status: RetryStatusPayload): Promise<"done" | "cancelled"> => {
+		return new Promise((resolve) => {
+			let settled = false;
+			let currentHandle: RetryCountdownHandle | null = null;
+			const handle = createRetryCountdown({
+				attempt: status.attempt,
+				maxAttempts: status.maxAttempts,
+				delayMs: status.delayMs ?? 0,
+				onTick: (state) => {
+					emitRetryStatus({
+						...status,
+						phase: "waiting",
+						seconds: state.seconds,
+					});
+				},
+				onDone: () => {
+					settled = true;
+					if (retryCountdown === currentHandle) retryCountdown = null;
+					resolve("done");
+				},
+				onCancel: () => {
+					settled = true;
+					if (retryCountdown === currentHandle) retryCountdown = null;
+					resolve("cancelled");
+				},
+			});
+			currentHandle = handle;
+			retryCountdown = settled ? null : handle;
+		});
 	};
 
 	const readTarget = (): ChatLoopTarget | null => {
@@ -572,6 +727,98 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	const runTransientRetryChain = async (
+		agentRuntime: AgentRuntime,
+		text: string,
+		initialFailure: TerminalAssistantFailure,
+	): Promise<boolean> => {
+		const settings = retrySettings();
+		if (!settings.enabled || settings.maxRetries <= 0) return false;
+		if (initialFailure.stopReason === "aborted" || !isRetryableErrorMessage(initialFailure.errorMessage)) return false;
+
+		let failure = initialFailure;
+		for (let attempt = 1; attempt <= settings.maxRetries; attempt += 1) {
+			ensureFailureVisibleAndPersisted(failure);
+			pruneFailedAssistantFromContext(agentRuntime.agent);
+
+			const scheduled: RetryStatusPayload = {
+				phase: "scheduled",
+				attempt,
+				maxAttempts: settings.maxRetries,
+				delayMs: computeRetryDelayMs(attempt, settings),
+				errorMessage: failure.errorMessage,
+			};
+			recordRetryStatus(scheduled);
+			const countdown = await waitForRetryCountdown(scheduled);
+			if (countdown === "cancelled") {
+				recordRetryStatus({
+					phase: "cancelled",
+					attempt,
+					maxAttempts: settings.maxRetries,
+					errorMessage: failure.errorMessage,
+				});
+				return true;
+			}
+
+			recordRetryStatus(
+				{
+					phase: "retrying",
+					attempt,
+					maxAttempts: settings.maxRetries,
+					errorMessage: failure.errorMessage,
+				},
+				false,
+			);
+
+			try {
+				await agentRuntime.agent.continue();
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				if (!isRetryableErrorMessage(message) || attempt >= settings.maxRetries) {
+					recordRetryStatus({
+						phase: "exhausted",
+						attempt,
+						maxAttempts: settings.maxRetries,
+						errorMessage: message,
+					});
+					emitNotice(message);
+					return true;
+				}
+				failure = { stopReason: "error", errorMessage: message };
+				continue;
+			}
+
+			const overflow = detectOverflowFromState(agentRuntime.agent);
+			if (overflow) {
+				await runCompactAndRetry(agentRuntime, text, overflow);
+				return true;
+			}
+
+			const nextFailure = detectTerminalFailureFromState(agentRuntime.agent);
+			if (!nextFailure) {
+				recordRetryStatus({
+					phase: "recovered",
+					attempt,
+					maxAttempts: settings.maxRetries,
+				});
+				return true;
+			}
+			ensureFailureVisibleAndPersisted(nextFailure);
+			if (nextFailure.stopReason === "aborted" || !isRetryableErrorMessage(nextFailure.errorMessage)) {
+				return true;
+			}
+			failure = nextFailure;
+		}
+
+		recordRetryStatus({
+			phase: "exhausted",
+			attempt: settings.maxRetries,
+			maxAttempts: settings.maxRetries,
+			errorMessage: failure.errorMessage,
+		});
+		return true;
+	};
+
 	/**
 	 * Compile the prompt for the current turn, write the rendered text into
 	 * `state.systemPrompt`, and capture the renderedPromptHash so the user
@@ -744,6 +991,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
 				if (overflowPostResolve) {
 					await runCompactAndRetry(agentRuntime, text, overflowPostResolve);
+				} else {
+					const failure = detectTerminalFailureFromState(agentRuntime.agent);
+					if (failure) {
+						ensureFailureVisibleAndPersisted(failure);
+						await runTransientRetryChain(agentRuntime, text, failure);
+					}
 				}
 			} catch (err) {
 				// Genuine throws (network, abort, pre-stream bugs) still land
@@ -751,6 +1004,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// an older pi-agent-core still routes through compact-retry.
 				const overflow = toContextOverflowError(err);
 				if (!overflow) {
+					const message = err instanceof Error ? err.message : String(err);
+					if (isRetryableErrorMessage(message)) {
+						await runTransientRetryChain(agentRuntime, text, { stopReason: "error", errorMessage: message });
+						return;
+					}
 					emitNotice(err instanceof Error ? err.message : String(err));
 					return;
 				}
@@ -760,6 +1018,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 		},
 		cancel(): void {
+			retryCountdown?.cancel();
 			runtime?.agent.abort();
 		},
 		onEvent(handler: (event: ChatLoopEvent) => void): () => void {
@@ -775,6 +1034,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return streaming;
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			retryCountdown?.cancel();
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];

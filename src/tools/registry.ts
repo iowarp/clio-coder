@@ -47,7 +47,7 @@ export interface ToolSpec {
 	 */
 	executionMode?: ToolExecutionMode;
 	/** Execute the tool. Only called after admission. */
-	run(args: Record<string, unknown>): Promise<ToolResult>;
+	run(args: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<ToolResult>;
 }
 
 export type ToolResult =
@@ -94,7 +94,7 @@ export interface ToolRegistry {
 	 * and the current mode denies the action, the returned promise stays
 	 * pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
 	 */
-	invoke(call: ClassifierCall): Promise<RegistryVerdict>;
+	invoke(call: ClassifierCall, options?: { signal?: AbortSignal }): Promise<RegistryVerdict>;
 	/**
 	 * True while at least one call awaits mode elevation. The interactive
 	 * layer reads this from `closeOverlay()` to re-open the super overlay
@@ -137,9 +137,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const parked: ParkedCall[] = [];
 	const superListeners = new Set<(call: ClassifierCall) => void>();
 
-	const runSpec = async (spec: ToolSpec, call: ClassifierCall, decision: SafetyDecision): Promise<RegistryVerdict> => {
+	const runSpec = async (
+		spec: ToolSpec,
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options?: { signal?: AbortSignal },
+	): Promise<RegistryVerdict> => {
 		try {
-			const result = await spec.run(call.args ?? {});
+			const result = await spec.run(call.args ?? {}, options);
 			return { kind: "ok", result, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -217,10 +222,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const visible = deps.modes.visibleTools();
 			return Array.from(tools.values()).filter((t) => visible.has(t.name));
 		},
-		async invoke(call) {
+		async invoke(call, options) {
 			const outcome = admit(call);
 			if (outcome.kind === "terminal") return outcome.verdict;
-			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision);
+			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
 			return new Promise<RegistryVerdict>((resolve) => {
 				parked.push({ call, decision: outcome.decision, resolve });
 				notifySuperRequired(call);

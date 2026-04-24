@@ -163,6 +163,21 @@ function chatMessageText(entry: MessageEntry): string {
 	return extractTurnText(entry.payload);
 }
 
+function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted"; errorMessage: string } | null {
+	const obj = payloadObject(entry.payload);
+	if (!obj) return null;
+	const stopReason = obj?.stopReason;
+	if (stopReason !== "error" && stopReason !== "aborted") return null;
+	const raw = obj.errorMessage;
+	const errorMessage =
+		typeof raw === "string" && raw.length > 0
+			? raw
+			: stopReason === "aborted"
+				? "request aborted"
+				: "provider returned an error";
+	return { stopReason, errorMessage };
+}
+
 function payloadObject(payload: unknown): Record<string, unknown> | null {
 	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
 }
@@ -285,7 +300,22 @@ function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): str
 	return lines;
 }
 
+function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
+	const data = payloadObject(entry.data);
+	const phase = typeof data?.phase === "string" ? data.phase : "status";
+	const attempt = typeof data?.attempt === "number" ? data.attempt : null;
+	const maxAttempts = typeof data?.maxAttempts === "number" ? data.maxAttempts : null;
+	const errorMessage =
+		typeof data?.errorMessage === "string" && data.errorMessage.length > 0 ? `: ${data.errorMessage}` : "";
+	const delayMs = typeof data?.delayMs === "number" ? data.delayMs : null;
+	const prefix =
+		attempt !== null && maxAttempts !== null ? `[retry] ${phase} ${attempt}/${maxAttempts}` : `[retry] ${phase}`;
+	const delay = delayMs !== null && phase === "scheduled" ? ` in ${Math.ceil(delayMs / 1000)}s` : "";
+	return wrapTextWithAnsi(`${prefix}${delay}${errorMessage}`, width);
+}
+
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
+	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
 	const body = stringifyPreview(entry.data);
 	const suffix = body.length > 0 ? ` ${body}` : "";
 	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
@@ -396,6 +426,7 @@ export function buildReplayAgentMessagesFromTurns(
 			case "message": {
 				const text = textBlockFromEntry(entry);
 				if (entry.role === "user" || entry.role === "assistant") {
+					if (entry.role === "assistant" && messageFailure(entry)) break;
 					appendContextMessage(out, entry.role, chatMessageText(entry), entry.timestamp);
 				} else if (entry.role === "tool_call") {
 					const call = extractToolCall(entry);
@@ -462,8 +493,13 @@ export function rehydrateChatPanelFromTurns(
 				}
 				if (entry.role === "assistant") {
 					const text = chatMessageText(entry);
-					if (text.length > 0) {
+					const failure = messageFailure(entry);
+					if (text.length > 0 || failure) {
 						const message = makeTextMessage("assistant", text, entry.timestamp);
+						if (failure) {
+							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
+							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
+						}
 						chatPanel.applyEvent({ type: "message_end", message });
 						chatPanel.applyEvent({ type: "agent_end", messages: [message] });
 					}
@@ -484,6 +520,8 @@ export function rehydrateChatPanelFromTurns(
 					const result = extractToolResult(entry);
 					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;
 					if (fallbackId) {
+						const pendingIndex = pendingToolIds.indexOf(fallbackId);
+						if (pendingIndex >= 0) pendingToolIds.splice(pendingIndex, 1);
 						chatPanel.applyEvent({
 							type: "tool_execution_end",
 							toolCallId: fallbackId,
@@ -537,5 +575,14 @@ export function rehydrateChatPanelFromTurns(
 				if (entry.name || entry.label) chatPanel.appendReplayBlock((width) => renderSessionInfoEntry(entry, width));
 				break;
 		}
+	}
+	for (const pendingId of pendingToolIds) {
+		chatPanel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: pendingId,
+			toolName: "tool",
+			result: "missing result; session ended before the tool completed",
+			isError: true,
+		});
 	}
 }

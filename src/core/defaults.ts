@@ -43,6 +43,17 @@ export interface CompactionSettings {
 	systemPrompt?: string;
 }
 
+/**
+ * Transient provider retry controls for the interactive chat loop. These are
+ * intentionally small and mirror the session retry helper defaults.
+ */
+export interface RetrySettings {
+	enabled: boolean;
+	maxRetries: number;
+	baseDelayMs: number;
+	maxDelayMs: number;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -81,6 +92,12 @@ export const DEFAULT_SETTINGS = {
 		threshold: 0.8,
 		auto: true,
 	} as CompactionSettings,
+	retry: {
+		enabled: true,
+		maxRetries: 3,
+		baseDelayMs: 2000,
+		maxDelayMs: 60000,
+	} as RetrySettings,
 };
 
 export type DefaultSettings = typeof DEFAULT_SETTINGS;
@@ -214,4 +231,13 @@ compaction:
   auto: true
   # model: openai/gpt-5-mini
   # systemPrompt: ~/.config/clio/prompts/compaction.md
+
+# Transient provider/stream retry controls for interactive chat.
+# Retryable errors include overloads, rate limits, 5xx responses, network
+# resets, and timeouts. Context overflow uses compaction recovery instead.
+retry:
+  enabled: true
+  maxRetries: 3
+  baseDelayMs: 2000
+  maxDelayMs: 60000
 `;

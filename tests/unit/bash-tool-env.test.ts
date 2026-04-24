@@ -66,4 +66,20 @@ describe("bash tool environment", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") strictEqual(result.output.trim(), "||");
 	});
+
+	it("honors abort signals for long-running commands", async () => {
+		const controller = new AbortController();
+		const started = bashTool.run(
+			{
+				command: "sleep 5; printf done",
+				timeout_ms: 10_000,
+			},
+			{ signal: controller.signal },
+		);
+		setTimeout(() => controller.abort(), 20);
+		const result = await started;
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
+	});
 });

@@ -32,12 +32,16 @@ function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema>
 		description: spec.description,
 		parameters: spec.parameters,
 		label: spec.name,
-		async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ kind: "ok" } | { kind: "error" }>> {
+		async execute(
+			_toolCallId: string,
+			params: unknown,
+			signal?: AbortSignal,
+		): Promise<AgentToolResult<{ kind: "ok" } | { kind: "error" }>> {
 			const args = (params && typeof params === "object" ? (params as Record<string, unknown>) : {}) as Record<
 				string,
 				unknown
 			>;
-			const verdict = await registry.invoke({ tool: spec.name, args });
+			const verdict = await registry.invoke({ tool: spec.name, args }, signal ? { signal } : undefined);
 			if (verdict.kind === "ok") {
 				if (verdict.result.kind === "ok") {
 					const result: AgentToolResult<{ kind: "ok" }> = {
