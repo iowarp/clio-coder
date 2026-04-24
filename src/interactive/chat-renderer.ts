@@ -11,10 +11,25 @@
  * synchronously so finalizers like `message_end` are never deferred.
  */
 
-import type { ClioTurnRecord } from "../engine/session.js";
+import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
+import type {
+	BashExecutionEntry,
+	BranchSummaryEntry,
+	CompactionSummaryEntry,
+	CustomEntry,
+	FileEntryEntry,
+	MessageEntry,
+	ModelChangeEntry,
+	SessionEntry,
+	SessionInfoEntry,
+	ThinkingLevelChangeEntry,
+} from "../domains/session/entries.js";
+import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
+import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
+import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 
 const DEFAULT_COALESCE_MS = 16;
 
@@ -110,6 +125,309 @@ function extractTurnText(payload: unknown): string {
 	return "";
 }
 
+function stringifyPreview(value: unknown, limit = 600): string {
+	if (value === undefined) return "";
+	if (typeof value === "string") return value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
+	try {
+		const text = JSON.stringify(value);
+		if (!text) return "";
+		return text.length <= limit ? text : `${text.slice(0, limit - 3)}...`;
+	} catch {
+		const text = String(value);
+		return text.length <= limit ? text : `${text.slice(0, limit - 3)}...`;
+	}
+}
+
+function timestampMillis(timestamp: string): number {
+	const parsed = Date.parse(timestamp);
+	return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function makeTextMessage(role: "user" | "assistant", text: string, timestamp: string): AgentMessage {
+	const message: Record<string, unknown> = {
+		role,
+		content: [{ type: "text", text }],
+		timestamp: timestampMillis(timestamp),
+	};
+	if (role === "assistant") message.stopReason = "stop";
+	return message as unknown as AgentMessage;
+}
+
+function textBlockFromEntry(entry: MessageEntry): string {
+	const text = extractTurnText(entry.payload);
+	if (text.length > 0) return text;
+	return stringifyPreview(entry.payload);
+}
+
+function chatMessageText(entry: MessageEntry): string {
+	return extractTurnText(entry.payload);
+}
+
+function payloadObject(payload: unknown): Record<string, unknown> | null {
+	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
+}
+
+function parseMaybeJson(value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	const trimmed = value.trim();
+	if (!trimmed) return value;
+	try {
+		return JSON.parse(trimmed) as unknown;
+	} catch {
+		return value;
+	}
+}
+
+function firstContentBlock(payload: unknown, type: string): Record<string, unknown> | null {
+	const obj = payloadObject(payload);
+	const content = obj?.content;
+	if (!Array.isArray(content)) return null;
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		const b = block as Record<string, unknown>;
+		if (b.type === type) return b;
+	}
+	return null;
+}
+
+interface ReplayToolCall {
+	id: string;
+	name: string;
+	args: unknown;
+}
+
+function extractToolCall(entry: MessageEntry): ReplayToolCall {
+	const payload = entry.payload;
+	const obj = payloadObject(payload);
+	const block = firstContentBlock(payload, "toolCall");
+	const fn = payloadObject(obj?.function);
+	const id =
+		(typeof obj?.id === "string" && obj.id) ||
+		(typeof obj?.toolCallId === "string" && obj.toolCallId) ||
+		(typeof obj?.tool_call_id === "string" && obj.tool_call_id) ||
+		(typeof block?.id === "string" && block.id) ||
+		entry.turnId;
+	const name =
+		(typeof obj?.name === "string" && obj.name) ||
+		(typeof obj?.toolName === "string" && obj.toolName) ||
+		(typeof obj?.tool === "string" && obj.tool) ||
+		(typeof fn?.name === "string" && fn.name) ||
+		(typeof block?.name === "string" && block.name) ||
+		"tool";
+	const args =
+		obj?.arguments ??
+		obj?.args ??
+		obj?.input ??
+		parseMaybeJson(fn?.arguments) ??
+		block?.arguments ??
+		block?.args ??
+		undefined;
+	return { id, name, args };
+}
+
+interface ReplayToolResult {
+	id: string | null;
+	name: string;
+	result: unknown;
+	isError: boolean;
+}
+
+function extractToolResult(entry: MessageEntry): ReplayToolResult {
+	const payload = entry.payload;
+	const obj = payloadObject(payload);
+	const contentText = extractTurnText(payload);
+	const id =
+		(typeof obj?.toolCallId === "string" && obj.toolCallId) ||
+		(typeof obj?.tool_call_id === "string" && obj.tool_call_id) ||
+		(typeof obj?.id === "string" && obj.id) ||
+		null;
+	const name =
+		(typeof obj?.toolName === "string" && obj.toolName) ||
+		(typeof obj?.name === "string" && obj.name) ||
+		(typeof obj?.tool === "string" && obj.tool) ||
+		"tool";
+	const result =
+		obj?.result ?? obj?.output ?? obj?.out ?? obj?.content ?? (contentText.length > 0 ? contentText : payload);
+	return { id, name, result, isError: obj?.isError === true || obj?.error === true };
+}
+
+function renderReplayLine(text: string, width: number): string[] {
+	return wrapTextWithAnsi(text, width);
+}
+
+function appendReplayLine(chatPanel: ChatPanel, text: string): void {
+	chatPanel.appendReplayBlock((width) => renderReplayLine(text, width));
+}
+
+const BASH_REPLAY_MAX_LINES = 12;
+
+function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
+	const lines: string[] = [];
+	lines.push(...wrapTextWithAnsi(`bash: $ ${entry.command}`, width));
+	const output = entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "");
+	if (output.length > 0) {
+		const outputLines = output.split("\n");
+		const hidden = Math.max(0, outputLines.length - BASH_REPLAY_MAX_LINES);
+		const visible = outputLines.slice(-BASH_REPLAY_MAX_LINES);
+		if (hidden > 0) lines.push(...wrapTextWithAnsi(`  ... ${hidden} earlier lines`, width));
+		for (const line of visible) {
+			lines.push(...wrapTextWithAnsi(`  ${line}`, width));
+		}
+	} else {
+		lines.push(...wrapTextWithAnsi("  (no output)", width));
+	}
+	const status: string[] = [];
+	if (entry.cancelled) status.push("cancelled");
+	if (entry.exitCode !== null && entry.exitCode !== 0) status.push(`exit ${entry.exitCode}`);
+	if (entry.truncated) status.push(entry.fullOutputPath ? `truncated: ${entry.fullOutputPath}` : "truncated");
+	if (entry.excludeFromContext) status.push("excluded from context");
+	if (status.length > 0) lines.push(...wrapTextWithAnsi(`  (${status.join(", ")})`, width));
+	return lines;
+}
+
+function renderCustomEntry(entry: CustomEntry, width: number): string[] {
+	const body = stringifyPreview(entry.data);
+	const suffix = body.length > 0 ? ` ${body}` : "";
+	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
+}
+
+function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
+	const endpoint = entry.endpoint ? `${entry.endpoint}/` : "";
+	return wrapTextWithAnsi(`[model] ${endpoint}${entry.provider}/${entry.modelId}`, width);
+}
+
+function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {
+	return wrapTextWithAnsi(`[thinking] ${entry.thinkingLevel}`, width);
+}
+
+function renderFileEntry(entry: FileEntryEntry, width: number): string[] {
+	const bytes = typeof entry.bytes === "number" ? `, ${entry.bytes} bytes` : "";
+	return wrapTextWithAnsi(`[file ${entry.operation}] ${entry.path}${bytes}`, width);
+}
+
+function renderSessionInfoEntry(entry: SessionInfoEntry, width: number): string[] {
+	if (entry.name) return wrapTextWithAnsi(`[session] ${entry.name}`, width);
+	if (entry.label && entry.targetTurnId) return wrapTextWithAnsi(`[label] ${entry.targetTurnId}: ${entry.label}`, width);
+	return [];
+}
+
+function truncateAtTurn(entries: ReadonlyArray<SessionEntry>, uptoTurnId?: string): SessionEntry[] {
+	if (!uptoTurnId) return [...entries];
+	const index = entries.findIndex((entry) => entry.turnId === uptoTurnId);
+	if (index < 0) return [...entries];
+	return entries.slice(0, index + 1);
+}
+
+function latestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i]?.kind === "compactionSummary") return i;
+	}
+	return -1;
+}
+
+/**
+ * Normalize a heterogeneous session JSONL stream into the entry sequence the
+ * replay surfaces should show. When the slice contains a compaction boundary,
+ * render the latest summary first and keep only the retained suffix plus
+ * later entries, mirroring pi-coding-agent's buildSessionContext behavior.
+ */
+export function selectReplayEntries(
+	turns: ReadonlyArray<unknown>,
+	options: RehydrateChatPanelOptions = {},
+): SessionEntry[] {
+	const entries = truncateAtTurn(collectSessionEntries(turns), options.uptoTurnId);
+	const compactionIndex = latestCompactionIndex(entries);
+	if (compactionIndex < 0) return entries;
+
+	const compaction = entries[compactionIndex] as CompactionSummaryEntry;
+	const selected: SessionEntry[] = [compaction];
+	const firstKeptIndex = compaction.firstKeptTurnId
+		? entries.findIndex((entry) => entry.turnId === compaction.firstKeptTurnId)
+		: -1;
+	if (firstKeptIndex >= 0 && firstKeptIndex < compactionIndex) {
+		selected.push(...entries.slice(firstKeptIndex, compactionIndex));
+	}
+	selected.push(...entries.slice(compactionIndex + 1));
+	return selected;
+}
+
+function compactionContextText(entry: CompactionSummaryEntry): string {
+	return [
+		"The conversation history before this point was compacted into the following summary:",
+		"",
+		"<summary>",
+		entry.summary,
+		"</summary>",
+	].join("\n");
+}
+
+function branchContextText(entry: BranchSummaryEntry): string {
+	return [
+		"The following is a summary of a branch that this conversation came back from:",
+		"",
+		"<summary>",
+		entry.summary,
+		"</summary>",
+	].join("\n");
+}
+
+function bashContextText(entry: BashExecutionEntry): string {
+	let text = `Ran \`${entry.command}\`\n`;
+	text += entry.output.length > 0 ? `\`\`\`\n${entry.output}\n\`\`\`` : "(no output)";
+	if (entry.cancelled) text += "\n\n(command cancelled)";
+	else if (entry.exitCode !== null && entry.exitCode !== 0) text += `\n\nCommand exited with code ${entry.exitCode}`;
+	if (entry.truncated && entry.fullOutputPath) text += `\n\n[Output truncated. Full output: ${entry.fullOutputPath}]`;
+	return text;
+}
+
+function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", text: string, timestamp: string): void {
+	const trimmed = text.trim();
+	if (trimmed.length === 0) return;
+	out.push(makeTextMessage(role, trimmed, timestamp));
+}
+
+export function buildReplayAgentMessagesFromTurns(
+	turns: ReadonlyArray<unknown>,
+	options: RehydrateChatPanelOptions = {},
+): AgentMessage[] {
+	const out: AgentMessage[] = [];
+	for (const entry of selectReplayEntries(turns, options)) {
+		switch (entry.kind) {
+			case "message": {
+				const text = textBlockFromEntry(entry);
+				if (entry.role === "user" || entry.role === "assistant") {
+					appendContextMessage(out, entry.role, chatMessageText(entry), entry.timestamp);
+				} else if (entry.role === "tool_call") {
+					const call = extractToolCall(entry);
+					appendContextMessage(out, "assistant", `Tool call: ${call.name}(${stringifyPreview(call.args)})`, entry.timestamp);
+				} else if (entry.role === "tool_result") {
+					const result = extractToolResult(entry);
+					appendContextMessage(out, "user", `Tool result: ${stringifyPreview(result.result)}`, entry.timestamp);
+				} else if (entry.role === "system") {
+					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
+				}
+				break;
+			}
+			case "bashExecution":
+				if (!entry.excludeFromContext) appendContextMessage(out, "user", bashContextText(entry), entry.timestamp);
+				break;
+			case "branchSummary":
+				appendContextMessage(out, "user", branchContextText(entry), entry.timestamp);
+				break;
+			case "compactionSummary":
+				appendContextMessage(out, "user", compactionContextText(entry), entry.timestamp);
+				break;
+			case "custom":
+			case "modelChange":
+			case "thinkingLevelChange":
+			case "fileEntry":
+			case "sessionInfo":
+				break;
+		}
+	}
+	return out;
+}
+
 /**
  * Rehydrate a chat panel from a persisted session's turn list. The
  * interactive layer calls this after /resume or /fork so the user sees the
@@ -117,12 +435,12 @@ function extractTurnText(payload: unknown): string {
  * session contract updated meta but left the visible chat untouched
  * (Row 51 and Row 52 on the Phase 12 ledger).
  *
- * Replays user and assistant message turns in file order. tool_call,
- * tool_result, system, and checkpoint turns are skipped in this pass: the
- * tool segments that chat-panel's `segments[]` model renders need the
- * paired start/update/end args+result stream that ClioTurnRecord does
- * not carry on its own. A later slice can thread richer replay once
- * SessionEntry storage captures tool-execution deltas.
+ * Replays a normalized SessionEntry stream. Legacy ClioTurnRecord lines are
+ * normalized into message entries; v2 entries such as compaction summaries,
+ * branch summaries, bash executions, custom entries, and metadata entries
+ * are rendered explicitly. Tool call/result entries are best-effort: when a
+ * result can be paired to a prior call id it updates that tool segment,
+ * otherwise it falls back to a standalone transcript line.
  *
  * Pure except for the chat-panel calls: no I/O, no chat-loop events
  * wired. Callers read turns via `openSession(id).turns()` and pass them
@@ -130,28 +448,94 @@ function extractTurnText(payload: unknown): string {
  */
 export function rehydrateChatPanelFromTurns(
 	chatPanel: ChatPanel,
-	turns: ReadonlyArray<ClioTurnRecord>,
+	turns: ReadonlyArray<unknown>,
 	options: RehydrateChatPanelOptions = {},
 ): void {
-	const stopAt = options.uptoTurnId;
-	for (const turn of turns) {
-		if (turn.kind === "user") {
-			const text = extractTurnText(turn.payload);
-			if (text.length > 0) chatPanel.appendUser(text);
-		} else if (turn.kind === "assistant") {
-			const text = extractTurnText(turn.payload);
-			if (text.length > 0) {
-				const timestamp = Number.isNaN(Date.parse(turn.at)) ? 0 : Date.parse(turn.at);
-				const message = {
-					role: "assistant",
-					content: [{ type: "text", text }],
-					stopReason: "stop",
-					timestamp,
-				} as AgentMessage;
-				chatPanel.applyEvent({ type: "message_end", message });
-				chatPanel.applyEvent({ type: "agent_end", messages: [message] });
+	const pendingToolIds: string[] = [];
+	for (const entry of selectReplayEntries(turns, options)) {
+		switch (entry.kind) {
+			case "message": {
+				if (entry.role === "user") {
+					const text = chatMessageText(entry);
+					if (text.length > 0) chatPanel.appendUser(text);
+					break;
+				}
+				if (entry.role === "assistant") {
+					const text = chatMessageText(entry);
+					if (text.length > 0) {
+						const message = makeTextMessage("assistant", text, entry.timestamp);
+						chatPanel.applyEvent({ type: "message_end", message });
+						chatPanel.applyEvent({ type: "agent_end", messages: [message] });
+					}
+					break;
+				}
+				if (entry.role === "tool_call") {
+					const call = extractToolCall(entry);
+					pendingToolIds.push(call.id);
+					chatPanel.applyEvent({
+						type: "tool_execution_start",
+						toolCallId: call.id,
+						toolName: call.name,
+						args: call.args,
+					});
+					break;
+				}
+				if (entry.role === "tool_result") {
+					const result = extractToolResult(entry);
+					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;
+					if (fallbackId) {
+						chatPanel.applyEvent({
+							type: "tool_execution_end",
+							toolCallId: fallbackId,
+							toolName: result.name,
+							result: result.result,
+							isError: result.isError,
+						});
+					} else {
+						appendReplayLine(chatPanel, `tool result: ${stringifyPreview(result.result)}`);
+					}
+					break;
+				}
+				if (entry.role === "system") {
+					const text = textBlockFromEntry(entry);
+					if (text.length > 0) appendReplayLine(chatPanel, `system: ${text}`);
+					break;
+				}
+				if (entry.role === "checkpoint") {
+					const text = textBlockFromEntry(entry);
+					appendReplayLine(chatPanel, text.length > 0 ? `[checkpoint] ${text}` : "[checkpoint]");
+					break;
+				}
+				break;
 			}
+			case "bashExecution":
+				chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
+				break;
+			case "custom":
+				if (entry.display !== false) chatPanel.appendReplayBlock((width) => renderCustomEntry(entry, width));
+				break;
+			case "modelChange":
+				chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));
+				break;
+			case "thinkingLevelChange":
+				chatPanel.appendReplayBlock((width) => renderThinkingChangeEntry(entry, width));
+				break;
+			case "fileEntry":
+				chatPanel.appendReplayBlock((width) => renderFileEntry(entry, width));
+				break;
+			case "branchSummary":
+				if (entry.summary.trim().length > 0) {
+					chatPanel.appendReplayBlock((width) => renderBranchSummaryEntry(entry, width));
+				}
+				break;
+			case "compactionSummary":
+				if (entry.summary.trim().length > 0) {
+					chatPanel.appendReplayBlock((width) => renderCompactionSummaryEntry(entry, width));
+				}
+				break;
+			case "sessionInfo":
+				if (entry.name || entry.label) chatPanel.appendReplayBlock((width) => renderSessionInfoEntry(entry, width));
+				break;
 		}
-		if (stopAt !== undefined && turn.id === stopAt) break;
 	}
 }

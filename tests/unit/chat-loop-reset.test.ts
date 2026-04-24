@@ -210,11 +210,18 @@ describe("interactive/chat-loop resetForSession", () => {
 		strictEqual(appended[2]?.parentId, null, `expected reset to clear lastTurnId, got ${String(appended[2]?.parentId)}`);
 
 		// Reset to a specific leaf id (the resume case where the next user
-		// turn must parent onto the resumed session's last turn).
-		loop.resetForSession("leaf-from-disk");
+		// turn must parent onto the resumed session's last turn) and seed the
+		// provider context rebuilt from the resumed session entries.
+		const replayed = {
+			role: "user",
+			content: [{ type: "text", text: "replayed context" }],
+		} as AgentMessage;
+		loop.resetForSession("leaf-from-disk", [replayed]);
+		deepStrictEqual(agentState.messages, [replayed], "agent messages replaced with replayed context");
 		await loop.submit("turn three");
 		strictEqual(appended.length, 6);
 		strictEqual(appended[4]?.kind, "user");
 		strictEqual(appended[4]?.parentId, "leaf-from-disk", "next user turn parents under the supplied leaf");
+		strictEqual(agentState.messages[0], replayed, "replayed context stays before the new prompt");
 	});
 });

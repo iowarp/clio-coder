@@ -71,6 +71,7 @@ type ToolSegment = {
 	preview: string;
 };
 type AssistantSegment = TextSegment | ToolSegment;
+type ReplayBlockRenderer = (width: number) => string[];
 
 type TranscriptEntry =
 	| { role: "user"; text: string }
@@ -87,10 +88,12 @@ type TranscriptEntry =
 			 */
 			thinking: string;
 			pending: boolean;
-	  };
+	  }
+	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
+	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
@@ -191,6 +194,9 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 }
 
 function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
+	if (entry.role === "replayBlock") {
+		return entry.renderBlock(width);
+	}
 	if (entry.role === "user") {
 		return wrapTextWithAnsi(`you: ${entry.text}`, width);
 	}
@@ -290,6 +296,10 @@ export function createChatPanel(): ChatPanel {
 	return {
 		appendUser(text: string): void {
 			transcript.push({ role: "user", text });
+			markDirty();
+		},
+		appendReplayBlock(renderBlock: ReplayBlockRenderer): void {
+			transcript.push({ role: "replayBlock", renderBlock });
 			markDirty();
 		},
 		reset(): void {

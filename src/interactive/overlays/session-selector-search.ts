@@ -4,15 +4,18 @@ import { fuzzyFilter } from "../../engine/tui.js";
 /**
  * Compose the searchable text for a session. Includes every field a user
  * might recall: the id (for the rare "I remember the prefix" recall),
- * the cwd path, and the endpoint/model pair so model-name searches work.
- * Names are not present in `SessionMeta` today; if/when sessions grow a
- * `name` field, append it here.
+ * timestamps, cwd, endpoint/model pair, and any display name or turn labels
+ * discovered from sessionInfo entries.
  */
 function getSessionSearchText(meta: SessionMeta): string {
 	const endpoint = meta.endpoint ?? "";
 	const model = meta.model ?? "";
 	const cwd = meta.cwd ?? "";
-	return `${meta.id} ${endpoint}/${model} ${cwd}`;
+	const created = meta.createdAt ?? "";
+	const ended = meta.endedAt ?? "";
+	const name = meta.name ?? "";
+	const labels = meta.labels?.join(" ") ?? "";
+	return `${meta.id} ${created} ${ended} ${endpoint}/${model} ${cwd} ${name} ${labels}`;
 }
 
 /**

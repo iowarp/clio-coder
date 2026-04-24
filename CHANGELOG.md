@@ -7,6 +7,13 @@ Keep a Changelog.
 
 ### Fixed
 
+- Session resume, fork, and tree-switch replay now read the rich session entry
+  stream instead of only legacy user/assistant turns, so compaction summaries,
+  branch summaries, bash/tool entries, custom display entries, system notes,
+  and checkpoints are visible when present.
+- Resuming a session whose JSONL tail is metadata no longer resets the next
+  turn parent to `null`; the interactive loop now derives the resumed leaf
+  from the persisted tree.
 - CLI-backed subprocess runtimes now dispatch through the native worker entry
   instead of running inline in the orchestrator process.
 - Out-of-tree SDK runtime plugins now pass runtime descriptor validation and
