@@ -1,11 +1,31 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.1.0-dev",
-	"description": "Clio: IOWarp's orchestrator coding-agent, built on a Level-3 custom harness over pi-mono",
+	"description": "Agentic coding harness for supervised repository work, model-target orchestration, worker dispatch, and self-development.",
+	"keywords": [
+		"ai",
+		"agentic-ai",
+		"agentic-coding",
+		"coding",
+		"repository",
+		"terminal",
+		"developer-tools",
+		"llm",
+		"agents",
+		"model-targets",
+		"multi-agent",
+		"coding-agents",
+		"software-engineering",
+		"research-software"
+	],
 	"type": "module",
 	"license": "Apache-2.0",
-	"author": "Anthony Kougkas <a.kougkas@gmail.com>",
-	"homepage": "https://github.com/iowarp/clio-coder",
+	"author": "Anthony Kougkas <a.kougkas@gmail.com> (https://github.com/akougkas)",
+	"contributors": [
+		"IOWarp <https://iowarp.ai>",
+		"Gnosis Research Center <https://grc.iit.edu/>"
+	],
+	"homepage": "https://iowarp.ai",
 	"bugs": "https://github.com/iowarp/clio-coder/issues",
 	"repository": {
 		"type": "git",
@@ -23,7 +43,15 @@
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
 		"README.md",
+		"CHANGELOG.md",
+		"CONTRIBUTING.md",
+		"GOVERNANCE.md",
+		"SECURITY.md",
+		"CODE_OF_CONDUCT.md",
+		"NOTICE",
 		"LICENSE",
+		"STATUS.md",
+		"AGENTS.md",
 		"damage-control-rules.yaml"
 	],
 	"publishConfig": {

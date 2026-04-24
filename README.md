@@ -41,9 +41,10 @@
 12. [Receipts and cost](#receipts-and-cost)
 13. [Architecture at a glance](#architecture-at-a-glance)
 14. [Development](#development)
-15. [Roadmap](#roadmap)
-16. [Lineage and credits](#lineage-and-credits)
-17. [License](#license)
+15. [Governance](#governance)
+16. [Roadmap](#roadmap)
+17. [Lineage and credits](#lineage-and-credits)
+18. [License](#license)
 
 ---
 
@@ -312,7 +313,10 @@ Three hard invariants are enforced by the boundary tests in [`tests/boundaries/c
 2. `src/worker/**` never imports `src/domains/**`.
 3. Cross-domain traffic goes through `SafeEventBus`.
 
-Full design: [docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md). Engine boundary detail: [docs/architecture/pi-mono-boundary-0.68.1.md](docs/architecture/pi-mono-boundary-0.68.1.md).
+Current project status lives in [`STATUS.md`](STATUS.md). Contributor and
+review rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`GOVERNANCE.md`](GOVERNANCE.md). Agent-specific operating rules live in
+[`AGENTS.md`](AGENTS.md).
 
 ---
 
@@ -337,13 +341,22 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ---
 
+## Governance
+
+Clio Coder is led by Anthony Kougkas (`@akougkas`) for IOWarp, iowarp.ai,
+and Gnosis Research Center. The project has no public release yet.
+
+Pull requests into `main` require CI and maintainer review. See
+[`GOVERNANCE.md`](GOVERNANCE.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), and
+[`CHANGELOG.md`](CHANGELOG.md) before proposing non-trivial work.
+
+---
+
 ## Roadmap
 
 - **v0.1 (current)**: native runtime, endpoint-first provider config, interactive TUI, receipts and cost ledger, auth/setup flows, model and session controls, and early self-dev harness support.
 - **v0.2**: real tool implementations beyond stubs, SDK runtime admitted, CLI runtime admitted, MCP support, richer agent library.
 - **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
-
-See [docs/superpowers/plans/](docs/superpowers/plans/) for detailed phase plans.
 
 ---
 
