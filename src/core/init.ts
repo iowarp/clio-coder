@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
+import { readClioVersion } from "./package-root.js";
 import { clioCacheDir, clioConfigDir, clioDataDir } from "./xdg.js";
 
 export interface InitReport {
@@ -70,7 +71,7 @@ export function initializeClioHome(): InitReport {
 	const installPath = join(dataDir, "install.json");
 	if (!existsSync(installPath)) {
 		const payload = {
-			version: "0.1.0-dev",
+			version: readClioVersion(),
 			installedAt: new Date().toISOString(),
 			platform: process.platform,
 			nodeVersion: process.version,
