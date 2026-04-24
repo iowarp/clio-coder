@@ -12,6 +12,14 @@ import { clioConfigDir } from "./xdg.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
 
+type SerializedSettings = Omit<ClioSettings, "endpoints" | "orchestrator" | "workers"> & {
+	targets: ClioSettings["endpoints"];
+	orchestrator: Omit<ClioSettings["orchestrator"], "endpoint"> & { target: string | null };
+	workers: {
+		default: Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null };
+	};
+};
+
 export function settingsPath(): string {
 	return join(clioConfigDir(), "settings.yaml");
 }
@@ -372,7 +380,7 @@ function normalizeWorkerTarget(
 ): ClioSettings["orchestrator"] {
 	const out = cloneValue(defaults);
 	if (!isPlainObject(value)) return out;
-	const endpoint = trimString(value.endpoint);
+	const endpoint = trimString(value.target) ?? trimString(value.endpoint);
 	const endpointExists = endpoint ? endpoints.find((entry) => entry.id === endpoint) : undefined;
 	out.endpoint = endpointExists?.id ?? null;
 	out.thinkingLevel = normalizeThinkingLevel(value.thinkingLevel, defaults.thinkingLevel);
@@ -468,11 +476,13 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 		settings.safetyLevel = raw.safetyLevel;
 	}
 
-	const explicitEndpoints = Array.isArray(raw.endpoints)
-		? raw.endpoints
-				.map((entry) => normalizeEndpoint(entry))
-				.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-		: [];
+	const rawTargets = Array.isArray(raw.targets) ? raw.targets : Array.isArray(raw.endpoints) ? raw.endpoints : [];
+	const explicitEndpoints =
+		rawTargets.length > 0
+			? rawTargets
+					.map((entry) => normalizeEndpoint(entry))
+					.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+			: [];
 	const legacyEndpoints = normalizeLegacyProviders(raw.providers);
 	settings.endpoints = explicitEndpoints.length > 0 ? explicitEndpoints : legacyEndpoints.endpoints;
 	settings.runtimePlugins = trimStringArray(raw.runtimePlugins);
@@ -591,5 +601,28 @@ export function readSettings(): ClioSettings {
 }
 
 export function writeSettings(settings: ClioSettings): void {
-	writeFileSync(settingsPath(), stringifyYaml(normalizeSettings(settings)), { encoding: "utf8", mode: 0o644 });
+	writeFileSync(settingsPath(), stringifyYaml(serializeSettings(normalizeSettings(settings))), {
+		encoding: "utf8",
+		mode: 0o644,
+	});
+}
+
+function serializeSettings(settings: ClioSettings): SerializedSettings {
+	const { endpoints, orchestrator, workers, ...rest } = settings;
+	return {
+		...rest,
+		targets: endpoints,
+		orchestrator: {
+			target: orchestrator.endpoint,
+			model: orchestrator.model,
+			thinkingLevel: orchestrator.thinkingLevel,
+		},
+		workers: {
+			default: {
+				target: workers.default.endpoint,
+				model: workers.default.model,
+				thinkingLevel: workers.default.thinkingLevel,
+			},
+		},
+	};
 }

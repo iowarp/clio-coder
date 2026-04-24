@@ -16,7 +16,14 @@ export type {
 	AuthTarget,
 	OAuthCredential,
 } from "./auth/index.js";
-export { createMemoryAuthStorage, openAuthStorage, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
+export {
+	authNotRequiredStatus,
+	createMemoryAuthStorage,
+	openAuthStorage,
+	resolveAuthTarget,
+	resolveRuntimeAuthTarget,
+	targetRequiresAuth,
+} from "./auth/index.js";
 export { mergeCapabilities } from "./capabilities.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 export { ProvidersManifest } from "./manifest.js";
@@ -33,7 +40,6 @@ export {
 	compareProviderSupportEntries,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
-	defaultWorkerModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,

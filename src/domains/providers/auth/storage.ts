@@ -58,7 +58,7 @@ export interface AuthStatus {
 	providerId: string;
 	available: boolean;
 	credentialType: AuthCredential["type"] | null;
-	source: "runtime-override" | "stored-api-key" | "stored-oauth" | "environment" | "fallback" | "none";
+	source: "runtime-override" | "stored-api-key" | "stored-oauth" | "environment" | "fallback" | "not-required" | "none";
 	detail: string | null;
 }
 
@@ -189,6 +189,23 @@ export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget
 	};
 	if (runtime.credentialsEnvVar) target.explicitEnvVar = runtime.credentialsEnvVar;
 	return target;
+}
+
+export function targetRequiresAuth(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): boolean {
+	if (runtime.auth === "oauth") return true;
+	if (runtime.auth !== "api-key") return false;
+	if (endpoint.auth?.apiKeyEnvVar || endpoint.auth?.apiKeyRef || endpoint.auth?.oauthProfile) return true;
+	return runtime.tier === "cloud" || Boolean(runtime.credentialsEnvVar);
+}
+
+export function authNotRequiredStatus(providerId: string): AuthStatus {
+	return {
+		providerId,
+		available: true,
+		credentialType: null,
+		source: "not-required",
+		detail: null,
+	};
 }
 
 export class AuthStorage {

@@ -19,21 +19,21 @@ const defaultCapabilities: CapabilityFlags = {
 	embeddings: false,
 	rerank: false,
 	fim: false,
-	contextWindow: 272000,
-	maxTokens: 16384,
+	contextWindow: 200000,
+	maxTokens: 8192,
 };
 
-const codexRuntime: RuntimeDescriptor = {
-	id: "codex-cli",
-	displayName: "Codex CLI",
+const openCodeRuntime: RuntimeDescriptor = {
+	id: "opencode-cli",
+	displayName: "OpenCode CLI",
 	kind: "subprocess",
 	tier: "cli-stub",
-	apiFamily: "subprocess-codex",
+	apiFamily: "subprocess-opencode",
 	auth: "cli",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const started = performance.now();
-		const result = await probeBinaryVersion(spawn, "codex", ctx);
+		const result = await probeBinaryVersion(spawn, "opencode", ctx);
 		const latencyMs = Math.round(performance.now() - started);
 		if (result.ok) {
 			const res: ProbeResult = { ok: true, latencyMs };
@@ -48,8 +48,8 @@ const codexRuntime: RuntimeDescriptor = {
 		const stub = {
 			id: wireModelId,
 			name: `${endpoint.id}`,
-			api: "subprocess-codex",
-			provider: "openai",
+			api: "subprocess-opencode",
+			provider: "opencode",
 			baseUrl: "",
 			reasoning: defaultCapabilities.reasoning,
 			input: ["text"] as ("text" | "image")[],
@@ -61,4 +61,4 @@ const codexRuntime: RuntimeDescriptor = {
 	},
 };
 
-export default codexRuntime;
+export default openCodeRuntime;

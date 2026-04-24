@@ -29,7 +29,7 @@ const geminiRuntime: RuntimeDescriptor = {
 	kind: "subprocess",
 	tier: "cli-stub",
 	apiFamily: "subprocess-gemini",
-	auth: "oauth",
+	auth: "cli",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const started = performance.now();

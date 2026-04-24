@@ -6,7 +6,7 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { ensureInstalled, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
@@ -15,12 +15,12 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	'usage: clio run [--endpoint <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
+	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 interface ParsedArgs {
-	endpoint?: string;
+	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
 	agentId?: string;
@@ -40,10 +40,13 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			i += 1;
 			return v;
 		};
-		if (a === "--endpoint") {
+		if (a === "--help" || a === "-h") {
+			return null;
+		}
+		if (a === "--target") {
 			const v = need();
 			if (v === null) return null;
-			out.endpoint = v;
+			out.target = v;
 		} else if (a === "--model") {
 			const v = need();
 			if (v === null) return null;
@@ -63,6 +66,8 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			out.required.push(v);
 		} else if (a === "--json") {
 			out.json = true;
+		} else if (a?.startsWith("-")) {
+			return null;
 		} else if (typeof a === "string") {
 			taskParts.push(a);
 		}
@@ -83,7 +88,7 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 		return 2;
 	}
 
-	ensureInstalled();
+	ensureClioState();
 	const loaded = await loadDomains([
 		ConfigDomainModule,
 		ProvidersDomainModule,
@@ -110,11 +115,11 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 			return 1;
 		}
 		const settings = readSettings();
-		const targetEndpointId = parsed.endpoint ?? settings.workers?.default?.endpoint ?? settings.orchestrator?.endpoint;
+		const targetEndpointId = parsed.target ?? settings.workers?.default?.endpoint ?? settings.orchestrator?.endpoint;
 		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
 		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
 		if (!endpoint || !runtime) {
-			process.stderr.write("clio run: --api-key supplied but no endpoint resolved; pass --endpoint <id>\n");
+			process.stderr.write("clio run: --api-key supplied but no target resolved; pass --target <id>\n");
 			await loaded.stop();
 			return 2;
 		}
@@ -125,7 +130,7 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 		agentId: parsed.agentId ?? "scout",
 		task: parsed.task,
 	};
-	if (parsed.endpoint) dispatchReq.endpoint = parsed.endpoint;
+	if (parsed.target) dispatchReq.endpoint = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
@@ -158,13 +163,14 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio run failed: ${msg}\n`);
 		await loaded.stop();
+		if (/target '.+' not found/.test(msg)) return 2;
 		if (msg.includes("admission") || msg.includes("capability") || msg.includes("budget")) return 2;
 		return 1;
 	}
 }
 
 function formatReceipt(r: RunReceipt): string {
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} endpoint=${r.endpointId} model=${r.wireModelId} start=${r.startedAt} end=${r.endedAt}`;
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.endpointId} model=${r.wireModelId} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

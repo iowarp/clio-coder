@@ -103,6 +103,7 @@ describe("interactive/model-selector", () => {
 			probeAll: async () => undefined,
 			probeAllLive: async () => undefined,
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: (endpoint) => ({
 					providerId: endpoint.runtime,
@@ -193,6 +194,7 @@ describe("interactive/model-selector", () => {
 			probeAll: async () => undefined,
 			probeAllLive: async () => undefined,
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "llamacpp",

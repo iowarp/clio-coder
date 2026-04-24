@@ -8,7 +8,6 @@ import {
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
-	defaultWorkerModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -22,27 +21,27 @@ import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/pr
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio setup
+const HELP = `clio configure
 
-Configure model endpoints for chat and worker dispatch.
+Configure model targets for chat and worker dispatch.
 
 Usage:
-  clio setup                       interactive wizard
-  clio setup --list                list endpoint types
-  clio setup --id <endpointId> [flags] --runtime <runtimeId>
-  clio setup --remove <endpointId>
-  clio setup --rename <oldId> <newId>
+  clio configure                   interactive wizard
+  clio configure --list            list target runtimes
+  clio configure --id <targetId> [flags] --runtime <runtimeId>
 
 Non-interactive flags:
-  --id <endpointId>                endpoint id to register (required when non-interactive)
-  --runtime <runtimeId>            endpoint type to use when registering non-interactively
-  --url <host>                     endpoint base URL (http(s):// or ws://)
-  --model <wireModelId>            default model id for this endpoint
+  --id <targetId>                  target id to register (required when non-interactive)
+  --runtime <runtimeId>            runtime to use when registering non-interactively
+  --url <host>                     target base URL (http(s):// or ws://)
+  --model <wireModelId>            default model id for this target
+  --orchestrator-model <id>        model to use when setting chat default
+  --worker-model <id>              model to use when setting worker default
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
-  --gateway                        mark the endpoint as a gateway
-  --set-orchestrator               point settings.orchestrator at this endpoint
-  --set-worker-default             point settings.workers.default at this endpoint
+  --gateway                        mark the target as a gateway
+  --set-orchestrator               use this target for chat
+  --set-worker-default             use this target for workers
   --context-window <N>             capability override
   --max-tokens <N>                 output token capability override
   --reasoning <true|false>         capability override
@@ -73,6 +72,8 @@ interface ParsedArgs {
 	runtime?: string;
 	url?: string;
 	model?: string;
+	orchestratorModel?: string;
+	workerModel?: string;
 	apiKeyEnv?: string;
 	apiKey?: string;
 	gateway: boolean;
@@ -126,6 +127,12 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--model":
 				out.model = need();
+				break;
+			case "--orchestrator-model":
+				out.orchestratorModel = need();
+				break;
+			case "--worker-model":
+				out.workerModel = need();
 				break;
 			case "--api-key-env":
 				out.apiKeyEnv = need();
@@ -218,7 +225,7 @@ function printRuntimeList(): void {
 			runtime?.auth === "oauth"
 				? status?.available
 					? "connected"
-					: "connect"
+					: "login"
 				: runtime?.auth === "api-key"
 					? status?.available
 						? "credential"
@@ -231,7 +238,7 @@ function printRuntimeList(): void {
 				? entry.modelHints.slice(0, 2).join(", ")
 				: (defaultModelForRuntime(entry.runtimeId) ?? "-");
 		process.stdout.write(
-			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} endpoints=${String(endpointCount).padEnd(3)} models=${modelLabel}\n`,
+			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} targets=${String(endpointCount).padEnd(3)} models=${modelLabel}\n`,
 		);
 	}
 }
@@ -278,27 +285,18 @@ function applyEndpoint(settings: ClioSettings, descriptor: EndpointDescriptor): 
 	else settings.endpoints.push(descriptor);
 }
 
-function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
 	settings.orchestrator.endpoint = descriptor.id;
-	if (descriptor.defaultModel) settings.orchestrator.model = descriptor.defaultModel;
+	settings.orchestrator.model = model ?? descriptor.defaultModel ?? null;
 }
 
-function workerDefaultModelForDescriptor(descriptor: EndpointDescriptor): string | undefined {
-	const runtimeDefault = defaultWorkerModelForRuntime(descriptor.runtime);
-	if (runtimeDefault && (!descriptor.wireModels || descriptor.wireModels.includes(runtimeDefault))) {
-		return runtimeDefault;
-	}
-	return descriptor.defaultModel;
-}
-
-function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
 	settings.workers.default.endpoint = descriptor.id;
-	const workerModel = workerDefaultModelForDescriptor(descriptor);
-	if (workerModel) settings.workers.default.model = workerModel;
+	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
 }
 
 function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, probe: ProbeResult | null): void {
-	process.stdout.write(`\nsaved endpoint ${descriptor.id} (runtime=${descriptor.runtime})\n`);
+	process.stdout.write(`\nsaved target ${descriptor.id} (runtime=${descriptor.runtime})\n`);
 	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
 	if (descriptor.defaultModel) process.stdout.write(`  model      ${descriptor.defaultModel}\n`);
 	if (descriptor.auth?.apiKeyEnvVar) process.stdout.write(`  apiKeyEnv  ${descriptor.auth.apiKeyEnvVar}\n`);
@@ -385,7 +383,7 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 				process.stderr.write(`${message}\n`);
 			},
 		});
-		printOk(`connected ${runtime.id}`);
+		printOk(`authenticated ${runtime.id}`);
 		return true;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -407,6 +405,30 @@ async function resolveSupportedWireModels(
 	return existing?.wireModels ? [...existing.wireModels] : [];
 }
 
+function resolveModelChoice(
+	answer: string,
+	wireModels: ReadonlyArray<string>,
+	defaultValue: string | undefined,
+): string | undefined {
+	if (answer.length === 0) return defaultValue;
+	const numeric = Number(answer);
+	if (Number.isInteger(numeric) && numeric >= 1 && numeric <= wireModels.length) {
+		return wireModels[numeric - 1];
+	}
+	return answer;
+}
+
+async function askModelChoice(
+	rl: ReturnType<typeof createInterface>,
+	label: string,
+	wireModels: ReadonlyArray<string>,
+	defaultValue: string | undefined,
+): Promise<string | null> {
+	const answer = await ask(rl, `${label} (number or id)`, defaultValue ?? "");
+	if (answer === null) return null;
+	return resolveModelChoice(answer, wireModels, defaultValue) ?? "";
+}
+
 async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): Promise<number> {
 	if (!args.id) {
 		printError("--id is required when passing flags non-interactively");
@@ -417,7 +439,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const support = buildProviderSupportEntry(runtime);
 	const existing = settings.endpoints.find((e) => e.id === args.id);
 	if (existing && existing.runtime !== runtime.id) {
-		printError(`endpoint ${args.id} already exists with runtime ${existing.runtime}`);
+		printError(`target ${args.id} already exists with runtime ${existing.runtime}`);
 		return 2;
 	}
 	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
@@ -465,8 +487,12 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	});
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
 	applyEndpoint(settings, descriptor);
-	if (args.setOrchestrator) setOrchestratorPointer(settings, descriptor);
-	if (args.setWorkerDefault) setWorkerDefaultPointer(settings, descriptor);
+	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
+	const setWorkerDefault = args.setWorkerDefault || args.workerModel !== undefined;
+	if (setOrchestrator)
+		setOrchestratorPointer(settings, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
+	if (setWorkerDefault)
+		setWorkerDefaultPointer(settings, descriptor, args.workerModel ?? descriptor.defaultModel ?? null);
 	writeSettings(settings);
 	const probe = await runtimeProbe(runtime, descriptor);
 	printSummary(settings, descriptor, probe);
@@ -474,9 +500,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		runtime.auth === "oauth" &&
 		!auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }).available
 	) {
-		process.stdout.write(`note: connect ${runtime.id} with \`clio connect ${runtime.id}\` before using this endpoint\n`);
+		process.stdout.write(
+			`note: authenticate ${runtime.id} with \`clio auth login ${runtime.id}\` before using this target\n`,
+		);
 	}
-	printOk(`endpoint ${args.id} saved`);
+	printOk(`target ${args.id} saved`);
 	return 0;
 }
 
@@ -550,7 +578,7 @@ async function runInteractive(
 ): Promise<number> {
 	const runtime = preselectedRuntime ?? (await pickRuntime(rl));
 	if (!runtime) {
-		printError("setup cancelled");
+		printError("configuration cancelled");
 		return 0;
 	}
 	const auth = openAuthStorage();
@@ -562,7 +590,7 @@ async function runInteractive(
 		existingForRuntime[0] ??
 		null;
 	if (existingForRuntime.length > 0) {
-		process.stdout.write(`\nExisting endpoints for ${runtime.id}:\n`);
+		process.stdout.write(`\nExisting targets for ${runtime.id}:\n`);
 		for (const endpoint of existingForRuntime) {
 			process.stdout.write(`  - ${endpoint.id}${endpoint.defaultModel ? ` (${endpoint.defaultModel})` : ""}\n`);
 		}
@@ -573,9 +601,9 @@ async function runInteractive(
 		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
 	}
 	const suggestedId = defaults.id ?? existing?.id ?? deriveEndpointId(runtime.id, settings.endpoints);
-	const idInput = await ask(rl, "Endpoint id", suggestedId);
+	const idInput = await ask(rl, "Target id", suggestedId);
 	if (idInput === null || idInput.length === 0) {
-		printError("endpoint id is required");
+		printError("target id is required");
 		return 2;
 	}
 	const endpointId = idInput;
@@ -585,7 +613,7 @@ async function runInteractive(
 		const urlDefault = defaults.url ?? existing?.url ?? defaultUrlFor(runtime.id);
 		const urlInput = await ask(
 			rl,
-			support.group === "local-http" ? "Endpoint URL" : "Base URL override (blank for runtime default)",
+			support.group === "local-http" ? "Target URL" : "Base URL override (blank for runtime default)",
 			urlDefault,
 		);
 		if (urlInput === null) return 0;
@@ -664,16 +692,9 @@ async function runInteractive(
 		for (const [index, wireModel] of wireModels.entries()) {
 			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
-		const pick = await ask(rl, "Default model (number or id)", model ?? "");
-		if (pick === null) return 0;
-		if (pick.length > 0) {
-			const numeric = Number(pick);
-			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= wireModels.length) {
-				model = wireModels[numeric - 1];
-			} else {
-				model = pick;
-			}
-		}
+		const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);
+		if (pickedModel === null) return 0;
+		if (pickedModel.length > 0) model = pickedModel;
 	} else if (!model) {
 		const manual = await ask(rl, "Default model id (blank to leave empty)", "");
 		if (manual && manual.length > 0) model = manual;
@@ -703,7 +724,7 @@ async function runInteractive(
 			: `probe failed: ${probe.error ?? "unknown"}`;
 		process.stdout.write(`\n${line}\n`);
 		if (!probe.ok) {
-			const keepAnyway = await askYesNo(rl, "save endpoint anyway?", true);
+			const keepAnyway = await askYesNo(rl, "save target anyway?", true);
 			if (!keepAnyway) {
 				printError("aborted; settings not changed");
 				return 0;
@@ -717,23 +738,43 @@ async function runInteractive(
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
 		: await askYesNo(rl, "use as worker default?", !settings.workers.default.endpoint);
+	const orchestratorModel = setOrchestrator
+		? (defaults.orchestratorModel ??
+			(await askModelChoice(
+				rl,
+				"Orchestrator model",
+				wireModels,
+				settings.orchestrator.endpoint === endpointId ? (settings.orchestrator.model ?? model) : model,
+			)))
+		: undefined;
+	if (orchestratorModel === null) return 0;
+	const workerModel = setWorkerDefault
+		? (defaults.workerModel ??
+			(await askModelChoice(
+				rl,
+				"Worker model",
+				wireModels,
+				settings.workers.default.endpoint === endpointId ? (settings.workers.default.model ?? model) : model,
+			)))
+		: undefined;
+	if (workerModel === null) return 0;
 
 	applyEndpoint(settings, descriptor);
-	if (setOrchestrator) setOrchestratorPointer(settings, descriptor);
-	if (setWorkerDefault) setWorkerDefaultPointer(settings, descriptor);
+	if (setOrchestrator) setOrchestratorPointer(settings, descriptor, orchestratorModel);
+	if (setWorkerDefault) setWorkerDefaultPointer(settings, descriptor, workerModel);
 	writeSettings(settings);
 
 	printSummary(settings, descriptor, probe);
-	printOk(`endpoint ${endpointId} saved`);
+	printOk(`target ${endpointId} saved`);
 	return 0;
 }
 
-function runRemove(id: string): number {
+export function runTargetRemove(id: string): number {
 	const settings = readSettings();
 	const before = settings.endpoints.length;
 	settings.endpoints = settings.endpoints.filter((e) => e.id !== id);
 	if (settings.endpoints.length === before) {
-		printError(`no endpoint with id ${id}`);
+		printError(`no target with id ${id}`);
 		return 1;
 	}
 	if (settings.orchestrator.endpoint === id) {
@@ -749,23 +790,23 @@ function runRemove(id: string): number {
 		return head !== id;
 	});
 	writeSettings(settings);
-	printOk(`removed endpoint ${id}`);
+	printOk(`removed target ${id}`);
 	return 0;
 }
 
-function runRename(oldId: string, newId: string): number {
+export function runTargetRename(oldId: string, newId: string): number {
 	if (oldId === newId) {
 		printError("old and new id are identical");
 		return 2;
 	}
 	const settings = readSettings();
 	if (settings.endpoints.some((e) => e.id === newId)) {
-		printError(`endpoint id already exists: ${newId}`);
+		printError(`target id already exists: ${newId}`);
 		return 2;
 	}
 	const target = settings.endpoints.find((e) => e.id === oldId);
 	if (!target) {
-		printError(`no endpoint with id ${oldId}`);
+		printError(`no target with id ${oldId}`);
 		return 1;
 	}
 	target.id = newId;
@@ -781,7 +822,7 @@ function runRename(oldId: string, newId: string): number {
 	return 0;
 }
 
-export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<number> {
+export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<number> {
 	let args: ParsedArgs;
 	try {
 		args = parseSetupArgs(argv);
@@ -801,12 +842,12 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 		printRuntimeList();
 		return 0;
 	}
-	if (args.remove) return runRemove(args.remove);
-	if (args.renameOld && args.renameNew) return runRename(args.renameOld, args.renameNew);
+	if (args.remove) return runTargetRemove(args.remove);
+	if (args.renameOld && args.renameNew) return runTargetRename(args.renameOld, args.renameNew);
 
 	if (args.positional.length > 0) {
 		printError(
-			"`clio setup` no longer accepts a positional runtime. Use `clio connect <provider>` and then `clio setup`, or `clio setup --runtime <runtimeId> ...`.",
+			"`clio configure` accepts flags, not positional runtimes. Use `clio auth login <runtime>` first when authentication is needed, then `clio configure --runtime <runtimeId> ...`.",
 		);
 		return 2;
 	}
@@ -817,7 +858,7 @@ export async function runSetupCommand(argv: ReadonlyArray<string>): Promise<numb
 		runtime = getRuntimeRegistry().get(runtimeId);
 		if (!runtime) {
 			printError(`unknown runtime id: ${runtimeId}`);
-			process.stdout.write("run `clio setup --list` to see registered runtimes\n");
+			process.stdout.write("run `clio configure --list` to see registered runtimes\n");
 			return 2;
 		}
 	}

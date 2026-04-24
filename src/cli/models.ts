@@ -1,49 +1,96 @@
 import chalk from "chalk";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
 import { listKnownModelsForRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import { printError } from "./shared.js";
 
 interface ModelRow {
-	endpointId: string;
+	targetId: string;
 	runtimeId: string;
 	modelId: string;
 	caps: string;
 }
 
-export async function runListModelsCommand(args: ReadonlyArray<string>): Promise<number> {
-	const asJson = args.includes("--json");
-	const probe = args.includes("--probe");
-	const filterIdx = args.indexOf("--endpoint");
-	const filter = filterIdx >= 0 ? args[filterIdx + 1] : undefined;
-	// When `--endpoint` is absent the "value slot" index is -1 so the skip
-	// predicate leaves every positional eligible. The previous `index !==
-	// filterIdx + 1` variant computed index !== 0 in this case, silently
-	// dropping the positional `<search>` arg when it was the only positional.
-	const filterValueIdx = filterIdx >= 0 ? filterIdx + 1 : -1;
-	const search = args.find((arg, index) => index !== filterValueIdx && !arg.startsWith("--"));
+const HELP = `clio models [search] [--target <id>] [--json] [--probe]
 
-	ensureInstalled();
+List known or discovered models for configured targets.
+`;
+
+interface ModelArgs {
+	json: boolean;
+	probe: boolean;
+	target?: string;
+	search?: string;
+	help: boolean;
+}
+
+function parseModelArgs(args: ReadonlyArray<string>): ModelArgs {
+	const parsed: ModelArgs = { json: false, probe: false, help: false };
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === undefined) continue;
+		if (arg === "--help" || arg === "-h") {
+			parsed.help = true;
+			continue;
+		}
+		if (arg === "--json") {
+			parsed.json = true;
+			continue;
+		}
+		if (arg === "--probe") {
+			parsed.probe = true;
+			continue;
+		}
+		if (arg === "--target") {
+			const value = args[i + 1];
+			if (!value) throw new Error("--target requires a value");
+			parsed.target = value;
+			i += 1;
+			continue;
+		}
+		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
+		if (parsed.search) throw new Error("models accepts at most one search term");
+		parsed.search = arg;
+	}
+	return parsed;
+}
+
+export async function runModelsCommand(args: ReadonlyArray<string>): Promise<number> {
+	let parsed: ModelArgs;
+	try {
+		parsed = parseModelArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		process.stdout.write(HELP);
+		return 2;
+	}
+	if (parsed.help) {
+		process.stdout.write(HELP);
+		return 0;
+	}
+
+	ensureClioState();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 	const providers = loaded.getContract<ProvidersContract>("providers");
 	if (!providers) {
-		process.stderr.write("providers: domain not loaded\n");
+		process.stderr.write("models: provider domain not loaded\n");
 		await loaded.stop();
 		return 1;
 	}
-	if (probe) {
+	if (parsed.probe) {
 		try {
 			await providers.probeAllLive();
 		} catch (err) {
-			process.stderr.write(`list-models: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
+			process.stderr.write(`models: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
 	}
 	const entries = providers.list();
-	const filtered = filter ? entries.filter((e) => e.endpoint.id === filter) : entries;
-	const rows = collectRows(filtered).filter((row) => matchesSearch(row, search));
+	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
+	const rows = collectRows(filtered).filter((row) => matchesSearch(row, parsed.search));
 
-	if (asJson) {
+	if (parsed.json) {
 		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
 	} else {
 		renderRows(rows);
@@ -60,7 +107,7 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>): ModelRow[] {
 		const discovered = status.discoveredModels.length > 0 ? status.discoveredModels : fallbackModels(status);
 		if (discovered.length === 0) {
 			rows.push({
-				endpointId: status.endpoint.id,
+				targetId: status.endpoint.id,
 				runtimeId,
 				modelId: "(no models)",
 				caps,
@@ -68,7 +115,7 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>): ModelRow[] {
 			continue;
 		}
 		for (const modelId of discovered) {
-			rows.push({ endpointId: status.endpoint.id, runtimeId, modelId, caps });
+			rows.push({ targetId: status.endpoint.id, runtimeId, modelId, caps });
 		}
 	}
 	return rows;
@@ -101,15 +148,15 @@ function capabilityBadges(status: EndpointStatus): string {
 
 function renderRows(rows: ReadonlyArray<ModelRow>): void {
 	if (rows.length === 0) {
-		process.stdout.write("no endpoints configured. run `clio setup` to register one.\n");
+		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
 		return;
 	}
 	const widths: ReadonlyArray<number> = [16, 18, 42, 8];
-	const header = ["endpoint", "runtime", "model", "caps"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
+	const header = ["target", "runtime", "model", "caps"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
 	process.stdout.write(`${chalk.bold(header.trimEnd())}\n`);
 	for (const row of rows) {
 		const line = [
-			row.endpointId.padEnd(widths[0] ?? 0),
+			row.targetId.padEnd(widths[0] ?? 0),
 			row.runtimeId.padEnd(widths[1] ?? 0),
 			row.modelId.padEnd(widths[2] ?? 0),
 			row.caps.padEnd(widths[3] ?? 0),
@@ -122,7 +169,7 @@ function matchesSearch(row: ModelRow, search: string | undefined): boolean {
 	if (!search) return true;
 	const needle = search.toLowerCase();
 	return (
-		row.endpointId.toLowerCase().includes(needle) ||
+		row.targetId.toLowerCase().includes(needle) ||
 		row.runtimeId.toLowerCase().includes(needle) ||
 		row.modelId.toLowerCase().includes(needle)
 	);

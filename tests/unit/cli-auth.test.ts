@@ -5,8 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { runAuthCommand } from "../../src/cli/auth.js";
-import { runConnectCommand } from "../../src/cli/login.js";
-import { runDisconnectCommand } from "../../src/cli/logout.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import {
@@ -89,9 +87,9 @@ describe("cli auth commands", () => {
 		resetXdgCache();
 	});
 
-	it("connect stores oauth credentials and auth status/disconnect reflect them", async () => {
-		const connect = await captureOutput(() => runConnectCommand([TEST_PROVIDER_ID]));
-		strictEqual(connect.result, 0);
+	it("auth login stores oauth credentials and auth status/logout reflect them", async () => {
+		const login = await captureOutput(() => runAuthCommand(["login", TEST_PROVIDER_ID]));
+		strictEqual(login.result, 0);
 		const stored = openAuthStorage().get(TEST_PROVIDER_ID);
 		ok(stored && stored.type === "oauth");
 
@@ -99,8 +97,8 @@ describe("cli auth commands", () => {
 		strictEqual(status.result, 0);
 		ok(status.stdout.includes(`${TEST_PROVIDER_ID}\toauth\tpresent`));
 
-		const disconnect = await captureOutput(() => runDisconnectCommand([TEST_PROVIDER_ID]));
-		strictEqual(disconnect.result, 0);
+		const logout = await captureOutput(() => runAuthCommand(["logout", TEST_PROVIDER_ID]));
+		strictEqual(logout.result, 0);
 		strictEqual(openAuthStorage().get(TEST_PROVIDER_ID), undefined);
 
 		const after = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));

@@ -58,6 +58,7 @@ describe("interactive/chat-loop resetForSession", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () =>
 					({

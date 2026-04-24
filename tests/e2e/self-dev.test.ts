@@ -8,12 +8,53 @@ import { runCli } from "../harness/spawn.js";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
+function writeTargetFixture(home: string): void {
+	writeFileSync(
+		join(home, "settings.yaml"),
+		[
+			"version: 1",
+			"identity: clio",
+			"defaultMode: default",
+			"safetyLevel: auto-edit",
+			"targets:",
+			"  - id: anthropic-prod",
+			"    runtime: anthropic",
+			"    defaultModel: claude-sonnet-4-6",
+			"    auth:",
+			"      apiKeyEnvVar: ANTHROPIC_API_KEY",
+			"orchestrator:",
+			"  target: anthropic-prod",
+			"  model: claude-sonnet-4-6",
+			"  thinkingLevel: off",
+			"workers:",
+			"  default:",
+			"    target: anthropic-prod",
+			"    model: claude-sonnet-4-6",
+			"    thinkingLevel: off",
+			"scope: []",
+			"budget:",
+			"  sessionCeilingUsd: 5",
+			"  concurrency: auto",
+			"theme: default",
+			"keybindings: {}",
+			"state:",
+			"  lastMode: default",
+			"compaction:",
+			"  threshold: 0.8",
+			"  auto: true",
+			"",
+		].join("\n"),
+		"utf8",
+	);
+}
+
 describe("CLIO_SELF_DEV end-to-end", () => {
 	let home: string;
 
 	beforeEach(async () => {
 		home = mkdtempSync(join(tmpdir(), "clio-selfdev-e2e-"));
-		await runCli(["install"], { env: { CLIO_HOME: home } });
+		await runCli(["doctor", "--fix"], { env: { CLIO_HOME: home } });
+		writeTargetFixture(home);
 	});
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
@@ -30,7 +71,7 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		const readToolPath = join(REPO_ROOT, "src", "tools", "read.ts");
 		const original = readFileSync(readToolPath, "utf8");
 		const pty = spawnClioPty({
-			env: { CLIO_HOME: home, CLIO_SELF_DEV: "1" },
+			env: { CLIO_HOME: home, CLIO_SELF_DEV: "1", ANTHROPIC_API_KEY: "sk-test" },
 		});
 		try {
 			await pty.expect(/CLIO_SELF_DEV=1/, 8000);

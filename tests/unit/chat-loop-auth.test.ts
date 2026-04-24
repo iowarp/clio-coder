@@ -43,6 +43,7 @@ describe("interactive/chat-loop auth resolution", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "openai-codex",

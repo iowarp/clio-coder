@@ -9,10 +9,10 @@ import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	getRuntimeRegistry,
-	listProviderSupportEntries,
 	type ProvidersContract,
 	resolveProviderReference,
 	type ThinkingLevel,
+	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
@@ -356,7 +356,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Pure overlay key router for the /providers overlay. Esc closes; everything else is swallowed. */
+/** Pure overlay key router for the target status overlay. Esc closes; everything else is swallowed. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
@@ -840,7 +840,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 	};
 
-	const resolveAuthReference = (target: string) => {
+	const resolveConnectionReference = (target: string) => {
 		const settings = deps.getSettings?.();
 		if (!settings) return null;
 		return resolveProviderReference(
@@ -851,53 +851,80 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const performDisconnect = (target: string): void => {
-		const resolved = resolveAuthReference(target);
-		if (!resolved) {
-			io.stderr(`[/disconnect] unknown provider or endpoint: ${target}\n`);
+		const resolved = resolveConnectionReference(target);
+		if (!resolved?.endpoint) {
+			io.stderr(`[/disconnect] unknown target: ${target}\n`);
 			return;
 		}
-		const status = deps.providers.auth.statusForTarget(
-			resolved.endpoint ?? { id: "", runtime: resolved.runtime.id },
-			resolved.runtime,
-		);
-		if (!status.available) {
-			io.stderr(`[/disconnect] no stored credential for ${resolved.authTarget.providerId}\n`);
+		const status = deps.providers.disconnectEndpoint(resolved.endpoint.id);
+		if (!status) {
+			io.stderr(`[/disconnect] unknown target: ${target}\n`);
 			return;
 		}
-		if (status.source === "environment") {
-			io.stderr(
-				`[/disconnect] ${resolved.authTarget.providerId} uses ${status.detail ?? "environment"}; clear the env var to disconnect\n`,
-			);
-			return;
-		}
-		if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
-			io.stderr(`[/disconnect] cannot disconnect ${resolved.authTarget.providerId} from source ${status.source}\n`);
-			return;
-		}
-		deps.providers.auth.logout(resolved.authTarget.providerId);
+		io.stderr(`[/disconnect] disconnected target ${status.endpoint.id}; credentials unchanged\n`);
 		footer.refresh();
 		tui.requestRender();
 	};
 
 	const openConnectFlowState = (target: string): void => {
 		if (overlayState !== "closed") return;
-		const resolved = resolveAuthReference(target);
-		if (!resolved) {
-			io.stderr(`[/connect] unknown provider or endpoint: ${target}\n`);
+		const resolved = resolveConnectionReference(target);
+		if (!resolved?.endpoint) {
+			io.stderr(`[/connect] unknown target: ${target}. Configure a target first with clio targets add.\n`);
 			return;
 		}
-		if (resolved.runtime.auth !== "oauth" && resolved.runtime.auth !== "api-key") {
-			io.stderr(`[/connect] runtime ${resolved.runtime.id} is not connectable from the TUI\n`);
-			return;
-		}
+		const endpointId = resolved.endpoint.id;
+		const runtimeId = resolved.runtime.id;
+		const probeTarget = async (dialog: ReturnType<typeof openAuthDialog>): Promise<void> => {
+			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking connection..."]);
+			const status = await deps.providers.probeEndpoint(endpointId);
+			if (!status) {
+				dialog.controller.setLines([`Target: ${endpointId}`, "Connection failed: target is not configured."]);
+				return;
+			}
+			const health = status.health.status;
+			const detail =
+				status.reason ||
+				status.health.lastError ||
+				(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
+			dialog.controller.setLines([
+				`Target: ${endpointId}`,
+				`Runtime: ${runtimeId}`,
+				status.available ? `Connected (${health})` : `Connection failed (${health})`,
+				detail,
+			]);
+			footer.refresh();
+			tui.requestRender();
+		};
+
 		overlayState = "auth";
+		const requiresManagedAuth = targetRequiresAuth(resolved.endpoint, resolved.runtime);
+		const authStatus = deps.providers.auth.statusForTarget(resolved.endpoint, resolved.runtime);
+		if (!requiresManagedAuth || authStatus.available) {
+			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
+			overlayHandle = dialog.handle;
+			void (async () => {
+				try {
+					await probeTarget(dialog);
+				} catch (error) {
+					dialog.controller.setLines([
+						`Target: ${endpointId}`,
+						`Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+					]);
+					tui.requestRender();
+				}
+			})();
+			tui.requestRender();
+			return;
+		}
 		if (resolved.runtime.auth === "api-key") {
-			const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
 			overlayHandle = dialog.handle;
 			authDialogDismiss = dialog.controller.dismiss;
 			dialog.controller.setLines([
-				`Provider: ${resolved.authTarget.providerId}`,
-				"Store an API key in credentials.yaml for this provider.",
+				`Target: ${endpointId}`,
+				`Runtime: ${resolved.runtime.id}`,
+				"API key required before Clio can connect to this target.",
 			]);
 			void (async () => {
 				try {
@@ -905,8 +932,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					if (apiKey.length === 0) throw new Error("empty API key");
 					deps.providers.auth.setApiKey(resolved.authTarget.providerId, apiKey);
 					authDialogDismiss = null;
-					closeOverlay();
-					footer.refresh();
+					await probeTarget(dialog);
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					if (message !== "dismissed" && message !== "cancelled") {
@@ -919,10 +945,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			return;
 		}
-		const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+		const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
 		overlayHandle = dialog.handle;
 		authDialogDismiss = dialog.controller.dismiss;
-		dialog.controller.setLines([`Provider: ${resolved.authTarget.providerId}`, "Starting OAuth flow..."]);
+		dialog.controller.setLines([
+			`Target: ${endpointId}`,
+			`Runtime: ${resolved.runtime.id}`,
+			"Starting authorization flow...",
+		]);
 		void (async () => {
 			let manualCodeTimer: NodeJS.Timeout | null = null;
 			try {
@@ -954,8 +984,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					},
 				});
 				authDialogDismiss = null;
-				closeOverlay();
-				footer.refresh();
+				await probeTarget(dialog);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message !== "dismissed" && message !== "cancelled") {
@@ -980,20 +1009,33 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		const settings = deps.getSettings?.();
 		if (!settings) return;
-		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
-			.filter((entry) => entry.connectable)
-			.map((entry) => {
-				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
-				const status = runtime ? deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime) : null;
-				return {
-					value: entry.runtimeId,
-					label: `${entry.runtimeId}  ${entry.label}`,
-					description: status?.available ? `${status.source}` : entry.summary,
-				};
-			});
+		const statuses = deps.providers.list();
+		const targetItems: SelectItem[] = settings.endpoints.map((endpoint) => {
+			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
+			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
+			const auth =
+				runtime && (runtime.auth === "oauth" || runtime.auth === "api-key")
+					? deps.providers.auth.statusForTarget(endpoint, runtime)
+					: null;
+			const connection =
+				status?.health.status && status.health.status !== "unknown"
+					? status.health.status
+					: auth?.available
+						? auth.source
+						: (status?.reason ?? "configured target");
+			return {
+				value: endpoint.id,
+				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
+				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
+			};
+		});
+		if (targetItems.length === 0) {
+			io.stderr("[/connect] no targets configured. Run clio configure or clio targets add.\n");
+			return;
+		}
 		overlayState = "auth";
 		overlayHandle = openAuthSelectorOverlay(tui, {
-			items,
+			items: targetItems,
 			onSelect: (value) => {
 				closeOverlay();
 				queueMicrotask(() => openConnectFlowState(value));
@@ -1009,20 +1051,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		if (overlayState !== "closed") return;
-		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
-			.filter((entry) => {
-				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
-				if (!runtime) return false;
-				const status = deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime);
-				return status.source === "stored-api-key" || status.source === "stored-oauth";
-			})
-			.map((entry) => ({
-				value: entry.runtimeId,
-				label: `${entry.runtimeId}  ${entry.label}`,
-				description: "disconnect stored credential",
-			}));
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		const statuses = deps.providers.list();
+		const items: SelectItem[] = settings.endpoints.map((endpoint) => {
+			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
+			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
+			const connection =
+				status?.health.status && status.health.status !== "unknown"
+					? status.health.status
+					: (status?.reason ?? "configured target");
+			return {
+				value: endpoint.id,
+				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
+				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
+			};
+		});
 		if (items.length === 0) {
-			io.stderr("[/disconnect] no stored provider credentials\n");
+			io.stderr("[/disconnect] no targets configured. Run clio configure or clio targets add.\n");
 			return;
 		}
 		overlayState = "auth";

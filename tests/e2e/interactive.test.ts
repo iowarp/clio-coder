@@ -9,19 +9,19 @@ function writeSettings(configDir: string, yaml: string): void {
 	writeFileSync(join(configDir, "settings.yaml"), yaml, "utf8");
 }
 
-function baseSettingsYaml(body: { endpoints: string; orchestrator: string }): string {
+function baseSettingsYaml(body: { targets: string; orchestrator: string }): string {
 	return [
 		"version: 1",
 		"identity: clio",
 		"defaultMode: default",
 		"safetyLevel: auto-edit",
-		"endpoints:",
-		body.endpoints,
+		"targets:",
+		body.targets,
 		"orchestrator:",
 		body.orchestrator,
 		"workers:",
 		"  default:",
-		"    endpoint: null",
+		"    target: null",
 		"    model: null",
 		"    thinkingLevel: off",
 		"scope: []",
@@ -43,14 +43,14 @@ function writeEndpointFixture(configDir: string): void {
 	writeSettings(
 		configDir,
 		baseSettingsYaml({
-			endpoints: [
+			targets: [
 				"  - id: anthropic-prod",
 				"    runtime: anthropic",
 				"    defaultModel: claude-sonnet-4-6",
 				"    auth:",
 				"      apiKeyEnvVar: ANTHROPIC_API_KEY",
 			].join("\n"),
-			orchestrator: ["  endpoint: anthropic-prod", "  model: claude-sonnet-4-6", "  thinkingLevel: off"].join("\n"),
+			orchestrator: ["  target: anthropic-prod", "  model: claude-sonnet-4-6", "  thinkingLevel: off"].join("\n"),
 		}),
 	);
 }
@@ -60,8 +60,12 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 
 	beforeEach(async () => {
 		scratch = makeScratchHome();
+		scratch.env.ANTHROPIC_API_KEY = "sk-test";
 		// Bootstrap the scratch home so interactive mode doesn't hit first-run paths.
-		await runCli(["install"], { env: scratch.env });
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		writeEndpointFixture(configDir);
 	});
 
 	afterEach(() => {
@@ -115,7 +119,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		try {
 			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/model\r");
-			// The configured endpoint id appears only inside the /model picker,
+			// The configured target id appears only inside the /model picker,
 			// never in the footer, so matching it proves the overlay rendered.
 			await p.expect(/anthropic-prod/, 10_000);
 			// Esc closes the overlay per routeModelOverlayKey.
@@ -157,18 +161,16 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: mini",
 					"    runtime: openai-compat",
 					"    url: http://127.0.0.1:8080",
-					"    auth:",
-					"      apiKeyRef: openai-compat",
 					"    defaultModel: gemma-4-26B-A4B-it-Q4_K_M",
 					"    wireModels:",
 					"      - Qwen3.6-35B-A3B-UD-Q4_K_XL",
 					"      - gemma-4-26B-A4B-it-Q4_K_M",
 				].join("\n"),
-				orchestrator: ["  endpoint: mini", "  model: gemma-4-26B-A4B-it-Q4_K_M", "  thinkingLevel: off"].join("\n"),
+				orchestrator: ["  target: mini", "  model: gemma-4-26B-A4B-it-Q4_K_M", "  thinkingLevel: off"].join("\n"),
 			}),
 		);
 		const p = spawnClioPty({ env: scratch.env });
@@ -193,16 +195,33 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: openai-codex",
 					"    runtime: openai-codex",
 					"    defaultModel: gpt-5.4",
+					"    auth:",
+					"      oauthProfile: openai-codex",
 					"    wireModels:",
 					"      - gpt-5.4",
 					"      - gpt-5.4-mini",
 				].join("\n"),
-				orchestrator: ["  endpoint: openai-codex", "  model: gpt-5.4", "  thinkingLevel: low"].join("\n"),
+				orchestrator: ["  target: openai-codex", "  model: gpt-5.4", "  thinkingLevel: low"].join("\n"),
 			}),
+		);
+		writeFileSync(
+			join(configDir, "credentials.yaml"),
+			[
+				"version: 2",
+				"entries:",
+				"  openai-codex:",
+				"    type: oauth",
+				"    access: test-access",
+				"    refresh: test-refresh",
+				"    expires: 4102444800000",
+				"    updatedAt: 2026-01-01T00:00:00.000Z",
+				"",
+			].join("\n"),
+			"utf8",
 		);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
@@ -224,7 +243,24 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("/connect opens the provider selector, Esc closes, /quit exits clean", async () => {
+	it("/targets opens the target overlay, Esc closes, /quit exits clean", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+Clio Coder/, 15_000);
+			p.send("/targets\r");
+			await p.expect(/Targets/, 10_000);
+			await p.expect(/anthropic-prod/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/connect opens the target connection selector, Esc closes, /quit exits clean", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
 			await p.expect(/clio\s+Clio Coder/, 15_000);
@@ -437,11 +473,11 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("/thinking shows the full level set for a reasoning-capable endpoint", async () => {
-		// W7 replaced the legacy provider/providers/endpoint trio with a flat
-		// endpoints[] list. The orchestrator target points at an endpoint id,
-		// and the endpoint carries its own capability overrides. Here we pin
-		// reasoning=true at the endpoint level and assert /thinking offers
+	it("/thinking shows the full level set for a reasoning-capable target", async () => {
+		// Target config is a flat targets[] list. The orchestrator target
+		// points at a target id, and the target carries its own capability
+		// overrides. Here we pin reasoning=true at the target level and assert
+		// /thinking offers
 		// more than [off], proving the capability-merge path reaches the
 		// overlay.
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
@@ -449,7 +485,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: mini",
 					"    runtime: openai-compat",
 					"    url: http://mini.local:8080",
@@ -460,7 +496,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 					"      contextWindow: 262144",
 					"      maxTokens: 8192",
 				].join("\n"),
-				orchestrator: ["  endpoint: mini", "  model: Qwen3.6-35B-A3B", "  thinkingLevel: medium"].join("\n"),
+				orchestrator: ["  target: mini", "  model: Qwen3.6-35B-A3B", "  thinkingLevel: medium"].join("\n"),
 			}),
 		);
 
@@ -472,7 +508,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			// but the slash command must route and Esc must close cleanly so
 			// /quit exits 0. The availableThinkingLevels ↔ endpoint capability
 			// wiring is covered by
-			// tests/unit/providers/capabilities.test.ts and the endpoint lookup
+			// tests/unit/providers/capabilities.test.ts and the target lookup
 			// path by tests/integration/providers/endpoint-lifecycle.test.ts.
 			await new Promise((r) => setTimeout(r, 400));
 			p.send("\x1b");

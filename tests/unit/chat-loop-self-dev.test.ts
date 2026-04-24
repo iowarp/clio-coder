@@ -33,6 +33,7 @@ describe("interactive/chat-loop self-dev prompt", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () =>
 					({

@@ -14,6 +14,7 @@ import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import claudeCodeCli from "./cli-stub/claude-code-cli.js";
 import codexCli from "./cli-stub/codex-cli.js";
 import geminiCli from "./cli-stub/gemini-cli.js";
+import openCodeCli from "./cli-stub/opencode-cli.js";
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
 import google from "./cloud/google.js";
@@ -46,6 +47,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	claudeCodeCli,
 	codexCli,
 	geminiCli,
+	openCodeCli,
 	lemonadeAnthropic,
 	lemonadeOpenai,
 	llamacppAnthropic,

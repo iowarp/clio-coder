@@ -1,7 +1,7 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.2.0-dev",
-	"description": "AI coding harness for supervised repository work with interactive chat, configurable model endpoints, worker dispatch, and self-development mode.",
+	"description": "AI coding harness for supervised repository work with interactive chat, configurable model targets, worker dispatch, and self-development mode.",
 	"keywords": [
 		"ai",
 		"coding",
@@ -10,7 +10,7 @@
 		"developer-tools",
 		"llm",
 		"agents",
-		"model-endpoints"
+		"model-targets"
 	],
 	"type": "module",
 	"license": "Apache-2.0",

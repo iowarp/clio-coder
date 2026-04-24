@@ -10,7 +10,7 @@
 <p align="center"><strong>AI coding harness for supervised repository work.</strong></p>
 
 <p align="center">
-  Interactive terminal chat, configurable local and cloud model endpoints, dispatchable coding workers, and self-development mode.
+  Interactive terminal chat, configurable local and cloud model targets, dispatchable coding workers, and self-development mode.
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 5. [Slash commands](#slash-commands)
 6. [Keybindings](#keybindings)
 7. [Configuration](#configuration)
-8. [Providers](#providers)
+8. [Targets and runtimes](#targets-and-runtimes)
 9. [Runtimes](#runtimes)
 10. [Agents](#agents)
 11. [Safety model](#safety-model)
@@ -48,14 +48,14 @@
 
 ## What is Clio Coder?
 
-Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model endpoints, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
+Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
 Status: **v0.2.0-dev**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows.
 
 Recent focus in this dev cycle:
 
-- unified endpoint auth and setup flows across the CLI and interactive UI
-- provider controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
+- target-oriented auth and configuration flows across the CLI and interactive UI
+- target controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
 - safer uninstall and reset flows for wiping or reseeding local state
 - an experimental self-dev harness for hot-reload and restart-required feedback while working on Clio Coder itself
 
@@ -72,8 +72,6 @@ git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm install
 npm run build && npm link
-clio install
-clio setup
 clio
 ```
 
@@ -94,19 +92,18 @@ The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_D
 ## First run
 
 ```bash
-clio install                         # bootstrap config/data/cache dirs and seed settings.yaml
-clio setup                           # add or edit an endpoint
-clio auth list                       # optional: show connectable providers
-clio connect <provider-or-endpoint>  # optional: OAuth/API-key flow for hosted providers
-clio providers                       # probe configured endpoints and show health/capabilities
-clio                                 # start the interactive TUI
+clio                                 # start the TUI; first run bootstraps and configures
+clio configure                       # rerun the configuration wizard
+clio targets                         # inspect target health/auth/capabilities
+clio models                          # list models for configured targets
+clio auth login <target-or-runtime>  # optional OAuth/API-key flow
 ```
 
-`clio setup` writes endpoint entries into `settings.yaml` under `endpoints[]`, and can also point `orchestrator` and `workers.default` at the same target so chat and worker dispatch are aligned immediately. Re-run it to add, remove, rename, or retarget endpoints without hand-editing the whole file.
+Bare `clio` bootstraps config, data, and cache automatically. If it is running interactively and no usable default target exists, it guides you into `clio configure` instead of requiring a separate lifecycle step.
 
-For a non-interactive run, `clio run --agent scout "summarize the repo layout"` dispatches a worker and writes a receipt. Use `--endpoint`, `--model`, `--thinking`, and `--require` when you want a one-off override without changing defaults.
+For a non-interactive run, `clio run --agent scout "summarize the repo layout"` dispatches a worker and writes a receipt. Use `--target`, `--model`, `--thinking`, and `--require` when you want a one-off override without changing defaults.
 
-Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Clio Coder`. The current surface includes provider and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
+Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Clio Coder`. The current surface includes target and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
 
 ---
 
@@ -115,15 +112,16 @@ Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Cli
 | Command | What it does |
 | --- | --- |
 | `clio` | Launch the interactive TUI. |
-| `clio install` | Bootstrap the resolved config/data/cache dirs and seed `settings.yaml`. |
-| `clio setup` | Create, edit, remove, rename, or retarget endpoints. Supports interactive and non-interactive flows. |
-| `clio uninstall` | Remove Clio Coder state or reset it to a fresh default install with guarded flags. |
-| `clio doctor` | Parse settings, resolve XDG paths, and report health. |
-| `clio providers` | Probe configured endpoints and report health, capabilities, and discovered models. |
-| `clio list-models` | List discovered or known models per endpoint. |
-| `clio connect [provider|endpoint]` | Start an OAuth or API-key connect flow for a supported runtime. |
-| `clio disconnect <provider|endpoint>` | Remove stored credentials for a provider or endpoint. |
-| `clio auth [list|status]` | List supported connectable providers or show current auth status. |
+| `clio configure` | Run the first-run/configuration wizard. |
+| `clio targets` | List configured targets, health, auth, runtime, model, and capabilities. |
+| `clio targets add` | Add a target interactively or via flags. |
+| `clio targets use <id>` | Set chat and worker defaults to one target. |
+| `clio targets remove <id>` / `rename <old> <new>` | Manage target ids. |
+| `clio models [search] [--target <id>]` | List discovered or known models for targets. |
+| `clio auth list|status|login|logout [target-or-runtime]` | Inspect, add, or remove stored auth. |
+| `clio doctor [--fix]` | Diagnose without creating files; `--fix` creates or repairs state. |
+| `clio reset [--state|--auth|--config|--all]` | Recover or wipe Clio state while keeping the binary installed. |
+| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio state and print package-manager removal guidance. |
 | `clio agents` | List builtin agent specs. |
 | `clio run [flags] "<task>"` | Dispatch a single worker non-interactively and persist a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
@@ -140,9 +138,9 @@ Available inside the interactive TUI.
 | Command | What it does |
 | --- | --- |
 | `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
-| `/providers` | Overlay provider and endpoint health from the providers domain. |
-| `/connect [target]` | Connect a provider or endpoint from the TUI. |
-| `/disconnect [target]` | Disconnect stored provider auth from the TUI. |
+| `/targets` | Overlay target health, auth, runtime, model, and capabilities. |
+| `/connect [target]` | Connect to a target or runtime; auth-backed runtimes prompt for credentials, local targets are probed. |
+| `/disconnect [target]` | Disconnect a target or runtime when Clio owns stored connection state. |
 | `/model` or `/models` | Open the model selector for the orchestrator target. |
 | `/scoped-models` | Edit the scoped list used by model cycling. |
 | `/thinking` | Open the thinking-level selector. |
@@ -182,12 +180,12 @@ Parser source: [`src/interactive/`](src/interactive/).
 
 Clio Coder reads from the platform config dir by default: `~/.config/clio/settings.yaml` on Linux, `~/Library/Application Support/clio/settings.yaml` on macOS, and `%APPDATA%/clio/settings.yaml` on Windows. Every path is overridable via XDG or Clio Coder-specific env vars so you can keep dev and prod state separate.
 
-The happy path is still `clio install` followed by `clio setup`, but the config shape is now endpoint-first: local HTTP engines, cloud APIs, and OAuth-backed providers all land in `endpoints[]`, then `orchestrator` and `workers.default` select from those endpoint ids.
+The happy path is package install followed by bare `clio`. The config shape is target-first: local HTTP engines, cloud APIs, OAuth/subscription runtimes, and CLI-backed runtimes all land in `targets[]`, then `orchestrator` and `workers.default` select from those target ids.
 
 ```yaml
 # Linux default: ~/.config/clio/settings.yaml (excerpt)
 version: 1
-endpoints:
+targets:
   - id: mini
     runtime: openai-compat
     url: http://127.0.0.1:8080
@@ -197,13 +195,13 @@ endpoints:
       reasoning: true
 
 orchestrator:
-  endpoint: mini
+  target: mini
   model: Qwen3.6-35B-A3B-UD-Q4_K_XL
   thinkingLevel: off
 
 workers:
   default:
-    endpoint: mini
+    target: mini
     model: Qwen3.6-35B-A3B-UD-Q4_K_XL
     thinkingLevel: off
 
@@ -224,35 +222,35 @@ compaction:
 | `ANTHROPIC_API_KEY` | unset | Enables Claude providers. |
 | `OPENAI_API_KEY` | unset | Enables OpenAI providers. |
 
-Other provider-specific credentials can live in environment variables referenced by `endpoints[].auth.apiKeyEnvVar`, or in Clio Coder's credential store when you use `clio connect`.
+Runtime credentials can live in environment variables referenced by `targets[].auth.apiKeyEnvVar`, or in Clio Coder's credential store when you use `clio auth login`.
 
 ---
 
-## Providers
+## Targets and runtimes
 
 | Group | Examples | Notes |
 | --- | --- | --- |
-| Featured / subscription | `openai-codex` | ChatGPT Plus/Pro via Codex OAuth. Recent work has made this a first-class connectable option. |
-| Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock` | API-key-backed runtimes. Use `clio auth list` or `clio connect` to inspect the current support surface. |
-| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` | Configured as `endpoints[]` with a URL and optional capability overrides. |
+| Featured / subscription | `openai-codex` | ChatGPT Plus/Pro via Codex OAuth. Use `clio auth login openai-codex`. |
+| Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock` | API-key-backed runtimes. Use `clio auth list` to inspect the current support surface. |
+| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` | Configured as `targets[]` with a URL and optional capability overrides. |
 | CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli` | Recognized by the registry and support surfaces. Dispatch requires the matching CLI to be installed and authenticated. |
 
-`clio providers` probes configured endpoints and reports health, capability flags, and discovered models. `clio list-models` gives a flatter per-endpoint model view.
+`clio targets --probe` probes configured targets and reports health, capability flags, and discovered models. `clio models` gives a flatter per-target model view.
 
 ---
 
 ## Runtimes
 
-Runtime tiers classify how an endpoint is reached.
+Runtime tiers classify how a target is reached.
 
 | Tier | What it is |
 | --- | --- |
-| `protocol` | HTTP endpoints that speak a supported model API protocol. |
+| `protocol` | HTTP targets that speak a supported model API protocol. |
 | `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
 | `local-native` | Local model runtimes reached through their native HTTP or SDK surface. |
 | `cli-stub` | CLI-backed runtimes launched through installed command-line tools. |
 
-That split is intentionally visible in `clio setup`, `clio providers`, and `clio list-models` so endpoint configuration, health, and dispatch behavior stay understandable.
+That split is intentionally visible in `clio configure`, `clio targets`, and `clio models` so target configuration, health, and dispatch behavior stay understandable.
 
 ---
 
@@ -290,7 +288,7 @@ Hardcoded kill-switches for dangerous Bash patterns live in [`damage-control-rul
 
 ## Receipts and cost
 
-Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and endpoint used, and a hash of the event ledger.
+Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and target used, and a hash of the event ledger.
 
 ```bash
 /receipts                   # paginated list in the TUI
@@ -337,7 +335,7 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ## Roadmap
 
-- **v0.2 (current)**: endpoint-first provider config, interactive TUI, receipts and cost ledger, auth/setup flows, model and session controls, dispatchable workers, and early self-dev harness support.
+- **v0.2 (current)**: target-first config, interactive TUI, receipts and cost ledger, auth/configure flows, model and session controls, dispatchable workers, and early self-dev harness support.
 - **Next**: broader runtime hardening, MCP support, richer agent library, and deeper developer ergonomics.
 - **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
 

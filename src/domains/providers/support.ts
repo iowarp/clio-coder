@@ -50,6 +50,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	"claude-code-cli": "Claude Code CLI",
 	"codex-cli": "Codex CLI",
 	"gemini-cli": "Gemini CLI",
+	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
 	"lmstudio-native": "LM Studio native API",
 };
@@ -105,13 +106,7 @@ export function listKnownModelsForRuntime(runtimeId: string): string[] {
 }
 
 export function defaultModelForRuntime(runtimeId: string): string | undefined {
-	if (runtimeId === "openai-codex") return "gpt-5.4";
 	return listKnownModelsForRuntime(runtimeId)[0];
-}
-
-export function defaultWorkerModelForRuntime(runtimeId: string): string | undefined {
-	if (runtimeId === "openai-codex") return "gpt-5.4-mini";
-	return defaultModelForRuntime(runtimeId);
 }
 
 export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderSupportEntry {

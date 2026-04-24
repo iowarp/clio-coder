@@ -60,14 +60,14 @@ export interface HandleRunDeps {
 
 /**
  * Dispatches /run through the dispatch contract and streams events to stdout.
- * Endpoint + model are resolved from `settings.workers.default`; when that
+ * Target + model are resolved from `settings.workers.default`; when that
  * block is empty, we refuse to dispatch and print an actionable error instead.
  */
 export async function handleRun(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
 	const { dispatch, io, workerDefault, bus } = deps;
 	if (!workerDefault?.endpoint) {
 		io.stderr(
-			`[run] no endpoint configured. Edit ${settingsPath()} (workers.default.endpoint + workers.default.model) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
+			`[run] no worker target configured. Edit ${settingsPath()} (workers.default.target + workers.default.model) or launch Clio with CLIO_WORKER_FAUX=1 for a smoke test.\n`,
 		);
 		return;
 	}
@@ -220,11 +220,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "providers",
-		description: "Open providers overlay",
+		name: "targets",
+		description: "Open targets overlay",
 		kinds: ["providers"],
 		match(trimmed) {
-			return trimmed === "/providers" ? { kind: "providers" } : null;
+			return trimmed === "/targets" ? { kind: "providers" } : null;
 		},
 		handle(_command, ctx) {
 			ctx.openProviders();
@@ -232,16 +232,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "connect",
-		description: "Connect a provider or endpoint",
+		description: "Connect to a target",
 		kinds: ["connect"],
 		match(trimmed) {
-			if (trimmed === "/connect" || trimmed === "/login") return { kind: "connect" };
+			if (trimmed === "/connect") return { kind: "connect" };
 			if (trimmed.startsWith("/connect ")) {
 				const target = trimmed.slice("/connect ".length).trim();
-				return { kind: "connect", ...(target.length > 0 ? { target } : {}) };
-			}
-			if (trimmed.startsWith("/login ")) {
-				const target = trimmed.slice("/login ".length).trim();
 				return { kind: "connect", ...(target.length > 0 ? { target } : {}) };
 			}
 			return null;
@@ -253,16 +249,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "disconnect",
-		description: "Disconnect a provider or endpoint",
+		description: "Disconnect a target",
 		kinds: ["disconnect"],
 		match(trimmed) {
-			if (trimmed === "/disconnect" || trimmed === "/logout") return { kind: "disconnect" };
+			if (trimmed === "/disconnect") return { kind: "disconnect" };
 			if (trimmed.startsWith("/disconnect ")) {
 				const target = trimmed.slice("/disconnect ".length).trim();
-				return { kind: "disconnect", ...(target.length > 0 ? { target } : {}) };
-			}
-			if (trimmed.startsWith("/logout ")) {
-				const target = trimmed.slice("/logout ".length).trim();
 				return { kind: "disconnect", ...(target.length > 0 ? { target } : {}) };
 			}
 			return null;

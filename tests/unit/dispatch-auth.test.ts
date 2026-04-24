@@ -84,6 +84,7 @@ describe("dispatch auth resolution", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => status,
+			disconnectEndpoint: () => status,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "openai-codex",

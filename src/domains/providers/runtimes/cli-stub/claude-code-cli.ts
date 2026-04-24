@@ -30,7 +30,7 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	kind: "subprocess",
 	tier: "cli-stub",
 	apiFamily: "subprocess-claude-code",
-	auth: "oauth",
+	auth: "cli",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return runVersionProbe(spawn, "claude", ctx);

@@ -76,9 +76,9 @@ export function buildSettingItems(
 		},
 		{
 			id: "orchestrator.endpoint",
-			label: "orchestrator.endpoint",
+			label: "orchestrator.target",
 			currentValue: settings.orchestrator.endpoint ?? "(unset)",
-			description: "Active endpoint id. Edit via /model.",
+			description: "Active target id. Edit via /model.",
 		},
 		{
 			id: "orchestrator.model",
@@ -88,9 +88,9 @@ export function buildSettingItems(
 		},
 		{
 			id: "workers.default.endpoint",
-			label: "workers.default.endpoint",
+			label: "workers.default.target",
 			currentValue: settings.workers.default.endpoint ?? "(unset)",
-			description: "/run endpoint id. Edit settings.yaml.",
+			description: "/run target id. Edit settings.yaml.",
 		},
 		{
 			id: "workers.default.model",
@@ -102,7 +102,7 @@ export function buildSettingItems(
 			id: "endpoints.count",
 			label: "endpoints",
 			currentValue: String(endpointCount),
-			description: "Configured endpoints. Edit settings.yaml or run /providers.",
+			description: "Configured targets. Edit settings.yaml or run /targets.",
 		},
 		{
 			id: "budget.sessionCeilingUsd",

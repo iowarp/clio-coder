@@ -6,11 +6,12 @@ import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.j
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
-import type {
-	EndpointDescriptor,
-	ProvidersContract,
-	RuntimeDescriptor,
-	ThinkingLevel,
+import {
+	type EndpointDescriptor,
+	type ProvidersContract,
+	type RuntimeDescriptor,
+	type ThinkingLevel,
+	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
@@ -73,7 +74,7 @@ export interface CreateChatLoopDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	/**
-	 * Whitelist of endpoint ids that the chat-loop is allowed to drive. The
+	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
 	 * `settings.orchestrator.endpoint` surfaces a configuration error before
 	 * the agent is constructed.
@@ -139,7 +140,7 @@ interface AgentRuntime {
 }
 
 function notConfiguredNotice(): string {
-	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.endpoint + orchestrator.model) to enable chat.`;
+	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.target + orchestrator.model) to enable chat.`;
 }
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
@@ -352,7 +353,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!endpointId || !wireModelId) return null;
 		const endpoint = deps.providers.getEndpoint(endpointId);
 		if (!endpoint) {
-			throw new Error(`[clio] orchestrator endpoint='${endpointId}' not found in settings.endpoints`);
+			throw new Error(`[clio] orchestrator target='${endpointId}' not found in settings.targets`);
 		}
 		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
 		if (!runtimeDesc) {
@@ -360,7 +361,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		if (runtimeDesc.kind === "subprocess") {
 			throw new Error(
-				`[clio] endpoint '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets (workers.default), not as the orchestrator chat endpoint`,
+				`[clio] target '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
 			);
 		}
 		return {
@@ -382,7 +383,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!target) return null;
 		if (!deps.knownEndpoints().has(target.endpoint.id)) {
 			throw new Error(
-				`[clio] orchestrator endpoint=${target.endpoint.id} unknown. Run \`clio providers\` to see configured endpoints.`,
+				`[clio] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
 			);
 		}
 		if (
@@ -411,7 +412,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			onPayload: async (payload, currentModel) =>
 				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
 			getApiKey: async () => {
-				if (target.runtime.auth !== "api-key" && target.runtime.auth !== "oauth") {
+				if (!targetRequiresAuth(target.endpoint, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
 				const resolved = await deps.providers.auth.resolveForTarget(target.endpoint, target.runtime);

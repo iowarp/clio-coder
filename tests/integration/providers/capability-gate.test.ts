@@ -64,6 +64,7 @@ function setupHarness(toolsSupported: boolean): Harness {
 		probeAll: async () => {},
 		probeAllLive: async () => {},
 		probeEndpoint: async () => status,
+		disconnectEndpoint: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,

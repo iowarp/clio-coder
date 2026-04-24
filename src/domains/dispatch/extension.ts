@@ -17,12 +17,13 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
-import type {
-	CapabilityFlags,
-	EndpointDescriptor,
-	ProvidersContract,
-	RuntimeDescriptor,
-	ThinkingLevel,
+import {
+	type CapabilityFlags,
+	type EndpointDescriptor,
+	type ProvidersContract,
+	type RuntimeDescriptor,
+	type ThinkingLevel,
+	targetRequiresAuth,
 } from "../providers/index.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
@@ -88,17 +89,15 @@ function resolveDispatchTarget(
 ): ResolvedTarget {
 	const endpointId = req.endpoint ?? recipe?.endpoint ?? workerDefault?.endpoint ?? null;
 	if (!endpointId) {
-		throw new Error("dispatch: no endpoint configured (set workers.default.endpoint or pass --endpoint)");
+		throw new Error("dispatch: no target configured (set workers.default.target or pass --target)");
 	}
 	const endpoint = providers.getEndpoint(endpointId);
-	if (!endpoint) throw new Error(`dispatch: endpoint '${endpointId}' not found`);
+	if (!endpoint) throw new Error(`dispatch: target '${endpointId}' not found`);
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
 	const wireModelId = req.model ?? recipe?.model ?? workerDefault?.model ?? endpoint.defaultModel;
 	if (!wireModelId) {
-		throw new Error(
-			`dispatch: no model for endpoint '${endpointId}' (set workers.default.model or endpoint.defaultModel)`,
-		);
+		throw new Error(`dispatch: no model for target '${endpointId}' (set workers.default.model or target.defaultModel)`);
 	}
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe?.thinkingLevel ??
@@ -216,10 +215,9 @@ export function createDispatchBundle(
 		const allowedTools =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
 		const workerMode = recipe?.mode ?? currentMode;
-		const auth =
-			target.runtime.auth === "api-key" || target.runtime.auth === "oauth"
-				? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
-				: null;
+		const auth = targetRequiresAuth(target.endpoint, target.runtime)
+			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
+			: null;
 		const apiKey = auth?.apiKey;
 		const runtimeKind: RunKind = target.runtime.kind;
 
