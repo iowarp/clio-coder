@@ -98,6 +98,17 @@ export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?
 		return 2;
 	}
 
+	if (parsed.target && parsed.workerProfile) {
+		process.stderr.write(
+			`clio run: --target ${parsed.target} takes precedence; --worker-profile ${parsed.workerProfile} will be ignored\n`,
+		);
+	}
+	if (parsed.target && parsed.workerRuntime) {
+		process.stderr.write(
+			`clio run: --target ${parsed.target} takes precedence; --worker-runtime ${parsed.workerRuntime} will be ignored\n`,
+		);
+	}
+
 	ensureClioState();
 	const loaded = await loadDomains([
 		ConfigDomainModule,

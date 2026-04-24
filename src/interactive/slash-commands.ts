@@ -79,6 +79,14 @@ export async function handleRun(
 	options: RunCommandOptions = {},
 ): Promise<void> {
 	const { dispatch, io, bus } = deps;
+	if (options.endpoint && options.workerProfile) {
+		io.stderr(`[run] --target ${options.endpoint} takes precedence; --worker ${options.workerProfile} will be ignored\n`);
+	}
+	if (options.endpoint && options.workerRuntime) {
+		io.stderr(
+			`[run] --target ${options.endpoint} takes precedence; --runtime ${options.workerRuntime} will be ignored\n`,
+		);
+	}
 	try {
 		const request = {
 			agentId,

@@ -115,4 +115,12 @@ describe("providers/runtimes built-in descriptors", () => {
 		ok(byId.get("gemini-cli")?.knownModels?.includes("gemini-3-flash-preview"));
 		ok(!byId.get("gemini-cli")?.knownModels?.includes("gemini-3.0-flash"));
 	});
+
+	it("openai-codex exposes gpt-5.4-mini through the engine model list", async () => {
+		const { createEngineAi } = await import("../../../src/engine/ai.js");
+		const engineAi = createEngineAi();
+		const ids = engineAi.listModels("openai-codex").map((m) => m.id);
+		ok(ids.includes("gpt-5.4-mini"), `expected gpt-5.4-mini in openai-codex models, got: ${ids.join(",")}`);
+		ok(ids.includes("gpt-5.4"), `expected gpt-5.4 in openai-codex models, got: ${ids.join(",")}`);
+	});
 });
