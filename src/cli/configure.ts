@@ -37,6 +37,8 @@ Non-interactive flags:
   --model <wireModelId>            default model id for this target
   --orchestrator-model <id>        model to use when setting chat default
   --worker-model <id>              model to use when setting worker default
+  --worker-profile <name>          save this target as a named worker profile
+  --worker-profile-model <id>      model to use for --worker-profile
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
   --gateway                        mark the target as a gateway
@@ -74,6 +76,8 @@ interface ParsedArgs {
 	model?: string;
 	orchestratorModel?: string;
 	workerModel?: string;
+	workerProfile?: string;
+	workerProfileModel?: string;
 	apiKeyEnv?: string;
 	apiKey?: string;
 	gateway: boolean;
@@ -133,6 +137,12 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--worker-model":
 				out.workerModel = need();
+				break;
+			case "--worker-profile":
+				out.workerProfile = need();
+				break;
+			case "--worker-profile-model":
+				out.workerProfileModel = need();
 				break;
 			case "--api-key-env":
 				out.apiKeyEnv = need();
@@ -297,6 +307,21 @@ function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDes
 	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
 }
 
+function setWorkerProfilePointer(
+	settings: ClioSettings,
+	name: string,
+	descriptor: EndpointDescriptor,
+	model?: string | null,
+): void {
+	const trimmed = name.trim();
+	if (trimmed.length === 0) throw new Error("worker profile name must be non-empty");
+	settings.workers.profiles[trimmed] = {
+		endpoint: descriptor.id,
+		model: model ?? descriptor.defaultModel ?? null,
+		thinkingLevel: "off",
+	};
+}
+
 function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, probe: ProbeResult | null): void {
 	process.stdout.write(`\nsaved target ${descriptor.id} (runtime=${descriptor.runtime})\n`);
 	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
@@ -311,6 +336,9 @@ function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, pr
 	}
 	if (settings.orchestrator.endpoint === descriptor.id) process.stdout.write("  orchestrator target\n");
 	if (settings.workers.default.endpoint === descriptor.id) process.stdout.write("  worker default\n");
+	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
+		if (profile.endpoint === descriptor.id) process.stdout.write(`  worker profile ${name}\n`);
+	}
 	process.stdout.write(`\nsettings written to ${settingsPath()}\n`);
 }
 
@@ -437,6 +465,14 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError("--id is required when passing flags non-interactively");
 		return 2;
 	}
+	if (args.workerProfileModel !== undefined && args.workerProfile === undefined) {
+		printError("--worker-profile-model requires --worker-profile");
+		return 2;
+	}
+	if (args.workerProfile !== undefined && args.workerProfile.trim().length === 0) {
+		printError("--worker-profile must be non-empty");
+		return 2;
+	}
 	const settings = readSettings();
 	const auth = openAuthStorage();
 	const support = buildProviderSupportEntry(runtime);
@@ -491,11 +527,19 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
 	applyEndpoint(settings, descriptor);
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
-	const setWorkerDefault = args.setWorkerDefault || args.workerModel !== undefined;
+	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
 	if (setOrchestrator)
 		setOrchestratorPointer(settings, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
 	if (setWorkerDefault)
 		setWorkerDefaultPointer(settings, descriptor, args.workerModel ?? descriptor.defaultModel ?? null);
+	if (args.workerProfile !== undefined) {
+		setWorkerProfilePointer(
+			settings,
+			args.workerProfile,
+			descriptor,
+			args.workerProfileModel ?? args.workerModel ?? descriptor.defaultModel ?? null,
+		);
+	}
 	writeSettings(settings);
 	const probe = await runtimeProbe(runtime, descriptor);
 	printSummary(settings, descriptor, probe);
@@ -788,6 +832,9 @@ export function runTargetRemove(id: string): number {
 		settings.workers.default.endpoint = null;
 		settings.workers.default.model = null;
 	}
+	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
+		if (profile.endpoint === id) delete settings.workers.profiles[name];
+	}
 	settings.scope = settings.scope.filter((entry) => {
 		const [head] = entry.split("/");
 		return head !== id;
@@ -815,6 +862,9 @@ export function runTargetRename(oldId: string, newId: string): number {
 	target.id = newId;
 	if (settings.orchestrator.endpoint === oldId) settings.orchestrator.endpoint = newId;
 	if (settings.workers.default.endpoint === oldId) settings.workers.default.endpoint = newId;
+	for (const profile of Object.values(settings.workers.profiles)) {
+		if (profile.endpoint === oldId) profile.endpoint = newId;
+	}
 	settings.scope = settings.scope.map((entry) => {
 		const [head, ...rest] = entry.split("/");
 		if (head !== oldId) return entry;
@@ -870,6 +920,8 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 		(args.id !== undefined ||
 			args.url !== undefined ||
 			args.model !== undefined ||
+			args.workerProfile !== undefined ||
+			args.workerProfileModel !== undefined ||
 			args.apiKey !== undefined ||
 			args.apiKeyEnv !== undefined ||
 			args.gateway ||

@@ -17,6 +17,7 @@ type SerializedSettings = Omit<ClioSettings, "endpoints" | "orchestrator" | "wor
 	orchestrator: Omit<ClioSettings["orchestrator"], "endpoint"> & { target: string | null };
 	workers: {
 		default: Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null };
+		profiles: Record<string, Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null }>;
 	};
 };
 
@@ -389,6 +390,27 @@ function normalizeWorkerTarget(
 	return out;
 }
 
+function normalizeWorkerProfiles(
+	value: unknown,
+	defaults: ClioSettings["workers"]["default"],
+	endpoints: ReadonlyArray<ClioSettings["endpoints"][number]>,
+): ClioSettings["workers"]["profiles"] {
+	if (!isPlainObject(value)) return {};
+	const out: ClioSettings["workers"]["profiles"] = {};
+	for (const [rawName, rawProfile] of Object.entries(value)) {
+		const name = trimString(rawName);
+		if (!name) continue;
+		const profile = normalizeWorkerTarget(rawProfile, defaults, endpoints);
+		if (!profile.endpoint) continue;
+		out[name] = {
+			endpoint: profile.endpoint,
+			model: profile.model,
+			thinkingLevel: profile.thinkingLevel,
+		};
+	}
+	return out;
+}
+
 function normalizeScope(
 	value: unknown,
 	endpoints: ReadonlyArray<ClioSettings["endpoints"][number]>,
@@ -510,6 +532,11 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 					legacyEndpoints.pairToEndpointId,
 				) ?? settings.workers.default;
 		}
+		settings.workers.profiles = normalizeWorkerProfiles(
+			raw.workers.profiles,
+			DEFAULT_SETTINGS.workers.default,
+			settings.endpoints,
+		);
 	}
 
 	settings.scope = normalizeScope(raw.scope, settings.endpoints);
@@ -609,6 +636,14 @@ export function writeSettings(settings: ClioSettings): void {
 
 function serializeSettings(settings: ClioSettings): SerializedSettings {
 	const { endpoints, orchestrator, workers, ...rest } = settings;
+	const profiles: SerializedSettings["workers"]["profiles"] = {};
+	for (const [name, profile] of Object.entries(workers.profiles)) {
+		profiles[name] = {
+			target: profile.endpoint,
+			model: profile.model,
+			thinkingLevel: profile.thinkingLevel,
+		};
+	}
 	return {
 		...rest,
 		targets: endpoints,
@@ -623,6 +658,7 @@ function serializeSettings(settings: ClioSettings): SerializedSettings {
 				model: workers.default.model,
 				thinkingLevel: workers.default.thinkingLevel,
 			},
+			profiles,
 		},
 	};
 }

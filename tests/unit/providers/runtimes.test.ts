@@ -109,5 +109,10 @@ describe("providers/runtimes built-in descriptors", () => {
 		strictEqual(byId.get("codex-cli")?.tier, "cli-gold");
 		strictEqual(byId.get("copilot-cli")?.tier, "cli-silver");
 		strictEqual(byId.get("opencode-cli")?.tier, "cli-bronze");
+		ok(byId.get("claude-code-sdk")?.knownModels?.includes("claude-opus-4-7"));
+		ok(byId.get("copilot-cli")?.knownModels?.includes("claude-sonnet-4.6"));
+		ok(!byId.get("copilot-cli")?.knownModels?.includes("claude-sonnet-4-6"));
+		ok(byId.get("gemini-cli")?.knownModels?.includes("gemini-3-flash-preview"));
+		ok(!byId.get("gemini-cli")?.knownModels?.includes("gemini-3.0-flash"));
 	});
 });

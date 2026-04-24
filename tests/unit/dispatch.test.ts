@@ -39,6 +39,18 @@ describe("dispatch/validation", () => {
 		const v = validateJobSpec({ agentId: "a", task: "t", endpoint: "anthropic", model: "claude-sonnet-4-6" });
 		ok(v.ok);
 	});
+
+	it("accepts a named worker profile selector", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", workerProfile: "claude-opus" });
+		ok(v.ok);
+		strictEqual(v.spec.workerProfile, "claude-opus");
+	});
+
+	it("accepts a worker runtime selector without reintroducing the legacy runtime key", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", workerRuntime: "copilot-cli" });
+		ok(v.ok);
+		strictEqual(v.spec.workerRuntime, "copilot-cli");
+	});
 });
 
 describe("dispatch/admission", () => {

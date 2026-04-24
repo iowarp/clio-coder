@@ -35,7 +35,7 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
 	{ keys: "/receipts", action: "Open receipts overlay", scope: "editor" },
 	{ keys: "/receipt verify <runId>", action: "Verify a receipt file", scope: "editor" },
-	{ keys: "/run <agent> <task>", action: "Dispatch agent", scope: "editor" },
+	{ keys: "/run [--worker <profile>|--runtime <id>] <agent> <task>", action: "Dispatch agent", scope: "editor" },
 	{ keys: "/quit", action: "Exit", scope: "editor" },
 ];
 

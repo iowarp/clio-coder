@@ -26,6 +26,18 @@ describe("core/config normalizeSettings", () => {
 					model: "",
 					thinkingLevel: "medium",
 				},
+				profiles: {
+					"codex-mini": {
+						target: "codex-pro",
+						model: "gpt-5.4-mini",
+						thinkingLevel: "low",
+					},
+					stale: {
+						target: "missing-target",
+						model: "stale",
+						thinkingLevel: "high",
+					},
+				},
 			},
 			scope: ["codex-pro", "missing-target", "codex-pro/gpt-5.4-mini", "codex-pro"],
 		});
@@ -36,6 +48,13 @@ describe("core/config normalizeSettings", () => {
 		strictEqual(normalized.orchestrator.model, null);
 		strictEqual(normalized.workers.default.endpoint, "codex-pro");
 		strictEqual(normalized.workers.default.model, "gpt-5.4");
+		deepStrictEqual(normalized.workers.profiles, {
+			"codex-mini": {
+				endpoint: "codex-pro",
+				model: "gpt-5.4-mini",
+				thinkingLevel: "low",
+			},
+		});
 		deepStrictEqual(normalized.runtimePlugins, ["example-runtime"]);
 		deepStrictEqual(normalized.scope, ["codex-pro", "codex-pro/gpt-5.4-mini"]);
 	});

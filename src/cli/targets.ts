@@ -22,6 +22,8 @@ Usage:
   clio targets [--json] [--probe] [--target <id>]
   clio targets add [configure flags]
   clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]
+  clio targets workers [--json]
+  clio targets worker <profile> <id> [--model <id>] [--thinking <level>]
   clio targets remove <id>
   clio targets rename <old> <new>
 `;
@@ -38,6 +40,17 @@ interface UseArgs {
 	model?: string;
 	orchestratorModel?: string;
 	workerModel?: string;
+}
+
+type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+const VALID_THINKING = new Set<WorkerThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+interface WorkerProfileArgs {
+	name: string;
+	targetId: string;
+	model?: string;
+	thinkingLevel?: WorkerThinkingLevel;
 }
 
 function parseListArgs(args: ReadonlyArray<string>): ListArgs {
@@ -73,6 +86,8 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	const subcommand = args[0];
 	if (subcommand === "add") return runConfigureCommand(args.slice(1));
 	if (subcommand === "use") return runUse(args.slice(1));
+	if (subcommand === "workers") return runWorkers(args.slice(1));
+	if (subcommand === "worker") return runWorker(args.slice(1));
 	if (subcommand === "remove") return runRemove(args.slice(1));
 	if (subcommand === "rename") return runRename(args.slice(1));
 	if (subcommand === "--help" || subcommand === "-h") {
@@ -178,6 +193,111 @@ function runUse(args: ReadonlyArray<string>): number {
 	settings.workers.default.model = parsed.workerModel ?? sharedModel;
 	writeSettings(settings);
 	printOk(`using target ${target.id} for chat and workers`);
+	return 0;
+}
+
+function parseWorkerArgs(args: ReadonlyArray<string>): WorkerProfileArgs | null {
+	const name = args[0];
+	const targetId = args[1];
+	if (!name || !targetId) return null;
+	const parsed: WorkerProfileArgs = { name, targetId };
+	for (let i = 2; i < args.length; i += 1) {
+		const arg = args[i];
+		const need = (): string => {
+			const value = args[i + 1];
+			if (!value) throw new Error(`${arg} requires a value`);
+			i += 1;
+			return value;
+		};
+		if (arg === "--model") {
+			parsed.model = need();
+			continue;
+		}
+		if (arg === "--thinking") {
+			const value = need();
+			if (!VALID_THINKING.has(value as WorkerThinkingLevel)) {
+				throw new Error("--thinking must be one of: off|minimal|low|medium|high|xhigh");
+			}
+			parsed.thinkingLevel = value as WorkerThinkingLevel;
+			continue;
+		}
+		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
+		throw new Error(`unknown targets worker argument: ${arg}`);
+	}
+	return parsed;
+}
+
+function runWorker(args: ReadonlyArray<string>): number {
+	let parsed: WorkerProfileArgs | null;
+	try {
+		parsed = parseWorkerArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	if (!parsed) {
+		printError("usage: clio targets worker <profile> <id> [--model <id>] [--thinking <level>]");
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	const target = settings.endpoints.find((entry) => entry.id === parsed.targetId);
+	if (!target) {
+		printError(`no target with id ${parsed.targetId}`);
+		return 1;
+	}
+	const existing = settings.workers.profiles[parsed.name];
+	settings.workers.profiles[parsed.name] = {
+		endpoint: target.id,
+		model: parsed.model ?? target.defaultModel ?? null,
+		thinkingLevel: parsed.thinkingLevel ?? existing?.thinkingLevel ?? "off",
+	};
+	writeSettings(settings);
+	printOk(`worker profile ${parsed.name} -> ${target.id}`);
+	return 0;
+}
+
+function runWorkers(args: ReadonlyArray<string>): number {
+	let json = false;
+	for (const arg of args) {
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
+		if (arg === "--help" || arg === "-h") {
+			process.stdout.write("usage: clio targets workers [--json]\n");
+			return 0;
+		}
+		printError(`unknown targets workers argument: ${arg}`);
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	const byId = new Map(settings.endpoints.map((target) => [target.id, target] as const));
+	const rows = Object.entries(settings.workers.profiles).map(([name, profile]) => {
+		const target = profile.endpoint ? byId.get(profile.endpoint) : undefined;
+		return {
+			name,
+			target: profile.endpoint,
+			runtime: target?.runtime ?? null,
+			model: profile.model,
+			thinkingLevel: profile.thinkingLevel,
+		};
+	});
+	if (json) {
+		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+		return 0;
+	}
+	if (rows.length === 0) {
+		process.stdout.write("no worker profiles configured. run `clio targets worker <profile> <id>` to add one.\n");
+		return 0;
+	}
+	process.stdout.write(`${pad("profile", 18)}${pad("target", 16)}${pad("runtime", 20)}${pad("model", 30)}thinking\n`);
+	for (const row of rows) {
+		process.stdout.write(
+			`${pad(row.name, 18)}${pad(row.target ?? "-", 16)}${pad(row.runtime ?? "-", 20)}${pad(row.model ?? "-", 30)}${row.thinkingLevel}\n`,
+		);
+	}
 	return 0;
 }
 
