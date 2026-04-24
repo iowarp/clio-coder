@@ -757,6 +757,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					maxAttempts: settings.maxRetries,
 					errorMessage: failure.errorMessage,
 				});
+				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
 
@@ -782,6 +783,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						errorMessage: message,
 					});
 					emitNotice(message);
+					pruneFailedAssistantFromContext(agentRuntime.agent);
 					return true;
 				}
 				failure = { stopReason: "error", errorMessage: message };
@@ -805,6 +807,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			ensureFailureVisibleAndPersisted(nextFailure);
 			if (nextFailure.stopReason === "aborted" || !isRetryableErrorMessage(nextFailure.errorMessage)) {
+				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
 			failure = nextFailure;
@@ -816,6 +819,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			maxAttempts: settings.maxRetries,
 			errorMessage: failure.errorMessage,
 		});
+		pruneFailedAssistantFromContext(agentRuntime.agent);
 		return true;
 	};
 
@@ -1006,7 +1010,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!overflow) {
 					const message = err instanceof Error ? err.message : String(err);
 					if (isRetryableErrorMessage(message)) {
-						await runTransientRetryChain(agentRuntime, text, { stopReason: "error", errorMessage: message });
+						const failureMessage = {
+							role: "assistant",
+							content: [{ type: "text", text: "" }],
+							stopReason: "error",
+							errorMessage: message,
+							timestamp: Date.now(),
+						} as AgentMessage;
+						await runTransientRetryChain(agentRuntime, text, {
+							stopReason: "error",
+							errorMessage: message,
+							message: failureMessage,
+						});
 						return;
 					}
 					emitNotice(err instanceof Error ? err.message : String(err));
