@@ -53,6 +53,16 @@ function errorMessage(text: string): AgentMessage {
 	} as AgentMessage;
 }
 
+function abortedMessage(text: string): AgentMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: "" }],
+		stopReason: "aborted",
+		errorMessage: text,
+		timestamp: 0,
+	} as AgentMessage;
+}
+
 function providers(settings: typeof DEFAULT_SETTINGS): ProvidersContract {
 	const endpoint = { id: "stub-endpoint", runtime: "stub-runtime", defaultModel: "stub-model" };
 	const runtime: RuntimeDescriptor = {
@@ -278,7 +288,130 @@ describe("interactive/chat-loop transient retry", () => {
 
 		strictEqual(continueCalls, 2);
 		strictEqual(turns.filter((turn) => turn.kind === "user").length, 1);
+		strictEqual(agentState.messages.at(-1)?.role, "user");
 		ok(retryPhases(entries).includes("exhausted"), "retry exhaustion should be durable");
+	});
+
+	it("prunes the failed assistant when abort lands before continue completes", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.retry.baseDelayMs = 0;
+		settings.retry.maxRetries = 2;
+		const { session } = sessionHarness();
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+		let continueCalls = 0;
+		let abortCalls = 0;
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		let loop: ReturnType<typeof createChatLoop>;
+		loop = createChatLoop({
+			getSettings: () => settings,
+			modes: modes(),
+			providers: providers(settings),
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			createAgent: () =>
+				({
+					agent: {
+						state: agentState,
+						sessionId: undefined,
+						subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+							subscribeCb = cb;
+							return () => {};
+						},
+						prompt: async (text: string) => {
+							agentState.messages.push(userMessage(text));
+							const failed = errorMessage("rate limit 429");
+							agentState.messages.push(failed);
+							await subscribeCb?.({ type: "agent_end", messages: [failed] });
+						},
+						continue: async () => {
+							continueCalls += 1;
+							const failed = abortedMessage("request aborted");
+							agentState.messages.push(failed);
+							loop.cancel();
+							await subscribeCb?.({ type: "agent_end", messages: [failed] });
+						},
+						abort: () => {
+							abortCalls += 1;
+						},
+					},
+					state: () => agentState,
+				}) as unknown as EngineAgentHandle,
+		});
+
+		await loop.submit("hello");
+
+		strictEqual(continueCalls, 1);
+		strictEqual(abortCalls, 1);
+		strictEqual(agentState.messages.at(-1)?.role, "user");
+	});
+
+	it("persists a thrown retryable error before continuing", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.retry.baseDelayMs = 0;
+		settings.retry.maxRetries = 1;
+		const { session, turns } = sessionHarness();
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+		let continueCalls = 0;
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: modes(),
+			providers: providers(settings),
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			createAgent: () =>
+				({
+					agent: {
+						state: agentState,
+						sessionId: undefined,
+						subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+							subscribeCb = cb;
+							return () => {};
+						},
+						prompt: async (text: string) => {
+							agentState.messages.push(userMessage(text));
+							throw new Error("rate limit 429");
+						},
+						continue: async () => {
+							continueCalls += 1;
+							strictEqual(agentState.messages.at(-1)?.role, "user");
+							const okMessage = assistantMessage("retry recovered");
+							agentState.messages.push(okMessage);
+							await subscribeCb?.({ type: "message_end", message: okMessage });
+							await subscribeCb?.({ type: "agent_end", messages: [okMessage] });
+						},
+						abort: () => {},
+					},
+					state: () => agentState,
+				}) as unknown as EngineAgentHandle,
+		});
+
+		await loop.submit("hello");
+
+		const durableFailures = turns.filter(
+			(turn) => turn.kind === "assistant" && (turn.payload as { stopReason?: string }).stopReason === "error",
+		);
+		strictEqual(continueCalls, 1);
+		strictEqual(durableFailures.length, 1);
+		strictEqual((durableFailures[0]?.payload as { errorMessage?: string } | undefined)?.errorMessage, "rate limit 429");
 	});
 
 	it("cancels a pending retry countdown before continuing", async () => {
