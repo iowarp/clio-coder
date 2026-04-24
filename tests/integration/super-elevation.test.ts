@@ -338,7 +338,7 @@ describe("super-mode elevation end-to-end", () => {
 				}
 			};
 
-			// User has /providers open when the agent emits a privileged call.
+			// User has the target status overlay open when the agent emits a privileged call.
 			overlayState = "providers";
 			const pending = registry.invoke({
 				tool: ToolNames.Bash,
@@ -350,7 +350,7 @@ describe("super-mode elevation end-to-end", () => {
 			strictEqual(overlayState, "providers");
 			strictEqual(registry.hasParkedCalls(), true);
 
-			// User closes /providers via Esc. closeOverlay observes the parked
+			// User closes the target status overlay via Esc. closeOverlay observes the parked
 			// queue and opens the super overlay.
 			closeOverlay();
 			strictEqual(overlayState, "super-confirm");

@@ -1,0 +1,153 @@
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+
+import { runConfigureCommand } from "../../src/cli/configure.js";
+import { runTargetsCommand } from "../../src/cli/targets.js";
+import { readSettings, settingsPath } from "../../src/core/config.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
+
+const ORIGINAL_ENV = { ...process.env };
+
+describe("cli configure and targets", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-configure-"));
+		process.env.CLIO_HOME = scratch;
+		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_DATA_DIR = join(scratch, "data");
+		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+		resetXdgCache();
+	});
+
+	afterEach(() => {
+		for (const key of Object.keys(process.env)) {
+			if (!(key in ORIGINAL_ENV)) Reflect.deleteProperty(process.env, key);
+		}
+		for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+			if (value !== undefined) process.env[key] = value;
+		}
+		rmSync(scratch, { recursive: true, force: true });
+		resetXdgCache();
+	});
+
+	it("persists an openai-codex target with known models", async () => {
+		const code = await runConfigureCommand([
+			"--runtime",
+			"openai-codex",
+			"--id",
+			"codex-pro",
+			"--model",
+			"gpt-5.4",
+			"--set-orchestrator",
+			"--set-worker-default",
+			"--worker-model",
+			"gpt-5.4-mini",
+		]);
+		strictEqual(code, 0);
+
+		const settings = readSettings();
+		const target = settings.endpoints.find((entry) => entry.id === "codex-pro");
+		ok(target, "expected openai-codex target");
+		strictEqual(target.runtime, "openai-codex");
+		strictEqual(target.auth?.oauthProfile, "openai-codex");
+		strictEqual(target.defaultModel, "gpt-5.4");
+		ok(target.wireModels?.includes("gpt-5.4"));
+		ok(target.wireModels?.includes("gpt-5.4-mini"));
+		deepStrictEqual([settings.orchestrator.endpoint, settings.orchestrator.model], ["codex-pro", "gpt-5.4"]);
+		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["codex-pro", "gpt-5.4-mini"]);
+
+		const raw = readFileSync(settingsPath(), "utf8");
+		ok(raw.includes("targets:"));
+		ok(raw.includes("target: codex-pro"));
+		ok(!raw.includes("endpoints:"));
+		ok(!raw.includes("endpoint: codex-pro"));
+	});
+
+	it("persists context and output caps for local self-dev targets", async () => {
+		const code = await runTargetsCommand([
+			"add",
+			"--runtime",
+			"openai-compat",
+			"--id",
+			"mini",
+			"--url",
+			"http://mini:8080",
+			"--model",
+			"Qwen3.6-35B-A3B-UD-Q4_K_XL",
+			"--context-window",
+			"262144",
+			"--max-tokens",
+			"65536",
+			"--reasoning",
+			"true",
+		]);
+		strictEqual(code, 0);
+
+		const settings = readSettings();
+		const target = settings.endpoints.find((entry) => entry.id === "mini");
+		ok(target, "expected mini target");
+		strictEqual(target.runtime, "openai-compat");
+		strictEqual(target.url, "http://mini:8080");
+		strictEqual(target.defaultModel, "Qwen3.6-35B-A3B-UD-Q4_K_XL");
+		strictEqual(target.capabilities?.contextWindow, 262144);
+		strictEqual(target.capabilities?.maxTokens, 65536);
+		strictEqual(target.capabilities?.reasoning, true);
+	});
+
+	it("targets use sets chat and worker defaults", async () => {
+		await runConfigureCommand(["--runtime", "openai-codex", "--id", "codex-pro", "--model", "gpt-5.4"]);
+		const code = await runTargetsCommand(["use", "codex-pro", "--worker-model", "gpt-5.4-mini"]);
+		strictEqual(code, 0);
+		const settings = readSettings();
+		deepStrictEqual([settings.orchestrator.endpoint, settings.orchestrator.model], ["codex-pro", "gpt-5.4"]);
+		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["codex-pro", "gpt-5.4-mini"]);
+	});
+
+	it("keeps the selected OpenRouter model as the worker default", async () => {
+		const model = "nvidia/nemotron-3-super-120b-a12b:free";
+		const code = await runConfigureCommand([
+			"--runtime",
+			"openrouter",
+			"--id",
+			"openrouter-live",
+			"--model",
+			model,
+			"--api-key-env",
+			"OPENROUTER_API_KEY",
+			"--set-orchestrator",
+			"--set-worker-default",
+		]);
+		strictEqual(code, 0);
+
+		const settings = readSettings();
+		const target = settings.endpoints.find((entry) => entry.id === "openrouter-live");
+		ok(target, "expected openrouter target");
+		strictEqual(target.defaultModel, model);
+		deepStrictEqual([settings.orchestrator.endpoint, settings.orchestrator.model], ["openrouter-live", model]);
+		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["openrouter-live", model]);
+	});
+
+	it("CLI-backed targets do not get Clio-managed auth profiles", async () => {
+		const code = await runConfigureCommand([
+			"--runtime",
+			"claude-code-cli",
+			"--id",
+			"claude-worker",
+			"--model",
+			"sonnet",
+			"--set-worker-default",
+		]);
+		strictEqual(code, 0);
+
+		const settings = readSettings();
+		const target = settings.endpoints.find((entry) => entry.id === "claude-worker");
+		ok(target, "expected claude-worker target");
+		strictEqual(target.runtime, "claude-code-cli");
+		strictEqual(target.auth, undefined);
+		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["claude-worker", "sonnet"]);
+	});
+});

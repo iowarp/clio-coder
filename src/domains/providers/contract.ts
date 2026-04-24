@@ -59,6 +59,9 @@ export interface ProvidersContract {
 	/** Probe a single endpoint live. Null when the id is not in settings.endpoints. */
 	probeEndpoint(id: string): Promise<EndpointStatus | null>;
 
+	/** Clear in-memory live connection state for a configured target. */
+	disconnectEndpoint(id: string): EndpointStatus | null;
+
 	/**
 	 * Shared auth access for both API keys and OAuth credentials. Provider ids
 	 * default to runtime ids, with endpoint-level overrides through

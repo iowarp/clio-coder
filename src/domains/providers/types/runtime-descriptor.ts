@@ -25,9 +25,10 @@ export type RuntimeApiFamily =
 	| "embeddings-http"
 	| "subprocess-claude-code"
 	| "subprocess-codex"
-	| "subprocess-gemini";
+	| "subprocess-gemini"
+	| "subprocess-opencode";
 
-export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "none";
+export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "cli" | "none";
 
 export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;

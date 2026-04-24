@@ -22,9 +22,10 @@ const VALID_API_FAMILIES = new Set<string>([
 	"subprocess-claude-code",
 	"subprocess-codex",
 	"subprocess-gemini",
+	"subprocess-opencode",
 ]);
 
-const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "none"]);
+const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "cli", "none"]);
 const VALID_KINDS = new Set<string>(["http", "subprocess"]);
 const VALID_TIERS = new Set<string>(["protocol", "cloud", "local-native", "cli-stub"]);
 

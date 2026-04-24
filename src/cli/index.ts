@@ -1,15 +1,13 @@
 import { runAgentsCommand } from "./agents.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
+import { runConfigureCommand } from "./configure.js";
 import { runDoctorCommand } from "./doctor.js";
-import { runInstallCommand } from "./install.js";
-import { runListModelsCommand } from "./list-models.js";
-import { runConnectCommand } from "./login.js";
-import { runDisconnectCommand } from "./logout.js";
-import { runProvidersCommand } from "./providers.js";
+import { runModelsCommand } from "./models.js";
+import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
-import { runSetupCommand } from "./setup.js";
 import { extractApiKeyFlag, parseFlags, printError } from "./shared.js";
+import { runTargetsCommand } from "./targets.js";
 import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
 import { runVersionCommand } from "./version.js";
@@ -22,17 +20,19 @@ Usage:
   clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
   clio --version, -v        print the clio version
-  clio --api-key <key>      override the active endpoint API key for this run
-  clio doctor               run environment diagnostics
-  clio setup                add, edit, remove, rename, or retarget endpoints
-  clio install              bootstrap Clio Coder config, data, and cache
-  clio uninstall            remove or reset Clio Coder state directories
+  clio --api-key <key>      override the active target API key for this run
+  clio configure            interactive first-run/configuration wizard
+  clio targets              list configured targets, health, auth, and capabilities
+  clio targets add          add a target interactively or via flags
+  clio targets use <id>     set chat and worker defaults to a target
+  clio targets remove <id>  remove a target
+  clio targets rename <old> <new>
+  clio models [search]      list models for configured targets
+  clio auth list|status|login|logout [target-or-runtime]
+  clio doctor [--fix]       diagnose state; --fix creates or repairs it
+  clio reset                recover or wipe Clio state
+  clio uninstall            remove Clio state and print package removal guidance
   clio upgrade              upgrade clio and run pending migrations
-  clio providers            list endpoint status, health, and capabilities
-  clio list-models          list discovered models per endpoint
-  clio connect [target]     connect a provider or endpoint (OAuth or API key)
-  clio disconnect <target>  disconnect stored credentials for a provider or endpoint
-  clio auth [list|status]   list supported providers or show connection status
   clio agents               list discovered agent recipes
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
@@ -59,30 +59,22 @@ async function main(argv: string[]): Promise<number> {
 	if (!subcommand) return runClioCommand(bootOptions);
 
 	switch (subcommand) {
-		case "providers":
-			return runProvidersCommand(subArgs);
-		case "list-models":
-			return runListModelsCommand(subArgs);
-		case "connect":
-			return runConnectCommand(subArgs);
-		case "disconnect":
-			return runDisconnectCommand(subArgs);
-		case "login":
-			return runConnectCommand(subArgs);
-		case "logout":
-			return runDisconnectCommand(subArgs);
 		case "auth":
 			return runAuthCommand(subArgs);
+		case "configure":
+			return runConfigureCommand(subArgs);
+		case "targets":
+			return runTargetsCommand(subArgs);
+		case "models":
+			return runModelsCommand(subArgs);
 		case "agents":
 			return runAgentsCommand(subArgs);
 		case "run":
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":
-			return runDoctorCommand();
-		case "setup":
-			return runSetupCommand(subArgs);
-		case "install":
-			return runInstallCommand();
+			return runDoctorCommand(subArgs);
+		case "reset":
+			return runResetCommand(subArgs);
 		case "uninstall":
 			return runUninstallCommand(subArgs);
 		case "upgrade":

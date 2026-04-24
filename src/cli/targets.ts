@@ -1,49 +1,202 @@
 import chalk from "chalk";
+import { readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
+import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
+import { printError, printOk } from "./shared.js";
 
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
 const WIDTHS: ReadonlyArray<number> = [14, 14, 18, 18, 28, 26, 10, 8, 28];
 type ProviderOutputTier = RuntimeTier | "unknown";
 
-export async function runProvidersCommand(args: ReadonlyArray<string>): Promise<number> {
-	const asJson = args.includes("--json");
-	const probe = args.includes("--probe");
-	const filterIdx = args.indexOf("--endpoint");
-	const filter = filterIdx >= 0 ? args[filterIdx + 1] : undefined;
+const HELP = `clio targets
 
-	ensureInstalled();
+List and manage configured model targets.
+
+Usage:
+  clio targets [--json] [--probe] [--target <id>]
+  clio targets add [configure flags]
+  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]
+  clio targets remove <id>
+  clio targets rename <old> <new>
+`;
+
+interface ListArgs {
+	json: boolean;
+	probe: boolean;
+	target?: string;
+	help: boolean;
+}
+
+interface UseArgs {
+	id: string;
+	model?: string;
+	orchestratorModel?: string;
+	workerModel?: string;
+}
+
+function parseListArgs(args: ReadonlyArray<string>): ListArgs {
+	const parsed: ListArgs = { json: false, probe: false, help: false };
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === "--help" || arg === "-h") {
+			parsed.help = true;
+			continue;
+		}
+		if (arg === "--json") {
+			parsed.json = true;
+			continue;
+		}
+		if (arg === "--probe") {
+			parsed.probe = true;
+			continue;
+		}
+		if (arg === "--target") {
+			const value = args[i + 1];
+			if (!value) throw new Error("--target requires a value");
+			parsed.target = value;
+			i += 1;
+			continue;
+		}
+		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
+		throw new Error(`unknown targets argument: ${arg}`);
+	}
+	return parsed;
+}
+
+export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<number> {
+	const subcommand = args[0];
+	if (subcommand === "add") return runConfigureCommand(args.slice(1));
+	if (subcommand === "use") return runUse(args.slice(1));
+	if (subcommand === "remove") return runRemove(args.slice(1));
+	if (subcommand === "rename") return runRename(args.slice(1));
+	if (subcommand === "--help" || subcommand === "-h") {
+		process.stdout.write(HELP);
+		return 0;
+	}
+
+	let parsed: ListArgs;
+	try {
+		parsed = parseListArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		process.stdout.write(HELP);
+		return 2;
+	}
+	if (parsed.help) {
+		process.stdout.write(HELP);
+		return 0;
+	}
+
+	ensureClioState();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 	const providers = loaded.getContract<ProvidersContract>("providers");
 	if (!providers) {
-		process.stderr.write("providers: domain not loaded\n");
+		process.stderr.write("targets: provider domain not loaded\n");
 		await loaded.stop();
 		return 1;
 	}
-	if (probe) {
+	if (parsed.probe) {
 		try {
 			await providers.probeAllLive();
 		} catch (err) {
-			process.stderr.write(`providers: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
+			process.stderr.write(`targets: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
 	}
 	const entries = providers.list();
-	const filtered = filter ? entries.filter((e) => e.endpoint.id === filter) : entries;
+	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
 
-	if (asJson) {
+	if (parsed.json) {
 		process.stdout.write(`${JSON.stringify(filtered.map(serializeStatus), null, 2)}\n`);
 	} else if (filtered.length === 0) {
-		process.stdout.write("no endpoints configured. run `clio setup` to register one.\n");
+		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
 	} else {
 		renderTable(providers, filtered);
 	}
 	await loaded.stop();
 	return 0;
+}
+
+function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
+	const id = args[0];
+	if (!id) return null;
+	const parsed: UseArgs = { id };
+	for (let i = 1; i < args.length; i += 1) {
+		const arg = args[i];
+		const need = (): string => {
+			const value = args[i + 1];
+			if (!value) throw new Error(`${arg} requires a value`);
+			i += 1;
+			return value;
+		};
+		if (arg === "--model") {
+			parsed.model = need();
+			continue;
+		}
+		if (arg === "--orchestrator-model") {
+			parsed.orchestratorModel = need();
+			continue;
+		}
+		if (arg === "--worker-model") {
+			parsed.workerModel = need();
+			continue;
+		}
+		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
+		throw new Error(`unknown targets use argument: ${arg}`);
+	}
+	return parsed;
+}
+
+function runUse(args: ReadonlyArray<string>): number {
+	let parsed: UseArgs | null;
+	try {
+		parsed = parseUseArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	if (!parsed) {
+		printError("usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]");
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	const target = settings.endpoints.find((entry) => entry.id === parsed.id);
+	if (!target) {
+		printError(`no target with id ${parsed.id}`);
+		return 1;
+	}
+	const sharedModel = parsed.model ?? target.defaultModel ?? null;
+	settings.orchestrator.endpoint = target.id;
+	settings.orchestrator.model = parsed.orchestratorModel ?? sharedModel;
+	settings.workers.default.endpoint = target.id;
+	settings.workers.default.model = parsed.workerModel ?? sharedModel;
+	writeSettings(settings);
+	printOk(`using target ${target.id} for chat and workers`);
+	return 0;
+}
+
+function runRemove(args: ReadonlyArray<string>): number {
+	if (args.length !== 1 || !args[0]) {
+		printError("usage: clio targets remove <id>");
+		return 2;
+	}
+	ensureClioState();
+	return runTargetRemove(args[0]);
+}
+
+function runRename(args: ReadonlyArray<string>): number {
+	if (args.length !== 2 || !args[0] || !args[1]) {
+		printError("usage: clio targets rename <old> <new>");
+		return 2;
+	}
+	ensureClioState();
+	return runTargetRename(args[0], args[1]);
 }
 
 function pad(value: string, width: number): string {
@@ -187,6 +340,29 @@ function compareStatusByTier(a: EndpointStatus, b: EndpointStatus): number {
 	);
 }
 
-function serializeStatus(status: EndpointStatus): EndpointStatus & { tier: ProviderOutputTier } {
-	return { ...status, tier: statusTier(status) };
+function serializeStatus(status: EndpointStatus): {
+	target: EndpointStatus["endpoint"];
+	runtime: EndpointStatus["runtime"];
+	available: boolean;
+	reason: string;
+	health: EndpointStatus["health"];
+	capabilities: EndpointStatus["capabilities"];
+	probeCapabilities?: EndpointStatus["probeCapabilities"];
+	discoveredModels: EndpointStatus["discoveredModels"];
+	tier: ProviderOutputTier;
+} {
+	const out = {
+		target: status.endpoint,
+		runtime: status.runtime,
+		available: status.available,
+		reason: status.reason,
+		health: status.health,
+		capabilities: status.capabilities,
+		discoveredModels: status.discoveredModels,
+		tier: statusTier(status),
+	};
+	if (status.probeCapabilities !== undefined) {
+		return { ...out, probeCapabilities: status.probeCapabilities };
+	}
+	return out;
 }

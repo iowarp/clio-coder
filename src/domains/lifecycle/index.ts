@@ -9,7 +9,6 @@ export const LifecycleDomainModule: DomainModule = {
 
 export type { LifecycleContract } from "./contract.js";
 export { type DoctorFinding, formatDoctorReport, runDoctor } from "./doctor.js";
-export { ensureInstalled, type InstallInfo, readInstallInfo } from "./install.js";
 export {
 	listMigrations,
 	type Migration,
@@ -17,4 +16,5 @@ export {
 	type MigrationRunResult,
 	runPending,
 } from "./migrations/index.js";
+export { ensureClioState, readStateInfo, type StateInfo } from "./state.js";
 export { getVersionInfo, type VersionInfo } from "./version.js";

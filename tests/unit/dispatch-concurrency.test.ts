@@ -105,6 +105,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		probeAll: async () => {},
 		probeAllLive: async () => {},
 		probeEndpoint: async () => status,
+		disconnectEndpoint: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,

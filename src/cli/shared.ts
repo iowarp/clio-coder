@@ -26,19 +26,20 @@ export function parseFlags(argv: string[]): { flags: Set<string>; positional: st
 }
 
 /**
- * Pull the optional `--api-key <value>` startup flag out of argv. Returned
- * `rest` preserves order and drops the flag pair so downstream parsers (the
- * subcommand router, `clio run`, etc.) never see it. The value may be an empty
- * string if the user passed `--api-key` without an argument or with `--`; in
- * that case we treat the flag as absent and leave the next arg untouched.
+ * Pull the optional top-level `--api-key <value>` startup flag out of argv.
+ * Only flags before the first subcommand are global; after the first
+ * positional token, `--api-key` belongs to that subcommand (for example
+ * `clio auth login openai --api-key ...` or `clio configure --api-key ...`).
  */
 export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: string; rest: string[] } {
 	const rest: string[] = [];
 	let apiKey: string | undefined;
+	let sawSubcommand = false;
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
-		if (arg !== "--api-key") {
+		if (sawSubcommand || arg !== "--api-key") {
 			if (arg !== undefined) rest.push(arg);
+			if (arg !== undefined && !arg.startsWith("-")) sawSubcommand = true;
 			continue;
 		}
 		const value = argv[i + 1];

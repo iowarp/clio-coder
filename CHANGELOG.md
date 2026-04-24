@@ -245,7 +245,7 @@ Source commits: `e905731`, `dd3ed3d`, `fa2703f`, `05efdf6`, `6ce8d79`,
 - Added: seven builtin agent recipe markdown files.
 - Added: providers domain wired with probe-all and health bus.
 - Added: agents domain wired with builtin + user + project discovery.
-- Added: `clio providers` and `clio agents list` CLI commands.
+- Added: early provider and agent listing commands, since replaced by `clio targets` and `clio agents`.
 - Fixed: credentials umask race (CWE-377) closed by opening with `0o600`.
 - Fixed: `diag-providers` asserts `data-dir-matches-home`.
 - Fixed: tarball `files` globs so agent builtins, prompt fragments, and

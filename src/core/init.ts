@@ -58,7 +58,7 @@ export function initializeClioHome(): InitReport {
 	if (!existsSync(credentialsPath)) {
 		writeFileSync(
 			credentialsPath,
-			"# Managed via the /providers overlay. Do not edit manually unless you know what you are doing.\n{}\n",
+			"# Managed via `clio auth`. Do not edit manually unless you know what you are doing.\n{}\n",
 			{
 				encoding: "utf8",
 				mode: 0o600,

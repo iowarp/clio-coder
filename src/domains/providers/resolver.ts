@@ -127,10 +127,10 @@ function buildResult(
 }
 
 /**
- * Resolve a user-supplied model pattern against the configured endpoints.
+ * Resolve a user-supplied model pattern against the configured targets.
  * Order of attempts:
- *   1. Exact `endpoint/model` reference (case-insensitive).
- *   2. Glob (`*`, `?`, `[…]`) against `endpoint/model` and bare `model`.
+ *   1. Exact `target/model` reference (case-insensitive).
+ *   2. Glob (`*`, `?`, `[…]`) against `target/model` and bare `model`.
  *   3. Bare model id, exact case-insensitive.
  *   4. Bare model id, case-insensitive substring.
  *
@@ -145,7 +145,7 @@ export function resolveModelReference(rawPattern: string, providers: ProvidersCo
 	const { base, thinkingLevel } = splitThinkingSuffix(trimmed);
 	const candidates = collectCandidates(providers);
 	if (candidates.length === 0) {
-		return { ref: null, error: "no endpoints configured; add one with `clio setup`" };
+		return { ref: null, error: "no targets configured; add one with `clio configure` or `clio targets add`" };
 	}
 
 	const lower = base.toLowerCase();

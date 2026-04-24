@@ -83,9 +83,9 @@ export function readThinkingLevel(settings: Readonly<ClioSettings>): ThinkingLev
 }
 
 /**
- * Thinking levels permitted for the active orchestrator endpoint. Looks up the
- * endpoint's merged `CapabilityFlags` via `providers.list()` and gates the list
- * through `availableThinkingLevels`. Unknown or unconfigured endpoints return
+ * Thinking levels permitted for the active orchestrator target. Looks up the
+ * target's merged `CapabilityFlags` via `providers.list()` and gates the list
+ * through `availableThinkingLevels`. Unknown or unconfigured targets return
  * `["off"]` so the overlay degrades to a no-op single-option picker.
  */
 export function resolveAvailableThinkingLevels(

@@ -47,4 +47,4 @@ The recommended self-development stack is:
 
 1. Orchestrator: `openai-codex/gpt-5.4`
 2. Workers: `openai-codex/gpt-5.4-mini`
-3. Auth: `clio connect openai-codex`
+3. Auth: `clio auth login openai-codex`

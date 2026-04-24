@@ -15,7 +15,7 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
-import { ensureInstalled, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
@@ -28,6 +28,7 @@ import {
 	availableThinkingLevels,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
+	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
@@ -96,7 +97,7 @@ async function resolveApiKeyForEndpoint(
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) return undefined;
-	if (runtime.auth !== "api-key" && runtime.auth !== "oauth") return undefined;
+	if (!targetRequiresAuth(endpoint, runtime)) return undefined;
 	const resolved = await providers.auth.resolveForTarget(endpoint, runtime);
 	return resolved.apiKey;
 }
@@ -224,7 +225,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	installBusTracer();
 	termination.installSignalHandlers();
 
-	ensureInstalled();
+	ensureClioState();
 	timer.mark("install check");
 
 	const result = await loadDomains([
@@ -280,7 +281,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (endpoint && runtime) {
 				providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
 			} else {
-				process.stderr.write("clio: --api-key supplied but no active orchestrator endpoint is configured; ignoring.\n");
+				process.stderr.write("clio: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
 			}
 		}
 	}

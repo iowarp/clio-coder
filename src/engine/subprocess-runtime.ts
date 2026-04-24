@@ -85,6 +85,15 @@ function planInvocation(input: SubprocessWorkerInput): InvocationPlan {
 			if (runtime.credentialsEnvVar) plan.envKeyName = runtime.credentialsEnvVar;
 			return plan;
 		}
+		case "opencode-cli": {
+			return {
+				binary: "opencode",
+				args: ["run", "-m", wireModelId, task],
+				provider: "opencode",
+				api: "subprocess-opencode",
+				...(runtime.credentialsEnvVar ? { envKeyName: runtime.credentialsEnvVar } : {}),
+			};
+		}
 		default:
 			throw new Error(`subprocess-runtime: unknown runtime id '${runtime.id}'`);
 	}

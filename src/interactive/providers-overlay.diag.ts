@@ -151,6 +151,7 @@ async function main(): Promise<void> {
 				await live.promise;
 			},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "diag",

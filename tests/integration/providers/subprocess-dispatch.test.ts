@@ -24,8 +24,7 @@ const runtime: RuntimeDescriptor = {
 	displayName: "Claude Code CLI",
 	kind: "subprocess",
 	apiFamily: "subprocess-claude-code",
-	auth: "api-key",
-	credentialsEnvVar: "ANTHROPIC_API_KEY",
+	auth: "cli",
 	defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 	synthesizeModel: () => ({ id: "claude-sonnet-4-6", provider: "anthropic", baseUrl: "" }) as never,
 };
