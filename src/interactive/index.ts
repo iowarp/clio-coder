@@ -2,26 +2,39 @@ import { exec } from "node:child_process";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
-	type ProvidersContract,
-	type ThinkingLevel,
 	getRuntimeRegistry,
-	listProviderSupportEntries,
+	type ProvidersContract,
 	resolveProviderReference,
+	type ThinkingLevel,
+	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import { Editor, ProcessTerminal, type SelectItem, TUI, Text, isKeyRelease, matchesKey } from "../engine/tui.js";
+import { openSession } from "../engine/session.js";
+import {
+	createAgentProgress,
+	Editor,
+	isKeyRelease,
+	matchesKey,
+	ProcessTerminal,
+	type SelectItem,
+	Text,
+	TUI,
+} from "../engine/tui.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
-import { createCoalescingChatRenderer } from "./chat-renderer.js";
+import { createCoalescingChatRenderer, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
+import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout, defaultBanner } from "./layout.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
@@ -40,7 +53,7 @@ import {
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
-import { type RunIo, type SlashCommandContext, dispatchSlashCommand, parseSlashCommand } from "./slash-commands.js";
+import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -49,14 +62,14 @@ import { renderSuperOverlayLines } from "./super-overlay.js";
 export {
 	BUILTIN_SLASH_COMMANDS,
 	type BuiltinSlashCommand,
+	dispatchSlashCommand,
 	type HandleRunDeps,
+	handleRun,
+	parseSlashCommand,
 	type RunIo,
 	type SlashCommand,
 	type SlashCommandContext,
 	type SlashCommandKind,
-	dispatchSlashCommand,
-	handleRun,
-	parseSlashCommand,
 } from "./slash-commands.js";
 
 export interface InteractiveDeps {
@@ -66,6 +79,14 @@ export interface InteractiveDeps {
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
+	/**
+	 * Shared tool registry. When wired, the super overlay opens automatically
+	 * whenever a tool call is parked waiting for super admission, and the
+	 * confirm / cancel overlay handlers drive `resumeParkedCalls` /
+	 * `cancelParkedCalls` so blocked bash batches run (or reject cleanly)
+	 * after the mode transition rather than stalling indefinitely.
+	 */
+	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
 	/** XDG data dir (clioDataDir()). `/receipt verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
@@ -120,21 +141,7 @@ export interface InteractiveDeps {
 	onShutdown: () => Promise<void>;
 }
 
-export const SHIFT_TAB = "\x1b[Z";
-export const CTRL_D = "\x04";
-export const CTRL_B = "\x02";
-export const CTRL_L = "\x0c";
-export const CTRL_P = "\x10";
-export const CTRL_R = "\x12";
 export const CTRL_C_DOUBLE_TAP_MS = 500;
-// pi-coding-agent emits Shift+Ctrl+P as the CSI-u sequence for key 80 with the
-// shift+ctrl modifiers. Terminals in kitty-protocol mode deliver this literally;
-// legacy terminals without CSI-u will not fire this binding, by design — fall
-// back to /scoped-models to reach the scope in that environment.
-export const SHIFT_CTRL_P = "\x1b[80;6u";
-export const ALT_S = "\x1bs";
-export const ALT_M = "\x1bm";
-export const ALT_T = "\x1bt";
 export const ENTER = "\r";
 export const ESC = "\x1b";
 export type OverlayState =
@@ -156,6 +163,12 @@ export type OverlayState =
 	| "hotkeys";
 
 export interface KeyBindingDeps {
+	/**
+	 * Keybinding lookup injected by startInteractive. Defaults come from
+	 * CLIO_KEYBINDINGS; user overrides from settings.keybindings. Tests may
+	 * substitute a narrower matcher via createKeybindingManagerForTesting.
+	 */
+	matches: (data: string, id: ClioKeybinding) => boolean;
 	cycleMode: () => void;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
@@ -274,41 +287,44 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 
 /** Pure key router: returns true when the input was consumed. */
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
-	if (data === ALT_S) {
+	if (deps.matches(data, "clio.super.request")) {
 		deps.requestSuper();
 		return true;
 	}
-	if (data === SHIFT_TAB) {
+	if (deps.matches(data, "clio.thinking.cycle")) {
 		deps.cycleThinking();
 		return true;
 	}
-	if (data === ALT_M) {
+	if (deps.matches(data, "clio.mode.cycle")) {
 		deps.cycleMode();
 		return true;
 	}
-	if (data === ALT_T) {
+	if (deps.matches(data, "clio.session.tree")) {
 		deps.openTree();
 		return true;
 	}
-	if (data === CTRL_B) {
+	if (deps.matches(data, "clio.dispatchBoard.toggle")) {
 		deps.toggleDispatchBoard();
 		return true;
 	}
-	if (data === CTRL_L) {
+	if (deps.matches(data, "clio.model.select")) {
 		deps.openModelSelector();
 		return true;
 	}
-	if (data === SHIFT_CTRL_P) {
-		// Match before CTRL_P so the longer sequence wins. SHIFT_CTRL_P starts
-		// with \x1b, CTRL_P is a single \x10 byte, so the two do not prefix-match.
+	// Match shift+ctrl+p before ctrl+p so the longer sequence wins. In the
+	// default bindings these do not prefix-match each other anyway (the
+	// first starts with \x1b via CSI-u, the second is a single \x10 byte),
+	// but the order still matters if a user rebinds ctrl+p to an escape
+	// sequence that shift+ctrl+p shares a prefix with.
+	if (deps.matches(data, "clio.model.cycleBackward")) {
 		deps.cycleScopedModelBackward();
 		return true;
 	}
-	if (data === CTRL_P) {
+	if (deps.matches(data, "clio.model.cycleForward")) {
 		deps.cycleScopedModelForward();
 		return true;
 	}
-	if (data === CTRL_D) {
+	if (deps.matches(data, "clio.exit")) {
 		deps.requestShutdown();
 		return true;
 	}
@@ -340,7 +356,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Pure overlay key router for the /providers overlay. Esc closes; everything else is swallowed. */
+/** Pure overlay key router for the target status overlay. Esc closes; everything else is swallowed. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
@@ -515,10 +531,15 @@ export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps
 	return false;
 }
 
-/** Overlay inputs always stay inside the overlay except for Ctrl+D shutdown. */
-export function routeOverlayKey(data: string, overlayState: OverlayState, deps: OverlayKeyDeps): boolean {
+/** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
+export function routeOverlayKey(
+	data: string,
+	overlayState: OverlayState,
+	deps: OverlayKeyDeps,
+	matches: (data: string, id: ClioKeybinding) => boolean,
+): boolean {
 	if (overlayState === "closed") return false;
-	if (data === CTRL_D) {
+	if (matches(data, "clio.exit")) {
 		deps.requestShutdown();
 		return true;
 	}
@@ -578,6 +599,14 @@ export function routeOverlayKey(data: string, overlayState: OverlayState, deps: 
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
 	}
+	// Dispatch-board branch (fall-through). The overlay has no focused
+	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
+	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
+	// and Esc still closes via routeDispatchBoardOverlayKey.
+	if (matches(data, "clio.dispatchBoard.toggle")) {
+		deps.closeOverlay();
+		return true;
+	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -588,6 +617,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const terminal = new ProcessTerminal();
 	const tui = new TUI(terminal);
 
+	// Build the runtime keybinding manager from the current settings snapshot.
+	// This also installs the manager as pi-tui's global (via setKeybindings)
+	// so editor/select components honor overrides without explicit plumbing.
+	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
+
 	const banner = defaultBanner();
 	const chatPanel = createChatPanel();
 	const harness = deps.harness;
@@ -597,6 +631,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
 		getStreaming: () => deps.chat.isStreaming(),
+		getSessionTokens: () => deps.observability.sessionTokens(),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -627,6 +662,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		requestRender: () => tui.requestRender(),
 	});
 	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
+	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.69.0
+	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
+	// are idempotent and unit-testable.
+	const agentProgress = createAgentProgress(terminal);
+	const unsubscribeProgress = deps.chat.onEvent((event) => {
+		if (event.type === "agent_start") agentProgress.start();
+		else if (event.type === "agent_end") agentProgress.stop();
+	});
+	// Repaint the footer whenever an assistant message completes so the
+	// running `in:/out:` token counters reflect the latest usage. The
+	// existing 120ms ticker only refreshes while streaming, which means the
+	// final frame after a turn ends would otherwise be stale.
+	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
+		if (event.type !== "message_end" && event.type !== "agent_end") return;
+		footer.refresh();
+		tui.requestRender();
+	});
 
 	const slashCtx: SlashCommandContext = {
 		io,
@@ -644,6 +696,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
+		providers: deps.providers,
+		applyModelRef: (ref) => {
+			deps.onSelectModel?.({ endpoint: ref.endpoint, model: ref.model });
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
+			tui.requestRender();
+		},
 		openScopedModels: () => openScopedModelsOverlayState(),
 		openSettings: () => openSettingsOverlayState(),
 		openResume: () => openResumeOverlayState(),
@@ -738,6 +796,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
+		const leaving = overlayState;
 		if (overlayState === "auth") {
 			authDialogDismiss?.();
 			authDialogDismiss = null;
@@ -746,6 +805,25 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
+		// Centralize the parked-call lifecycle here so every super-overlay
+		// dismissal (Enter, Esc, Ctrl+C, shutdown) drives the registry to a
+		// terminal verdict. `modes.confirmSuper` flips the mode before the
+		// confirm handler calls closeOverlay, so a post-close mode of "super"
+		// means the user confirmed; anything else means they cancelled.
+		if (leaving === "super-confirm" && deps.toolRegistry) {
+			if (deps.modes.current() === "super") {
+				void deps.toolRegistry.resumeParkedCalls();
+			} else {
+				deps.toolRegistry.cancelParkedCalls("super mode confirmation cancelled");
+			}
+		}
+		// If a parked call arrived while an unrelated overlay was open, the
+		// onSuperRequired listener's attempt to open the super overlay was a
+		// no-op. Re-check on every overlay close so the user sees the
+		// confirmation prompt as soon as the competing overlay dismisses.
+		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+			openSuperOverlay("tool");
+		}
 		tui.requestRender();
 	};
 
@@ -762,7 +840,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 	};
 
-	const resolveAuthReference = (target: string) => {
+	const resolveConnectionReference = (target: string) => {
 		const settings = deps.getSettings?.();
 		if (!settings) return null;
 		return resolveProviderReference(
@@ -773,53 +851,80 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const performDisconnect = (target: string): void => {
-		const resolved = resolveAuthReference(target);
-		if (!resolved) {
-			io.stderr(`[/disconnect] unknown provider or endpoint: ${target}\n`);
+		const resolved = resolveConnectionReference(target);
+		if (!resolved?.endpoint) {
+			io.stderr(`[/disconnect] unknown target: ${target}\n`);
 			return;
 		}
-		const status = deps.providers.auth.statusForTarget(
-			resolved.endpoint ?? { id: "", runtime: resolved.runtime.id },
-			resolved.runtime,
-		);
-		if (!status.available) {
-			io.stderr(`[/disconnect] no stored credential for ${resolved.authTarget.providerId}\n`);
+		const status = deps.providers.disconnectEndpoint(resolved.endpoint.id);
+		if (!status) {
+			io.stderr(`[/disconnect] unknown target: ${target}\n`);
 			return;
 		}
-		if (status.source === "environment") {
-			io.stderr(
-				`[/disconnect] ${resolved.authTarget.providerId} uses ${status.detail ?? "environment"}; clear the env var to disconnect\n`,
-			);
-			return;
-		}
-		if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
-			io.stderr(`[/disconnect] cannot disconnect ${resolved.authTarget.providerId} from source ${status.source}\n`);
-			return;
-		}
-		deps.providers.auth.logout(resolved.authTarget.providerId);
+		io.stderr(`[/disconnect] disconnected target ${status.endpoint.id}; credentials unchanged\n`);
 		footer.refresh();
 		tui.requestRender();
 	};
 
 	const openConnectFlowState = (target: string): void => {
 		if (overlayState !== "closed") return;
-		const resolved = resolveAuthReference(target);
-		if (!resolved) {
-			io.stderr(`[/connect] unknown provider or endpoint: ${target}\n`);
+		const resolved = resolveConnectionReference(target);
+		if (!resolved?.endpoint) {
+			io.stderr(`[/connect] unknown target: ${target}. Configure a target first with clio targets add.\n`);
 			return;
 		}
-		if (resolved.runtime.auth !== "oauth" && resolved.runtime.auth !== "api-key") {
-			io.stderr(`[/connect] runtime ${resolved.runtime.id} is not connectable from the TUI\n`);
-			return;
-		}
+		const endpointId = resolved.endpoint.id;
+		const runtimeId = resolved.runtime.id;
+		const probeTarget = async (dialog: ReturnType<typeof openAuthDialog>): Promise<void> => {
+			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking connection..."]);
+			const status = await deps.providers.probeEndpoint(endpointId);
+			if (!status) {
+				dialog.controller.setLines([`Target: ${endpointId}`, "Connection failed: target is not configured."]);
+				return;
+			}
+			const health = status.health.status;
+			const detail =
+				status.reason ||
+				status.health.lastError ||
+				(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
+			dialog.controller.setLines([
+				`Target: ${endpointId}`,
+				`Runtime: ${runtimeId}`,
+				status.available ? `Connected (${health})` : `Connection failed (${health})`,
+				detail,
+			]);
+			footer.refresh();
+			tui.requestRender();
+		};
+
 		overlayState = "auth";
+		const requiresManagedAuth = targetRequiresAuth(resolved.endpoint, resolved.runtime);
+		const authStatus = deps.providers.auth.statusForTarget(resolved.endpoint, resolved.runtime);
+		if (!requiresManagedAuth || authStatus.available) {
+			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
+			overlayHandle = dialog.handle;
+			void (async () => {
+				try {
+					await probeTarget(dialog);
+				} catch (error) {
+					dialog.controller.setLines([
+						`Target: ${endpointId}`,
+						`Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+					]);
+					tui.requestRender();
+				}
+			})();
+			tui.requestRender();
+			return;
+		}
 		if (resolved.runtime.auth === "api-key") {
-			const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
 			overlayHandle = dialog.handle;
 			authDialogDismiss = dialog.controller.dismiss;
 			dialog.controller.setLines([
-				`Provider: ${resolved.authTarget.providerId}`,
-				"Store an API key in credentials.yaml for this provider.",
+				`Target: ${endpointId}`,
+				`Runtime: ${resolved.runtime.id}`,
+				"API key required before Clio can connect to this target.",
 			]);
 			void (async () => {
 				try {
@@ -827,8 +932,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					if (apiKey.length === 0) throw new Error("empty API key");
 					deps.providers.auth.setApiKey(resolved.authTarget.providerId, apiKey);
 					authDialogDismiss = null;
-					closeOverlay();
-					footer.refresh();
+					await probeTarget(dialog);
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					if (message !== "dismissed" && message !== "cancelled") {
@@ -841,10 +945,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			return;
 		}
-		const dialog = openAuthDialog(tui, `Connect ${resolved.runtime.displayName}`, () => closeOverlay());
+		const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
 		overlayHandle = dialog.handle;
 		authDialogDismiss = dialog.controller.dismiss;
-		dialog.controller.setLines([`Provider: ${resolved.authTarget.providerId}`, "Starting OAuth flow..."]);
+		dialog.controller.setLines([
+			`Target: ${endpointId}`,
+			`Runtime: ${resolved.runtime.id}`,
+			"Starting authorization flow...",
+		]);
 		void (async () => {
 			let manualCodeTimer: NodeJS.Timeout | null = null;
 			try {
@@ -876,8 +984,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					},
 				});
 				authDialogDismiss = null;
-				closeOverlay();
-				footer.refresh();
+				await probeTarget(dialog);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message !== "dismissed" && message !== "cancelled") {
@@ -902,20 +1009,33 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		const settings = deps.getSettings?.();
 		if (!settings) return;
-		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
-			.filter((entry) => entry.connectable)
-			.map((entry) => {
-				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
-				const status = runtime ? deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime) : null;
-				return {
-					value: entry.runtimeId,
-					label: `${entry.runtimeId}  ${entry.label}`,
-					description: status?.available ? `${status.source}` : entry.summary,
-				};
-			});
+		const statuses = deps.providers.list();
+		const targetItems: SelectItem[] = settings.endpoints.map((endpoint) => {
+			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
+			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
+			const auth =
+				runtime && (runtime.auth === "oauth" || runtime.auth === "api-key")
+					? deps.providers.auth.statusForTarget(endpoint, runtime)
+					: null;
+			const connection =
+				status?.health.status && status.health.status !== "unknown"
+					? status.health.status
+					: auth?.available
+						? auth.source
+						: (status?.reason ?? "configured target");
+			return {
+				value: endpoint.id,
+				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
+				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
+			};
+		});
+		if (targetItems.length === 0) {
+			io.stderr("[/connect] no targets configured. Run clio configure or clio targets add.\n");
+			return;
+		}
 		overlayState = "auth";
 		overlayHandle = openAuthSelectorOverlay(tui, {
-			items,
+			items: targetItems,
 			onSelect: (value) => {
 				closeOverlay();
 				queueMicrotask(() => openConnectFlowState(value));
@@ -931,20 +1051,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		if (overlayState !== "closed") return;
-		const items: SelectItem[] = listProviderSupportEntries(getRuntimeRegistry().list())
-			.filter((entry) => {
-				const runtime = deps.providers.getRuntime(entry.runtimeId) ?? getRuntimeRegistry().get(entry.runtimeId);
-				if (!runtime) return false;
-				const status = deps.providers.auth.statusForTarget({ id: "", runtime: runtime.id }, runtime);
-				return status.source === "stored-api-key" || status.source === "stored-oauth";
-			})
-			.map((entry) => ({
-				value: entry.runtimeId,
-				label: `${entry.runtimeId}  ${entry.label}`,
-				description: "disconnect stored credential",
-			}));
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		const statuses = deps.providers.list();
+		const items: SelectItem[] = settings.endpoints.map((endpoint) => {
+			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
+			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
+			const connection =
+				status?.health.status && status.health.status !== "unknown"
+					? status.health.status
+					: (status?.reason ?? "configured target");
+			return {
+				value: endpoint.id,
+				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
+				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
+			};
+		});
 		if (items.length === 0) {
-			io.stderr("[/disconnect] no stored provider credentials\n");
+			io.stderr("[/disconnect] no targets configured. Run clio configure or clio targets add.\n");
 			return;
 		}
 		overlayState = "auth";
@@ -959,9 +1083,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openSuperOverlay = (): void => {
+	const openSuperOverlay = (requestedBy: string = "keybind"): void => {
 		if (overlayState !== "closed") return;
-		deps.modes.requestSuper("keybind");
+		deps.modes.requestSuper(requestedBy);
 		overlayState = "super-confirm";
 		overlayHandle = tui.showOverlay(superOverlay, {
 			anchor: "center",
@@ -969,6 +1093,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 		tui.requestRender();
 	};
+
+	// Subscribe to registry parking so the super overlay opens automatically
+	// whenever a tool call (typically a privileged bash batch) stalls waiting
+	// for super admission. The resume/cancel handlers on the overlay drive the
+	// registry back to a terminal verdict so pi-agent-core sees either a real
+	// result or a clean rejection instead of a hung promise.
+	const unsubscribeSuperRequired =
+		deps.toolRegistry?.onSuperRequired(() => {
+			if (overlayState === "super-confirm") return;
+			openSuperOverlay("tool");
+		}) ?? (() => {});
 
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
@@ -1055,6 +1190,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openSettingsOverlay(tui, {
 			getSettings,
 			providers: deps.providers,
+			keybindings,
 			writeSettings: (next) => {
 				writeSettingsOut(next);
 				footer.refresh();
@@ -1077,7 +1213,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			session: sessionContract,
 			onResume: (sessionId) => {
 				deps.onResumeSession?.(sessionId);
+				// Replay the resumed session's on-disk turns into the chat
+				// panel so the user sees their prior transcript, and reset
+				// chat-loop's lastTurnId + agent.state.messages so the next
+				// submit parents onto the resumed leaf rather than inheriting
+				// whatever state the previous session left behind. Row 51
+				// regression fix.
+				try {
+					const turns = openSession(sessionId).turns();
+					chatPanel.reset();
+					rehydrateChatPanelFromTurns(chatPanel, turns);
+					const leafTurnId = turns.length > 0 ? (turns[turns.length - 1]?.id ?? null) : null;
+					deps.chat.resetForSession(leafTurnId);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
+				}
 				footer.refresh();
+				tui.requestRender();
 			},
 			onClose: () => {
 				closeOverlay();
@@ -1145,6 +1298,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openMessagePickerOverlay(tui, {
 			session: sessionContract,
 			onFork: (parentTurnId) => {
+				// Capture the parent session id BEFORE fork swaps the
+				// contract's current pointer; the pre-fork transcript lives
+				// on the parent session's current.jsonl, and we need it for
+				// replay into the new branch's chat panel.
+				const parentSessionId = sessionContract.current()?.id ?? null;
 				try {
 					if (deps.onForkSession) {
 						deps.onForkSession(parentTurnId);
@@ -1152,11 +1310,27 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						sessionContract.fork(parentTurnId);
 					}
 					chatPanel.reset();
+					if (parentSessionId) {
+						try {
+							const parentTurns = openSession(parentSessionId).turns();
+							rehydrateChatPanelFromTurns(chatPanel, parentTurns, { uptoTurnId: parentTurnId });
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
+						}
+					}
+					// The new branch starts a fresh tree (tree.json is empty on
+					// the fork; the parent-pointer lives on meta.json), so the
+					// next user turn must parent to null. Row 52 regression
+					// fix also relies on clearing agent.state.messages so the
+					// post-fork submit does not ship the pre-fork conversation.
+					deps.chat.resetForSession(null);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/fork] fork failed: ${msg}\n`);
 				}
 				footer.refresh();
+				tui.requestRender();
 			},
 			onClose: () => closeOverlay(),
 		});
@@ -1170,6 +1344,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		deps.onNewSession();
 		chatPanel.reset();
+		// Same pre-switch cleanup as /resume and /fork: without this, the
+		// chat-loop closure keeps the prior session's lastTurnId and the
+		// agent's state.messages, so the first submit on the new session
+		// would reach back into context that the user believes was dropped.
+		deps.chat.resetForSession(null);
 		footer.refresh();
 		tui.requestRender();
 	};
@@ -1178,7 +1357,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	 * Pop the cwd-fallback overlay after /resume landed on a session whose
 	 * recorded cwd no longer exists on disk (see src/domains/session/
 	 * cwd-fallback.ts for the reasons). Continue silently accepts the
-	 * broken-cwd session — downstream file ops will surface real errors.
+	 * broken-cwd session. Downstream file ops will surface real errors.
 	 * Cancel restores the prior session when one existed, or re-opens the
 	 * /resume picker so the user can select a different session.
 	 */
@@ -1219,7 +1398,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openHotkeysOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "hotkeys";
-		overlayHandle = openHotkeysOverlay(tui);
+		overlayHandle = openHotkeysOverlay(tui, keybindings);
 		tui.requestRender();
 	};
 
@@ -1248,12 +1427,20 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
+		unsubscribeProgress();
+		unsubscribeFooterTokens();
+		unsubscribeSuperRequired();
+		agentProgress.stop();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
 			tui.stop();
 		} catch {
 			// TUI may already be stopped; swallow.
 		}
+		// Drain the parked queue so any worker or agent loop still holding
+		// a pending tool-execution promise sees a terminal verdict rather
+		// than a promise that never settles across process exit.
+		deps.toolRegistry?.cancelParkedCalls("clio shutting down");
 		await deps.onShutdown();
 		resolveRun(0);
 	};
@@ -1325,35 +1512,41 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
-		const overlayConsumed = routeOverlayKey(data, overlayState, {
-			cancelSuper: () => {
-				closeOverlay();
+		const overlayConsumed = routeOverlayKey(
+			data,
+			overlayState,
+			{
+				cancelSuper: () => {
+					closeOverlay();
+				},
+				confirmSuper: (conf) => {
+					deps.modes.confirmSuper(conf);
+					closeOverlay();
+					footer.refresh();
+					tui.requestRender();
+				},
+				now: () => Date.now(),
+				closeOverlay,
+				requestShutdown: () => {
+					void shutdown();
+				},
 			},
-			confirmSuper: (conf) => {
-				deps.modes.confirmSuper(conf);
-				closeOverlay();
-				footer.refresh();
-				tui.requestRender();
-			},
-			now: () => Date.now(),
-			closeOverlay,
-			requestShutdown: () => {
-				void shutdown();
-			},
-		});
+			(input, id) => keybindings.matches(input, id),
+		);
 		if (overlayConsumed) {
 			return { consume: true };
 		}
 
 		if (harness) {
 			const snap = harness.state.snapshot();
-			if (snap.kind === "restart-required" && data === CTRL_R) {
+			if (snap.kind === "restart-required" && keybindings.matches(data, "clio.harness.restart")) {
 				void harness.restart();
 				return { consume: true };
 			}
 		}
 
 		const consumed = routeInteractiveKey(data, {
+			matches: (input, id) => keybindings.matches(input, id),
 			cycleMode: () => {
 				deps.modes.cycleNormal();
 				footer.refresh();

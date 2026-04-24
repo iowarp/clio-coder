@@ -1,9 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { probeHttp, probeJson } from "../../../src/domains/providers/probe/http.js";
+import { probeLlamaCppProps } from "../../../src/domains/providers/runtimes/common/probe-helpers.js";
 
 interface Spec {
 	status?: number;
@@ -111,5 +112,26 @@ describe("providers/probe probeJson", () => {
 		const result = await probeJson({ url: baseUrl, timeoutMs: 1000 });
 		strictEqual(result.ok, false);
 		ok(result.error?.startsWith("JSON parse: "), `expected JSON parse error, got: ${result.error}`);
+	});
+});
+
+describe("providers/probe llama.cpp props", () => {
+	it("maps n_ctx and n_predict into discovered capabilities", async () => {
+		configure({
+			status: 200,
+			body: JSON.stringify({
+				default_generation_settings: { n_ctx: 262144, n_predict: 65536 },
+				modalities: { vision: true },
+			}),
+		});
+
+		const result = await probeLlamaCppProps(baseUrl, {
+			credentialsPresent: new Set<string>(),
+			httpTimeoutMs: 1000,
+		});
+
+		strictEqual(result.discoveredCapabilities?.contextWindow, 262144);
+		strictEqual(result.discoveredCapabilities?.maxTokens, 65536);
+		strictEqual(result.discoveredCapabilities?.vision, true);
 	});
 });

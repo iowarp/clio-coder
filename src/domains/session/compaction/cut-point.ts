@@ -86,6 +86,17 @@ function findValidCutPoints(entries: ReadonlyArray<SessionEntry>, startIndex: nu
  * the chosen cut would swallow non-message bookkeeping entries (modelChange,
  * thinkingLevelChange, fileEntry, sessionInfo), the cut is widened so those
  * entries ride along with the suffix instead of being summarized.
+ *
+ * Small-session fallback: when the walker exhausts `entries` without ever
+ * accumulating `keepRecentTokens`, the pi-coding-agent reference left
+ * `cutIndex` at the oldest valid cut, which made `compact()` produce an
+ * empty `pre` slice and the chat-loop report "nothing to compact" on
+ * populated sessions below the keep-recent window. Clio's manual `/compact`
+ * expects to summarize whatever older history exists, so when no suffix
+ * crosses the threshold the cut falls back to the newest turn start (user
+ * message, bashExecution, or branchSummary). Sessions with only a single
+ * turn still land the cut at index 0. `pre` stays empty and the caller
+ * surfaces the honest "nothing to compact" notice.
  */
 export function findCutPoint(
 	entries: ReadonlyArray<SessionEntry>,
@@ -100,7 +111,7 @@ export function findCutPoint(
 	}
 
 	let accumulated = 0;
-	let cutIndex = cutPoints[0] ?? startIndex;
+	let cutIndex = -1;
 	for (let i = endIndex - 1; i >= startIndex; i--) {
 		const entry = entries[i];
 		if (!entry) continue;
@@ -114,6 +125,17 @@ export function findCutPoint(
 			}
 			break;
 		}
+	}
+
+	if (cutIndex === -1) {
+		// Walker never crossed keepRecentTokens, or crossed but found no valid
+		// cut at/after the stop index (all valid cuts precede the tool_result
+		// tail). Prefer the newest turn start so older turns still feed the
+		// summary prompt. Absent any turn start, fall back to the oldest valid
+		// cut. That matches the pre-fix behavior, so pre stays empty and the
+		// orchestrator reports nothing to compact.
+		const lastTurnStart = findTurnStartIndex(entries, endIndex - 1, startIndex);
+		cutIndex = lastTurnStart !== -1 ? lastTurnStart : (cutPoints[0] ?? startIndex);
 	}
 
 	// Scan backwards from cutIndex to fold bookkeeping entries into the suffix.

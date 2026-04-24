@@ -19,13 +19,26 @@ const VALID_API_FAMILIES = new Set<string>([
 	"ollama-native",
 	"rerank-http",
 	"embeddings-http",
+	"claude-agent-sdk",
 	"subprocess-claude-code",
 	"subprocess-codex",
 	"subprocess-gemini",
+	"subprocess-copilot",
+	"subprocess-opencode",
 ]);
 
-const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "none"]);
-const VALID_KINDS = new Set<string>(["http", "subprocess"]);
+const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "cli", "none"]);
+const VALID_KINDS = new Set<string>(["http", "subprocess", "sdk"]);
+const VALID_TIERS = new Set<string>([
+	"protocol",
+	"cloud",
+	"local-native",
+	"sdk",
+	"cli",
+	"cli-gold",
+	"cli-silver",
+	"cli-bronze",
+]);
 
 function describeDescriptor(desc: RuntimeDescriptor): string {
 	return `${desc.id} (${desc.kind}/${desc.apiFamily})`;
@@ -49,6 +62,7 @@ describe("providers/runtimes built-in descriptors", () => {
 			ok(desc.displayName.length > 0, `${label}: displayName must be non-empty`);
 
 			ok(VALID_KINDS.has(desc.kind), `${label}: invalid kind '${desc.kind}'`);
+			ok(desc.tier !== undefined && VALID_TIERS.has(desc.tier), `${label}: invalid tier '${String(desc.tier)}'`);
 			ok(VALID_API_FAMILIES.has(desc.apiFamily), `${label}: invalid apiFamily '${desc.apiFamily}'`);
 			ok(VALID_AUTH.has(desc.auth), `${label}: invalid auth '${desc.auth}'`);
 
@@ -80,5 +94,33 @@ describe("providers/runtimes built-in descriptors", () => {
 				`${describeDescriptor(desc)}: subprocess kind requires subprocess-* apiFamily`,
 			);
 		}
+	});
+
+	it("registers local CLI-backed targets with native CLI auth semantics", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		for (const id of ["claude-code-sdk", "claude-code-cli", "codex-cli", "gemini-cli", "copilot-cli", "opencode-cli"]) {
+			const desc = byId.get(id);
+			ok(desc, `missing runtime ${id}`);
+			strictEqual(desc.auth, "cli", `${id}: expected native CLI auth`);
+			ok(desc.knownModels && desc.knownModels.length > 0, `${id}: expected static model hints`);
+		}
+		strictEqual(byId.get("claude-code-sdk")?.tier, "sdk");
+		strictEqual(byId.get("claude-code-cli")?.tier, "cli-gold");
+		strictEqual(byId.get("codex-cli")?.tier, "cli-gold");
+		strictEqual(byId.get("copilot-cli")?.tier, "cli-silver");
+		strictEqual(byId.get("opencode-cli")?.tier, "cli-bronze");
+		ok(byId.get("claude-code-sdk")?.knownModels?.includes("claude-opus-4-7"));
+		ok(byId.get("copilot-cli")?.knownModels?.includes("claude-sonnet-4.6"));
+		ok(!byId.get("copilot-cli")?.knownModels?.includes("claude-sonnet-4-6"));
+		ok(byId.get("gemini-cli")?.knownModels?.includes("gemini-3-flash-preview"));
+		ok(!byId.get("gemini-cli")?.knownModels?.includes("gemini-3.0-flash"));
+	});
+
+	it("openai-codex exposes gpt-5.4-mini through the engine model list", async () => {
+		const { createEngineAi } = await import("../../../src/engine/ai.js");
+		const engineAi = createEngineAi();
+		const ids = engineAi.listModels("openai-codex").map((m) => m.id);
+		ok(ids.includes("gpt-5.4-mini"), `expected gpt-5.4-mini in openai-codex models, got: ${ids.join(",")}`);
+		ok(ids.includes("gpt-5.4"), `expected gpt-5.4 in openai-codex models, got: ${ids.join(",")}`);
 	});
 });

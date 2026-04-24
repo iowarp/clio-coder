@@ -10,42 +10,31 @@
 
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
-
+import claudeCodeCli from "./cli-stub/claude-code-cli.js";
+import claudeCodeSdk from "./cli-stub/claude-code-sdk.js";
+import codexCli from "./cli-stub/codex-cli.js";
+import copilotCli from "./cli-stub/copilot-cli.js";
+import geminiCli from "./cli-stub/gemini-cli.js";
+import openCodeCli from "./cli-stub/opencode-cli.js";
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
 import google from "./cloud/google.js";
 import groq from "./cloud/groq.js";
 import mistral from "./cloud/mistral.js";
-import openaiCodex from "./cloud/openai-codex.js";
 import openai from "./cloud/openai.js";
+import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
-
-import claudeCodeCli from "./subprocess/claude-code-cli.js";
-import codexCli from "./subprocess/codex-cli.js";
-import geminiCli from "./subprocess/gemini-cli.js";
-
-import aphrodite from "./local/aphrodite.js";
-import koboldcpp from "./local/koboldcpp.js";
-import lemonadeAnthropic from "./local/lemonade-anthropic.js";
-import lemonadeOpenai from "./local/lemonade-openai.js";
-import litellmGateway from "./local/litellm-gateway.js";
-import llamacppAnthropic from "./local/llamacpp-anthropic.js";
-import llamacppCompletion from "./local/llamacpp-completion.js";
-import llamacppEmbed from "./local/llamacpp-embed.js";
-import llamacppOpenai from "./local/llamacpp-openai.js";
-import llamacppRerank from "./local/llamacpp-rerank.js";
-import lmstudioNative from "./local/lmstudio-native.js";
-import lmstudio from "./local/lmstudio.js";
-import localai from "./local/localai.js";
-import mistralRs from "./local/mistral-rs.js";
-import mlc from "./local/mlc.js";
-import ollamaNative from "./local/ollama-native.js";
-import ollamaOpenai from "./local/ollama-openai.js";
-import openaiCompat from "./local/openai-compat.js";
-import sglang from "./local/sglang.js";
-import tabbyapi from "./local/tabbyapi.js";
-import tgi from "./local/tgi.js";
-import vllm from "./local/vllm.js";
+import lemonadeAnthropic from "./local-native/lemonade-anthropic.js";
+import lemonadeOpenai from "./local-native/lemonade-openai.js";
+import llamacppAnthropic from "./local-native/llamacpp-anthropic.js";
+import llamacppCompletion from "./local-native/llamacpp-completion.js";
+import llamacppEmbed from "./local-native/llamacpp-embed.js";
+import llamacppRerank from "./local-native/llamacpp-rerank.js";
+import lmstudioNative from "./local-native/lmstudio-native.js";
+import ollamaNative from "./local-native/ollama-native.js";
+import sglang from "./local-native/sglang.js";
+import vllm from "./local-native/vllm.js";
+import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	anthropic,
@@ -56,30 +45,22 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openai,
 	openaiCodex,
 	openrouter,
+	claudeCodeSdk,
 	claudeCodeCli,
 	codexCli,
 	geminiCli,
-	aphrodite,
-	koboldcpp,
+	copilotCli,
+	openCodeCli,
 	lemonadeAnthropic,
 	lemonadeOpenai,
-	litellmGateway,
 	llamacppAnthropic,
 	llamacppCompletion,
 	llamacppEmbed,
-	llamacppOpenai,
 	llamacppRerank,
-	lmstudio,
 	lmstudioNative,
-	localai,
-	mistralRs,
-	mlc,
 	ollamaNative,
-	ollamaOpenai,
 	openaiCompat,
 	sglang,
-	tabbyapi,
-	tgi,
 	vllm,
 ];
 

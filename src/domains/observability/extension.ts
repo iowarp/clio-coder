@@ -30,6 +30,10 @@ function recordDispatchCost(
 		return;
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
+	// Dispatch bus payloads carry only the total token count; no per-kind
+	// breakdown is available, so sessionTokens() will show the total under
+	// totalTokens and leave input/output at zero for dispatch runs. Chat-loop
+	// runs pass the full Usage breakdown through recordTokens().
 	cost.accumulate(payload.endpointId, payload.wireModelId, payload.tokenCount, payload.costUsd);
 }
 
@@ -76,10 +80,11 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		telemetry: () => telemetry.snapshot(),
 		metrics: () => aggregateMetrics(telemetry.snapshot()),
 		sessionCost: () => cost.sessionTotal(),
+		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
-		recordTokens(providerId, modelId, tokens, costUsd) {
+		recordTokens(providerId, modelId, tokens, costUsd, breakdown) {
 			telemetry.record("counter", "tokens.total", tokens);
-			cost.accumulate(providerId, modelId, tokens, costUsd);
+			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown);
 		},
 	};
 

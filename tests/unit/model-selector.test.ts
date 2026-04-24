@@ -103,6 +103,7 @@ describe("interactive/model-selector", () => {
 			probeAll: async () => undefined,
 			probeAllLive: async () => undefined,
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: (endpoint) => ({
 					providerId: endpoint.runtime,
@@ -121,6 +122,8 @@ describe("interactive/model-selector", () => {
 				login: async () => undefined,
 				logout: () => undefined,
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => undefined,
+				clearRuntimeOverrideForTarget: () => undefined,
 			},
 			credentials: {
 				hasKey: () => false,
@@ -191,6 +194,7 @@ describe("interactive/model-selector", () => {
 			probeAll: async () => undefined,
 			probeAllLive: async () => undefined,
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "llamacpp",
@@ -209,6 +213,8 @@ describe("interactive/model-selector", () => {
 				login: async () => undefined,
 				logout: () => undefined,
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => undefined,
+				clearRuntimeOverrideForTarget: () => undefined,
 			},
 			credentials: {
 				hasKey: () => true,

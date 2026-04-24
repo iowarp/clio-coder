@@ -294,7 +294,7 @@ describe("session/compaction/cut-point findCutPoint", () => {
 		deepStrictEqual(cut, { firstKeptEntryIndex: 0, turnStartIndex: -1, isSplitTurn: false });
 	});
 
-	it("never cuts at a tool_result — keeps the call/result pair together", () => {
+	it("never cuts at a tool_result and keeps the call/result pair together", () => {
 		// Force keepRecentTokens=0 so the walker wants to cut at the newest entry.
 		// A tool_result as the newest entry must not be a chosen cut; the cut
 		// should land on the preceding tool_call, keeping the pair intact.
@@ -339,6 +339,39 @@ describe("session/compaction/cut-point findCutPoint", () => {
 			strictEqual(cut.isSplitTurn, true);
 			strictEqual(cut.turnStartIndex, 2);
 		}
+	});
+
+	it("falls back to the most recent turn start when no suffix crosses keepRecentTokens", () => {
+		// Populated session whose total token budget is well below the
+		// keep-recent window. Before slice B4, cutIndex was initialized to
+		// cutPoints[0] (the oldest valid cut) and stayed there, making `pre`
+		// empty in compact() and producing the spurious
+		// "[/compact] nothing to compact" notice. The fallback now lands the
+		// cut on the newest turn start so manual /compact still summarizes
+		// older turns on a small session.
+		const entries = [
+			userMessage("u1", "hi", null),
+			assistantMessage("a1", "first reply", "u1"),
+			userMessage("u2", "follow up", "a1"),
+			assistantMessage("a2", "second reply", "u2"),
+			userMessage("u3", "thanks", "a2"),
+			assistantMessage("a3", "you are welcome", "u3"),
+		];
+		const cut = findCutPoint(entries, 20_000);
+		// Newest turn-start is u3 at index 4. Pre = [u1,a1,u2,a2]; post = [u3,a3].
+		strictEqual(cut.firstKeptEntryIndex, 4);
+		strictEqual(cut.isSplitTurn, false);
+		strictEqual(cut.turnStartIndex, -1);
+	});
+
+	it("single-turn session still reports nothing to compact under fallback", () => {
+		// Defensive: one user+assistant turn below keepRecent has no older
+		// history to summarize. Fallback lands on u1 (index 0) so pre stays
+		// empty and compact() short-circuits to an empty summary, which the
+		// chat-loop surfaces as the "nothing to compact" notice.
+		const entries = [userMessage("u1", "only turn", null), assistantMessage("a1", "reply", "u1")];
+		const cut = findCutPoint(entries, 20_000);
+		strictEqual(cut.firstKeptEntryIndex, 0);
 	});
 });
 
@@ -453,7 +486,7 @@ describe("interactive/renderers/compaction-summary renderCompactionSummaryLine",
 });
 
 // ---------------------------------------------------------------------------
-// auto.ts — shouldCompact + AutoCompactionTrigger (slice 12d)
+// auto.ts: shouldCompact + AutoCompactionTrigger (slice 12d)
 // ---------------------------------------------------------------------------
 
 describe("session/compaction/auto shouldCompact", () => {

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";

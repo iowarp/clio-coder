@@ -10,6 +10,8 @@ export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "
 export interface JobSpec {
 	agentId: string;
 	task: string;
+	workerProfile?: string;
+	workerRuntime?: string;
 	endpoint?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
@@ -19,7 +21,17 @@ export interface JobSpec {
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 
-const KNOWN_KEYS = new Set(["agentId", "task", "endpoint", "model", "thinkingLevel", "requiredCapabilities", "cwd"]);
+const KNOWN_KEYS = new Set([
+	"agentId",
+	"task",
+	"workerProfile",
+	"workerRuntime",
+	"endpoint",
+	"model",
+	"thinkingLevel",
+	"requiredCapabilities",
+	"cwd",
+]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -55,6 +67,18 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("workerProfile" in spec && spec.workerProfile !== undefined) {
+		if (typeof spec.workerProfile !== "string" || spec.workerProfile.length === 0) {
+			errors.push("workerProfile must be a non-empty string");
+		}
+	}
+
+	if ("workerRuntime" in spec && spec.workerRuntime !== undefined) {
+		if (typeof spec.workerRuntime !== "string" || spec.workerRuntime.length === 0) {
+			errors.push("workerRuntime must be a non-empty string");
+		}
+	}
+
 	if ("model" in spec && spec.model !== undefined) {
 		if (typeof spec.model !== "string" || spec.model.length === 0) {
 			errors.push("model must be a non-empty string");
@@ -87,6 +111,8 @@ export function validateJobSpec(spec: unknown): Validated {
 		agentId: agentId as string,
 		task: task as string,
 	};
+	if (typeof spec.workerProfile === "string") out.workerProfile = spec.workerProfile;
+	if (typeof spec.workerRuntime === "string") out.workerRuntime = spec.workerRuntime;
 	if (typeof spec.endpoint === "string") out.endpoint = spec.endpoint;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;

@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -19,6 +19,7 @@ export const editTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "write",
+	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
 		const pathArg =
 			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;

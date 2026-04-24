@@ -1,4 +1,4 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 
 import { mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
@@ -14,6 +14,31 @@ export interface LocalSynthesisInput {
 	apiFamily: RuntimeApiFamily;
 	provider: string;
 	baseUrlForEndpoint: (endpointUrl: string) => string;
+}
+
+function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["thinkingFormat"] | undefined {
+	if (
+		caps.thinkingFormat === "qwen-chat-template" ||
+		caps.thinkingFormat === "openrouter" ||
+		caps.thinkingFormat === "zai"
+	) {
+		return caps.thinkingFormat;
+	}
+	return undefined;
+}
+
+function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {
+	const compat: OpenAICompletionsCompat = {
+		supportsStore: false,
+		supportsDeveloperRole: false,
+		supportsReasoningEffort: false,
+		supportsUsageInStreaming: true,
+		maxTokensField: "max_tokens",
+		supportsStrictMode: false,
+	};
+	const thinkingFormat = openAIThinkingFormat(caps);
+	if (thinkingFormat) compat.thinkingFormat = thinkingFormat;
+	return compat;
 }
 
 export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
@@ -46,6 +71,9 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		maxTokens: caps.maxTokens,
 	};
 	if (headers) model.headers = headers;
+	if (apiFamily === "openai-completions") {
+		(model as Model<"openai-completions">).compat = localOpenAICompat(caps);
+	}
 	return model;
 }
 

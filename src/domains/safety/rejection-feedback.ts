@@ -41,7 +41,7 @@ function buildHints(ctx: RejectionContext): string[] {
 	const hints: string[] = [];
 	const hardBlock = HARD_BLOCK_CLASSES.includes(ctx.actionClass) || ctx.ruleId !== undefined;
 	if (hardBlock) {
-		hints.push("This is a hard block — no mode allows it.");
+		hints.push("This is a hard block; no mode allows it.");
 		return hints;
 	}
 	if (ctx.mode === "default" && ctx.actionClass === "system_modify") {

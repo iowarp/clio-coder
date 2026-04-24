@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import { createEngineAi } from "../../engine/ai.js";
 import { type AuthTarget, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
+import { getRuntimeRegistry } from "./registry.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
@@ -47,13 +48,14 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	openai: "OpenAI Platform API",
 	"openai-codex": "ChatGPT Plus/Pro via Codex OAuth",
 	openrouter: "OpenRouter API",
+	"claude-code-sdk": "Claude Code Agent SDK",
 	"claude-code-cli": "Claude Code CLI",
 	"codex-cli": "Codex CLI",
 	"gemini-cli": "Gemini CLI",
+	"copilot-cli": "GitHub Copilot CLI",
+	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
-	ollama: "Ollama OpenAI-compatible API",
 	"lmstudio-native": "LM Studio native API",
-	lmstudio: "LM Studio OpenAI-compatible API",
 };
 
 function groupPriority(group: ProviderSupportGroup): number {
@@ -89,7 +91,7 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
 	if (runtime.auth === "oauth") return "subscription";
-	if (runtime.kind === "subprocess") return "cli-runtime";
+	if (runtime.kind === "subprocess" || runtime.kind === "sdk") return "cli-runtime";
 	if (MODEL_PROVIDER_BY_RUNTIME_ID.has(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
 	}
@@ -98,7 +100,10 @@ function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 
 export function listKnownModelsForRuntime(runtimeId: string): string[] {
 	const provider = MODEL_PROVIDER_BY_RUNTIME_ID.get(runtimeId);
-	if (!provider) return [];
+	if (!provider) {
+		const runtime = getRuntimeIfRegistered(runtimeId);
+		return runtime?.knownModels ? [...runtime.knownModels] : [];
+	}
 	try {
 		return engineAi.listModels(provider).map((model) => model.id);
 	} catch {
@@ -106,8 +111,15 @@ export function listKnownModelsForRuntime(runtimeId: string): string[] {
 	}
 }
 
+function getRuntimeIfRegistered(runtimeId: string): RuntimeDescriptor | null {
+	try {
+		return getRuntimeRegistry().get(runtimeId);
+	} catch {
+		return null;
+	}
+}
+
 export function defaultModelForRuntime(runtimeId: string): string | undefined {
-	if (runtimeId === "openai-codex") return "gpt-5.4";
 	return listKnownModelsForRuntime(runtimeId)[0];
 }
 
@@ -122,7 +134,7 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		...(defaultModel ? { defaultModel } : {}),
 		modelHints,
 		featured: runtime.id === "openai-codex",
-		connectable: runtime.auth === "oauth" || runtime.auth === "api-key",
+		connectable: runtime.auth === "oauth" || runtime.auth === "api-key" || runtime.auth === "cli",
 		supportsCustomUrl:
 			runtime.kind === "http" && (classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat"),
 	};

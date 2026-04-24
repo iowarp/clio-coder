@@ -13,7 +13,7 @@ coding agents working in this repository.
 ## Repo Facts
 
 - Package: `@iowarp/clio-coder`
-- Version: `0.1.0-dev`
+- Version: `0.2.0-dev`
 - Release state: no public releases yet
 - Maintainer: Anthony Kougkas, `@akougkas`
 - Lab: IOWarp, iowarp.ai, Gnosis Research Center

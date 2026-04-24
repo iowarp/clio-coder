@@ -12,6 +12,15 @@ import { clioConfigDir } from "./xdg.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
 
+type SerializedSettings = Omit<ClioSettings, "endpoints" | "orchestrator" | "workers"> & {
+	targets: ClioSettings["endpoints"];
+	orchestrator: Omit<ClioSettings["orchestrator"], "endpoint"> & { target: string | null };
+	workers: {
+		default: Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null };
+		profiles: Record<string, Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null }>;
+	};
+};
+
 export function settingsPath(): string {
 	return join(clioConfigDir(), "settings.yaml");
 }
@@ -372,12 +381,33 @@ function normalizeWorkerTarget(
 ): ClioSettings["orchestrator"] {
 	const out = cloneValue(defaults);
 	if (!isPlainObject(value)) return out;
-	const endpoint = trimString(value.endpoint);
+	const endpoint = trimString(value.target) ?? trimString(value.endpoint);
 	const endpointExists = endpoint ? endpoints.find((entry) => entry.id === endpoint) : undefined;
 	out.endpoint = endpointExists?.id ?? null;
 	out.thinkingLevel = normalizeThinkingLevel(value.thinkingLevel, defaults.thinkingLevel);
 	const model = trimString(value.model);
 	out.model = out.endpoint ? (model ?? endpointExists?.defaultModel ?? null) : null;
+	return out;
+}
+
+function normalizeWorkerProfiles(
+	value: unknown,
+	defaults: ClioSettings["workers"]["default"],
+	endpoints: ReadonlyArray<ClioSettings["endpoints"][number]>,
+): ClioSettings["workers"]["profiles"] {
+	if (!isPlainObject(value)) return {};
+	const out: ClioSettings["workers"]["profiles"] = {};
+	for (const [rawName, rawProfile] of Object.entries(value)) {
+		const name = trimString(rawName);
+		if (!name) continue;
+		const profile = normalizeWorkerTarget(rawProfile, defaults, endpoints);
+		if (!profile.endpoint) continue;
+		out[name] = {
+			endpoint: profile.endpoint,
+			model: profile.model,
+			thinkingLevel: profile.thinkingLevel,
+		};
+	}
 	return out;
 }
 
@@ -468,11 +498,13 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 		settings.safetyLevel = raw.safetyLevel;
 	}
 
-	const explicitEndpoints = Array.isArray(raw.endpoints)
-		? raw.endpoints
-				.map((entry) => normalizeEndpoint(entry))
-				.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-		: [];
+	const rawTargets = Array.isArray(raw.targets) ? raw.targets : Array.isArray(raw.endpoints) ? raw.endpoints : [];
+	const explicitEndpoints =
+		rawTargets.length > 0
+			? rawTargets
+					.map((entry) => normalizeEndpoint(entry))
+					.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+			: [];
 	const legacyEndpoints = normalizeLegacyProviders(raw.providers);
 	settings.endpoints = explicitEndpoints.length > 0 ? explicitEndpoints : legacyEndpoints.endpoints;
 	settings.runtimePlugins = trimStringArray(raw.runtimePlugins);
@@ -500,6 +532,11 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 					legacyEndpoints.pairToEndpointId,
 				) ?? settings.workers.default;
 		}
+		settings.workers.profiles = normalizeWorkerProfiles(
+			raw.workers.profiles,
+			DEFAULT_SETTINGS.workers.default,
+			settings.endpoints,
+		);
 	}
 
 	settings.scope = normalizeScope(raw.scope, settings.endpoints);
@@ -531,11 +568,30 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	if (theme) settings.theme = theme;
 
 	if (isPlainObject(raw.keybindings)) {
-		settings.keybindings = Object.fromEntries(
-			Object.entries(raw.keybindings)
-				.map(([key, value]) => [trimString(key), trimString(value)] as const)
-				.filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1])),
-		);
+		// pi-tui's KeybindingsConfig accepts `KeyId | KeyId[]`. Legacy Clio
+		// settings persisted only strings; accept both shapes, drop empty or
+		// non-string entries, and preserve arrays verbatim so a user can bind
+		// two keystrokes to one action (`shift+tab: ["shift+tab","alt+t"]`).
+		const next: Record<string, string | string[]> = {};
+		for (const [rawKey, rawValue] of Object.entries(raw.keybindings)) {
+			const id = trimString(rawKey);
+			if (!id) continue;
+			if (typeof rawValue === "string") {
+				const v = trimString(rawValue);
+				if (v) next[id] = v;
+				continue;
+			}
+			if (Array.isArray(rawValue)) {
+				const arr: string[] = [];
+				for (const entry of rawValue) {
+					if (typeof entry !== "string") continue;
+					const trimmed = trimString(entry);
+					if (trimmed) arr.push(trimmed);
+				}
+				if (arr.length > 0) next[id] = arr;
+			}
+		}
+		settings.keybindings = next;
 	}
 
 	if (isPlainObject(raw.state)) {
@@ -572,5 +628,37 @@ export function readSettings(): ClioSettings {
 }
 
 export function writeSettings(settings: ClioSettings): void {
-	writeFileSync(settingsPath(), stringifyYaml(normalizeSettings(settings)), { encoding: "utf8", mode: 0o644 });
+	writeFileSync(settingsPath(), stringifyYaml(serializeSettings(normalizeSettings(settings))), {
+		encoding: "utf8",
+		mode: 0o644,
+	});
+}
+
+function serializeSettings(settings: ClioSettings): SerializedSettings {
+	const { endpoints, orchestrator, workers, ...rest } = settings;
+	const profiles: SerializedSettings["workers"]["profiles"] = {};
+	for (const [name, profile] of Object.entries(workers.profiles)) {
+		profiles[name] = {
+			target: profile.endpoint,
+			model: profile.model,
+			thinkingLevel: profile.thinkingLevel,
+		};
+	}
+	return {
+		...rest,
+		targets: endpoints,
+		orchestrator: {
+			target: orchestrator.endpoint,
+			model: orchestrator.model,
+			thinkingLevel: orchestrator.thinkingLevel,
+		},
+		workers: {
+			default: {
+				target: workers.default.endpoint,
+				model: workers.default.model,
+				thinkingLevel: workers.default.thinkingLevel,
+			},
+			profiles,
+		},
+	};
 }

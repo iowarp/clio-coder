@@ -1,9 +1,9 @@
 import type { ClioSettings } from "../../core/config.js";
 import {
-	type ProvidersContract,
-	type ThinkingLevel,
 	availableThinkingLevels,
+	type ProvidersContract,
 	resolveModelCapabilities,
+	type ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
 	Box,
@@ -13,6 +13,7 @@ import {
 	type SettingsListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import type { ClioKeybindingManager } from "../keybinding-manager.js";
 
 export const SETTINGS_OVERLAY_WIDTH = 84;
 const VISIBLE_ROWS = 12;
@@ -36,11 +37,16 @@ const SETTINGS_THEME: SettingsListTheme = {
  */
 export function buildSettingItems(
 	settings: Readonly<ClioSettings>,
-	options?: { providers?: ProvidersContract },
+	options?: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager },
 ): SettingItem[] {
 	const scopeList = settings.scope ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
 	const endpointCount = settings.endpoints?.length ?? 0;
+	const profileEntries = Object.entries(settings.workers?.profiles ?? {});
+	const profileSummary =
+		profileEntries.length === 0
+			? "(none)"
+			: profileEntries.map(([name, profile]) => `${name}->${profile.endpoint ?? "(unset)"}`).join(", ");
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
 		? availableThinkingLevels(
@@ -75,9 +81,9 @@ export function buildSettingItems(
 		},
 		{
 			id: "orchestrator.endpoint",
-			label: "orchestrator.endpoint",
+			label: "orchestrator.target",
 			currentValue: settings.orchestrator.endpoint ?? "(unset)",
-			description: "Active endpoint id. Edit via /model.",
+			description: "Active target id. Edit via /model.",
 		},
 		{
 			id: "orchestrator.model",
@@ -87,9 +93,9 @@ export function buildSettingItems(
 		},
 		{
 			id: "workers.default.endpoint",
-			label: "workers.default.endpoint",
+			label: "workers.default.target",
 			currentValue: settings.workers.default.endpoint ?? "(unset)",
-			description: "/run endpoint id. Edit settings.yaml.",
+			description: "/run target id. Edit settings.yaml.",
 		},
 		{
 			id: "workers.default.model",
@@ -98,10 +104,16 @@ export function buildSettingItems(
 			description: "/run wire model id. Edit settings.yaml.",
 		},
 		{
+			id: "workers.profiles",
+			label: "workers.profiles",
+			currentValue: `${profileEntries.length} (${profileSummary})`,
+			description: "Named worker profiles. Edit via clio targets worker or settings.yaml.",
+		},
+		{
 			id: "endpoints.count",
 			label: "endpoints",
 			currentValue: String(endpointCount),
-			description: "Configured endpoints. Edit settings.yaml or run /providers.",
+			description: "Configured targets. Edit settings.yaml or run /targets.",
 		},
 		{
 			id: "budget.sessionCeilingUsd",
@@ -115,7 +127,25 @@ export function buildSettingItems(
 			currentValue: scopeText,
 			description: "Ctrl+P cycle set. Edit via /scoped-models.",
 		},
+		{
+			id: "keybindings",
+			label: "keybindings",
+			currentValue: formatKeybindingsSummary(options?.keybindings),
+			description: "Open /hotkeys to see bindings; edit settings.yaml > keybindings to override.",
+		},
 	];
+}
+
+function formatKeybindingsSummary(manager?: ClioKeybindingManager): string {
+	if (!manager) return "(unavailable)";
+	const overrides = manager.overrideCount();
+	const conflicts = manager.getConflicts().length;
+	const invalid = manager.invalidCount();
+	if (overrides === 0 && conflicts === 0 && invalid === 0) return "defaults (no overrides)";
+	const parts = [`${overrides} override${overrides === 1 ? "" : "s"}`];
+	parts.push(`${invalid} invalid`);
+	parts.push(`${conflicts} conflict${conflicts === 1 ? "" : "s"}`);
+	return parts.join(", ");
 }
 
 /**
@@ -148,6 +178,7 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 export interface OpenSettingsOverlayDeps {
 	getSettings: () => Readonly<ClioSettings>;
 	providers?: ProvidersContract;
+	keybindings?: ClioKeybindingManager;
 	writeSettings: (next: ClioSettings) => void;
 	onClose: () => void;
 }
@@ -163,7 +194,10 @@ class SettingsOverlayBox extends Box {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): OverlayHandle {
-	const items = buildSettingItems(deps.getSettings(), deps.providers ? { providers: deps.providers } : undefined);
+	const buildOptions: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager } = {};
+	if (deps.providers) buildOptions.providers = deps.providers;
+	if (deps.keybindings) buildOptions.keybindings = deps.keybindings;
+	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SettingsList(
 		items,

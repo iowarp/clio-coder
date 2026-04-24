@@ -65,7 +65,7 @@ function compileRule(raw: RawRule, index: number): DamageControlRule {
 		pattern = new RegExp(patternString, "i");
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(`damage-control rule '${id}': invalid pattern — ${msg}`);
+		throw new Error(`damage-control rule '${id}': invalid pattern: ${msg}`);
 	}
 	return { id, description, pattern, class: klass, block: raw.block };
 }

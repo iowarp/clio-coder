@@ -5,15 +5,16 @@ Last updated: 2026-04-24
 ## Release State
 
 - Public releases: none.
-- Current package version: `0.1.0-dev`.
-- Current protected branch: `main`.
-- Baseline before governance setup: `747f71c`.
+- Current package version: `0.2.0-dev`.
+- Current development branch in this checkout: `v0.2/parity`.
+- Baseline branch: `main` at `747f71c`.
+- Active source range: `747f71c..9c59275`.
 
 ## Current Focus
 
-- Stabilize the v0.1 development surface before any public release.
-- Keep CLI lifecycle, provider config, native worker dispatch, session restore,
-  TUI overlays, and developer workflow coherent.
+- Stabilize the v0.2 development surface before any public release.
+- Keep CLI lifecycle, provider targets, worker dispatch, session restore,
+  TUI overlays, and self-development mode coherent.
 - Prepare the repo for outside contributors and coding agents.
 
 ## Required Gates

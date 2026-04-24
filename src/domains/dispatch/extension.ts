@@ -3,7 +3,7 @@
  *
  * Resolves a DispatchRequest to an EndpointDescriptor + RuntimeDescriptor +
  * wire model id via the providers contract. Gates admission on safety
- * scopes, concurrency, budget, and (new) capability flags. HTTP runtimes
+ * scopes, concurrency, budget, and capability flags. HTTP and SDK runtimes
  * spawn the native worker subprocess; subprocess runtimes (claude-code-cli,
  * codex-cli, gemini-cli) run the CLI agent inline through the engine's
  * subprocess-runtime.
@@ -17,8 +17,14 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
-import type { EndpointDescriptor, ProvidersContract, RuntimeDescriptor } from "../providers/index.js";
-import type { CapabilityFlags, ThinkingLevel } from "../providers/index.js";
+import {
+	type CapabilityFlags,
+	type EndpointDescriptor,
+	type ProvidersContract,
+	type RuntimeDescriptor,
+	type ThinkingLevel,
+	targetRequiresAuth,
+} from "../providers/index.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
@@ -27,7 +33,7 @@ import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { type Ledger, openLedger } from "./state.js";
 import type { RunKind, RunReceipt, RunStatus } from "./types.js";
 import { validateJobSpec } from "./validation.js";
-import { type SpawnedWorker, type WorkerSpec, spawnNativeWorker } from "./worker-spawn.js";
+import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface ActiveRun {
 	runId: string;
@@ -75,37 +81,120 @@ interface ResolvedTarget {
 	capabilities: CapabilityFlags | null;
 }
 
+interface WorkerTargetConfig {
+	endpoint: string | null;
+	model: string | null;
+	thinkingLevel: ThinkingLevel;
+}
+
+type WorkerProfileMap = Record<string, WorkerTargetConfig>;
+
+function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
+	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
+}
+
+function runtimeIdForEndpoint(providers: ProvidersContract, endpointId: string): string | null {
+	return providers.getEndpoint(endpointId)?.runtime ?? null;
+}
+
+function supportsRequiredCapabilities(
+	capabilities: CapabilityFlags | null,
+	required: ReadonlyArray<string> | undefined,
+): boolean {
+	if (!required || required.length === 0) return true;
+	if (!capabilities) return false;
+	const caps = capabilities as unknown as Record<string, unknown>;
+	for (const name of required) {
+		const value = caps[name];
+		if (value === undefined || value === false || value === 0 || value === "") return false;
+	}
+	return true;
+}
+
+function pickCapabilityMatchedWorker(
+	required: ReadonlyArray<string> | undefined,
+	runtimeId: string | undefined,
+	workerDefault: WorkerTargetConfig | null,
+	workerProfiles: WorkerProfileMap,
+	providers: ProvidersContract,
+): WorkerTargetConfig | null {
+	if ((!required || required.length === 0) && !runtimeId) return null;
+	if (
+		workerDefault?.endpoint &&
+		(!runtimeId || runtimeIdForEndpoint(providers, workerDefault.endpoint) === runtimeId) &&
+		supportsRequiredCapabilities(capabilityInfoForEndpoint(providers, workerDefault.endpoint), required)
+	) {
+		return workerDefault;
+	}
+	for (const profile of Object.values(workerProfiles)) {
+		if (!profile.endpoint) continue;
+		if (runtimeId && runtimeIdForEndpoint(providers, profile.endpoint) !== runtimeId) continue;
+		if (supportsRequiredCapabilities(capabilityInfoForEndpoint(providers, profile.endpoint), required)) {
+			return profile;
+		}
+	}
+	return null;
+}
+
 function resolveDispatchTarget(
 	req: DispatchRequest,
 	recipe: AgentRecipe | null,
-	workerDefault: { endpoint: string | null; model: string | null; thinkingLevel: ThinkingLevel } | null,
+	workerDefault: WorkerTargetConfig | null,
+	workerProfiles: WorkerProfileMap,
 	providers: ProvidersContract,
 ): ResolvedTarget {
-	const endpointId = req.endpoint ?? recipe?.endpoint ?? workerDefault?.endpoint ?? null;
+	let selectedWorkerTarget: WorkerTargetConfig | null = null;
+	let endpointId = req.endpoint ?? null;
+	if (!endpointId && req.workerProfile) {
+		const profile = workerProfiles[req.workerProfile];
+		if (!profile) throw new Error(`dispatch: worker profile '${req.workerProfile}' not configured`);
+		if (!profile.endpoint) throw new Error(`dispatch: worker profile '${req.workerProfile}' has no target`);
+		selectedWorkerTarget = profile;
+		endpointId = profile.endpoint;
+	}
+	if (!endpointId) endpointId = recipe?.endpoint ?? null;
 	if (!endpointId) {
-		throw new Error("dispatch: no endpoint configured (set workers.default.endpoint or pass --endpoint)");
+		selectedWorkerTarget = pickCapabilityMatchedWorker(
+			req.requiredCapabilities,
+			req.workerRuntime,
+			workerDefault,
+			workerProfiles,
+			providers,
+		);
+		endpointId = selectedWorkerTarget?.endpoint ?? null;
+	}
+	if (!endpointId && req.workerRuntime) {
+		throw new Error(`dispatch: no worker target configured for runtime '${req.workerRuntime}'`);
+	}
+	if (!endpointId) {
+		selectedWorkerTarget = workerDefault;
+		endpointId = workerDefault?.endpoint ?? null;
+	}
+	if (!endpointId) {
+		throw new Error(
+			"dispatch: no target configured (set workers.default.target, add workers.profiles, or pass --target)",
+		);
 	}
 	const endpoint = providers.getEndpoint(endpointId);
-	if (!endpoint) throw new Error(`dispatch: endpoint '${endpointId}' not found`);
+	if (!endpoint) throw new Error(`dispatch: target '${endpointId}' not found`);
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
-	const wireModelId = req.model ?? recipe?.model ?? workerDefault?.model ?? endpoint.defaultModel;
+	const matchingDefault = workerDefault?.endpoint === endpointId ? workerDefault : null;
+	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
+	const wireModelId = req.model ?? recipe?.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
 	if (!wireModelId) {
-		throw new Error(
-			`dispatch: no model for endpoint '${endpointId}' (set workers.default.model or endpoint.defaultModel)`,
-		);
+		throw new Error(`dispatch: no model for target '${endpointId}' (set worker profile model or target.defaultModel)`);
 	}
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe?.thinkingLevel ??
-		workerDefault?.thinkingLevel ??
+		fallbackWorkerTarget?.thinkingLevel ??
 		"off") as ThinkingLevel;
-	const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
 	return {
 		endpoint,
 		runtime,
 		wireModelId,
 		thinkingLevel,
-		capabilities: status?.capabilities ?? null,
+		capabilities: capabilityInfoForEndpoint(providers, endpoint.id),
 	};
 }
 
@@ -116,13 +205,13 @@ function enforceCapabilityGate(
 ): void {
 	if (!required || required.length === 0) return;
 	if (!capabilities) {
-		throw new Error(`dispatch: admission denied — capability info unavailable for endpoint '${endpointId}'`);
+		throw new Error(`dispatch: admission denied: capability info unavailable for endpoint '${endpointId}'`);
 	}
 	const caps = capabilities as unknown as Record<string, unknown>;
 	for (const name of required) {
 		const value = caps[name];
 		if (value === undefined || value === false || value === 0 || value === "") {
-			throw new Error(`dispatch: admission denied — capability '${name}' not supported by endpoint '${endpointId}'`);
+			throw new Error(`dispatch: admission denied: capability '${name}' not supported by endpoint '${endpointId}'`);
 		}
 	}
 }
@@ -163,14 +252,14 @@ export function createDispatchBundle(
 		const { systemPrompt: _sp, ...jobSpec } = req;
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {
-			throw new Error(`dispatch: invalid spec — ${validated.errors.join("; ")}`);
+			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
 			if (preflight.verdict === "over" || preflight.verdict === "at") {
 				throw new Error(
-					`dispatch: admission denied — budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
+					`dispatch: admission denied: budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
 				);
 			}
 		}
@@ -190,7 +279,7 @@ export function createDispatchBundle(
 			safety.isSubset,
 		);
 		if (!verdict.admitted) {
-			throw new Error(`dispatch: admission denied — ${verdict.reason}`);
+			throw new Error(`dispatch: admission denied: ${verdict.reason}`);
 		}
 
 		const settings = config?.get();
@@ -201,7 +290,15 @@ export function createDispatchBundle(
 					thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
 				}
 			: null;
-		const target = resolveDispatchTarget(req, recipe, workerDefault, providers);
+		const workerProfiles: WorkerProfileMap = {};
+		for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
+			workerProfiles[name] = {
+				endpoint: profile.endpoint ?? null,
+				model: profile.model ?? null,
+				thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
+			};
+		}
+		const target = resolveDispatchTarget(req, recipe, workerDefault, workerProfiles, providers);
 		enforceCapabilityGate(target.endpoint.id, target.capabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
@@ -211,10 +308,9 @@ export function createDispatchBundle(
 		const allowedTools =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
 		const workerMode = recipe?.mode ?? currentMode;
-		const auth =
-			target.runtime.auth === "api-key" || target.runtime.auth === "oauth"
-				? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
-				: null;
+		const auth = targetRequiresAuth(target.endpoint, target.runtime)
+			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
+			: null;
 		const apiKey = auth?.apiKey;
 		const runtimeKind: RunKind = target.runtime.kind;
 
@@ -229,7 +325,7 @@ export function createDispatchBundle(
 			workerSlotHeld = scheduling.tryAcquireWorker();
 			if (!workerSlotHeld) {
 				throw new Error(
-					`dispatch: admission denied — concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
+					`dispatch: admission denied: concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
 				);
 			}
 		}
@@ -240,7 +336,7 @@ export function createDispatchBundle(
 		let workerEvents: AsyncIterable<unknown>;
 		let workerDone: Promise<{ exitCode: number | null }>;
 
-		if (runtimeKind === "http") {
+		if (runtimeKind === "http" || runtimeKind === "sdk") {
 			const spec: WorkerSpec = {
 				systemPrompt,
 				task: req.task,

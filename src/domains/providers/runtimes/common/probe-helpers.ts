@@ -23,7 +23,7 @@ export async function probeOpenAIModels(base: string, ctx: ProbeContext): Promis
 }
 
 interface LlamaCppProps {
-	default_generation_settings?: { n_ctx?: unknown };
+	default_generation_settings?: { n_ctx?: unknown; n_predict?: unknown };
 	modalities?: { vision?: unknown };
 	build_info?: unknown;
 }
@@ -44,6 +44,8 @@ export async function probeLlamaCppProps(base: string, ctx: ProbeContext): Promi
 	const caps: Partial<CapabilityFlags> = {};
 	const nCtx = data.default_generation_settings?.n_ctx;
 	if (typeof nCtx === "number" && nCtx > 0) caps.contextWindow = nCtx;
+	const nPredict = data.default_generation_settings?.n_predict;
+	if (typeof nPredict === "number" && nPredict > 0) caps.maxTokens = nPredict;
 	const vision = data.modalities?.vision;
 	if (typeof vision === "boolean") caps.vision = vision;
 	if (Object.keys(caps).length > 0) enrichment.discoveredCapabilities = caps;

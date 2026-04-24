@@ -24,3 +24,28 @@ export function parseFlags(argv: string[]): { flags: Set<string>; positional: st
 	}
 	return { flags, positional };
 }
+
+/**
+ * Pull the optional top-level `--api-key <value>` startup flag out of argv.
+ * Only flags before the first subcommand are global; after the first
+ * positional token, `--api-key` belongs to that subcommand (for example
+ * `clio auth login openai --api-key ...` or `clio configure --api-key ...`).
+ */
+export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: string; rest: string[] } {
+	const rest: string[] = [];
+	let apiKey: string | undefined;
+	let sawSubcommand = false;
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (sawSubcommand || arg !== "--api-key") {
+			if (arg !== undefined) rest.push(arg);
+			if (arg !== undefined && !arg.startsWith("-")) sawSubcommand = true;
+			continue;
+		}
+		const value = argv[i + 1];
+		if (value === undefined || value.startsWith("-")) continue;
+		apiKey = value;
+		i += 1;
+	}
+	return apiKey === undefined ? { rest } : { apiKey, rest };
+}

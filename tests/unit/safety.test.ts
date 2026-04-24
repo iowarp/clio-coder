@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("safety/action-classifier", () => {
 	it("read tools classify as read", () => {

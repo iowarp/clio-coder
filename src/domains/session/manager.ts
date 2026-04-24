@@ -11,7 +11,7 @@ import { runMigrations } from "./migrations/index.js";
 
 /**
  * Wraps engine/session.ts so the session domain can track the single in-memory
- * current writer + meta. The manager never persists on its own — writes go
+ * current writer + meta. The manager never persists on its own. Writes go
  * through the engine writer (`append` / `appendEntry`) or through the helpers
  * in checkpoint.ts which call writer.persistTree and atomicWrite.
  */
@@ -22,7 +22,7 @@ export interface SessionManagerState {
 }
 
 /**
- * Generate a v7 UUID for session and turn ids. RFC 9562 § 5.7 — a 48-bit
+ * Generate a v7 UUID for session and turn ids. RFC 9562 § 5.7 defines a 48-bit
  * unix-ms timestamp prefix makes the ids time-sortable, which lets
  * history()/tree() order by creation without a separate timestamp index.
  */

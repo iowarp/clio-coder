@@ -176,7 +176,7 @@ function parseText(value: unknown, fallback: string): string {
 }
 
 function parseRuntimeKind(value: unknown): RunKind {
-	if (value === "http" || value === "subprocess") return value;
+	if (value === "http" || value === "subprocess" || value === "sdk") return value;
 	return "http";
 }
 

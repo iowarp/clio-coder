@@ -42,6 +42,22 @@ function shortTurnId(id: string): string {
 	return id.length > 8 ? id.slice(0, 8) : id;
 }
 
+/**
+ * Translate a deleteSession failure into an operator-facing message. The
+ * session.deleteSession guard against removing the currently-open session
+ * throws a verbose `session.deleteSession: refusing to delete the currently
+ * open session; close() first` string that leaks contract-level language
+ * into the TUI. Strip it down to a plain sentence; surface anything else
+ * verbatim so genuine disk errors still reach the user.
+ */
+export function formatTreeDeleteError(err: unknown): string {
+	const message = err instanceof Error ? err.message : String(err);
+	if (message.includes("refusing to delete the currently open session")) {
+		return "[tree] cannot delete the currently-open session";
+	}
+	return `[tree] could not delete session: ${message}`;
+}
+
 function clampPreview(text: string, max: number): string {
 	const firstLine = text.split("\n", 1)[0] ?? "";
 	return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine;
@@ -305,8 +321,7 @@ class TreeOverlayView implements Component {
 				this.deps.session.deleteSession(row.sessionId, { keepFiles: ctx.keepFiles });
 				this.status = `[tree] session ${shortTurnId(row.sessionId)} ${ctx.keepFiles ? "tombstoned" : "deleted"}`;
 			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				this.status = `[tree] deleteSession failed: ${msg}`;
+				this.status = formatTreeDeleteError(err);
 			}
 			this.submode = "browse";
 			this.deleteContext = null;
@@ -350,4 +365,19 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 	const box = new TreeOverlayBox(view);
 	box.addChild(view);
 	return tui.showOverlay(box, { anchor: "center", width: TREE_OVERLAY_WIDTH });
+}
+
+/** Construct the overlay view without mounting a TUI. Testing hook only. */
+export function createTreeOverlayViewForTesting(
+	deps: OpenTreeOverlayDeps,
+	initial: TreeSnapshot | null,
+): {
+	handleInput: (data: string) => void;
+	render: (width: number) => string[];
+} {
+	const view = new TreeOverlayView(deps, initial);
+	return {
+		handleInput: (data) => view.handleInput(data),
+		render: (width) => view.render(width),
+	};
 }

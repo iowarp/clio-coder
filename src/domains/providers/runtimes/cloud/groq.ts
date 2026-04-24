@@ -24,6 +24,7 @@ const groqRuntime: RuntimeDescriptor = {
 	id: "groq",
 	displayName: "Groq",
 	kind: "http",
+	tier: "cloud",
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "GROQ_API_KEY",

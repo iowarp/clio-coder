@@ -5,16 +5,16 @@ import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionM
 import type { SessionInfoEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
 import {
-	type SessionManagerState,
 	appendEntry,
 	appendTurn,
 	newTurnId,
 	resumeSessionState,
+	type SessionManagerState,
 	startSession,
 } from "./manager.js";
 import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
-import { type TreeSnapshot, buildTreeSnapshot } from "./tree/navigator.js";
+import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
 
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and

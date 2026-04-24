@@ -24,6 +24,7 @@ const mistralRuntime: RuntimeDescriptor = {
 	id: "mistral",
 	displayName: "Mistral AI",
 	kind: "http",
+	tier: "cloud",
 	apiFamily: "mistral-conversations",
 	auth: "api-key",
 	credentialsEnvVar: "MISTRAL_API_KEY",

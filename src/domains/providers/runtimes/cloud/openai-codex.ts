@@ -48,6 +48,7 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 	id: "openai-codex",
 	displayName: "OpenAI Codex",
 	kind: "http",
+	tier: "cloud",
 	apiFamily: "openai-codex-responses",
 	auth: "oauth",
 	defaultCapabilities,

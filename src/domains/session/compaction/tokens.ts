@@ -9,7 +9,7 @@
  *   - Conservative by design: over-estimating trips compaction earlier,
  *     never later. Missing a trigger and hitting provider overflow is
  *     expensive; running a compaction on 80k when actual was 95k is cheap.
- *   - pi-coding-agent ships it at scale through 0.68.1, so we adopt the
+ *   - pi-coding-agent ships it at scale through 0.69.0, so we adopt the
  *     known ceiling rather than introduce a new numeric contract.
  *   - Exact per-provider counts (Anthropic /count_tokens, tiktoken) are
  *     parked. The `TokenEstimator` interface below keeps them a drop-in
@@ -126,7 +126,7 @@ function extractUsage(payload: unknown): Usage | undefined {
 /**
  * Walk entries from newest to oldest, returning the first assistant message
  * whose payload carries a valid usage block. Aborted/error assistant turns
- * are skipped — their usage is not meaningful for context accounting.
+ * are skipped because their usage is not meaningful for context accounting.
  */
 export function getLastAssistantUsage(entries: ReadonlyArray<SessionEntry>): Usage | undefined {
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -150,7 +150,7 @@ function findLastAssistantUsageIndex(entries: ReadonlyArray<SessionEntry>): numb
 /**
  * Total context tokens for the supplied entry list. When `lastUsage` is
  * provided (or derivable from the entries), uses its totalTokens as the
- * anchor and only estimates the entries that followed it — this matches
+ * anchor and only estimates the entries that followed it. This matches
  * pi-coding-agent's `estimateContextTokens` behavior and keeps the number
  * accurate for sessions whose most recent assistant turn carried real
  * provider usage data.
@@ -172,7 +172,7 @@ export function calculateContextTokens(entries: ReadonlyArray<SessionEntry>, las
 	return total;
 }
 
-/** Default estimator — chars/4. Future `/count_tokens` estimators drop in here. */
+/** Default estimator: chars/4. Future `/count_tokens` estimators drop in here. */
 export const charsOverFourEstimator: TokenEstimator = {
 	estimateEntry: estimateTokens,
 	calculateContextTokens,

@@ -1,3 +1,4 @@
+import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -5,20 +6,23 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
+import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	'usage: clio run [--endpoint <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
+	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 interface ParsedArgs {
-	endpoint?: string;
+	workerProfile?: string;
+	workerRuntime?: string;
+	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
 	agentId?: string;
@@ -38,10 +42,21 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			i += 1;
 			return v;
 		};
-		if (a === "--endpoint") {
+		if (a === "--help" || a === "-h") {
+			return null;
+		}
+		if (a === "--worker-profile" || a === "--worker") {
 			const v = need();
 			if (v === null) return null;
-			out.endpoint = v;
+			out.workerProfile = v;
+		} else if (a === "--worker-runtime" || a === "--runtime") {
+			const v = need();
+			if (v === null) return null;
+			out.workerRuntime = v;
+		} else if (a === "--target") {
+			const v = need();
+			if (v === null) return null;
+			out.target = v;
 		} else if (a === "--model") {
 			const v = need();
 			if (v === null) return null;
@@ -61,6 +76,8 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			out.required.push(v);
 		} else if (a === "--json") {
 			out.json = true;
+		} else if (a?.startsWith("-")) {
+			return null;
 		} else if (typeof a === "string") {
 			taskParts.push(a);
 		}
@@ -69,7 +86,7 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 	return out;
 }
 
-export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
+export async function runClioRun(args: ReadonlyArray<string>, options: { apiKey?: string } = {}): Promise<number> {
 	const parsed = parseArgs(args);
 	if (parsed === null) {
 		process.stderr.write(USAGE);
@@ -81,7 +98,18 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		return 2;
 	}
 
-	ensureInstalled();
+	if (parsed.target && parsed.workerProfile) {
+		process.stderr.write(
+			`clio run: --target ${parsed.target} takes precedence; --worker-profile ${parsed.workerProfile} will be ignored\n`,
+		);
+	}
+	if (parsed.target && parsed.workerRuntime) {
+		process.stderr.write(
+			`clio run: --target ${parsed.target} takes precedence; --worker-runtime ${parsed.workerRuntime} will be ignored\n`,
+		);
+	}
+
+	ensureClioState();
 	const loaded = await loadDomains([
 		ConfigDomainModule,
 		ProvidersDomainModule,
@@ -100,11 +128,46 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		return 1;
 	}
 
+	if (options.apiKey) {
+		const providers = loaded.getContract<ProvidersContract>("providers");
+		if (!providers) {
+			process.stderr.write("clio run: --api-key supplied but providers domain unavailable\n");
+			await loaded.stop();
+			return 1;
+		}
+		const settings = readSettings();
+		const profileEndpointId = parsed.workerProfile
+			? settings.workers?.profiles?.[parsed.workerProfile]?.endpoint
+			: undefined;
+		const runtimeByEndpoint = new Map(settings.endpoints.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
+		const runtimeEndpointId = parsed.workerRuntime
+			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
+					(profile) => profile?.endpoint && runtimeByEndpoint.get(profile.endpoint) === parsed.workerRuntime,
+				)?.endpoint
+			: undefined;
+		const targetEndpointId =
+			parsed.target ??
+			profileEndpointId ??
+			runtimeEndpointId ??
+			settings.workers?.default?.endpoint ??
+			settings.orchestrator?.endpoint;
+		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
+		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
+		if (!endpoint || !runtime) {
+			process.stderr.write("clio run: --api-key supplied but no target resolved; pass --target <id>\n");
+			await loaded.stop();
+			return 2;
+		}
+		providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
+	}
+
 	const dispatchReq: DispatchRequest = {
 		agentId: parsed.agentId ?? "scout",
 		task: parsed.task,
 	};
-	if (parsed.endpoint) dispatchReq.endpoint = parsed.endpoint;
+	if (parsed.workerProfile) dispatchReq.workerProfile = parsed.workerProfile;
+	if (parsed.workerRuntime) dispatchReq.workerRuntime = parsed.workerRuntime;
+	if (parsed.target) dispatchReq.endpoint = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
@@ -137,13 +200,14 @@ export async function runClioRun(args: ReadonlyArray<string>): Promise<number> {
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio run failed: ${msg}\n`);
 		await loaded.stop();
+		if (/target '.+' not found/.test(msg)) return 2;
 		if (msg.includes("admission") || msg.includes("capability") || msg.includes("budget")) return 2;
 		return 1;
 	}
 }
 
 function formatReceipt(r: RunReceipt): string {
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} endpoint=${r.endpointId} model=${r.wireModelId} start=${r.startedAt} end=${r.endedAt}`;
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.endpointId} model=${r.wireModelId} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

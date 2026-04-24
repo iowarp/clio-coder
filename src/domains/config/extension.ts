@@ -1,4 +1,4 @@
-import { Value } from "@sinclair/typebox/value";
+import { Value } from "typebox/value";
 import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -22,7 +22,7 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		if (Value.Check(SettingsSchema, candidate)) return;
 		const first = [...Value.Errors(SettingsSchema, candidate)][0];
 		throw new Error(
-			`settings.yaml failed schema validation at ${first?.path ?? "(root)"}: ${first?.message ?? "unknown"}`,
+			`settings.yaml failed schema validation at ${first?.instancePath || "(root)"}: ${first?.message ?? "unknown"}`,
 		);
 	}
 

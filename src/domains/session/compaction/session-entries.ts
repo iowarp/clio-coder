@@ -18,7 +18,7 @@
  */
 
 import type { ClioTurnRecord } from "../../../engine/session.js";
-import { type SessionEntry, fromLegacyTurn, isSessionEntry } from "../entries.js";
+import { fromLegacyTurn, isSessionEntry, type SessionEntry } from "../entries.js";
 
 function hasLegacyTurnShape(value: unknown): value is ClioTurnRecord {
 	if (!value || typeof value !== "object") return false;

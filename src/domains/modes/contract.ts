@@ -28,4 +28,14 @@ export interface ModesContract {
 	 */
 	requestSuper(requestedBy: string): void;
 	confirmSuper(conf: SuperModeConfirmation): ModeName;
+
+	/**
+	 * Return the mode the interactive layer should elevate to so that
+	 * `action` becomes admissible, or null when no elevation path exists.
+	 * The tool registry calls this to decide whether to park a blocked
+	 * call pending user confirmation; worker-side stubs return null so
+	 * the worker registry rejects cleanly instead of hanging on a
+	 * confirmation UI that does not exist.
+	 */
+	elevatedModeFor(action: ActionClass): ModeName | null;
 }

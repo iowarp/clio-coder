@@ -9,7 +9,7 @@
  *
  * Applied migration ids are persisted to `<dir>/state/migrations.json`. A
  * migration whose id already appears in that manifest is skipped. `up()` is
- * invoked at most once per clio install for a given id.
+ * invoked at most once per Clio state tree for a given id.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

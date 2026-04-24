@@ -3,7 +3,7 @@ import type { ChangeKind, ConfigDiff } from "./classify.js";
 
 /**
  * The ConfigDomain's external surface. Other domains import this through the contract
- * returned by the domain loader — never by reaching into extension.ts.
+ * returned by the domain loader, never by reaching into extension.ts.
  */
 export interface ConfigContract {
 	get(): Readonly<ClioSettings>;

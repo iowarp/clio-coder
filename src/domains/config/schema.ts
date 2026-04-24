@@ -1,4 +1,4 @@
-import { type Static, Type } from "@sinclair/typebox";
+import { type Static, Type } from "typebox";
 
 /**
  * TypeBox schema for the settings file. Mirrors the DEFAULT_SETTINGS constant in
@@ -119,6 +119,7 @@ export const SettingsSchema = Type.Object({
 	orchestrator: WorkerTargetSchema,
 	workers: Type.Object({
 		default: WorkerTargetSchema,
+		profiles: Type.Record(Type.String({ minLength: 1 }), WorkerTargetSchema),
 	}),
 	scope: Type.Array(Type.String()),
 	budget: Type.Object({
@@ -126,7 +127,10 @@ export const SettingsSchema = Type.Object({
 		concurrency: Type.Union([Type.Literal("auto"), Type.Number({ minimum: 1 })]),
 	}),
 	theme: Type.String(),
-	keybindings: Type.Record(Type.String(), Type.String()),
+	// User keybinding overrides mirror pi-tui's KeybindingsConfig: each id
+	// maps to a KeyId (string) or a KeyId[] (array of strings). The loader
+	// in core/config.ts normalizes legacy single-string entries on read.
+	keybindings: Type.Record(Type.String(), Type.Union([Type.String(), Type.Array(Type.String())])),
 	state: Type.Object({
 		lastMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	}),

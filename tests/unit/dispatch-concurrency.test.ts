@@ -105,6 +105,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		probeAll: async () => {},
 		probeAllLive: async () => {},
 		probeEndpoint: async () => status,
+		disconnectEndpoint: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,
@@ -127,6 +128,8 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 			login: async () => {},
 			logout: () => {},
 			getOAuthProviders: () => [],
+			setRuntimeOverrideForTarget: () => {},
+			clearRuntimeOverrideForTarget: () => {},
 		},
 		credentials: {
 			hasKey: () => false,
@@ -171,6 +174,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		isActionAllowed: () => true,
 		requestSuper: () => {},
 		confirmSuper: () => "super",
+		elevatedModeFor: () => null,
 	};
 
 	const bus = createSafeEventBus();
