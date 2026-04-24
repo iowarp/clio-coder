@@ -5,6 +5,7 @@ import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
 import type { ModeName } from "../modes/index.js";
 import { compile } from "./compiler.js";
+import { loadProjectContextFiles, renderProjectContextFiles } from "./context-files.js";
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 
@@ -46,13 +47,17 @@ export function createPromptsBundle(context: DomainContext): DomainBundle<Prompt
 			const currentMode: ModeName = input.overrideMode ?? modesContract?.current() ?? "default";
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.safetyLevel ?? settings?.safetyLevel ?? "auto-edit";
+			const cwd = input.cwd ?? process.cwd();
+			const contextFiles = renderProjectContextFiles(loadProjectContextFiles({ cwd }), cwd);
+			const dynamicInputs = contextFiles.length > 0 ? { ...input.dynamicInputs, contextFiles } : input.dynamicInputs;
 			return compile(table, {
 				identity: "identity.clio",
 				mode: `modes.${currentMode}`,
 				safety: `safety.${safety}`,
+				...(contextFiles.length > 0 ? { context: "context.files" } : {}),
 				providers: "providers.dynamic",
 				session: "session.dynamic",
-				dynamicInputs: input.dynamicInputs,
+				dynamicInputs,
 			});
 		},
 		reload,

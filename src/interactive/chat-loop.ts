@@ -607,6 +607,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				dynamicInputs,
 				overrideMode: deps.modes.current(),
 				safetyLevel,
+				cwd: process.cwd(),
 			});
 			if (!deps.selfDevPrompt) {
 				agentRuntime.agent.state.systemPrompt = result.text;
