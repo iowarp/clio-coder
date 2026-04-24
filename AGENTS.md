@@ -5,19 +5,15 @@ coding agents working in this repository.
 
 ## Read First
 
-1. `STATUS.md`
-2. `CHANGELOG.md`
-3. `CONTRIBUTING.md`
-4. `README.md`
+1. `CHANGELOG.md`
+2. `CONTRIBUTING.md`
+3. `README.md`
 
 ## Repo Facts
 
 - Package: `@iowarp/clio-coder`
-- Version: `0.2.0-dev`
-- Release state: no public releases yet
-- Maintainer: Anthony Kougkas, `@akougkas`
-- Lab: IOWarp, iowarp.ai, Gnosis Research Center
-- Main reviewer: `@akougkas`
+- Version: `0.1.0-exp`
+
 
 ## Default Commands
 
@@ -44,7 +40,7 @@ npm run ci
 - Keep one behavioral topic per PR.
 - Prefer existing helpers and domain contracts.
 - Add tests near the changed surface.
-- Update `CHANGELOG.md` and `STATUS.md` when status or visible behavior moves.
+- Update `CHANGELOG.md` when status or visible behavior moves.
 - Preserve unrelated user changes in dirty worktrees.
 - Use ASCII punctuation in docs.
 
