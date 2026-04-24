@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a focused capability or developer workflow.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What user or agent workflow should improve?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Proposed shape
+      description: CLI, TUI, runtime, provider, session, docs, or test surface.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete checks a reviewer can apply.
+      placeholder: |
+        - Command exits 0.
+        - Config is backwards-compatible.
+        - Test covers the changed path.

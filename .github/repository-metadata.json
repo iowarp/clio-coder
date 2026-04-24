@@ -1,0 +1,26 @@
+{
+	"description": "Agentic coding harness for supervised repository work, model-target orchestration, worker dispatch, and self-development.",
+	"homepage": "https://iowarp.ai",
+	"topics": [
+		"ai",
+		"agentic-ai",
+		"agentic-coding",
+		"coding-agents",
+		"developer-tools",
+		"llm",
+		"multi-agent",
+		"research-software",
+		"software-engineering",
+		"terminal"
+	],
+	"features": {
+		"has_issues": true,
+		"has_projects": false,
+		"has_wiki": false,
+		"delete_branch_on_merge": true,
+		"allow_auto_merge": true,
+		"allow_merge_commit": false,
+		"allow_squash_merge": true,
+		"allow_rebase_merge": false
+	}
+}
