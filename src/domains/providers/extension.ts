@@ -55,7 +55,7 @@ function availabilityFor(
 	endpoint: EndpointDescriptor,
 	authStatusFor: (endpoint: EndpointDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
-	if (desc.kind === "subprocess") {
+	if (desc.kind === "subprocess" || desc.kind === "sdk") {
 		return { available: true, reason: desc.auth };
 	}
 	if (desc.auth === "api-key" || desc.auth === "oauth") {
@@ -154,7 +154,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
 		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
-		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? []);
+		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? desc.knownModels ?? []);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
 			probe === null

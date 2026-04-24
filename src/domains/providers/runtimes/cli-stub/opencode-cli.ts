@@ -27,9 +27,14 @@ const openCodeRuntime: RuntimeDescriptor = {
 	id: "opencode-cli",
 	displayName: "OpenCode CLI",
 	kind: "subprocess",
-	tier: "cli-stub",
+	tier: "cli-bronze",
 	apiFamily: "subprocess-opencode",
 	auth: "cli",
+	knownModels: ["opencode/grok-code-fast-1", "opencode/qwen3-coder"],
+	binaryName: "opencode",
+	defaultBinaryPath: "/home/akougkas/.opencode/bin/opencode",
+	headlessCommand: "opencode run --model <provider/model> --format json <prompt>",
+	outputParser: "opencode-json",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const started = performance.now();

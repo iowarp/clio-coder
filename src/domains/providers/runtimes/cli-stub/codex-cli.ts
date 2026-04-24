@@ -27,9 +27,14 @@ const codexRuntime: RuntimeDescriptor = {
 	id: "codex-cli",
 	displayName: "Codex CLI",
 	kind: "subprocess",
-	tier: "cli-stub",
+	tier: "cli-gold",
 	apiFamily: "subprocess-codex",
 	auth: "cli",
+	knownModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+	binaryName: "codex",
+	defaultBinaryPath: "/home/akougkas/.nvm/versions/node/v24.9.0/bin/codex",
+	headlessCommand: "codex exec --json -m <model> -",
+	outputParser: "codex-jsonl",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const started = performance.now();

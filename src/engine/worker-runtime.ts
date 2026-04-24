@@ -19,6 +19,7 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import { registerFauxFromEnv } from "./ai.js";
+import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
@@ -110,7 +111,29 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		};
 		if (input.apiKey !== undefined) subprocessInput.apiKey = input.apiKey;
 		if (input.signal !== undefined) subprocessInput.signal = input.signal;
+		if (input.sessionId !== undefined) subprocessInput.sessionId = input.sessionId;
+		if (input.mode !== undefined) subprocessInput.mode = input.mode;
+		if (input.allowedTools !== undefined) subprocessInput.allowedTools = input.allowedTools;
 		return startSubprocessWorkerRun(subprocessInput, emit);
+	}
+
+	if (input.runtime.kind === "sdk" && input.runtime.id === "claude-code-sdk") {
+		const sdkInput: Parameters<typeof startClaudeCodeSdkWorkerRun>[0] = {
+			systemPrompt: input.systemPrompt,
+			task: input.task,
+			endpoint: input.endpoint,
+			runtime: input.runtime,
+			wireModelId: input.wireModelId,
+		};
+		if (input.sessionId !== undefined) {
+			sdkInput.threadId = input.sessionId;
+			sdkInput.resumeSessionId = input.sessionId;
+		}
+		if (input.mode !== undefined) sdkInput.mode = input.mode;
+		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
+		if (input.allowedTools !== undefined) sdkInput.allowedTools = input.allowedTools;
+		if (input.signal !== undefined) sdkInput.signal = input.signal;
+		return startClaudeCodeSdkWorkerRun(sdkInput, emit);
 	}
 
 	const kb = getKnowledgeBase();

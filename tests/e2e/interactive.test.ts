@@ -265,7 +265,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		try {
 			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/connect\r");
-			await p.expect(/openai-codex/, 10_000);
+			await p.expect(/anthropic-prod/, 10_000);
 			p.send("\x1b");
 			await new Promise((r) => setTimeout(r, 300));
 			p.send("/quit\r");

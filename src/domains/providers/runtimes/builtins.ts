@@ -10,9 +10,10 @@
 
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
-
 import claudeCodeCli from "./cli-stub/claude-code-cli.js";
+import claudeCodeSdk from "./cli-stub/claude-code-sdk.js";
 import codexCli from "./cli-stub/codex-cli.js";
+import copilotCli from "./cli-stub/copilot-cli.js";
 import geminiCli from "./cli-stub/gemini-cli.js";
 import openCodeCli from "./cli-stub/opencode-cli.js";
 import anthropic from "./cloud/anthropic.js";
@@ -44,9 +45,11 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openai,
 	openaiCodex,
 	openrouter,
+	claudeCodeSdk,
 	claudeCodeCli,
 	codexCli,
 	geminiCli,
+	copilotCli,
 	openCodeCli,
 	lemonadeAnthropic,
 	lemonadeOpenai,

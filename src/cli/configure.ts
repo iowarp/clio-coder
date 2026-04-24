@@ -222,17 +222,19 @@ function printRuntimeList(): void {
 				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
 				: null;
 		const authLabel =
-			runtime?.auth === "oauth"
-				? status?.available
-					? "connected"
-					: "login"
-				: runtime?.auth === "api-key"
+			runtime?.auth === "cli"
+				? "cli"
+				: runtime?.auth === "oauth"
 					? status?.available
-						? "credential"
-						: "needs-key"
-					: runtime?.kind === "subprocess"
-						? "cli"
-						: (runtime?.auth ?? "none");
+						? "connected"
+						: "login"
+					: runtime?.auth === "api-key"
+						? status?.available
+							? "credential"
+							: "needs-key"
+						: runtime?.kind === "subprocess"
+							? "cli"
+							: (runtime?.auth ?? "none");
 		const modelLabel =
 			entry.modelHints.length > 0
 				? entry.modelHints.slice(0, 2).join(", ")
@@ -353,6 +355,7 @@ function buildDescriptor(
 }
 
 function describeAuthStatus(runtime: RuntimeDescriptor): string {
+	if (runtime.auth === "cli") return "native CLI auth";
 	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (!status.available) return "not connected";
 	if (status.source === "environment") return `environment${status.detail ? ` (${status.detail})` : ""}`;

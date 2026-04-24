@@ -5,6 +5,7 @@ import { readSettings } from "../core/config.js";
 import { authNotRequiredStatus, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
+import { nativeCliAuthStatus, runNativeCliLogin, runNativeCliLogout } from "./native-cli-auth.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import {
 	type ConnectableProviderRow,
@@ -53,6 +54,14 @@ function printStatusLine(id: string, type: string | null, present: boolean, sour
 	process.stdout.write(`${id}\t${type ?? "-"}\t${present ? "present" : "absent"}\t${source}\n`);
 }
 
+function printNativeStatusLine(
+	id: string,
+	state: "authenticated" | "unauthenticated" | "unknown" | "not-required",
+	detail: string,
+): void {
+	process.stdout.write(`${id}\tcli\t${state}\t${detail}\n`);
+}
+
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
 	const settings = readSettings();
 	const activeTarget = settings.orchestrator.endpoint
@@ -85,7 +94,9 @@ async function promptForLoginTarget(rows: ReadonlyArray<ConnectableProviderRow>)
 				? row.status.source === "environment"
 					? `env:${row.status.detail ?? row.entry.runtimeId}`
 					: row.status.source
-				: "disconnected";
+				: row.status === null
+					? "native-cli"
+					: "disconnected";
 			process.stdout.write(
 				`    ${String(index + 1).padStart(2)}. ${row.entry.runtimeId.padEnd(22)} ${status.padEnd(18)} targets=${row.targetCount}\n`,
 			);
@@ -228,12 +239,12 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		}
 	}
 
+	if (resolved.runtime.auth === "cli") {
+		return runNativeCliLogin(resolved.runtime, input.isTTY && output.isTTY);
+	}
+
 	if (resolved.runtime.auth !== "api-key") {
-		if (resolved.runtime.auth === "cli") {
-			printError(`runtime ${resolved.runtime.id} uses its native CLI login; run its CLI auth command directly`);
-		} else {
-			printError(`runtime ${resolved.runtime.id} does not support interactive auth login`);
-		}
+		printError(`runtime ${resolved.runtime.id} does not support interactive auth login`);
 		return 1;
 	}
 
@@ -255,7 +266,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	}
 }
 
-function runStatus(args: ReadonlyArray<string>): number {
+async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(USAGE);
 		return 0;
@@ -279,6 +290,11 @@ function runStatus(args: ReadonlyArray<string>): number {
 			printError(`unknown target or runtime: ${target}`);
 			return 2;
 		}
+		if (resolved.runtime.auth === "cli") {
+			const status = await nativeCliAuthStatus(resolved.runtime);
+			printNativeStatusLine(resolved.runtime.id, status.state, status.detail);
+			return status.exitCode;
+		}
 		const status = statusForResolvedTarget(resolved, auth);
 		printStatusLine(
 			resolved.authTarget.providerId,
@@ -291,12 +307,15 @@ function runStatus(args: ReadonlyArray<string>): number {
 
 	for (const row of listConnectableProviderRows()) {
 		const status = row.status;
-		printStatusLine(
-			row.entry.runtimeId,
-			status?.credentialType ?? null,
-			status?.available ?? false,
-			status?.detail ?? status?.source ?? "none",
-		);
+		if (status === null) {
+			printNativeStatusLine(
+				row.entry.runtimeId,
+				"unknown",
+				"native CLI auth; run targeted status to probe when supported",
+			);
+		} else {
+			printStatusLine(row.entry.runtimeId, status.credentialType, status.available, status.detail ?? status.source);
+		}
 	}
 	return 0;
 }
@@ -332,6 +351,9 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		printError(`unknown target or runtime: ${target}`);
 		process.stderr.write(USAGE);
 		return 2;
+	}
+	if (resolved.runtime.auth === "cli") {
+		return runNativeCliLogout(resolved.runtime, input.isTTY && output.isTTY);
 	}
 
 	const auth = openAuthStorage();
