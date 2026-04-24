@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -37,11 +37,11 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		scratch.cleanup();
 	});
 
-	it("--version exits 0 and prints clio + node versions", async () => {
+	it("--version exits 0 and prints only the clio version", async () => {
 		const result = await runCli(["--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		match(result.stdout, /^clio /m);
-		match(result.stdout, /^node /m);
+		strictEqual(result.stdout, "clio 0.2.0-dev\n");
+		doesNotMatch(result.stdout, /node|platform|pi-agent-core|pi-ai|pi-tui/);
 	});
 
 	it("--help exits 0 and prints usage", async () => {
