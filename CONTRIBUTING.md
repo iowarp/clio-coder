@@ -52,8 +52,10 @@ npm run hooks:install
 
 The boundary checker enforces these:
 
-- Engine boundary: only `src/engine/**` imports pi-mono packages.
-- Worker isolation: `src/worker/**` does not import `src/domains/**`.
+- Engine boundary: only `src/engine/**` value-imports pi-mono packages.
+- Worker isolation: `src/worker/**` value-imports only the worker-safe
+  provider runtime rehydration modules under `src/domains/providers/**`;
+  all other worker domain imports must be type-only.
 - Domain independence: cross-domain flows go through `SafeEventBus`.
 
 Run:
@@ -126,4 +128,3 @@ Agents should:
 - Avoid touching unrelated files in a dirty worktree.
 - Leave remote writes, branch rules, and release tags to `@akougkas` unless
   explicitly instructed.
-

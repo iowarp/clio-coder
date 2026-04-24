@@ -55,6 +55,10 @@ interface ExtractedSpecifier {
 	typeOnly: boolean;
 }
 
+function isTypeOnlyImportOrExportClause(clause: string): boolean {
+	return clause.trim().startsWith("type ");
+}
+
 function extractSpecifiers(source: string): ExtractedSpecifier[] {
 	const stripped = stripComments(source);
 	const specifiers: ExtractedSpecifier[] = [];
@@ -64,7 +68,7 @@ function extractSpecifiers(source: string): ExtractedSpecifier[] {
 		const clause = match[2] ?? "";
 		const specifier = match[3];
 		if (!specifier) continue;
-		const typeOnly = /\btype\b/.test(clause);
+		const typeOnly = isTypeOnlyImportOrExportClause(clause);
 		specifiers.push({ specifier, typeOnly });
 	}
 
@@ -111,15 +115,25 @@ function domainOf(filePath: string, domainsRoot: string): string | null {
 	return first ?? null;
 }
 
+function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoot: string): boolean {
+	const allowedFiles = new Set([
+		path.join(providersDomainRoot, "plugins.ts"),
+		path.join(providersDomainRoot, "registry.ts"),
+		path.join(providersDomainRoot, "runtimes", "builtins.ts"),
+	]);
+	return allowedFiles.has(resolved);
+}
+
 /**
  * Enforce the three static isolation rules:
  *   1. Only src/engine/** may value-import @mariozechner/pi-*. Type-only imports
  *      are allowed anywhere because types erase at compile time and the
  *      RuntimeDescriptor contract in src/domains/providers inherently surfaces
  *      Model<Api>.
- *   2. src/worker/** never imports src/domains/** EXCEPT src/domains/providers,
- *      which carries the pure-data EndpointDescriptor type and the runtime
- *      registry + built-in descriptors the worker re-hydrates from stdin.
+ *   2. src/worker/** never value-imports src/domains/** EXCEPT the worker-safe
+ *      provider runtime registry, builtin descriptors, and plugin loader used
+ *      to rehydrate runtime descriptors from stdin. Type-only imports are
+ *      allowed because they erase at compile time.
  *   3. src/domains/<x> never imports src/domains/<y>/extension.ts for y != x.
  */
 export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
@@ -155,10 +169,10 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			if (!(specifier.startsWith(".") || specifier.startsWith("/"))) return;
 			const resolved = resolveRelativeImport(filePath, specifier);
 
-			if (inWorker && isWithin(resolved, domainsRoot) && !isWithin(resolved, providersDomainRoot)) {
-				if (!typeOnly) {
+			if (inWorker && isWithin(resolved, domainsRoot)) {
+				if (!typeOnly && !isAllowedWorkerProviderValueImport(resolved, providersDomainRoot)) {
 					violations.push(
-						`rule2: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (value imports outside src/domains/providers are not permitted from the worker)`,
+						`rule2: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (worker value imports are limited to provider runtime rehydration modules)`,
 					);
 				}
 				return;

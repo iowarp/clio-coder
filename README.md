@@ -224,6 +224,10 @@ compaction:
 | `OPENAI_API_KEY` | unset | Enables OpenAI providers. |
 
 Runtime credentials can live in environment variables referenced by `targets[].auth.apiKeyEnvVar`, or in Clio Coder's credential store when you use `clio auth login`.
+Out-of-tree runtime plugins are loaded from `<configDir>/runtimes/*.js` or
+packages listed in `runtimePlugins`; descriptors with `kind: "http"`,
+`"subprocess"`, or `"sdk"` are admitted when they satisfy the runtime
+descriptor contract.
 
 ---
 
@@ -307,8 +311,8 @@ Core logic is split across [`src/domains/`](src/domains/), [`src/interactive/`](
 
 Three hard invariants are enforced by the boundary tests in [`tests/boundaries/check-boundaries.ts`](tests/boundaries/check-boundaries.ts):
 
-1. Only `src/engine/**` imports engine adapter packages.
-2. `src/worker/**` never imports `src/domains/**`.
+1. Only `src/engine/**` value-imports engine adapter packages.
+2. `src/worker/**` value-imports only the worker-safe provider runtime rehydration modules needed to rebuild runtime descriptors before entering the engine boundary.
 3. Cross-domain traffic goes through `SafeEventBus`.
 
 Contributor and review rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
