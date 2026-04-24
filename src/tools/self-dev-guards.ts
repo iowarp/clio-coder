@@ -15,12 +15,12 @@ function appendRestartNotice(result: ToolResult, relativePath: string): ToolResu
 function wrapPathMutator(spec: ToolSpec, mode: SelfDevMode): ToolSpec {
 	return {
 		...spec,
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
 			const target = pathArg(args);
-			if (!target) return spec.run(args);
+			if (!target) return spec.run(args, options);
 			const decision = evaluateSelfDevWritePath(mode, target);
 			if (!decision.allowed) return { kind: "error", message: decision.reason };
-			const result = await spec.run(args);
+			const result = await spec.run(args, options);
 			return decision.restartRequired ? appendRestartNotice(result, decision.relativePath) : result;
 		},
 	};
@@ -29,11 +29,11 @@ function wrapPathMutator(spec: ToolSpec, mode: SelfDevMode): ToolSpec {
 function wrapBash(spec: ToolSpec): ToolSpec {
 	return {
 		...spec,
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
 			const command = typeof args.command === "string" ? args.command : "";
 			const blocked = evaluateSelfDevBashCommand(command);
 			if (blocked) return { kind: "error", message: blocked };
-			return spec.run(args);
+			return spec.run(args, options);
 		},
 	};
 }

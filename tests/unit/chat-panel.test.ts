@@ -145,6 +145,63 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("clio: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
+	it("renders tool status and bash command previews", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "bash-1",
+			toolName: "bash",
+			args: { command: "npm test" },
+		});
+		let text = strip(panel.render(90).join("\n"));
+		ok(text.includes("bash: $ npm test [running]"), text);
+
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "bash-1",
+			toolName: "bash",
+			result: "ok",
+			isError: false,
+		});
+		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("bash: $ npm test [done"), text);
+		ok(text.includes("ok"), text);
+	});
+
+	it("renders retry countdown and recovery status as a single updating line", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "retry_status",
+			status: { phase: "scheduled", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "rate limit" },
+		});
+		panel.applyEvent({
+			type: "retry_status",
+			status: { phase: "waiting", attempt: 1, maxAttempts: 3, seconds: 1, errorMessage: "rate limit" },
+		});
+		panel.applyEvent({
+			type: "retry_status",
+			status: { phase: "recovered", attempt: 1, maxAttempts: 3 },
+		});
+		const text = strip(panel.render(90).join("\n"));
+		ok(text.includes("[retry] recovered after 1 attempt"), text);
+		strictEqual((text.match(/\[retry\]/g) ?? []).length, 1);
+	});
+
+	it("renders assistant terminal errors even when they have no text content", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "" }],
+				stopReason: "error",
+				errorMessage: "provider returned 503",
+			} as never,
+		});
+		const text = strip(panel.render(90).join("\n"));
+		ok(text.includes("clio: [error] provider returned 503"), text);
+	});
+
 	it("shows a working placeholder after assistant message_start before first token", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({

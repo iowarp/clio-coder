@@ -1,5 +1,5 @@
 import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
-import type { ChatLoopEvent } from "./chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 
 const TOOL_PREVIEW_LIMIT = 96;
 
@@ -69,12 +69,16 @@ type ToolSegment = {
 	name: string;
 	args: unknown;
 	preview: string;
+	status: "running" | "done" | "error";
+	startedAt: number;
+	durationMs?: number;
 };
 type AssistantSegment = TextSegment | ToolSegment;
 type ReplayBlockRenderer = (width: number) => string[];
 
 type TranscriptEntry =
 	| { role: "user"; text: string }
+	| { role: "retryStatus"; status: RetryStatusPayload }
 	| {
 			role: "assistant";
 			segments: AssistantSegment[];
@@ -149,6 +153,15 @@ function extractAssistantThinking(message: unknown): string {
 		.join("");
 }
 
+function extractAssistantTerminalError(message: unknown): string {
+	if (!message || typeof message !== "object" || !("role" in message) || message.role !== "assistant") return "";
+	const stopReason = (message as { stopReason?: unknown }).stopReason;
+	if (stopReason !== "error" && stopReason !== "aborted") return "";
+	const raw = (message as { errorMessage?: unknown }).errorMessage;
+	const reason = typeof raw === "string" && raw.length > 0 ? raw : "unknown error";
+	return stopReason === "aborted" ? `[aborted] ${reason}` : `[error] ${reason}`;
+}
+
 function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") return true;
@@ -193,12 +206,54 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 	return [...wrappedFirst, ...lines.slice(1)];
 }
 
+function formatRetryStatus(status: RetryStatusPayload): string {
+	const suffix = status.errorMessage ? `: ${shorten(status.errorMessage, 120)}` : "";
+	if (status.phase === "waiting") {
+		return `[retry] attempt ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
+	}
+	if (status.phase === "scheduled") {
+		const seconds = Math.ceil((status.delayMs ?? 0) / 1000);
+		return `[retry] attempt ${status.attempt}/${status.maxAttempts} scheduled in ${seconds}s${suffix}`;
+	}
+	if (status.phase === "retrying") return `[retry] attempt ${status.attempt}/${status.maxAttempts} running${suffix}`;
+	if (status.phase === "cancelled") return `[retry] cancelled attempt ${status.attempt}/${status.maxAttempts}${suffix}`;
+	if (status.phase === "exhausted") return `[retry] exhausted after ${status.attempt} attempt(s)${suffix}`;
+	return `[retry] recovered after ${status.attempt} attempt(s)`;
+}
+
+function toolStatusLabel(seg: ToolSegment): string {
+	const duration = typeof seg.durationMs === "number" ? `, ${Math.max(0, Math.round(seg.durationMs))}ms` : "";
+	return `${seg.status}${duration}`;
+}
+
+function commandFromToolArgs(args: unknown): string | null {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+	const command = (args as { command?: unknown }).command;
+	return typeof command === "string" && command.length > 0 ? command : null;
+}
+
+function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
+	const status = toolStatusLabel(seg);
+	if (seg.name === "bash") {
+		const command = commandFromToolArgs(seg.args) ?? previewValue(seg.args, 72);
+		const lines = wrapTextWithAnsi(`  tool: bash: $ ${command} [${status}]`, width);
+		if (seg.preview && seg.preview !== "running") {
+			lines.push(...wrapTextWithAnsi(`    ${seg.preview}`, width));
+		}
+		return lines;
+	}
+	return wrapTextWithAnsi(`  tool: ${seg.name}(${previewValue(seg.args, 48)}) [${status}] -> ${seg.preview}`, width);
+}
+
 function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
 	}
 	if (entry.role === "user") {
 		return wrapTextWithAnsi(`you: ${entry.text}`, width);
+	}
+	if (entry.role === "retryStatus") {
+		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
 	}
 	const lines: string[] = [];
 	let labeled = false;
@@ -215,8 +270,7 @@ function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
 			}
 			continue;
 		}
-		const toolLine = `  tool: ${seg.name}(${previewValue(seg.args, 48)}) → ${seg.preview}`;
-		lines.push(...wrapTextWithAnsi(toolLine, width));
+		lines.push(...renderToolSegmentLines(seg, width));
 	}
 	if (!labeled && !hasVisibleOutput(entry)) {
 		lines.push(entry.pending ? "clio: [working]" : "clio: ");
@@ -336,6 +390,8 @@ export function createChatPanel(): ChatPanel {
 					name: event.toolName,
 					args: event.args,
 					preview: "running",
+					status: "running",
+					startedAt: Date.now(),
 				});
 				markDirty();
 				return;
@@ -354,17 +410,32 @@ export function createChatPanel(): ChatPanel {
 				const tool = assistant.segments.find(
 					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
 				);
-				if (tool) tool.preview = previewValue(event.result);
+				if (tool) {
+					tool.preview = previewValue(event.result);
+					tool.status = event.isError ? "error" : "done";
+					tool.durationMs = Date.now() - tool.startedAt;
+				}
 				markDirty();
 				return;
 			}
 			if (event.type === "message_end") {
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
-				if (text.length === 0 && thinking.length === 0) return;
+				const terminalError = extractAssistantTerminalError(event.message);
+				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
 				const assistant = ensureAssistant();
 				if (thinking.length > 0) assistant.thinking = thinking;
-				canonicalizeMessageText(assistant, text);
+				canonicalizeMessageText(assistant, text.length > 0 ? text : terminalError);
+				markDirty();
+				return;
+			}
+			if (event.type === "retry_status") {
+				const last = transcript[transcript.length - 1];
+				if (last?.role === "retryStatus" && last.status.attempt === event.status.attempt) {
+					last.status = event.status;
+				} else {
+					transcript.push({ role: "retryStatus", status: event.status });
+				}
 				markDirty();
 				return;
 			}

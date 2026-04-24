@@ -109,6 +109,13 @@ const CompactionSchema = Type.Object({
 	systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
 });
 
+const RetrySchema = Type.Object({
+	enabled: Type.Boolean(),
+	maxRetries: Type.Integer({ minimum: 0 }),
+	baseDelayMs: Type.Integer({ minimum: 0 }),
+	maxDelayMs: Type.Integer({ minimum: 0 }),
+});
+
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
@@ -135,6 +142,7 @@ export const SettingsSchema = Type.Object({
 		lastMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	}),
 	compaction: CompactionSchema,
+	retry: RetrySchema,
 });
 
 export type ValidatedSettings = Static<typeof SettingsSchema>;

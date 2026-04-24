@@ -211,4 +211,52 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(serialized.includes("Ran `npm test`"), serialized);
 		ok(!serialized.includes("hidden old prompt"), serialized);
 	});
+
+	it("replays retry status entries and excludes failed assistant attempts from model context", () => {
+		const panel = createChatPanel();
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-24T00:00:00.000Z",
+				role: "user",
+				payload: { text: "hello" },
+			},
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp: "2026-04-24T00:00:01.000Z",
+				role: "assistant",
+				payload: { text: "", stopReason: "error", errorMessage: "rate limit 429" },
+			},
+			{
+				kind: "custom",
+				turnId: "r1",
+				parentTurnId: "a1",
+				timestamp: "2026-04-24T00:00:02.000Z",
+				customType: "retryStatus",
+				display: true,
+				data: { phase: "scheduled", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "rate limit 429" },
+			},
+			{
+				kind: "message",
+				turnId: "a2",
+				parentTurnId: "a1",
+				timestamp: "2026-04-24T00:00:03.000Z",
+				role: "assistant",
+				payload: { text: "ok now" },
+			},
+		];
+		rehydrateChatPanelFromTurns(panel, entries);
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("clio: [error] rate limit 429"), text);
+		ok(text.includes("[retry] scheduled 1/3 in 2s: rate limit 429"), text);
+		ok(text.includes("clio: ok now"), text);
+
+		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
+		ok(!serialized.includes("rate limit 429"), serialized);
+		ok(serialized.includes("ok now"), serialized);
+	});
 });

@@ -35,6 +35,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"scope",
 	"budget.sessionCeilingUsd",
 	"compaction",
+	"retry",
 ]);
 
 const RESTART_REQUIRED_FIELDS = new Set<string>(["budget.concurrency"]);

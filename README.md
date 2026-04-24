@@ -180,6 +180,11 @@ session log. Interactive tool activity is written as durable tool call/result
 entries, so tool work remains visible after resume and fork; full output replay
 still depends on the corresponding durable entries being present.
 
+Transient provider and stream failures retry automatically when `retry.enabled`
+is true. Failed attempts remain visible in the transcript, retry countdowns and
+exhaustion/recovery markers are persisted for resume/fork replay, and the retry
+continues from the existing user turn rather than adding the prompt again.
+
 Before each interactive turn, Clio loads project context files from the current
 working directory upward to the filesystem root. The first supported names are
 `AGENTS.md` and `CODEX.md`; parent files are injected before child files, and
@@ -247,6 +252,12 @@ scope:
 compaction:
   threshold: 0.8
   auto: true
+
+retry:
+  enabled: true
+  maxRetries: 3
+  baseDelayMs: 2000
+  maxDelayMs: 60000
 ```
 
 | Env var | Default | Purpose |
