@@ -3,16 +3,15 @@
  *
  * Resolves a DispatchRequest to an EndpointDescriptor + RuntimeDescriptor +
  * wire model id via the providers contract. Gates admission on safety
- * scopes, concurrency, budget, and capability flags. HTTP and SDK runtimes
- * spawn the native worker subprocess; subprocess runtimes (claude-code-cli,
- * codex-cli, gemini-cli) run the CLI agent inline through the engine's
- * subprocess-runtime.
+ * scopes, concurrency, budget, and capability flags. Every admitted runtime
+ * kind enters through the native worker subprocess; the worker entry
+ * rehydrates the runtime descriptor and delegates runtime-specific execution
+ * behind the engine boundary.
  */
 
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
-import { startSubprocessWorkerRun } from "../../engine/subprocess-runtime.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -30,8 +29,9 @@ import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
+import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { type Ledger, openLedger } from "./state.js";
-import type { RunKind, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
+import type { RunEnvelope, RunKind, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
@@ -49,12 +49,20 @@ interface ActiveRun {
 	task: string;
 	cwd: string;
 	aborted: boolean;
+	heartbeatAt: { current: number } | null;
+	heartbeatStatus: HeartbeatStatus;
+	terminalStatusOverride: RunStatus | null;
 	finalPromise: Promise<RunReceipt>;
 }
 
 interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	heartbeatSpec?: HeartbeatSpec;
+	heartbeatIntervalMs?: number;
+	now?: () => number;
 }
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 
 function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined): ScopeSpec {
 	if (mode === "super") return safety.scopes.super;
@@ -235,13 +243,79 @@ export function createDispatchBundle(
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
+	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
+	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+	const now = options?.now ?? (() => Date.now());
 
 	let ledger: Ledger | null = null;
+	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
 
 	function requireLedger(): Ledger {
 		if (!ledger) throw new Error("dispatch: ledger not initialised");
 		return ledger;
+	}
+
+	function heartbeatIso(heartbeatMs: number): string {
+		return new Date(heartbeatMs).toISOString();
+	}
+
+	function heartbeatRunStatus(status: HeartbeatStatus): RunStatus {
+		return status === "alive" ? "running" : status;
+	}
+
+	function emitHeartbeatStatus(run: ActiveRun, status: HeartbeatStatus): void {
+		context.bus.emit(BusChannels.DispatchProgress, {
+			runId: run.runId,
+			agentId: run.agentId,
+			endpointId: run.endpointId,
+			wireModelId: run.wireModelId,
+			runtimeId: run.runtimeId,
+			runtimeKind: run.runtimeKind,
+			event: {
+				type: "heartbeat_status",
+				status,
+				heartbeatAt: run.heartbeatAt ? heartbeatIso(run.heartbeatAt.current) : null,
+			},
+		});
+	}
+
+	function checkActiveHeartbeats(): void {
+		if (!ledger) return;
+		const tickNow = now();
+		for (const run of active.values()) {
+			if (run.aborted || run.terminalStatusOverride || !run.heartbeatAt) continue;
+			const heartbeatMs = run.heartbeatAt.current;
+			if (!Number.isFinite(heartbeatMs)) continue;
+			const status = classifyHeartbeat(heartbeatMs, tickNow, heartbeatSpec);
+			const patch: Partial<RunEnvelope> = {
+				status: heartbeatRunStatus(status),
+				heartbeatAt: heartbeatIso(heartbeatMs),
+			};
+			ledger.update(run.runId, patch);
+			if (status === run.heartbeatStatus) continue;
+			run.heartbeatStatus = status;
+			emitHeartbeatStatus(run, status);
+			if (status !== "dead") continue;
+			run.terminalStatusOverride = "dead";
+			try {
+				run.abort();
+			} catch {
+				// child may have exited between classification and reap attempt
+			}
+		}
+	}
+
+	function startHeartbeatWatchdog(): void {
+		if (heartbeatTimer || heartbeatIntervalMs <= 0) return;
+		heartbeatTimer = setInterval(checkActiveHeartbeats, heartbeatIntervalMs);
+		heartbeatTimer.unref?.();
+	}
+
+	function stopHeartbeatWatchdog(): void {
+		if (!heartbeatTimer) return;
+		clearInterval(heartbeatTimer);
+		heartbeatTimer = null;
 	}
 
 	async function dispatch(req: DispatchRequest): Promise<{
@@ -331,96 +405,29 @@ export function createDispatchBundle(
 		}
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
-		let pid: number | null = null;
-		let abort: () => void;
-		let workerEvents: AsyncIterable<unknown>;
-		let workerDone: Promise<{ exitCode: number | null }>;
-
-		if (runtimeKind === "http" || runtimeKind === "sdk") {
-			const spec: WorkerSpec = {
-				systemPrompt,
-				task: req.task,
-				endpoint: target.endpoint,
-				runtimeId: target.runtime.id,
-				wireModelId: target.wireModelId,
-				thinkingLevel: target.thinkingLevel,
-				allowedTools,
-				mode: workerMode,
-			};
-			if (apiKey) spec.apiKey = apiKey;
-			let worker: SpawnedWorker;
-			try {
-				worker = spawnWorker(spec, { cwd });
-			} catch (error) {
-				releaseWorkerSlot();
-				throw error;
-			}
-			pid = worker.pid;
-			abort = () => worker.abort();
-			workerEvents = worker.events;
-			workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
-		} else {
-			// subprocess kind: run inline inside the orchestrator process
-			const queue: unknown[] = [];
-			const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
-			let finished = false;
-			function push(value: unknown): void {
-				const w = waiters.shift();
-				if (w) {
-					w({ value, done: false });
-					return;
-				}
-				queue.push(value);
-			}
-			function end(): void {
-				if (finished) return;
-				finished = true;
-				while (waiters.length > 0) {
-					const w = waiters.shift();
-					if (w) w({ value: undefined, done: true });
-				}
-			}
-			const iterator: AsyncIterableIterator<unknown> = {
-				next(): Promise<IteratorResult<unknown>> {
-					if (queue.length > 0) {
-						const value = queue.shift();
-						return Promise.resolve({ value, done: false });
-					}
-					if (finished) return Promise.resolve({ value: undefined, done: true });
-					return new Promise<IteratorResult<unknown>>((resolve) => {
-						waiters.push(resolve);
-					});
-				},
-				return(): Promise<IteratorResult<unknown>> {
-					end();
-					return Promise.resolve({ value: undefined, done: true });
-				},
-				[Symbol.asyncIterator](): AsyncIterableIterator<unknown> {
-					return this;
-				},
-			};
-			const abortController = new AbortController();
-			const inputForSubprocess: Parameters<typeof startSubprocessWorkerRun>[0] = {
-				systemPrompt,
-				task: req.task,
-				endpoint: target.endpoint,
-				runtime: target.runtime,
-				wireModelId: target.wireModelId,
-				signal: abortController.signal,
-			};
-			if (apiKey) inputForSubprocess.apiKey = apiKey;
-			const handle = startSubprocessWorkerRun(inputForSubprocess, (event) => push(event));
-			pid = null;
-			abort = () => {
-				abortController.abort();
-				handle.abort();
-			};
-			workerEvents = iterator;
-			workerDone = handle.promise.then((r) => {
-				end();
-				return { exitCode: r.exitCode };
-			});
+		const spec: WorkerSpec = {
+			systemPrompt,
+			task: req.task,
+			endpoint: target.endpoint,
+			runtimeId: target.runtime.id,
+			wireModelId: target.wireModelId,
+			thinkingLevel: target.thinkingLevel,
+			allowedTools,
+			mode: workerMode,
+		};
+		if (apiKey) spec.apiKey = apiKey;
+		let worker: SpawnedWorker;
+		try {
+			worker = spawnWorker(spec, { cwd });
+		} catch (error) {
+			releaseWorkerSlot();
+			throw error;
 		}
+		const pid = worker.pid;
+		const abort = () => worker.abort();
+		const heartbeatAt = worker.heartbeatAt;
+		const workerEvents = worker.events;
+		const workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
 
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
@@ -451,7 +458,12 @@ export function createDispatchBundle(
 			sessionId: null,
 			cwd,
 		});
-		ledgerRef.update(envelope.id, { status: "running", pid });
+		ledgerRef.update(
+			envelope.id,
+			heartbeatAt
+				? { status: "running", pid, heartbeatAt: heartbeatIso(heartbeatAt.current) }
+				: { status: "running", pid },
+		);
 
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
@@ -487,15 +499,21 @@ export function createDispatchBundle(
 			task: req.task,
 			cwd,
 			aborted: false,
+			heartbeatAt,
+			heartbeatStatus: "alive",
+			terminalStatusOverride: null,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
-				const receiptExitCode = result.exitCode ?? 1;
 				const endedAt = new Date().toISOString();
-				const status: RunStatus = activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed";
+				const status: RunStatus =
+					activeRun.terminalStatusOverride ??
+					(activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed");
+				activeRun.terminalStatusOverride = status;
+				const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
 				const pricing = target.endpoint.pricing;
 				const costUsd = pricing
 					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
@@ -523,7 +541,14 @@ export function createDispatchBundle(
 					toolCalls: 0,
 					sessionId: null,
 				};
-				ledgerRef.update(envelope.id, { status, endedAt, exitCode: receiptExitCode, tokenCount, costUsd });
+				ledgerRef.update(envelope.id, {
+					status,
+					endedAt,
+					exitCode: receiptExitCode,
+					tokenCount,
+					costUsd,
+					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt.current) } : {}),
+				});
 				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
@@ -577,8 +602,10 @@ export function createDispatchBundle(
 	const extension: DomainExtension = {
 		async start() {
 			ledger = openLedger();
+			startHeartbeatWatchdog();
 		},
 		async stop() {
+			stopHeartbeatWatchdog();
 			await drain();
 		},
 	};

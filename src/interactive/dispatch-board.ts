@@ -2,7 +2,10 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { RunKind, RunStatus } from "../domains/dispatch/types.js";
 
-export type DispatchBoardStatus = Extract<RunStatus, "running" | "completed" | "failed"> | "aborted" | "enqueued";
+export type DispatchBoardStatus =
+	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
+	| "aborted"
+	| "enqueued";
 
 export interface DispatchBoardRow {
 	runId: string;
@@ -77,10 +80,12 @@ const HINT_MESSAGE = "[Esc] close";
 
 const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,
-	enqueued: 1,
-	failed: 2,
-	aborted: 3,
-	completed: 4,
+	stale: 1,
+	enqueued: 2,
+	dead: 3,
+	failed: 4,
+	aborted: 5,
+	completed: 6,
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
 
@@ -202,7 +207,18 @@ function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null
 }
 
 function resolveFailedStatus(reason: unknown): DispatchBoardStatus {
+	if (reason === "dead") return "dead";
 	return reason === "interrupted" ? "aborted" : "failed";
+}
+
+function resolveHeartbeatStatus(status: unknown): DispatchBoardStatus | null {
+	if (status === "alive") return "running";
+	if (status === "stale" || status === "dead") return status;
+	return null;
+}
+
+function isTerminalStatus(status: DispatchBoardStatus): boolean {
+	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
 function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
@@ -239,7 +255,7 @@ function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
 function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 	if (entries.size <= MAX_DISPATCH_BOARD_ROWS) return;
 	const terminalEntries = [...entries.values()]
-		.filter((entry) => entry.status === "completed" || entry.status === "failed")
+		.filter((entry) => isTerminalStatus(entry.status))
 		.sort((a, b) => a.sequence - b.sequence);
 	const evictionQueue =
 		terminalEntries.length > 0 ? terminalEntries : [...entries.values()].sort((a, b) => a.sequence - b.sequence);
@@ -338,6 +354,15 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			if (!entry) return;
 			const workerEvent = (payload.event ?? {}) as WorkerEventShape;
 			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
+			if (type === "heartbeat_status") {
+				if (isTerminalStatus(entry.status)) return;
+				const status = resolveHeartbeatStatus((workerEvent as { status?: unknown }).status);
+				if (!status) return;
+				entry.status = status;
+				if (status === "dead") entry.finishedAtMs ??= Date.now();
+				return;
+			}
+			if (isTerminalStatus(entry.status)) return;
 			if (type === "message_end" && workerEvent.message?.role === "assistant") {
 				const usage = workerEvent.message.usage;
 				entry.tokenCount +=

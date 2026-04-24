@@ -1,11 +1,13 @@
-import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { ToolName } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
@@ -43,6 +45,15 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+	const deadline = Date.now() + 1000;
+	while (Date.now() <= deadline) {
+		if (predicate()) return;
+		await delay(5);
+	}
+	throw new Error(`timed out waiting for ${label}`);
+}
+
 function createSchedulingStub(limit: number): SchedulingStub {
 	let active = 0;
 	const stats = { acquires: 0, releases: 0 };
@@ -69,9 +80,16 @@ function createSchedulingStub(limit: number): SchedulingStub {
 	};
 }
 
-function stubContext(scheduling: SchedulingContract): DomainContext & { bus: ReturnType<typeof createSafeEventBus> } {
+function stubContext(
+	scheduling: SchedulingContract,
+	overrides: {
+		endpoint?: EndpointDescriptor;
+		runtime?: RuntimeDescriptor;
+		visibleTools?: ReadonlySet<ToolName>;
+	} = {},
+): DomainContext & { bus: ReturnType<typeof createSafeEventBus> } {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: EndpointDescriptor = {
+	const endpoint: EndpointDescriptor = overrides.endpoint ?? {
 		id: "default",
 		runtime: "openai",
 		defaultModel: "gpt-4o",
@@ -80,7 +98,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 	settings.workers.default.endpoint = endpoint.id;
 	settings.workers.default.model = endpoint.defaultModel ?? "gpt-4o";
 
-	const runtime: RuntimeDescriptor = {
+	const runtime: RuntimeDescriptor = overrides.runtime ?? {
 		id: "openai",
 		displayName: "OpenAI",
 		kind: "http",
@@ -169,7 +187,7 @@ function stubContext(scheduling: SchedulingContract): DomainContext & { bus: Ret
 		current: () => "default",
 		setMode: () => "default",
 		cycleNormal: () => "default",
-		visibleTools: () => new Set(),
+		visibleTools: () => overrides.visibleTools ?? new Set(),
 		isToolVisible: () => false,
 		isActionAllowed: () => true,
 		requestSuper: () => {},
@@ -294,6 +312,127 @@ describe("dispatch concurrency gate", () => {
 			strictEqual(receipt.exitCode, 1);
 			strictEqual(scheduling.activeWorkers(), 0);
 			strictEqual(scheduling.stats.releases, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("routes subprocess runtimes through the native worker entry", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const endpoint: EndpointDescriptor = {
+			id: "claude-cli",
+			runtime: "claude-code-cli",
+			defaultModel: "claude-sonnet-4-6",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "claude-code-cli",
+			displayName: "Claude Code CLI",
+			kind: "subprocess",
+			tier: "cli-gold",
+			apiFamily: "subprocess-claude-code",
+			auth: "cli",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: endpoint.defaultModel, provider: "anthropic" }) as never,
+		};
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling, {
+			endpoint,
+			runtime,
+			visibleTools: new Set<ToolName>(["read"]),
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const captured: { spec?: WorkerSpec; opts: { cwd?: string } | undefined } = { opts: undefined };
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec, opts) => {
+				captured.spec = spec;
+				captured.opts = opts;
+				return {
+					pid: 1005,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cli task", cwd: dataDir });
+			const run = bundle.contract.getRun(handle.runId);
+			ok(captured.spec);
+			const spec = captured.spec;
+
+			strictEqual(spec.runtimeId, "claude-code-cli");
+			strictEqual(spec.wireModelId, "claude-sonnet-4-6");
+			strictEqual(spec.mode, "default");
+			deepStrictEqual(spec.allowedTools, ["read"]);
+			strictEqual(spec.thinkingLevel, "off");
+			strictEqual(captured.opts?.cwd, dataDir);
+			strictEqual(run?.runtimeKind, "subprocess");
+			strictEqual(run?.pid, 1005);
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("marks native workers stale, restores them on heartbeat, and reaps dead workers", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const heartbeatAt = { current: 0 };
+		let now = 0;
+		let aborts = 0;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1004,
+				promise: exit.promise,
+				events: emptyEvents(),
+				abort: () => {
+					aborts += 1;
+				},
+				heartbeatAt,
+			}),
+			heartbeatSpec: { windowMs: 5, graceMs: 5 },
+			heartbeatIntervalMs: 1,
+			now: () => now,
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "heartbeat task" });
+			strictEqual(bundle.contract.getRun(handle.runId)?.status, "running");
+
+			now = 6;
+			await waitFor(() => bundle.contract.getRun(handle.runId)?.status === "stale", "stale heartbeat status");
+
+			heartbeatAt.current = 6;
+			now = 7;
+			await waitFor(() => bundle.contract.getRun(handle.runId)?.status === "running", "heartbeat recovery");
+
+			now = 20;
+			await waitFor(() => bundle.contract.getRun(handle.runId)?.status === "dead", "dead heartbeat status");
+			strictEqual(aborts, 1);
+
+			exit.resolve({ exitCode: null, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.exitCode, 1);
+			strictEqual(bundle.contract.getRun(handle.runId)?.status, "dead");
+			ok(bundle.contract.getRun(handle.runId)?.heartbeatAt);
 		} finally {
 			await bundle.extension.stop?.();
 		}
