@@ -10,7 +10,7 @@ can audit the git history without expanding every commit.
 
 ## Unreleased
 
-Target: `0.2.0-dev`
+Target: `0.1.0-exp`
 
 Source range: `main..v0.2/parity` (`747f71c..9c59275`) as of 2026-04-24.
 

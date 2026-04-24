@@ -51,7 +51,7 @@
 
 Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
-Status: **v0.2.0-dev**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows.
+Status: **v0.1.0-exp**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows.
 
 Recent focus in this dev cycle:
 
