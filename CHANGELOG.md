@@ -3,6 +3,13 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## 0.1.1 — Unreleased
+
+### Fixed
+
+- `/receipt verify <runId>` now verifies a SHA-256 integrity field against the
+  persisted run ledger entry instead of accepting schema-valid receipt JSON.
+
 ## 0.1.0-exp — 2026-04-24
 
 First public release. Experimental. Expect moving surfaces; pin the tag if
@@ -38,8 +45,7 @@ you need a stable target.
   developers editing Clio from inside Clio, with shell environment isolation
   and tool guards.
 - **Receipts and audit.** Every run writes a receipt under
-  `<dataDir>/receipts/<runId>.json` with token counts, USD cost, and a hash
-  of the event ledger. `/receipt verify <runId>` re-hashes on demand.
+  `<dataDir>/receipts/<runId>.json` with token counts and USD cost.
 - **Safety model.** Three modes (`default`, `advise`, `super`) gate tool
   visibility at the registry. Hardcoded Bash kill-switches live in
   `damage-control-rules.yaml`.

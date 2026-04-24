@@ -151,7 +151,7 @@ Available inside the interactive TUI.
 | `/compact [instructions]` | Compact earlier session context. |
 | `/cost` | Overlay session token totals and USD cost accumulated from completed runs. |
 | `/receipts` | Paginated list of run receipts persisted under `<dataDir>/receipts/`. |
-| `/receipt verify <runId>` | Read a receipt and report whether its ledger hash matches on disk. |
+| `/receipt verify <runId>` | Read a receipt and report whether its integrity hash matches the persisted run ledger. |
 | `/help` | Show the slash-command reference. |
 | `/hotkeys` | Show the current keyboard and slash-command reference. |
 | `/quit` | Exit the TUI cleanly. |
@@ -289,11 +289,11 @@ Hardcoded kill-switches for dangerous Bash patterns live in [`damage-control-rul
 
 ## Receipts and cost
 
-Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and target used, and a hash of the event ledger.
+Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and target used, and a SHA-256 integrity hash over the receipt fields plus the matching run ledger entry.
 
 ```bash
 /receipts                   # paginated list in the TUI
-/receipt verify <runId>     # re-hash the ledger and report match / mismatch
+/receipt verify <runId>     # re-hash the receipt + run ledger and report match / mismatch
 /cost                       # session-level token and USD totals
 ```
 

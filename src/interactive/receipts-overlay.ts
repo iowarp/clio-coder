@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import type { RunEnvelope } from "../domains/dispatch/types.js";
+import { isReceiptIntegrity, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -157,6 +158,7 @@ const RECEIPT_REQUIRED_KEYS = [
 	"nodeVersion",
 	"toolCalls",
 	"sessionId",
+	"integrity",
 ] as const;
 
 const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -175,6 +177,41 @@ function isNullableString(value: unknown): value is string | null {
 
 export function receiptFilePath(dataDir: string, runId: string): string {
 	return join(dataDir, "receipts", `${runId}.json`);
+}
+
+function runLedgerPath(dataDir: string): string {
+	return join(dataDir, "state", "runs.json");
+}
+
+type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reason: string };
+
+function readRunEnvelope(dataDir: string, runId: string): ReadLedgerResult {
+	let raw: string;
+	const target = runLedgerPath(dataDir);
+	try {
+		raw = readFileSync(target, "utf8");
+	} catch (err) {
+		const e = err as NodeJS.ErrnoException;
+		if (e.code === "ENOENT") return { ok: false, reason: "run ledger not found" };
+		return { ok: false, reason: `ledger read error: ${e.message ?? String(e)}` };
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (err) {
+		return { ok: false, reason: `invalid run ledger json: ${(err as Error).message}` };
+	}
+	if (!Array.isArray(parsed)) {
+		return { ok: false, reason: "run ledger is not an array" };
+	}
+	for (const entry of parsed) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const candidate = entry as Record<string, unknown>;
+		if (candidate.id === runId) {
+			return { ok: true, envelope: candidate as unknown as RunEnvelope };
+		}
+	}
+	return { ok: false, reason: "run not found in ledger" };
 }
 
 // Missing receipt files resolve to a fail result rather than throwing so
@@ -268,5 +305,10 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (!isNullableString(r.sessionId)) {
 		return { ok: false, reason: `sessionId invalid: ${String(r.sessionId)}` };
 	}
-	return { ok: true };
+	if (!isReceiptIntegrity(r.integrity)) {
+		return { ok: false, reason: "integrity invalid" };
+	}
+	const ledger = readRunEnvelope(dataDir, runId);
+	if (!ledger.ok) return ledger;
+	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.envelope);
 }

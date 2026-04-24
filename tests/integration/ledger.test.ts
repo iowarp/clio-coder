@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -143,7 +143,14 @@ describe("dispatch/ledger", () => {
 			sessionId: null,
 			cwd: ".",
 		});
-		ledger.recordReceipt(env.id, {
+		ledger.update(env.id, {
+			status: "completed",
+			endedAt: "2026-04-24T00:00:01.000Z",
+			exitCode: 0,
+			tokenCount: 0,
+			costUsd: 0,
+		});
+		const receipt = ledger.recordReceipt(env.id, {
 			runId: env.id,
 			agentId: "a",
 			task: "t",
@@ -151,8 +158,8 @@ describe("dispatch/ledger", () => {
 			wireModelId: "claude-sonnet-4-6",
 			runtimeId: "anthropic",
 			runtimeKind: "http" as const,
-			startedAt: new Date().toISOString(),
-			endedAt: new Date().toISOString(),
+			startedAt: env.startedAt,
+			endedAt: "2026-04-24T00:00:01.000Z",
 			exitCode: 0,
 			tokenCount: 0,
 			costUsd: 0,
@@ -167,5 +174,7 @@ describe("dispatch/ledger", () => {
 		});
 		const receiptPath = join(scratch, "data", "receipts", `${env.id}.json`);
 		ok(existsSync(receiptPath));
+		const written = JSON.parse(readFileSync(receiptPath, "utf8")) as typeof receipt;
+		strictEqual(written.integrity.digest, receipt.integrity.digest);
 	});
 });

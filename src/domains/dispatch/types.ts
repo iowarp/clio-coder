@@ -10,6 +10,12 @@ export type RunStatus = "queued" | "running" | "completed" | "failed" | "interru
 
 export type RunKind = "http" | "subprocess" | "sdk";
 
+export interface RunReceiptIntegrity {
+	version: 1;
+	algorithm: "sha256";
+	digest: string;
+}
+
 export interface RunEnvelope {
 	id: string;
 	agentId: string;
@@ -52,4 +58,7 @@ export interface RunReceipt {
 	nodeVersion: string;
 	toolCalls: number;
 	sessionId: string | null;
+	integrity: RunReceiptIntegrity;
 }
+
+export type RunReceiptDraft = Omit<RunReceipt, "integrity">;
