@@ -85,7 +85,7 @@ Use concise conventional subjects:
 ```text
 feat(cli): add target profile flag
 fix(session): restore chat on fork
-docs(changelog): mark v0.2 dev work
+docs(changelog): record v0.1.0-exp release notes
 ```
 
 Rules:
