@@ -19,15 +19,26 @@ const VALID_API_FAMILIES = new Set<string>([
 	"ollama-native",
 	"rerank-http",
 	"embeddings-http",
+	"claude-agent-sdk",
 	"subprocess-claude-code",
 	"subprocess-codex",
 	"subprocess-gemini",
+	"subprocess-copilot",
 	"subprocess-opencode",
 ]);
 
 const VALID_AUTH = new Set<string>(["api-key", "oauth", "aws-sdk", "vertex-adc", "cli", "none"]);
-const VALID_KINDS = new Set<string>(["http", "subprocess"]);
-const VALID_TIERS = new Set<string>(["protocol", "cloud", "local-native", "cli-stub"]);
+const VALID_KINDS = new Set<string>(["http", "subprocess", "sdk"]);
+const VALID_TIERS = new Set<string>([
+	"protocol",
+	"cloud",
+	"local-native",
+	"sdk",
+	"cli",
+	"cli-gold",
+	"cli-silver",
+	"cli-bronze",
+]);
 
 function describeDescriptor(desc: RuntimeDescriptor): string {
 	return `${desc.id} (${desc.kind}/${desc.apiFamily})`;
@@ -83,5 +94,20 @@ describe("providers/runtimes built-in descriptors", () => {
 				`${describeDescriptor(desc)}: subprocess kind requires subprocess-* apiFamily`,
 			);
 		}
+	});
+
+	it("registers local CLI-backed targets with native CLI auth semantics", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		for (const id of ["claude-code-sdk", "claude-code-cli", "codex-cli", "gemini-cli", "copilot-cli", "opencode-cli"]) {
+			const desc = byId.get(id);
+			ok(desc, `missing runtime ${id}`);
+			strictEqual(desc.auth, "cli", `${id}: expected native CLI auth`);
+			ok(desc.knownModels && desc.knownModels.length > 0, `${id}: expected static model hints`);
+		}
+		strictEqual(byId.get("claude-code-sdk")?.tier, "sdk");
+		strictEqual(byId.get("claude-code-cli")?.tier, "cli-gold");
+		strictEqual(byId.get("codex-cli")?.tier, "cli-gold");
+		strictEqual(byId.get("copilot-cli")?.tier, "cli-silver");
+		strictEqual(byId.get("opencode-cli")?.tier, "cli-bronze");
 	});
 });

@@ -28,9 +28,14 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	id: "claude-code-cli",
 	displayName: "Claude Code CLI",
 	kind: "subprocess",
-	tier: "cli-stub",
+	tier: "cli-gold",
 	apiFamily: "subprocess-claude-code",
 	auth: "cli",
+	knownModels: ["claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
+	binaryName: "claude",
+	defaultBinaryPath: "/home/akougkas/.local/bin/claude",
+	headlessCommand: "claude --print --model <model> --output-format stream-json --include-partial-messages <prompt>",
+	outputParser: "claude-code-stream-json",
 	defaultCapabilities,
 	async probe(_endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return runVersionProbe(spawn, "claude", ctx);

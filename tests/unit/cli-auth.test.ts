@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { runAuthCommand } from "../../src/cli/auth.js";
@@ -16,6 +16,7 @@ import {
 } from "../../src/engine/oauth.js";
 
 const ORIGINAL_ENV = { ...process.env };
+const ORIGINAL_PATH = process.env.PATH;
 const TEST_PROVIDER_ID = "clio-cli-oauth";
 
 const TEST_PROVIDER: OAuthProviderInterface = {
@@ -56,6 +57,13 @@ async function captureOutput<T>(fn: () => Promise<T>): Promise<{ result: T; stdo
 		process.stdout.write = realStdout;
 		process.stderr.write = realStderr;
 	}
+}
+
+function installClaudeShim(dir: string, script: string): void {
+	const binPath = join(dir, "claude");
+	writeFileSync(binPath, script, "utf8");
+	chmodSync(binPath, 0o755);
+	process.env.PATH = `${dir}${delimiter}${ORIGINAL_PATH ?? ""}`;
 }
 
 describe("cli auth commands", () => {
@@ -104,5 +112,24 @@ describe("cli auth commands", () => {
 		const after = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));
 		strictEqual(after.result, 1);
 		ok(after.stdout.includes(`${TEST_PROVIDER_ID}\t-\tabsent`));
+	});
+
+	it("auth status probes Claude native CLI auth without storing Clio credentials", async () => {
+		installClaudeShim(
+			scratch,
+			'#!/bin/sh\nif [ "$1" = auth ] && [ "$2" = status ]; then echo \'Logged in as test@example.com\'; exit 0; fi\nexit 2\n',
+		);
+
+		const status = await captureOutput(() => runAuthCommand(["status", "claude-code-cli"]));
+		strictEqual(status.result, 0);
+		ok(status.stdout.includes("claude-code-cli\tcli\tauthenticated"));
+		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
+	});
+
+	it("auth login for Claude native CLI prints handoff guidance in non-interactive tests", async () => {
+		const login = await captureOutput(() => runAuthCommand(["login", "claude-code-cli"]));
+		strictEqual(login.result, 0);
+		ok(login.stdout.includes("claude auth login"));
+		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
 	});
 });

@@ -263,6 +263,7 @@ function colorHealth(status: EndpointStatus["health"]["status"]): string {
 function formatUrl(status: EndpointStatus): string {
 	const runtime = status.runtime;
 	if (runtime?.kind === "subprocess") return "(subprocess)";
+	if (runtime?.kind === "sdk") return "(sdk)";
 	if (status.endpoint.url) return status.endpoint.url;
 	return "(built-in)";
 }
@@ -310,8 +311,16 @@ function tierLabel(tier: ProviderOutputTier): string {
 			return "Cloud";
 		case "local-native":
 			return "Local native";
-		case "cli-stub":
-			return "CLI stubs";
+		case "sdk":
+			return "SDK runtimes";
+		case "cli":
+			return "CLI runtimes";
+		case "cli-gold":
+			return "Gold CLI runtimes";
+		case "cli-silver":
+			return "Silver CLI runtimes";
+		case "cli-bronze":
+			return "Bronze CLI runtimes";
 		case "unknown":
 			return "Unknown";
 	}
@@ -325,10 +334,18 @@ function tierRank(tier: ProviderOutputTier): number {
 			return 1;
 		case "local-native":
 			return 2;
-		case "cli-stub":
+		case "sdk":
 			return 3;
-		case "unknown":
+		case "cli-gold":
 			return 4;
+		case "cli-silver":
+			return 5;
+		case "cli":
+			return 6;
+		case "cli-bronze":
+			return 7;
+		case "unknown":
+			return 8;
 	}
 }
 

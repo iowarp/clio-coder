@@ -11,6 +11,28 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
+async function captureOutput<T>(fn: () => Promise<T> | T): Promise<{ result: T; stdout: string; stderr: string }> {
+	let stdout = "";
+	let stderr = "";
+	const realStdout = process.stdout.write.bind(process.stdout);
+	const realStderr = process.stderr.write.bind(process.stderr);
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		const result = await fn();
+		return { result, stdout, stderr };
+	} finally {
+		process.stdout.write = realStdout;
+		process.stderr.write = realStderr;
+	}
+}
+
 describe("cli configure and targets", () => {
 	let scratch: string;
 
@@ -149,5 +171,44 @@ describe("cli configure and targets", () => {
 		strictEqual(target.runtime, "claude-code-cli");
 		strictEqual(target.auth, undefined);
 		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["claude-worker", "sonnet"]);
+	});
+
+	it("configure --list shows SDK and CLI runtimes with native CLI auth", async () => {
+		const out = await captureOutput(() => runConfigureCommand(["--list"]));
+		strictEqual(out.result, 0);
+		ok(out.stdout.includes("claude-code-sdk"));
+		ok(out.stdout.includes("claude-code-cli"));
+		ok(out.stdout.includes("copilot-cli"));
+		for (const line of out.stdout.split(/\r?\n/)) {
+			if (line.includes("claude-code-sdk") || line.includes("claude-code-cli") || line.includes("copilot-cli")) {
+				ok(line.includes(" cli "), `expected native cli auth label in line: ${line}`);
+			}
+		}
+	});
+
+	it("persists a Claude SDK target without Clio-managed credentials", async () => {
+		const code = await runConfigureCommand([
+			"--runtime",
+			"claude-code-sdk",
+			"--id",
+			"claude-sdk",
+			"--model",
+			"claude-sonnet-4-6",
+			"--set-worker-default",
+			"--worker-model",
+			"claude-opus-4-7",
+		]);
+		strictEqual(code, 0);
+
+		const settings = readSettings();
+		const target = settings.endpoints.find((entry) => entry.id === "claude-sdk");
+		ok(target, "expected claude-sdk target");
+		strictEqual(target.runtime, "claude-code-sdk");
+		strictEqual(target.auth, undefined);
+		ok(target.wireModels?.includes("claude-opus-4-7"));
+		deepStrictEqual(
+			[settings.workers.default.endpoint, settings.workers.default.model],
+			["claude-sdk", "claude-opus-4-7"],
+		);
 	});
 });
