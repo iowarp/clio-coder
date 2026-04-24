@@ -33,6 +33,7 @@ export {
 	compareProviderSupportEntries,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
+	defaultWorkerModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
