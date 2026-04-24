@@ -43,6 +43,7 @@ describe("interactive/chat-loop auth resolution", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "openai-codex",
@@ -66,6 +67,8 @@ describe("interactive/chat-loop auth resolution", () => {
 				login: async () => {},
 				logout: () => {},
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: {
 				hasKey: () => false,
@@ -87,6 +90,7 @@ describe("interactive/chat-loop auth resolution", () => {
 				isActionAllowed: () => true,
 				requestSuper: () => {},
 				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
 			},
 			providers,
 			knownEndpoints: () => new Set([endpoint.id]),

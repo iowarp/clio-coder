@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { admit } from "../../src/domains/dispatch/admission.js";
 import { createBackoff, nextDelay, reset } from "../../src/domains/dispatch/backoff.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("dispatch/validation", () => {
 	it("accepts minimal spec", () => {
@@ -38,6 +38,18 @@ describe("dispatch/validation", () => {
 	it("accepts endpoint + model as the post-W7 way to target a runtime", () => {
 		const v = validateJobSpec({ agentId: "a", task: "t", endpoint: "anthropic", model: "claude-sonnet-4-6" });
 		ok(v.ok);
+	});
+
+	it("accepts a named worker profile selector", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", workerProfile: "claude-opus" });
+		ok(v.ok);
+		strictEqual(v.spec.workerProfile, "claude-opus");
+	});
+
+	it("accepts a worker runtime selector without reintroducing the legacy runtime key", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", workerRuntime: "copilot-cli" });
+		ok(v.ok);
+		strictEqual(v.spec.workerRuntime, "copilot-cli");
 	});
 });
 

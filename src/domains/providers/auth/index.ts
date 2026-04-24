@@ -27,4 +27,10 @@ export type {
 	AuthTarget,
 	OAuthCredential,
 } from "./storage.js";
-export { AuthStorage, resolveAuthTarget, resolveRuntimeAuthTarget } from "./storage.js";
+export {
+	AuthStorage,
+	authNotRequiredStatus,
+	resolveAuthTarget,
+	resolveRuntimeAuthTarget,
+	targetRequiresAuth,
+} from "./storage.js";

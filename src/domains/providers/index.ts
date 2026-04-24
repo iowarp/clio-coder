@@ -8,8 +8,6 @@ export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	createExtension: createProvidersBundle,
 };
 
-export { ProvidersManifest } from "./manifest.js";
-export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 export type {
 	ApiKeyCredential,
 	AuthCredential,
@@ -18,7 +16,52 @@ export type {
 	AuthTarget,
 	OAuthCredential,
 } from "./auth/index.js";
+export {
+	authNotRequiredStatus,
+	createMemoryAuthStorage,
+	openAuthStorage,
+	resolveAuthTarget,
+	resolveRuntimeAuthTarget,
+	targetRequiresAuth,
+} from "./auth/index.js";
+export { mergeCapabilities } from "./capabilities.js";
+export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
+export { ProvidersManifest } from "./manifest.js";
+export { resolveModelCapabilities } from "./model-capabilities.js";
+export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
+export {
+	type ResolvedModelRef,
+	type ResolveModelResult,
+	resolveModelReference,
+	splitThinkingSuffix,
+} from "./resolver.js";
+export {
+	buildProviderSupportEntry,
+	compareProviderSupportEntries,
+	configuredEndpointsForRuntime,
+	defaultModelForRuntime,
+	listKnownModelsForRuntime,
+	listProviderSupportEntries,
+	type ProviderSupportEntry,
+	type ProviderSupportGroup,
+	type ResolvedProviderReference,
+	resolveProviderReference,
+	supportGroupLabel,
+} from "./support.js";
+export type {
+	CapabilityFlags,
+	StructuredOutputMode,
+	ThinkingFormat,
+	ThinkingLevel,
+	ToolCallFormat,
+} from "./types/capability-flags.js";
+export {
+	availableThinkingLevels,
+	EMPTY_CAPABILITIES,
+	VALID_THINKING_LEVELS,
+} from "./types/capability-flags.js";
 export type { EndpointAuth, EndpointDescriptor, EndpointPricing } from "./types/endpoint-descriptor.js";
+export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export type {
 	ProbeContext,
 	ProbeResult,
@@ -27,33 +70,3 @@ export type {
 	RuntimeDescriptor,
 	RuntimeKind,
 } from "./types/runtime-descriptor.js";
-export type {
-	CapabilityFlags,
-	StructuredOutputMode,
-	ThinkingFormat,
-	ThinkingLevel,
-	ToolCallFormat,
-} from "./types/capability-flags.js";
-export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
-export {
-	EMPTY_CAPABILITIES,
-	VALID_THINKING_LEVELS,
-	availableThinkingLevels,
-} from "./types/capability-flags.js";
-export { createMemoryAuthStorage, openAuthStorage, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
-export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
-export { mergeCapabilities } from "./capabilities.js";
-export { resolveModelCapabilities } from "./model-capabilities.js";
-export {
-	buildProviderSupportEntry,
-	compareProviderSupportEntries,
-	configuredEndpointsForRuntime,
-	defaultModelForRuntime,
-	listKnownModelsForRuntime,
-	listProviderSupportEntries,
-	resolveProviderReference,
-	supportGroupLabel,
-	type ProviderSupportEntry,
-	type ProviderSupportGroup,
-	type ResolvedProviderReference,
-} from "./support.js";

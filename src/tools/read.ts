@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -13,6 +13,7 @@ export const readTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const pathArg =
 			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;

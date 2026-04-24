@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -38,11 +38,9 @@ export class FileKnowledgeBase implements KnowledgeBase {
 
 	reload(): void {
 		const next: KnowledgeBaseEntry[] = [];
-		const files = readdirSync(this.dir, { withFileTypes: true });
+		const files = collectYamlFiles(this.dir);
 		for (const entry of files) {
-			if (!entry.isFile()) continue;
-			if (!entry.name.endsWith(".yaml") && !entry.name.endsWith(".yml")) continue;
-			const raw = readFileSync(join(this.dir, entry.name), "utf8");
+			const raw = readFileSync(entry.path, "utf8");
 			const parsed = parseYaml(raw);
 			if (!Array.isArray(parsed)) {
 				throw new Error(`knowledge base file ${entry.name} must be a YAML list of KnowledgeBaseEntry`);
@@ -73,6 +71,23 @@ export class FileKnowledgeBase implements KnowledgeBase {
 		const isFamilyMatch = best.pattern.toLowerCase() === best.entry.family.toLowerCase();
 		return { entry: best.entry, matchKind: isFamilyMatch ? "family" : "alias" };
 	}
+}
+
+function collectYamlFiles(dir: string, prefix = ""): Array<{ path: string; name: string }> {
+	const out: Array<{ path: string; name: string }> = [];
+	const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+	for (const entry of entries) {
+		const path = join(dir, entry.name);
+		const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+		if (entry.isDirectory()) {
+			out.push(...collectYamlFiles(path, name));
+			continue;
+		}
+		if (!entry.isFile()) continue;
+		if (!entry.name.endsWith(".yaml") && !entry.name.endsWith(".yml")) continue;
+		out.push({ path, name });
+	}
+	return out;
 }
 
 function normalizeEntry(raw: unknown, file: string): KnowledgeBaseEntry {

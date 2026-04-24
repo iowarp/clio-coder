@@ -122,11 +122,11 @@ export interface ModelItemsResult {
 }
 
 /**
- * Build the endpoint-first model picker. Each configured endpoint renders one
- * row per candidate wire model (see `modelsForEndpoint`). Endpoints without
+ * Build the target-first model picker. Each configured target renders one
+ * row per candidate wire model (see `modelsForEndpoint`). Targets without
  * a resolvable wire model still render a single "no-model" row so users can
- * see the endpoint exists and why it is not selectable. Scope stars come from
- * `settings.scope`: both plain `endpointId` and `endpointId/wireModelId` refs
+ * see the target exists and why it is not selectable. Scope stars come from
+ * `settings.scope`: both plain `targetId` and `targetId/wireModelId` refs
  * match so a user can pin either granularity.
  */
 export function buildModelItems(deps: {

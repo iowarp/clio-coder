@@ -37,9 +37,9 @@ export function collectEntriesForBranchSummary(
 }
 
 export interface PreparedBranchEntries {
-	/** Entries up to (exclusive) the first-kept index — these get summarized. */
+	/** Entries up to (exclusive) the first-kept index. These get summarized. */
 	pre: SessionEntry[];
-	/** Entries at and after the first-kept index — these remain verbatim. */
+	/** Entries at and after the first-kept index. These remain verbatim. */
 	post: SessionEntry[];
 }
 
@@ -68,7 +68,7 @@ function truncate(text: string, max: number): string {
 /**
  * Flatten a MessageEntry payload into plain text. Accepts three payload
  * shapes in use today:
- *   - `string` (raw text line — defensive; chat-loop writes objects today)
+ *   - `string` (raw text line, defensive; chat-loop writes objects today)
  *   - `{ text: string }` (chat-loop user/assistant writes)
  *   - `{ content: [{ type: "text", text }...] }` (future rich payloads)
  * Returns "" for unrecognized shapes so the serializer silently drops them
@@ -95,7 +95,7 @@ function messageText(entry: MessageEntry): string {
 /**
  * Walk entries in order and emit `[Role]: body` sections suitable for
  * embedding inside a `<conversation>...</conversation>` block. Output is
- * stable for a given input — tests rely on this determinism.
+ * stable for a given input. Tests rely on this determinism.
  *
  * Non-context-bearing kinds (modelChange, thinkingLevelChange, fileEntry,
  * sessionInfo, custom) are skipped: they never contribute to the replayed

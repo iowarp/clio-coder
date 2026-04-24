@@ -9,22 +9,19 @@ function writeSettings(configDir: string, yaml: string): void {
 	writeFileSync(join(configDir, "settings.yaml"), yaml, "utf8");
 }
 
-function baseSettingsYaml(body: {
-	endpoints: string;
-	orchestrator: string;
-}): string {
+function baseSettingsYaml(body: { targets: string; orchestrator: string }): string {
 	return [
 		"version: 1",
 		"identity: clio",
 		"defaultMode: default",
 		"safetyLevel: auto-edit",
-		"endpoints:",
-		body.endpoints,
+		"targets:",
+		body.targets,
 		"orchestrator:",
 		body.orchestrator,
 		"workers:",
 		"  default:",
-		"    endpoint: null",
+		"    target: null",
 		"    model: null",
 		"    thinkingLevel: off",
 		"scope: []",
@@ -46,14 +43,14 @@ function writeEndpointFixture(configDir: string): void {
 	writeSettings(
 		configDir,
 		baseSettingsYaml({
-			endpoints: [
+			targets: [
 				"  - id: anthropic-prod",
 				"    runtime: anthropic",
 				"    defaultModel: claude-sonnet-4-6",
 				"    auth:",
 				"      apiKeyEnvVar: ANTHROPIC_API_KEY",
 			].join("\n"),
-			orchestrator: ["  endpoint: anthropic-prod", "  model: claude-sonnet-4-6", "  thinkingLevel: off"].join("\n"),
+			orchestrator: ["  target: anthropic-prod", "  model: claude-sonnet-4-6", "  thinkingLevel: off"].join("\n"),
 		}),
 	);
 }
@@ -63,8 +60,12 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 
 	beforeEach(async () => {
 		scratch = makeScratchHome();
+		scratch.env.ANTHROPIC_API_KEY = "sk-test";
 		// Bootstrap the scratch home so interactive mode doesn't hit first-run paths.
-		await runCli(["install"], { env: scratch.env });
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		writeEndpointFixture(configDir);
 	});
 
 	afterEach(() => {
@@ -74,7 +75,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("boots, renders banner, and exits cleanly on /quit", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp orchestrator coding-agent/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
@@ -86,7 +87,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("Ctrl-D shuts down the tui", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			// Ctrl-D (EOT, 0x04)
 			p.send("\x04");
 			const exit = await p.wait(10_000);
@@ -99,7 +100,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("Ctrl-C twice shuts down the tui", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("\x03");
 			await new Promise((r) => setTimeout(r, 100));
 			p.send("\x03");
@@ -116,9 +117,9 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeEndpointFixture(configDir);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/model\r");
-			// The configured endpoint id appears only inside the /model picker,
+			// The configured target id appears only inside the /model picker,
 			// never in the footer, so matching it proves the overlay rendered.
 			await p.expect(/anthropic-prod/, 10_000);
 			// Esc closes the overlay per routeModelOverlayKey.
@@ -141,7 +142,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeEndpointFixture(configDir);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/models\r");
 			await p.expect(/anthropic-prod/, 10_000);
 			p.send("\x1b");
@@ -160,23 +161,21 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: mini",
-					"    runtime: llamacpp",
+					"    runtime: openai-compat",
 					"    url: http://127.0.0.1:8080",
-					"    auth:",
-					"      apiKeyRef: llamacpp",
 					"    defaultModel: gemma-4-26B-A4B-it-Q4_K_M",
 					"    wireModels:",
 					"      - Qwen3.6-35B-A3B-UD-Q4_K_XL",
 					"      - gemma-4-26B-A4B-it-Q4_K_M",
 				].join("\n"),
-				orchestrator: ["  endpoint: mini", "  model: gemma-4-26B-A4B-it-Q4_K_M", "  thinkingLevel: off"].join("\n"),
+				orchestrator: ["  target: mini", "  model: gemma-4-26B-A4B-it-Q4_K_M", "  thinkingLevel: off"].join("\n"),
 			}),
 		);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/model\r");
 			await p.expect(/Qwen3\.6-35B-A3B-UD-Q4_K_XL/, 10_000);
 			await p.expect(/262kctx/, 10_000);
@@ -196,20 +195,37 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: openai-codex",
 					"    runtime: openai-codex",
 					"    defaultModel: gpt-5.4",
+					"    auth:",
+					"      oauthProfile: openai-codex",
 					"    wireModels:",
 					"      - gpt-5.4",
 					"      - gpt-5.4-mini",
 				].join("\n"),
-				orchestrator: ["  endpoint: openai-codex", "  model: gpt-5.4", "  thinkingLevel: low"].join("\n"),
+				orchestrator: ["  target: openai-codex", "  model: gpt-5.4", "  thinkingLevel: low"].join("\n"),
 			}),
+		);
+		writeFileSync(
+			join(configDir, "credentials.yaml"),
+			[
+				"version: 2",
+				"entries:",
+				"  openai-codex:",
+				"    type: oauth",
+				"    access: test-access",
+				"    refresh: test-refresh",
+				"    expires: 4102444800000",
+				"    updatedAt: 2026-01-01T00:00:00.000Z",
+				"",
+			].join("\n"),
+			"utf8",
 		);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/model\r");
 			await p.expect(/→ .*gpt-5\.4/, 10_000);
 			p.send("\x1b[B");
@@ -227,12 +243,29 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("/connect opens the provider selector, Esc closes, /quit exits clean", async () => {
+	it("/targets opens the target overlay, Esc closes, /quit exits clean", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
+			p.send("/targets\r");
+			await p.expect(/Targets/, 10_000);
+			await p.expect(/anthropic-prod/, 10_000);
+			p.send("\x1b");
+			await new Promise((r) => setTimeout(r, 300));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0);
+		} finally {
+			p.kill();
+		}
+	});
+
+	it("/connect opens the target connection selector, Esc closes, /quit exits clean", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/connect\r");
-			await p.expect(/openai-codex/, 10_000);
+			await p.expect(/anthropic-prod/, 10_000);
 			p.send("\x1b");
 			await new Promise((r) => setTimeout(r, 300));
 			p.send("/quit\r");
@@ -249,7 +282,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeEndpointFixture(configDir);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			// Ctrl+L is \x0c (form feed).
 			p.send("\x0c");
 			await p.expect(/anthropic-prod/, 10_000);
@@ -267,7 +300,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	});
 
 	it("/scoped-models dispatches cleanly and Esc restores the editor", async () => {
-		// The overlay renders a SelectList but pi-tui can chunk updates below
+		// The overlay renders a SelectList but terminal updates can chunk below
 		// the PTY viewport depending on terminal height; we verify the slash
 		// command routes and that the overlay closes cleanly on Esc + /quit
 		// (a failure to route leaves the TUI on the editor prompt and /quit
@@ -278,7 +311,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeEndpointFixture(configDir);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/scoped-models\r");
 			await new Promise((r) => setTimeout(r, 400));
 			p.send("\x1b");
@@ -294,7 +327,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/settings opens the settings overlay, Esc closes", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/settings\r");
 			// defaultMode / safetyLevel labels are unique to the settings overlay.
 			await p.expect(/defaultMode|safetyLevel/, 10_000);
@@ -311,7 +344,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/resume opens the session picker (possibly empty), Esc closes", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/resume\r");
 			// The overlay may render an empty list (fresh scratch home) or a single
 			// row that we just created. Give the TUI time to paint either way, then
@@ -330,7 +363,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/new rotates the session and exits clean on /quit", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/new\r");
 			await new Promise((r) => setTimeout(r, 300));
 			p.send("/quit\r");
@@ -344,7 +377,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/hotkeys opens the reference, Esc closes", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/hotkeys\r");
 			// The scope headers (GLOBAL / EDITOR) are unique to the hotkeys overlay.
 			await p.expect(/GLOBAL|EDITOR/, 10_000);
@@ -361,7 +394,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/tree opens the navigator, Esc closes", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/tree\r");
 			// A fresh scratch home has no current session; the overlay either
 			// shows the empty-state line or the navigator header. Both paths
@@ -382,7 +415,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/fork without a current session prints the no-op message", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/fork\r");
 			// The handler short-circuits with an actionable stderr line rather
 			// than opening an empty picker.
@@ -398,7 +431,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 	it("/compact without a current session prints the actionable error", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/compact\r");
 			// The orchestrator's onCompact short-circuits with a stderr line
 			// rather than calling the summarization model. The message string
@@ -431,7 +464,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		const env = { ...scratch.env, CLIO_FORCE_COMPACT: "1" };
 		const p = spawnClioPty({ env });
 		try {
-			await p.expect(/clio\s+IOWarp orchestrator coding-agent/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
@@ -440,11 +473,11 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("/thinking shows the full level set for a reasoning-capable endpoint", async () => {
-		// W7 replaced the legacy provider/providers/endpoint trio with a flat
-		// endpoints[] list. The orchestrator target points at an endpoint id,
-		// and the endpoint carries its own capability overrides. Here we pin
-		// reasoning=true at the endpoint level and assert /thinking offers
+	it("/thinking shows the full level set for a reasoning-capable target", async () => {
+		// Target config is a flat targets[] list. The orchestrator target
+		// points at a target id, and the target carries its own capability
+		// overrides. Here we pin reasoning=true at the target level and assert
+		// /thinking offers
 		// more than [off], proving the capability-merge path reaches the
 		// overlay.
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
@@ -452,9 +485,9 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		writeSettings(
 			configDir,
 			baseSettingsYaml({
-				endpoints: [
+				targets: [
 					"  - id: mini",
-					"    runtime: llamacpp-openai",
+					"    runtime: openai-compat",
 					"    url: http://mini.local:8080",
 					"    defaultModel: Qwen3.6-35B-A3B",
 					"    capabilities:",
@@ -463,19 +496,19 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 					"      contextWindow: 262144",
 					"      maxTokens: 8192",
 				].join("\n"),
-				orchestrator: ["  endpoint: mini", "  model: Qwen3.6-35B-A3B", "  thinkingLevel: medium"].join("\n"),
+				orchestrator: ["  target: mini", "  model: Qwen3.6-35B-A3B", "  thinkingLevel: medium"].join("\n"),
 			}),
 		);
 
 		const p = spawnClioPty({ env: scratch.env });
 		try {
-			await p.expect(/clio\s+IOWarp/, 15_000);
+			await p.expect(/clio\s+Clio Coder/, 15_000);
 			p.send("/thinking\r");
 			// The overlay may render below the PTY viewport on narrow terminals,
 			// but the slash command must route and Esc must close cleanly so
 			// /quit exits 0. The availableThinkingLevels ↔ endpoint capability
 			// wiring is covered by
-			// tests/unit/providers/capabilities.test.ts and the endpoint lookup
+			// tests/unit/providers/capabilities.test.ts and the target lookup
 			// path by tests/integration/providers/endpoint-lifecycle.test.ts.
 			await new Promise((r) => setTimeout(r, 400));
 			p.send("\x1b");

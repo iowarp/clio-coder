@@ -2,9 +2,9 @@ import { readSettings } from "../core/config.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import {
 	EMPTY_CAPABILITIES,
+	listProviderSupportEntries,
 	type ProviderSupportEntry,
 	type ResolvedProviderReference,
-	listProviderSupportEntries,
 	resolveProviderReference,
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
@@ -15,7 +15,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 export interface ConnectableProviderRow {
 	entry: ProviderSupportEntry;
 	status: ReturnType<ReturnType<typeof openAuthStorage>["statusForTarget"]> | null;
-	endpointCount: number;
+	targetCount: number;
 }
 
 export function ensureSetupRuntimeRegistry(): void {
@@ -60,11 +60,14 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 		.filter((entry) => entry.connectable)
 		.map((entry) => {
 			const runtime = getRuntimeRegistry().get(entry.runtimeId);
-			const status = runtime ? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }) : null;
+			const status =
+				runtime && runtime.auth !== "cli"
+					? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
+					: null;
 			return {
 				entry,
 				status,
-				endpointCount: settings.endpoints.filter((endpoint) => endpoint.runtime === entry.runtimeId).length,
+				targetCount: settings.endpoints.filter((endpoint) => endpoint.runtime === entry.runtimeId).length,
 			};
 		});
 }
@@ -81,9 +84,11 @@ export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectablePro
 			? row.status.source === "environment"
 				? `env${row.status.detail ? `:${row.status.detail}` : ""}`
 				: row.status.source
-			: "disconnected";
+			: row.entry.runtimeId.endsWith("-cli") || row.entry.runtimeId.endsWith("-sdk")
+				? "native-cli"
+				: "disconnected";
 		lines.push(
-			`  ${row.entry.runtimeId.padEnd(22)} ${row.entry.label.padEnd(18)} ${status.padEnd(20)} endpoints=${row.endpointCount}`,
+			`  ${row.entry.runtimeId.padEnd(22)} ${row.entry.label.padEnd(18)} ${status.padEnd(20)} targets=${row.targetCount}`,
 		);
 	}
 	return `${lines.join("\n")}\n`;

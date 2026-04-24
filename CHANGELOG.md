@@ -6,41 +6,71 @@ No public release has shipped yet. Treat every entry below as pre-release
 development history until `0.1.0` is tagged.
 
 Format: compact Keep a Changelog style, with source ranges included so agents
-can audit git history without expanding every commit.
+can audit the git history without expanding every commit.
 
 ## Unreleased
 
-Target: `0.1.0-dev`
+Target: `0.2.0-dev`
 
-Current `main` is the pre-release baseline. The online repository is being
-prepared for community development, CI gates, and maintainer-owned review.
+Source range: `main..v0.2/parity` (`747f71c..9c59275`) as of 2026-04-24.
 
 ### Added
 
-- Contributor, governance, security, code-of-conduct, status, and agent guide
-  files for a public contributor workflow.
-- GitHub CODEOWNERS, issue templates, pull request template, Dependabot config,
-  repository metadata record, and desired branch-protection record.
-- NOTICE attribution for IOWarp, iowarp.ai, Gnosis Research Center, and Anthony
-  Kougkas.
+- Interactive worker profiles for non-interactive dispatch and `/run`, with
+  per-profile target, model, thinking, and permission settings.
+- CLI-backed runtimes for Codex CLI, Claude Code CLI, Gemini CLI, OpenCode CLI,
+  Copilot CLI, plus a Claude Agent SDK worker path.
+- `clio targets`, `clio models`, `clio auth`, `clio configure`, `clio reset`,
+  and `clio uninstall` as the current lifecycle surface.
+- Self-development mode with hot-reload/restart signals, shell environment
+  isolation, and tool guards for editing Clio Coder from inside Clio Coder.
+- Session retry helpers, branch summary rendering, compaction summary
+  rendering, resume/fork replay coverage, and populated-session compaction
+  detection.
+- Configurable TUI keybindings, searchable resume picker, markdown chat
+  rendering, live token counters, and corrected cost overlay math.
+- Model reference resolver and `/model <pattern>` selection path.
+- Protocol/runtime tier split for cloud, local-native, protocol, and CLI-stub
+  providers.
+- Local development model knowledge base for Clio self-dev targets.
 
 ### Changed
 
-- README now points contributors and agents to status, governance, and review
-  rules.
-- Package metadata now carries agentic-coding keywords, lab attribution, and
-  package-file inclusion for the governance docs.
-- CI now has explicit read-only permissions, workflow dispatch, concurrency,
-  named matrix jobs, and disabled checkout credential persistence.
+- Runtime catalog upgraded to pi-mono `0.69.0`.
+- Provider model knowledge was narrowed to the active development catalog.
+- CLI lifecycle naming moved from install/setup/providers/list-models toward
+  configure/targets/models/auth.
+- Documentation was pruned from long phase plans toward current status,
+  specs, and source-of-truth repo files.
+- Shutdown now caps domain stop time to avoid TUI exit stalls.
+
+### Fixed
+
+- API key overrides are scoped to the active endpoint.
+- Super-confirmed bash dispatch now routes through tool-registry parking.
+- Chat panel resume/fork rehydrates consistently and resets active loops.
+- TUI tool calls render in turn order and filter thinking text.
+- Tree delete errors and keybinding validation are user-facing and tested.
+- List-models search filtering and dispatch-board closing behavior were
+  corrected.
+- Bash child processes no longer inherit unsafe local runtime environment.
+
+### Removed
+
+- Dead local runtime descriptors and legacy provider command files.
+- Large transient phase/design docs from tracked source. Use current docs and
+  git history for audit context.
 
 ### Verification
 
-- Required local gate: `npm run ci`.
+- Current gate: `npm run ci`.
+- Additional live smoke: `npm run smoke:workers:live` when local/CLI runtimes
+  are configured.
 
 ## 0.1.0-dev History
 
 No `0.1.0` tag has been released. This section records the pre-release base
-through `747f71c`.
+that `main` currently points at (`747f71c`).
 
 ### Phase 11 TUI selector suite
 

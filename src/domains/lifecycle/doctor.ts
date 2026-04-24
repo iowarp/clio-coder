@@ -1,9 +1,9 @@
-import { constants, accessSync, existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { settingsPath } from "../../core/config.js";
-import { clioConfigDir, clioDataDir } from "../../core/xdg.js";
-import { readInstallInfo } from "./install.js";
+import { initializeClioHome } from "../../core/init.js";
+import { resolveClioDirs } from "../../core/xdg.js";
+import { readStateInfo } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
 export interface DoctorFinding {
@@ -12,28 +12,46 @@ export interface DoctorFinding {
 	detail: string;
 }
 
-export function runDoctor(): DoctorFinding[] {
+export interface DoctorOptions {
+	fix?: boolean;
+}
+
+export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
+	if (options.fix) {
+		initializeClioHome();
+		const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
+		if (existsSync(credentialsPath)) {
+			chmodSync(credentialsPath, 0o600);
+		}
+	}
 	const findings: DoctorFinding[] = [];
 	const version = getVersionInfo();
 	findings.push({ ok: true, name: "clio version", detail: version.clio });
 	findings.push({ ok: true, name: "node version", detail: version.node });
 	findings.push({ ok: true, name: "platform", detail: version.platform });
-	findings.push({ ok: Boolean(version.piAgentCore), name: "pi-agent-core", detail: version.piAgentCore ?? "missing" });
-	findings.push({ ok: Boolean(version.piAi), name: "pi-ai", detail: version.piAi ?? "missing" });
-	findings.push({ ok: Boolean(version.piTui), name: "pi-tui", detail: version.piTui ?? "missing" });
+	const engineReady = Boolean(version.piAgentCore && version.piAi && version.piTui);
+	findings.push({
+		ok: engineReady,
+		name: "engine runtime",
+		detail: engineReady ? "ready" : "missing required packages",
+	});
 
-	const config = clioConfigDir();
+	const dirs = resolveClioDirs();
+	const config = dirs.config;
 	findings.push({ ok: existsSync(config), name: "config dir", detail: config });
 
-	const data = clioDataDir();
+	const data = dirs.data;
 	findings.push({ ok: existsSync(data), name: "data dir", detail: data });
 
-	const settings = settingsPath();
+	const cache = dirs.cache;
+	findings.push({ ok: existsSync(cache), name: "cache dir", detail: cache });
+
+	const settings = join(config, "settings.yaml");
 	if (!existsSync(settings)) {
 		findings.push({
 			ok: false,
 			name: "settings.yaml",
-			detail: "missing (run `clio install`)",
+			detail: "missing (run `clio doctor --fix` or `clio configure`)",
 		});
 	} else {
 		try {
@@ -50,9 +68,9 @@ export function runDoctor(): DoctorFinding[] {
 	// Single "credentials" row covers all three states (missing / wrong mode /
 	// correct mode / read error) so external assertions can grep one stable
 	// row name instead of branching on state.
-	const creds = join(clioConfigDir(), "credentials.yaml");
+	const creds = join(config, "credentials.yaml");
 	if (!existsSync(creds)) {
-		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio install`)" });
+		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio doctor --fix`)" });
 	} else {
 		try {
 			accessSync(creds, constants.R_OK);
@@ -68,11 +86,11 @@ export function runDoctor(): DoctorFinding[] {
 		}
 	}
 
-	const install = readInstallInfo();
+	const state = readStateInfo();
 	findings.push({
-		ok: Boolean(install),
-		name: "install metadata",
-		detail: install ? `${install.version} @ ${install.installedAt}` : "missing",
+		ok: Boolean(state),
+		name: "state metadata",
+		detail: state ? `${state.version} @ ${state.installedAt}` : "missing",
 	});
 
 	return findings;

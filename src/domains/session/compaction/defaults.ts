@@ -1,9 +1,9 @@
 /**
- * Compaction settings — user-visible defaults (Phase 12 slice 12c).
+ * Compaction settings: user-visible defaults (Phase 12 slice 12c).
  *
  * The public settings block documented in the plan is intentionally tiny:
  * `threshold` (fraction of contextWindow at which auto-compaction fires),
- * `auto` (master switch), and two optional overrides — `model` and
+ * `auto` (master switch), and two optional overrides: `model` and
  * `systemPrompt`. The structural type lives in `src/core/defaults.ts`
  * alongside the rest of the settings tree so core code stays free of a
  * backward domain dependency; this module pairs that type with the value

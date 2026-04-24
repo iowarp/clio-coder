@@ -8,16 +8,16 @@
  * directly.
  */
 
-import type { TSchema } from "@sinclair/typebox";
+import type { TSchema } from "typebox";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { formatRejection } from "../domains/safety/rejection-feedback.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE, isSubset } from "../domains/safety/scope.js";
+import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { type ToolRegistry, type ToolSpec, createRegistry } from "../tools/registry.js";
+import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
 export interface ResolveAgentToolsInput {
@@ -27,7 +27,7 @@ export interface ResolveAgentToolsInput {
 }
 
 function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema> {
-	return {
+	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
 		parameters: spec.parameters,
@@ -40,16 +40,24 @@ function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema>
 			const verdict = await registry.invoke({ tool: spec.name, args });
 			if (verdict.kind === "ok") {
 				if (verdict.result.kind === "ok") {
-					return {
+					const result: AgentToolResult<{ kind: "ok" }> = {
 						content: [{ type: "text", text: verdict.result.output }],
 						details: { kind: "ok" },
 					};
+					if (verdict.result.terminate === true) {
+						result.terminate = true;
+					}
+					return result;
 				}
 				throw new Error(verdict.result.message);
 			}
 			throw new Error(verdict.reason);
 		},
 	};
+	if (spec.executionMode) {
+		tool.executionMode = spec.executionMode;
+	}
+	return tool;
 }
 
 function createWorkerModes(mode: ModeName): ModesContract {
@@ -63,6 +71,10 @@ function createWorkerModes(mode: ModeName): ModesContract {
 		isActionAllowed: (action) => profile.allowedActions.has(action),
 		requestSuper: () => {},
 		confirmSuper: () => mode,
+		// Workers have no Alt+S pathway; parking requires interactive
+		// confirmation. Returning null forces the registry to reject
+		// mode-gate blocks synchronously.
+		elevatedModeFor: () => null,
 	};
 }
 

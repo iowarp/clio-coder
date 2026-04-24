@@ -2,7 +2,7 @@ import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ModesContract, SuperModeConfirmation } from "./contract.js";
-import { MODE_MATRIX, type ModeName, isActionAllowed, isToolVisible } from "./matrix.js";
+import { isActionAllowed, isToolVisible, MODE_MATRIX, type ModeName } from "./matrix.js";
 import { createModeState, parseModeName } from "./state.js";
 
 type SettingsWithState = ClioSettings & { state?: { lastMode?: string } };
@@ -70,6 +70,12 @@ export function createModesBundle(context: DomainContext): DomainBundle<ModesCon
 			if (pending !== "super") return state.get();
 			pending = null;
 			return state.set("super", "confirmed");
+		},
+		elevatedModeFor: (action) => {
+			const current = state.get();
+			if (current === "super") return null;
+			if (MODE_MATRIX.super.allowedActions.has(action)) return "super";
+			return null;
 		},
 	};
 

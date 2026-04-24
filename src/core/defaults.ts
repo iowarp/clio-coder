@@ -1,5 +1,5 @@
 /**
- * Default settings shipped with Clio. Written to the resolved config
+ * Default settings shipped with Clio Coder. Written to the resolved config
  * directory's settings.yaml on first install if the file does not already
  * exist. Users edit the file directly or through TUI overlays.
  */
@@ -15,6 +15,8 @@ export interface WorkerTarget {
 	model: string | null;
 	thinkingLevel: ThinkingLevel;
 }
+
+export type WorkerProfiles = Record<string, WorkerTarget>;
 
 /**
  * Compaction controls the session domain reads at runtime. Ships as Phase 12
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS = {
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
+		profiles: {} as WorkerProfiles,
 	},
 	scope: [] as string[],
 	budget: {
@@ -66,7 +69,11 @@ export const DEFAULT_SETTINGS = {
 		concurrency: "auto" as "auto" | number,
 	},
 	theme: "default",
-	keybindings: {} as Record<string, string>,
+	// User keybinding overrides. Each id maps to a single KeyId string or a
+	// list of KeyIds. The interactive keybinding manager reads this table
+	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
+	// keybindings.ts).
+	keybindings: {} as Record<string, string | string[]>,
 	state: {
 		lastMode: "default" as "default" | "advise" | "super",
 	},
@@ -82,14 +89,14 @@ export type DefaultSettings = typeof DEFAULT_SETTINGS;
  * Raw YAML document written to the resolved config directory's settings.yaml on
  * first install. Mirrors every field of DEFAULT_SETTINGS at the same key path
  * so settings migration keeps working, and carries fully commented example
- * endpoint blocks that a new user can uncomment to point Clio at a local
+ * target blocks that a new user can uncomment to point Clio Coder at a local
  * llama-server or LM Studio.
  *
  * The YAML library strips comments when round-tripping through stringify, so
  * first-install writes this raw string directly instead of going through
  * stringifyYaml(DEFAULT_SETTINGS).
  */
-export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first install; edit freely.
+export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install; edit freely.
 # Docs: https://github.com/iowarp/clio-coder
 #
 # Default location:
@@ -100,61 +107,83 @@ export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first ins
 # CLIO_CACHE_DIR to override config, data, and cache separately.
 #
 # Common first run:
-#   1. Run: clio setup
-#   2. Verify the endpoint: clio providers
-#   3. Start chat: clio
+#   1. Run: clio
+#   2. Follow the configuration wizard if no usable target exists.
+#   3. Inspect targets later with: clio targets
 
 version: 1
 identity: clio
 defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
-# Inference endpoints. Each entry becomes a selectable target for the
-# orchestrator (chat) and for workers (dispatch). Add entries via \`clio setup\`
+# Inference targets. Each entry becomes selectable for chat and workers.
+# Add entries via \`clio configure\` or \`clio targets add\`
 # or hand-edit. \`runtime\` must match an id registered in the runtime registry
-# (cloud SDKs, local HTTP engines, CLI agents, or third-party plugins under
+# (cloud APIs, local HTTP engines, CLI adapters, or third-party plugins under
 # ~/.clio/runtimes/).
-endpoints: []
-# Example:
-# endpoints:
-#   - id: anthropic-prod
-#     runtime: anthropic
+targets: []
+# Recommended self-development layout:
+#   clio configure --runtime openai-codex --id codex-pro --model gpt-5.4 --set-orchestrator --set-worker-default --worker-profile codex-mini --worker-profile-model gpt-5.4-mini
+#   clio configure --runtime claude-code-sdk --id claude-sdk-opus --model claude-opus-4-7 --worker-profile claude-opus
+#   clio configure --runtime copilot-cli --id copilot-sonnet --model claude-sonnet-4.6 --worker-profile copilot-sonnet
+#   clio configure --runtime gemini-cli --id gemini-flash --model gemini-3-flash-preview --worker-profile gemini-flash
+#   clio targets add --runtime openai-compat --id mini --url http://mini:8080 --model Qwen3.6-35B-A3B-UD-Q4_K_XL --context-window 262144 --max-tokens 65536 --reasoning true
+#   clio targets add --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
+#
+# Example targets:
+# targets:
+#   - id: codex-pro
+#     runtime: openai-codex
+#     defaultModel: gpt-5.4
 #     auth:
-#       apiKeyEnvVar: ANTHROPIC_API_KEY
+#       oauthProfile: openai-codex
+#     wireModels:
+#       - gpt-5.4
+#       - gpt-5.4-mini
 #   - id: mini
-#     runtime: llamacpp
-#     url: http://192.168.86.141:8080
+#     runtime: openai-compat
+#     url: http://mini:8080
 #     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
 #     capabilities:
 #       contextWindow: 262144
+#       maxTokens: 65536
 #       reasoning: true
-#   - id: litellm
-#     runtime: litellm-gateway
-#     url: http://127.0.0.1:4000
-#     gateway: true
-#     auth:
-#       apiKeyEnvVar: LITELLM_MASTER_KEY
+#       thinkingFormat: qwen-chat-template
+#   - id: dynamo
+#     runtime: lmstudio-native
+#     url: http://dynamo:1234
+#     defaultModel: gemma-4-26B-A4B-it-Q4_K_M
+#     capabilities:
+#       contextWindow: 262144
+#       maxTokens: 65536
+#       reasoning: true
 
 # Optional npm packages that export clioRuntimes: RuntimeDescriptor[].
 runtimePlugins: []
 
-# Orchestrator target for the interactive loop. \`endpoint\` refers to
-# endpoints[].id; \`model\` is the wire model id to request.
+# Orchestrator target for the interactive loop. \`target\` refers to
+# targets[].id; \`model\` is the wire model id to request.
 # thinkingLevel valid values: off | minimal | low | medium | high | xhigh.
 orchestrator:
-  endpoint: null
+  target: null
   model: null
   thinkingLevel: off
 
-# Worker targets for dispatch. \`default\` applies when a recipe or request
-# does not specify its own override.
+# Worker targets for dispatch. \`default\` preserves the legacy behavior when a
+# recipe or request does not specify an override. \`profiles\` are named worker
+# choices that /run and clio run can select explicitly or by required capability.
 workers:
   default:
-    endpoint: null
+    target: null
     model: null
     thinkingLevel: off
+  profiles: {}
+  # codex-mini:
+  #   target: codex-pro
+  #   model: gpt-5.4-mini
+  #   thinkingLevel: off
 
-# Ctrl+P cycling order: plain endpoint ids or "endpoint/model" refs.
+# Ctrl+P cycling order: plain target ids or "target/model" refs.
 scope: []
 
 # Session budget guardrails.
@@ -165,7 +194,7 @@ budget:
 theme: default
 keybindings: {}
 
-# Transient session state. Clio rewrites this block; do not hand-edit.
+# Transient session state. Clio Coder rewrites this block; do not hand-edit.
 state:
   lastMode: default
 

@@ -84,6 +84,7 @@ describe("dispatch auth resolution", () => {
 			probeAll: async () => {},
 			probeAllLive: async () => {},
 			probeEndpoint: async () => status,
+			disconnectEndpoint: () => status,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "openai-codex",
@@ -107,6 +108,8 @@ describe("dispatch auth resolution", () => {
 				login: async () => {},
 				logout: () => {},
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: {
 				hasKey: () => false,
@@ -144,6 +147,7 @@ describe("dispatch auth resolution", () => {
 			isActionAllowed: () => true,
 			requestSuper: () => {},
 			confirmSuper: () => "super",
+			elevatedModeFor: () => null,
 		};
 		const context: DomainContext = {
 			bus: createSafeEventBus(),

@@ -5,7 +5,7 @@ import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders } from "../../engine/apis/index.js";
 import type { ConfigContract } from "../config/contract.js";
 
-import { openAuthStorage, resolveAuthTarget } from "./auth/index.js";
+import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
@@ -55,7 +55,7 @@ function availabilityFor(
 	endpoint: EndpointDescriptor,
 	authStatusFor: (endpoint: EndpointDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
-	if (desc.kind === "subprocess") {
+	if (desc.kind === "subprocess" || desc.kind === "sdk") {
 		return { available: true, reason: desc.auth };
 	}
 	if (desc.auth === "api-key" || desc.auth === "oauth") {
@@ -109,6 +109,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		runtime: RuntimeDescriptor,
 	): { available: boolean; reason: string } {
 		const target = resolveAuthTarget(endpoint, runtime);
+		if (!targetRequiresAuth(endpoint, runtime)) {
+			return { available: true, reason: "auth:not-required" };
+		}
 		const status = authStore.statusForTarget(target, { includeFallback: false });
 		if (status.available) {
 			switch (status.source) {
@@ -151,7 +154,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
 		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
-		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? []);
+		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? desc.knownModels ?? []);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
 			probe === null
@@ -276,6 +279,15 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			if (!endpoint) return null;
 			return probeEndpointInternal(endpoint, true);
 		},
+		disconnectEndpoint(id) {
+			const settings = readConfig();
+			const endpoint = settings.endpoints.find((ep) => ep.id === id);
+			if (!endpoint) return null;
+			const status = buildStatus(endpoint, registry.get(endpoint.runtime), null);
+			statuses.set(endpoint.id, status);
+			context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
+			return status;
+		},
 		credentials: {
 			hasKey(providerId) {
 				const stored = authStore.get(providerId);
@@ -294,9 +306,15 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		auth: {
 			statusForTarget(endpoint, runtime) {
+				if (!targetRequiresAuth(endpoint, runtime)) {
+					return authNotRequiredStatus(resolveAuthTarget(endpoint, runtime).providerId);
+				}
 				return authStore.statusForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
 			},
 			resolveForTarget(endpoint, runtime) {
+				if (!targetRequiresAuth(endpoint, runtime)) {
+					return Promise.resolve(authNotRequiredStatus(resolveAuthTarget(endpoint, runtime).providerId));
+				}
 				return authStore.resolveForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
 			},
 			getStored(providerId) {
@@ -319,6 +337,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			},
 			getOAuthProviders() {
 				return authStore.getOAuthProviders();
+			},
+			setRuntimeOverrideForTarget(endpoint, _runtime, key) {
+				authStore.setRuntimeOverride(endpoint.id, key);
+			},
+			clearRuntimeOverrideForTarget(endpoint, _runtime) {
+				authStore.clearRuntimeOverride(endpoint.id);
 			},
 		},
 		knowledgeBase: kb,

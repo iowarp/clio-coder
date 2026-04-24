@@ -5,7 +5,16 @@ import type { EndpointDescriptor } from "./endpoint-descriptor.js";
 import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 
-export type RuntimeKind = "http" | "subprocess";
+export type RuntimeKind = "http" | "subprocess" | "sdk";
+export type RuntimeTier =
+	| "protocol"
+	| "cloud"
+	| "local-native"
+	| "sdk"
+	| "cli"
+	| "cli-gold"
+	| "cli-silver"
+	| "cli-bronze";
 
 export type RuntimeApiFamily =
 	| "openai-completions"
@@ -22,11 +31,14 @@ export type RuntimeApiFamily =
 	| "ollama-native"
 	| "rerank-http"
 	| "embeddings-http"
+	| "claude-agent-sdk"
 	| "subprocess-claude-code"
 	| "subprocess-codex"
-	| "subprocess-gemini";
+	| "subprocess-gemini"
+	| "subprocess-copilot"
+	| "subprocess-opencode";
 
-export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "none";
+export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "cli" | "none";
 
 export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;
@@ -47,9 +59,15 @@ export interface RuntimeDescriptor {
 	id: string;
 	displayName: string;
 	kind: RuntimeKind;
+	tier?: RuntimeTier;
 	apiFamily: RuntimeApiFamily;
 	auth: RuntimeAuth;
 	credentialsEnvVar?: string;
+	knownModels?: string[];
+	binaryName?: string;
+	defaultBinaryPath?: string;
+	headlessCommand?: string;
+	outputParser?: string;
 	defaultCapabilities: CapabilityFlags;
 	probe?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
 	probeModels?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]>;

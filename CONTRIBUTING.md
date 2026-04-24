@@ -91,7 +91,7 @@ Use concise conventional subjects:
 ```text
 feat(cli): add target profile flag
 fix(session): restore chat on fork
-docs(changelog): mark pre-release work
+docs(changelog): mark v0.2 dev work
 ```
 
 Rules:
@@ -137,6 +137,6 @@ Agents should:
 
 Until `0.1.0` is tagged:
 
-- Treat `0.1.0-dev` as active development, not a released package.
+- Treat `0.2.0-dev` as active development, not a released package.
 - Do not publish npm packages or GitHub releases without maintainer approval.
 - Do not call an entry "released" in docs unless a tag and release exist.

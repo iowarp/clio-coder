@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
 import { atomicWrite, cwdHash, sessionPaths } from "../../engine/session.js";

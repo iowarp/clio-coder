@@ -31,6 +31,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"workers.default.endpoint",
 	"workers.default.model",
 	"workers.default.thinkingLevel",
+	"workers.profiles",
 	"scope",
 	"budget.sessionCeilingUsd",
 ]);

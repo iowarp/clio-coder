@@ -1,6 +1,6 @@
-import { type Stats, lstatSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, type Stats } from "node:fs";
 import path from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { compileGlobRegex, normalizeGlobInput } from "./glob.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -61,6 +61,7 @@ export const grepTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const patternArg = typeof args.pattern === "string" ? args.pattern : null;
 		if (!patternArg) {

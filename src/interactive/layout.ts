@@ -1,5 +1,5 @@
-import { Container, Text } from "../engine/tui.js";
 import type { Component } from "../engine/tui.js";
+import { Container, Text } from "../engine/tui.js";
 
 export interface LayoutParts {
 	banner: Text;
@@ -18,5 +18,5 @@ export function buildLayout(parts: LayoutParts): Container {
 }
 
 export function defaultBanner(): Text {
-	return new Text("  ◆ clio  IOWarp orchestrator coding-agent\n");
+	return new Text("  ◆ clio  Clio Coder\n");
 }

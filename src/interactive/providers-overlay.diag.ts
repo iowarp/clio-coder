@@ -151,6 +151,7 @@ async function main(): Promise<void> {
 				await live.promise;
 			},
 			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
 			auth: {
 				statusForTarget: () => ({
 					providerId: "diag",
@@ -173,6 +174,8 @@ async function main(): Promise<void> {
 				login: async () => {},
 				logout: () => {},
 				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: {
 				hasKey: () => false,

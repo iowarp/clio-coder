@@ -28,7 +28,12 @@ interface Harness {
 	cleanup: () => Promise<void>;
 }
 
-function setupHarness(toolsSupported: boolean): Harness {
+function setupHarness(
+	toolsSupported: boolean,
+	workerProfiles: ClioSettings["workers"]["profiles"] = {},
+	extraStatuses: EndpointStatus[] = [],
+	runtimeKind: RuntimeDescriptor["kind"] = "http",
+): Harness {
 	const endpoint: EndpointDescriptor = {
 		id: "gated",
 		runtime: "faux-runtime",
@@ -38,7 +43,7 @@ function setupHarness(toolsSupported: boolean): Harness {
 	const runtime: RuntimeDescriptor = {
 		id: "faux-runtime",
 		displayName: "Faux",
-		kind: "http",
+		kind: runtimeKind,
 		apiFamily: "openai-completions",
 		auth: "none",
 		defaultCapabilities: {
@@ -57,13 +62,15 @@ function setupHarness(toolsSupported: boolean): Harness {
 		capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: toolsSupported },
 		discoveredModels: [],
 	};
+	const statuses = [status, ...extraStatuses];
 	const providers: ProvidersContract = {
-		list: () => [status],
-		getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+		list: () => statuses,
+		getEndpoint: (id) => statuses.find((entry) => entry.endpoint.id === id)?.endpoint ?? null,
 		getRuntime: (id) => (id === runtime.id ? runtime : null),
 		probeAll: async () => {},
 		probeAllLive: async () => {},
 		probeEndpoint: async () => status,
+		disconnectEndpoint: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,
@@ -86,6 +93,8 @@ function setupHarness(toolsSupported: boolean): Harness {
 			login: async () => {},
 			logout: () => {},
 			getOAuthProviders: () => [],
+			setRuntimeOverrideForTarget: () => {},
+			clearRuntimeOverrideForTarget: () => {},
 		},
 		credentials: {
 			hasKey: () => false,
@@ -97,9 +106,10 @@ function setupHarness(toolsSupported: boolean): Harness {
 	};
 
 	const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	settings.endpoints = [endpoint];
+	settings.endpoints = statuses.map((entry) => entry.endpoint);
 	settings.workers.default.endpoint = endpoint.id;
 	settings.workers.default.model = endpoint.defaultModel ?? null;
+	settings.workers.profiles = workerProfiles;
 
 	const config: ConfigContract = {
 		get: () => settings,
@@ -128,6 +138,7 @@ function setupHarness(toolsSupported: boolean): Harness {
 		isActionAllowed: () => true,
 		requestSuper: () => {},
 		confirmSuper: () => "super",
+		elevatedModeFor: () => null,
 	};
 	const bus = createSafeEventBus();
 	const context: DomainContext = {
@@ -235,11 +246,105 @@ describe("dispatch capability gate", () => {
 			const result = await harness.bundle.contract.dispatch({
 				agentId: "coder",
 				task: "needs-tools",
+				workerRuntime: "faux-runtime",
 				requiredCapabilities: ["tools"],
 			});
 			const receipt = await result.finalPromise;
 			strictEqual(receipt.exitCode, 0);
 			strictEqual(harness.spawnCalls.length, 1);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("selects a configured worker profile when required capabilities exceed the default", async () => {
+		const profileEndpoint: EndpointDescriptor = {
+			id: "tools-worker",
+			runtime: "faux-runtime",
+			url: "http://faux.invalid",
+			defaultModel: "tools-model",
+		};
+		const harness = setupHarness(
+			false,
+			{
+				tooling: {
+					endpoint: profileEndpoint.id,
+					model: "tools-model",
+					thinkingLevel: "medium",
+				},
+			},
+			[
+				{
+					endpoint: profileEndpoint,
+					runtime: null,
+					available: true,
+					reason: "test",
+					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					discoveredModels: [],
+				},
+			],
+			"sdk",
+		);
+		try {
+			await harness.bundle.extension.start();
+			const result = await harness.bundle.contract.dispatch({
+				agentId: "coder",
+				task: "needs-tools",
+				requiredCapabilities: ["tools"],
+			});
+			const receipt = await result.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(harness.spawnCalls.length, 1);
+			strictEqual(harness.spawnCalls[0]?.endpoint.id, "tools-worker");
+			strictEqual(harness.spawnCalls[0]?.wireModelId, "tools-model");
+			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "medium");
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("selects an explicit worker profile by name", async () => {
+		const profileEndpoint: EndpointDescriptor = {
+			id: "claude-sdk-opus",
+			runtime: "faux-runtime",
+			url: "http://faux.invalid",
+			defaultModel: "claude-opus-4-7",
+		};
+		const harness = setupHarness(
+			false,
+			{
+				"claude-opus": {
+					endpoint: profileEndpoint.id,
+					model: "claude-opus-4-7",
+					thinkingLevel: "high",
+				},
+			},
+			[
+				{
+					endpoint: profileEndpoint,
+					runtime: null,
+					available: true,
+					reason: "test",
+					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					discoveredModels: [],
+				},
+			],
+		);
+		try {
+			await harness.bundle.extension.start();
+			const result = await harness.bundle.contract.dispatch({
+				agentId: "coder",
+				task: "profile-pick",
+				workerProfile: "claude-opus",
+			});
+			const receipt = await result.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(harness.spawnCalls.length, 1);
+			strictEqual(harness.spawnCalls[0]?.endpoint.id, "claude-sdk-opus");
+			strictEqual(harness.spawnCalls[0]?.wireModelId, "claude-opus-4-7");
+			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "high");
 		} finally {
 			await harness.cleanup();
 		}

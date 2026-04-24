@@ -4,7 +4,7 @@ import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../doma
 import { Box, type Component, Loader, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
-const TITLE = "─ Providers ";
+const TITLE = "─ Targets ";
 const HINT = "[r] probe selected  [R] probe all  [Esc] close";
 const ANSI_RESET = "\u001b[0m";
 
@@ -120,7 +120,7 @@ export function formatProvidersOverlayLines(
 		lines.push(padContent("", contentWidth));
 	}
 	if (statuses.length === 0) {
-		lines.push(padContent("no endpoints configured (edit settings.yaml -> endpoints)", contentWidth));
+		lines.push(padContent("no targets configured (run clio configure)", contentWidth));
 	} else {
 		for (const status of statuses) {
 			const marker = options?.selectedId === status.endpoint.id ? "▸" : " ";
@@ -151,7 +151,7 @@ class ProvidersOverlayView implements Component {
 
 	render(width: number): string[] {
 		if (width <= 4) {
-			return [truncateToWidth("Providers", width, "", true)];
+			return [truncateToWidth("Targets", width, "", true)];
 		}
 		const { statuses, error, selectedId, authByEndpoint } = this.getState();
 		return formatProvidersOverlayLines(statuses, {
@@ -250,7 +250,7 @@ export function openProvidersOverlay(
 			})();
 		},
 	});
-	const loader = new Loader(tui, IDENTITY, IDENTITY, "Probing providers...");
+	const loader = new Loader(tui, IDENTITY, IDENTITY, "Probing targets...");
 	box.addChild(loader);
 	const handle = tui.showOverlay(box, {
 		anchor: "center",

@@ -51,7 +51,7 @@ export type ResolveSessionCwdResult =
 /**
  * Check whether a resumed session's recorded cwd still points at a live
  * directory on disk. Returns `{ok: true, cwd}` when the path resolves and
- * is a directory; a typed reason otherwise. No side effects — callers
+ * is a directory; a typed reason otherwise. No side effects. Callers
  * persist nothing here; they decide how to react based on the reason.
  */
 export function resolveSessionCwd(

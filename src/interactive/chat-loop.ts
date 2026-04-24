@@ -4,12 +4,14 @@ import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
+import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
-import type {
-	EndpointDescriptor,
-	ProvidersContract,
-	RuntimeDescriptor,
-	ThinkingLevel,
+import {
+	type EndpointDescriptor,
+	type ProvidersContract,
+	type RuntimeDescriptor,
+	type ThinkingLevel,
+	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
@@ -55,6 +57,16 @@ export interface ChatLoop {
 	 * notice so the `/compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
+	/**
+	 * Drop the chat-loop's in-memory state after a session switch (/resume,
+	 * /fork, /new) so the next `submit` threads a clean lineage and the LLM
+	 * does not see pre-switch context. `leafTurnId` is the id the next user
+	 * turn should parent under: the resumed session's leaf for /resume, or
+	 * null when a fresh branch begins (/fork, /new). Also clears the runtime
+	 * agent's `state.messages` when a runtime exists; a no-op on leafTurnId
+	 * and messages when the runtime has not been built yet.
+	 */
+	resetForSession(leafTurnId: string | null): void;
 }
 
 export interface CreateChatLoopDeps {
@@ -62,7 +74,7 @@ export interface CreateChatLoopDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	/**
-	 * Whitelist of endpoint ids that the chat-loop is allowed to drive. The
+	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
 	 * `settings.orchestrator.endpoint` surfaces a configuration error before
 	 * the agent is constructed.
@@ -103,6 +115,8 @@ export interface CreateChatLoopDeps {
 	autoCompact?: (instructions?: string) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
+	/** Optional prompt supplement installed when Clio is editing its own repository. */
+	selfDevPrompt?: string;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
 	 * through `ToolRegistry.invoke(...)` so safety classification and mode
@@ -126,7 +140,7 @@ interface AgentRuntime {
 }
 
 function notConfiguredNotice(): string {
-	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.endpoint + orchestrator.model) to enable chat.`;
+	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.target + orchestrator.model) to enable chat.`;
 }
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
@@ -185,7 +199,7 @@ function noticeMessage(text: string): AgentMessage {
 function fallbackIdentityPrompt(): string {
 	return [
 		"You are Clio. You are Clio. You are Clio.",
-		"You are the orchestrator coding-agent for the Clio Coder harness, built by IOWarp.",
+		"You are the interactive agent inside the Clio Coder harness, built by IOWarp.",
 		'If asked who made you or what model you are, reply: "I am Clio, built by IOWarp."',
 		"You are not Claude, GPT, Qwen, Gemini, Llama, or Mistral.",
 		"You are not from Anthropic, OpenAI, Alibaba, Google, Meta, or any other model vendor.",
@@ -205,9 +219,38 @@ function resolveRuntimeTools(deps: CreateChatLoopDeps): ReturnType<typeof resolv
 	});
 }
 
-function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number | null {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as
+interface RunUsageSummary {
+	tokens: number;
+	costUsd: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	hadUsage: boolean;
+}
+
+/**
+ * Sum per-call usage across every assistant message in a single agent run.
+ * pi-ai emits one `AssistantMessage` per API call, each carrying its own
+ * `Usage` object; a multi-turn tool-calling loop produces several assistant
+ * messages. Earlier versions of this function walked the list from the tail
+ * and returned the first match, which silently dropped every intermediate
+ * API call from the cost tally. Summing instead matches what the provider
+ * actually billed and keeps the `/cost` overlay and footer counters
+ * aligned across tool-heavy runs.
+ */
+export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
+	const summary: RunUsageSummary = {
+		tokens: 0,
+		costUsd: 0,
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		hadUsage: false,
+	};
+	for (const raw of messages) {
+		const message = raw as
 			| AgentMessage
 			| {
 					role?: unknown;
@@ -224,32 +267,24 @@ function readAssistantUsageTokens(messages: ReadonlyArray<AgentMessage>): number
 		if (message.role !== "assistant") continue;
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
-		if (typeof usage.totalTokens === "number") return usage.totalTokens;
+		summary.hadUsage = true;
 		const input = typeof usage.input === "number" ? usage.input : 0;
 		const output = typeof usage.output === "number" ? usage.output : 0;
 		const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 		const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-		return input + output + cacheRead + cacheWrite;
+		summary.input += input;
+		summary.output += output;
+		summary.cacheRead += cacheRead;
+		summary.cacheWrite += cacheWrite;
+		if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) {
+			summary.tokens += usage.totalTokens;
+		} else {
+			summary.tokens += input + output + cacheRead + cacheWrite;
+		}
+		const total = usage.cost?.total;
+		if (typeof total === "number") summary.costUsd += total;
 	}
-	return null;
-}
-
-function readAssistantUsageCostUsd(messages: ReadonlyArray<AgentMessage>): number | undefined {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as
-			| AgentMessage
-			| {
-					role?: unknown;
-					usage?: {
-						cost?: { total?: unknown };
-					};
-			  };
-		if (!message || typeof message !== "object") continue;
-		if (message.role !== "assistant") continue;
-		const total = message.usage?.cost?.total;
-		return typeof total === "number" ? total : undefined;
-	}
-	return undefined;
+	return summary;
 }
 
 /**
@@ -318,7 +353,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!endpointId || !wireModelId) return null;
 		const endpoint = deps.providers.getEndpoint(endpointId);
 		if (!endpoint) {
-			throw new Error(`[clio] orchestrator endpoint='${endpointId}' not found in settings.endpoints`);
+			throw new Error(`[clio] orchestrator target='${endpointId}' not found in settings.targets`);
 		}
 		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
 		if (!runtimeDesc) {
@@ -326,7 +361,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		if (runtimeDesc.kind === "subprocess") {
 			throw new Error(
-				`[clio] endpoint '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets (workers.default), not as the orchestrator chat endpoint`,
+				`[clio] target '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
 			);
 		}
 		return {
@@ -348,7 +383,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!target) return null;
 		if (!deps.knownEndpoints().has(target.endpoint.id)) {
 			throw new Error(
-				`[clio] orchestrator endpoint=${target.endpoint.id} unknown. Run \`clio providers\` to see configured endpoints.`,
+				`[clio] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
 			);
 		}
 		if (
@@ -377,7 +412,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			onPayload: async (payload, currentModel) =>
 				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
 			getApiKey: async () => {
-				if (target.runtime.auth !== "api-key" && target.runtime.auth !== "oauth") {
+				if (!targetRequiresAuth(target.endpoint, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
 				const resolved = await deps.providers.auth.resolveForTarget(target.endpoint, target.runtime);
@@ -415,14 +450,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				appendAssistantTurn(event.message);
 			}
 			if (event.type === "agent_end" && deps.observability) {
-				const tokens = readAssistantUsageTokens(event.messages);
-				if (tokens !== null) {
-					deps.observability.recordTokens(
-						target.endpoint.id,
-						target.wireModelId,
-						tokens,
-						readAssistantUsageCostUsd(event.messages),
-					);
+				const summary = sumRunUsage(event.messages);
+				if (summary.hadUsage) {
+					deps.observability.recordTokens(target.endpoint.id, target.wireModelId, summary.tokens, summary.costUsd, {
+						input: summary.input,
+						output: summary.output,
+						cacheRead: summary.cacheRead,
+						cacheWrite: summary.cacheWrite,
+						totalTokens: summary.tokens,
+					});
 				}
 			}
 		});
@@ -438,7 +474,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Inspect the agent's state after `agent.prompt` resolves. pi-agent-core
-	 * 0.68.1's `handleRunFailure` records the upstream error on the assistant
+	 * 0.69.0's `handleRunFailure` records the upstream error on the assistant
 	 * message (stopReason="error", errorMessage="<text>") and on
 	 * `state.errorMessage`, then resolves the prompt() Promise normally.
 	 * Returns a ContextOverflowError when either surface matches the heuristic
@@ -538,9 +574,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				overrideMode: deps.modes.current(),
 				safetyLevel,
 			});
-			agentRuntime.agent.state.systemPrompt = result.text;
-			currentTurnHash = result.renderedPromptHash;
-			return result;
+			if (!deps.selfDevPrompt) {
+				agentRuntime.agent.state.systemPrompt = result.text;
+				currentTurnHash = result.renderedPromptHash;
+				return result;
+			}
+			const text = `${result.text}\n\n${deps.selfDevPrompt}`;
+			const renderedPromptHash = sha256(text);
+			agentRuntime.agent.state.systemPrompt = text;
+			currentTurnHash = renderedPromptHash;
+			return { ...result, text, renderedPromptHash };
 		} catch (err) {
 			currentTurnHash = null;
 			emitNotice(
@@ -657,7 +700,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			try {
 				await agentRuntime.agent.prompt(text);
-				// pi-agent-core 0.68.1 does NOT throw on provider failures:
+				// pi-agent-core 0.69.0 does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
 				// state.errorMessage, emits agent_end, and resolves normally.
@@ -696,13 +739,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		isStreaming(): boolean {
 			return streaming;
 		},
+		resetForSession(leafTurnId: string | null): void {
+			lastTurnId = leafTurnId;
+			currentTurnHash = null;
+			if (runtime) {
+				runtime.agent.state.messages = [];
+			}
+		},
 		async compact(instructions?: string): Promise<void> {
 			// Session check runs BEFORE orchestrator-configuration so a fresh
 			// TUI with nothing configured still reports the actionable "no
 			// current session" message rather than the "not configured"
 			// banner. The e2e regex in tests/e2e/interactive.test.ts locks
 			// this ordering.
-			if (!deps.session || !deps.session.current()) {
+			if (!deps.session?.current()) {
 				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");
 				return;
 			}

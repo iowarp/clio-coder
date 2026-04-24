@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { fetch } from "undici";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -44,6 +44,7 @@ export const webFetchTool: ToolSpec = {
 		{ additionalProperties: false },
 	),
 	baseActionClass: "read",
+	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {
 		const urlArg = typeof args.url === "string" ? args.url : null;
 		if (!urlArg) return { kind: "error", message: "web_fetch: missing url argument" };

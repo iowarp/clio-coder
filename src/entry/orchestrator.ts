@@ -1,11 +1,10 @@
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import chalk from "chalk";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { buildSelfDevPrompt, resolveSelfDevMode } from "../core/self-dev.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -16,23 +15,24 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
-import { LifecycleDomainModule, ensureInstalled } from "../domains/lifecycle/index.js";
+import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { PromptsDomainModule } from "../domains/prompts/index.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	VALID_THINKING_LEVELS,
 	availableThinkingLevels,
+	ProvidersDomainModule,
 	resolveModelCapabilities,
+	targetRequiresAuth,
+	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
-import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
+import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
@@ -44,19 +44,28 @@ import type { Model } from "../engine/types.js";
 import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
+import { formatInvalidKeybindingNotice, validateKeybindings } from "../interactive/keybinding-manager.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry } from "../tools/registry.js";
+import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
 
 export interface BootResult {
 	exitCode: number;
 	bootTimeMs: number;
 }
 
+export interface BootOptions {
+	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
+	apiKey?: string;
+	/** Enable Clio self-development mode for the current process. */
+	dev?: boolean;
+}
+
 function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
-  ${chalk.cyan("◆ clio")}  IOWarp orchestrator coding-agent
-  ${chalk.dim(`v${clio} · pi-mono 0.68.1 · ready`)}
+  ${chalk.cyan("◆ clio")}  Clio Coder
+  ${chalk.dim(`v${clio} · supervised repository work · ready`)}
 `;
 }
 
@@ -88,7 +97,7 @@ async function resolveApiKeyForEndpoint(
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) return undefined;
-	if (runtime.auth !== "api-key" && runtime.auth !== "oauth") return undefined;
+	if (!targetRequiresAuth(endpoint, runtime)) return undefined;
 	const resolved = await providers.auth.resolveForTarget(endpoint, runtime);
 	return resolved.apiKey;
 }
@@ -208,32 +217,15 @@ function cycleScoped(
 	persist(current);
 }
 
-function resolveRepoRoot(): string | null {
-	try {
-		const here = dirname(fileURLToPath(import.meta.url));
-		let cursor = here;
-		for (let i = 0; i < 8; i++) {
-			if (existsSync(join(cursor, "package.json")) && existsSync(join(cursor, "src"))) {
-				return cursor;
-			}
-			const parent = dirname(cursor);
-			if (parent === cursor) break;
-			cursor = parent;
-		}
-	} catch {
-		// fall through
-	}
-	return null;
-}
-
-export async function bootOrchestrator(): Promise<BootResult> {
+export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
+	const selfDev = resolveSelfDevMode({ cliDev: options.dev === true });
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	installBusTracer();
 	termination.installSignalHandlers();
 
-	ensureInstalled();
+	ensureClioState();
 	timer.mark("install check");
 
 	const result = await loadDomains([
@@ -266,11 +258,32 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	timer.mark("session_start fired");
 
 	process.stdout.write(buildBanner());
-	if (process.env.CLIO_SELF_DEV === "1") {
-		process.stdout.write(`  ${chalk.magenta("CLIO_SELF_DEV=1 · hot-reload on src/tools/*.ts · watching src/")}\n`);
+	if (selfDev) {
+		process.stdout.write(
+			`  ${chalk.magenta(`${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`)}\n`,
+		);
 	}
 	if (process.env.CLIO_TIMING === "1") {
 		process.stdout.write(`${timer.report()}\n`);
+	}
+
+	const config = result.getContract<ConfigContract>("config");
+	const providers = result.getContract<ProvidersContract>("providers");
+
+	if (options.apiKey) {
+		if (!providers) {
+			process.stderr.write("clio: --api-key supplied but providers domain unavailable; ignoring.\n");
+		} else {
+			const settingsNow = config?.get() ?? readSettings();
+			const activeEndpointId = settingsNow.orchestrator?.endpoint;
+			const endpoint = resolveEndpoint(providers, activeEndpointId);
+			const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
+			if (endpoint && runtime) {
+				providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
+			} else {
+				process.stderr.write("clio: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
+			}
+		}
 	}
 
 	const runInteractive = process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
@@ -281,7 +294,6 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 
 	const modes = result.getContract<ModesContract>("modes");
-	const providers = result.getContract<ProvidersContract>("providers");
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
 	if (!modes || !providers || !dispatch || !observability || !safety) {
@@ -293,16 +305,21 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	}
 	const toolRegistry = createRegistry({ safety, modes });
 	registerAllTools(toolRegistry);
+	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
 	for (const spec of toolRegistry.listAll()) {
 		if (spec.allowedModes) allowedModesByName.set(spec.name, spec.allowedModes);
 	}
 
-	const config = result.getContract<ConfigContract>("config");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
+
+	const invalidBindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {}).invalid;
+	if (invalidBindings.length > 0) {
+		process.stderr.write(formatInvalidKeybindingNotice(invalidBindings));
+	}
 	const persistSettings = (next: ClioSettings): void => {
 		if (config?.set) {
 			config.set(next);
@@ -334,6 +351,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		providers,
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
+		...(selfDev ? { selfDevPrompt: buildSelfDevPrompt(selfDev) } : {}),
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		...(session
@@ -356,31 +374,27 @@ export async function bootOrchestrator(): Promise<BootResult> {
 	});
 
 	let harness: HarnessHandle | null = null;
-	if (process.env.CLIO_SELF_DEV === "1") {
-		const repoRoot = resolveRepoRoot();
-		if (!repoRoot) {
-			process.stderr.write("clio: CLIO_SELF_DEV=1 but no repo checkout found; hot-reload disabled.\n");
-		} else {
-			// Compile hot modules under the repo's node_modules so Node resolves
-			// bare imports (e.g. @sinclair/typebox) via the repo's installed deps.
-			// An XDG cache path would be outside any node_modules tree and break
-			// bare-specifier resolution.
-			const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
-			harness = startHarness({
-				repoRoot,
-				cacheRoot: hotCacheRoot,
-				toolRegistry,
-				bus,
-				allowedModesByName,
-				getSessionId: () => session?.current()?.id ?? null,
-				shutdown: async (code?: number) => {
-					await termination.shutdown(code ?? 0);
-				},
-			});
-			termination.onDrain(() => {
-				harness?.stop();
-			});
-		}
+	if (selfDev) {
+		const repoRoot = selfDev.repoRoot;
+		// Compile hot modules under the repo's node_modules so Node resolves
+		// bare imports (e.g. typebox) via the repo's installed deps. An XDG
+		// cache path would be outside any node_modules tree and break
+		// bare-specifier resolution.
+		const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
+		harness = startHarness({
+			repoRoot,
+			cacheRoot: hotCacheRoot,
+			toolRegistry,
+			bus,
+			allowedModesByName,
+			getSessionId: () => session?.current()?.id ?? null,
+			shutdown: async (code?: number) => {
+				await termination.shutdown(code ?? 0);
+			},
+		});
+		termination.onDrain(() => {
+			harness?.stop();
+		});
 	}
 
 	await startInteractive({
@@ -390,6 +404,7 @@ export async function bootOrchestrator(): Promise<BootResult> {
 		dispatch,
 		observability,
 		chat,
+		toolRegistry,
 		...(session ? { session } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),

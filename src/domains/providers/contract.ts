@@ -59,6 +59,9 @@ export interface ProvidersContract {
 	/** Probe a single endpoint live. Null when the id is not in settings.endpoints. */
 	probeEndpoint(id: string): Promise<EndpointStatus | null>;
 
+	/** Clear in-memory live connection state for a configured target. */
+	disconnectEndpoint(id: string): EndpointStatus | null;
+
 	/**
 	 * Shared auth access for both API keys and OAuth credentials. Provider ids
 	 * default to runtime ids, with endpoint-level overrides through
@@ -74,6 +77,13 @@ export interface ProvidersContract {
 		login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void>;
 		logout(providerId: string): void;
 		getOAuthProviders(): ReadonlyArray<{ id: string; name: string }>;
+		/**
+		 * Install a process-lifetime API key override for the provider behind
+		 * `endpoint`. Used by the top-level `--api-key <key>` startup flag so a
+		 * one-shot run can authenticate without persisting credentials.
+		 */
+		setRuntimeOverrideForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor, key: string): void;
+		clearRuntimeOverrideForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): void;
 	};
 
 	/**

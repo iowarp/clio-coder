@@ -23,8 +23,8 @@ import {
 	fsyncSync,
 	mkdirSync,
 	openSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	renameSync,
 	statSync,
 	writeSync,
@@ -141,11 +141,7 @@ function newTurnId(): string {
 	return raw.padStart(12, "0");
 }
 
-function buildMeta(input: {
-	cwd: string;
-	model?: string | null;
-	endpoint?: string | null;
-}): ClioSessionMeta {
+function buildMeta(input: { cwd: string; model?: string | null; endpoint?: string | null }): ClioSessionMeta {
 	const resolvedCwd = resolve(input.cwd);
 	return {
 		id: newTurnId(),
@@ -251,11 +247,10 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 	};
 }
 
-export function createSession(input: {
-	cwd: string;
-	model?: string | null;
-	endpoint?: string | null;
-}): { meta: ClioSessionMeta; writer: ClioSessionWriter } {
+export function createSession(input: { cwd: string; model?: string | null; endpoint?: string | null }): {
+	meta: ClioSessionMeta;
+	writer: ClioSessionWriter;
+} {
 	const meta = buildMeta(input);
 	const paths = sessionPaths(meta);
 	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));

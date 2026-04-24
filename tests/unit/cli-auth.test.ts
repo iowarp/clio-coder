@@ -1,12 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { runAuthCommand } from "../../src/cli/auth.js";
-import { runConnectCommand } from "../../src/cli/login.js";
-import { runDisconnectCommand } from "../../src/cli/logout.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import {
@@ -18,6 +16,7 @@ import {
 } from "../../src/engine/oauth.js";
 
 const ORIGINAL_ENV = { ...process.env };
+const ORIGINAL_PATH = process.env.PATH;
 const TEST_PROVIDER_ID = "clio-cli-oauth";
 
 const TEST_PROVIDER: OAuthProviderInterface = {
@@ -60,6 +59,13 @@ async function captureOutput<T>(fn: () => Promise<T>): Promise<{ result: T; stdo
 	}
 }
 
+function installClaudeShim(dir: string, script: string): void {
+	const binPath = join(dir, "claude");
+	writeFileSync(binPath, script, "utf8");
+	chmodSync(binPath, 0o755);
+	process.env.PATH = `${dir}${delimiter}${ORIGINAL_PATH ?? ""}`;
+}
+
 describe("cli auth commands", () => {
 	let scratch: string;
 
@@ -89,9 +95,9 @@ describe("cli auth commands", () => {
 		resetXdgCache();
 	});
 
-	it("connect stores oauth credentials and auth status/disconnect reflect them", async () => {
-		const connect = await captureOutput(() => runConnectCommand([TEST_PROVIDER_ID]));
-		strictEqual(connect.result, 0);
+	it("auth login stores oauth credentials and auth status/logout reflect them", async () => {
+		const login = await captureOutput(() => runAuthCommand(["login", TEST_PROVIDER_ID]));
+		strictEqual(login.result, 0);
 		const stored = openAuthStorage().get(TEST_PROVIDER_ID);
 		ok(stored && stored.type === "oauth");
 
@@ -99,12 +105,31 @@ describe("cli auth commands", () => {
 		strictEqual(status.result, 0);
 		ok(status.stdout.includes(`${TEST_PROVIDER_ID}\toauth\tpresent`));
 
-		const disconnect = await captureOutput(() => runDisconnectCommand([TEST_PROVIDER_ID]));
-		strictEqual(disconnect.result, 0);
+		const logout = await captureOutput(() => runAuthCommand(["logout", TEST_PROVIDER_ID]));
+		strictEqual(logout.result, 0);
 		strictEqual(openAuthStorage().get(TEST_PROVIDER_ID), undefined);
 
 		const after = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));
 		strictEqual(after.result, 1);
 		ok(after.stdout.includes(`${TEST_PROVIDER_ID}\t-\tabsent`));
+	});
+
+	it("auth status probes Claude native CLI auth without storing Clio credentials", async () => {
+		installClaudeShim(
+			scratch,
+			'#!/bin/sh\nif [ "$1" = auth ] && [ "$2" = status ]; then echo \'Logged in as test@example.com\'; exit 0; fi\nexit 2\n',
+		);
+
+		const status = await captureOutput(() => runAuthCommand(["status", "claude-code-cli"]));
+		strictEqual(status.result, 0);
+		ok(status.stdout.includes("claude-code-cli\tcli\tauthenticated"));
+		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
+	});
+
+	it("auth login for Claude native CLI prints handoff guidance in non-interactive tests", async () => {
+		const login = await captureOutput(() => runAuthCommand(["login", "claude-code-cli"]));
+		strictEqual(login.result, 0);
+		ok(login.stdout.includes("claude auth login"));
+		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
 	});
 });

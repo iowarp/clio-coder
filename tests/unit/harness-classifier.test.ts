@@ -19,8 +19,8 @@ describe("classifyChange", () => {
 	it("restart: src/core/config.ts", () => strictEqual(classify("src/core/config.ts").class, "restart"));
 	it("restart: src/domains/session/extension.ts", () =>
 		strictEqual(classify("src/domains/session/extension.ts").class, "restart"));
-	it("restart: src/domains/providers/runtimes/local.ts", () =>
-		strictEqual(classify("src/domains/providers/runtimes/local.ts").class, "restart"));
+	it("restart: src/domains/providers/runtimes/local-native/vllm.ts", () =>
+		strictEqual(classify("src/domains/providers/runtimes/local-native/vllm.ts").class, "restart"));
 	it("worker-next-dispatch: src/worker/entry.ts", () =>
 		strictEqual(classify("src/worker/entry.ts").class, "worker-next-dispatch"));
 	it("restart: src/entry/orchestrator.ts", () => strictEqual(classify("src/entry/orchestrator.ts").class, "restart"));
