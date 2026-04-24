@@ -101,7 +101,26 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "old context" } });
 		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "old answer" } });
 		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "kept question" } });
-		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "kept answer" } });
+		const t1 = contract.append({
+			parentId: u2.id,
+			kind: "tool_call",
+			payload: { toolCallId: "call-kept", name: "read", args: { path: "README.md" } },
+		});
+		const tr1 = contract.append({
+			parentId: t1.id,
+			kind: "tool_result",
+			payload: { toolCallId: "call-kept", toolName: "read", out: "read ok" },
+		});
+		const a2 = contract.append({ parentId: tr1.id, kind: "assistant", payload: { text: "kept answer" } });
+		contract.appendEntry({
+			kind: "bashExecution",
+			parentTurnId: a2.id,
+			command: "npm test",
+			output: "tests passed",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		});
 		contract.appendEntry({
 			kind: "compactionSummary",
 			parentTurnId: u2.id,
@@ -126,6 +145,10 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		ok(text.includes("[compaction summary]"), `summary block missing:\n${text}`);
 		ok(text.includes("Old context and answer were summarized."), text);
 		ok(text.includes("you: kept question"), text);
+		ok(text.includes("tool: read"), text);
+		ok(text.includes("read ok"), text);
+		ok(text.includes("bash: $ npm test"), text);
+		ok(text.includes("tests passed"), text);
 		ok(text.includes("clio: kept answer"), text);
 		ok(!text.includes("you: old context"), `pre-compaction prefix leaked:\n${text}`);
 
@@ -133,6 +156,9 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		const serialized = JSON.stringify(replayMessages);
 		ok(serialized.includes("Old context and answer were summarized."), serialized);
 		ok(serialized.includes("kept question"), serialized);
+		ok(serialized.includes("Tool call: read"), serialized);
+		ok(serialized.includes("Tool result: read ok"), serialized);
+		ok(serialized.includes("Ran `npm test`"), serialized);
 		ok(!serialized.includes("old context"), serialized);
 		strictEqual(contract.tree(meta.id).leafId, a2.id, "trailing sessionInfo must not become the resume leaf");
 	});

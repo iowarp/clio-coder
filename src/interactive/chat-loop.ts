@@ -338,6 +338,35 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		lastTurnId = turn.id;
 	};
 
+	const appendToolCallTurn = (event: Extract<AgentEvent, { type: "tool_execution_start" }>): void => {
+		if (!deps.session) return;
+		const turn = deps.session.append({
+			kind: "tool_call",
+			parentId: lastTurnId,
+			payload: {
+				toolCallId: event.toolCallId,
+				name: event.toolName,
+				args: event.args,
+			},
+		});
+		lastTurnId = turn.id;
+	};
+
+	const appendToolResultTurn = (event: Extract<AgentEvent, { type: "tool_execution_end" }>): void => {
+		if (!deps.session) return;
+		const turn = deps.session.append({
+			kind: "tool_result",
+			parentId: lastTurnId,
+			payload: {
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				result: event.result,
+				isError: event.isError,
+			},
+		});
+		lastTurnId = turn.id;
+	};
+
 	const emitNotice = (text: string): void => {
 		const message = noticeMessage(text);
 		emit({ type: "message_end", message });
@@ -447,6 +476,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (event.type === "message_end") {
 				appendAssistantTurn(event.message);
+			}
+			if (event.type === "tool_execution_start") {
+				appendToolCallTurn(event);
+			}
+			if (event.type === "tool_execution_end") {
+				appendToolResultTurn(event);
 			}
 			if (event.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(event.messages);

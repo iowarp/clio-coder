@@ -11,6 +11,8 @@ Keep a Changelog.
   stream instead of only legacy user/assistant turns, so compaction summaries,
   branch summaries, bash/tool entries, custom display entries, system notes,
   and checkpoints are visible when present.
+- Interactive tool calls and results are now written as durable session entries
+  so tool work remains visible after resume and fork.
 - Resuming a session whose JSONL tail is metadata no longer resets the next
   turn parent to `null`; the interactive loop now derives the resumed leaf
   from the persisted tree.
