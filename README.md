@@ -173,8 +173,9 @@ parent-prefix context while the new branch records fresh turns.
 Replay renders user and assistant messages, branch and compaction summaries,
 system and checkpoint notes, bash execution entries, custom display entries,
 and persisted tool call/result entries when those entries exist in the
-session log. Live tool activity is still rendered during the current run; full
-tool output replay depends on the corresponding tool entries being present.
+session log. Interactive tool activity is written as durable tool call/result
+entries, so tool work remains visible after resume and fork; full output replay
+still depends on the corresponding durable entries being present.
 
 Compaction can run manually with `/compact [instructions]` or automatically
 when `compaction.auto` is enabled and the estimated context crosses

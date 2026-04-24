@@ -120,7 +120,17 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 			summary: "The abandoned branch edited src/app.ts.",
 		});
 		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "second" } });
-		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "reply2" } });
+		const t1 = contract.append({
+			parentId: u2.id,
+			kind: "tool_call",
+			payload: { toolCallId: "fork-call", name: "bash", args: { command: "npm test" } },
+		});
+		const tr1 = contract.append({
+			parentId: t1.id,
+			kind: "tool_result",
+			payload: { toolCallId: "fork-call", toolName: "bash", out: "tests passed" },
+		});
+		const a2 = contract.append({ parentId: tr1.id, kind: "assistant", payload: { text: "reply2" } });
 
 		const forked = contract.fork(a2.id);
 		strictEqual(forked.parentSessionId, parent.id);
@@ -132,10 +142,14 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		ok(text.includes("[branch summary]"), text);
 		ok(text.includes("The abandoned branch edited src/app.ts."), text);
 		ok(text.includes("you: second"), text);
+		ok(text.includes("tool: bash"), text);
+		ok(text.includes("tests passed"), text);
 
 		const replayMessages = buildReplayAgentMessagesFromTurns(parentTurns, { uptoTurnId: a2.id });
 		const serialized = JSON.stringify(replayMessages);
 		ok(serialized.includes("abandoned branch edited src/app.ts"), serialized);
 		ok(serialized.includes("second"), serialized);
+		ok(serialized.includes("Tool call: bash"), serialized);
+		ok(serialized.includes("Tool result: tests passed"), serialized);
 	});
 });
