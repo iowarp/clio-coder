@@ -6,7 +6,7 @@
  * surface a warning in the UI and `dead` to reap a subprocess whose event
  * stream has gone quiet for too long.
  *
- * No I/O, no clocks of its own — callers pass `now` to keep the function pure
+ * No I/O, no clocks of its own. Callers pass `now` to keep the function pure
  * and easy to test.
  */
 

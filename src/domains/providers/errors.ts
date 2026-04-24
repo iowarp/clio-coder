@@ -45,13 +45,13 @@ export function isContextOverflowError(err: unknown): err is ContextOverflowErro
 /**
  * Known substrings that identify a context-length overflow across providers.
  *
- *   /context[_ -]length.*exceed/i — OpenAI "context_length_exceeded",
+ *   /context[_ -]length.*exceed/i: OpenAI "context_length_exceeded",
  *     "context length exceeded", "maximum context length".
- *   /maximum context length/i    — OpenAI variant without "exceed".
- *   /context[_ -]window.*exceed/i — llama.cpp / Groq "context window exceeded".
- *   /prompt is too long/i         — Anthropic literal.
- *   /request (?:is )?too large/i  — Anthropic / Groq large-payload rejection.
- *   /token(?:s)?.{0,40}exceed/i   — catches "tokens exceed" without keying on
+ *   /maximum context length/i: OpenAI variant without "exceed".
+ *   /context[_ -]window.*exceed/i: llama.cpp / Groq "context window exceeded".
+ *   /prompt is too long/i: Anthropic literal.
+ *   /request (?:is )?too large/i: Anthropic / Groq large-payload rejection.
+ *   /token(?:s)?.{0,40}exceed/i: catches "tokens exceed" without keying on
  *                                   the word "context" (Groq, Mistral).
  */
 const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [

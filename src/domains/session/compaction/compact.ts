@@ -69,7 +69,7 @@ export interface CompactInput {
 	entries: ReadonlyArray<SessionEntry>;
 	/** Resolved orchestrator or compaction-override model. */
 	model: Model<never>;
-	/** API key for the model. Optional — local engines accept a fallback handled upstream. */
+	/** API key for the model. Optional because local engines accept a fallback handled upstream. */
 	apiKey?: string;
 	/** Per-provider headers to pass through with the stream request. */
 	headers?: Record<string, string>;

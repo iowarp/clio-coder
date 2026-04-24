@@ -1,5 +1,5 @@
 /**
- * Default settings shipped with Clio. Written to the resolved config
+ * Default settings shipped with Clio Coder. Written to the resolved config
  * directory's settings.yaml on first install if the file does not already
  * exist. Users edit the file directly or through TUI overlays.
  */
@@ -86,14 +86,14 @@ export type DefaultSettings = typeof DEFAULT_SETTINGS;
  * Raw YAML document written to the resolved config directory's settings.yaml on
  * first install. Mirrors every field of DEFAULT_SETTINGS at the same key path
  * so settings migration keeps working, and carries fully commented example
- * endpoint blocks that a new user can uncomment to point Clio at a local
+ * endpoint blocks that a new user can uncomment to point Clio Coder at a local
  * llama-server or LM Studio.
  *
  * The YAML library strips comments when round-tripping through stringify, so
  * first-install writes this raw string directly instead of going through
  * stringifyYaml(DEFAULT_SETTINGS).
  */
-export const DEFAULT_SETTINGS_YAML = `# Clio settings. Written once on first install; edit freely.
+export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install; edit freely.
 # Docs: https://github.com/iowarp/clio-coder
 #
 # Default location:
@@ -116,7 +116,7 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 # Inference endpoints. Each entry becomes a selectable target for the
 # orchestrator (chat) and for workers (dispatch). Add entries via \`clio setup\`
 # or hand-edit. \`runtime\` must match an id registered in the runtime registry
-# (cloud SDKs, local HTTP engines, CLI agents, or third-party plugins under
+# (cloud APIs, local HTTP engines, CLI adapters, or third-party plugins under
 # ~/.clio/runtimes/).
 endpoints: []
 # Recommended self-development layout:
@@ -182,7 +182,7 @@ budget:
 theme: default
 keybindings: {}
 
-# Transient session state. Clio rewrites this block; do not hand-edit.
+# Transient session state. Clio Coder rewrites this block; do not hand-edit.
 state:
   lastMode: default
 

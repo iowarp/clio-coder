@@ -294,7 +294,7 @@ describe("session/compaction/cut-point findCutPoint", () => {
 		deepStrictEqual(cut, { firstKeptEntryIndex: 0, turnStartIndex: -1, isSplitTurn: false });
 	});
 
-	it("never cuts at a tool_result — keeps the call/result pair together", () => {
+	it("never cuts at a tool_result and keeps the call/result pair together", () => {
 		// Force keepRecentTokens=0 so the walker wants to cut at the newest entry.
 		// A tool_result as the newest entry must not be a chosen cut; the cut
 		// should land on the preceding tool_call, keeping the pair intact.
@@ -486,7 +486,7 @@ describe("interactive/renderers/compaction-summary renderCompactionSummaryLine",
 });
 
 // ---------------------------------------------------------------------------
-// auto.ts — shouldCompact + AutoCompactionTrigger (slice 12d)
+// auto.ts: shouldCompact + AutoCompactionTrigger (slice 12d)
 // ---------------------------------------------------------------------------
 
 describe("session/compaction/auto shouldCompact", () => {

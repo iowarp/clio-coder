@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -41,14 +41,21 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		const result = await runCli(["--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
 		strictEqual(result.stdout, "clio 0.2.0-dev\n");
-		doesNotMatch(result.stdout, /node|platform|pi-agent-core|pi-ai|pi-tui/);
 	});
 
 	it("--help exits 0 and prints usage", async () => {
 		const result = await runCli(["--help"], { env: scratch.env });
 		strictEqual(result.code, 0);
+		match(result.stdout, /Clio Coder command line/);
 		match(result.stdout, /Usage:/);
 		match(result.stdout, /clio doctor/);
+	});
+
+	it("setup --help exits 0 and prints setup usage", async () => {
+		const result = await runCli(["setup", "--help"], { env: scratch.env });
+		strictEqual(result.code, 0);
+		match(result.stdout, /Configure model endpoints/);
+		match(result.stdout, /clio setup --list/);
 	});
 
 	it("unknown subcommand exits 2 and prints help", async () => {
@@ -70,6 +77,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		const result = await runCli(["doctor"], { env: scratch.env, timeoutMs: 20_000 });
 		ok(result.code === 0 || result.code === 1, `doctor exit=${result.code}`);
 		ok(result.stdout.length > 0, "doctor produced no output");
+		match(result.stdout, /engine runtime/);
 	});
 
 	it("providers --json --no-probe returns an array", async () => {

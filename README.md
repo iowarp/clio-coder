@@ -1,26 +1,25 @@
 <p align="center">
   <picture>
     <source srcset="assets/banner.webp" type="image/webp" />
-    <img src="assets/banner.png" alt="Clio Coder — the CLIO Agent for your science" width="100%" />
+    <img src="assets/banner.png" alt="Clio Coder, AI coding harness for repository work" width="100%" />
   </picture>
 </p>
 
 <h1 align="center">Clio Coder</h1>
 
-<p align="center"><strong>The CLIO Agent for your science.</strong></p>
+<p align="center"><strong>AI coding harness for supervised repository work.</strong></p>
 
 <p align="center">
-  A composable coding agent inside the <a href="https://iowarp.ai">CLIO Agent</a> framework.
+  Interactive terminal chat, configurable local and cloud model endpoints, dispatchable coding workers, and self-development mode.
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.0--dev-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.0--dev-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/badge/npm-coming%20soon-lightgrey?style=flat-square" /></a>
   <a href="https://iowarp.ai"><img alt="IOWarp CLIO" src="https://img.shields.io/badge/IOWarp-CLIO-00d4db?style=flat-square" /></a>
-  <a href="https://github.com/mariozechner"><img alt="pi-mono" src="https://img.shields.io/badge/pi--mono-0.68.1-241131?style=flat-square" /></a>
 </p>
 
 ---
@@ -49,16 +48,16 @@
 
 ## What is Clio Coder?
 
-Clio Coder is the coding specialization of the [CLIO Agent](https://iowarp.ai) framework, the autonomous-agent layer of the [IOWarp](https://iowarp.ai) platform. It is a terminal-first coding agent that researchers, scientists, and developers can install and drive directly, and a composable coding primitive that larger CLIO-based multi-agent systems can embed.
+Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model endpoints, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
-Status: **v0.1.0-dev**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows. The native worker path is the one being hardened first; broader runtime coverage and some developer ergonomics are ahead of the maturity curve.
+Status: **v0.2.0-dev**. Pre-release. Useful for active development and local experimentation, but still moving fast enough that docs, config shape, and runtime coverage can change between short release windows.
 
 Recent focus in this dev cycle:
 
 - unified endpoint auth and setup flows across the CLI and interactive UI
 - provider controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
 - safer uninstall and reset flows for wiping or reseeding local state
-- an experimental self-dev harness for hot-reload and restart-required feedback while working on Clio itself
+- an experimental self-dev harness for hot-reload and restart-required feedback while working on Clio Coder itself
 
 ---
 
@@ -66,7 +65,7 @@ Recent focus in this dev cycle:
 
 Prerequisites: Node.js `>=20`.
 
-### From source (current path for v0.1)
+### From source (current path for v0.2)
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
@@ -83,12 +82,12 @@ clio
 ### From npm
 
 ```bash
-npm install -g @iowarp/clio-coder   # coming with v0.1.0
+npm install -g @iowarp/clio-coder
 ```
 
 ### Isolated state trees
 
-The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_DATA_DIR`, and `CLIO_CACHE_DIR` so you can sandbox a dev install from your daily config. The full walkthrough lives in [docs/guides/interactive-test-walkthrough.md](docs/guides/interactive-test-walkthrough.md).
+The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_DATA_DIR`, and `CLIO_CACHE_DIR` so you can sandbox a dev install from your daily config.
 
 ---
 
@@ -107,7 +106,7 @@ clio                                 # start the interactive TUI
 
 For a non-interactive run, `clio run --agent scout "summarize the repo layout"` dispatches a worker and writes a receipt. Use `--endpoint`, `--model`, `--thinking`, and `--require` when you want a one-off override without changing defaults.
 
-Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  IOWarp orchestrator coding-agent`. The current surface includes provider and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
+Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Clio Coder`. The current surface includes provider and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
 
 ---
 
@@ -118,7 +117,7 @@ Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  IOW
 | `clio` | Launch the interactive TUI. |
 | `clio install` | Bootstrap the resolved config/data/cache dirs and seed `settings.yaml`. |
 | `clio setup` | Create, edit, remove, rename, or retarget endpoints. Supports interactive and non-interactive flows. |
-| `clio uninstall` | Remove Clio state or reset it to a fresh default install with guarded flags. |
+| `clio uninstall` | Remove Clio Coder state or reset it to a fresh default install with guarded flags. |
 | `clio doctor` | Parse settings, resolve XDG paths, and report health. |
 | `clio providers` | Probe configured endpoints and report health, capabilities, and discovered models. |
 | `clio list-models` | List discovered or known models per endpoint. |
@@ -181,7 +180,7 @@ Parser source: [`src/interactive/`](src/interactive/).
 
 ## Configuration
 
-Clio reads from the platform config dir by default: `~/.config/clio/settings.yaml` on Linux, `~/Library/Application Support/clio/settings.yaml` on macOS, and `%APPDATA%/clio/settings.yaml` on Windows. Every path is overridable via XDG or Clio-specific env vars so you can keep dev and prod state separate.
+Clio Coder reads from the platform config dir by default: `~/.config/clio/settings.yaml` on Linux, `~/Library/Application Support/clio/settings.yaml` on macOS, and `%APPDATA%/clio/settings.yaml` on Windows. Every path is overridable via XDG or Clio Coder-specific env vars so you can keep dev and prod state separate.
 
 The happy path is still `clio install` followed by `clio setup`, but the config shape is now endpoint-first: local HTTP engines, cloud APIs, and OAuth-backed providers all land in `endpoints[]`, then `orchestrator` and `workers.default` select from those endpoint ids.
 
@@ -190,7 +189,7 @@ The happy path is still `clio install` followed by `clio setup`, but the config 
 version: 1
 endpoints:
   - id: mini
-    runtime: llamacpp
+    runtime: openai-compat
     url: http://127.0.0.1:8080
     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
     capabilities:
@@ -218,14 +217,14 @@ compaction:
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `CLIO_HOME` | unset | Optional single-tree root for all Clio state. |
+| `CLIO_HOME` | unset | Optional single-tree root for all Clio Coder state. |
 | `CLIO_CONFIG_DIR` | platform config dir, or `$CLIO_HOME` when set | Location of `settings.yaml`. |
 | `CLIO_DATA_DIR` | platform data dir, or `$CLIO_HOME/data` when set | Receipts, ledgers, sessions. |
 | `CLIO_CACHE_DIR` | platform cache dir, or `$CLIO_HOME/cache` when set | Transient caches. |
-| `ANTHROPIC_API_KEY` | — | Enables Claude providers. |
-| `OPENAI_API_KEY` | — | Enables OpenAI providers. |
+| `ANTHROPIC_API_KEY` | unset | Enables Claude providers. |
+| `OPENAI_API_KEY` | unset | Enables OpenAI providers. |
 
-Other provider-specific credentials can live in environment variables referenced by `endpoints[].auth.apiKeyEnvVar`, or in Clio's credential store when you use `clio connect`.
+Other provider-specific credentials can live in environment variables referenced by `endpoints[].auth.apiKeyEnvVar`, or in Clio Coder's credential store when you use `clio connect`.
 
 ---
 
@@ -235,8 +234,8 @@ Other provider-specific credentials can live in environment variables referenced
 | --- | --- | --- |
 | Featured / subscription | `openai-codex` | ChatGPT Plus/Pro via Codex OAuth. Recent work has made this a first-class connectable option. |
 | Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock` | API-key-backed runtimes. Use `clio auth list` or `clio connect` to inspect the current support surface. |
-| Local HTTP | `llamacpp`, `lmstudio`, `lmstudio-native`, `ollama`, `ollama-native`, `openai-compat`, `vllm`, `sglang`, `tgi` | Configured as `endpoints[]` with a URL and optional capability overrides. |
-| CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli` | Recognized by the registry and support surfaces, but not admitted for dispatch in v0.1. |
+| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` | Configured as `endpoints[]` with a URL and optional capability overrides. |
+| CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli` | Recognized by the registry and support surfaces. Dispatch requires the matching CLI to be installed and authenticated. |
 
 `clio providers` probes configured endpoints and reports health, capability flags, and discovered models. `clio list-models` gives a flatter per-endpoint model view.
 
@@ -244,15 +243,16 @@ Other provider-specific credentials can live in environment variables referenced
 
 ## Runtimes
 
-Runtime tiers classify how a worker process is started and spoken to.
+Runtime tiers classify how an endpoint is reached.
 
-| Tier | Status in v0.1 | What it is |
-| --- | --- | --- |
-| `native` | Admitted | Clio's own worker subprocess on `pi-agent-core`. This is the only execution tier dispatch accepts in `0.1.0-dev`. |
-| `sdk` | Partially integrated, rejected for dispatch | SDK-backed runtimes can be described and surfaced in setup/auth flows, but execution is not yet admitted. |
-| `cli` | Partially integrated, rejected for dispatch | CLI-backed runtimes such as Codex and Claude Code are present in the registry and support tables, but dispatch still rejects them. |
+| Tier | What it is |
+| --- | --- |
+| `protocol` | HTTP endpoints that speak a supported model API protocol. |
+| `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
+| `local-native` | Local model runtimes reached through their native HTTP or SDK surface. |
+| `cli-stub` | CLI-backed runtimes launched through installed command-line tools. |
 
-That split is intentional. The project is broad enough now that discovery, setup, auth, and UI coverage move ahead of the stable execution contract. The current release line is still about hardening one worker path instead of pretending all registered runtimes are equally mature.
+That split is intentionally visible in `clio setup`, `clio providers`, and `clio list-models` so endpoint configuration, health, and dispatch behavior stay understandable.
 
 ---
 
@@ -308,17 +308,15 @@ Core logic is split across [`src/domains/`](src/domains/), [`src/interactive/`](
 
 Three hard invariants are enforced by the boundary tests in [`tests/boundaries/check-boundaries.ts`](tests/boundaries/check-boundaries.ts):
 
-1. Only `src/engine/**` imports pi-mono packages.
+1. Only `src/engine/**` imports engine adapter packages.
 2. `src/worker/**` never imports `src/domains/**`.
 3. Cross-domain traffic goes through `SafeEventBus`.
 
-Full design: [docs/specs/2026-04-16-clio-coder-design.md](docs/specs/2026-04-16-clio-coder-design.md). Engine boundary detail: [docs/architecture/pi-mono-boundary-0.68.1.md](docs/architecture/pi-mono-boundary-0.68.1.md).
+Detailed design notes live under [`docs/.superpowers/`](docs/.superpowers/).
 
 ---
 
 ## Development
-
-Full script index: [docs/guides/scripts.md](docs/guides/scripts.md).
 
 | Script | Purpose |
 | --- | --- |
@@ -339,11 +337,11 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ## Roadmap
 
-- **v0.1 (current)**: native runtime, endpoint-first provider config, interactive TUI, receipts and cost ledger, auth/setup flows, model and session controls, and early self-dev harness support.
-- **v0.2**: real tool implementations beyond stubs, SDK runtime admitted, CLI runtime admitted, MCP support, richer agent library.
+- **v0.2 (current)**: endpoint-first provider config, interactive TUI, receipts and cost ledger, auth/setup flows, model and session controls, dispatchable workers, and early self-dev harness support.
+- **Next**: broader runtime hardening, MCP support, richer agent library, and deeper developer ergonomics.
 - **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
 
-See [docs/superpowers/plans/](docs/superpowers/plans/) for detailed phase plans.
+See [`docs/.superpowers/plans/`](docs/.superpowers/plans/) for detailed phase plans.
 
 ---
 

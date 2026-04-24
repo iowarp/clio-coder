@@ -1,6 +1,6 @@
 /**
  * In-memory telemetry store. Counters increment; histograms keep every sample
- * so metrics.ts can derive p50/p95 on demand. No I/O, no persistence — the
+ * so metrics.ts can derive p50/p95 on demand. No I/O, no persistence. The
  * process exiting discards the state.
  */
 

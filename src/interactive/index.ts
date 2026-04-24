@@ -1311,7 +1311,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	 * Pop the cwd-fallback overlay after /resume landed on a session whose
 	 * recorded cwd no longer exists on disk (see src/domains/session/
 	 * cwd-fallback.ts for the reasons). Continue silently accepts the
-	 * broken-cwd session — downstream file ops will surface real errors.
+	 * broken-cwd session. Downstream file ops will surface real errors.
 	 * Cancel restores the prior session when one existed, or re-opens the
 	 * /resume picker so the user can select a different session.
 	 */

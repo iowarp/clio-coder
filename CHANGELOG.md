@@ -1,15 +1,15 @@
 # Changelog
 
-All notable changes to Clio-Coder will be documented in this file.
+All notable changes to Clio Coder will be documented in this file.
 
 Format follows the spirit of Keep a Changelog (https://keepachangelog.com).
 Versioning: semver after 0.1.0 ships; pre-release versions use `0.1.0-dev`
 with phase tags (`phase-N-complete`, `phase-N-partial`).
 
-## 0.1.0-rc2 (2026-04-17) — Phase 11 TUI selector suite
+## 0.1.0-rc2 (2026-04-17): Phase 11 TUI selector suite
 
-Sprint range: `6d58797..HEAD`. Ports the pi-coding-agent selector
-surface to the Clio interactive TUI. One slash-command registry owns
+Sprint range: `6d58797..HEAD`. Ports the upstream selector
+surface to the Clio Coder interactive TUI. One slash-command registry owns
 every command; overlays consume the existing providers, session, and
 config contracts.
 
@@ -27,7 +27,7 @@ config contracts.
   (backward, CSI-u `\x1b[80;6u`). Space toggles inclusion and Enter
   commits the `provider.scope` list. Cycling advances the orchestrator
   target across the resolved scope.
-- `/settings` overlay wrapping pi-tui's `SettingsList`. Phase 11
+- `/settings` overlay wrapping the settings list. Phase 11
   cycles the enum fields (`defaultMode`, `safetyLevel`,
   `orchestrator.thinkingLevel`); free-text fields render read-only
   until an editor lands in Phase 12.
@@ -64,13 +64,13 @@ dispatch-board streaming overlay, and a stub-removal sweep.
 
 - Real local-provider dispatch against `llamacpp`, `lmstudio`,
   `ollama`, and `openai-compat` endpoints with per-endpoint model
-  discovery and registration into the pi-ai runtime catalog.
+  discovery and registration into the model runtime catalog.
 - `EndpointSpec` threaded through the worker subprocess boundary so
   workers inherit the active local endpoint from dispatch.
 - First-install `settings.yaml` seeded with commented `llamacpp@mini`
   and `lmstudio@dynamo` endpoint examples plus matching
   `orchestrator` and `workers.default` override blocks.
-- `pi-ai` `stream` re-exported through `src/engine/ai.ts` so every
+- Model streaming re-exported through `src/engine/ai.ts` so every
   consumer crosses the engine boundary through one module.
 - `/providers` interactive overlay with live endpoint health, covered
   by `diag-interactive-tui`.
@@ -141,8 +141,8 @@ Post-`phase-10-partial` commits on `main` (in landing order):
 ### Fixed
 
 - `fix(engine+dispatch): tighten boundary + PID-owned ledger lock`
-  (3a92f6b). `engine/pi-mono-names.ts` is the single source for pi-mono
-  package strings. `withLedgerLock` writes `process.pid` into the
+  (3a92f6b). The engine package-name module is the single source for
+  engine adapter package strings. `withLedgerLock` writes `process.pid` into the
   lockfile, probes owner liveness with `process.kill(pid, 0)`, and only
   unlinks peer locks when the owner is dead or the file is older than
   30s. 5-worker concurrent regression test lives in
@@ -175,7 +175,7 @@ Source commit: `cbf70fc feat(domains): scaffold observability + scheduling + int
 ### Phase 9: Interactive TUI scaffold (`phase-9-partial`, e47b4f7)
 
 - Added: minimal interactive TUI scaffold with banner, editor, and
-  footer panel mounted under pi-tui.
+  footer panel.
 - Added: Shift+Tab cycles default ⇄ advise via a pure
   `routeInteractiveKey` helper with footer refresh.
 - Added: Ctrl+D triggers `termination.shutdown(0)` through the existing
@@ -215,8 +215,7 @@ Source commit: `c6100f2 feat(providers): ship six CLI adapter stubs + generic cl
 - Added: stress suite, shutdown wiring, and multi-process ledger safety.
   Ten concurrent workers all produce valid receipts and merge into the
   shared ledger.
-- Added: worker-runtime wired through `pi-agent-core` faux and real
-  paths.
+- Added: worker runtime wired through faux and real engine paths.
 - Fixed: four Phase 6 audit findings (exit-code mis-reporting, child
   error listener, bedrock id, ledger clone).
 - Fixed: utf8-safe truncation in tools and em-dash prose cleanup.
@@ -259,7 +258,7 @@ Source commits: `ba71856`, `958d784`, `9798e5d`, `31b8fb0`, `8040900`,
 
 - Added: prompt fragment set (nine files) and full frontmatter
   validator.
-- Added: Clio session JSONL writer/reader through the engine boundary.
+- Added: Clio Coder session JSONL writer/reader through the engine boundary.
 - Added: prompt compiler with two-hash reproducibility and `diag-prompt`.
 - Added: session domain wired with lazy create and atomic checkpoint.
 - Added: verify exercises prompt compile determinism and session
@@ -288,8 +287,8 @@ Source commits: `a81aa2c`, `a1e00bb`, `01ce3ae`, `28103a5`, `a43fde6`,
 Pre-orchestrator scaffolding that established the runtime shape: config
 domain (TypeBox schema, manifest, watcher with hot-reload classifier,
 extension), lifecycle domain (install metadata, doctor diagnostics,
-manifest, extension), engine boundary wrappers around pi-mono 0.67.4
-and pi-agent-core, CLI dispatcher with `version` + `install` + `doctor`
+manifest, extension), engine boundary wrappers, CLI dispatcher with
+`version` + `install` + `doctor`
 subcommands, orchestrator composition root, XDG-aware idempotent
 bootstrap, event bus with synchronous delivery, bus tracer, XDG path
 handling, and the Phase 1 inline verify script.

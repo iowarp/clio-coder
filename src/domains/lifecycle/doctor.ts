@@ -18,9 +18,12 @@ export function runDoctor(): DoctorFinding[] {
 	findings.push({ ok: true, name: "clio version", detail: version.clio });
 	findings.push({ ok: true, name: "node version", detail: version.node });
 	findings.push({ ok: true, name: "platform", detail: version.platform });
-	findings.push({ ok: Boolean(version.piAgentCore), name: "pi-agent-core", detail: version.piAgentCore ?? "missing" });
-	findings.push({ ok: Boolean(version.piAi), name: "pi-ai", detail: version.piAi ?? "missing" });
-	findings.push({ ok: Boolean(version.piTui), name: "pi-tui", detail: version.piTui ?? "missing" });
+	const engineReady = Boolean(version.piAgentCore && version.piAi && version.piTui);
+	findings.push({
+		ok: engineReady,
+		name: "engine runtime",
+		detail: engineReady ? "ready" : "missing required packages",
+	});
 
 	const config = clioConfigDir();
 	findings.push({ ok: existsSync(config), name: "config dir", detail: config });

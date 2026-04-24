@@ -9,7 +9,7 @@
  * mutate memory only; `persist()` writes the bounded ring (default 1000, env
  * override `CLIO_MAX_RUNS`) atomically via engine.atomicWrite.
  *
- * No worker spawning, no domain wire-up, no SafeEventBus emission yet — those
+ * No worker spawning, no domain wire-up, no SafeEventBus emission yet. Those
  * land in P6S3 and P6S5. This slice is a pure persistence primitive.
  *
  * v0.1 known limitation: a crash between recordReceipt and persist leaves the
@@ -137,7 +137,7 @@ function isProcessAlive(pid: number): boolean {
 		return true;
 	} catch (err) {
 		const e = err as NodeJS.ErrnoException;
-		// EPERM means the PID exists but belongs to another user — still alive.
+		// EPERM means the PID exists but belongs to another user, so it is still alive.
 		if (e.code === "EPERM") return true;
 		return false;
 	}
@@ -184,7 +184,7 @@ async function withLedgerLock<T>(targetPath: string, fn: () => T | Promise<T>): 
 			const e = err as NodeJS.ErrnoException;
 			if (e.code !== "EEXIST") throw err;
 
-			// Existing lock — inspect ownership before touching it.
+			// Existing lock: inspect ownership before touching it.
 			const ownerPid = readLockPid(lockPath);
 			const ageMs = lockfileAgeMs(lockPath);
 			const ownerDead = ownerPid !== null && !isProcessAlive(ownerPid);

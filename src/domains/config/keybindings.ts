@@ -43,12 +43,12 @@ declare module "@mariozechner/pi-tui" {
 }
 
 /**
- * Built-in defaults. Users override via `settings.yaml.keybindings` — the
+ * Built-in defaults. Users override via `settings.yaml.keybindings`; the
  * manager reads those and patches this table before the TUI starts.
  *
  * Default key strings follow pi-tui's `KeyId` format (`modifier+modifier+key`,
  * lowercase). `shift+ctrl+p` uses kitty-protocol CSI-u; terminals without
- * CSI-u cannot fire it by design — users can rebind to an alt combo or use
+ * CSI-u cannot fire it by design. Users can rebind to an alt combo or use
  * `/scoped-models` instead.
  */
 export const CLIO_APP_KEYBINDINGS = {

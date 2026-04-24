@@ -12,6 +12,6 @@ describe("prompt fragments", () => {
 			for (const e of result.errors) console.error(`  - ${e}`);
 		}
 		strictEqual(result.errors.length, 0);
-		ok(result.fragments.length > 0, "no fragments discovered — did the fragments dir move?");
+		ok(result.fragments.length > 0, "no fragments discovered, did the fragments dir move?");
 	});
 });

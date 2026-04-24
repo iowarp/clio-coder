@@ -24,20 +24,22 @@ import { printError, printOk } from "./shared.js";
 
 const HELP = `clio setup
 
+Configure model endpoints for chat and worker dispatch.
+
 Usage:
   clio setup                       interactive wizard
-  clio setup --list                list registered runtimes
+  clio setup --list                list endpoint types
   clio setup --id <endpointId> [flags] --runtime <runtimeId>
   clio setup --remove <endpointId>
   clio setup --rename <oldId> <newId>
 
 Non-interactive flags:
   --id <endpointId>                endpoint id to register (required when non-interactive)
-  --runtime <runtimeId>            runtime to use when registering non-interactively
-  --url <host>                     endpoint base url (http(s):// or ws://)
+  --runtime <runtimeId>            endpoint type to use when registering non-interactively
+  --url <host>                     endpoint base URL (http(s):// or ws://)
   --model <wireModelId>            default model id for this endpoint
-  --api-key-env <VAR>              read api key from this env var at call time
-  --api-key <literal>              store api key in credentials.yaml (keyed by runtime id)
+  --api-key-env <VAR>              read API key from this env var at call time
+  --api-key <literal>              store API key in credentials.yaml
   --gateway                        mark the endpoint as a gateway
   --set-orchestrator               point settings.orchestrator at this endpoint
   --set-worker-default             point settings.workers.default at this endpoint

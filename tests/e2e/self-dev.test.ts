@@ -34,7 +34,7 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		});
 		try {
 			await pty.expect(/CLIO_SELF_DEV=1/, 8000);
-			await pty.expect(/clio\s+IOWarp/, 8000);
+			await pty.expect(/clio\s+Clio Coder/, 8000);
 			// touch read.ts (safe: change only a comment)
 			const patched = original.replace("export const readTool", "/* hot-reload smoke test */\nexport const readTool");
 			writeFileSync(readToolPath, patched);

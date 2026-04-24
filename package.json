@@ -1,7 +1,17 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.2.0-dev",
-	"description": "Clio: IOWarp's orchestrator coding-agent, built on a Level-3 custom harness over pi-mono",
+	"description": "AI coding harness for supervised repository work with interactive chat, configurable model endpoints, worker dispatch, and self-development mode.",
+	"keywords": [
+		"ai",
+		"coding",
+		"repository",
+		"terminal",
+		"developer-tools",
+		"llm",
+		"agents",
+		"model-endpoints"
+	],
 	"type": "module",
 	"license": "Apache-2.0",
 	"author": "Anthony Kougkas <a.kougkas@gmail.com>",
