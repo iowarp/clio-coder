@@ -2,20 +2,20 @@
  * Worker subprocess entry point.
  *
  * Reads a WorkerSpec JSON document from stdin, re-hydrates the runtime
- * descriptor from the in-tree runtime registry (EndpointDescriptor is pure
- * data; RuntimeDescriptor carries functions and cannot cross the stdin
- * boundary), builds a WorkerRunInput, and dispatches to `startWorkerRun` from
- * the engine boundary. Emits NDJSON events on stdout.
+ * descriptor from the runtime registry (EndpointDescriptor is pure data;
+ * RuntimeDescriptor carries functions and cannot cross the stdin boundary),
+ * builds a WorkerRunInput, and dispatches to `startWorkerRun` from the engine
+ * boundary. Emits NDJSON events on stdout.
  */
 
 import type { ToolName } from "../core/tool-names.js";
-import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor } from "../domains/providers/index.js";
-import { getRuntimeRegistry } from "../domains/providers/registry.js";
-import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
+import { resolveWorkerRuntime } from "./runtime-registry.js";
+
+type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
 
 interface WorkerSpec {
 	systemPrompt: string;
@@ -33,11 +33,9 @@ interface WorkerSpec {
 async function main(): Promise<number> {
 	const spec = await readSpecFromStdin();
 	const stopHeartbeat = startWorkerHeartbeat();
-	const mode = (spec.mode ?? "default") as ModeName;
+	const mode = (spec.mode ?? "default") as WorkerMode;
 
-	const registry = getRuntimeRegistry();
-	registerBuiltinRuntimes(registry);
-	const runtime = registry.get(spec.runtimeId);
+	const runtime = await resolveWorkerRuntime(spec.runtimeId);
 	if (!runtime) {
 		process.stderr.write(`[worker] runtime '${spec.runtimeId}' not registered\n`);
 		stopHeartbeat();
@@ -79,6 +77,7 @@ async function readSpecFromStdin(): Promise<WorkerSpec> {
 	return new Promise((resolve, reject) => {
 		let data = "";
 		process.stdin.setEncoding("utf8");
+		process.stdin.resume();
 		process.stdin.on("data", (chunk) => {
 			data += chunk;
 		});
