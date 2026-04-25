@@ -49,3 +49,25 @@ export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: strin
 	}
 	return apiKey === undefined ? { rest } : { apiKey, rest };
 }
+
+/**
+ * Pull the optional top-level `--no-context-files` (alias `-nc`) startup flag
+ * out of argv. Mirrors `extractApiKeyFlag`: only flags before the first
+ * subcommand are global; after the first positional token the flag is left in
+ * place so the subcommand can decide what to do with it.
+ */
+export function extractNoContextFilesFlag(argv: ReadonlyArray<string>): { noContextFiles: boolean; rest: string[] } {
+	const rest: string[] = [];
+	let noContextFiles = false;
+	let sawSubcommand = false;
+	for (const arg of argv) {
+		if (arg === undefined) continue;
+		if (!sawSubcommand && (arg === "--no-context-files" || arg === "-nc")) {
+			noContextFiles = true;
+			continue;
+		}
+		rest.push(arg);
+		if (!arg.startsWith("-")) sawSubcommand = true;
+	}
+	return { noContextFiles, rest };
+}

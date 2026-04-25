@@ -9,8 +9,19 @@ import { loadProjectContextFiles, renderProjectContextFiles } from "./context-fi
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 
-export function createPromptsBundle(context: DomainContext): DomainBundle<PromptsContract> {
+export interface PromptsBundleOptions {
+	/** When true, the dynamic context.files fragment renders the empty string
+	 * even if AGENTS.md / CLAUDE.md / CODEX.md exist on disk. Set by the
+	 * top-level `--no-context-files` (alias `-nc`) startup flag. */
+	noContextFiles?: boolean;
+}
+
+export function createPromptsBundle(
+	context: DomainContext,
+	options: PromptsBundleOptions = {},
+): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
+	const suppressContextFiles = options.noContextFiles === true;
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -48,7 +59,7 @@ export function createPromptsBundle(context: DomainContext): DomainBundle<Prompt
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.safetyLevel ?? settings?.safetyLevel ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
-			const contextFiles = renderProjectContextFiles(loadProjectContextFiles({ cwd }), cwd);
+			const contextFiles = suppressContextFiles ? "" : renderProjectContextFiles(loadProjectContextFiles({ cwd }), cwd);
 			const dynamicInputs = contextFiles.length > 0 ? { ...input.dynamicInputs, contextFiles } : input.dynamicInputs;
 			return compile(table, {
 				identity: "identity.clio",

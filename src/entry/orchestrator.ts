@@ -22,7 +22,7 @@ import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
-import { PromptsDomainModule } from "../domains/prompts/index.js";
+import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	availableThinkingLevels,
@@ -65,6 +65,8 @@ export interface BootOptions {
 	apiKey?: string;
 	/** Enable Clio self-development mode for the current process. */
 	dev?: boolean;
+	/** Suppress AGENTS.md / CLAUDE.md / CODEX.md context-file injection for this run. */
+	noContextFiles?: boolean;
 }
 
 function buildBanner(): string {
@@ -239,7 +241,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		ModesDomainModule,
-		PromptsDomainModule,
+		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
 		AgentsDomainModule,
 		SessionDomainModule,
 		ObservabilityDomainModule,

@@ -6,7 +6,7 @@ import { runDoctorCommand } from "./doctor.js";
 import { runModelsCommand } from "./models.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
-import { extractApiKeyFlag, parseFlags, printError } from "./shared.js";
+import { extractApiKeyFlag, extractNoContextFilesFlag, parseFlags, printError } from "./shared.js";
 import { runTargetsCommand } from "./targets.js";
 import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
@@ -21,6 +21,7 @@ Usage:
   clio --dev                start self-development mode for this checkout
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
+  clio --no-context-files, -nc  Skip AGENTS.md/CLAUDE.md/CODEX.md context-file injection.
   clio configure            interactive first-run/configuration wizard
   clio targets              list configured targets, health, auth, and capabilities
   clio targets add          add a target interactively or via flags
@@ -40,7 +41,8 @@ Usage:
 `;
 
 async function main(argv: string[]): Promise<number> {
-	const { apiKey, rest } = extractApiKeyFlag(argv);
+	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
+	const { noContextFiles, rest } = extractNoContextFilesFlag(afterApiKey);
 	const { flags, positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
@@ -56,6 +58,7 @@ async function main(argv: string[]): Promise<number> {
 	const bootOptions = {
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(dev ? { dev: true } : {}),
+		...(noContextFiles ? { noContextFiles: true } : {}),
 	};
 	if (!subcommand) return runClioCommand(bootOptions);
 
