@@ -1570,7 +1570,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
-		if (overlayState === "closed" && matchesKey(data, "ctrl+o") && !isKeyRelease(data)) {
+		if (overlayState === "closed" && keybindings.matches(data, "clio.tool.expand") && !isKeyRelease(data)) {
 			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
 			return { consume: true };
 		}
