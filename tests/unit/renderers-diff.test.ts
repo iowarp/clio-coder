@@ -2,8 +2,10 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderUnifiedDiff } from "../../src/interactive/renderers/diff.js";
 
-const stripAnsi = (s: string): string =>
-	s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
+// Strip ANSI sequences. Biome bans literal control chars in regex source,
+// so build the pattern from a constructor with the ESC byte injected.
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
+const stripAnsi = (s: string): string => s.replace(ANSI, "");
 
 describe("renderers/diff", () => {
 	it("emits no-change marker for identical input", () => {
@@ -35,6 +37,14 @@ describe("renderers/diff", () => {
 		for (const line of out) {
 			ok(stripAnsi(line).length <= 40, `line too wide: ${stripAnsi(line).length}`);
 		}
+	});
+
+	it("renders pure deletion (empty newText) with - lines for every removed line", () => {
+		const out = renderUnifiedDiff({ oldText: "alpha\nbeta\n", newText: "", filename: "doomed.ts" }, 80);
+		const plain = out.map(stripAnsi).join("\n");
+		ok(plain.includes("--- a/doomed.ts"), JSON.stringify(plain));
+		ok(plain.includes("-alpha"), JSON.stringify(plain));
+		ok(plain.includes("-beta"), JSON.stringify(plain));
 	});
 
 	it("respects custom context line count", () => {

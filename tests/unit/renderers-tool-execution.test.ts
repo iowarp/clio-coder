@@ -259,6 +259,28 @@ describe("renderers/tool-execution", () => {
 		);
 	});
 
+	it("renders the edit-tool dispatch path with +new and -old diff lines", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "edit",
+				args: { path: "x.ts", old_string: "old", new_string: "new" },
+				result: "ok",
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(
+			plain.some((l) => l.includes("+new")),
+			`expected +new in diff output, got: ${JSON.stringify(plain)}`,
+		);
+		ok(
+			plain.some((l) => l.includes("-old")),
+			`expected -old in diff output, got: ${JSON.stringify(plain)}`,
+		);
+	});
+
 	it("wraps long result preview lines to the supplied width", () => {
 		const long = "y".repeat(200);
 		const lines = renderToolExecution(
