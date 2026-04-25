@@ -435,7 +435,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const retrySettings = (): RetrySettings => {
-		const raw = deps.getSettings().retry as Partial<RetrySettings> | undefined;
+		const raw = deps.getSettings().retry;
 		return {
 			enabled: raw?.enabled ?? DEFAULT_RETRY_SETTINGS.enabled,
 			maxRetries:
