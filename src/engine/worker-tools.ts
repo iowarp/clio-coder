@@ -39,6 +39,11 @@ function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema>
 		description: spec.description,
 		parameters: spec.parameters,
 		label: spec.name,
+		// prepareArguments runs in pi-agent-core's prepareToolCall; pi-ai's
+		// validateToolArguments runs immediately after. Inside the agent loop
+		// the work below is therefore redundant. We keep it because tests and
+		// scripted callers may invoke execute() directly without going through
+		// the loop, and registry.invoke must still see coerced arguments.
 		prepareArguments: validateArguments,
 		async execute(
 			_toolCallId: string,

@@ -17,16 +17,16 @@ export interface LocalSynthesisInput {
 }
 
 function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["thinkingFormat"] | undefined {
-	if (
-		caps.thinkingFormat === "qwen-chat-template" ||
-		caps.thinkingFormat === "openrouter" ||
-		caps.thinkingFormat === "zai" ||
-		caps.thinkingFormat === "deepseek-r1"
-	) {
-		if (caps.thinkingFormat === "deepseek-r1") return "deepseek";
-		return caps.thinkingFormat;
+	switch (caps.thinkingFormat) {
+		case "qwen-chat-template":
+		case "openrouter":
+		case "zai":
+			return caps.thinkingFormat;
+		case "deepseek-r1":
+			return "deepseek";
+		default:
+			return undefined;
 	}
-	return undefined;
 }
 
 function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {

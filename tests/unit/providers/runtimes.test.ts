@@ -182,6 +182,20 @@ describe("providers/runtimes built-in descriptors", () => {
 		ok(mistralLarge.input.includes("image"));
 	});
 
+	it("cloud runtime defaultBaseUrl falls back with the catalog path component", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+
+		const openai = byId.get("openai");
+		ok(openai, "missing openai runtime");
+		const customOpenai = openai.synthesizeModel({ id: "oa-custom", runtime: "openai" }, "ft:gpt-x-custom", null);
+		strictEqual(customOpenai.baseUrl, "https://api.openai.com/v1");
+
+		const google = byId.get("google");
+		ok(google, "missing google runtime");
+		const customGoogle = google.synthesizeModel({ id: "g-custom", runtime: "google" }, "gemini-custom", null);
+		strictEqual(customGoogle.baseUrl, "https://generativelanguage.googleapis.com/v1beta");
+	});
+
 	it("endpoint overrides still win over catalog-backed cloud synthesis", () => {
 		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
 		const openrouter = byId.get("openrouter");

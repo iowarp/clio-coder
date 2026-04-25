@@ -82,9 +82,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		input.endpoint.capabilities ?? null,
 	);
 	const pricing = input.endpoint.pricing;
-	const builtinHeaders = builtin?.headers;
 	const endpointHeaders = input.endpoint.auth?.headers;
-	const headers = endpointHeaders ? { ...(builtinHeaders ?? {}), ...endpointHeaders } : builtinHeaders;
 	const model: Model<Api> = {
 		...(builtin ?? {}),
 		id: input.wireModelId,
@@ -103,6 +101,8 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
-	if (headers) model.headers = headers;
+	if (endpointHeaders) {
+		model.headers = { ...(builtin?.headers ?? {}), ...endpointHeaders };
+	}
 	return model;
 }
