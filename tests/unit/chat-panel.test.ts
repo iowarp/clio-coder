@@ -145,7 +145,7 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("Clio Coder: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
-	it("renders tool status and bash command previews", () => {
+	it("renders bash tool call header before completion and result block after", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({
 			type: "tool_execution_start",
@@ -154,7 +154,9 @@ describe("chat-panel active entry update", () => {
 			args: { command: "npm test" },
 		});
 		let text = strip(panel.render(90).join("\n"));
-		ok(text.includes("bash: $ npm test [running]"), text);
+		ok(text.includes("tool: bash(npm test)"), text);
+		// In flight, no result block yet.
+		ok(!text.includes("  result:"), text);
 
 		panel.applyEvent({
 			type: "tool_execution_end",
@@ -164,8 +166,9 @@ describe("chat-panel active entry update", () => {
 			isError: false,
 		});
 		text = strip(panel.render(90).join("\n"));
-		ok(text.includes("bash: $ npm test [done"), text);
-		ok(text.includes("ok"), text);
+		ok(text.includes("tool: bash(npm test)"), text);
+		ok(text.includes("  result:"), text);
+		ok(text.includes("  ok"), text);
 	});
 
 	it("renders retry countdown and recovery status as a single updating line", () => {
