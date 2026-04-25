@@ -39,7 +39,8 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { buildFooter } from "./footer-panel.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
-import { buildLayout, defaultBanner } from "./layout.js";
+import { buildLayout } from "./layout.js";
+import { editorBorderColorForMode } from "./mode-theme.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
@@ -59,6 +60,7 @@ import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
+import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
 // names from "interactive/index.js". Slice 2.6 relocated the implementations
@@ -142,6 +144,8 @@ export interface InteractiveDeps {
 	onCycleScopedModelBackward?: () => void;
 	/** Hot-reload harness handle. When present, the footer shows an indicator line and Ctrl+R triggers restart. */
 	harness?: import("../harness/index.js").HarnessHandle;
+	/** True when the dashboard should show the self-development mode badge. */
+	selfDev: boolean;
 	onShutdown: () => Promise<void>;
 }
 
@@ -523,10 +527,7 @@ export function handleCwdFallbackCancel(preResumeSessionId: string | null, deps:
 	deps.openResumeOverlay();
 }
 
-/**
- * Pure overlay key router for the /hotkeys overlay. Esc closes; everything
- * else is swallowed so arrow keys cannot disturb the banner-style render.
- */
+/** Pure overlay key router for the /hotkeys overlay. Esc closes; list keys fall through to the focused view. */
 export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
@@ -626,7 +627,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// so editor/select components honor overrides without explicit plumbing.
 	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
 
-	const banner = defaultBanner();
+	const banner = createWelcomeDashboard({
+		modes: deps.modes,
+		providers: deps.providers,
+		observability: deps.observability,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		selfDev: deps.selfDev,
+	});
 	const chatPanel = createChatPanel();
 	const harness = deps.harness;
 	const footer = buildFooter({
@@ -648,6 +655,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 	});
 	editor.focused = true;
+	const applyEditorModeTheme = (): void => {
+		editor.borderColor = editorBorderColorForMode(deps.modes.current());
+	};
+	applyEditorModeTheme();
 
 	const superOverlayLines = renderSuperOverlayLines();
 	const superOverlayWidth = superOverlayLines.reduce((max, line) => Math.max(max, line.length), 0);
@@ -681,6 +692,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
 		if (event.type !== "message_end" && event.type !== "agent_end") return;
 		footer.refresh();
+		tui.requestRender();
+	});
+	const unsubscribeModeTheme = deps.bus.on(BusChannels.ModeChanged, () => {
+		applyEditorModeTheme();
 		tui.requestRender();
 	});
 
@@ -1444,6 +1459,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeChat();
 		unsubscribeProgress();
 		unsubscribeFooterTokens();
+		unsubscribeModeTheme();
 		unsubscribeSuperRequired();
 		agentProgress.stop();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
@@ -1455,7 +1471,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// Drain the parked queue so any worker or agent loop still holding
 		// a pending tool-execution promise sees a terminal verdict rather
 		// than a promise that never settles across process exit.
-		deps.toolRegistry?.cancelParkedCalls("clio shutting down");
+		deps.toolRegistry?.cancelParkedCalls("Clio Coder shutting down");
 		await deps.onShutdown();
 		resolveRun(0);
 	};

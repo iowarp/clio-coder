@@ -161,7 +161,7 @@ interface AgentRuntime {
 }
 
 function notConfiguredNotice(): string {
-	return `[clio] orchestrator not configured. Edit ${settingsPath()} (orchestrator.target + orchestrator.model) to enable chat.`;
+	return `[Clio Coder] orchestrator not configured. Edit ${settingsPath()} (orchestrator.target + orchestrator.model) to enable chat.`;
 }
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
@@ -535,15 +535,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!endpointId || !wireModelId) return null;
 		const endpoint = deps.providers.getEndpoint(endpointId);
 		if (!endpoint) {
-			throw new Error(`[clio] orchestrator target='${endpointId}' not found in settings.targets`);
+			throw new Error(`[Clio Coder] orchestrator target='${endpointId}' not found in settings.targets`);
 		}
 		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
 		if (!runtimeDesc) {
-			throw new Error(`[clio] orchestrator runtime='${endpoint.runtime}' not registered`);
+			throw new Error(`[Clio Coder] orchestrator runtime='${endpoint.runtime}' not registered`);
 		}
 		if (runtimeDesc.kind === "subprocess") {
 			throw new Error(
-				`[clio] target '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
+				`[Clio Coder] target '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
 			);
 		}
 		return {
@@ -565,7 +565,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!target) return null;
 		if (!deps.knownEndpoints().has(target.endpoint.id)) {
 			throw new Error(
-				`[clio] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
+				`[Clio Coder] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
 			);
 		}
 		if (
@@ -707,22 +707,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			compacted = await runAutoCompact(agentRuntime, true);
 		} catch (compactErr) {
 			emitNotice(
-				`[clio] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
+				`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 			);
 		}
 		if (!compacted) {
-			emitNotice(`[clio] context overflow: ${overflow.message}`);
+			emitNotice(`[Clio Coder] context overflow: ${overflow.message}`);
 			return;
 		}
 		try {
 			await agentRuntime.agent.prompt(text);
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
-				emitNotice(`[clio] context overflow persisted after compaction: ${stillOverflowed.message}`);
+				emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
 			}
 		} catch (retryErr) {
 			emitNotice(
-				`[clio] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+				`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
 			);
 		}
 	};
@@ -873,7 +873,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		} catch (err) {
 			currentTurnHash = null;
 			emitNotice(
-				`[clio] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
+				`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 			);
 			return null;
 		}
@@ -925,7 +925,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	return {
 		async submit(text: string): Promise<void> {
 			if (streaming) {
-				emitNotice("[clio] response already in progress. Press Esc to cancel the active run.");
+				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
 				return;
 			}
 
@@ -956,7 +956,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				await runAutoCompact(agentRuntime, forceNow);
 			} catch (err) {
-				emitNotice(`[clio] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
 			if (deps.session) {

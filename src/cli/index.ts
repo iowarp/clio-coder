@@ -19,7 +19,7 @@ AI coding harness for supervised repository work.
 Usage:
   clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
-  clio --version, -v        print the clio version
+  clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
   clio configure            interactive first-run/configuration wizard
   clio targets              list configured targets, health, auth, and capabilities
@@ -31,9 +31,9 @@ Usage:
   clio models [search]      list models for configured targets
   clio auth list|status|login|logout [target-or-runtime]
   clio doctor [--fix]       diagnose state; --fix creates or repairs it
-  clio reset                recover or wipe Clio state
-  clio uninstall            remove Clio state and print package removal guidance
-  clio upgrade              upgrade clio and run pending migrations
+  clio reset                recover or wipe Clio Coder state
+  clio uninstall            remove Clio Coder state and print package removal guidance
+  clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message

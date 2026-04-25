@@ -245,7 +245,7 @@ export interface BuiltinSlashCommand {
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "quit",
-		description: "Quit clio",
+		description: "Quit Clio Coder",
 		kinds: ["quit"],
 		match(trimmed) {
 			return trimmed === "/quit" || trimmed === "/exit" ? { kind: "quit" } : null;

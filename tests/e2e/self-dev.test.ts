@@ -67,15 +67,15 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		ok(result.stdout.includes("watching src/"), result.stdout);
 	});
 
-	it("banner shows CLIO_SELF_DEV line and footer flips to restart-required on engine edit", async () => {
+	it("dashboard shows DEV MODE and footer flips to restart-required on engine edit", async () => {
 		const readToolPath = join(REPO_ROOT, "src", "tools", "read.ts");
 		const original = readFileSync(readToolPath, "utf8");
 		const pty = spawnClioPty({
 			env: { CLIO_HOME: home, CLIO_SELF_DEV: "1", ANTHROPIC_API_KEY: "sk-test" },
 		});
 		try {
-			await pty.expect(/CLIO_SELF_DEV=1/, 8000);
-			await pty.expect(/clio\s+Clio Coder/, 8000);
+			await pty.expect(/DEV MODE/, 8000);
+			await pty.expect(/Clio Coder/, 8000);
 			// touch read.ts (safe: change only a comment)
 			const patched = original.replace("export const readTool", "/* hot-reload smoke test */\nexport const readTool");
 			writeFileSync(readToolPath, patched);

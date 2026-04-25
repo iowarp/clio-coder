@@ -102,9 +102,9 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		const text = strip(panel.render(80).join("\n"));
 
 		ok(text.includes("you: first"), `first user missing:\n${text}`);
-		ok(text.includes("clio: reply1"), `first assistant missing:\n${text}`);
+		ok(text.includes("Clio Coder: reply1"), `first assistant missing:\n${text}`);
 		ok(text.includes("you: second"), `fork-point user missing:\n${text}`);
-		ok(text.includes("clio: reply2"), `fork-point assistant missing:\n${text}`);
+		ok(text.includes("Clio Coder: reply2"), `fork-point assistant missing:\n${text}`);
 		ok(!text.includes("third"), `post-fork user turn leaked:\n${text}`);
 		ok(!text.includes("reply3"), `post-fork assistant turn leaked:\n${text}`);
 	});

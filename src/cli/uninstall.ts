@@ -6,7 +6,7 @@ import { printError, printHeader, printOk } from "./shared.js";
 
 const HELP = `clio uninstall [--keep-config] [--keep-data] [--dry-run] [--force]
 
-Remove Clio state and print package-manager removal guidance. This does not remove the clio binary.
+Remove Clio Coder state and print package-manager removal guidance. This does not remove the clio binary.
 
 Flags:
   --keep-config  keep settings.yaml and credentials.yaml
@@ -98,7 +98,7 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 	}
 
 	const dirs = resolveClioDirs();
-	printHeader("clio uninstall");
+	printHeader("Clio Coder uninstall");
 	report("config", dirs.config, args.keepConfig);
 	report("data", dirs.data, args.keepData);
 	report("cache", dirs.cache, false);
@@ -115,7 +115,7 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 	removePath(dirs.cache, args.dryRun);
 	resetXdgCache();
 
-	printOk(args.dryRun ? "uninstall preview complete" : "removed selected Clio state");
+	printOk(args.dryRun ? "uninstall preview complete" : "removed selected Clio Coder state");
 	printRemovalGuidance();
 	return 0;
 }

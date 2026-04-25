@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Migration } from "./index.js";
 
 /**
- * First-ever Clio state migration. No-op beyond ensuring `<dir>/state/` exists,
+ * First-ever Clio Coder state migration. No-op beyond ensuring `<dir>/state/` exists,
  * which validates the migration scaffolding end-to-end. Later migrations can
  * assume the state directory is there.
  */

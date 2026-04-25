@@ -6,13 +6,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const TRUNCATION_MARKER = "\n[output truncated]\n";
-const CLIO_CONTROL_ENV_KEYS = [
-	"CLIO_DEV",
-	"CLIO_SELF_DEV",
-	"CLIO_INTERACTIVE",
-	"CLIO_PHASE1_INTERACTIVE",
-	"CLIO_RESUME_SESSION_ID",
-] as const;
+const CLIO_CONTROL_ENV_KEYS = ["CLIO_DEV", "CLIO_SELF_DEV", "CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
 function truncate(text: string): string {
 	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);

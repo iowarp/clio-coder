@@ -1,8 +1,8 @@
 import type { Component } from "../engine/tui.js";
-import { Container, Text } from "../engine/tui.js";
+import { Container } from "../engine/tui.js";
 
 export interface LayoutParts {
-	banner: Text;
+	banner: Component;
 	chat: Component;
 	editor: Component;
 	footer: Component;
@@ -15,8 +15,4 @@ export function buildLayout(parts: LayoutParts): Container {
 	root.addChild(parts.editor);
 	root.addChild(parts.footer);
 	return root;
-}
-
-export function defaultBanner(): Text {
-	return new Text("  ◆ clio  Clio Coder\n");
 }

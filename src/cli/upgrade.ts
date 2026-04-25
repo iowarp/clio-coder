@@ -87,7 +87,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 
 	const before = getVersionInfo().clio;
 	const dataDir = clioDataDir();
-	printHeader("clio upgrade");
+	printHeader("Clio Coder upgrade");
 	process.stdout.write(`channel     ${opts.channel}\n`);
 	process.stdout.write(`current     ${before}\n`);
 	process.stdout.write(`data dir    ${dataDir}\n`);

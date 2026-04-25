@@ -7,7 +7,7 @@ import { printError, printHeader, printOk } from "./shared.js";
 
 const HELP = `clio reset [--state|--auth|--config|--all] [--dry-run] [--force]
 
-Recover or wipe Clio state while keeping the clio binary installed.
+Recover or wipe Clio Coder state while keeping the clio binary installed.
 
 Modes:
   --state       reset data and cache only (default)
@@ -110,7 +110,7 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 	const settingsPath = join(dirs.config, "settings.yaml");
 	const credentialsPath = join(dirs.config, "credentials.yaml");
 
-	printHeader("clio reset");
+	printHeader("Clio Coder reset");
 	if (args.all) {
 		report("config", dirs.config);
 		report("data", dirs.data);

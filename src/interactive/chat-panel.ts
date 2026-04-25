@@ -185,14 +185,14 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	return seg.md.render(width);
 }
 
-const CLIO_PREFIX = "clio: ";
+const CLIO_PREFIX = "Clio Coder: ";
 
 /**
- * Prefix the first rendered line of the active assistant entry with "clio: ".
+ * Prefix the first rendered line of the active assistant entry with "Clio Coder: ".
  * pi-tui's Markdown renderer right-pads every line to the requested width so
  * background colors extend edge-to-edge (markdown.js:104-107), so a line
- * returned at width=N already has visible width N. Prepending the 6-char
- * "clio: " tag without stripping the pad would push the line to N+6, which
+ * returned at width=N already has visible width N. Prepending the assistant
+ * label without stripping the pad would push the line past N, which
  * trips pi-tui's `Rendered line i exceeds terminal width` invariant inside
  * doRender() and crashes the TUI before the caller's output ever reaches the
  * user (regression seen on /compact without a current session at width=120).
@@ -259,7 +259,7 @@ function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
 		lines.push(...renderToolSegmentLines(seg, width));
 	}
 	if (!labeled && !hasVisibleOutput(entry)) {
-		lines.push(entry.pending ? "clio: [working]" : "clio: ");
+		lines.push(entry.pending ? `${CLIO_PREFIX}[working]` : CLIO_PREFIX);
 	}
 	return lines;
 }
