@@ -75,7 +75,9 @@ afterEach(async () => {
 	lastBodyString = "";
 });
 
-function makeModel(): Model<"ollama-native"> {
+function makeModel(
+	cost: Model<"ollama-native">["cost"] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+): Model<"ollama-native"> {
 	return {
 		id: "ollama-test-model",
 		name: "ollama-test-model",
@@ -84,7 +86,7 @@ function makeModel(): Model<"ollama-native"> {
 		baseUrl,
 		reasoning: false,
 		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		cost,
 		contextWindow: 8192,
 		maxTokens: 4096,
 	} as Model<"ollama-native">;
@@ -104,6 +106,16 @@ async function collect(stream: AsyncIterable<{ type: string } & Record<string, u
 		types.push(ev.type);
 	}
 	return types;
+}
+
+async function collectEvents(
+	stream: AsyncIterable<{ type: string } & Record<string, unknown>>,
+): Promise<Array<{ type: string } & Record<string, unknown>>> {
+	const events: Array<{ type: string } & Record<string, unknown>> = [];
+	for await (const ev of stream) {
+		events.push(ev);
+	}
+	return events;
 }
 
 describe("engine/apis ollamaNativeApiProvider.stream", () => {
@@ -139,5 +151,28 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 		ok(types.includes("toolcall_delta"));
 		ok(types.includes("toolcall_end"));
 		strictEqual(types.at(-1), "done");
+	});
+
+	it("calculates usage cost when native token counts are known", async () => {
+		respondWith = [
+			{
+				done: true,
+				done_reason: "stop",
+				prompt_eval_count: 1_000_000,
+				eval_count: 2_000_000,
+			},
+		];
+		const stream = ollamaNativeApiProvider.stream(
+			makeModel({ input: 2, output: 3, cacheRead: 0.5, cacheWrite: 0 }),
+			makeContext(),
+			undefined,
+		);
+		const events = await collectEvents(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
+		const done = events.find((ev) => ev.type === "done");
+		ok(done, "expected done event");
+		const message = done.message as { usage: { cost: { input: number; output: number; total: number } } };
+		strictEqual(message.usage.cost.input, 2);
+		strictEqual(message.usage.cost.output, 6);
+		strictEqual(message.usage.cost.total, 8);
 	});
 });

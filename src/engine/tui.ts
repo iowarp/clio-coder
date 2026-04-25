@@ -27,6 +27,7 @@ export type {
 	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
+	SlashCommand,
 	Terminal,
 } from "@mariozechner/pi-tui";
 
@@ -73,6 +74,7 @@ export function createAgentProgress(terminal: AgentProgressSink): {
 export {
 	Box,
 	CancellableLoader,
+	CombinedAutocompleteProvider,
 	Container,
 	Editor,
 	fuzzyFilter,

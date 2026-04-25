@@ -20,8 +20,10 @@ function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["t
 	if (
 		caps.thinkingFormat === "qwen-chat-template" ||
 		caps.thinkingFormat === "openrouter" ||
-		caps.thinkingFormat === "zai"
+		caps.thinkingFormat === "zai" ||
+		caps.thinkingFormat === "deepseek-r1"
 	) {
+		if (caps.thinkingFormat === "deepseek-r1") return "deepseek";
 		return caps.thinkingFormat;
 	}
 	return undefined;

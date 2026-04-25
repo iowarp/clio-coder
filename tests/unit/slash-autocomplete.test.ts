@@ -1,4 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -46,6 +49,22 @@ describe("interactive/slash-autocomplete", () => {
 		const result = provider.applyCompletion(["/m"], 0, 2, { value: "model", label: "model" }, "/m");
 		deepStrictEqual(result.lines, ["/model "]);
 		strictEqual(result.cursorCol, "/model ".length);
+	});
+
+	it("uses pi-tui file completion for @path triggers", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-autocomplete-"));
+		try {
+			writeFileSync(join(scratch, "README.md"), "# test\n");
+			const provider = createSlashCommandAutocompleteProvider({ basePath: scratch });
+			const suggestions = await provider.getSuggestions(["@READ"], 0, 5, { signal: abortSignal(), force: true });
+			ok(suggestions, "expected file suggestions");
+			ok(
+				suggestions.items.some((item) => item.value === "README.md" || item.label === "README.md"),
+				JSON.stringify(suggestions.items),
+			);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 
 	it("parses canonical command names without duplicate aliases", () => {

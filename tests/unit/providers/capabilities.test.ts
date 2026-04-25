@@ -2,6 +2,8 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { mergeCapabilities } from "../../../src/domains/providers/capabilities.js";
+import { resolveModelCapabilities } from "../../../src/domains/providers/model-capabilities.js";
+import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../../../src/domains/providers/types/capability-flags.js";
 import {
 	availableThinkingLevels,
@@ -84,10 +86,33 @@ describe("providers/capabilities availableThinkingLevels", () => {
 		ok(levels.includes("xhigh"));
 	});
 
+	it("known anthropic catalog models use pi-ai supportsXhigh", () => {
+		const sonnet = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "anthropic-extended" }), {
+			runtimeId: "anthropic",
+			modelId: "claude-sonnet-4-6",
+		});
+		ok(sonnet.includes("high"));
+		ok(!sonnet.includes("xhigh"));
+
+		const opus = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "anthropic-extended" }), {
+			runtimeId: "anthropic",
+			modelId: "claude-opus-4-6",
+		});
+		deepStrictEqual(Array.from(opus), [...VALID_THINKING_LEVELS]);
+	});
+
 	it("openai-codex gpt-5.4 omits minimal but keeps xhigh", () => {
 		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "openai-codex" }), {
 			runtimeId: "openai-codex",
 			modelId: "gpt-5.4",
+		});
+		deepStrictEqual(Array.from(levels), ["off", "low", "medium", "high", "xhigh"]);
+	});
+
+	it("openai-codex gpt-5.5 keeps xhigh", () => {
+		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "openai-codex" }), {
+			runtimeId: "openai-codex",
+			modelId: "gpt-5.5",
 		});
 		deepStrictEqual(Array.from(levels), ["off", "low", "medium", "high", "xhigh"]);
 	});
@@ -109,5 +134,28 @@ describe("providers/capabilities availableThinkingLevels", () => {
 	it("VALID_THINKING_LEVELS is a 6-element readonly tuple", () => {
 		strictEqual(VALID_THINKING_LEVELS.length, 6);
 		deepStrictEqual(Array.from(VALID_THINKING_LEVELS), ["off", "minimal", "low", "medium", "high", "xhigh"]);
+	});
+});
+
+describe("providers/model-capabilities catalog alignment", () => {
+	it("uses pi-ai catalog windows and reasoning for known cloud models", () => {
+		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "openrouter");
+		ok(runtime, "missing openrouter runtime");
+
+		const caps = resolveModelCapabilities(
+			{
+				endpoint: { id: "or", runtime: "openrouter", defaultModel: "openai/gpt-5.4" },
+				runtime,
+				capabilities: base({ reasoning: false, contextWindow: 128000, maxTokens: 8192 }),
+				probeCapabilities: null,
+			},
+			"openai/gpt-5.4",
+			null,
+		);
+
+		strictEqual(caps.reasoning, true);
+		strictEqual(caps.vision, true);
+		strictEqual(caps.contextWindow, 1050000);
+		strictEqual(caps.maxTokens, 128000);
 	});
 });

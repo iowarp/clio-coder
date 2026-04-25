@@ -164,3 +164,17 @@ describe("settings overlay retry controls", () => {
 		strictEqual(settings.retry.maxDelayMs, 30000);
 	});
 });
+
+describe("settings overlay terminal controls", () => {
+	it("surfaces and applies terminal progress controls", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const items = buildSettingItems(settings);
+		const showProgress = items.find((item) => item.id === "terminal.showTerminalProgress");
+
+		ok(showProgress, "terminal.showTerminalProgress row should be visible");
+		strictEqual(showProgress.currentValue, "false");
+
+		applySettingChange(settings, "terminal.showTerminalProgress", "true");
+		strictEqual(settings.terminal.showTerminalProgress, true);
+	});
+});

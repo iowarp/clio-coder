@@ -97,6 +97,38 @@ describe("engine/worker-tools registry wiring", () => {
 		}
 	});
 
+	it("validates and coerces tool arguments before registry admission", async () => {
+		let runCalls = 0;
+		const decisions: ClassifierCall[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => action === "write", ["write"]),
+		});
+		registerWriteTool(registry, async (args) => {
+			runCalls += 1;
+			strictEqual(args.content, "123");
+			return { kind: "ok", output: `${args.path}:${args.content}` };
+		});
+
+		const [tool] = resolveAgentTools({
+			registry,
+			allowedTools: ["write"],
+			mode: "default",
+		});
+		ok(tool);
+
+		const result = await tool.execute("tool-call-coerce", { path: "notes.txt", content: 123 });
+		strictEqual(runCalls, 1);
+		strictEqual(decisions[0]?.args?.content, "123");
+		if (result.content[0]?.type === "text") {
+			strictEqual(result.content[0].text, "notes.txt:123");
+		}
+
+		await rejects(tool.execute("tool-call-invalid", { path: "notes.txt" }), /Validation failed for tool "write"/);
+		strictEqual(runCalls, 1);
+		strictEqual(decisions.length, 1);
+	});
+
 	it("worker registry rejects write-like system modifications before spec.run", async () => {
 		const registry = createWorkerToolRegistry("default");
 		const [tool] = resolveAgentTools({

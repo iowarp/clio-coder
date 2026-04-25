@@ -1,3 +1,5 @@
+import { catalogSupportsXhighForRuntime } from "../catalog.js";
+
 export type ToolCallFormat = "openai" | "anthropic" | "hermes" | "llama3-json" | "mistral" | "qwen" | "xml";
 
 export type ThinkingFormat =
@@ -58,7 +60,12 @@ function availableOpenAICodexThinkingLevels(modelId: string | undefined): Readon
 	const normalized = normalizeModelId(modelId);
 	if (!normalized) return VALID_THINKING_LEVELS;
 	if (normalized === "gpt-5.1-codex-mini") return THINKING_LEVELS_OPENAI_5_1_MINI;
-	if (normalized.startsWith("gpt-5.2") || normalized.startsWith("gpt-5.3") || normalized.startsWith("gpt-5.4")) {
+	if (
+		normalized.startsWith("gpt-5.2") ||
+		normalized.startsWith("gpt-5.3") ||
+		normalized.startsWith("gpt-5.4") ||
+		normalized.startsWith("gpt-5.5")
+	) {
 		return THINKING_LEVELS_OPENAI_5_2_PLUS;
 	}
 	return THINKING_LEVELS_WITHOUT_XHIGH;
@@ -69,6 +76,22 @@ export function availableThinkingLevels(
 	options?: { runtimeId?: string; modelId?: string },
 ): ReadonlyArray<ThinkingLevel> {
 	if (!caps.reasoning) return ["off"];
+	const catalogSupportsXhigh =
+		options?.runtimeId && options.modelId
+			? catalogSupportsXhighForRuntime(options.runtimeId, options.modelId)
+			: undefined;
+	if (catalogSupportsXhigh === false) {
+		if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
+			return availableOpenAICodexThinkingLevels(options?.modelId);
+		}
+		return THINKING_LEVELS_WITHOUT_XHIGH;
+	}
+	if (catalogSupportsXhigh === true) {
+		if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
+			return THINKING_LEVELS_OPENAI_5_2_PLUS;
+		}
+		return VALID_THINKING_LEVELS;
+	}
 	if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
 		return availableOpenAICodexThinkingLevels(options?.modelId);
 	}

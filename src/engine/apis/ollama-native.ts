@@ -23,6 +23,7 @@ import {
 	type Tool as OllamaTool,
 	type ToolCall as OllamaToolCall,
 } from "ollama";
+import { calculateEngineCost } from "../ai.js";
 
 function toolToOllama(tool: Tool): OllamaTool {
 	const fn: OllamaTool["function"] = {
@@ -229,6 +230,7 @@ function runStream(
 					output.usage.input = response.prompt_eval_count ?? 0;
 					output.usage.output = response.eval_count ?? 0;
 					output.usage.totalTokens = output.usage.input + output.usage.output;
+					calculateEngineCost(model, output.usage);
 					doneReason = response.done_reason;
 				}
 			}

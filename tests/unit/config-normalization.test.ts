@@ -94,4 +94,21 @@ describe("core/config normalizeSettings", () => {
 		deepStrictEqual(diff.restartRequired, []);
 		deepStrictEqual(diff.nextTurn, ["retry.enabled"]);
 	});
+
+	it("normalizes terminal settings and classifies them as next-turn updates", () => {
+		const normalized = normalizeSettings({
+			terminal: {
+				showTerminalProgress: true,
+			},
+		});
+		strictEqual(normalized.terminal.showTerminalProgress, true);
+
+		const prev = structuredClone(DEFAULT_SETTINGS);
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.terminal.showTerminalProgress = true;
+		const diff = diffSettings(prev, next);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.restartRequired, []);
+		deepStrictEqual(diff.nextTurn, ["terminal.showTerminalProgress"]);
+	});
 });

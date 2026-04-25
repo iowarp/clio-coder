@@ -567,6 +567,12 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	const theme = trimString(raw.theme);
 	if (theme) settings.theme = theme;
 
+	if (isPlainObject(raw.terminal)) {
+		if (typeof raw.terminal.showTerminalProgress === "boolean") {
+			settings.terminal.showTerminalProgress = raw.terminal.showTerminalProgress;
+		}
+	}
+
 	if (isPlainObject(raw.keybindings)) {
 		// pi-tui's KeybindingsConfig accepts `KeyId | KeyId[]`. Legacy Clio
 		// settings persisted only strings; accept both shapes, drop empty or
