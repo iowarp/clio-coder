@@ -1049,6 +1049,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return streaming;
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			runtime?.agent.abort();
 			retryCountdown?.cancel();
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
