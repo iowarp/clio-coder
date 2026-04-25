@@ -24,6 +24,7 @@ interface ExecOutcome {
 	stderr: string;
 	aborted: boolean;
 	timedOut: boolean;
+	outputCapped: boolean;
 }
 
 function buildToolEnv(): NodeJS.ProcessEnv {
@@ -50,6 +51,7 @@ function execBash(
 		let stdout = "";
 		let stderr = "";
 		let outputBytes = 0;
+		let outputCapped = false;
 
 		const child = spawn("/bin/bash", ["-lc", command], {
 			cwd,
@@ -107,9 +109,11 @@ function execBash(
 		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
 			outputBytes += chunk.byteLength;
 			if (outputBytes > MAX_OUTPUT_BYTES * 2) {
+				outputCapped = true;
 				killChild();
 				return;
 			}
+			if (outputCapped) return;
 			if (target === "stdout") stdout += chunk.toString("utf8");
 			else stderr += chunk.toString("utf8");
 		};
@@ -122,7 +126,7 @@ function execBash(
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
 			signal?.removeEventListener("abort", onAbort);
-			resolve({ error: error as NodeJS.ErrnoException, stdout, stderr, aborted, timedOut });
+			resolve({ error: error as NodeJS.ErrnoException, stdout, stderr, aborted, timedOut, outputCapped });
 		});
 		child.on("close", (code, signalName) => {
 			if (settled) return;
@@ -139,7 +143,7 @@ function execBash(
 							code: code ?? undefined,
 							signal: signalName ?? undefined,
 						} as NodeJS.ErrnoException);
-			resolve({ error, stdout, stderr, aborted, timedOut });
+			resolve({ error, stdout, stderr, aborted, timedOut, outputCapped });
 		});
 	});
 }
@@ -166,12 +170,20 @@ export const bashTool: ToolSpec = {
 		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 60_000;
 		try {
-			const { error, stdout, stderr, aborted, timedOut } = await execBash(args.command, cwd, timeout, options?.signal);
+			const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
+				args.command,
+				cwd,
+				timeout,
+				options?.signal,
+			);
 			if (aborted) {
 				return { kind: "error", message: "bash: command aborted" };
 			}
 			if (timedOut) {
 				return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
+			}
+			if (outputCapped) {
+				return { kind: "error", message: `bash: command output exceeded ${MAX_OUTPUT_BYTES * 2} bytes` };
 			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;

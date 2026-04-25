@@ -101,4 +101,14 @@ describe("bash tool environment", () => {
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
 		ok(elapsedMs < 6500, `expected abort escalation within 6.5s, got ${elapsedMs}ms`);
 	});
+
+	it("reports output cap exits explicitly", async () => {
+		const result = await bashTool.run({
+			command: "yes hello | head -c 3000000",
+			timeout_ms: 10_000,
+		});
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") strictEqual(result.message, "bash: command output exceeded 2000000 bytes");
+	});
 });
