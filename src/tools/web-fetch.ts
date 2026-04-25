@@ -45,7 +45,7 @@ export const webFetchTool: ToolSpec = {
 	),
 	baseActionClass: "read",
 	executionMode: "parallel",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		const urlArg = typeof args.url === "string" ? args.url : null;
 		if (!urlArg) return { kind: "error", message: "web_fetch: missing url argument" };
 
@@ -69,8 +69,30 @@ export const webFetchTool: ToolSpec = {
 		const timeoutMs = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : DEFAULT_TIMEOUT_MS;
 		const maxBytes = typeof args.max_bytes === "number" && args.max_bytes > 0 ? args.max_bytes : DEFAULT_MAX_BYTES;
 
+		const externalSignal = options?.signal;
 		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), timeoutMs);
+		// Track which source caused the abort so the catch can disambiguate.
+		// External (caller-initiated) wins ties because user-initiated cancel
+		// is the more informative error to surface.
+		let externalAborted = false;
+		let timedOut = false;
+
+		const onExternalAbort = (): void => {
+			externalAborted = true;
+			controller.abort();
+		};
+
+		if (externalSignal?.aborted) {
+			onExternalAbort();
+		} else {
+			externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+		}
+
+		const timer = setTimeout(() => {
+			timedOut = true;
+			controller.abort();
+		}, timeoutMs);
+
 		try {
 			const init: Parameters<typeof fetch>[1] = {
 				method,
@@ -89,12 +111,21 @@ export const webFetchTool: ToolSpec = {
 			return { kind: "ok", output: truncate(text, maxBytes) };
 		} catch (err) {
 			if (err instanceof Error && err.name === "AbortError") {
-				return { kind: "error", message: `web_fetch: timeout after ${timeoutMs}ms` };
+				if (externalAborted) {
+					return { kind: "error", message: "web_fetch: request aborted" };
+				}
+				if (timedOut) {
+					return { kind: "error", message: `web_fetch: timeout after ${timeoutMs}ms` };
+				}
+				// Defensive fallback: AbortError with neither flag set should not
+				// happen, but treat it as an external cancel rather than a timeout.
+				return { kind: "error", message: "web_fetch: request aborted" };
 			}
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `web_fetch: ${msg}` };
 		} finally {
 			clearTimeout(timer);
+			externalSignal?.removeEventListener("abort", onExternalAbort);
 		}
 	},
 };
