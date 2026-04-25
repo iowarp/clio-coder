@@ -3,7 +3,7 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## 0.1.2 — Unreleased
+## 0.1.2 — 2026-04-24
 
 ### Added
 
@@ -11,14 +11,37 @@ Keep a Changelog.
   session retry settings. Retry boundaries, cancellation, exhaustion, and
   recovery are visible in the transcript and persisted for resume/fork replay.
 - Tool and bash transcript lines now show clearer running/success/error status,
-  with bash command previews in live and replayed transcripts.
+  with bash command previews and elapsed time in live and replayed transcripts.
+- Settings overlay exposes retry controls (`retry.enabled`, `retry.maxRetries`,
+  `retry.baseDelayMs`, `retry.maxDelayMs`) so users can tune retry behavior
+  without hand-editing settings.yaml.
 
 ### Fixed
 
-- Retrying a transient failure now continues from the existing user turn instead
-  of adding a duplicate user message to model context.
+- Retrying a transient failure now continues from the existing user turn
+  instead of adding a duplicate user message to model context.
 - Cancelling an interactive run now also cancels a pending retry countdown and
   forwards abort signals into bash tool subprocesses.
+- The last failed assistant message is pruned from live model context on every
+  terminal exit of the retry chain so live state matches what /resume and
+  /fork rebuild from the persisted transcript.
+- A retryable error thrown from `agent.prompt` now persists the original error
+  as a visible failed assistant entry instead of surfacing only as a `[retry]`
+  status line.
+- Bash subprocess abort now escalates to SIGKILL after a 5-second SIGTERM
+  grace period so commands that trap or ignore SIGTERM no longer hang the
+  chat-loop.
+- Bash commands that exceed the 2 MB output cap now report
+  `command output exceeded N bytes` instead of a generic SIGTERM termination.
+- /resume, /fork, and /new abort an in-flight agent run before reseating
+  context so a pending retry-chain `agent.continue()` cannot race the new
+  session's messages.
+- Retry status lines render byte-identically in the live transcript and after
+  /resume by sharing a single formatter.
+- Streamed responses that emitted partial text before failing now render both
+  the partial output and the terminal error indicator together.
+- Failed turns with empty usage no longer write zero-token rows to the
+  observability ledger.
 
 ## 0.1.1 — 2026-04-24
 

@@ -40,7 +40,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 	it("--version exits 0 and prints only the clio version", async () => {
 		const result = await runCli(["--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "clio 0.1.1\n");
+		strictEqual(result.stdout, "clio 0.1.2\n");
 	});
 
 	it("--help exits 0 and prints usage", async () => {
