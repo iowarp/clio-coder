@@ -135,3 +135,32 @@ describe("settings overlay compaction controls", () => {
 		strictEqual(settings.compaction.threshold, 0.9);
 	});
 });
+
+describe("settings overlay retry controls", () => {
+	it("surfaces and applies retry controls", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const items = buildSettingItems(settings);
+		const enabled = items.find((item) => item.id === "retry.enabled");
+		const maxRetries = items.find((item) => item.id === "retry.maxRetries");
+		const baseDelayMs = items.find((item) => item.id === "retry.baseDelayMs");
+		const maxDelayMs = items.find((item) => item.id === "retry.maxDelayMs");
+
+		ok(enabled, "retry.enabled row should be visible");
+		ok(maxRetries, "retry.maxRetries row should be visible");
+		ok(baseDelayMs, "retry.baseDelayMs row should be visible");
+		ok(maxDelayMs, "retry.maxDelayMs row should be visible");
+		strictEqual(enabled.currentValue, "true");
+		strictEqual(maxRetries.currentValue, "3");
+		strictEqual(baseDelayMs.currentValue, "2000");
+		strictEqual(maxDelayMs.currentValue, "60000");
+
+		applySettingChange(settings, "retry.enabled", "false");
+		applySettingChange(settings, "retry.maxRetries", "5");
+		applySettingChange(settings, "retry.baseDelayMs", "1000");
+		applySettingChange(settings, "retry.maxDelayMs", "30000");
+		strictEqual(settings.retry.enabled, false);
+		strictEqual(settings.retry.maxRetries, 5);
+		strictEqual(settings.retry.baseDelayMs, 1000);
+		strictEqual(settings.retry.maxDelayMs, 30000);
+	});
+});
