@@ -142,7 +142,7 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		ok(text.includes("[branch summary]"), text);
 		ok(text.includes("The abandoned branch edited src/app.ts."), text);
 		ok(text.includes("you: second"), text);
-		ok(text.includes("tool: bash"), text);
+		ok(text.includes("▸ bash"), text);
 		ok(text.includes("tests passed"), text);
 
 		const replayMessages = buildReplayAgentMessagesFromTurns(parentTurns, { uptoTurnId: a2.id });

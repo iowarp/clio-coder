@@ -145,7 +145,7 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		ok(text.includes("[compaction summary]"), `summary block missing:\n${text}`);
 		ok(text.includes("Old context and answer were summarized."), text);
 		ok(text.includes("you: kept question"), text);
-		ok(text.includes("tool: read"), text);
+		ok(text.includes("▸ read"), text);
 		ok(text.includes("read ok"), text);
 		ok(text.includes("bash: $ npm test"), text);
 		ok(text.includes("tests passed"), text);

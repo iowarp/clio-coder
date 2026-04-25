@@ -12,14 +12,22 @@
  * two surfaces stay byte-identical.
  */
 
+import chalk from "chalk";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
 
-const BODY_INDENT = "  ";
+// Visible width of the rail prefix is 2 columns (`│ `). Width budgets and
+// diff renderers compute against the visible length, not the styled length,
+// so the constant is kept as the plain-text representation.
+const BODY_INDENT_PLAIN = "│ ";
+const BODY_INDENT_VISIBLE_WIDTH = 2;
+const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
 const RESULT_PREVIEW_LIMIT = 4000;
 const RESULT_LINE_LIMIT = 12;
 const ARGS_BODY_LIMIT = 600;
+const STATUS_OK_GLYPH = "✓";
+const STATUS_ERROR_GLYPH = "✗";
 
 export interface ToolExecutionStart {
 	toolCallId: string;
@@ -109,19 +117,46 @@ function summarizeArgs(toolName: string, args: unknown): string {
 	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
 }
 
-function headerLine(toolName: string, args: unknown): string {
-	return `tool: ${toolName}(${summarizeArgs(toolName, args)})`;
+/**
+ * Header status: `undefined` when the call is still in flight (no glyph),
+ * `"ok"` for success (green check), `"error"` for failure (red cross). The
+ * glyph hangs off the right of the header line so the tool name + args read
+ * left-to-right without extra punctuation.
+ */
+type HeaderStatus = "ok" | "error" | undefined;
+
+function statusGlyph(status: HeaderStatus): string {
+	if (status === undefined) return "";
+	return status === "ok" ? ` ${chalk.green(STATUS_OK_GLYPH)}` : ` ${chalk.red(STATUS_ERROR_GLYPH)}`;
+}
+
+function headerLine(toolName: string, args: unknown, status: HeaderStatus): string {
+	const summary = summarizeArgs(toolName, args);
+	const head = `${chalk.dim(HEADER_PREFIX_PLAIN)}${chalk.cyan.bold(toolName)}${chalk.dim("(")}${chalk.cyan(summary)}${chalk.dim(")")}`;
+	return `${head}${statusGlyph(status)}`;
 }
 
 function wrap(line: string, width: number): string[] {
 	return wrapTextWithAnsi(line, width);
 }
 
-function indentAndWrap(line: string, width: number): string[] {
-	return wrap(`${BODY_INDENT}${line}`, width);
+/**
+ * Apply the body rail to a line and wrap it. The rail (`│ `) is dim by
+ * default and red on error so the tool block reads as a single visual unit
+ * even when its result spans many lines.
+ */
+function indentAndWrap(line: string, width: number, isError: boolean): string[] {
+	const railColor = isError ? chalk.red : chalk.dim;
+	const rail = railColor(BODY_INDENT_PLAIN);
+	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
+	const out: string[] = [];
+	for (const wrapped of wrap(line, bodyWidth)) {
+		out.push(`${rail}${wrapped}`);
+	}
+	return out;
 }
 
-function renderArgsBody(args: unknown, width: number): string[] {
+function renderArgsBody(args: unknown, width: number, isError: boolean): string[] {
 	if (isEmptyArgs(args)) return [];
 	let pretty: string;
 	try {
@@ -134,7 +169,7 @@ function renderArgsBody(args: unknown, width: number): string[] {
 	const truncated = truncate(pretty, ARGS_BODY_LIMIT);
 	const out: string[] = [];
 	for (const raw of truncated.split("\n")) {
-		out.push(...indentAndWrap(raw, width));
+		out.push(...indentAndWrap(raw, width, isError));
 	}
 	return out;
 }
@@ -213,12 +248,13 @@ function asEditDiffArgs(args: unknown): EditDiffArgs | null {
 }
 
 function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
-	const bodyWidth = Math.max(1, width - BODY_INDENT.length);
+	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const input: DiffRenderInput = { oldText: args.old_string, newText: args.new_string };
 	if (args.path !== undefined) input.filename = args.path;
+	const rail = chalk.dim(BODY_INDENT_PLAIN);
 	const out: string[] = [];
 	for (const line of renderUnifiedDiff(input, bodyWidth)) {
-		out.push(`${BODY_INDENT}${line}`);
+		out.push(`${rail}${line}`);
 	}
 	return out;
 }
@@ -226,14 +262,14 @@ function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		return indentAndWrap("(no output)", width);
+		return indentAndWrap(chalk.dim("(no output)"), width, isError);
 	}
-	const label = isError ? "error:" : "result:";
-	const out: string[] = [...indentAndWrap(label, width)];
 	const preview = previewResult(unwrapped);
 	const lines = capResultLines(preview.split("\n"));
+	const out: string[] = [];
 	for (const raw of lines) {
-		out.push(...indentAndWrap(raw, width));
+		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? chalk.dim(raw) : raw;
+		out.push(...indentAndWrap(styled, width, isError));
 	}
 	return out;
 }
@@ -241,25 +277,29 @@ function renderResultBlock(result: unknown, isError: boolean, width: number): st
 /**
  * Header-only render for a tool call that has not yet finished. Used by the
  * live chat panel between `tool_execution_start` and `tool_execution_end`.
+ * No status glyph: the absence of the glyph signals "still running".
  */
 export function renderToolCallHeader(call: ToolExecutionStart, width: number): string[] {
-	return wrap(headerLine(call.toolName, call.args), width);
+	return wrap(headerLine(call.toolName, call.args, undefined), width);
 }
 
 /**
  * Full render: header + args body (if non-empty) + result block. Used by
  * the live chat panel on `tool_execution_end` and by the replay path when a
- * tool result can be paired with its prior call's args.
+ * tool result can be paired with its prior call's args. Header carries a
+ * green check on success and a red cross on error so the user can scan tool
+ * outcomes without reading the body.
  */
 export function renderToolExecution(finished: ToolExecutionFinished, width: number): string[] {
+	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, finished.args), width));
+	out.push(...wrap(headerLine(finished.toolName, finished.args, status), width));
 
 	// Edit-tool dispatch: when the tool succeeded and `args` carries the
 	// expected `{ old_string, new_string }` strings, swap the args body and
 	// result block for a unified diff. The header still renders so the user
-	// sees `tool: edit(<path>)`, and the args body is suppressed because
-	// echoing both strings would just duplicate what the diff already shows.
+	// sees `▸ edit(<path>)`, and the args body is suppressed because echoing
+	// both strings would just duplicate what the diff already shows.
 	if (finished.toolName === "edit" && finished.isError === false) {
 		const editArgs = asEditDiffArgs(finished.args);
 		if (editArgs !== null) {
@@ -269,12 +309,12 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 	}
 
 	// Suppress the args body when the header already encodes the salient arg
-	// (e.g. `tool: read(README.md)` already shows the path; rendering
+	// (e.g. `▸ read(README.md)` already shows the path; rendering
 	// `{"path": "README.md"}` underneath is duplicate noise). For tools without
 	// a known primary arg the body still renders so users see what the model
 	// actually invoked.
 	if (capturedPrimaryArg(finished.toolName, finished.args) === null) {
-		out.push(...renderArgsBody(finished.args, width));
+		out.push(...renderArgsBody(finished.args, width, finished.isError));
 	}
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
 	return out;
@@ -286,8 +326,9 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
  * Identical to `renderToolExecution` minus the args body.
  */
 export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args">, width: number): string[] {
+	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, undefined), width));
+	out.push(...wrap(headerLine(finished.toolName, undefined, status), width));
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
 	return out;
 }
