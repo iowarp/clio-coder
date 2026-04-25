@@ -1,4 +1,4 @@
-import { existsSync, type FSWatcher, watch } from "node:fs";
+import { existsSync, type FSWatcher, statSync, watch } from "node:fs";
 import { join, resolve } from "node:path";
 
 export interface FileChangeEvent {
@@ -48,6 +48,15 @@ export function watchRepo(
 		if (existing) clearTimeout(existing);
 		const timer = setTimeout(() => {
 			pending.delete(absPath);
+			// macOS fs-events emit change events for parent directories alongside
+			// the file itself; Linux inotify usually doesn't. Stat-gate so only
+			// real files reach the classifier.
+			try {
+				const stat = statSync(absPath);
+				if (!stat.isFile()) return;
+			} catch {
+				return;
+			}
 			onChange({ path: absPath });
 		}, debounceMs);
 		pending.set(absPath, timer);

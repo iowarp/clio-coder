@@ -20,6 +20,19 @@ function makeDomain(
 	};
 }
 
+// A controllable promise that "hangs" until settle() is called. Replaces the
+// `new Promise(() => {})` pattern, which Node 22's test runner flags as
+// "Promise resolution is still pending but the event loop has already
+// resolved" once the test under test stops awaiting it. We always settle in a
+// finally block.
+function hangingPromise(): { promise: Promise<void>; settle: () => void } {
+	let settle: () => void = () => {};
+	const promise = new Promise<void>((resolve) => {
+		settle = resolve;
+	});
+	return { promise, settle };
+}
+
 describe("core/termination runWithBudget", () => {
 	it("reports completion when op resolves inside the budget", async () => {
 		const completed = await runWithBudget(async () => {
@@ -30,17 +43,16 @@ describe("core/termination runWithBudget", () => {
 
 	it("reports timeout when op exceeds the budget", async () => {
 		const start = Date.now();
-		const completed = await runWithBudget(
-			() =>
-				new Promise<void>(() => {
-					// never resolves
-				}),
-			80,
-		);
-		const elapsed = Date.now() - start;
-		strictEqual(completed, false);
-		// allow generous headroom for slow CI; the point is we didn't block indefinitely.
-		ok(elapsed < 500, `expected prompt return, elapsed=${elapsed}ms`);
+		const hung = hangingPromise();
+		try {
+			const completed = await runWithBudget(() => hung.promise, 80);
+			const elapsed = Date.now() - start;
+			strictEqual(completed, false);
+			// allow generous headroom for slow CI; the point is we didn't block indefinitely.
+			ok(elapsed < 500, `expected prompt return, elapsed=${elapsed}ms`);
+		} finally {
+			hung.settle();
+		}
 	});
 
 	it("swallows rejections and routes them to onError", async () => {
@@ -99,6 +111,7 @@ describe("core/domain-loader stop() timeout cap", () => {
 		const saved = process.env.CLIO_SHUTDOWN_HOOK_MS;
 		process.env.CLIO_SHUTDOWN_HOOK_MS = "80";
 		const stopped: string[] = [];
+		const hung = hangingPromise();
 		const modules: DomainModule[] = [
 			makeDomain("fast-a", {
 				stop: async () => {
@@ -106,10 +119,7 @@ describe("core/domain-loader stop() timeout cap", () => {
 				},
 			}),
 			makeDomain("hanger", {
-				stop: () =>
-					new Promise<void>(() => {
-						// intentionally never resolves
-					}),
+				stop: () => hung.promise,
 			}),
 			makeDomain("fast-b", {
 				stop: async () => {
@@ -128,6 +138,7 @@ describe("core/domain-loader stop() timeout cap", () => {
 			strictEqual(stopped[0], "fast-b");
 			strictEqual(stopped[1], "fast-a");
 		} finally {
+			hung.settle();
 			if (saved === undefined) delete process.env.CLIO_SHUTDOWN_HOOK_MS;
 			else process.env.CLIO_SHUTDOWN_HOOK_MS = saved;
 		}
