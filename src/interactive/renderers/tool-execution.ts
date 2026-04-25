@@ -12,9 +12,25 @@
  * two surfaces stay byte-identical.
  */
 
-import chalk from "chalk";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
+
+// Raw ANSI escape constants. Mirrors the sibling renderers
+// (`branch-summary.ts`, `compaction-summary.ts`) so the tool-execution
+// renderer stays free of the `chalk` dependency. Visible widths are computed
+// against the un-escaped content because `wrapTextWithAnsi` is ANSI-aware.
+const ANSI_RESET = "\u001b[0m";
+const ANSI_BOLD = "\u001b[1m";
+const ANSI_DIM = "\u001b[2m";
+const ANSI_RED = "\u001b[31m";
+const ANSI_GREEN = "\u001b[32m";
+const ANSI_CYAN = "\u001b[36m";
+
+const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
+const red = (text: string): string => `${ANSI_RED}${text}${ANSI_RESET}`;
+const green = (text: string): string => `${ANSI_GREEN}${text}${ANSI_RESET}`;
+const cyan = (text: string): string => `${ANSI_CYAN}${text}${ANSI_RESET}`;
+const cyanBold = (text: string): string => `${ANSI_BOLD}${ANSI_CYAN}${text}${ANSI_RESET}`;
 
 // Visible width of the rail prefix is 2 columns (`│ `). Width budgets and
 // diff renderers compute against the visible length, not the styled length,
@@ -25,9 +41,15 @@ const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
 const RESULT_PREVIEW_LIMIT = 4000;
 const RESULT_LINE_LIMIT = 12;
-const ARGS_BODY_LIMIT = 600;
+const ARGS_BODY_LINE_LIMIT = 24;
 const STATUS_OK_GLYPH = "✓";
 const STATUS_ERROR_GLYPH = "✗";
+
+// Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
+// styled strings per rendered line; by precomputing the dim and error variants
+// once at module scope, repeated rendering of long result blocks stays cheap.
+const RAIL_DIM = dim(BODY_INDENT_PLAIN);
+const RAIL_ERROR = red(BODY_INDENT_PLAIN);
 
 export interface ToolExecutionStart {
 	toolCallId: string;
@@ -43,6 +65,7 @@ export interface ToolExecutionFinished {
 	isError: boolean;
 }
 
+// Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
 function truncate(value: string, limit: number): string {
 	if (value.length <= limit) return value;
 	const cut = Math.max(0, limit - 3);
@@ -127,17 +150,17 @@ type HeaderStatus = "ok" | "error" | undefined;
 
 function statusGlyph(status: HeaderStatus): string {
 	if (status === undefined) return "";
-	return status === "ok" ? ` ${chalk.green(STATUS_OK_GLYPH)}` : ` ${chalk.red(STATUS_ERROR_GLYPH)}`;
+	return status === "ok" ? ` ${green(STATUS_OK_GLYPH)}` : ` ${red(STATUS_ERROR_GLYPH)}`;
 }
 
 function headerLine(toolName: string, args: unknown, status: HeaderStatus): string {
 	const summary = summarizeArgs(toolName, args);
-	const head = `${chalk.dim(HEADER_PREFIX_PLAIN)}${chalk.cyan.bold(toolName)}${chalk.dim("(")}${chalk.cyan(summary)}${chalk.dim(")")}`;
+	const head = `${dim(HEADER_PREFIX_PLAIN)}${cyanBold(toolName)}${dim("(")}${cyan(summary)}${dim(")")}`;
 	return `${head}${statusGlyph(status)}`;
 }
 
 function sublineLead(token: string, rest: string): string {
-	return `${chalk.cyan.bold(token)}${rest}`;
+	return `${cyanBold(token)}${rest}`;
 }
 
 function styleSublineBody(body: string): string {
@@ -187,7 +210,7 @@ function buildSublineBody(toolName: string, args: unknown): string {
 
 function sublineLine(toolName: string, args: unknown, status: HeaderStatus): string {
 	const body = styleSublineBody(buildSublineBody(toolName, args));
-	return `${chalk.dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status)}`;
+	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status)}`;
 }
 
 function wrap(line: string, width: number): string[] {
@@ -197,11 +220,12 @@ function wrap(line: string, width: number): string[] {
 /**
  * Apply the body rail to a line and wrap it. The rail (`│ `) is dim by
  * default and red on error so the tool block reads as a single visual unit
- * even when its result spans many lines.
+ * even when its result spans many lines. Uses the hoisted `RAIL_DIM` /
+ * `RAIL_ERROR` constants so we do not allocate a fresh styled prefix per
+ * wrapped line.
  */
 function indentAndWrap(line: string, width: number, isError: boolean): string[] {
-	const railColor = isError ? chalk.red : chalk.dim;
-	const rail = railColor(BODY_INDENT_PLAIN);
+	const rail = isError ? RAIL_ERROR : RAIL_DIM;
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const out: string[] = [];
 	for (const wrapped of wrap(line, bodyWidth)) {
@@ -210,6 +234,13 @@ function indentAndWrap(line: string, width: number, isError: boolean): string[] 
 	return out;
 }
 
+/**
+ * Render the pretty-printed JSON args body. Splits on `\n` first and then
+ * applies a line cap so the cut never lands inside an open string or before
+ * a closing brace; the previous codepoint-level `truncate` could leave a
+ * malformed JSON snippet that broke copy-paste. Mirrors the line-cap strategy
+ * `renderResultBlock` already uses for tool output.
+ */
 function renderArgsBody(args: unknown, width: number, isError: boolean): string[] {
 	if (isEmptyArgs(args)) return [];
 	let pretty: string;
@@ -220,10 +251,15 @@ function renderArgsBody(args: unknown, width: number, isError: boolean): string[
 	} catch {
 		return [];
 	}
-	const truncated = truncate(pretty, ARGS_BODY_LIMIT);
+	const lines = pretty.split("\n");
+	const visible: string[] =
+		lines.length > ARGS_BODY_LINE_LIMIT
+			? [...lines.slice(0, ARGS_BODY_LINE_LIMIT), `... ${lines.length - ARGS_BODY_LINE_LIMIT} more lines hidden`]
+			: lines;
 	const out: string[] = [];
-	for (const raw of truncated.split("\n")) {
-		out.push(...indentAndWrap(raw, width, isError));
+	for (const raw of visible) {
+		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
+		out.push(...indentAndWrap(styled, width, isError));
 	}
 	return out;
 }
@@ -305,10 +341,9 @@ function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const input: DiffRenderInput = { oldText: args.old_string, newText: args.new_string };
 	if (args.path !== undefined) input.filename = args.path;
-	const rail = chalk.dim(BODY_INDENT_PLAIN);
 	const out: string[] = [];
 	for (const line of renderUnifiedDiff(input, bodyWidth)) {
-		out.push(`${rail}${line}`);
+		out.push(`${RAIL_DIM}${line}`);
 	}
 	return out;
 }
@@ -316,13 +351,13 @@ function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		return indentAndWrap(chalk.dim("(no output)"), width, isError);
+		return indentAndWrap(dim("(no output)"), width, isError);
 	}
 	const preview = previewResult(unwrapped);
 	const lines = capResultLines(preview.split("\n"));
 	const out: string[] = [];
 	for (const raw of lines) {
-		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? chalk.dim(raw) : raw;
+		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
 		out.push(...indentAndWrap(styled, width, isError));
 	}
 	return out;
@@ -338,7 +373,11 @@ export function renderToolCallHeader(call: ToolExecutionStart, width: number): s
 }
 
 function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
-	if (!("isError" in call)) return undefined;
+	// Discriminate on `result` rather than `isError`: only `ToolExecutionFinished`
+	// carries a `result` field, so a `ToolExecutionStart` with a stray
+	// `isError: false` (e.g. from a future event-shape change) cannot trip the
+	// finished path. `result` is the type's load-bearing field.
+	if (!("result" in call)) return undefined;
 	return call.isError ? "error" : "ok";
 }
 
@@ -347,9 +386,30 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
  *   ▸ <body><status>
  * `status` is "" for in-flight, " ✓" green for success, " ✗" red for error.
  * Output is width-wrapped via wrapTextWithAnsi.
+ *
+ * When `expandKey` is supplied AND the call has finished, appends a dim
+ * ` (<key>)` discoverability hint to the first wrapped line so users see how
+ * to expand the collapsed block. Continuation lines stay untouched. The hint
+ * is suppressed for in-flight calls (still running, no useful body to expand
+ * yet) and when `expandKey` is empty/undefined (no key bound, hint would be
+ * misleading). The renderer never imports the keybindings manager directly;
+ * the caller resolves the key string and passes it in to keep this module
+ * pure.
  */
-export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
-	return wrap(sublineLine(call.toolName, call.args, sublineStatus(call)), width);
+export function renderToolSubline(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	expandKey?: string,
+): string[] {
+	const status = sublineStatus(call);
+	const wrapped = wrap(sublineLine(call.toolName, call.args, status), width);
+	if (status === undefined) return wrapped;
+	if (expandKey === undefined || expandKey.length === 0) return wrapped;
+	if (wrapped.length === 0) return wrapped;
+	const first = wrapped[0] ?? "";
+	const hint = dim(` (${expandKey})`);
+	const rewrapped = wrap(`${first}${hint}`, width);
+	return [...rewrapped, ...wrapped.slice(1)];
 }
 
 /**

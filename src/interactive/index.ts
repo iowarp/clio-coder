@@ -635,7 +635,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		selfDev: deps.selfDev,
 	});
-	const chatPanel = createChatPanel();
+	const chatPanel = createChatPanel({
+		// Surface the bound `clio.tool.expand` key on collapsed tool sublines so
+		// users can discover the Ctrl+O toggle. Pulls from the keybindings
+		// manager on every render so user rebinds flow through; the first bound
+		// key wins when multiple are configured.
+		getToolExpandKey: () => {
+			const keys = keybindings.getKeys("clio.tool.expand");
+			const first = keys[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+	});
 	const harness = deps.harness;
 	const footer = buildFooter({
 		modes: deps.modes,
@@ -679,7 +689,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		requestRender: () => tui.requestRender(),
 	});
 	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
-	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.69.0
+	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.70.x
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);

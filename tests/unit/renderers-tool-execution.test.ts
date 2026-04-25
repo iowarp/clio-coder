@@ -348,4 +348,119 @@ describe("renderers/tool-execution", () => {
 			`expected hidden-count marker, got: ${JSON.stringify(plain)}`,
 		);
 	});
+
+	// Fix 4: rail color flips to red when the finished result is an error so
+	// the tool block reads as a single failed unit even at a glance.
+	it("renders the result rail in red when the finished call is an error", () => {
+		const lines = renderToolExecution(
+			{ toolCallId: "t1", toolName: "bash", args: { command: "false" }, result: "boom", isError: true },
+			80,
+		);
+		const railLine = lines.find((line) => stripAnsi(line).startsWith(`${RAIL}boom`));
+		ok(railLine !== undefined, `expected a rail line carrying 'boom', got: ${JSON.stringify(lines.map(stripAnsi))}`);
+		ok(
+			railLine.includes(`${String.fromCharCode(27)}[31m`),
+			`expected red ANSI sequence on rail line, got: ${JSON.stringify(railLine)}`,
+		);
+		strictEqual(stripAnsi(railLine).startsWith(RAIL), true);
+	});
+
+	// Fix 5: discriminate `ToolExecutionStart` vs `ToolExecutionFinished` on
+	// `result`, not `isError`. A start payload that happens to carry a stray
+	// `isError: false` must still take the in-flight (no-glyph) path.
+	it("treats a start payload with a stray isError as in-flight", () => {
+		const start = { toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, isError: false } as unknown;
+		const plain = renderPlainSubline(start as Parameters<typeof renderToolSubline>[0], 80)[0] ?? "";
+		ok(!plain.includes(STATUS_OK), `start payload must not render the ok glyph: ${plain}`);
+		ok(!plain.includes(STATUS_ERROR), `start payload must not render the error glyph: ${plain}`);
+	});
+
+	// Fix 2: the JSON args body splits on \n first, then caps the line count.
+	// The previous codepoint-level truncate could cut inside an open string or
+	// before a closing brace and break copy-paste of the rendered block.
+	it("caps a long JSON args body at the line limit with a hidden-count marker", () => {
+		const args: Record<string, string> = {};
+		for (let i = 0; i < 50; i += 1) args[`field${String(i).padStart(2, "0")}`] = `value-${i}`;
+		const lines = renderToolExecution({ toolCallId: "t1", toolName: "mystery", args, result: "ok", isError: false }, 120);
+		const plain = lines.map(stripAnsi);
+		// The pretty-printed JSON has 52 lines (open brace + 50 fields + close brace),
+		// which exceeds the 24-line cap. The renderer must emit a hidden-count
+		// marker rather than slicing mid-line.
+		const markerIdx = plain.findIndex((l) => / more lines hidden$/.test(l));
+		ok(markerIdx >= 0, `expected hidden-count marker, got: ${JSON.stringify(plain)}`);
+		// Inspect only the args-body region (between the header and the marker
+		// inclusive). The result block sits past the marker. Every body line
+		// must be a complete JSON line, never a mid-line cut: open brace,
+		// `"fieldNN": "value-N",` (indented two spaces), or the marker itself.
+		const headerIdx = plain.findIndex((l) => l.startsWith(`${HEADER_PREFIX}mystery(`));
+		ok(headerIdx >= 0 && markerIdx > headerIdx, `unexpected layout: ${JSON.stringify(plain)}`);
+		for (let i = headerIdx + 1; i <= markerIdx; i += 1) {
+			const line = plain[i] ?? "";
+			ok(line.startsWith(RAIL), `args-body line missing rail: ${JSON.stringify(line)}`);
+			const body = line.slice(RAIL.length);
+			if (body.startsWith("...")) continue;
+			ok(
+				body === "{" || body.startsWith("  "),
+				`args-body line not a complete JSON line (mid-line cut?): ${JSON.stringify(line)}`,
+			);
+		}
+		// Also assert that no malformed JSON terminator (a stray `..."` from
+		// the old codepoint truncate) leaked in.
+		for (let i = headerIdx + 1; i < markerIdx; i += 1) {
+			const line = plain[i] ?? "";
+			ok(!line.includes(`..."`), `mid-string cut leaked into args body: ${JSON.stringify(line)}`);
+		}
+	});
+
+	// Fix 1: the dim ` (<key>)` discoverability hint is appended to the first
+	// wrapped line of finished collapsed sublines. Suppressed on in-flight
+	// (header) and expanded paths and when no key string is supplied.
+	it("appends the expand-key hint to finished sublines when an expandKey is supplied", () => {
+		const lines = renderToolSubline(
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
+			80,
+			"ctrl+o",
+		);
+		const plain = lines.map(stripAnsi);
+		ok(
+			plain.some((l) => l.includes("(ctrl+o)")),
+			`expected expand-key hint, got: ${JSON.stringify(plain)}`,
+		);
+		ok(plain[0]?.includes("(ctrl+o)"), `hint must land on the first line, got: ${JSON.stringify(plain)}`);
+	});
+
+	it("omits the expand-key hint on in-flight sublines even when a key is supplied", () => {
+		const lines = renderToolSubline({ toolCallId: "t1", toolName: "read", args: { path: "a.ts" } }, 80, "ctrl+o");
+		const plain = lines.map(stripAnsi).join("\n");
+		ok(!plain.includes("(ctrl+o)"), `in-flight subline must not carry expand-key hint: ${plain}`);
+	});
+
+	it("omits the expand-key hint when no key is supplied", () => {
+		const lines = renderToolSubline(
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
+			80,
+		);
+		const plain = lines.map(stripAnsi).join("\n");
+		ok(!plain.includes("(ctrl+o)"), `unbound expand-key must suppress hint: ${plain}`);
+	});
+
+	it("omits the expand-key hint on the expanded full-render path (renderToolExecution)", () => {
+		const lines = renderToolExecution(
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
+			80,
+		);
+		const plain = lines.map(stripAnsi).join("\n");
+		ok(!plain.includes("(ctrl+o)"), `expanded render must not carry expand-key hint: ${plain}`);
+	});
+
+	it("respects user rebinds: the supplied key string is rendered verbatim", () => {
+		const lines = renderToolSubline(
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
+			80,
+			"alt+x",
+		);
+		const plain = lines.map(stripAnsi).join("\n");
+		ok(plain.includes("(alt+x)"), `expected rebinding to surface, got: ${plain}`);
+		ok(!plain.includes("(ctrl+o)"), `default key must not leak when a rebind is supplied: ${plain}`);
+	});
 });
