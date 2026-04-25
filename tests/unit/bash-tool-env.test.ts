@@ -102,10 +102,7 @@ describe("bash tool environment", () => {
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
-		ok(
-			elapsedMs >= 1500 + 4_500,
-			`expected abort escalation after the grace period, got ${elapsedMs}ms`,
-		);
+		ok(elapsedMs >= 1500 + 4_500, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
 		ok(elapsedMs < 1500 + 9_000, `expected abort escalation within window, got ${elapsedMs}ms`);
 	});
 
