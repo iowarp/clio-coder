@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ToolName } from "../../src/core/tool-names.js";
@@ -470,5 +470,64 @@ describe("interactive/chat-loop transient retry", () => {
 
 		strictEqual(continueCalls, 0);
 		ok(retryPhases(entries).includes("cancelled"), "retry cancellation should be durable");
+	});
+
+	it("aborts pending retry state before resetting session context", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.retry.baseDelayMs = 60_000;
+		settings.retry.maxRetries = 1;
+		const { session, entries } = sessionHarness();
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+		let continueCalls = 0;
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: modes(),
+			providers: providers(settings),
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			createAgent: () =>
+				({
+					agent: {
+						state: agentState,
+						sessionId: undefined,
+						subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+							subscribeCb = cb;
+							return () => {};
+						},
+						prompt: async (text: string) => {
+							agentState.messages.push(userMessage(text));
+							const failed = errorMessage("network timeout");
+							agentState.messages.push(failed);
+							await subscribeCb?.({ type: "agent_end", messages: [failed] });
+						},
+						continue: async () => {
+							continueCalls += 1;
+						},
+						abort: () => {},
+					},
+					state: () => agentState,
+				}) as unknown as EngineAgentHandle,
+		});
+
+		const submitted = loop.submit("hello");
+		while (!retryPhases(entries).includes("scheduled")) {
+			await new Promise((resolve) => setTimeout(resolve, 1));
+		}
+		const replay = [userMessage("replayed prompt"), assistantMessage("replayed answer")];
+		loop.resetForSession(null, replay);
+		await submitted;
+
+		strictEqual(continueCalls, 0);
+		deepStrictEqual(agentState.messages, replay);
 	});
 });
