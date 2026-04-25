@@ -48,6 +48,7 @@ export function buildSettingItems(
 			? "(none)"
 			: profileEntries.map(([name, profile]) => `${name}->${profile.endpoint ?? "(unset)"}`).join(", ");
 	const compaction = settings.compaction;
+	const retry = settings.retry;
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
 		? availableThinkingLevels(
@@ -143,6 +144,34 @@ export function buildSettingItems(
 			description: "Fraction of context window that triggers auto-compaction.",
 		},
 		{
+			id: "retry.enabled",
+			label: "retry.enabled",
+			currentValue: String(retry.enabled),
+			values: ["true", "false"],
+			description: "Retry transient provider errors on the next submit.",
+		},
+		{
+			id: "retry.maxRetries",
+			label: "retry.maxRetries",
+			currentValue: String(retry.maxRetries),
+			values: ["0", "1", "2", "3", "5", "8"],
+			description: "Retry attempts after the initial failure.",
+		},
+		{
+			id: "retry.baseDelayMs",
+			label: "retry.baseDelayMs",
+			currentValue: String(retry.baseDelayMs),
+			values: ["500", "1000", "2000", "5000", "10000"],
+			description: "Initial retry delay in milliseconds.",
+		},
+		{
+			id: "retry.maxDelayMs",
+			label: "retry.maxDelayMs",
+			currentValue: String(retry.maxDelayMs),
+			values: ["10000", "30000", "60000", "120000", "300000"],
+			description: "Maximum retry delay in milliseconds.",
+		},
+		{
 			id: "keybindings",
 			label: "keybindings",
 			currentValue: formatKeybindingsSummary(options?.keybindings),
@@ -167,9 +196,14 @@ function formatKeybindingsSummary(manager?: ClioKeybindingManager): string {
 	return parts.join(", ");
 }
 
+function applyNonNegativeInteger(value: string, set: (next: number) => void): void {
+	const parsed = Number(value);
+	if (Number.isFinite(parsed) && parsed >= 0) set(Math.floor(parsed));
+}
+
 /**
- * Pure mutation applied in-place. Only handles cycled enum values; every
- * other id is a read-only reference row today.
+ * Pure mutation applied in-place for overlay-editable rows. Every other id is
+ * a read-only reference row today.
  */
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
 	switch (id) {
@@ -199,6 +233,24 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.threshold = parsed;
 			return;
 		}
+		case "retry.enabled":
+			if (value === "true" || value === "false") settings.retry.enabled = value === "true";
+			return;
+		case "retry.maxRetries":
+			applyNonNegativeInteger(value, (next) => {
+				settings.retry.maxRetries = next;
+			});
+			return;
+		case "retry.baseDelayMs":
+			applyNonNegativeInteger(value, (next) => {
+				settings.retry.baseDelayMs = next;
+			});
+			return;
+		case "retry.maxDelayMs":
+			applyNonNegativeInteger(value, (next) => {
+				settings.retry.maxDelayMs = next;
+			});
+			return;
 	}
 }
 
