@@ -11,77 +11,89 @@ import {
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 const stripAnsi = (s: string): string => s.replace(ANSI, "");
 
+const RAIL = "│ ";
+const HEADER_PREFIX = "▸ ";
+const STATUS_OK = "✓";
+const STATUS_ERROR = "✗";
+
 describe("renderers/tool-execution", () => {
-	it("renders header with the most informative arg per tool", () => {
+	it("renders the header with the prefix glyph and the captured primary arg", () => {
 		const lines = renderToolCallHeader({ toolCallId: "t1", toolName: "read", args: { path: "src/foo.ts" } }, 80);
+		const plain = lines.map(stripAnsi);
 		ok(
-			lines.some((l) => stripAnsi(l).startsWith("tool: read(src/foo.ts)")),
-			JSON.stringify(lines),
+			plain.some((l) => l.startsWith(`${HEADER_PREFIX}read(src/foo.ts)`)),
+			JSON.stringify(plain),
 		);
 	});
 
-	it("falls back to full-args summary for unknown tools", () => {
+	it("falls back to a JSON-dump summary in the header for unknown tools", () => {
 		const lines = renderToolCallHeader({ toolCallId: "t1", toolName: "mystery", args: { x: 1, y: "z" } }, 80);
-		ok(stripAnsi(lines[0] ?? "").startsWith("tool: mystery("), JSON.stringify(lines));
+		const plain = stripAnsi(lines[0] ?? "");
+		ok(plain.startsWith(`${HEADER_PREFIX}mystery(`), JSON.stringify(plain));
 	});
 
-	it("renders header with no args parens when args missing", () => {
+	it("renders the header with empty parens when args are absent", () => {
 		const lines = renderToolCallHeader({ toolCallId: "t1", toolName: "ls", args: undefined }, 80);
-		strictEqual(stripAnsi(lines[0] ?? "").startsWith("tool: ls("), true);
+		const plain = stripAnsi(lines[0] ?? "");
+		strictEqual(plain.startsWith(`${HEADER_PREFIX}ls(`), true);
+		ok(plain.includes("()"), JSON.stringify(plain));
 	});
 
-	it("renders result block with success prefix and indentation", () => {
+	it("omits the status glyph for in-flight tool calls", () => {
+		const lines = renderToolCallHeader({ toolCallId: "t1", toolName: "read", args: { path: "a.ts" } }, 80);
+		const plain = stripAnsi(lines[0] ?? "");
+		ok(!plain.includes(STATUS_OK), `header should not carry ok glyph in flight: ${plain}`);
+		ok(!plain.includes(STATUS_ERROR), `header should not carry error glyph in flight: ${plain}`);
+	});
+
+	it("appends a green check to the header on success", () => {
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "read",
-				args: { path: "a.ts" },
-				result: "hello\nworld",
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
 			80,
 		);
 		const plain = lines.map(stripAnsi);
-		ok(plain.includes("  result:"), JSON.stringify(plain));
 		ok(
-			plain.some((l) => l === "  hello"),
-			JSON.stringify(plain),
-		);
-		ok(
-			plain.some((l) => l === "  world"),
+			plain.some((l) => l.startsWith(`${HEADER_PREFIX}read(a.ts)`) && l.endsWith(STATUS_OK)),
 			JSON.stringify(plain),
 		);
 	});
 
-	it("renders error block with error prefix", () => {
+	it("appends a red cross to the header on error", () => {
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "bash",
-				args: { command: "false" },
-				result: "exit 1",
-				isError: true,
-			},
+			{ toolCallId: "t1", toolName: "bash", args: { command: "false" }, result: "exit 1", isError: true },
 			80,
 		);
-		ok(lines.map(stripAnsi).includes("  error:"), JSON.stringify(lines));
+		const plain = lines.map(stripAnsi);
+		ok(
+			plain.some((l) => l.startsWith(`${HEADER_PREFIX}bash(false)`) && l.endsWith(STATUS_ERROR)),
+			JSON.stringify(plain),
+		);
 	});
 
-	it("emits (no output) marker for empty results", () => {
+	it("renders the result body using the rail prefix without a label line", () => {
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "ls",
-				args: { path: "." },
-				result: "",
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hello\nworld", isError: false },
 			80,
 		);
-		ok(lines.map(stripAnsi).includes("  (no output)"), JSON.stringify(lines));
+		const plain = lines.map(stripAnsi);
+		ok(plain.includes(`${RAIL}hello`), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}world`), JSON.stringify(plain));
+		ok(
+			!plain.some((l) => l.includes("result:") || l.includes("error:")),
+			`expected no label line, got: ${JSON.stringify(plain)}`,
+		);
 	});
 
-	it("truncates very long bash commands in the header", () => {
+	it("emits the (no output) marker on the rail when result is empty", () => {
+		const lines = renderToolExecution(
+			{ toolCallId: "t1", toolName: "ls", args: { path: "." }, result: "", isError: false },
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(plain.includes(`${RAIL}(no output)`), JSON.stringify(plain));
+	});
+
+	it("truncates a very long bash command in the header preview", () => {
 		const long = "x".repeat(200);
 		const lines = renderToolCallHeader({ toolCallId: "t1", toolName: "bash", args: { command: long } }, 120);
 		const head = stripAnsi(lines[0] ?? "");
@@ -89,18 +101,13 @@ describe("renderers/tool-execution", () => {
 		ok(head.includes("..."), JSON.stringify(head));
 	});
 
-	it("renderToolResultOnly emits result block without args body", () => {
+	it("renderToolResultOnly emits result block without an args body", () => {
 		const lines = renderToolResultOnly({ toolCallId: "t1", toolName: "read", result: "abc", isError: false }, 80);
 		const plain = lines.map(stripAnsi);
-		ok(
-			plain.some((l) => l.startsWith("tool: read")),
-			JSON.stringify(plain),
-		);
-		ok(plain.includes("  result:"), JSON.stringify(plain));
-		// No args section: there must be no JSON-args body line between header and result.
-		const headerIdx = plain.findIndex((l) => l.startsWith("tool: read"));
-		const resultIdx = plain.indexOf("  result:");
-		strictEqual(resultIdx, headerIdx + 1, JSON.stringify(plain));
+		const headerIdx = plain.findIndex((l) => l.startsWith(`${HEADER_PREFIX}read`));
+		const bodyIdx = plain.indexOf(`${RAIL}abc`);
+		ok(headerIdx >= 0 && bodyIdx >= 0, JSON.stringify(plain));
+		strictEqual(bodyIdx, headerIdx + 1, JSON.stringify(plain));
 	});
 
 	it("renders edit results as a unified diff between old_string and new_string", () => {
@@ -116,7 +123,7 @@ describe("renderers/tool-execution", () => {
 		);
 		const plain = lines.map(stripAnsi);
 		ok(
-			plain.some((l) => l.startsWith("tool: edit(src/foo.ts)")),
+			plain.some((l) => l.startsWith(`${HEADER_PREFIX}edit(src/foo.ts)`)),
 			JSON.stringify(plain),
 		);
 		ok(
@@ -137,16 +144,10 @@ describe("renderers/tool-execution", () => {
 		);
 	});
 
-	it("wraps long result preview lines at the supplied width", () => {
+	it("wraps long result preview lines to the supplied width", () => {
 		const long = "y".repeat(200);
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "read",
-				args: { path: "a.ts" },
-				result: long,
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: long, isError: false },
 			40,
 		);
 		for (const line of lines) {
@@ -154,34 +155,22 @@ describe("renderers/tool-execution", () => {
 		}
 	});
 
-	it("suppresses the args body when the header captured the primary arg", () => {
+	it("suppresses the args body when the header already encodes the primary arg", () => {
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "read",
-				args: { path: "README.md" },
-				result: "hello",
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "read", args: { path: "README.md" }, result: "hello", isError: false },
 			80,
 		);
 		const plain = lines.map(stripAnsi);
-		const headerIdx = plain.findIndex((l) => l.startsWith("tool: read(README.md)"));
-		const resultIdx = plain.indexOf("  result:");
-		ok(headerIdx >= 0 && resultIdx >= 0, JSON.stringify(plain));
-		strictEqual(resultIdx, headerIdx + 1, `expected result block immediately after header, got ${JSON.stringify(plain)}`);
+		const headerIdx = plain.findIndex((l) => l.startsWith(`${HEADER_PREFIX}read(README.md)`));
+		const bodyIdx = plain.indexOf(`${RAIL}hello`);
+		ok(headerIdx >= 0 && bodyIdx >= 0, JSON.stringify(plain));
+		strictEqual(bodyIdx, headerIdx + 1, `expected body to immediately follow header, got ${JSON.stringify(plain)}`);
 		ok(!plain.some((l) => l.includes(`"path"`)), `args body leaked into output: ${JSON.stringify(plain)}`);
 	});
 
 	it("retains the args body for unknown tools so users see what was invoked", () => {
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "mystery",
-				args: { x: 1, y: "z" },
-				result: "ok",
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "mystery", args: { x: 1, y: "z" }, result: "ok", isError: false },
 			80,
 		);
 		const plain = lines.map(stripAnsi);
@@ -203,8 +192,8 @@ describe("renderers/tool-execution", () => {
 			80,
 		);
 		const plain = lines.map(stripAnsi);
-		ok(plain.includes("  hello"), JSON.stringify(plain));
-		ok(plain.includes("  world"), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}hello`), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}world`), JSON.stringify(plain));
 		ok(
 			!plain.some((l) => l.includes(`"content"`) || l.includes(`"type"`)),
 			`envelope leaked into output: ${JSON.stringify(plain)}`,
@@ -226,24 +215,18 @@ describe("renderers/tool-execution", () => {
 			80,
 		);
 		const plain = lines.map(stripAnsi);
-		ok(plain.includes("  first chunk second chunk"), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}first chunk second chunk`), JSON.stringify(plain));
 	});
 
-	it("caps long results at 12 visible lines with a hidden-count marker", () => {
+	it("caps long results at 12 visible lines with a hidden-count marker on the rail", () => {
 		const result = Array.from({ length: 30 }, (_, i) => `line${i + 1}`).join("\n");
 		const lines = renderToolExecution(
-			{
-				toolCallId: "t1",
-				toolName: "read",
-				args: { path: "a.ts" },
-				result,
-				isError: false,
-			},
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result, isError: false },
 			80,
 		);
 		const plain = lines.map(stripAnsi);
-		ok(plain.includes("  line1"), JSON.stringify(plain));
-		ok(plain.includes("  line12"), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}line1`), JSON.stringify(plain));
+		ok(plain.includes(`${RAIL}line12`), JSON.stringify(plain));
 		ok(!plain.some((l) => l.includes("line13")), `expected line13 to be hidden, got: ${JSON.stringify(plain)}`);
 		ok(
 			plain.some((l) => l.includes("18 more lines hidden")),

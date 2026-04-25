@@ -100,7 +100,7 @@ describe("chat-panel active entry update", () => {
 
 		const text = strip(panel.render(80).join("\n"));
 		const preToolIdx = text.indexOf("I'll read the file.");
-		const toolIdx = text.indexOf("tool: read");
+		const toolIdx = text.indexOf("▸ read");
 		const postToolIdx = text.indexOf("The file is a small TUI helper module.");
 		ok(preToolIdx >= 0, `missing pre-tool text: ${text}`);
 		ok(toolIdx > preToolIdx, `tool call must follow pre-tool text: ${text}`);
@@ -138,7 +138,7 @@ describe("chat-panel active entry update", () => {
 		panel.applyEvent({ type: "agent_end", messages: [] });
 
 		const text = strip(panel.render(80).join("\n"));
-		const toolIdx = text.indexOf("tool: read");
+		const toolIdx = text.indexOf("▸ read");
 		const summaryIdx = text.indexOf("Summary here.");
 		ok(toolIdx >= 0, `missing tool line: ${text}`);
 		ok(summaryIdx > toolIdx, `post-tool summary must follow tool call: ${text}`);
@@ -154,9 +154,9 @@ describe("chat-panel active entry update", () => {
 			args: { command: "npm test" },
 		});
 		let text = strip(panel.render(90).join("\n"));
-		ok(text.includes("tool: bash(npm test)"), text);
-		// In flight, no result block yet.
-		ok(!text.includes("  result:"), text);
+		ok(text.includes("▸ bash(npm test)"), text);
+		// In flight, no body rail yet.
+		ok(!text.includes("│ "), text);
 
 		panel.applyEvent({
 			type: "tool_execution_end",
@@ -166,9 +166,8 @@ describe("chat-panel active entry update", () => {
 			isError: false,
 		});
 		text = strip(panel.render(90).join("\n"));
-		ok(text.includes("tool: bash(npm test)"), text);
-		ok(text.includes("  result:"), text);
-		ok(text.includes("  ok"), text);
+		ok(text.includes("▸ bash(npm test) ✓"), text);
+		ok(text.includes("│ ok"), text);
 	});
 
 	it("renders retry countdown and recovery status as a single updating line", () => {

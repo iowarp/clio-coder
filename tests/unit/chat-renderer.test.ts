@@ -74,9 +74,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(text.includes("you: hi"), text);
 		ok(text.includes("Clio Coder: done"), text);
 		ok(text.includes("system: system boot"), text);
-		ok(text.includes("tool: ls(.)"), text);
-		ok(text.includes("  result:"), text);
-		ok(text.includes("  x"), text);
+		ok(text.includes("▸ ls(.)"), text);
+		ok(text.includes("│ x"), text);
 		ok(text.includes("[checkpoint]"), text);
 	});
 
