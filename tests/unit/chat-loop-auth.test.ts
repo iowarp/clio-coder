@@ -76,6 +76,8 @@ describe("interactive/chat-loop auth resolution", () => {
 				set: () => {},
 				remove: () => {},
 			},
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: null,
 		};
 

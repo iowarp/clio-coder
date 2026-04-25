@@ -72,6 +72,8 @@ function buildProvidersAndRuntimes(opts: {
 			clearRuntimeOverrideForTarget: () => {},
 		},
 		credentials: { hasKey: () => false, get: () => null, set: () => {}, remove: () => {} },
+		getDetectedReasoning: () => null,
+		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 	};
 }

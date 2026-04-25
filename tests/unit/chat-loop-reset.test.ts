@@ -85,6 +85,8 @@ describe("interactive/chat-loop resetForSession", () => {
 				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: { hasKey: () => false, get: () => null, set: () => {}, remove: () => {} },
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: null,
 		};
 

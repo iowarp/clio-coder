@@ -97,8 +97,12 @@ export function resolveAvailableThinkingLevels(
 	if (!endpointId) return ["off"];
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
 	if (!status) return ["off"];
-	return availableThinkingLevels(resolveModelCapabilities(status, wireModelId, providers.knowledgeBase), {
-		runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-		...(wireModelId ? { modelId: wireModelId } : {}),
-	});
+	const detectedReasoning = wireModelId ? providers.getDetectedReasoning(endpointId, wireModelId) : null;
+	return availableThinkingLevels(
+		resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning }),
+		{
+			runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+			...(wireModelId ? { modelId: wireModelId } : {}),
+		},
+	);
 }

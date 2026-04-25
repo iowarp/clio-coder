@@ -60,6 +60,8 @@ describe("interactive/chat-loop self-dev prompt", () => {
 				clearRuntimeOverrideForTarget: () => {},
 			},
 			credentials: { hasKey: () => false, get: () => null, set: () => {}, remove: () => {} },
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: null,
 		};
 

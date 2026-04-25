@@ -94,7 +94,11 @@ function resolveOrchestratorTarget(
 		wireModelId,
 		runtimeId: status?.runtime?.id ?? status?.endpoint.runtime ?? "",
 		healthStatus: status?.health.status ?? "unknown",
-		capabilities: status ? resolveModelCapabilities(status, wireModelId, providers.knowledgeBase) : null,
+		capabilities: status
+			? resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
+					detectedReasoning: providers.getDetectedReasoning(endpointId, wireModelId),
+				})
+			: null,
 	};
 }
 

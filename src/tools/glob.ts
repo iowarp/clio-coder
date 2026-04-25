@@ -93,16 +93,11 @@ function walk(root: string, out: WalkEntry[]): void {
 export const globTool: ToolSpec = {
 	name: ToolNames.Glob,
 	description:
-		"Match files and directories with a minimal glob (*, **, ?, [abc]) and return absolute paths sorted by mtime desc.",
-	parameters: Type.Object(
-		{
-			pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
-			path: Type.Optional(
-				Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." }),
-			),
-		},
-		{ additionalProperties: false },
-	),
+		"Find files and directories matching a glob (supports *, **, ?, [abc]). Returns absolute paths sorted by mtime descending.",
+	parameters: Type.Object({
+		pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
+		path: Type.Optional(Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." })),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {

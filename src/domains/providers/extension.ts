@@ -96,7 +96,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
 	const statuses = new Map<string, EndpointStatus>();
+	const reasoningCache = new Map<string, boolean>();
 	const unsubscribeConfigListeners: Array<() => void> = [];
+
+	function reasoningCacheKey(endpointId: string, modelId: string): string {
+		return `${endpointId}:${modelId}`;
+	}
 
 	function readConfig(): ClioSettings {
 		const config = context.getContract<ConfigContract>("config");
@@ -211,10 +216,48 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				// model discovery is best-effort; keep probe as-is.
 			}
 		}
+		if (probeResult.ok && typeof desc.probeReasoning === "function") {
+			const settings = readConfig();
+			const orchestratorTarget = settings.orchestrator.endpoint === endpoint.id ? settings.orchestrator.model : null;
+			const candidateModelId = orchestratorTarget ?? endpoint.defaultModel ?? null;
+			if (candidateModelId) {
+				try {
+					const result = await desc.probeReasoning(endpoint, candidateModelId, probeCtx);
+					reasoningCache.set(reasoningCacheKey(endpoint.id, candidateModelId), result.reasoning);
+					if (result.reasoning) {
+						probeResult = {
+							...probeResult,
+							discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: true },
+						};
+					}
+				} catch {
+					// reasoning detection is best-effort; missing/timeout leaves the cache cold.
+				}
+			}
+		}
 		const status = buildStatus(endpoint, desc, probeResult, previous);
 		statuses.set(endpoint.id, status);
 		context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
 		return status;
+	}
+
+	async function probeReasoningForModelInternal(endpointId: string, modelId: string): Promise<boolean | null> {
+		const settings = readConfig();
+		const endpoint = settings.endpoints.find((ep) => ep.id === endpointId);
+		if (!endpoint) return null;
+		const desc = registry.get(endpoint.runtime);
+		if (!desc || typeof desc.probeReasoning !== "function") return null;
+		const probeCtx: ProbeContext = {
+			credentialsPresent: credentialsPresent(),
+			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+		};
+		try {
+			const result = await desc.probeReasoning(endpoint, modelId, probeCtx);
+			reasoningCache.set(reasoningCacheKey(endpointId, modelId), result.reasoning);
+			return result.reasoning;
+		} catch {
+			return null;
+		}
 	}
 
 	async function probeAll(): Promise<void> {
@@ -287,6 +330,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			statuses.set(endpoint.id, status);
 			context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
 			return status;
+		},
+		getDetectedReasoning(endpointId, modelId) {
+			const cached = reasoningCache.get(reasoningCacheKey(endpointId, modelId));
+			return cached ?? null;
+		},
+		probeReasoningForModel(endpointId, modelId) {
+			return probeReasoningForModelInternal(endpointId, modelId);
 		},
 		credentials: {
 			hasKey(providerId) {

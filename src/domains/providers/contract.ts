@@ -63,6 +63,22 @@ export interface ProvidersContract {
 	disconnectEndpoint(id: string): EndpointStatus | null;
 
 	/**
+	 * Cached reasoning detection result for a given (endpoint, wire model id).
+	 * Returns true/false when a probe has populated the cache, null otherwise.
+	 * Surfaces local-server reasoning capability that is per loaded model and
+	 * cannot be inferred from runtime defaults alone.
+	 */
+	getDetectedReasoning(endpointId: string, modelId: string): boolean | null;
+
+	/**
+	 * Probe an endpoint's loaded model for reasoning support. Caches the result
+	 * keyed by `(endpointId, modelId)` and returns it. Null when the runtime
+	 * lacks `probeReasoning`, the endpoint is unknown, or the probe could not
+	 * reach the server.
+	 */
+	probeReasoningForModel(endpointId: string, modelId: string): Promise<boolean | null>;
+
+	/**
 	 * Shared auth access for both API keys and OAuth credentials. Provider ids
 	 * default to runtime ids, with endpoint-level overrides through
 	 * `auth.apiKeyRef` / `auth.oauthProfile`.

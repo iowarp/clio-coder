@@ -46,20 +46,17 @@ function walkFiles(root: string, current: string, depth: number, out: FileEntry[
 export const grepTool: ToolSpec = {
 	name: ToolNames.Grep,
 	description:
-		"Search files under a path with a JS regex and optional glob filter, returning file:line: content matches.",
-	parameters: Type.Object(
-		{
-			pattern: Type.String({ description: "JavaScript RegExp pattern (no leading slash)." }),
-			path: Type.Optional(Type.String({ description: "Root directory to search. Defaults to the orchestrator cwd." })),
-			glob: Type.Optional(
-				Type.String({ description: "Glob filter for file paths (e.g. **/*.ts). Omit to include every file." }),
-			),
-			context: Type.Optional(
-				Type.Number({ description: "Lines of surrounding context per match. Must be >= 0. Defaults to 0." }),
-			),
-		},
-		{ additionalProperties: false },
-	),
+		"Search files under a directory with a JavaScript regex. Returns file:line: matches, optionally with surrounding context. Filter files with a glob like **/*.ts.",
+	parameters: Type.Object({
+		pattern: Type.String({ description: "JavaScript RegExp pattern (no leading slash)." }),
+		path: Type.Optional(Type.String({ description: "Root directory to search. Defaults to the orchestrator cwd." })),
+		glob: Type.Optional(
+			Type.String({ description: "Glob filter for file paths (e.g. **/*.ts). Omit to include every file." }),
+		),
+		context: Type.Optional(
+			Type.Number({ description: "Lines of surrounding context per match. Must be >= 0. Defaults to 0." }),
+		),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {

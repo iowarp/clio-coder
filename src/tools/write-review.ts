@@ -8,14 +8,12 @@ const ALLOWED_BASENAME = "REVIEW.md";
 
 export const writeReviewTool: ToolSpec = {
 	name: ToolNames.WriteReview,
-	description: "Write a review document to REVIEW.md at the project root. Any other path is rejected.",
-	parameters: Type.Object(
-		{
-			content: Type.String({ description: "Full review contents in Markdown. Must be non-empty." }),
-			path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "REVIEW.md" at the project root.' })),
-		},
-		{ additionalProperties: false },
-	),
+	description:
+		"Write a review document to REVIEW.md at the project root. Any other path is rejected. This is the advise-mode terminal action.",
+	parameters: Type.Object({
+		content: Type.String({ description: "Full review contents in Markdown. Must be non-empty." }),
+		path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "REVIEW.md" at the project root.' })),
+	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {

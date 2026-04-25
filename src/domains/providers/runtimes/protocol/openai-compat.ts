@@ -1,11 +1,13 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 
+import { probeOpenAICompatReasoning } from "../../probe/reasoning.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type {
 	ProbeContext,
 	ProbeResult,
+	ReasoningProbeResult,
 	RuntimeApiFamily,
 	RuntimeAuth,
 	RuntimeDescriptor,
@@ -72,6 +74,24 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			if (!base) return [];
 			if (modelsPath === "/v1/models") return probeOpenAIModels(base, ctx);
 			return probeOpenAIModels(base, ctx);
+		},
+		async probeReasoning(
+			endpoint: EndpointDescriptor,
+			modelId: string,
+			ctx: ProbeContext,
+		): Promise<ReasoningProbeResult> {
+			const base = endpointBase(endpoint);
+			if (!base) return { reasoning: false, latencyMs: 0, error: "endpoint has no url" };
+			const apiKeyEnv = endpoint.auth?.apiKeyEnvVar;
+			const apiKey = apiKeyEnv && ctx.credentialsPresent.has(apiKeyEnv) ? process.env[apiKeyEnv] : undefined;
+			const probeOpts: Parameters<typeof probeOpenAICompatReasoning>[0] = {
+				baseUrl: base,
+				modelId,
+				timeoutMs: Math.max(ctx.httpTimeoutMs, 8000),
+			};
+			if (apiKey) probeOpts.apiKey = apiKey;
+			if (ctx.signal) probeOpts.signal = ctx.signal;
+			return probeOpenAICompatReasoning(probeOpts);
 		},
 		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthesizeOpenAICompatModel({

@@ -144,17 +144,16 @@ function execBash(
 
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
-	description: "Execute a shell command via /bin/bash -lc. Captures stdout and stderr.",
-	parameters: Type.Object(
-		{
-			command: Type.String({ description: "Shell command to run. Piped into bash -lc." }),
-			cwd: Type.Optional(
-				Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
-			),
-			timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds. Defaults to 60000. Must be > 0." })),
-		},
-		{ additionalProperties: false },
-	),
+	description:
+		"Execute a bash command in the current working directory via /bin/bash -lc. Returns stdout and stderr. Optionally provide a timeout in seconds (or timeout_ms in milliseconds) and a cwd. Default timeout is 60 seconds.",
+	parameters: Type.Object({
+		command: Type.String({ description: "Bash command to execute." }),
+		cwd: Type.Optional(
+			Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
+		),
+		timeout: Type.Optional(Type.Number({ description: "Timeout in seconds. Alias of timeout_ms. Must be > 0." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds. Defaults to 60000. Must be > 0." })),
+	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
 	async run(args, options): Promise<ToolResult> {
@@ -162,7 +161,10 @@ export const bashTool: ToolSpec = {
 			return { kind: "error", message: "bash: missing command argument" };
 		}
 		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
-		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 60_000;
+		const timeoutMsArg = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : null;
+		const timeoutSecArg =
+			timeoutMsArg === null && typeof args.timeout === "number" && args.timeout > 0 ? args.timeout * 1000 : null;
+		const timeout = timeoutMsArg ?? timeoutSecArg ?? 60_000;
 		try {
 			const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
 				args.command,
