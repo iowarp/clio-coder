@@ -32,7 +32,7 @@
 		"url": "git+https://github.com/iowarp/clio-coder.git"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.0.0"
 	},
 	"bin": {
 		"clio": "dist/cli/index.js"
@@ -72,7 +72,7 @@
 		"prepublishOnly": "npm run typecheck && npm run lint && npm run build && node scripts/check-dist.mjs"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.2.119",
+		"@anthropic-ai/claude-agent-sdk": "^0.2.120",
 		"@lmstudio/sdk": "1.5.0",
 		"@mariozechner/pi-agent-core": "0.69.0",
 		"@mariozechner/pi-ai": "0.69.0",
@@ -81,13 +81,13 @@
 		"diff": "^8.0.2",
 		"esbuild": "^0.28.0",
 		"ollama": "0.6.3",
-		"typebox": "^1.1.24",
+		"typebox": "^1.1.33",
 		"undici": "^8.1.0",
 		"uuid": "^14.0.0",
 		"yaml": "^2.6.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.12",
+		"@biomejs/biome": "^2.4.13",
 		"@types/diff": "^8.0.0",
 		"@types/node": "^22.19.17",
 		"node-pty": "^1.1.0",

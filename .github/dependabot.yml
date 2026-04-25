@@ -7,7 +7,7 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Chicago
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - dependencies
     commit-message:
@@ -22,6 +22,23 @@ updates:
       # @types/node tracks the Node runtime target. Allow minor/patch only.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+    groups:
+      # Production deps: bundle patch+minor only. Major bumps escape the group
+      # and open as individual PRs so a human reviews them.
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - patch
+          - minor
+      # Dev-tool patch/minor/major bumps go into one PR; these are auto-merged
+      # by .github/workflows/dependabot-automerge.yml once CI passes.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - patch
+          - minor
+          - major
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -29,9 +46,18 @@ updates:
       day: monday
       time: "09:30"
       timezone: America/Chicago
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
     labels:
       - dependencies
     commit-message:
       prefix: ci
       include: scope
+    groups:
+      # All actions in one PR. Patch+minor auto-merged; majors escape for review.
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+          - major
