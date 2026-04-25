@@ -5,66 +5,103 @@ Keep a Changelog.
 
 ## Unreleased
 
-### Added
-
-- Interactive chat now shows an autocomplete dropdown for all built-in slash
-  commands when the prompt starts with `/`, filters command names as the user
-  types, and accepts Tab to complete the selected command.
-
-### Changed
-
-- Slash-command help and autocomplete now present only canonical commands:
-  `/model`, `/quit`, and `/receipts [verify <runId>]` replace duplicate
-  spellings such as `/models`, `/exit`, and `/receipt verify <runId>`.
-
-## 0.1.2 — 2026-04-24
+## 0.1.2 — 2026-04-25
 
 ### Added
 
 - Interactive chat now retries transient provider and stream failures using
   session retry settings. Retry boundaries, cancellation, exhaustion, and
   recovery are visible in the transcript and persisted for resume/fork replay.
-- Tool and bash transcript lines now show clearer running/success/error status,
+- Tool and bash transcript lines now show clearer running/success/error status
   with bash command previews and elapsed time in live and replayed transcripts.
+  Tool segments collapse by default with per-tool sublines, and `Ctrl+O`
+  toggles full-output expansion through the keybindings manager.
+- Edit-tool results render a unified diff preview alongside the structured
+  tool-execution block.
 - Settings overlay exposes retry controls (`retry.enabled`, `retry.maxRetries`,
   `retry.baseDelayMs`, `retry.maxDelayMs`) so users can tune retry behavior
-  without hand-editing settings.yaml.
+  without hand-editing `settings.yaml`.
 - The interactive TUI now opens with a Clio Coder dashboard showing target,
-  model-registry, context, latency, and worker-profile status; interactive
+  model registry, context, latency, and worker-profile status. Interactive
   startup no longer prints a separate legacy banner above the dashboard.
-- `/hotkeys` now supports row selection, a read-only keybinding detail panel,
-  and legacy-terminal warnings when user bindings require CSI-u support.
-- Editor prompt rails now reflect the active mode: default uses the terminal
-  foreground, advise uses amber, and super uses red.
+- `/hotkeys` supports row selection, a read-only keybinding detail panel, and
+  legacy-terminal warnings when user bindings require CSI-u support.
+- Editor prompt rails reflect the active mode: default uses the terminal
+  foreground, advise uses amber, super uses red.
+- Slash-command autocomplete: typing `/` opens a filtered dropdown of every
+  built-in command, and Tab accepts the selected entry.
+- `/resume` picker now shows a one-line conversation preview, message count,
+  and relative time per session.
+- Prompt assembly auto-loads project context files (`AGENTS.md`, `CODEX.md`,
+  `CLAUDE.md`) walking from the working directory upward; pass
+  `--no-context-files` (alias `-nc`) to disable.
+- Run receipts now carry per-tool stats (loops, errors, blocked attempts,
+  parallel batches) emitted by worker telemetry hooks.
+- `clio targets --json` exposes `detectedReasoning` and
+  `reasoningCandidateModelId` so the `/thinking` probe state is observable
+  from the CLI.
+- Compaction summaries persist `triggerReason` and `tokensAfter` in the
+  session entry stream, leaving a queryable trail for every `/compact`.
+- Audit JSONL is now a five-arm discriminated union over `kind`: `tool_call`,
+  `mode_change`, `abort` (sources `dispatch_abort`, `dispatch_drain`,
+  `stream_cancel`), `session_park`, `session_resume`. Safety subscribes on
+  start, unhooks on stop, and fsyncs every row. Integration coverage lives
+  in `tests/integration/audit-{mode-transitions,run-aborts,session-lifecycle}.test.ts`.
+- `tools.web_fetch` honors the abort signal end-to-end; bash abort coverage
+  now includes a success-then-abort guard.
+
+### Changed
+
+- Slash-command help and autocomplete present only canonical commands:
+  `/model`, `/quit`, and `/receipts [verify <runId>]` replace duplicate
+  spellings such as `/models`, `/exit`, and `/receipt verify <runId>`.
+- Provider catalog and cloud defaults realign with `pi-ai` 0.70.2; the
+  `@mariozechner/pi-*` line is pinned to 0.70.x with a current lock at 0.70.2.
+- Worker tool-call path validates once and threads telemetry hooks so the
+  agent loop, dispatch board, and receipts share one source of truth.
+- Mode fragments must now enumerate the matrix tool set; a new regression
+  test pins per-mode tool resolution and toggle re-resolution so future drift
+  between `MODE_MATRIX` and the chat-loop fails fast.
 
 ### Fixed
 
-- Retrying a transient failure now continues from the existing user turn
-  instead of adding a duplicate user message to model context.
-- Cancelling an interactive run now also cancels a pending retry countdown and
+- Retrying a transient failure continues from the existing user turn instead
+  of duplicating it in model context.
+- Cancelling an interactive run cancels any pending retry countdown and
   forwards abort signals into bash tool subprocesses.
-- The last failed assistant message is pruned from live model context on every
-  terminal exit of the retry chain so live state matches what /resume and
-  /fork rebuild from the persisted transcript.
-- A retryable error thrown from `agent.prompt` now persists the original error
-  as a visible failed assistant entry instead of surfacing only as a `[retry]`
-  status line.
-- Bash subprocess abort now escalates to SIGKILL after a 5-second SIGTERM
-  grace period so commands that trap or ignore SIGTERM no longer hang the
-  chat-loop.
-- Bash commands that exceed the 2 MB output cap now report
-  `command output exceeded N bytes` instead of a generic SIGTERM termination.
-- /resume, /fork, and /new abort an in-flight agent run before reseating
-  context so a pending retry-chain `agent.continue()` cannot race the new
-  session's messages.
-- Retry status lines render byte-identically in the live transcript and after
-  /resume by sharing a single formatter.
-- Streamed responses that emitted partial text before failing now render both
+- The last failed assistant message is pruned from live model context on
+  every terminal exit of the retry chain so live state matches what
+  `/resume` and `/fork` rebuild from the persisted transcript.
+- A retryable error thrown from `agent.prompt` persists the original error
+  as a visible failed assistant entry instead of surfacing only as a
+  `[retry]` status line.
+- Bash subprocess abort escalates to `SIGKILL` after a 5-second `SIGTERM`
+  grace period so commands that trap or ignore `SIGTERM` no longer hang
+  the chat-loop.
+- Bash commands that exceed the 2 MB output cap report
+  `command output exceeded N bytes` instead of a generic `SIGTERM`
+  termination.
+- `/resume`, `/fork`, and `/new` abort an in-flight agent run before
+  reseating context so a pending retry-chain `agent.continue()` cannot race
+  the new session's messages.
+- Retry status lines render byte-identically in the live transcript and
+  after `/resume` by sharing a single formatter.
+- Streamed responses that emitted partial text before failing render both
   the partial output and the terminal error indicator together.
 - Failed turns with empty usage no longer write zero-token rows to the
   observability ledger.
-- User-facing product labels now consistently say Clio Coder instead of mixing
+- User-facing product labels consistently say Clio Coder instead of mixing
   lowercase command-name branding into headers, prompts, and status text.
+- Provider hot-swap on a same-endpoint model switch now updates the live
+  agent without rebuilding the chat-loop, and stale model state is hardened
+  on every swap surface.
+- `lmstudio-native` preserves reasoning content, drops `<think>` tags, and
+  forces `toolUse` on tool calls so `/thinking` and `clio run` behave on
+  LM Studio backends.
+- `openai-compat` tool schemas and reasoning probe align so `/thinking`
+  and `clio run` work against local llama.cpp / vLLM / SGLang servers.
+- Dismissing the Alt+S super-mode overlay emits a `request_cancelled`
+  `mode_change` audit row instead of dropping the transition silently.
 
 ## 0.1.1 — 2026-04-24
 
