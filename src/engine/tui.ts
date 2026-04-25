@@ -1,5 +1,5 @@
 /**
- * Re-export the pi-tui 0.69.0 primitives Clio's interactive layer consumes. Adding a
+ * Re-export the pi-tui 0.70.x primitives Clio's interactive layer consumes. Adding a
  * new pi-tui symbol to Clio happens here first (and in the audit document), then the
  * consuming file in src/interactive/ imports it from this module.
  */
@@ -41,7 +41,7 @@ export interface AgentProgressSink {
 }
 
 /**
- * Toggle OSC 9;4 indeterminate progress around an agent run. pi-tui 0.69.0's
+ * Toggle OSC 9;4 indeterminate progress around an agent run. pi-tui 0.70.x's
  * `Terminal.setProgress` emits the sequence terminals like WezTerm, Ghostty,
  * Konsole, and Windows Terminal render as a taskbar/tab progress badge.
  *
