@@ -136,6 +136,60 @@ function headerLine(toolName: string, args: unknown, status: HeaderStatus): stri
 	return `${head}${statusGlyph(status)}`;
 }
 
+function sublineLead(token: string, rest: string): string {
+	return `${chalk.cyan.bold(token)}${rest}`;
+}
+
+function styleSublineBody(body: string): string {
+	const match = /^(?<lead>[^ (]+)(?<rest>.*)$/u.exec(body);
+	if (match?.groups?.lead === undefined || match.groups.rest === undefined) return body;
+	return sublineLead(match.groups.lead, match.groups.rest);
+}
+
+function buildUnknownToolBody(toolName: string, args: unknown): string {
+	return `${toolName}(${summarizeArgs(toolName, args)})`;
+}
+
+function buildFieldSublineBody(
+	args: unknown,
+	key: string,
+	lead: string,
+	options: { wrapInBackticks?: boolean } = {},
+): string | null {
+	const value = readStringField(args, key);
+	if (value === null) return null;
+	const preview = truncate(value, ARG_PREVIEW_LIMIT);
+	if (options.wrapInBackticks) return `${lead}\`${preview}\``;
+	return `${lead}${preview}`;
+}
+
+const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string | null>> = {
+	read: (args) => buildFieldSublineBody(args, "path", "reading "),
+	edit: (args) => buildFieldSublineBody(args, "path", "editing "),
+	write: (args) => buildFieldSublineBody(args, "path", "writing "),
+	ls: (args) => buildFieldSublineBody(args, "path", "listing "),
+	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
+	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
+	glob: (args) => buildFieldSublineBody(args, "pattern", "matching ", { wrapInBackticks: true }),
+	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
+};
+
+/**
+ * Per-tool subline templates. Maps a tool name to a function that builds the
+ * verb-led subline body without the leading glyph and without the trailing
+ * status glyph. Unknown tools fall back to the existing `<name>(<arg>)` form.
+ */
+function buildSublineBody(toolName: string, args: unknown): string {
+	const body = SUBLINE_BODY_BUILDERS[toolName]?.(args);
+	if (body !== null && body !== undefined) return body;
+	return buildUnknownToolBody(toolName, args);
+}
+
+function sublineLine(toolName: string, args: unknown, status: HeaderStatus): string {
+	const body = styleSublineBody(buildSublineBody(toolName, args));
+	return `${chalk.dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status)}`;
+}
+
 function wrap(line: string, width: number): string[] {
 	return wrapTextWithAnsi(line, width);
 }
@@ -281,6 +335,21 @@ function renderResultBlock(result: unknown, isError: boolean, width: number): st
  */
 export function renderToolCallHeader(call: ToolExecutionStart, width: number): string[] {
 	return wrap(headerLine(call.toolName, call.args, undefined), width);
+}
+
+function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
+	if (!("isError" in call)) return undefined;
+	return call.isError ? "error" : "ok";
+}
+
+/**
+ * One-line subline form of a tool call. Format:
+ *   ▸ <body><status>
+ * `status` is "" for in-flight, " ✓" green for success, " ✗" red for error.
+ * Output is width-wrapped via wrapTextWithAnsi.
+ */
+export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+	return wrap(sublineLine(call.toolName, call.args, sublineStatus(call)), width);
 }
 
 /**
