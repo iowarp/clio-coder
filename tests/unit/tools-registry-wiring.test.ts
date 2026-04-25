@@ -11,7 +11,13 @@ import type { Classification, ClassifierCall } from "../../src/domains/safety/ac
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
 import { createAgentProgress } from "../../src/engine/tui.js";
-import { createWorkerToolRegistry, resolveAgentTools } from "../../src/engine/worker-tools.js";
+import {
+	createWorkerToolRegistry,
+	invokeWorkerTool,
+	resolveAgentTools,
+	type ToolFinishEvent,
+	type ToolStartEvent,
+} from "../../src/engine/worker-tools.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 function makeModes(
@@ -97,7 +103,7 @@ describe("engine/worker-tools registry wiring", () => {
 		}
 	});
 
-	it("validates and coerces tool arguments before registry admission", async () => {
+	it("invokeWorkerTool validates and coerces arguments before registry admission", async () => {
 		let runCalls = 0;
 		const decisions: ClassifierCall[] = [];
 		const registry = createRegistry({
@@ -110,23 +116,79 @@ describe("engine/worker-tools registry wiring", () => {
 			return { kind: "ok", output: `${args.path}:${args.content}` };
 		});
 
-		const [tool] = resolveAgentTools({
-			registry,
-			allowedTools: ["write"],
-			mode: "default",
-		});
-		ok(tool);
-
-		const result = await tool.execute("tool-call-coerce", { path: "notes.txt", content: 123 });
+		const result = await invokeWorkerTool(registry, "write", { path: "notes.txt", content: 123 });
 		strictEqual(runCalls, 1);
 		strictEqual(decisions[0]?.args?.content, "123");
 		if (result.content[0]?.type === "text") {
 			strictEqual(result.content[0].text, "notes.txt:123");
 		}
 
-		await rejects(tool.execute("tool-call-invalid", { path: "notes.txt" }), /Validation failed for tool "write"/);
+		await rejects(invokeWorkerTool(registry, "write", { path: "notes.txt" }), /Validation failed for tool "write"/);
 		strictEqual(runCalls, 1);
 		strictEqual(decisions.length, 1);
+	});
+
+	it("emits onStart and onFinish telemetry for ok, blocked, and error outcomes", async () => {
+		let allowWrite = true;
+		const decisions: ClassifierCall[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => allowWrite && action === "write", ["write"]),
+		});
+		let shouldFail = false;
+		registerWriteTool(registry, async () => {
+			if (shouldFail) return { kind: "error", message: "boom" };
+			return { kind: "ok", output: "wrote" };
+		});
+
+		const starts: ToolStartEvent[] = [];
+		const finishes: ToolFinishEvent[] = [];
+		const telemetry = {
+			onStart: (event: ToolStartEvent) => starts.push(event),
+			onFinish: (event: ToolFinishEvent) => finishes.push(event),
+		};
+
+		await invokeWorkerTool(registry, "write", { path: "a", content: "b" }, { telemetry });
+		strictEqual(starts.length, 1);
+		strictEqual(starts[0]?.tool, "write");
+		strictEqual(starts[0]?.mode, "default");
+		strictEqual(finishes.length, 1);
+		strictEqual(finishes[0]?.outcome, "ok");
+		ok(typeof finishes[0]?.durationMs === "number" && finishes[0].durationMs >= 0);
+
+		shouldFail = true;
+		await rejects(invokeWorkerTool(registry, "write", { path: "a", content: "b" }, { telemetry }));
+		strictEqual(finishes.length, 2);
+		strictEqual(finishes[1]?.outcome, "error");
+		strictEqual(finishes[1]?.reason, "boom");
+
+		shouldFail = false;
+		allowWrite = false;
+		await rejects(invokeWorkerTool(registry, "write", { path: "a", content: "b" }, { telemetry }));
+		strictEqual(finishes.length, 3);
+		strictEqual(finishes[2]?.outcome, "blocked");
+	});
+
+	it("threads telemetry through resolveAgentTools so the agent loop path is observable", async () => {
+		const decisions: ClassifierCall[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => true, ["write"]),
+		});
+		registerWriteTool(registry, async () => ({ kind: "ok", output: "wrote" }));
+
+		const finishes: ToolFinishEvent[] = [];
+		const [tool] = resolveAgentTools({
+			registry,
+			mode: "default",
+			telemetry: { onFinish: (event) => finishes.push(event) },
+		});
+		ok(tool);
+
+		await tool.execute("tc-loop", { path: "a", content: "b" });
+		strictEqual(finishes.length, 1);
+		strictEqual(finishes[0]?.tool, "write");
+		strictEqual(finishes[0]?.outcome, "ok");
 	});
 
 	it("worker registry rejects write-like system modifications before spec.run", async () => {
