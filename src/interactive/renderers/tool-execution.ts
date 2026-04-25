@@ -17,7 +17,8 @@ import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
 
 const BODY_INDENT = "  ";
 const ARG_PREVIEW_LIMIT = 60;
-const RESULT_PREVIEW_LIMIT = 600;
+const RESULT_PREVIEW_LIMIT = 4000;
+const RESULT_LINE_LIMIT = 12;
 const ARGS_BODY_LIMIT = 600;
 
 export interface ToolExecutionStart {
@@ -66,6 +67,35 @@ function jsonStringifySafe(value: unknown): string {
 }
 
 /**
+ * Map of known tools to their canonical "primary" arg field. When the arg is
+ * a string the header summarises it directly and the args body is suppressed
+ * because echoing `{"path": "..."}` next to `tool: read(...)` is duplicate
+ * noise. Tools not in this map (or with an unexpected arg shape) fall back
+ * to a JSON-dump summary plus the full args body.
+ */
+const PRIMARY_ARG_FIELD: Record<string, string> = {
+	read: "path",
+	edit: "path",
+	write: "path",
+	ls: "path",
+	bash: "command",
+	grep: "pattern",
+	glob: "pattern",
+	web_fetch: "url",
+};
+
+/**
+ * Returns the captured primary-arg string when the header successfully used a
+ * known tool's canonical arg, otherwise null. Drives the args-body suppression
+ * so `tool: read(README.md)` does not get followed by `{"path": "README.md"}`.
+ */
+function capturedPrimaryArg(toolName: string, args: unknown): string | null {
+	const field = PRIMARY_ARG_FIELD[toolName];
+	if (field === undefined) return null;
+	return readStringField(args, field);
+}
+
+/**
  * Pick the most informative single-line summary of a tool's arguments for
  * the header line. Known tools have a canonical "primary" arg (path,
  * command, pattern, url); unknown tools or unexpected shapes fall back to a
@@ -74,36 +104,8 @@ function jsonStringifySafe(value: unknown): string {
  */
 function summarizeArgs(toolName: string, args: unknown): string {
 	if (isEmptyArgs(args)) return "";
-
-	switch (toolName) {
-		case "read":
-		case "edit":
-		case "write":
-		case "ls": {
-			const path = readStringField(args, "path");
-			if (path !== null) return truncate(path, ARG_PREVIEW_LIMIT);
-			break;
-		}
-		case "bash": {
-			const command = readStringField(args, "command");
-			if (command !== null) return truncate(command, ARG_PREVIEW_LIMIT);
-			break;
-		}
-		case "grep":
-		case "glob": {
-			const pattern = readStringField(args, "pattern");
-			if (pattern !== null) return truncate(pattern, ARG_PREVIEW_LIMIT);
-			break;
-		}
-		case "web_fetch": {
-			const url = readStringField(args, "url");
-			if (url !== null) return truncate(url, ARG_PREVIEW_LIMIT);
-			break;
-		}
-		default:
-			break;
-	}
-
+	const primary = capturedPrimaryArg(toolName, args);
+	if (primary !== null) return truncate(primary, ARG_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
 }
 
@@ -137,6 +139,31 @@ function renderArgsBody(args: unknown, width: number): string[] {
 	return out;
 }
 
+/**
+ * pi-agent-core wraps tool results in `{ content: [{ type: "text", text }, ...] }`
+ * envelopes. Rendering that JSON verbatim hides the actual tool output behind
+ * a sea of escaped quotes. When the envelope shape matches, concatenate the
+ * text segments and treat the join as the real result; otherwise return the
+ * value untouched so callers stringify it normally.
+ */
+function unwrapResultEnvelope(result: unknown): unknown {
+	if (typeof result === "string" || result === null || result === undefined) return result;
+	const blocks = Array.isArray(result)
+		? result
+		: isPlainObject(result) && Array.isArray(result.content)
+			? result.content
+			: null;
+	if (blocks === null) return result;
+	const parts: string[] = [];
+	for (const block of blocks) {
+		if (!isPlainObject(block)) return result;
+		if (block.type !== "text" || typeof block.text !== "string") return result;
+		parts.push(block.text);
+	}
+	if (parts.length === 0) return result;
+	return parts.join("");
+}
+
 function previewResult(result: unknown): string {
 	if (typeof result === "string") return truncate(result, RESULT_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(result), RESULT_PREVIEW_LIMIT);
@@ -146,6 +173,20 @@ function isEmptyResult(result: unknown): boolean {
 	if (result === null || result === undefined) return true;
 	if (typeof result === "string" && result.length === 0) return true;
 	return false;
+}
+
+/**
+ * Cap the body of a result block at `RESULT_LINE_LIMIT` lines. When more
+ * lines would be shown, replaces the overflow with a single
+ * `... <N> more lines hidden` marker so long file reads, grep dumps, and
+ * stack traces stay scannable instead of pushing the conversation off-screen.
+ */
+function capResultLines(lines: ReadonlyArray<string>): string[] {
+	if (lines.length <= RESULT_LINE_LIMIT) return [...lines];
+	const visible = lines.slice(0, RESULT_LINE_LIMIT);
+	const hidden = lines.length - RESULT_LINE_LIMIT;
+	visible.push(`... ${hidden} more lines hidden`);
+	return visible;
 }
 
 interface EditDiffArgs {
@@ -183,13 +224,15 @@ function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 }
 
 function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
-	if (isEmptyResult(result)) {
+	const unwrapped = unwrapResultEnvelope(result);
+	if (isEmptyResult(unwrapped)) {
 		return indentAndWrap("(no output)", width);
 	}
 	const label = isError ? "error:" : "result:";
 	const out: string[] = [...indentAndWrap(label, width)];
-	const preview = previewResult(result);
-	for (const raw of preview.split("\n")) {
+	const preview = previewResult(unwrapped);
+	const lines = capResultLines(preview.split("\n"));
+	for (const raw of lines) {
 		out.push(...indentAndWrap(raw, width));
 	}
 	return out;
@@ -225,7 +268,14 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 		}
 	}
 
-	out.push(...renderArgsBody(finished.args, width));
+	// Suppress the args body when the header already encodes the salient arg
+	// (e.g. `tool: read(README.md)` already shows the path; rendering
+	// `{"path": "README.md"}` underneath is duplicate noise). For tools without
+	// a known primary arg the body still renders so users see what the model
+	// actually invoked.
+	if (capturedPrimaryArg(finished.toolName, finished.args) === null) {
+		out.push(...renderArgsBody(finished.args, width));
+	}
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
 	return out;
 }
