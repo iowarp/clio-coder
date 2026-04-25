@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -217,5 +218,91 @@ describe("interactive/chat-loop tool persistence", () => {
 		strictEqual(appended[4]?.parentId, appended[3]?.id);
 		strictEqual((appended[2]?.payload as { name?: string }).name, "read");
 		strictEqual((appended[3]?.payload as { toolCallId?: string }).toolCallId, "call-1");
+	});
+
+	it("skips zero-usage observability records for failed turns", async () => {
+		const { settings, providers } = createProviders();
+		settings.retry.enabled = false;
+		let recordCalls = 0;
+		const observability: ObservabilityContract = {
+			telemetry: () => ({}) as never,
+			metrics: () => ({}) as never,
+			sessionCost: () => 0,
+			sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 }),
+			costEntries: () => [],
+			recordTokens: () => {
+				recordCalls += 1;
+			},
+		};
+
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: {
+				current: () => "default",
+				setMode: () => "default",
+				cycleNormal: () => "default",
+				visibleTools: () => new Set(),
+				isToolVisible: () => false,
+				isActionAllowed: () => true,
+				requestSuper: () => {},
+				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
+			},
+			providers,
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			observability,
+			createAgent: () => {
+				const agent = {
+					state: agentState,
+					sessionId: undefined as string | undefined,
+					subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+						subscribeCb = cb;
+						return () => {
+							subscribeCb = null;
+						};
+					},
+					prompt: async () => {
+						const failed: AgentMessage = {
+							role: "assistant",
+							content: [{ type: "text", text: "" }],
+							stopReason: "error",
+							errorMessage: "provider returned an error",
+							timestamp: 0,
+							usage: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								totalTokens: 0,
+								cost: { total: 0 },
+							},
+						} as AgentMessage;
+						agentState.messages.push(failed);
+						await subscribeCb?.({ type: "agent_end", messages: [failed] });
+					},
+					abort: () => {},
+				};
+				return {
+					agent: agent as unknown as EngineAgentHandle["agent"],
+					state: () => agent.state,
+				} as unknown as EngineAgentHandle;
+			},
+		});
+
+		await loop.submit("trigger failure");
+
+		strictEqual(recordCalls, 0);
 	});
 });

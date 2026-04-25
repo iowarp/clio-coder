@@ -640,7 +640,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (event.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(event.messages);
-				if (summary.hadUsage) {
+				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
 					deps.observability.recordTokens(target.endpoint.id, target.wireModelId, summary.tokens, summary.costUsd, {
 						input: summary.input,
 						output: summary.output,
