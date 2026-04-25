@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Agentic coding harness for supervised repository work, model-target orchestration, worker dispatch, and self-development.",
 	"keywords": [
 		"ai",
