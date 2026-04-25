@@ -90,7 +90,8 @@ export function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, wid
 	const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
 	const label = `${ANSI_BOLD}[${LABEL}]${ANSI_RESET}`;
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
-	const meta = dim(`~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}`);
+	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
+	const meta = dim(`~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }
 

@@ -124,6 +124,24 @@ describe("renderers/compaction-summary renderCompactionSummaryEntry", () => {
 		match(header, /cont\. at turn t-k/);
 	});
 
+	it("renderCompactionSummaryHeader appends 'via <trigger>' when the entry carries a trigger", () => {
+		for (const trigger of ["auto", "force", "overflow"] as const) {
+			const entry = { ...compactionEntry("x", 100, "t-k"), trigger };
+			const lines = stripLines(renderCompactionSummaryHeader(entry, 200));
+			ok(lines.length >= 1);
+			const header = lines[0] ?? "";
+			match(header, new RegExp(`via ${trigger}`));
+		}
+	});
+
+	it("renderCompactionSummaryHeader omits the trigger suffix on legacy entries with no trigger field", () => {
+		const entry = compactionEntry("x", 100, "t-k");
+		const lines = stripLines(renderCompactionSummaryHeader(entry, 200));
+		ok(lines.length >= 1);
+		const header = lines[0] ?? "";
+		strictEqual(/via /.test(header), false, `legacy header must not invent a trigger suffix, got ${header}`);
+	});
+
 	it("renderCompactionSummaryLine preserves the legacy one-line shape", () => {
 		// chat-loop depends on the exact format; keep the shape stable so the
 		// notice seen by /compact users after slice 12c stays pixel-identical.
