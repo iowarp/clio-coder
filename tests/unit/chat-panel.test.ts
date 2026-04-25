@@ -202,6 +202,22 @@ describe("chat-panel active entry update", () => {
 		ok(text.includes("clio: [error] provider returned 503"), text);
 	});
 
+	it("renders assistant partial text and terminal errors together", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "partial output" }],
+				stopReason: "error",
+				errorMessage: "provider returned 503",
+			} as never,
+		});
+		const text = strip(panel.render(90).join("\n"));
+		ok(text.includes("clio: partial output"), text);
+		ok(text.includes("[error] provider returned 503"), text);
+	});
+
 	it("shows a working placeholder after assistant message_start before first token", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({

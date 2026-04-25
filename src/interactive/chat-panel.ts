@@ -411,7 +411,8 @@ export function createChatPanel(): ChatPanel {
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
 				const assistant = ensureAssistant();
 				if (thinking.length > 0) assistant.thinking = thinking;
-				canonicalizeMessageText(assistant, text.length > 0 ? text : terminalError);
+				if (text.length > 0) canonicalizeMessageText(assistant, text);
+				if (terminalError.length > 0) canonicalizeMessageText(assistant, terminalError);
 				markDirty();
 				return;
 			}
