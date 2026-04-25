@@ -2,8 +2,10 @@ import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import {
+	type AbortSource,
 	type AuditRecord,
 	type AuditWriter,
+	buildAbortAuditRecord,
 	buildAuditRecord,
 	buildModeChangeAuditRecord,
 	openAuditWriter,
@@ -31,12 +33,35 @@ function isModeChangedPayload(value: unknown): value is ModeChangedPayload {
 	return fromOk && typeof p.to === "string" && reasonOk;
 }
 
+interface RunAbortedPayload {
+	source: AbortSource;
+	runId: string | null;
+	startedAt: string | null;
+	elapsedMs: number | null;
+	at?: number;
+	reason?: string;
+}
+
+const ABORT_SOURCES = new Set<AbortSource>(["dispatch_abort", "dispatch_drain", "stream_cancel"]);
+
+function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.source !== "string" || !ABORT_SOURCES.has(p.source as AbortSource)) return false;
+	if (p.runId !== null && typeof p.runId !== "string") return false;
+	if (p.startedAt !== null && typeof p.startedAt !== "string") return false;
+	if (p.elapsedMs !== null && typeof p.elapsedMs !== "number") return false;
+	if (p.reason !== undefined && typeof p.reason !== "string") return false;
+	return true;
+}
+
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let writer: AuditWriter | null = null;
 	let ruleset: DamageControlRuleset | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let recordCount = 0;
 	let unsubscribeModeChanged: (() => void) | null = null;
+	let unsubscribeRunAborted: (() => void) | null = null;
 
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
@@ -59,10 +84,23 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				if (payload.requiresConfirmation !== undefined) recordInput.requiresConfirmation = payload.requiresConfirmation;
 				writeAudit(buildModeChangeAuditRecord(recordInput));
 			});
+			unsubscribeRunAborted = context.bus.on(BusChannels.RunAborted, (payload) => {
+				if (!isRunAbortedPayload(payload)) return;
+				const recordInput: Parameters<typeof buildAbortAuditRecord>[0] = {
+					source: payload.source,
+					runId: payload.runId,
+					startedAt: payload.startedAt,
+					elapsedMs: payload.elapsedMs,
+				};
+				if (payload.reason !== undefined) recordInput.reason = payload.reason;
+				writeAudit(buildAbortAuditRecord(recordInput));
+			});
 		},
 		async stop() {
 			unsubscribeModeChanged?.();
 			unsubscribeModeChanged = null;
+			unsubscribeRunAborted?.();
+			unsubscribeRunAborted = null;
 			await writer?.close();
 			writer = null;
 		},

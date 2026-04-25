@@ -12,6 +12,8 @@ import { clioDataDir } from "../../core/xdg.js";
  * Records are a discriminated union over `kind`:
  *   - `tool_call`: emitted by safety.evaluate() for every classified tool call.
  *   - `mode_change`: emitted on every BusChannels.ModeChanged transition.
+ *   - `abort`: emitted on every BusChannels.RunAborted event so /audit consumers
+ *     can reconstruct who cancelled which run and how long it ran first.
  *
  * Older audit files written before the discriminator existed have rows with
  * the tool_call shape but no `kind` field. Any future reader should treat a
@@ -41,7 +43,20 @@ export interface ModeChangeAuditRecord {
 	requiresConfirmation?: boolean;
 }
 
-export type AuditRecord = ToolCallAuditRecord | ModeChangeAuditRecord;
+export type AbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel";
+
+export interface AbortAuditRecord {
+	kind: "abort";
+	ts: string;
+	correlationId: string;
+	source: AbortSource;
+	runId: string | null;
+	startedAt: string | null;
+	elapsedMs: number | null;
+	reason?: string;
+}
+
+export type AuditRecord = ToolCallAuditRecord | ModeChangeAuditRecord | AbortAuditRecord;
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
@@ -116,6 +131,28 @@ export function buildAuditRecord(input: {
 	};
 	if (input.mode !== undefined) record.mode = input.mode;
 	if (input.args !== undefined) record.args = redactArgs(input.args);
+	return record;
+}
+
+export function buildAbortAuditRecord(input: {
+	source: AbortSource;
+	runId: string | null;
+	startedAt: string | null;
+	elapsedMs: number | null;
+	reason?: string;
+	now?: Date;
+}): AbortAuditRecord {
+	const now = input.now ?? new Date();
+	const record: AbortAuditRecord = {
+		kind: "abort",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		source: input.source,
+		runId: input.runId,
+		startedAt: input.startedAt,
+		elapsedMs: input.elapsedMs,
+	};
+	if (input.reason !== undefined) record.reason = input.reason;
 	return record;
 }
 

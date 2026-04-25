@@ -626,9 +626,23 @@ export function createDispatchBundle(
 		},
 	};
 
+	function emitRunAborted(run: ActiveRun, source: "dispatch_abort" | "dispatch_drain"): void {
+		const startedMs = Date.parse(run.startedAt);
+		const at = Date.now();
+		const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, at - startedMs) : null;
+		context.bus.emit(BusChannels.RunAborted, {
+			source,
+			runId: run.runId,
+			startedAt: run.startedAt,
+			elapsedMs,
+			at,
+		});
+	}
+
 	async function drain(): Promise<void> {
 		const runs = Array.from(active.values());
 		for (const run of runs) {
+			emitRunAborted(run, "dispatch_drain");
 			run.aborted = true;
 			try {
 				run.abort();
@@ -653,6 +667,7 @@ export function createDispatchBundle(
 		abort(runId) {
 			const run = active.get(runId);
 			if (!run) return;
+			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
 			try {
 				run.abort();

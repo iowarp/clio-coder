@@ -23,6 +23,7 @@ export const BusChannels = {
 	DispatchProgress: "dispatch.progress",
 	DispatchCompleted: "dispatch.completed",
 	DispatchFailed: "dispatch.failed",
+	RunAborted: "run.aborted",
 	BudgetAlert: "budget.alert",
 	ShutdownRequested: "shutdown.requested",
 	ShutdownDrained: "shutdown.drained",
