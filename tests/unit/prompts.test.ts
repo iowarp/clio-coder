@@ -133,6 +133,29 @@ describe("prompts/context-files", () => {
 		}
 	});
 
+	it("discovers CLAUDE.md alongside AGENTS.md and CODEX.md in the same cwd", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-claude-"));
+		try {
+			writeFileSync(join(scratch, "AGENTS.md"), "agents body", "utf8");
+			writeFileSync(join(scratch, "CLAUDE.md"), "claude body", "utf8");
+			writeFileSync(join(scratch, "CODEX.md"), "codex body", "utf8");
+
+			const files = loadProjectContextFiles({ cwd: scratch });
+			strictEqual(files.length, 3);
+			// Order is AGENTS.md, CLAUDE.md, CODEX.md so later files override earlier ones.
+			strictEqual(files.map((file) => file.name).join("|"), "AGENTS.md|CLAUDE.md|CODEX.md");
+
+			const rendered = renderProjectContextFiles(files, scratch);
+			ok(rendered.includes("agents body"), rendered);
+			ok(rendered.includes("claude body"), rendered);
+			ok(rendered.includes("codex body"), rendered);
+			ok(rendered.indexOf("agents body") < rendered.indexOf("claude body"), rendered);
+			ok(rendered.indexOf("claude body") < rendered.indexOf("codex body"), rendered);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps parent-child duplicate basenames but de-dupes exact paths", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-dedupe-"));
 		try {
@@ -217,6 +240,42 @@ describe("prompts/compiler context files", () => {
 			});
 			ok(result.text.includes("extension-loaded agents"), result.text);
 			ok(result.fragmentManifest.some((entry) => entry.id === "context.files"));
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("prompt extension suppresses the context.files fragment when noContextFiles is set", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-suppress-"));
+		try {
+			writeFileSync(join(scratch, "AGENTS.md"), "should-not-appear agents", "utf8");
+			writeFileSync(join(scratch, "CLAUDE.md"), "should-not-appear claude", "utf8");
+			writeFileSync(join(scratch, "CODEX.md"), "should-not-appear codex", "utf8");
+			const bundle = createPromptsBundle(
+				{
+					bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
+					getContract: () => undefined,
+				},
+				{ noContextFiles: true },
+			);
+			await bundle.extension.start?.();
+			const result = bundle.contract.compileForTurn({
+				cwd: scratch,
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					contextWindow: 1024,
+					thinkingBudget: "off",
+					turnCount: 1,
+				},
+				overrideMode: "default",
+				safetyLevel: "auto-edit",
+			});
+			strictEqual(result.text.includes("should-not-appear"), false);
+			strictEqual(
+				result.fragmentManifest.some((entry) => entry.id === "context.files"),
+				false,
+			);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}

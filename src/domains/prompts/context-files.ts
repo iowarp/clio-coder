@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-export const DEFAULT_CONTEXT_FILE_NAMES = ["AGENTS.md", "CODEX.md"] as const;
+export const DEFAULT_CONTEXT_FILE_NAMES = ["AGENTS.md", "CLAUDE.md", "CODEX.md"] as const;
 
 export interface ProjectContextFile {
 	path: string;

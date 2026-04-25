@@ -49,6 +49,19 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stdout, /Clio Coder command line/);
 		match(result.stdout, /Usage:/);
 		match(result.stdout, /clio doctor/);
+		match(result.stdout, /--no-context-files/);
+	});
+
+	it("--no-context-files is accepted at the top level without breaking subcommand parsing", async () => {
+		const result = await runCli(["--no-context-files", "--version"], { env: scratch.env });
+		strictEqual(result.code, 0);
+		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
+	});
+
+	it("-nc alias is accepted at the top level", async () => {
+		const result = await runCli(["-nc", "--version"], { env: scratch.env });
+		strictEqual(result.code, 0);
+		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
 	});
 
 	it("configure --help exits 0 and prints target usage", async () => {
