@@ -13,6 +13,15 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      # pi-mono is a vendored engine pinned exactly to 0.69.0 (see CLAUDE.md).
+      # Upgrades require coordinated boundary review and must not be automated.
+      - dependency-name: "@mariozechner/pi-agent-core"
+      - dependency-name: "@mariozechner/pi-ai"
+      - dependency-name: "@mariozechner/pi-tui"
+      # @types/node tracks the Node runtime target. Allow minor/patch only.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
