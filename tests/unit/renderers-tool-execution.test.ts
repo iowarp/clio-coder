@@ -4,6 +4,7 @@ import {
 	renderToolCallHeader,
 	renderToolExecution,
 	renderToolResultOnly,
+	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
 
 // Strip ANSI sequences. Biome bans literal control chars in regex source,
@@ -15,6 +16,10 @@ const RAIL = "│ ";
 const HEADER_PREFIX = "▸ ";
 const STATUS_OK = "✓";
 const STATUS_ERROR = "✗";
+
+function renderPlainSubline(call: Parameters<typeof renderToolSubline>[0], width: number): string[] {
+	return renderToolSubline(call, width).map(stripAnsi);
+}
 
 describe("renderers/tool-execution", () => {
 	it("renders the header with the prefix glyph and the captured primary arg", () => {
@@ -44,6 +49,116 @@ describe("renderers/tool-execution", () => {
 		const plain = stripAnsi(lines[0] ?? "");
 		ok(!plain.includes(STATUS_OK), `header should not carry ok glyph in flight: ${plain}`);
 		ok(!plain.includes(STATUS_ERROR), `header should not carry error glyph in flight: ${plain}`);
+	});
+
+	it("renders a read subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "read", args: { path: "README.md" } }, 80)[0],
+			`${HEADER_PREFIX}reading README.md`,
+		);
+	});
+
+	it("renders an edit subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "edit", args: { path: "src/foo.ts" } }, 80)[0],
+			`${HEADER_PREFIX}editing src/foo.ts`,
+		);
+	});
+
+	it("renders a write subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "write", args: { path: "src/bar.ts" } }, 80)[0],
+			`${HEADER_PREFIX}writing src/bar.ts`,
+		);
+	});
+
+	it("renders an ls subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "ls", args: { path: "." } }, 80)[0],
+			`${HEADER_PREFIX}listing .`,
+		);
+	});
+
+	it("renders a bash subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "bash", args: { command: "npm test" } }, 80)[0],
+			`${HEADER_PREFIX}running \`npm test\``,
+		);
+	});
+
+	it("renders a grep subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "grep", args: { pattern: "TODO" } }, 80)[0],
+			`${HEADER_PREFIX}searching for \`TODO\``,
+		);
+	});
+
+	it("renders a glob subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "glob", args: { pattern: "**/*.ts" } }, 80)[0],
+			`${HEADER_PREFIX}matching \`**/*.ts\``,
+		);
+	});
+
+	it("renders a web_fetch subline", () => {
+		strictEqual(
+			renderPlainSubline({ toolCallId: "t1", toolName: "web_fetch", args: { url: "https://example.com" } }, 80)[0],
+			`${HEADER_PREFIX}fetching https://example.com`,
+		);
+	});
+
+	it("renderToolSubline omits the status glyph for in-flight tool calls", () => {
+		const plain = renderPlainSubline({ toolCallId: "t1", toolName: "read", args: { path: "a.ts" } }, 80)[0] ?? "";
+		ok(!plain.includes(STATUS_OK), `subline should not carry ok glyph in flight: ${plain}`);
+		ok(!plain.includes(STATUS_ERROR), `subline should not carry error glyph in flight: ${plain}`);
+	});
+
+	it("renderToolSubline appends a green check on success", () => {
+		const plain = renderPlainSubline(
+			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result: "hi", isError: false },
+			80,
+		);
+		ok(
+			plain.some((line) => line === `${HEADER_PREFIX}reading a.ts ${STATUS_OK}`),
+			JSON.stringify(plain),
+		);
+	});
+
+	it("renderToolSubline appends a red cross on error", () => {
+		const plain = renderPlainSubline(
+			{ toolCallId: "t1", toolName: "bash", args: { command: "false" }, result: "exit 1", isError: true },
+			80,
+		);
+		ok(
+			plain.some((line) => line === `${HEADER_PREFIX}running \`false\` ${STATUS_ERROR}`),
+			JSON.stringify(plain),
+		);
+	});
+
+	it("truncates a very long bash command in the subline preview", () => {
+		const long = "x".repeat(200);
+		const plain = renderPlainSubline({ toolCallId: "t1", toolName: "bash", args: { command: long } }, 120)[0] ?? "";
+		ok(plain.includes("..."), JSON.stringify(plain));
+		ok(!plain.includes(long), JSON.stringify(plain));
+	});
+
+	it("renderToolSubline falls back to the header form for unknown tools", () => {
+		const plain = renderPlainSubline({ toolCallId: "t1", toolName: "mystery", args: { x: 1 } }, 80)[0] ?? "";
+		strictEqual(plain, `${HEADER_PREFIX}mystery({"x":1})`);
+	});
+
+	it("wraps tool sublines to the supplied width", () => {
+		const lines = renderPlainSubline(
+			{
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda" },
+			},
+			24,
+		);
+		for (const line of lines) {
+			ok(line.length <= 24, `line too wide: ${JSON.stringify(line)}`);
+		}
 	});
 
 	it("appends a green check to the header on success", () => {
