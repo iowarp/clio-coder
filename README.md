@@ -52,7 +52,7 @@
 
 Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
 
-Status: **v0.1.2** — an experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, and tightens tool/bash transcript rendering. Pin to the tag if you need a stable target.
+Status: **v0.1.2** — an experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, tightens tool/bash transcript rendering, and lands a structured `audit.jsonl` so post-mortem replay can reconstruct what happened in a session. Pin to the tag if you need a stable target.
 
 Recent focus in this dev cycle:
 
@@ -64,6 +64,13 @@ Recent focus in this dev cycle:
   command previews
 - durable, entry-aware transcript replay for resume, fork, summaries, bash,
   and tool activity
+- structured `<dataDir>/audit/YYYY-MM-DD.jsonl` rows for every classified
+  tool call, mode transition (including dismissed Alt+S elevations), run
+  abort (Esc-on-stream, dispatch.abort, shutdown drain), and session
+  park/resume so post-mortem replay knows which session was active and what
+  stopped it
+- per-tool stats in run receipts (loops, errors, blocked attempts, parallel
+  batches), plus `detectedReasoning` exposure in `clio targets --json`
 - deterministic project context loading from `AGENTS.md` and `CODEX.md`
 - target-oriented auth and configuration flows across the CLI and interactive UI
 - target controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
@@ -405,7 +412,7 @@ Recent contributor work also added a self-dev harness in `src/harness/` with hot
 
 ## Roadmap
 
-- **v0.1.2 (current)**: experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, and tightens tool/bash transcript rendering with status and elapsed time.
+- **v0.1.2 (current)**: experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, tightens tool/bash transcript rendering with status and elapsed time, and ships a five-arm `audit.jsonl` (tool calls, mode transitions, run aborts, session park/resume) so sessions leave a complete on-disk trail.
 - **v0.1.1**: experimental patch release. Durable transcript replay now preserves rich session entries across resume and fork, and interactive prompts load deterministic `AGENTS.md`/`CODEX.md` project context.
 - **v0.1.0-exp**: experimental first release. Target-first config, interactive TUI, receipts and cost ledger, auth and configure flows, model and session controls, dispatchable workers, and an early self-dev harness.
 - **Next**: broader runtime hardening, MCP support, richer agent library, deeper developer ergonomics, and more complete context/resource loading.
