@@ -28,6 +28,7 @@ export interface ClioAppKeybindings {
 	"clio.model.cycleForward": true;
 	"clio.model.cycleBackward": true;
 	"clio.harness.restart": true;
+	"clio.tool.expand": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -91,6 +92,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.harness.restart": {
 		defaultKeys: "ctrl+r",
 		description: "Restart the dev harness when engine edits are pending",
+	},
+	"clio.tool.expand": {
+		defaultKeys: "ctrl+o",
+		description: "Toggle the most recent tool segment between collapsed subline and full body",
 	},
 } as const satisfies KeybindingDefinitions;
 

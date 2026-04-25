@@ -35,8 +35,8 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 10 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 10);
+	it("app id list is exactly 11 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 11);
 	});
 });
 

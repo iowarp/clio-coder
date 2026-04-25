@@ -145,8 +145,12 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("Clio Coder: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
-	it("renders bash tool call header before completion and result block after", () => {
+	it("renders bash tool calls as collapsed sublines by default", () => {
 		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] } as never,
+		});
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "bash-1",
@@ -154,8 +158,7 @@ describe("chat-panel active entry update", () => {
 			args: { command: "npm test" },
 		});
 		let text = strip(panel.render(90).join("\n"));
-		ok(text.includes("▸ bash(npm test)"), text);
-		// In flight, no body rail yet.
+		ok(text.includes("▸ running `npm test`"), text);
 		ok(!text.includes("│ "), text);
 
 		panel.applyEvent({
@@ -166,8 +169,18 @@ describe("chat-panel active entry update", () => {
 			isError: false,
 		});
 		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("▸ running `npm test` ✓"), text);
+		ok(!text.includes("│ ok"), text);
+
+		strictEqual(panel.toggleLastToolExpanded(), true);
+		text = strip(panel.render(90).join("\n"));
 		ok(text.includes("▸ bash(npm test) ✓"), text);
 		ok(text.includes("│ ok"), text);
+	});
+
+	it("toggleLastToolExpanded returns false when no tool segment exists", () => {
+		const panel = createChatPanel();
+		strictEqual(panel.toggleLastToolExpanded(), false);
 	});
 
 	it("renders retry countdown and recovery status as a single updating line", () => {
@@ -412,6 +425,7 @@ describe("createCoalescingChatRenderer", () => {
 			appendUser: () => {},
 			appendReplayBlock: () => {},
 			reset: () => {},
+			toggleLastToolExpanded: () => false,
 			applyEvent: (event: ChatLoopEvent) => {
 				applied.push(event);
 			},
