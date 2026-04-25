@@ -4,13 +4,22 @@ import { join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
 
 /**
- * NDJSON audit writer. One line per classified tool call, fsynced after each
+ * NDJSON audit writer. One line per recorded event, fsynced after each
  * write, file rotated on local-date rollover. Write errors never throw back to
  * the caller because safety must not kill the hot path; they are logged to
  * stderr with a `[clio:audit]` prefix for post-mortem review.
+ *
+ * Records are a discriminated union over `kind`:
+ *   - `tool_call`: emitted by safety.evaluate() for every classified tool call.
+ *   - `mode_change`: emitted on every BusChannels.ModeChanged transition.
+ *
+ * Older audit files written before the discriminator existed have rows with
+ * the tool_call shape but no `kind` field. Any future reader should treat a
+ * missing `kind` as `tool_call`.
  */
 
-export interface AuditRecord {
+export interface ToolCallAuditRecord {
+	kind: "tool_call";
 	ts: string;
 	correlationId: string;
 	tool: string;
@@ -20,6 +29,19 @@ export interface AuditRecord {
 	reasons: ReadonlyArray<string>;
 	args?: unknown;
 }
+
+export interface ModeChangeAuditRecord {
+	kind: "mode_change";
+	ts: string;
+	correlationId: string;
+	from: string | null;
+	to: string;
+	reason: string | null;
+	requestedBy?: string;
+	requiresConfirmation?: boolean;
+}
+
+export type AuditRecord = ToolCallAuditRecord | ModeChangeAuditRecord;
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
@@ -81,9 +103,10 @@ export function buildAuditRecord(input: {
 	mode?: string;
 	args?: unknown;
 	now?: Date;
-}): AuditRecord {
+}): ToolCallAuditRecord {
 	const now = input.now ?? new Date();
-	const record: AuditRecord = {
+	const record: ToolCallAuditRecord = {
+		kind: "tool_call",
 		ts: now.toISOString(),
 		correlationId: newCorrelationId(),
 		tool: input.tool,
@@ -93,6 +116,28 @@ export function buildAuditRecord(input: {
 	};
 	if (input.mode !== undefined) record.mode = input.mode;
 	if (input.args !== undefined) record.args = redactArgs(input.args);
+	return record;
+}
+
+export function buildModeChangeAuditRecord(input: {
+	from: string | null;
+	to: string;
+	reason: string | null;
+	requestedBy?: string;
+	requiresConfirmation?: boolean;
+	now?: Date;
+}): ModeChangeAuditRecord {
+	const now = input.now ?? new Date();
+	const record: ModeChangeAuditRecord = {
+		kind: "mode_change",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		from: input.from,
+		to: input.to,
+		reason: input.reason,
+	};
+	if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;
+	if (input.requiresConfirmation !== undefined) record.requiresConfirmation = input.requiresConfirmation;
 	return record;
 }
 
