@@ -127,6 +127,37 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		);
 	});
 
+	it("targets --json exposes detectedReasoning and reasoningCandidateModelId so /thinking probe state is observable from CLI", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		seedTargets(join(scratch.dir, "config"));
+		const result = await runCli(["targets", "--json"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0);
+		const parsed = JSON.parse(result.stdout) as Array<{
+			detectedReasoning: boolean | null;
+			reasoningCandidateModelId: string | null;
+			target: { id: string; defaultModel?: string | null };
+		}>;
+		ok(Array.isArray(parsed) && parsed.length > 0, "expected at least one seeded target");
+		for (const row of parsed) {
+			ok(
+				Object.hasOwn(row, "detectedReasoning"),
+				`target ${row.target.id} must include detectedReasoning (was ${JSON.stringify(row)})`,
+			);
+			ok(
+				Object.hasOwn(row, "reasoningCandidateModelId"),
+				`target ${row.target.id} must include reasoningCandidateModelId`,
+			);
+			// Without --probe the reasoning cache stays cold; assert the
+			// negative-detection signal so a regression that swallows the
+			// cache miss surfaces here.
+			strictEqual(
+				row.detectedReasoning,
+				null,
+				`without --probe the reasoning cache must report null, got ${row.detectedReasoning}`,
+			);
+		}
+	});
+
 	it("agents --json lists built-in recipes", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const result = await runCli(["agents", "--json"], { env: scratch.env, timeoutMs: 20_000 });
