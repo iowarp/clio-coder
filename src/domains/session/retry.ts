@@ -25,21 +25,14 @@
  * runtime.
  */
 
-/**
- * User-facing retry configuration. Mirrors pi-coding-agent's RetrySettings
- * so settings migrated from pi-mono retain their meaning.
- */
-export interface RetrySettings {
-	/** When false, `/compact`-on-overflow still runs but transient retries are skipped. */
-	enabled: boolean;
-	/** Upper bound on retry attempts. Attempt 1 is the first retry after the initial failure. */
-	maxRetries: number;
-	/** Starting delay in milliseconds. Subsequent attempts double this until `maxDelayMs`. */
-	baseDelayMs: number;
-	/** Cap for the per-attempt wait. Prevents `2 ** N` blowout on long retry chains. */
-	maxDelayMs: number;
-}
+import type { RetrySettings } from "../../core/defaults.js";
 
+export type { RetrySettings } from "../../core/defaults.js";
+
+/**
+ * User-facing retry configuration lives in core defaults so settings and the
+ * session retry helper share one structural type.
+ */
 export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
 	enabled: true,
 	maxRetries: 3,
