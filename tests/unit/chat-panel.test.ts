@@ -171,6 +171,16 @@ describe("chat-panel active entry update", () => {
 		text = strip(panel.render(90).join("\n"));
 		ok(text.includes("▸ running `npm test` ✓"), text);
 		ok(!text.includes("│ ok"), text);
+
+		strictEqual(panel.toggleLastToolExpanded(), true);
+		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("▸ bash(npm test) ✓"), text);
+		ok(text.includes("│ ok"), text);
+	});
+
+	it("toggleLastToolExpanded returns false when no tool segment exists", () => {
+		const panel = createChatPanel();
+		strictEqual(panel.toggleLastToolExpanded(), false);
 	});
 
 	it("renders retry countdown and recovery status as a single updating line", () => {
@@ -415,6 +425,7 @@ describe("createCoalescingChatRenderer", () => {
 			appendUser: () => {},
 			appendReplayBlock: () => {},
 			reset: () => {},
+			toggleLastToolExpanded: () => false,
 			applyEvent: (event: ChatLoopEvent) => {
 				applied.push(event);
 			},
