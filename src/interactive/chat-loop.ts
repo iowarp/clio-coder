@@ -658,6 +658,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				tools,
 				messages: priorMessages,
 			},
+			maxRetryDelayMs: retrySettings().maxDelayMs,
 			onPayload: async (payload, currentModel) =>
 				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
 			getApiKey: async () => {
@@ -1073,6 +1074,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			agentRuntime.agent.state.tools = resolveRuntimeTools(deps);
+			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 
 			streaming = true;

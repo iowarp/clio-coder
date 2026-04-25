@@ -1,6 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
-import { createEngineAi } from "../../engine/ai.js";
 import { type AuthTarget, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
+import { catalogProviderForRuntime, listCatalogModelsForRuntime } from "./catalog.js";
 import { getRuntimeRegistry } from "./registry.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
@@ -26,22 +26,10 @@ export interface ResolvedProviderReference {
 	authTarget: AuthTarget;
 }
 
-const engineAi = createEngineAi();
-
-const MODEL_PROVIDER_BY_RUNTIME_ID = new Map<string, Parameters<typeof engineAi.listModels>[0]>([
-	["anthropic", "anthropic"],
-	["bedrock", "amazon-bedrock"],
-	["google", "google"],
-	["groq", "groq"],
-	["mistral", "mistral"],
-	["openai", "openai"],
-	["openai-codex", "openai-codex"],
-	["openrouter", "openrouter"],
-]);
-
 const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	anthropic: "Anthropic API",
 	bedrock: "Amazon Bedrock",
+	deepseek: "DeepSeek API",
 	google: "Google Gemini API",
 	groq: "Groq API",
 	mistral: "Mistral API",
@@ -92,23 +80,19 @@ function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
 	if (runtime.auth === "oauth") return "subscription";
 	if (runtime.kind === "subprocess" || runtime.kind === "sdk") return "cli-runtime";
-	if (MODEL_PROVIDER_BY_RUNTIME_ID.has(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
+	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
 	}
 	return "local-http";
 }
 
 export function listKnownModelsForRuntime(runtimeId: string): string[] {
-	const provider = MODEL_PROVIDER_BY_RUNTIME_ID.get(runtimeId);
-	if (!provider) {
+	const catalogModels = listCatalogModelsForRuntime(runtimeId);
+	if (catalogModels.length === 0) {
 		const runtime = getRuntimeIfRegistered(runtimeId);
 		return runtime?.knownModels ? [...runtime.knownModels] : [];
 	}
-	try {
-		return engineAi.listModels(provider).map((model) => model.id);
-	} catch {
-		return [];
-	}
+	return catalogModels.map((model) => model.id);
 }
 
 function getRuntimeIfRegistered(runtimeId: string): RuntimeDescriptor | null {

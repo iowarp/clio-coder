@@ -10,6 +10,7 @@
  */
 
 import {
+	type Api,
 	type AssistantMessage,
 	fauxAssistantMessage,
 	fauxToolCall,
@@ -17,10 +18,20 @@ import {
 	getProviders,
 	type KnownProvider,
 	type Model,
+	calculateCost as piCalculateCost,
 	getModel as piGetModel,
+	getOverflowPatterns as piGetOverflowPatterns,
+	isContextOverflow as piIsContextOverflow,
+	parseJsonWithRepair as piParseJsonWithRepair,
+	parseStreamingJson as piParseStreamingJson,
 	stream as piStream,
+	supportsXhigh as piSupportsXhigh,
+	validateToolArguments as piValidateToolArguments,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
+	type Tool,
+	type ToolCall,
+	type Usage,
 } from "@mariozechner/pi-ai";
 
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
@@ -54,6 +65,56 @@ export function createEngineAi(): EngineAi {
 			}
 		},
 	};
+}
+
+function emptyUsage(): Usage {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+export function supportsEngineXhigh(model: Model<Api>): boolean {
+	return piSupportsXhigh(model);
+}
+
+export function isEngineContextOverflow(errorMessage: string, contextWindow?: number): boolean {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: "clio",
+		provider: "clio",
+		model: "unknown",
+		usage: emptyUsage(),
+		stopReason: "error",
+		errorMessage,
+		timestamp: Date.now(),
+	};
+	return piIsContextOverflow(message, contextWindow);
+}
+
+export function getEngineOverflowPatterns(): RegExp[] {
+	return piGetOverflowPatterns();
+}
+
+export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unknown {
+	return piValidateToolArguments(tool, toolCall);
+}
+
+export function calculateEngineCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
+	return piCalculateCost(model, usage);
+}
+
+export function parseEngineJsonWithRepair<T>(json: string): T {
+	return piParseJsonWithRepair<T>(json);
+}
+
+export function parseEngineStreamingJson<T = Record<string, unknown>>(partialJson: string | undefined): T {
+	return piParseStreamingJson<T>(partialJson);
 }
 
 /**

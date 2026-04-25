@@ -18,6 +18,7 @@ import geminiCli from "./cli-stub/gemini-cli.js";
 import openCodeCli from "./cli-stub/opencode-cli.js";
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
+import deepseek from "./cloud/deepseek.js";
 import google from "./cloud/google.js";
 import groq from "./cloud/groq.js";
 import mistral from "./cloud/mistral.js";
@@ -39,6 +40,7 @@ import openaiCompat from "./protocol/openai-compat.js";
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	anthropic,
 	bedrock,
+	deepseek,
 	google,
 	groq,
 	mistral,

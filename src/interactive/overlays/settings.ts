@@ -49,6 +49,7 @@ export function buildSettingItems(
 			: profileEntries.map(([name, profile]) => `${name}->${profile.endpoint ?? "(unset)"}`).join(", ");
 	const compaction = settings.compaction;
 	const retry = settings.retry;
+	const terminal = settings.terminal;
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
 	const availableThinking = status
 		? availableThinkingLevels(
@@ -172,6 +173,13 @@ export function buildSettingItems(
 			description: "Maximum retry delay in milliseconds.",
 		},
 		{
+			id: "terminal.showTerminalProgress",
+			label: "terminal.showTerminalProgress",
+			currentValue: String(terminal.showTerminalProgress),
+			values: ["false", "true"],
+			description: "Emit OSC 9;4 progress badges during agent turns.",
+		},
+		{
 			id: "keybindings",
 			label: "keybindings",
 			currentValue: formatKeybindingsSummary(options?.keybindings),
@@ -250,6 +258,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			applyNonNegativeInteger(value, (next) => {
 				settings.retry.maxDelayMs = next;
 			});
+			return;
+		case "terminal.showTerminalProgress":
+			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
 			return;
 	}
 }

@@ -29,6 +29,7 @@ import type {
 	ToolCall,
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 
 function normalizeBaseUrl(url: string): string {
 	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;
@@ -264,6 +265,7 @@ function runStream(
 					const entry = pending.get(callId);
 					if (!entry) return;
 					entry.argBuffer += fragment;
+					entry.toolCallSlot.arguments = parseStreamingArgs(entry.argBuffer);
 					stream.push({
 						type: "toolcall_delta",
 						contentIndex: entry.contentIndex,
@@ -279,7 +281,7 @@ function runStream(
 					entry.toolCallSlot.arguments =
 						req.arguments && typeof req.arguments === "object"
 							? (req.arguments as Record<string, unknown>)
-							: safeParseArgs(entry.argBuffer);
+							: parseFinalArgs(entry.argBuffer);
 					if (req.id) entry.toolCallSlot.id = req.id;
 					stream.push({
 						type: "toolcall_end",
@@ -307,6 +309,7 @@ function runStream(
 			output.usage.input = result.stats.promptTokensCount ?? 0;
 			output.usage.output = result.stats.predictedTokensCount ?? 0;
 			output.usage.totalTokens = result.stats.totalTokensCount ?? output.usage.input + output.usage.output;
+			calculateEngineCost(model, output.usage);
 			output.stopReason = mapStopReason(result.stats.stopReason, aborted);
 			if (output.stopReason === "error" || output.stopReason === "aborted") {
 				output.errorMessage = `prediction stopped: ${result.stats.stopReason ?? "unknown"}`;
@@ -327,13 +330,25 @@ function runStream(
 	return stream;
 }
 
-function safeParseArgs(raw: string): Record<string, unknown> {
+function asRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function parseStreamingArgs(raw: string): Record<string, unknown> {
 	if (!raw) return {};
 	try {
-		const parsed = JSON.parse(raw);
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+		return asRecord(parseEngineStreamingJson<unknown>(raw));
 	} catch {
 		return {};
+	}
+}
+
+function parseFinalArgs(raw: string): Record<string, unknown> {
+	if (!raw) return {};
+	try {
+		return asRecord(parseEngineJsonWithRepair<unknown>(raw));
+	} catch {
+		return parseStreamingArgs(raw);
 	}
 }
 

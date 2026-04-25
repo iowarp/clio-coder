@@ -10,6 +10,7 @@ import {
 	type OAuthLoginCallbacks,
 	type OAuthProviderId,
 	type OAuthProviderInterface,
+	findEnvKeys as piFindEnvKeys,
 	getEnvApiKey as piGetEnvApiKey,
 } from "@mariozechner/pi-ai";
 import {
@@ -26,6 +27,14 @@ export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProvi
 export function getEngineEnvApiKey(providerId: string): string | undefined {
 	try {
 		return piGetEnvApiKey(providerId);
+	} catch {
+		return undefined;
+	}
+}
+
+export function findEngineEnvKeys(providerId: string): string[] | undefined {
+	try {
+		return piFindEnvKeys(providerId);
 	} catch {
 		return undefined;
 	}

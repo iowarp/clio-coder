@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
+import { buildProviderSupportEntry } from "../../../src/domains/providers/support.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
 
 const VALID_API_FAMILIES = new Set<string>([
@@ -122,5 +123,91 @@ describe("providers/runtimes built-in descriptors", () => {
 		const ids = engineAi.listModels("openai-codex").map((m) => m.id);
 		ok(ids.includes("gpt-5.4-mini"), `expected gpt-5.4-mini in openai-codex models, got: ${ids.join(",")}`);
 		ok(ids.includes("gpt-5.4"), `expected gpt-5.4 in openai-codex models, got: ${ids.join(",")}`);
+		ok(ids.includes("gpt-5.5"), `expected gpt-5.5 in openai-codex models, got: ${ids.join(",")}`);
+	});
+
+	it("deepseek follows the pi-ai provider catalog", async () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		const desc = byId.get("deepseek");
+		ok(desc, "missing deepseek runtime");
+		strictEqual(desc.auth, "api-key");
+		strictEqual(desc.credentialsEnvVar, "DEEPSEEK_API_KEY");
+		strictEqual(desc.apiFamily, "openai-completions");
+
+		const { createEngineAi } = await import("../../../src/engine/ai.js");
+		const engineAi = createEngineAi();
+		const ids = engineAi.listModels("deepseek").map((m) => m.id);
+		ok(ids.includes("deepseek-v4-flash"), `expected deepseek-v4-flash in deepseek models, got: ${ids.join(",")}`);
+		ok(ids.includes("deepseek-v4-pro"), `expected deepseek-v4-pro in deepseek models, got: ${ids.join(",")}`);
+
+		const model = desc.synthesizeModel({ id: "ds", runtime: "deepseek" }, "deepseek-v4-pro", null);
+		strictEqual(model.provider, "deepseek");
+		strictEqual(model.api, "openai-completions");
+		strictEqual(model.baseUrl, "https://api.deepseek.com");
+		strictEqual(model.reasoning, true);
+		strictEqual(model.contextWindow, 1000000);
+		strictEqual(model.maxTokens, 384000);
+		strictEqual(model.cost.input, 1.74);
+		strictEqual((model.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat, "deepseek");
+
+		const support = buildProviderSupportEntry(desc);
+		strictEqual(support.group, "cloud-api");
+		ok(support.modelHints.includes("deepseek-v4-pro"));
+	});
+
+	it("cloud runtime synthesis starts from pi-ai catalog metadata", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+
+		const openai = byId.get("openai");
+		ok(openai, "missing openai runtime");
+		const gpt55 = openai.synthesizeModel({ id: "oa", runtime: "openai" }, "gpt-5.5", null);
+		strictEqual(gpt55.baseUrl, "https://api.openai.com/v1");
+		strictEqual(gpt55.reasoning, true);
+		strictEqual(gpt55.maxTokens, 128000);
+		strictEqual(gpt55.cost.output, 30);
+
+		const groq = byId.get("groq");
+		ok(groq, "missing groq runtime");
+		const gptOss = groq.synthesizeModel({ id: "gq", runtime: "groq" }, "openai/gpt-oss-120b", null);
+		strictEqual(gptOss.reasoning, true);
+		strictEqual(gptOss.contextWindow, 131072);
+		strictEqual(gptOss.maxTokens, 65536);
+		strictEqual(gptOss.cost.input, 0.15);
+
+		const mistral = byId.get("mistral");
+		ok(mistral, "missing mistral runtime");
+		const mistralLarge = mistral.synthesizeModel({ id: "mi", runtime: "mistral" }, "mistral-large-latest", null);
+		strictEqual(mistralLarge.contextWindow, 262144);
+		strictEqual(mistralLarge.maxTokens, 262144);
+		ok(mistralLarge.input.includes("image"));
+	});
+
+	it("endpoint overrides still win over catalog-backed cloud synthesis", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		const openrouter = byId.get("openrouter");
+		ok(openrouter, "missing openrouter runtime");
+
+		const model = openrouter.synthesizeModel(
+			{
+				id: "or",
+				runtime: "openrouter",
+				url: "https://proxy.example.test/v1",
+				auth: { headers: { "x-clio-test": "1" } },
+				pricing: { input: 9, output: 8, cacheRead: 7, cacheWrite: 6 },
+				capabilities: { vision: false, contextWindow: 123456, maxTokens: 789 },
+			},
+			"openai/gpt-5.4",
+			null,
+		);
+
+		strictEqual(model.baseUrl, "https://proxy.example.test/v1");
+		strictEqual(model.headers?.["x-clio-test"], "1");
+		strictEqual(model.cost.input, 9);
+		strictEqual(model.cost.output, 8);
+		strictEqual(model.cost.cacheRead, 7);
+		strictEqual(model.cost.cacheWrite, 6);
+		strictEqual(model.contextWindow, 123456);
+		strictEqual(model.maxTokens, 789);
+		strictEqual(model.input.includes("image"), false);
 	});
 });

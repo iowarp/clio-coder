@@ -46,4 +46,35 @@ describe("providers/runtimes/local synthesis", () => {
 		strictEqual(compat?.supportsStrictMode, false);
 		strictEqual(compat?.thinkingFormat, "qwen-chat-template");
 	});
+
+	it("maps DeepSeek-R1 reasoning to pi-ai's deepseek thinking format", () => {
+		const kb: KnowledgeBaseHit = {
+			entry: {
+				family: "deepseek-r1",
+				matchPatterns: ["deepseek-r1"],
+				capabilities: {
+					chat: true,
+					tools: true,
+					reasoning: true,
+					thinkingFormat: "deepseek-r1",
+					vision: false,
+					audio: false,
+					embeddings: false,
+					rerank: false,
+					fim: false,
+					contextWindow: 128000,
+					maxTokens: 32768,
+				},
+			},
+			matchKind: "family",
+		};
+		const model = llamacppCompletionRuntime.synthesizeModel(
+			{ id: "mini", runtime: "llamacpp-completion", url: "http://mini:8080" },
+			"DeepSeek-R1",
+			kb,
+		);
+
+		const compat = model.compat as OpenAICompletionsCompat | undefined;
+		strictEqual(compat?.thinkingFormat, "deepseek");
+	});
 });

@@ -54,6 +54,10 @@ export interface RetrySettings {
 	maxDelayMs: number;
 }
 
+export interface TerminalSettings {
+	showTerminalProgress: boolean;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -80,6 +84,9 @@ export const DEFAULT_SETTINGS = {
 		concurrency: "auto" as "auto" | number,
 	},
 	theme: "default",
+	terminal: {
+		showTerminalProgress: false,
+	} as TerminalSettings,
 	// User keybinding overrides. Each id maps to a single KeyId string or a
 	// list of KeyIds. The interactive keybinding manager reads this table
 	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
@@ -209,6 +216,10 @@ budget:
   concurrency: auto           # auto or a positive integer
 
 theme: default
+terminal:
+  # OSC 9;4 terminal progress badges are opt-in; some terminals surface these
+  # in taskbars/tabs and keep them visible for long-running agent work.
+  showTerminalProgress: false
 keybindings: {}
 
 # Transient session state. Clio Coder rewrites this block; do not hand-edit.

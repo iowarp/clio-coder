@@ -1,4 +1,5 @@
 import { mergeCapabilities } from "./capabilities.js";
+import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { EndpointStatus } from "./contract.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
@@ -28,13 +29,17 @@ export function resolveModelCapabilities(
 ): CapabilityFlags {
 	if (!status.runtime) return status.capabilities;
 	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
+	const baseCapabilities = capabilitiesFromCatalogModel(
+		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
+		modelId ? getCatalogModelForRuntime(status.runtime.id, modelId) : undefined,
+	);
 	if (status.probeCapabilities === undefined) {
 		if (!modelId || modelId === normalizedModelId(status.endpoint.defaultModel)) {
 			return status.capabilities;
 		}
 		const kbHit = knowledgeBase?.lookup(modelId) ?? null;
 		return mergeCapabilities(
-			status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
+			baseCapabilities,
 			kbHit?.entry.capabilities ?? null,
 			null,
 			status.endpoint.capabilities ?? null,
@@ -42,7 +47,7 @@ export function resolveModelCapabilities(
 	}
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 	return mergeCapabilities(
-		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
+		baseCapabilities,
 		kbHit?.entry.capabilities ?? null,
 		status.probeCapabilities ?? null,
 		status.endpoint.capabilities ?? null,

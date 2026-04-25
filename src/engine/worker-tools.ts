@@ -18,6 +18,7 @@ import { formatRejection } from "../domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
+import { validateEngineToolArguments } from "./ai.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
 export interface ResolveAgentToolsInput {
@@ -27,20 +28,24 @@ export interface ResolveAgentToolsInput {
 }
 
 function toAgentTool(spec: ToolSpec, registry: ToolRegistry): AgentTool<TSchema> {
+	const validateArguments = (params: unknown): Record<string, unknown> =>
+		validateEngineToolArguments(
+			{ name: spec.name, description: spec.description, parameters: spec.parameters },
+			{ type: "toolCall", id: "", name: spec.name, arguments: params as Record<string, unknown> },
+		) as Record<string, unknown>;
+
 	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
 		parameters: spec.parameters,
 		label: spec.name,
+		prepareArguments: validateArguments,
 		async execute(
 			_toolCallId: string,
 			params: unknown,
 			signal?: AbortSignal,
 		): Promise<AgentToolResult<{ kind: "ok" } | { kind: "error" }>> {
-			const args = (params && typeof params === "object" ? (params as Record<string, unknown>) : {}) as Record<
-				string,
-				unknown
-			>;
+			const args = validateArguments(params);
 			const verdict = await registry.invoke({ tool: spec.name, args }, signal ? { signal } : undefined);
 			if (verdict.kind === "ok") {
 				if (verdict.result.kind === "ok") {

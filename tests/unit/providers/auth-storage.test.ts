@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, describe, it } from "node:test";
 
 import { type AuthStorageData, createMemoryAuthStorage } from "../../../src/domains/providers/auth/index.js";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../../../src/engine/oauth.js";
 
 const TEST_PROVIDER_ID = "clio-test-oauth";
+const ORIGINAL_DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 const TEST_PROVIDER: OAuthProviderInterface = {
 	id: TEST_PROVIDER_ID,
@@ -40,6 +41,13 @@ afterEach(() => {
 	} catch {
 		// provider may already be absent
 	}
+	if (ORIGINAL_DEEPSEEK_API_KEY === undefined) Reflect.deleteProperty(process.env, "DEEPSEEK_API_KEY");
+	else process.env.DEEPSEEK_API_KEY = ORIGINAL_DEEPSEEK_API_KEY;
+});
+
+after(() => {
+	if (ORIGINAL_DEEPSEEK_API_KEY === undefined) Reflect.deleteProperty(process.env, "DEEPSEEK_API_KEY");
+	else process.env.DEEPSEEK_API_KEY = ORIGINAL_DEEPSEEK_API_KEY;
 });
 
 describe("providers/auth in-memory storage", () => {
@@ -50,6 +58,16 @@ describe("providers/auth in-memory storage", () => {
 		const resolved = await auth.resolveApiKey("openai");
 		strictEqual(resolved.apiKey, "sk-memory");
 		strictEqual(auth.status("openai").source, "stored-api-key");
+	});
+
+	it("labels pi-ai provider environment keys by variable name", async () => {
+		process.env.DEEPSEEK_API_KEY = "sk-deepseek";
+		const auth = createMemoryAuthStorage();
+
+		const resolved = await auth.resolveApiKey("deepseek");
+		strictEqual(resolved.apiKey, "sk-deepseek");
+		strictEqual(resolved.source, "environment");
+		strictEqual(resolved.detail, "DEEPSEEK_API_KEY");
 	});
 
 	it("refreshes expired oauth credentials and persists the refreshed token", async () => {

@@ -694,7 +694,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
 	const unsubscribeProgress = deps.chat.onEvent((event) => {
-		if (event.type === "agent_start") agentProgress.start();
+		const settings = deps.getSettings?.();
+		const showProgress = settings?.terminal.showTerminalProgress ?? false;
+		if (event.type === "agent_start" && showProgress) agentProgress.start();
 		else if (event.type === "agent_end") agentProgress.stop();
 	});
 	// Repaint the footer whenever an assistant message completes so the

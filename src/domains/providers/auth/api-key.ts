@@ -1,4 +1,4 @@
-import { getEngineEnvApiKey } from "../../../engine/oauth.js";
+import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/oauth.js";
 
 export interface EnvironmentApiKeyResolution {
 	apiKey: string | undefined;
@@ -15,6 +15,12 @@ export function resolveEnvironmentApiKey(providerId: string, explicitEnvVar?: st
 		const fromExplicit = process.env[explicitEnvVar]?.trim();
 		if (fromExplicit && fromExplicit.length > 0) {
 			return { apiKey: fromExplicit, source: explicitEnvVar };
+		}
+	}
+	for (const envVar of findEngineEnvKeys(providerId) ?? []) {
+		const fromKnownEnv = process.env[envVar]?.trim();
+		if (fromKnownEnv && fromKnownEnv.length > 0) {
+			return { apiKey: fromKnownEnv, source: envVar };
 		}
 	}
 	const fromKnownProvider = getEngineEnvApiKey(providerId)?.trim();
