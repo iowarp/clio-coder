@@ -10,7 +10,6 @@
  * with the chat-pane width; the function returns ANSI-styled, width-wrapped
  * lines ready to splice into the transcript.
  */
-import chalk from "chalk";
 import { structuredPatch } from "diff";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
 
@@ -21,6 +20,21 @@ export interface DiffRenderInput {
 	/** Lines of context around each hunk. Defaults to 3. */
 	context?: number;
 }
+
+// Raw ANSI escape constants. Mirrors the sibling renderer
+// (`tool-execution.ts`) so the diff renderer stays free of the `chalk`
+// dependency. Visible widths are computed against the un-escaped content
+// because `wrapTextWithAnsi` is ANSI-aware.
+const ANSI_RESET = "[0m";
+const ANSI_DIM = "[2m";
+const ANSI_RED = "[31m";
+const ANSI_GREEN = "[32m";
+const ANSI_CYAN = "[36m";
+
+const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
+const red = (text: string): string => `${ANSI_RED}${text}${ANSI_RESET}`;
+const green = (text: string): string => `${ANSI_GREEN}${text}${ANSI_RESET}`;
+const cyan = (text: string): string => `${ANSI_CYAN}${text}${ANSI_RESET}`;
 
 const DEFAULT_FILENAME = "file";
 const DEFAULT_CONTEXT = 3;
@@ -47,8 +61,9 @@ function wrap(line: string, width: number): string[] {
  * of an empty diff.
  */
 export function renderUnifiedDiff(input: DiffRenderInput, width: number): string[] {
+	const safeWidth = Math.max(1, width);
 	if (input.oldText === input.newText) {
-		return wrap(NO_CHANGES_LINE, width);
+		return wrap(NO_CHANGES_LINE, safeWidth);
 	}
 
 	const filename = input.filename ?? DEFAULT_FILENAME;
@@ -57,23 +72,23 @@ export function renderUnifiedDiff(input: DiffRenderInput, width: number): string
 	const patch = structuredPatch(filename, filename, input.oldText, input.newText, undefined, undefined, { context });
 
 	const out: string[] = [];
-	out.push(...wrap(chalk.dim.white(`--- a/${filename}`), width));
-	out.push(...wrap(chalk.dim.white(`+++ b/${filename}`), width));
+	out.push(...wrap(dim(`--- a/${filename}`), safeWidth));
+	out.push(...wrap(dim(`+++ b/${filename}`), safeWidth));
 
 	for (const hunk of patch.hunks) {
 		const header = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
-		out.push(...wrap(chalk.cyan(header), width));
+		out.push(...wrap(cyan(header), safeWidth));
 		for (const raw of hunk.lines) {
 			const marker = raw.charAt(0);
 			let styled: string;
 			if (marker === "-") {
-				styled = chalk.red(raw);
+				styled = red(raw);
 			} else if (marker === "+") {
-				styled = chalk.green(raw);
+				styled = green(raw);
 			} else {
 				styled = raw;
 			}
-			out.push(...wrap(styled, width));
+			out.push(...wrap(styled, safeWidth));
 		}
 	}
 
