@@ -78,11 +78,29 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
 	summary: string;
 }
 
+/**
+ * Why a compaction run fired. Persisted on CompactionSummaryEntry so post-mortem
+ * tools can distinguish a threshold-driven shrink from a user-issued /compact
+ * and from a context-overflow retry.
+ *   - "auto"      : pre-submit threshold trigger via shouldCompact().
+ *   - "force"     : explicit /compact slash command or CLIO_FORCE_COMPACT=1.
+ *   - "overflow"  : compact-and-retry path after a context overflow error.
+ */
+export type CompactionTrigger = "auto" | "force" | "overflow";
+
 export interface CompactionSummaryEntry extends BaseSessionEntry {
 	kind: "compactionSummary";
 	summary: string;
 	tokensBefore: number;
 	firstKeptTurnId: string;
+	/** What kicked off this compaction. Optional so v1 entries written before the field existed still parse. */
+	trigger?: CompactionTrigger;
+	/** Estimated context tokens after the compaction bridge message replaced the older turns. */
+	tokensAfter?: number;
+	/** Count of session entries that fed the summarization prompt. Mirrors CompactResult.messagesSummarized. */
+	messagesSummarized?: number;
+	/** True when the cut split a turn (caller may want to render a banner). */
+	isSplitTurn?: boolean;
 }
 
 export interface SessionInfoEntry extends BaseSessionEntry {

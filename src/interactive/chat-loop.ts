@@ -17,7 +17,7 @@ import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compact
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import { calculateContextTokens } from "../domains/session/compaction/tokens.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { SessionEntry } from "../domains/session/entries.js";
+import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import {
 	computeRetryDelayMs,
 	createRetryCountdown,
@@ -133,7 +133,7 @@ export interface CreateChatLoopDeps {
 	 * Both sites share an AutoCompactionTrigger so two fires in the same tick
 	 * coalesce onto one summarization call.
 	 */
-	autoCompact?: (instructions?: string) => Promise<CompactResult | null>;
+	autoCompact?: (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
 	/** Optional prompt supplement installed when Clio is editing its own repository. */
@@ -826,7 +826,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	): Promise<void> => {
 		let compacted = false;
 		try {
-			compacted = await runAutoCompact(agentRuntime, true);
+			compacted = await runAutoCompact(agentRuntime, true, undefined, "overflow");
 		} catch (compactErr) {
 			emitNotice(
 				`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
@@ -1018,7 +1018,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 *   - CLIO_FORCE_COMPACT=1 (deterministic drills / e2e tests).
 	 *   - The overflow-recovery retry path after a ContextOverflowError.
 	 */
-	const runAutoCompact = async (agentRuntime: AgentRuntime, force: boolean, instructions?: string): Promise<boolean> => {
+	const runAutoCompact = async (
+		agentRuntime: AgentRuntime,
+		force: boolean,
+		instructions?: string,
+		triggerOverride?: CompactionTrigger,
+	): Promise<boolean> => {
 		if (!deps.autoCompact || !deps.readSessionEntries) return false;
 		const settings = deps.getSettings();
 		const cfg = settings.compaction;
@@ -1034,7 +1039,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!shouldCompact(tokens, threshold, contextWindow)) return false;
 		}
 
-		const result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions));
+		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
+		const result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
 		if (!result || result.summary.length === 0) return false;
 
 		agentRuntime.agent.state.messages = [buildCompactionBridgeMessage(result.summary)];
@@ -1210,7 +1216,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			let compacted = false;
 			try {
-				compacted = await runAutoCompact(agentRuntime, true, instructions);
+				compacted = await runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
 				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;

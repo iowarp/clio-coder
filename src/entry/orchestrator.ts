@@ -37,7 +37,7 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { SessionEntry } from "../domains/session/entries.js";
+import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
@@ -151,6 +151,7 @@ async function runCompactionFlow(
 	settings: ClioSettings,
 	providers: ProvidersContract,
 	instructions?: string,
+	trigger?: CompactionTrigger,
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
@@ -171,14 +172,28 @@ async function runCompactionFlow(
 	});
 	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
 
-	session.appendEntry({
+	const entry: Omit<CompactionSummaryEntry, "turnId" | "timestamp"> = {
 		kind: "compactionSummary",
 		parentTurnId: result.firstKeptTurnId ?? null,
 		summary: result.summary,
 		tokensBefore: result.tokensBefore,
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
-	});
+		messagesSummarized: result.messagesSummarized,
+		isSplitTurn: result.isSplitTurn,
+		tokensAfter: estimateTokensFromSummary(result.summary),
+	};
+	if (trigger !== undefined) entry.trigger = trigger;
+	session.appendEntry(entry);
 	return result;
+}
+
+function estimateTokensFromSummary(summary: string): number {
+	// Mirrors the rough byte/4 heuristic the rest of the compaction stack
+	// uses for unmeasured payloads. Kept inline because this is the only
+	// caller; pi-mono's token estimator is provider-specific and we do not
+	// have a model handle at the persistence layer.
+	if (summary.length === 0) return 0;
+	return Math.max(1, Math.ceil(summary.length / 4));
 }
 
 /**
@@ -376,9 +391,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (!meta) return [];
 						return readSessionEntriesForCompact(meta.id);
 					},
-					autoCompact: async (instructions?: string): Promise<CompactResult | null> => {
+					autoCompact: async (instructions?: string, trigger?: CompactionTrigger): Promise<CompactResult | null> => {
 						try {
-							return await runCompactionFlow(session, config?.get() ?? readSettings(), providers, instructions);
+							return await runCompactionFlow(session, config?.get() ?? readSettings(), providers, instructions, trigger);
 						} catch {
 							return null;
 						}
