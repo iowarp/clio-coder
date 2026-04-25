@@ -136,25 +136,6 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("/models opens the picker, Esc closes, /quit exits clean", async () => {
-		const configDir = scratch.env.CLIO_CONFIG_DIR;
-		ok(configDir);
-		writeEndpointFixture(configDir);
-		const p = spawnClioPty({ env: scratch.env });
-		try {
-			await p.expect(/Clio Coder/, 15_000);
-			p.send("/models\r");
-			await p.expect(/anthropic-prod/, 10_000);
-			p.send("\x1b");
-			await new Promise((r) => setTimeout(r, 300));
-			p.send("/quit\r");
-			const exit = await p.wait(10_000);
-			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
-		} finally {
-			p.kill();
-		}
-	});
-
 	it("/model shows llama.cpp wire model ids and model-specific context windows", async () => {
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
 		ok(configDir);

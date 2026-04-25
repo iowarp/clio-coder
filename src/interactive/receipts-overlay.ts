@@ -17,7 +17,7 @@ import {
 
 export const RECEIPTS_OVERLAY_WIDTH = 78;
 export const RECEIPTS_OVERLAY_MAX_VISIBLE = 10;
-export const RECEIPTS_OVERLAY_HINT = "[Up/Down] /receipt verify <id> [Esc]";
+export const RECEIPTS_OVERLAY_HINT = "[Up/Down] /receipts verify <id> [Esc]";
 
 const SHORT_ID_LEN = 8;
 const AGENT_COL_WIDTH = 10;
@@ -111,7 +111,7 @@ export interface OpenReceiptsOverlayOptions {
 /**
  * Mount a read-only receipts overlay. Reads dispatch.listRuns() once and
  * renders each envelope as a compact row. Validation lives in the
- * `/receipt verify` slash command, not here.
+ * `/receipts verify` slash command, not here.
  */
 export function openReceiptsOverlay(
 	tui: TUI,
@@ -215,7 +215,7 @@ function readRunEnvelope(dataDir: string, runId: string): ReadLedgerResult {
 }
 
 // Missing receipt files resolve to a fail result rather than throwing so
-// /receipt verify stays scriptable.
+// /receipts verify stays scriptable.
 export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerifyResult {
 	const target = receiptFilePath(dataDir, runId);
 	let raw: string;

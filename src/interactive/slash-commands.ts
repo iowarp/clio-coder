@@ -215,7 +215,7 @@ export interface SlashCommandContext {
 	 */
 	runCompact: (instructions: string | undefined) => void;
 	/**
-	 * Escape hatch for the `receipt verify` entry: verify a receipt file on disk
+	 * Escape hatch for the `receipts verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
@@ -234,6 +234,8 @@ export interface SlashCommandContext {
 export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
+	/** Optional usage suffix shown in the slash-command autocomplete dropdown. */
+	argumentHint?: string;
 	/** The set of SlashCommand kinds this entry is responsible for dispatching. */
 	kinds: ReadonlyArray<SlashCommandKind>;
 	/** Return the parsed SlashCommand for `trimmed` or null if this entry does not match. */
@@ -245,10 +247,10 @@ export interface BuiltinSlashCommand {
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "quit",
-		description: "Quit Clio Coder",
+		description: "Exit Clio Coder",
 		kinds: ["quit"],
 		match(trimmed) {
-			return trimmed === "/quit" || trimmed === "/exit" ? { kind: "quit" } : null;
+			return trimmed === "/quit" ? { kind: "quit" } : null;
 		},
 		handle(_command, ctx) {
 			ctx.shutdown();
@@ -262,13 +264,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return trimmed === "/help" || trimmed.startsWith("/help ") ? { kind: "help" } : null;
 		},
 		handle(_command, ctx) {
-			const rows = BUILTIN_SLASH_COMMANDS.map((entry) => `  /${entry.name.padEnd(16)} ${entry.description}`);
+			const rows = BUILTIN_SLASH_COMMANDS.map((entry) => {
+				const usage = `/${entry.name}${entry.argumentHint ? ` ${entry.argumentHint}` : ""}`;
+				return `  ${usage.padEnd(28)} ${entry.description}`;
+			});
 			ctx.io.stdout(`\ncommands:\n${rows.join("\n")}\n\nRun /hotkeys for the full keyboard + slash-command reference.\n`);
 		},
 	},
 	{
 		name: "run",
-		description: "Dispatch a run to a worker",
+		description: "Run a worker agent",
+		argumentHint: "[options] <agent> <task>",
 		kinds: ["run", "run-usage"],
 		match(trimmed) {
 			if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
@@ -304,7 +310,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "targets",
-		description: "Open targets overlay",
+		description: "Show target health, auth, and models",
 		kinds: ["providers"],
 		match(trimmed) {
 			return trimmed === "/targets" ? { kind: "providers" } : null;
@@ -315,7 +321,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "connect",
-		description: "Connect to a target",
+		description: "Connect a target or choose one",
+		argumentHint: "[target]",
 		kinds: ["connect"],
 		match(trimmed) {
 			if (trimmed === "/connect") return { kind: "connect" };
@@ -332,7 +339,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "disconnect",
-		description: "Disconnect a target",
+		description: "Disconnect a target or choose one",
+		argumentHint: "[target]",
 		kinds: ["disconnect"],
 		match(trimmed) {
 			if (trimmed === "/disconnect") return { kind: "disconnect" };
@@ -349,7 +357,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "cost",
-		description: "Open cost overlay",
+		description: "Show session token and cost totals",
 		kinds: ["cost"],
 		match(trimmed) {
 			return trimmed === "/cost" ? { kind: "cost" } : null;
@@ -360,23 +368,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "receipts",
-		description: "Open receipts overlay",
-		kinds: ["receipts"],
+		description: "Browse or verify run receipts",
+		argumentHint: "[verify <runId>]",
+		kinds: ["receipts", "receipt-verify", "receipt-usage"],
 		match(trimmed) {
-			return trimmed === "/receipts" ? { kind: "receipts" } : null;
-		},
-		handle(_command, ctx) {
-			ctx.openReceipts();
-		},
-	},
-	{
-		name: "receipt",
-		description: "Verify a receipt file: /receipt verify <runId>",
-		kinds: ["receipt-verify", "receipt-usage"],
-		match(trimmed) {
-			if (trimmed === "/receipt" || trimmed === "/receipt ") return { kind: "receipt-usage" };
-			if (trimmed.startsWith("/receipt ")) {
-				const parts = trimmed.slice("/receipt ".length).trim().split(/\s+/);
+			if (trimmed === "/receipts") return { kind: "receipts" };
+			if (trimmed.startsWith("/receipts ")) {
+				const parts = trimmed.slice("/receipts ".length).trim().split(/\s+/);
 				if (parts[0] === "verify" && parts[1] && parts.length === 2) {
 					return { kind: "receipt-verify", runId: parts[1] };
 				}
@@ -385,22 +383,26 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return null;
 		},
 		handle(command, ctx) {
+			if (command.kind === "receipts") {
+				ctx.openReceipts();
+				return;
+			}
 			if (command.kind === "receipt-usage") {
-				ctx.io.stdout("\nusage: /receipt verify <runId>\n");
+				ctx.io.stdout("\nusage: /receipts verify <runId>\n");
 				return;
 			}
 			if (command.kind !== "receipt-verify") return;
 			const result = ctx.verifyReceipt(command.runId);
 			if (result.ok) {
-				ctx.io.stdout(`[/receipt verify] ok ${command.runId}\n`);
+				ctx.io.stdout(`[/receipts verify] ok ${command.runId}\n`);
 			} else {
-				ctx.io.stdout(`[/receipt verify] fail ${command.runId} ${result.reason}\n`);
+				ctx.io.stdout(`[/receipts verify] fail ${command.runId} ${result.reason}\n`);
 			}
 		},
 	},
 	{
 		name: "thinking",
-		description: "Open thinking-level overlay",
+		description: "Open thinking-level selector",
 		kinds: ["thinking"],
 		match(trimmed) {
 			return trimmed === "/thinking" ? { kind: "thinking" } : null;
@@ -411,16 +413,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "model",
-		description: "Select orchestrator model. Bare opens the picker; `/model <pattern>[:thinking]` resolves directly",
+		description: "Open model selector or set a model",
+		argumentHint: "[pattern[:thinking]]",
 		kinds: ["model", "model-set"],
 		match(trimmed) {
-			if (trimmed === "/model" || trimmed === "/models") return { kind: "model" };
+			if (trimmed === "/model") return { kind: "model" };
 			if (trimmed.startsWith("/model ")) {
 				const pattern = trimmed.slice("/model ".length).trim();
-				if (pattern.length > 0) return { kind: "model-set", pattern };
-			}
-			if (trimmed.startsWith("/models ")) {
-				const pattern = trimmed.slice("/models ".length).trim();
 				if (pattern.length > 0) return { kind: "model-set", pattern };
 			}
 			return null;
@@ -444,7 +443,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "scoped-models",
-		description: "Edit the Ctrl+P cycle set",
+		description: "Edit the Ctrl+P model cycle set",
 		kinds: ["scoped-models"],
 		match(trimmed) {
 			return trimmed === "/scoped-models" ? { kind: "scoped-models" } : null;
@@ -455,7 +454,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "settings",
-		description: "View and cycle settings",
+		description: "Open interactive settings",
 		kinds: ["settings"],
 		match(trimmed) {
 			return trimmed === "/settings" ? { kind: "settings" } : null;
@@ -466,7 +465,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "resume",
-		description: "Pick a past session to resume",
+		description: "Resume a past session",
 		kinds: ["resume"],
 		match(trimmed) {
 			return trimmed === "/resume" ? { kind: "resume" } : null;
@@ -477,7 +476,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "new",
-		description: "Start a new session",
+		description: "Start a fresh session",
 		kinds: ["new"],
 		match(trimmed) {
 			return trimmed === "/new" ? { kind: "new" } : null;
@@ -488,7 +487,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "tree",
-		description: "Open the session tree navigator",
+		description: "Open session tree navigator",
 		kinds: ["tree"],
 		match(trimmed) {
 			return trimmed === "/tree" ? { kind: "tree" } : null;
@@ -499,7 +498,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fork",
-		description: "Pick an assistant turn to fork from",
+		description: "Fork from an assistant turn",
 		kinds: ["fork"],
 		match(trimmed) {
 			return trimmed === "/fork" ? { kind: "fork" } : null;
@@ -510,7 +509,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "compact",
-		description: "Summarize earlier context to free token budget",
+		description: "Compact earlier context",
+		argumentHint: "[instructions]",
 		kinds: ["compact"],
 		match(trimmed) {
 			if (trimmed === "/compact") return { kind: "compact", instructions: undefined };
@@ -527,7 +527,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "hotkeys",
-		description: "Show the keyboard + slash-command reference",
+		description: "Show keyboard and command reference",
 		kinds: ["hotkeys"],
 		match(trimmed) {
 			return trimmed === "/hotkeys" ? { kind: "hotkeys" } : null;

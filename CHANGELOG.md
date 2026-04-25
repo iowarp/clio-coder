@@ -3,6 +3,20 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## Unreleased
+
+### Added
+
+- Interactive chat now shows an autocomplete dropdown for all built-in slash
+  commands when the prompt starts with `/`, filters command names as the user
+  types, and accepts Tab to complete the selected command.
+
+### Changed
+
+- Slash-command help and autocomplete now present only canonical commands:
+  `/model`, `/quit`, and `/receipts [verify <runId>]` replace duplicate
+  spellings such as `/models`, `/exit`, and `/receipt verify <runId>`.
+
 ## 0.1.2 — 2026-04-24
 
 ### Added

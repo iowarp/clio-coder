@@ -58,6 +58,7 @@ import {
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
+import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
@@ -94,7 +95,7 @@ export interface InteractiveDeps {
 	 */
 	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
-	/** XDG data dir (clioDataDir()). `/receipt verify` reads from <dataDir>/receipts/<id>.json. */
+	/** XDG data dir (clioDataDir()). `/receipts verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
 	/**
 	 * Resolver for the current `workers.default` block. `/run` uses this to
@@ -655,6 +656,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 	});
 	editor.focused = true;
+	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider());
 	const applyEditorModeTheme = (): void => {
 		editor.borderColor = editorBorderColorForMode(deps.modes.current());
 	};
