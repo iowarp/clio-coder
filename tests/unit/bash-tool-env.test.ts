@@ -83,22 +83,27 @@ describe("bash tool environment", () => {
 
 	it("escalates aborted commands that ignore sigterm", async () => {
 		const controller = new AbortController();
+		// The shell runs with `-l`, which on cold CI runners can spend a few
+		// hundred ms reading /etc/profile before reaching the user command. If
+		// SIGTERM arrives before the trap is installed, bash dies at the
+		// default disposition and the escalation path never runs. Wait long
+		// enough for the trap to take effect on the slowest runners we see.
 		const startedAt = Date.now();
 		const started = bashTool.run(
 			{
-				command: 'trap "" TERM; end=$((SECONDS + 9)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
-				timeout_ms: 12_000,
+				command: 'trap "" TERM; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
+				timeout_ms: 16_000,
 			},
 			{ signal: controller.signal },
 		);
-		setTimeout(() => controller.abort(), 250);
+		setTimeout(() => controller.abort(), 1500);
 		const result = await started;
 		const elapsedMs = Date.now() - startedAt;
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
-		ok(elapsedMs >= 5000, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
-		ok(elapsedMs < 8000, `expected abort escalation within 8s, got ${elapsedMs}ms`);
+		ok(elapsedMs >= 1500 + 4_500, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
+		ok(elapsedMs < 1500 + 9_000, `expected abort escalation within window, got ${elapsedMs}ms`);
 	});
 
 	it("reports output cap exits explicitly", async () => {
