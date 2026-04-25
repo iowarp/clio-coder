@@ -374,7 +374,10 @@ describe("chat-panel active entry update", () => {
 		}
 		const stripped = lines.map(strip);
 		ok(stripped[0]?.startsWith("Clio Coder: [/compact] no current"), `expected label, got: ${JSON.stringify(stripped)}`);
-		ok(stripped.some((line) => line.includes("session to compact")), `expected wrapped notice, got: ${JSON.stringify(stripped)}`);
+		ok(
+			stripped.some((line) => line.includes("session to compact")),
+			`expected wrapped notice, got: ${JSON.stringify(stripped)}`,
+		);
 	});
 
 	it("leaves streaming text (pre-message_end) as plain lines to avoid partial-markdown garbage", () => {
