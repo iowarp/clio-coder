@@ -1,4 +1,6 @@
+import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
+import type { SafeEventBus } from "../core/event-bus.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -144,6 +146,14 @@ export interface CreateChatLoopDeps {
 	 * admission happen on the actual execution path.
 	 */
 	toolRegistry?: ToolRegistry;
+	/**
+	 * Shared event bus. When wired, `cancel()` fans a `BusChannels.RunAborted`
+	 * payload with `source: "stream_cancel"` so the safety audit subscriber
+	 * persists a kind: "abort" row for every Esc-on-stream / Ctrl+C cancel.
+	 * Optional so unit tests that drive chat-loop in isolation do not need
+	 * to construct a bus.
+	 */
+	bus?: SafeEventBus;
 }
 
 interface ChatLoopTarget {
@@ -1168,8 +1178,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 		},
 		cancel(): void {
+			const wasStreaming = streaming;
 			retryCountdown?.cancel();
 			runtime?.agent.abort();
+			if (wasStreaming && deps.bus) {
+				deps.bus.emit(BusChannels.RunAborted, {
+					source: "stream_cancel",
+					runId: null,
+					startedAt: null,
+					elapsedMs: null,
+					at: Date.now(),
+					reason: "user cancelled stream",
+				});
+			}
 		},
 		onEvent(handler: (event: ChatLoopEvent) => void): () => void {
 			listeners.add(handler);

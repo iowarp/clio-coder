@@ -381,6 +381,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
+		bus,
 		...(selfDev ? { selfDevPrompt: buildSelfDevPrompt(selfDev) } : {}),
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
