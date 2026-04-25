@@ -1,8 +1,7 @@
 import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
-
-const TOOL_PREVIEW_LIMIT = 96;
+import { renderToolCallHeader, renderToolExecution } from "./renderers/tool-execution.js";
 
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
@@ -69,10 +68,12 @@ type ToolSegment = {
 	id: string;
 	name: string;
 	args: unknown;
-	preview: string;
-	status: "running" | "done" | "error";
-	startedAt: number;
-	durationMs?: number;
+	/** Final result from `tool_execution_end`; undefined while the call is in flight. */
+	result?: unknown;
+	/** True once `tool_execution_end` has landed (success or error). */
+	finished: boolean;
+	/** True when the finished result was an error. Meaningful only after `finished`. */
+	isError: boolean;
 };
 type AssistantSegment = TextSegment | ToolSegment;
 type ReplayBlockRenderer = (width: number) => string[];
@@ -102,35 +103,6 @@ export interface ChatPanel extends Component {
 	applyEvent(event: ChatLoopEvent): void;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
-}
-
-function shorten(value: string, limit: number): string {
-	const compact = value.replace(/\s+/g, " ").trim();
-	if (compact.length <= limit) return compact;
-	return `${compact.slice(0, Math.max(0, limit - 3))}...`;
-}
-
-function previewValue(value: unknown, limit = TOOL_PREVIEW_LIMIT): string {
-	if (value === undefined) return "running";
-	if (typeof value === "string") return shorten(value, limit);
-	if (Array.isArray(value)) return shorten(JSON.stringify(value), limit);
-	if (value && typeof value === "object") {
-		const asContent =
-			"content" in value && Array.isArray((value as { content?: unknown[] }).content)
-				? ((value as { content: unknown[] }).content ?? [])
-						.map((item) => {
-							if (!item || typeof item !== "object") return "";
-							if ("text" in item && typeof item.text === "string") return item.text;
-							if ("thinking" in item && typeof item.thinking === "string") return item.thinking;
-							return "";
-						})
-						.filter(Boolean)
-						.join(" ")
-				: "";
-		if (asContent.length > 0) return shorten(asContent, limit);
-		return shorten(JSON.stringify(value), limit);
-	}
-	return shorten(String(value), limit);
 }
 
 function extractAssistantText(message: unknown): string {
@@ -207,28 +179,20 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 	return [...wrappedFirst, ...lines.slice(1)];
 }
 
-function toolStatusLabel(seg: ToolSegment): string {
-	const duration = typeof seg.durationMs === "number" ? `, ${Math.max(0, Math.round(seg.durationMs))}ms` : "";
-	return `${seg.status}${duration}`;
-}
-
-function commandFromToolArgs(args: unknown): string | null {
-	if (!args || typeof args !== "object" || Array.isArray(args)) return null;
-	const command = (args as { command?: unknown }).command;
-	return typeof command === "string" && command.length > 0 ? command : null;
-}
-
 function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
-	const status = toolStatusLabel(seg);
-	if (seg.name === "bash") {
-		const command = commandFromToolArgs(seg.args) ?? previewValue(seg.args, 72);
-		const lines = wrapTextWithAnsi(`  tool: bash: $ ${command} [${status}]`, width);
-		if (seg.preview && seg.preview !== "running") {
-			lines.push(...wrapTextWithAnsi(`    ${seg.preview}`, width));
-		}
-		return lines;
+	if (!seg.finished) {
+		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
 	}
-	return wrapTextWithAnsi(`  tool: ${seg.name}(${previewValue(seg.args, 48)}) [${status}] -> ${seg.preview}`, width);
+	return renderToolExecution(
+		{
+			toolCallId: seg.id,
+			toolName: seg.name,
+			args: seg.args,
+			result: seg.result,
+			isError: seg.isError,
+		},
+		width,
+	);
 }
 
 function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
@@ -375,19 +339,17 @@ export function createChatPanel(): ChatPanel {
 					id: event.toolCallId,
 					name: event.toolName,
 					args: event.args,
-					preview: "running",
-					status: "running",
-					startedAt: Date.now(),
+					finished: false,
+					isError: false,
 				});
 				markDirty();
 				return;
 			}
 			if (event.type === "tool_execution_update") {
-				const assistant = ensureAssistant();
-				const tool = assistant.segments.find(
-					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
-				);
-				if (tool) tool.preview = previewValue(event.partialResult);
+				// Partial results no longer surface in the rendered tool block; the
+				// structured renderer shows the final result on `tool_execution_end`
+				// instead. Still mark dirty so a future renderer revision can pick
+				// up partial output without changing the event wiring.
 				markDirty();
 				return;
 			}
@@ -397,9 +359,9 @@ export function createChatPanel(): ChatPanel {
 					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
 				);
 				if (tool) {
-					tool.preview = previewValue(event.result);
-					tool.status = event.isError ? "error" : "done";
-					tool.durationMs = Date.now() - tool.startedAt;
+					tool.result = event.result;
+					tool.isError = event.isError;
+					tool.finished = true;
 				}
 				markDirty();
 				return;

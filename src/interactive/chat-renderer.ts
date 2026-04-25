@@ -31,6 +31,7 @@ import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
+import { renderToolResultOnly } from "./renderers/tool-execution.js";
 
 const DEFAULT_COALESCE_MS = 16;
 
@@ -545,7 +546,17 @@ export function rehydrateChatPanelFromTurns(
 							isError: result.isError,
 						});
 					} else {
-						appendReplayLine(chatPanel, `tool result: ${stringifyPreview(result.result)}`);
+						chatPanel.appendReplayBlock((width) =>
+							renderToolResultOnly(
+								{
+									toolCallId: result.id ?? "",
+									toolName: result.name,
+									result: result.result,
+									isError: result.isError,
+								},
+								width,
+							),
+						);
 					}
 					break;
 				}
