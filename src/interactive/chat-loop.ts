@@ -571,6 +571,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return reasons ? requested : "off";
 	};
 
+	/**
+	 * Append a `modelChange` session entry so /resume and /fork can replay the
+	 * sequence of models a long-running session ran under. Silent no-op when
+	 * the session contract is absent or no session is current. The
+	 * orchestrator's chat-loop is the only writer; chat-renderer.ts already
+	 * knows how to display the entry.
+	 */
+	const appendModelChangeEntry = (target: ChatLoopTarget): void => {
+		if (!deps.session?.current()) return;
+		try {
+			deps.session.appendEntry({
+				kind: "modelChange",
+				parentTurnId: lastTurnId,
+				provider: target.runtime.id,
+				modelId: target.wireModelId,
+				endpoint: target.endpoint.id,
+			});
+		} catch {
+			// Persistence failures must not break chat. The marker is a
+			// best-effort breadcrumb; absence falls back to current behavior.
+		}
+	};
+
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
@@ -585,6 +608,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.runtimeId === target.runtime.id &&
 			runtime.wireModelId === target.wireModelId
 		) {
+			// Same endpoint+runtime+model. Settings may still have moved
+			// thinkingLevel since the last call (the user invoked /thinking
+			// or Alt+T); reconcile the clamped level so the next prompt
+			// dispatches under the current intent without forcing a rebuild.
+			const desiredLevel = clampThinkingLevelForModel(runtime.agent.state.model as Model<never>, target.thinkingLevel);
+			if (runtime.agent.state.thinkingLevel !== desiredLevel) {
+				runtime.agent.state.thinkingLevel = desiredLevel;
+			}
 			return runtime;
 		}
 
@@ -604,6 +635,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.agent.state.model = nextModel;
 			runtime.wireModelId = target.wireModelId;
 			runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(nextModel, target.thinkingLevel);
+			appendModelChangeEntry(target);
 			return runtime;
 		}
 
@@ -614,6 +646,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
 		// prompts contract is absent (tests, degraded boot).
+		const hadPriorRuntime = runtime !== null;
 		const priorMessages = runtime ? [...runtime.agent.state.messages] : [...replayedContextMessages];
 		// Drop any in-flight stream on the prior agent before discarding it.
 		runtime?.agent.abort();
@@ -635,6 +668,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return resolved.apiKey;
 			},
 		});
+
+		// Build the runtime object before subscribing so the callback closes
+		// over the same heap object the hot-swap path mutates. Reading
+		// `localRuntime.endpointId` / `localRuntime.wireModelId` at event time
+		// instead of the captured `target` guarantees per-turn observability
+		// rows are tagged with whatever model is active right now, not the
+		// model this agent was originally built with.
+		const localRuntime: AgentRuntime = {
+			agent: handle.agent,
+			endpointId: target.endpoint.id,
+			runtimeId: target.runtime.id,
+			wireModelId: target.wireModelId,
+		};
 
 		handle.agent.subscribe(async (event) => {
 			emit(event);
@@ -674,23 +720,30 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (event.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(event.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
-					deps.observability.recordTokens(target.endpoint.id, target.wireModelId, summary.tokens, summary.costUsd, {
-						input: summary.input,
-						output: summary.output,
-						cacheRead: summary.cacheRead,
-						cacheWrite: summary.cacheWrite,
-						totalTokens: summary.tokens,
-					});
+					deps.observability.recordTokens(
+						localRuntime.endpointId,
+						localRuntime.wireModelId,
+						summary.tokens,
+						summary.costUsd,
+						{
+							input: summary.input,
+							output: summary.output,
+							cacheRead: summary.cacheRead,
+							cacheWrite: summary.cacheWrite,
+							totalTokens: summary.tokens,
+						},
+					);
 				}
 			}
 		});
 
-		runtime = {
-			agent: handle.agent,
-			endpointId: target.endpoint.id,
-			runtimeId: target.runtime.id,
-			wireModelId: target.wireModelId,
-		};
+		runtime = localRuntime;
+		// Append a modelChange marker only when this rebuild replaces a prior
+		// runtime, which is the cross-target swap case (mid-session change of
+		// endpoint or runtime id). On the initial build, the session header's
+		// `meta.model` (written by `session.create()` in submit()) captures
+		// the first model and a marker would be redundant.
+		if (hadPriorRuntime) appendModelChangeEntry(target);
 		return runtime;
 	};
 
@@ -878,11 +931,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const settings = deps.getSettings();
 		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
+		// Read the thinking budget from the live agent state, which reflects
+		// `clampThinkingLevelForModel` after a hot-swap onto a non-reasoning
+		// model. If we read raw settings the prompt would advertise e.g.
+		// `thinkingBudget: high` while the runtime actually sends "off",
+		// telling the model a budget it does not have.
+		const runtimeThinkingLevel = agentRuntime.agent.state.thinkingLevel as ThinkingLevel | undefined;
 		const dynamicInputs: DynamicInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
-			thinkingBudget: settings.orchestrator.thinkingLevel ?? "off",
+			thinkingBudget: runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off",
 			turnCount: 0,
 		};
 		const safetyLevel = settings.safetyLevel ?? "auto-edit";
