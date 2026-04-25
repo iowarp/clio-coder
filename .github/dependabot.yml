@@ -14,29 +14,70 @@ updates:
       prefix: build
       include: scope
     ignore:
-      # pi-mono is a vendored engine pinned exactly to 0.69.0 (see CLAUDE.md).
-      # Upgrades require coordinated boundary review and must not be automated.
+      # Pi-mono is the vendored engine. The release line is the meaningful
+      # boundary (0.69.x -> 0.70.x), so alert on minor and major. Patches on
+      # the same release line are noise we absorb in periodic manual sweeps.
       - dependency-name: "@mariozechner/pi-agent-core"
+        update-types: ["version-update:semver-patch"]
       - dependency-name: "@mariozechner/pi-ai"
+        update-types: ["version-update:semver-patch"]
       - dependency-name: "@mariozechner/pi-tui"
-      # @types/node tracks the Node runtime target. Allow minor/patch only.
+        update-types: ["version-update:semver-patch"]
+      # @types/node tracks the CI Node version. Bumped manually when the CI
+      # runner moves; dependabot stays out of it entirely.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
+      # Every other dep: alert on major bumps only. Patches and minors are
+      # absorbed in periodic proactive sweeps so dependabot stays quiet.
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "@biomejs/biome"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "@lmstudio/sdk"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "@types/diff"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "chalk"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "diff"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "esbuild"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "node-pty"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "ollama"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "tsup"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "tsx"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "typebox"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "undici"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "uuid"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "yaml"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
     groups:
-      # Production deps: bundle patch+minor only. Major bumps escape the group
-      # and open as individual PRs so a human reviews them.
-      production-dependencies:
+      # Pi-mono minors+majors land in one PR so the boundary review is a single
+      # batch when the engine moves.
+      pi-mono:
+        patterns:
+          - "@mariozechner/pi-*"
+        update-types:
+          - minor
+          - major
+      # Other production majors share a PR.
+      production-majors:
         dependency-type: production
         update-types:
-          - patch
-          - minor
-      # Dev-tool patch/minor/major bumps go into one PR; these are auto-merged
-      # by .github/workflows/dependabot-automerge.yml once CI passes.
-      dev-dependencies:
+          - major
+      # Dev-tool majors share a PR.
+      dev-majors:
         dependency-type: development
         update-types:
-          - patch
-          - minor
           - major
 
   - package-ecosystem: github-actions
@@ -52,12 +93,15 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+    ignore:
+      # Actions: alert on major only. Patches and minors are absorbed manually.
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
     groups:
-      # All actions in one PR. Patch+minor auto-merged; majors escape for review.
-      github-actions:
+      github-actions-majors:
         patterns:
           - "*"
         update-types:
-          - patch
-          - minor
           - major
