@@ -128,6 +128,45 @@ describe("audit jsonl: mode transitions land in the audit file", () => {
 		}
 	});
 
+	it("interactive cancellation emits a request_cancelled mode_change row so dismissed Alt+S overlays leave a trail", async () => {
+		const bus = createSafeEventBus();
+		const safety = createSafetyBundle(makeContextOn(bus));
+		const modes = createModesBundle(makeContextOn(bus));
+		await safety.extension.start();
+		await modes.extension.start();
+		try {
+			// Mirror what the interactive overlay's closeOverlay() emits when the
+			// user dismisses the Alt+S confirmation. The from/to fields match
+			// the pre-request mode because the pending request never produced a
+			// real transition; the reason field discriminates the row.
+			modes.contract.requestSuper("keybind");
+			const current = modes.contract.current();
+			bus.emit("mode.changed", {
+				from: current,
+				to: current,
+				reason: "request_cancelled",
+				at: Date.now(),
+			});
+			await safety.extension.stop?.();
+			await modes.extension.stop?.();
+
+			const rows = readAuditRows();
+			const cancelRow = rows.find(
+				(r): r is { kind: string; from: string | null; to: string; reason: string | null } =>
+					typeof r === "object" &&
+					r !== null &&
+					(r as { kind?: unknown }).kind === "mode_change" &&
+					(r as { reason?: unknown }).reason === "request_cancelled",
+			);
+			ok(cancelRow, `expected a request_cancelled mode_change row, got ${JSON.stringify(rows)}`);
+			strictEqual(cancelRow.from, current);
+			strictEqual(cancelRow.to, current);
+		} finally {
+			await safety.extension.stop?.();
+			await modes.extension.stop?.();
+		}
+	});
+
 	it("requestSuper writes an audit row tagged requiresConfirmation=true so Alt+S overlays leave a trail", async () => {
 		const bus = createSafeEventBus();
 		const safety = createSafetyBundle(makeContextOn(bus));

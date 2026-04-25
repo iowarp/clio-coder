@@ -843,11 +843,30 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// terminal verdict. `modes.confirmSuper` flips the mode before the
 		// confirm handler calls closeOverlay, so a post-close mode of "super"
 		// means the user confirmed; anything else means they cancelled.
-		if (leaving === "super-confirm" && deps.toolRegistry) {
-			if (deps.modes.current() === "super") {
-				void deps.toolRegistry.resumeParkedCalls();
-			} else {
-				deps.toolRegistry.cancelParkedCalls("super mode confirmation cancelled");
+		if (leaving === "super-confirm") {
+			const cancelled = deps.modes.current() !== "super";
+			if (cancelled) {
+				// Emit before mutating the registry so the audit row lands even
+				// when toolRegistry is not wired (lighter integration tests, future
+				// non-tool callers). The from/to fields stay equal because the
+				// pending request never produced a real mode transition; safety's
+				// audit subscriber persists this row as kind: "mode_change" with
+				// reason: "request_cancelled" so /audit consumers can correlate
+				// dismissed Alt+S overlays with the prior request rows.
+				const current = deps.modes.current();
+				deps.bus.emit(BusChannels.ModeChanged, {
+					from: current,
+					to: current,
+					reason: "request_cancelled",
+					at: Date.now(),
+				});
+			}
+			if (deps.toolRegistry) {
+				if (cancelled) {
+					deps.toolRegistry.cancelParkedCalls("super mode confirmation cancelled");
+				} else {
+					void deps.toolRegistry.resumeParkedCalls();
+				}
 			}
 		}
 		// If a parked call arrived while an unrelated overlay was open, the
