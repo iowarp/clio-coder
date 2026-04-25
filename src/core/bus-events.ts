@@ -8,6 +8,8 @@
 export const BusChannels = {
 	SessionStart: "session.start",
 	SessionEnd: "session.end",
+	SessionParked: "session.parked",
+	SessionResumed: "session.resumed",
 	DomainLoaded: "domain.loaded",
 	DomainFailed: "domain.failed",
 	ConfigHotReload: "config.hotReload",
