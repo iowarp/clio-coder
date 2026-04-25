@@ -25,6 +25,7 @@ import type {
 	SimpleStreamOptions,
 	StreamOptions,
 	TextContent,
+	ThinkingContent,
 	Tool,
 	ToolCall,
 } from "@mariozechner/pi-ai";
@@ -100,8 +101,9 @@ async function userMessage(
 function assistantMessage(content: AssistantMessage["content"]): ChatMessageData {
 	const parts: AssistantPart[] = [];
 	for (const block of content) {
-		if (block.type === "text") parts.push({ type: "text", text: block.text });
-		else if (block.type === "toolCall") {
+		if (block.type === "text") {
+			parts.push({ type: "text", text: block.text });
+		} else if (block.type === "toolCall") {
 			const req: FunctionToolCallRequest = {
 				type: "function",
 				name: block.name,
@@ -110,6 +112,9 @@ function assistantMessage(content: AssistantMessage["content"]): ChatMessageData
 			if (block.id) req.id = block.id;
 			parts.push({ type: "toolCallRequest", toolCallRequest: req });
 		}
+		// ThinkingContent blocks are intentionally skipped on replay: LM Studio's
+		// chat protocol has no thinking part, and re-sending the raw chain of
+		// thought as text would confuse the model on the next turn.
 	}
 	return { role: "assistant", content: parts };
 }
@@ -141,10 +146,14 @@ async function buildChatHistory(client: LMStudioClient, context: Context): Promi
 	return { messages };
 }
 
-function mapStopReason(reason: LLMPredictionStopReason | undefined, aborted: boolean): AssistantMessage["stopReason"] {
+function mapStopReason(
+	reason: LLMPredictionStopReason | undefined,
+	aborted: boolean,
+	hadToolCall: boolean,
+): AssistantMessage["stopReason"] {
 	if (aborted || reason === "userStopped") return "aborted";
 	if (reason === "failed" || reason === "modelUnloaded") return "error";
-	if (reason === "toolCalls") return "toolUse";
+	if (reason === "toolCalls" || hadToolCall) return "toolUse";
 	if (reason === "maxPredictedTokensReached" || reason === "contextLengthReached") return "length";
 	return "stop";
 }
@@ -207,6 +216,7 @@ function runStream(
 			const llm = await client.llm.model(model.id, { signal: controller.signal });
 			stream.push({ type: "start", partial: output });
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };
+			const activeThinkingRef: { block: ThinkingContent | null; idx: number } = { block: null, idx: -1 };
 			const closeActiveText = () => {
 				const current = activeTextRef.block;
 				if (!current) return;
@@ -219,12 +229,55 @@ function runStream(
 				activeTextRef.block = null;
 				activeTextRef.idx = -1;
 			};
+			const closeActiveThinking = () => {
+				const current = activeThinkingRef.block;
+				if (!current) return;
+				stream.push({
+					type: "thinking_end",
+					contentIndex: activeThinkingRef.idx,
+					content: current.thinking,
+					partial: output,
+				});
+				activeThinkingRef.block = null;
+				activeThinkingRef.idx = -1;
+			};
 			const pending = new Map<number, PendingToolCall>();
 			const predictionOpts: LLMRespondOpts<unknown> = {
 				signal: controller.signal,
 				onPredictionFragment: (fragment) => {
-					if (fragment.reasoningType === "reasoning") return;
 					if (!fragment.content) return;
+					// LM Studio SDK reasoningType values:
+					//   "none"               normal content (text)
+					//   "reasoning"          chain-of-thought inside the block
+					//   "reasoningStartTag"  literal <think> token
+					//   "reasoningEndTag"    literal </think> token
+					// Drop the start/end tags so they never leak into text or thinking;
+					// route reasoning fragments into a ThinkingContent block so the
+					// agent message is non-empty and pi-agent-core's loop can chain
+					// correctly when the model only emits reasoning + tool calls.
+					if (fragment.reasoningType === "reasoningStartTag" || fragment.reasoningType === "reasoningEndTag") {
+						return;
+					}
+					if (fragment.reasoningType === "reasoning") {
+						closeActiveText();
+						let current = activeThinkingRef.block;
+						if (!current) {
+							current = { type: "thinking", thinking: "" };
+							output.content.push(current);
+							activeThinkingRef.block = current;
+							activeThinkingRef.idx = output.content.length - 1;
+							stream.push({ type: "thinking_start", contentIndex: activeThinkingRef.idx, partial: output });
+						}
+						current.thinking += fragment.content;
+						stream.push({
+							type: "thinking_delta",
+							contentIndex: activeThinkingRef.idx,
+							delta: fragment.content,
+							partial: output,
+						});
+						return;
+					}
+					closeActiveThinking();
 					let current = activeTextRef.block;
 					if (!current) {
 						current = { type: "text", text: "" };
@@ -243,6 +296,7 @@ function runStream(
 				},
 				onToolCallRequestStart: (callId) => {
 					closeActiveText();
+					closeActiveThinking();
 					const slot: ToolCall = { type: "toolCall", id: randomUUID(), name: "", arguments: {} };
 					output.content.push(slot);
 					const idx = output.content.length - 1;
@@ -305,12 +359,14 @@ function runStream(
 			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
 			closeActiveText();
+			closeActiveThinking();
 			if (aborted) throw new Error("Request was aborted");
 			output.usage.input = result.stats.promptTokensCount ?? 0;
 			output.usage.output = result.stats.predictedTokensCount ?? 0;
 			output.usage.totalTokens = result.stats.totalTokensCount ?? output.usage.input + output.usage.output;
 			calculateEngineCost(model, output.usage);
-			output.stopReason = mapStopReason(result.stats.stopReason, aborted);
+			const hadToolCall = output.content.some((block) => block.type === "toolCall");
+			output.stopReason = mapStopReason(result.stats.stopReason, aborted, hadToolCall);
 			if (output.stopReason === "error" || output.stopReason === "aborted") {
 				output.errorMessage = `prediction stopped: ${result.stats.stopReason ?? "unknown"}`;
 				stream.push({ type: "error", reason: output.stopReason, error: output });
