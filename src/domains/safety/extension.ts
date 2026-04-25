@@ -8,7 +8,11 @@ import {
 	buildAbortAuditRecord,
 	buildAuditRecord,
 	buildModeChangeAuditRecord,
+	buildSessionParkAuditRecord,
+	buildSessionResumeAuditRecord,
 	openAuditWriter,
+	type SessionParkReason,
+	type SessionResumeVia,
 } from "./audit.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { type DamageControlRuleset, loadDefaultRuleset, match as matchRule } from "./damage-control.js";
@@ -55,6 +59,44 @@ function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
 	return true;
 }
 
+interface SessionParkedPayload {
+	sessionId: string;
+	reason: SessionParkReason;
+	at?: number;
+}
+
+interface SessionResumedPayload {
+	sessionId: string;
+	via: SessionResumeVia;
+	at?: number;
+}
+
+const PARK_REASONS = new Set<SessionParkReason>([
+	"create_new",
+	"resume_other",
+	"fork",
+	"switch_branch",
+	"close",
+	"shutdown",
+]);
+const RESUME_VIAS = new Set<SessionResumeVia>(["resume", "switch_branch"]);
+
+function isSessionParkedPayload(value: unknown): value is SessionParkedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.sessionId !== "string") return false;
+	if (typeof p.reason !== "string" || !PARK_REASONS.has(p.reason as SessionParkReason)) return false;
+	return true;
+}
+
+function isSessionResumedPayload(value: unknown): value is SessionResumedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.sessionId !== "string") return false;
+	if (typeof p.via !== "string" || !RESUME_VIAS.has(p.via as SessionResumeVia)) return false;
+	return true;
+}
+
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let writer: AuditWriter | null = null;
 	let ruleset: DamageControlRuleset | null = null;
@@ -62,6 +104,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let recordCount = 0;
 	let unsubscribeModeChanged: (() => void) | null = null;
 	let unsubscribeRunAborted: (() => void) | null = null;
+	let unsubscribeSessionParked: (() => void) | null = null;
+	let unsubscribeSessionResumed: (() => void) | null = null;
 
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
@@ -95,12 +139,24 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				if (payload.reason !== undefined) recordInput.reason = payload.reason;
 				writeAudit(buildAbortAuditRecord(recordInput));
 			});
+			unsubscribeSessionParked = context.bus.on(BusChannels.SessionParked, (payload) => {
+				if (!isSessionParkedPayload(payload)) return;
+				writeAudit(buildSessionParkAuditRecord({ sessionId: payload.sessionId, reason: payload.reason }));
+			});
+			unsubscribeSessionResumed = context.bus.on(BusChannels.SessionResumed, (payload) => {
+				if (!isSessionResumedPayload(payload)) return;
+				writeAudit(buildSessionResumeAuditRecord({ sessionId: payload.sessionId, via: payload.via }));
+			});
 		},
 		async stop() {
 			unsubscribeModeChanged?.();
 			unsubscribeModeChanged = null;
 			unsubscribeRunAborted?.();
 			unsubscribeRunAborted = null;
+			unsubscribeSessionParked?.();
+			unsubscribeSessionParked = null;
+			unsubscribeSessionResumed?.();
+			unsubscribeSessionResumed = null;
 			await writer?.close();
 			writer = null;
 		},

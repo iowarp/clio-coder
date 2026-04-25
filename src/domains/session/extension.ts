@@ -1,3 +1,4 @@
+import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { openSession } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
@@ -16,18 +17,36 @@ import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
 
+type ParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
+type ResumeVia = "resume" | "switch_branch";
+
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and
  * funnels create/append/checkpoint/resume/fork/close through the engine
  * session writer. The CLI drives lifecycle; the extension only enforces the
  * shutdown contract (final checkpoint + close) on domain stop.
+ *
+ * Lifecycle transitions fan onto the shared bus so the safety audit
+ * subscriber can persist `session_park` and `session_resume` rows without
+ * pulling in the session contract directly. Park fires whenever the current
+ * session is replaced or closed; resume fires when an existing session is
+ * reopened via resume() or switchBranch().
  */
-export function createSessionBundle(_context: DomainContext): DomainBundle<SessionContract> {
+export function createSessionBundle(context: DomainContext): DomainBundle<SessionContract> {
 	let state: SessionManagerState | null = null;
 
-	async function closeCurrent(): Promise<void> {
+	function emitPark(sessionId: string, reason: ParkReason): void {
+		context.bus.emit(BusChannels.SessionParked, { sessionId, reason, at: Date.now() });
+	}
+
+	function emitResume(sessionId: string, via: ResumeVia): void {
+		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now() });
+	}
+
+	async function closeCurrent(reason: ParkReason = "close"): Promise<void> {
 		if (!state) return;
 		const s = state;
+		emitPark(s.meta.id, reason);
 		state = null;
 		await s.writer.close();
 	}
@@ -63,6 +82,7 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 			// every append since the last checkpoint.
 			if (state) {
 				const prior = state;
+				emitPark(prior.meta.id, "create_new");
 				state = null;
 				void prior.writer.close();
 			}
@@ -87,16 +107,19 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 			if (state) {
 				// best-effort close of prior session before switching
 				const prior = state;
+				emitPark(prior.meta.id, "resume_other");
 				state = null;
 				void prior.writer.close();
 			}
 			const next = resumeSessionState(sessionId);
 			state = next;
+			emitResume(next.meta.id, "resume");
 			return next.meta;
 		},
 		fork(parentTurnId, input) {
 			if (!state) throw new Error("session.fork: no current session to fork from");
 			const prior = state;
+			emitPark(prior.meta.id, "fork");
 			state = null;
 			const { next } = forkFromState({
 				from: prior,
@@ -125,11 +148,13 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 			if (state?.meta.id === sessionId) return state.meta;
 			if (state) {
 				const prior = state;
+				emitPark(prior.meta.id, "switch_branch");
 				state = null;
 				void prior.writer.close();
 			}
 			const next = resumeSessionState(sessionId);
 			state = next;
+			emitResume(next.meta.id, "switch_branch");
 			return next.meta;
 		},
 		editLabel(turnId, label, sessionId) {
@@ -190,7 +215,7 @@ export function createSessionBundle(_context: DomainContext): DomainBundle<Sessi
 					`[clio:session] shutdown checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
-			await closeCurrent();
+			await closeCurrent("shutdown");
 		},
 	};
 

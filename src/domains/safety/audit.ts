@@ -14,6 +14,10 @@ import { clioDataDir } from "../../core/xdg.js";
  *   - `mode_change`: emitted on every BusChannels.ModeChanged transition.
  *   - `abort`: emitted on every BusChannels.RunAborted event so /audit consumers
  *     can reconstruct who cancelled which run and how long it ran first.
+ *   - `session_park`: emitted on every BusChannels.SessionParked event so /audit
+ *     consumers know which session was suspended and why.
+ *   - `session_resume`: emitted on every BusChannels.SessionResumed event so
+ *     /audit consumers know which session was reopened and how.
  *
  * Older audit files written before the discriminator existed have rows with
  * the tool_call shape but no `kind` field. Any future reader should treat a
@@ -56,7 +60,32 @@ export interface AbortAuditRecord {
 	reason?: string;
 }
 
-export type AuditRecord = ToolCallAuditRecord | ModeChangeAuditRecord | AbortAuditRecord;
+export type SessionParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
+
+export interface SessionParkAuditRecord {
+	kind: "session_park";
+	ts: string;
+	correlationId: string;
+	sessionId: string;
+	reason: SessionParkReason;
+}
+
+export type SessionResumeVia = "resume" | "switch_branch";
+
+export interface SessionResumeAuditRecord {
+	kind: "session_resume";
+	ts: string;
+	correlationId: string;
+	sessionId: string;
+	via: SessionResumeVia;
+}
+
+export type AuditRecord =
+	| ToolCallAuditRecord
+	| ModeChangeAuditRecord
+	| AbortAuditRecord
+	| SessionParkAuditRecord
+	| SessionResumeAuditRecord;
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
@@ -154,6 +183,36 @@ export function buildAbortAuditRecord(input: {
 	};
 	if (input.reason !== undefined) record.reason = input.reason;
 	return record;
+}
+
+export function buildSessionParkAuditRecord(input: {
+	sessionId: string;
+	reason: SessionParkReason;
+	now?: Date;
+}): SessionParkAuditRecord {
+	const now = input.now ?? new Date();
+	return {
+		kind: "session_park",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		sessionId: input.sessionId,
+		reason: input.reason,
+	};
+}
+
+export function buildSessionResumeAuditRecord(input: {
+	sessionId: string;
+	via: SessionResumeVia;
+	now?: Date;
+}): SessionResumeAuditRecord {
+	const now = input.now ?? new Date();
+	return {
+		kind: "session_resume",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		sessionId: input.sessionId,
+		via: input.via,
+	};
 }
 
 export function buildModeChangeAuditRecord(input: {
