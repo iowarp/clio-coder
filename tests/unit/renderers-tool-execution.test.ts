@@ -103,6 +103,40 @@ describe("renderers/tool-execution", () => {
 		strictEqual(resultIdx, headerIdx + 1, JSON.stringify(plain));
 	});
 
+	it("renders edit results as a unified diff between old_string and new_string", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "edit",
+				args: { path: "src/foo.ts", old_string: "alpha\nbeta\n", new_string: "alpha\nGAMMA\n" },
+				result: "edit applied",
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(
+			plain.some((l) => l.startsWith("tool: edit(src/foo.ts)")),
+			JSON.stringify(plain),
+		);
+		ok(
+			plain.some((l) => l.includes("--- a/src/foo.ts")),
+			JSON.stringify(plain),
+		);
+		ok(
+			plain.some((l) => l.includes("+++ b/src/foo.ts")),
+			JSON.stringify(plain),
+		);
+		ok(
+			plain.some((l) => l.includes("-beta")),
+			JSON.stringify(plain),
+		);
+		ok(
+			plain.some((l) => l.includes("+GAMMA")),
+			JSON.stringify(plain),
+		);
+	});
+
 	it("wraps long result preview lines at the supplied width", () => {
 		const long = "y".repeat(200);
 		const lines = renderToolExecution(

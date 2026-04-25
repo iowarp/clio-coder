@@ -13,6 +13,7 @@
  */
 
 import { wrapTextWithAnsi } from "../../engine/tui.js";
+import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
 
 const BODY_INDENT = "  ";
 const ARG_PREVIEW_LIMIT = 60;
@@ -147,6 +148,40 @@ function isEmptyResult(result: unknown): boolean {
 	return false;
 }
 
+interface EditDiffArgs {
+	path?: string;
+	old_string: string;
+	new_string: string;
+}
+
+/**
+ * Defensive shape check: edit-tool args must carry both `old_string` and
+ * `new_string` strings before we can render a diff. `path` is optional; the
+ * diff renderer falls back to `"file"` when absent. Anything else falls
+ * through to the standard result block so the dispatch is opportunistic and
+ * never throws.
+ */
+function asEditDiffArgs(args: unknown): EditDiffArgs | null {
+	if (!isPlainObject(args)) return null;
+	const oldString = args.old_string;
+	const newString = args.new_string;
+	if (typeof oldString !== "string" || typeof newString !== "string") return null;
+	const out: EditDiffArgs = { old_string: oldString, new_string: newString };
+	if (typeof args.path === "string") out.path = args.path;
+	return out;
+}
+
+function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
+	const bodyWidth = Math.max(1, width - BODY_INDENT.length);
+	const input: DiffRenderInput = { oldText: args.old_string, newText: args.new_string };
+	if (args.path !== undefined) input.filename = args.path;
+	const out: string[] = [];
+	for (const line of renderUnifiedDiff(input, bodyWidth)) {
+		out.push(`${BODY_INDENT}${line}`);
+	}
+	return out;
+}
+
 function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
 	if (isEmptyResult(result)) {
 		return indentAndWrap("(no output)", width);
@@ -176,6 +211,20 @@ export function renderToolCallHeader(call: ToolExecutionStart, width: number): s
 export function renderToolExecution(finished: ToolExecutionFinished, width: number): string[] {
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, finished.args), width));
+
+	// Edit-tool dispatch: when the tool succeeded and `args` carries the
+	// expected `{ old_string, new_string }` strings, swap the args body and
+	// result block for a unified diff. The header still renders so the user
+	// sees `tool: edit(<path>)`, and the args body is suppressed because
+	// echoing both strings would just duplicate what the diff already shows.
+	if (finished.toolName === "edit" && finished.isError === false) {
+		const editArgs = asEditDiffArgs(finished.args);
+		if (editArgs !== null) {
+			out.push(...renderEditDiffBlock(editArgs, width));
+			return out;
+		}
+	}
+
 	out.push(...renderArgsBody(finished.args, width));
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
 	return out;
