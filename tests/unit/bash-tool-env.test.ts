@@ -88,8 +88,8 @@ describe("bash tool environment", () => {
 		const startedAt = Date.now();
 		const started = bashTool.run(
 			{
-				command: 'trap "" TERM; sleep 5',
-				timeout_ms: 10_000,
+				command: 'trap "" TERM; end=$((SECONDS + 9)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
+				timeout_ms: 12_000,
 			},
 			{ signal: controller.signal },
 		);
@@ -99,7 +99,8 @@ describe("bash tool environment", () => {
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
-		ok(elapsedMs < 6500, `expected abort escalation within 6.5s, got ${elapsedMs}ms`);
+		ok(elapsedMs >= 4500, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
+		ok(elapsedMs < 7500, `expected abort escalation within 7.5s, got ${elapsedMs}ms`);
 	});
 
 	it("reports output cap exits explicitly", async () => {
