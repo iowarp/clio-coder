@@ -103,6 +103,7 @@ export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
+	toggleLastToolExpanded(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -321,6 +322,20 @@ export function createChatPanel(): ChatPanel {
 		appendReplayBlock(renderBlock: ReplayBlockRenderer): void {
 			transcript.push({ role: "replayBlock", renderBlock });
 			markDirty();
+		},
+		toggleLastToolExpanded(): boolean {
+			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
+				const entry = transcript[entryIndex];
+				if (entry?.role !== "assistant") continue;
+				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+					const seg = entry.segments[segIndex];
+					if (seg?.kind !== "tool") continue;
+					seg.expanded = !seg.expanded;
+					markDirty();
+					return true;
+				}
+			}
+			return false;
 		},
 		reset(): void {
 			transcript.length = 0;
