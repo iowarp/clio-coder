@@ -33,7 +33,7 @@ const googleRuntime: RuntimeDescriptor = {
 			wireModelId,
 			kb,
 			defaultCapabilities,
-			defaultBaseUrl: "https://generativelanguage.googleapis.com",
+			defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
 		});
 	},
 };

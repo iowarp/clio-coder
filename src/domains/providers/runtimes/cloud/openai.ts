@@ -38,7 +38,7 @@ const openaiRuntime: RuntimeDescriptor = {
 			runtimeId: "openai",
 			api: "openai-responses",
 			provider: "openai",
-			defaultBaseUrl: "https://api.openai.com",
+			defaultBaseUrl: "https://api.openai.com/v1",
 		});
 	},
 };
