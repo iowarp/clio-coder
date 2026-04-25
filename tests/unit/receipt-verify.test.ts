@@ -61,6 +61,7 @@ async function createReceiptFixture(dataDir: string): Promise<ReceiptFixture> {
 		platform: "linux",
 		nodeVersion: "v20.0.0",
 		toolCalls: 0,
+		toolStats: [],
 		sessionId: null,
 	});
 	await ledger.persist();

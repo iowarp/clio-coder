@@ -437,4 +437,58 @@ describe("dispatch concurrency gate", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+
+	it("aggregates clio_tool_finish events into receipt toolCalls and toolStats", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const events = (async function* () {
+			yield { type: "clio_tool_finish", payload: { tool: "read", mode: "default", durationMs: 12, outcome: "ok" } };
+			yield { type: "clio_tool_finish", payload: { tool: "read", mode: "default", durationMs: 8, outcome: "ok" } };
+			yield {
+				type: "clio_tool_finish",
+				payload: { tool: "bash", mode: "default", durationMs: 50, outcome: "error", reason: "boom" },
+			};
+			yield {
+				type: "clio_tool_finish",
+				payload: { tool: "bash", mode: "default", durationMs: 0, outcome: "blocked", reason: "denied" },
+			};
+		})();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1006,
+				promise: exit.promise,
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "tool stats task" });
+			const drained = (async () => {
+				for await (const _ of handle.events) {
+					// drain so the dispatch enricher actually runs
+				}
+			})();
+			await drained;
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+
+			strictEqual(receipt.toolCalls, 4);
+			deepStrictEqual(receipt.toolStats, [
+				{ tool: "bash", count: 2, ok: 0, errors: 1, blocked: 1, totalDurationMs: 50 },
+				{ tool: "read", count: 2, ok: 2, errors: 0, blocked: 0, totalDurationMs: 20 },
+			]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 });

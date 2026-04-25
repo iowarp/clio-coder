@@ -31,9 +31,42 @@ import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { type Ledger, openLedger } from "./state.js";
-import type { RunEnvelope, RunKind, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
+import type { RunEnvelope, RunKind, RunReceipt, RunReceiptDraft, RunStatus, ToolCallStat } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
+
+function recordToolFinish(
+	stats: Map<string, ToolCallStat>,
+	payload: { tool?: string; durationMs?: number; outcome?: "ok" | "error" | "blocked" },
+): void {
+	if (typeof payload.tool !== "string") return;
+	const existing = stats.get(payload.tool) ?? {
+		tool: payload.tool,
+		count: 0,
+		ok: 0,
+		errors: 0,
+		blocked: 0,
+		totalDurationMs: 0,
+	};
+	existing.count += 1;
+	if (typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
+		existing.totalDurationMs += payload.durationMs;
+	}
+	if (payload.outcome === "ok") existing.ok += 1;
+	else if (payload.outcome === "error") existing.errors += 1;
+	else if (payload.outcome === "blocked") existing.blocked += 1;
+	stats.set(payload.tool, existing);
+}
+
+function countToolCalls(stats: Map<string, ToolCallStat>): number {
+	let total = 0;
+	for (const stat of stats.values()) total += stat.count;
+	return total;
+}
+
+function snapshotToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
+	return [...stats.values()].sort((a, b) => a.tool.localeCompare(b.tool));
+}
 
 interface ActiveRun {
 	runId: string;
@@ -429,6 +462,7 @@ export function createDispatchBundle(
 		const workerEvents = worker.events;
 		const workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
 
+		const toolStats = new Map<string, ToolCallStat>();
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
 				const event = raw as {
@@ -437,11 +471,19 @@ export function createDispatchBundle(
 						role?: string;
 						usage?: { input?: number; output?: number; totalTokens?: number };
 					};
+					payload?: {
+						tool?: string;
+						durationMs?: number;
+						outcome?: "ok" | "error" | "blocked";
+					};
 				};
 				if (event.type === "message_end" && event.message?.role === "assistant" && event.message.usage) {
 					const u = event.message.usage;
 					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
 					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+				}
+				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+					recordToolFinish(toolStats, event.payload);
 				}
 				yield raw;
 			}
@@ -538,7 +580,8 @@ export function createDispatchBundle(
 					piMonoVersion: readPiMonoVersion(),
 					platform: process.platform,
 					nodeVersion: process.version,
-					toolCalls: 0,
+					toolCalls: countToolCalls(toolStats),
+					toolStats: snapshotToolStats(toolStats),
 					sessionId: null,
 				};
 				ledgerRef.update(envelope.id, {
