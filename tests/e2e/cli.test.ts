@@ -64,6 +64,21 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
 	});
 
+	it("--no-context-files boots the orchestrator (non-interactive) and exits 0", async () => {
+		// Real boot smoke: bare `clio` with no subcommand and stdin not a TTY
+		// (runCli pipes stdin) routes through `runClioCommand` →
+		// `bootOrchestrator`, which loads every domain (including prompts with
+		// `noContextFiles: true`) and exits 0 after the non-interactive banner.
+		// This proves the cli → orchestrator → prompts-extension plumbing for
+		// the flag wires up without crashing, complementing the unit test in
+		// tests/unit/prompts.test.ts that asserts the fragment is suppressed.
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const result = await runCli(["--no-context-files"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0, `expected clean boot, got code=${result.code} stderr=${result.stderr}`);
+		match(result.stdout, /Clio Coder/);
+		match(result.stdout, /non-interactive boot/);
+	});
+
 	it("configure --help exits 0 and prints target usage", async () => {
 		const result = await runCli(["configure", "--help"], { env: scratch.env });
 		strictEqual(result.code, 0);

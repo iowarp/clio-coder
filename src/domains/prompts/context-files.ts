@@ -1,3 +1,15 @@
+/**
+ * project context-file loader for the prompts domain.
+ *
+ * walks from the filesystem root down to `cwd` and reads every matching
+ * filename in `DEFAULT_CONTEXT_FILE_NAMES` (`["AGENTS.md", "CLAUDE.md",
+ * "CODEX.md"]`). order matters: broader scope first, more specific later, so
+ * `renderProjectContextFiles` can let later files override earlier ones.
+ *
+ * deliberate divergence from pi-coding-agent's `loadContextFileFromDir`, which
+ * picks the first matching filename per directory. clio loads ALL matching
+ * files in each directory so AGENTS.md, CLAUDE.md, and CODEX.md can coexist.
+ */
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 

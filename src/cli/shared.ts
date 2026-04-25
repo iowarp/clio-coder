@@ -51,10 +51,14 @@ export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: strin
 }
 
 /**
- * Pull the optional top-level `--no-context-files` (alias `-nc`) startup flag
- * out of argv. Mirrors `extractApiKeyFlag`: only flags before the first
- * subcommand are global; after the first positional token the flag is left in
- * place so the subcommand can decide what to do with it.
+ * Pre-extract the top-level `--no-context-files` (alias `-nc`) flag from argv
+ * before subcommand parsing. Like `extractApiKeyFlag`, only flags before the
+ * first positional token are global; later occurrences pass through in `rest`
+ * so the subcommand can decide what to do with them. Unlike `extractApiKeyFlag`
+ * (which returns an optional string), this returns `noContextFiles: boolean`
+ * always (default `false`) because the flag is a binary toggle without an
+ * associated value. Consumed in `bootOrchestrator` to suppress the prompts
+ * domain `context.files` dynamic fragment.
  */
 export function extractNoContextFilesFlag(argv: ReadonlyArray<string>): { noContextFiles: boolean; rest: string[] } {
 	const rest: string[] = [];
