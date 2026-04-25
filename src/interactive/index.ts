@@ -1570,6 +1570,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
+		if (overlayState === "closed" && keybindings.matches(data, "clio.tool.expand") && !isKeyRelease(data)) {
+			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
+			return { consume: true };
+		}
+
 		if (harness) {
 			const snap = harness.state.snapshot();
 			if (snap.kind === "restart-required" && keybindings.matches(data, "clio.harness.restart")) {

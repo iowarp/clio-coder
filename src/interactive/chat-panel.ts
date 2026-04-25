@@ -1,7 +1,7 @@
 import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
-import { renderToolCallHeader, renderToolExecution } from "./renderers/tool-execution.js";
+import { renderToolCallHeader, renderToolExecution, renderToolSubline } from "./renderers/tool-execution.js";
 
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
@@ -74,6 +74,8 @@ type ToolSegment = {
 	finished: boolean;
 	/** True when the finished result was an error. Meaningful only after `finished`. */
 	isError: boolean;
+	/** When true, render the full structured block instead of the collapsed subline. */
+	expanded: boolean;
 };
 type AssistantSegment = TextSegment | ToolSegment;
 type ReplayBlockRenderer = (width: number) => string[];
@@ -101,6 +103,7 @@ export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
+	toggleLastToolExpanded(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -180,6 +183,20 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 }
 
 function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
+	if (!seg.expanded) {
+		return renderToolSubline(
+			seg.finished
+				? {
+						toolCallId: seg.id,
+						toolName: seg.name,
+						args: seg.args,
+						result: seg.result,
+						isError: seg.isError,
+					}
+				: { toolCallId: seg.id, toolName: seg.name, args: seg.args },
+			width,
+		);
+	}
 	if (!seg.finished) {
 		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
 	}
@@ -306,6 +323,20 @@ export function createChatPanel(): ChatPanel {
 			transcript.push({ role: "replayBlock", renderBlock });
 			markDirty();
 		},
+		toggleLastToolExpanded(): boolean {
+			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
+				const entry = transcript[entryIndex];
+				if (entry?.role !== "assistant") continue;
+				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+					const seg = entry.segments[segIndex];
+					if (seg?.kind !== "tool") continue;
+					seg.expanded = !seg.expanded;
+					markDirty();
+					return true;
+				}
+			}
+			return false;
+		},
 		reset(): void {
 			transcript.length = 0;
 			markDirty();
@@ -333,6 +364,7 @@ export function createChatPanel(): ChatPanel {
 			}
 			if (event.type === "tool_execution_start") {
 				const assistant = ensureAssistant();
+				const expanded = assistant.pending === false;
 				assistant.pending = true;
 				assistant.segments.push({
 					kind: "tool",
@@ -341,6 +373,7 @@ export function createChatPanel(): ChatPanel {
 					args: event.args,
 					finished: false,
 					isError: false,
+					expanded,
 				});
 				markDirty();
 				return;
