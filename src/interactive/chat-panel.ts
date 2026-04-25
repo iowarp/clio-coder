@@ -108,6 +108,18 @@ export interface ChatPanel extends Component {
 	reset(): void;
 }
 
+export interface ChatPanelOptions {
+	/**
+	 * Resolves the user-visible key string for the `clio.tool.expand`
+	 * action. Returning a non-empty string surfaces a dim ` (<key>)` hint on
+	 * the first wrapped line of every finished, collapsed tool subline so the
+	 * Ctrl+O toggle is discoverable. Returning undefined or an empty string
+	 * suppresses the hint (e.g. action unbound, or display intentionally
+	 * minimal). Called per render so live keybinding changes flow through.
+	 */
+	getToolExpandKey?: () => string | undefined;
+}
+
 function extractAssistantText(message: unknown): string {
 	if (!message || typeof message !== "object" || !("role" in message) || message.role !== "assistant") return "";
 	if (!("content" in message) || !Array.isArray(message.content)) return "";
@@ -182,7 +194,7 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 	return [...wrappedFirst, ...lines.slice(1)];
 }
 
-function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
+function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: string | undefined): string[] {
 	if (!seg.expanded) {
 		return renderToolSubline(
 			seg.finished
@@ -195,6 +207,7 @@ function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
 					}
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args },
 			width,
+			expandKey,
 		);
 	}
 	if (!seg.finished) {
@@ -212,7 +225,7 @@ function renderToolSegmentLines(seg: ToolSegment, width: number): string[] {
 	);
 }
 
-function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
+function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: string | undefined): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
 	}
@@ -237,7 +250,7 @@ function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
 			}
 			continue;
 		}
-		lines.push(...renderToolSegmentLines(seg, width));
+		lines.push(...renderToolSegmentLines(seg, width, expandKey));
 	}
 	if (!labeled && !hasVisibleOutput(entry)) {
 		lines.push(entry.pending ? `${CLIO_PREFIX}[working]` : CLIO_PREFIX);
@@ -245,14 +258,21 @@ function renderEntryLines(entry: TranscriptEntry, width: number): string[] {
 	return lines;
 }
 
-export function createChatPanel(): ChatPanel {
+export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
 	let dirty = true;
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
+	let cachedExpandKey: string | undefined;
 
 	const markDirty = (): void => {
 		dirty = true;
+	};
+
+	const resolveExpandKey = (): string | undefined => {
+		const key = options.getToolExpandKey?.();
+		if (typeof key !== "string" || key.length === 0) return undefined;
+		return key;
 	};
 
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
@@ -300,16 +320,18 @@ export function createChatPanel(): ChatPanel {
 	};
 
 	const render = (width: number): string[] => {
-		if (!dirty && cachedWidth === width) return cachedLines;
+		const expandKey = resolveExpandKey();
+		if (!dirty && cachedWidth === width && cachedExpandKey === expandKey) return cachedLines;
 		const out: string[] = [];
 		for (let i = 0; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			out.push(...renderEntryLines(entry, width));
+			out.push(...renderEntryLines(entry, width, expandKey));
 		}
 		cachedLines = out;
 		cachedWidth = width;
+		cachedExpandKey = expandKey;
 		dirty = false;
 		return out;
 	};
