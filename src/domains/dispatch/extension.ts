@@ -31,42 +31,10 @@ import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { type Ledger, openLedger } from "./state.js";
+import { countToolCalls, recordToolFinish, snapshotToolStats } from "./tool-stats.js";
 import type { RunEnvelope, RunKind, RunReceipt, RunReceiptDraft, RunStatus, ToolCallStat } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
-
-function recordToolFinish(
-	stats: Map<string, ToolCallStat>,
-	payload: { tool?: string; durationMs?: number; outcome?: "ok" | "error" | "blocked" },
-): void {
-	if (typeof payload.tool !== "string") return;
-	const existing = stats.get(payload.tool) ?? {
-		tool: payload.tool,
-		count: 0,
-		ok: 0,
-		errors: 0,
-		blocked: 0,
-		totalDurationMs: 0,
-	};
-	existing.count += 1;
-	if (typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
-		existing.totalDurationMs += payload.durationMs;
-	}
-	if (payload.outcome === "ok") existing.ok += 1;
-	else if (payload.outcome === "error") existing.errors += 1;
-	else if (payload.outcome === "blocked") existing.blocked += 1;
-	stats.set(payload.tool, existing);
-}
-
-function countToolCalls(stats: Map<string, ToolCallStat>): number {
-	let total = 0;
-	for (const stat of stats.values()) total += stat.count;
-	return total;
-}
-
-function snapshotToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
-	return [...stats.values()].sort((a, b) => a.tool.localeCompare(b.tool));
-}
 
 interface ActiveRun {
 	runId: string;
