@@ -1,16 +1,16 @@
 <p align="center">
   <picture>
     <source srcset="assets/banner.webp" type="image/webp" />
-    <img src="assets/banner.png" alt="Clio Coder, AI coding harness for repository work" width="100%" />
+    <img src="assets/banner.png" alt="Clio Coder, AI coding harness for supervised repository work" width="100%" />
   </picture>
 </p>
 
 <h1 align="center">Clio Coder</h1>
 
-<p align="center"><strong>AI coding harness for supervised repository work.</strong></p>
+<p align="center"><strong>A supervised AI coding harness for real repository work.</strong></p>
 
 <p align="center">
-  Interactive terminal chat, configurable local and cloud model targets, dispatchable coding workers, and self-development mode.
+  Terminal-first. Model-flexible. Agent-aware. Built for developers who want AI assistance without giving up review, control, or auditability.
 </p>
 
 <p align="center">
@@ -24,233 +24,327 @@
 
 ---
 
-## Table of contents
+## What is Clio Coder?
 
-1. [What is Clio Coder?](#what-is-clio-coder)
-2. [Install](#install)
-3. [First run](#first-run)
-4. [CLI commands](#cli-commands)
-5. [Slash commands](#slash-commands)
-6. [Sessions and context](#sessions-and-context)
-7. [Keybindings](#keybindings)
-8. [Configuration](#configuration)
-9. [Targets and runtimes](#targets-and-runtimes)
-10. [Runtimes](#runtimes)
-11. [Agents](#agents)
-12. [Safety model](#safety-model)
-13. [Receipts and cost](#receipts-and-cost)
-14. [Architecture at a glance](#architecture-at-a-glance)
-15. [Development](#development)
-16. [Governance](#governance)
-17. [Roadmap](#roadmap)
-18. [Lineage and credits](#lineage-and-credits)
-19. [License](#license)
+Clio Coder is an AI coding harness for supervised work inside software repositories.
+
+It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
+
+Clio Coder is currently in **alpha**. The current release is **v0.1.2**.
+
+Use it if you want to:
+
+- work with AI inside a repository from the terminal;
+- connect local models, cloud APIs, or CLI-backed model runtimes;
+- dispatch specialized agents for exploration, planning, review, and implementation;
+- resume, fork, and compact long coding sessions;
+- keep receipts for completed runs, including model, token, cost, and integrity metadata;
+- test a serious AI coding workflow before the system is polished.
+
+Do not use it yet if you need a fully stable production coding assistant with a mature plugin ecosystem and zero rough edges.
 
 ---
 
-## What is Clio Coder?
+## Why try it now?
 
-Clio Coder is an AI coding harness for supervised repository work. It combines an interactive terminal agent, configurable local and cloud model targets, dispatchable coding workers, and a self-development mode for safely evolving its own codebase.
+Clio Coder is looking for its first alpha users: people willing to test it on real repositories and give precise feedback about where the workflow helps, where it breaks, and where it needs sharper ergonomics.
 
-Status: **v0.1.2** — an experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, tightens tool/bash transcript rendering, and lands a structured `audit.jsonl` so post-mortem replay can reconstruct what happened in a session. Pin to the tag if you need a stable target.
+The most useful alpha users are:
 
-Recent focus in this dev cycle:
+- developers working in non-trivial repositories;
+- users running local models through Ollama, LM Studio, llama.cpp, vLLM, SGLang, or OpenAI-compatible servers;
+- users with cloud model API keys who want target-first model routing;
+- teams that care about receipts, replay, and controlled agent execution;
+- researchers building multi-agent or scientific-computing workflows.
 
-- transient provider and stream retry with cancellation, exhaustion, and
-  recovery markers persisted for resume and fork replay
-- reliable bash subprocess abort with SIGKILL escalation after a SIGTERM
-  grace period
-- richer tool and bash transcript rendering with status, elapsed time, and
-  command previews
-- durable, entry-aware transcript replay for resume, fork, summaries, bash,
-  and tool activity
-- structured `<dataDir>/audit/YYYY-MM-DD.jsonl` rows for every classified
-  tool call, mode transition (including dismissed Alt+S elevations), run
-  abort (Esc-on-stream, dispatch.abort, shutdown drain), and session
-  park/resume so post-mortem replay knows which session was active and what
-  stopped it
-- per-tool stats in run receipts (loops, errors, blocked attempts, parallel
-  batches), plus `detectedReasoning` exposure in `clio targets --json`
-- deterministic project context loading from `AGENTS.md` and `CODEX.md`
-- target-oriented auth and configuration flows across the CLI and interactive UI
-- target controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
-- a startup TUI dashboard with target/model, model-registry, context, latency,
-  and worker-profile status at a glance
-- mode-colored prompt rails: default stays neutral, advise is amber, and super
-  is red
-- `/hotkeys` now shows resolved keybindings, legacy-terminal warnings for
-  CSI-u-only user bindings, and per-binding settings guidance
-- an experimental self-dev harness for hot-reload and restart-required feedback while working on Clio Coder itself
+Good alpha feedback includes the command you ran, what target/model you used, what you expected, what happened, and whether `clio doctor` or the saved receipt exposed anything useful.
+
+---
+
+## Core features
+
+| Feature | What it gives you |
+| --- | --- |
+| Interactive terminal UI | Work with an assistant inside your repository without leaving the shell. |
+| Target-first model configuration | Route chat and workers through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
+| Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `worker`, and other focused agents. |
+| Persistent sessions | Resume, fork, compact, and replay coding sessions. |
+| Project context files | Automatically load `AGENTS.md`, `CLAUDE.md`, and `CODEX.md` from the current directory upward. |
+| Safety modes | Use default, advise, or super mode to gate which tools the assistant can see. |
+| Receipts and audit logs | Track completed runs, token usage, cost, tool activity, mode changes, aborts, and session park/resume events. |
+| Local + cloud model support | Use a local model for private repo exploration, a cloud model for deeper reasoning, or both. |
 
 ---
 
 ## Install
 
-Prerequisites: Node.js `>=20`.
+### Requirements
 
-### From source
+- Node.js `>=20`
+- npm
+- A model target, such as:
+  - a local OpenAI-compatible server;
+  - Ollama, LM Studio, llama.cpp, vLLM, SGLang, or another supported local runtime;
+  - a cloud API key;
+  - a supported CLI-backed runtime.
+
+### Install from source
+
+This is the recommended alpha path.
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm install
-npm run build && npm link
+npm run build
+npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary declared in [`package.json`](package.json) (`dist/cli/index.js`). Re-run `npm run build` after source changes because the link points at built output, not the TypeScript sources.
+`npm link` exposes the `clio` binary from the built output. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
-### From npm
+### Install from npm
+
+The package is planned for npm distribution.
 
 ```bash
 npm install -g @iowarp/clio-coder
 ```
 
-### Isolated state trees
-
-The runtime is XDG-aware and also honors `CLIO_HOME`, `CLIO_CONFIG_DIR`, `CLIO_DATA_DIR`, and `CLIO_CACHE_DIR` so you can sandbox a dev install from your daily config.
+Use the source install path if the npm package is not available yet.
 
 ---
 
 ## First run
 
+Start Clio Coder from the repository you want to work on:
+
 ```bash
-clio                                 # start the TUI; first run bootstraps and configures
-clio configure                       # rerun the configuration wizard
-clio targets                         # inspect target health/auth/capabilities
-clio models                          # list models for configured targets
-clio auth login <target-or-runtime>  # optional OAuth/API-key flow
+cd /path/to/your/repo
+clio
 ```
 
-Bare `clio` bootstraps config, data, and cache automatically. If it is running interactively and no usable default target exists, it guides you into `clio configure` instead of requiring a separate lifecycle step.
+On first run, Clio Coder creates its config, data, and cache directories. If no usable model target exists, it guides you into configuration.
 
-For a non-interactive run, `clio run --agent scout "summarize the repo layout"` dispatches a worker and writes a receipt. Use `--target`, `--model`, `--thinking`, and `--require` when you want a one-off override without changing defaults.
+Useful first commands:
 
-Start the interactive TUI with bare `clio`. The banner renders as `Clio Coder`. The current surface includes target and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
+```bash
+clio configure
+clio targets
+clio targets --probe
+clio models
+clio doctor
+```
+
+A good first non-interactive test is:
+
+```bash
+clio run --agent scout "Summarize this repository layout and identify the main entry points."
+```
+
+Inside the interactive UI, try:
+
+```text
+/run scout summarize the repo structure
+/run planner propose a safe first change for improving the README
+/targets
+/model
+/cost
+/receipts
+```
+
+---
+
+## Five-minute alpha test
+
+Use this sequence if you want to quickly decide whether Clio Coder is useful in your environment.
+
+```bash
+cd /path/to/your/repo
+clio doctor
+clio configure
+clio targets --probe
+clio run --agent scout "Map the repository: key directories, entry points, tests, and likely build commands."
+clio
+```
+
+Then, inside the TUI:
+
+```text
+/run planner identify one small, low-risk improvement
+/run reviewer check whether that plan is safe and complete
+/receipts
+/cost
+```
+
+If this fails, open an issue with:
+
+- OS and shell;
+- Node.js version;
+- Clio Coder version;
+- model target and model name;
+- command or slash command used;
+- relevant `clio doctor` output;
+- receipt ID, if one was written;
+- redacted logs or screenshots if helpful.
+
+Never paste API keys, private prompts, or proprietary source code into a public issue.
 
 ---
 
 ## CLI commands
 
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `clio` | Launch the interactive TUI. |
-| `clio configure` | Run the first-run/configuration wizard. |
+| `clio` | Launch the interactive terminal UI. |
+| `clio configure` | Run the configuration wizard. |
 | `clio targets` | List configured targets, health, auth, runtime, model, and capabilities. |
-| `clio targets add` | Add a target interactively or via flags. |
+| `clio targets add` | Add a target interactively or through flags. |
 | `clio targets use <id>` | Set chat and worker defaults to one target. |
-| `clio targets remove <id>` / `rename <old> <new>` | Manage target ids. |
-| `clio models [search] [--target <id>]` | List discovered or known models for targets. |
-| `clio auth list|status|login|logout [target-or-runtime]` | Inspect, add, or remove stored auth. |
-| `clio doctor [--fix]` | Diagnose without creating files; `--fix` creates or repairs state. |
-| `clio reset [--state|--auth|--config|--all]` | Recover or wipe Clio Coder state while keeping the binary installed. |
-| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print package-manager removal guidance. |
-| `clio agents` | List builtin agent specs. |
-| `clio run [flags] "<task>"` | Dispatch a single worker non-interactively and persist a receipt. |
+| `clio targets remove <id>` | Remove a target. |
+| `clio targets rename <old> <new>` | Rename a target id. |
+| `clio models [search] [--target <id>]` | List discovered or known models. |
+| `clio auth list` | Show known auth entries. |
+| `clio auth status [target-or-runtime]` | Inspect auth state. |
+| `clio auth login <target-or-runtime>` | Add credentials through the supported flow. |
+| `clio auth logout <target-or-runtime>` | Remove stored credentials. |
+| `clio doctor [--fix]` | Diagnose state; with `--fix`, repair or create missing state. |
+| `clio reset [--state\|--auth\|--config\|--all]` | Reset selected Clio Coder state. |
+| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print uninstall guidance. |
+| `clio agents` | List built-in agent specs. |
+| `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
+| `clio --no-context-files` (alias `-nc`) | Top-level flag that skips `AGENTS.md` / `CLAUDE.md` / `CODEX.md` injection for one invocation. |
 
-Source: [`src/cli/`](src/cli/).
+Example:
+
+```bash
+clio run \
+  --agent scout \
+  --target mini \
+  --model Qwen3.6-35B-A3B-UD-Q4_K_XL \
+  "Find the test command and summarize the project structure."
+```
 
 ---
 
-## Slash commands
+## Interactive slash commands
 
-Available inside the interactive TUI.
+Slash commands are available inside the terminal UI. Type `/` at the start of the prompt to open autocomplete.
 
-Typing `/` at the start of the prompt opens the autocomplete dropdown for all
-built-in slash commands. Keep typing to filter command names, such as `/m` for
-`/model`, and press `Tab` to complete the selected command.
-
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
 | `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
-| `/targets` | Overlay target health, auth, runtime, model, and capabilities. |
-| `/connect [target]` | Connect to a target or runtime; auth-backed runtimes prompt for credentials, local targets are probed. |
-| `/disconnect [target]` | Disconnect a target or runtime when Clio owns stored connection state. |
-| `/model [pattern[:thinking]]` | Open the model selector, or set the orchestrator model directly. |
-| `/scoped-models` | Edit the scoped list used by model cycling. |
+| `/targets` | Show target health, auth, runtime, model, and capabilities. |
+| `/connect [target]` | Connect to a target or runtime. |
+| `/disconnect [target]` | Disconnect a target or runtime when Clio owns the connection state. |
+| `/model [pattern[:thinking]]` | Open the model selector or set the orchestrator model. |
+| `/scoped-models` | Edit the model list used by model cycling. |
 | `/thinking` | Open the thinking-level selector. |
 | `/settings` | Open interactive settings controls. |
-| `/resume` and `/new` | Resume an existing session or start a fresh one. |
-| `/tree` and `/fork` | Navigate the session tree or branch from an earlier assistant turn. |
+| `/resume` | Resume an existing session. |
+| `/new` | Start a fresh session. |
+| `/tree` | Navigate the session tree. |
+| `/fork` | Branch from an earlier assistant turn. |
 | `/compact [instructions]` | Compact earlier session context. |
-| `/cost` | Overlay session token totals and USD cost accumulated from completed runs. |
-| `/receipts [verify <runId>]` | Browse saved run receipts, or verify one receipt against the persisted run ledger. |
+| `/cost` | Show token and USD totals for completed runs in the session. |
+| `/receipts` | Browse saved run receipts. |
+| `/receipts verify <runId>` | Verify a receipt against the persisted run ledger. |
 | `/help` | Show the slash-command reference. |
-| `/hotkeys` | Show the current keyboard and slash-command reference. |
+| `/hotkeys` | Show resolved keyboard bindings. |
 | `/quit` | Exit the TUI cleanly. |
 
-Parser source: [`src/interactive/`](src/interactive/).
-
 ---
 
-## Sessions and context
+## Built-in agents
 
-Interactive sessions persist under `<dataDir>/sessions/` as append-only JSONL
-plus tree metadata. `/resume` reloads the selected session, replays the
-entry-aware transcript, and rebuilds the next-turn context from the same
-entries. `/fork` starts a new branch from the selected parent turn, shows the
-parent transcript up to that point, and seeds the next model call with that
-parent-prefix context while the new branch records fresh turns.
+Clio Coder ships with built-in agent specs for common coding workflows.
 
-Replay renders user and assistant messages, branch and compaction summaries,
-system and checkpoint notes, bash execution entries, custom display entries,
-and persisted tool call/result entries when those entries exist in the
-session log. Interactive tool activity is written as durable tool call/result
-entries, so tool work remains visible after resume and fork; full output replay
-still depends on the corresponding durable entries being present.
-
-Transient provider and stream failures retry automatically when `retry.enabled`
-is true. Failed attempts remain visible in the transcript, retry countdowns and
-exhaustion/recovery markers are persisted for resume/fork replay, and the retry
-continues from the existing user turn rather than adding the prompt again.
-
-Before each interactive turn, Clio loads project context files from the current
-working directory upward to the filesystem root. The first supported names are
-`AGENTS.md` and `CODEX.md`; parent files are injected before child files, and
-`AGENTS.md` is injected before `CODEX.md` within the same directory. Missing or
-unreadable files are ignored. Broader resources such as skills, prompt
-templates, themes, packages, extensions, and a `--no-context-files` flag are
-intentionally deferred.
-
-Compaction can run manually with `/compact [instructions]` or automatically
-when `compaction.auto` is enabled and the estimated context crosses
-`compaction.threshold`. `/settings` exposes those two live controls; advanced
-compaction overrides remain direct `settings.yaml` fields.
-
----
-
-## Keybindings
-
-| Binding | Action |
+| Agent | Use it for |
 | --- | --- |
-| `Shift+Tab` | Cycle thinking level. |
-| `Alt+M` | Cycle mode `default` / `advise`. |
-| `Alt+S` | Open the super-mode confirmation overlay. |
-| `Alt+T` | Open the session tree navigator. |
-| `Ctrl+L` | Open the model selector. |
-| `Ctrl+P` / `Shift+Ctrl+P` | Cycle the scoped model set forward / backward. |
-| `Ctrl+B` | Toggle the dispatch-board overlay. Rows update live from the dispatch event bus. |
-| `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
-| `Ctrl+D` | Exit. |
-| `Esc` | Cancel a stream or close the active overlay. |
+| `scout` | Fast repository exploration and context assembly. |
+| `planner` | Turning a goal into a reviewable implementation plan. |
+| `researcher` | Documentation, literature, and web-grounded investigation. |
+| `reviewer` | Reviewing work against a plan or coding standard. |
+| `delegate` | Routing work across multiple sub-agents. |
+| `context-builder` | Building focused context bundles for downstream agents. |
+| `worker` | General bounded execution tasks. |
 
-Run `/hotkeys` for the resolved binding table. Use Up/Down and `E` there to
-inspect a binding's action id, current keys, source, and `settings.yaml`
-override guidance.
+Examples:
+
+```bash
+clio run --agent scout "Find the main build, test, and lint commands."
+clio run --agent planner "Plan a minimal change to add JSON output to the CLI."
+clio run --agent reviewer "Review the current diff for correctness and regressions."
+```
+
+Agent specs are Markdown files with frontmatter. Built-ins live under:
+
+```text
+src/domains/agents/builtins/
+```
+
+---
+
+## Model targets and runtimes
+
+Clio Coder is target-first. A target describes how to reach a model and what capabilities it has.
+
+| Group | Examples |
+| --- | --- |
+| Featured / subscription | `openai-codex` |
+| Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock`, `deepseek` |
+| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` |
+| CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli`, `copilot-cli`, `opencode-cli` |
+| SDK runtimes | `claude-code-sdk` (Claude Agent SDK worker path) |
+
+Runtime tiers:
+
+| Tier | Meaning |
+| --- | --- |
+| `protocol` | HTTP targets that speak a supported model API protocol. |
+| `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
+| `local-native` | Local model runtimes reached through native HTTP or SDK surfaces. |
+| `cli-stub` | CLI-backed runtimes launched through installed command-line tools. |
+| `sdk` | In-process SDK worker paths (scaffolded in v0.1.x, admitted by dispatch in a later release). |
+
+Inspect target state with:
+
+```bash
+clio targets
+clio targets --probe
+clio models
+```
 
 ---
 
 ## Configuration
 
-Clio Coder reads from the platform config dir by default: `~/.config/clio/settings.yaml` on Linux, `~/Library/Application Support/clio/settings.yaml` on macOS, and `%APPDATA%/clio/settings.yaml` on Windows. Every path is overridable via XDG or Clio Coder-specific env vars so you can keep dev and prod state separate.
+Clio Coder reads `settings.yaml` from the platform config directory by default:
 
-The happy path is package install followed by bare `clio`. The config shape is target-first: local HTTP engines, cloud APIs, OAuth/subscription runtimes, and CLI-backed runtimes all land in `targets[]`, then `orchestrator` and `workers.default` select from those target ids.
+| Platform | Default config path |
+| --- | --- |
+| Linux | `~/.config/clio/settings.yaml` |
+| macOS | `~/Library/Application Support/clio/settings.yaml` |
+| Windows | `%APPDATA%/clio/settings.yaml` |
+
+You can isolate state with environment variables:
+
+| Env var | Purpose |
+| --- | --- |
+| `CLIO_HOME` | Optional single-tree root for all Clio Coder state. |
+| `CLIO_CONFIG_DIR` | Location of `settings.yaml`. |
+| `CLIO_DATA_DIR` | Receipts, ledgers, sessions, and audit logs. |
+| `CLIO_CACHE_DIR` | Transient cache location. |
+| `ANTHROPIC_API_KEY` | Enables Anthropic-backed targets when configured. |
+| `OPENAI_API_KEY` | Enables OpenAI-backed targets when configured. |
+
+Example local target configuration:
 
 ```yaml
-# Linux default: ~/.config/clio/settings.yaml (excerpt)
 version: 1
+
 targets:
   - id: mini
     runtime: openai-compat
@@ -285,151 +379,317 @@ retry:
   maxDelayMs: 60000
 ```
 
-| Env var | Default | Purpose |
-| --- | --- | --- |
-| `CLIO_HOME` | unset | Optional single-tree root for all Clio Coder state. |
-| `CLIO_CONFIG_DIR` | platform config dir, or `$CLIO_HOME` when set | Location of `settings.yaml`. |
-| `CLIO_DATA_DIR` | platform data dir, or `$CLIO_HOME/data` when set | Receipts, ledgers, sessions. |
-| `CLIO_CACHE_DIR` | platform cache dir, or `$CLIO_HOME/cache` when set | Transient caches. |
-| `ANTHROPIC_API_KEY` | unset | Enables Claude providers. |
-| `OPENAI_API_KEY` | unset | Enables OpenAI providers. |
+Credentials can come from environment variables referenced by `targets[].auth.apiKeyEnvVar`, or from Clio Coder’s credential store through:
 
-Runtime credentials can live in environment variables referenced by `targets[].auth.apiKeyEnvVar`, or in Clio Coder's credential store when you use `clio auth login`.
-Out-of-tree runtime plugins are loaded from `<configDir>/runtimes/*.js` or
-packages listed in `runtimePlugins`; descriptors with `kind: "http"`,
-`"subprocess"`, or `"sdk"` are admitted when they satisfy the runtime
-descriptor contract.
+```bash
+clio auth login <target-or-runtime>
+```
 
 ---
 
-## Targets and runtimes
+## Project context files
 
-| Group | Examples | Notes |
-| --- | --- | --- |
-| Featured / subscription | `openai-codex` | ChatGPT Plus/Pro via Codex OAuth. Use `clio auth login openai-codex`. |
-| Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock` | API-key-backed runtimes. Use `clio auth list` to inspect the current support surface. |
-| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` | Configured as `targets[]` with a URL and optional capability overrides. |
-| CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli` | Recognized by the registry and support surfaces. Dispatch requires the matching CLI to be installed and authenticated. |
+Before each interactive turn, Clio Coder looks for project context files from the current working directory upward to the filesystem root.
 
-`clio targets --probe` probes configured targets and reports health, capability flags, and discovered models. `clio models` gives a flatter per-target model view.
+Supported names:
 
----
+```text
+AGENTS.md
+CLAUDE.md
+CODEX.md
+```
 
-## Runtimes
+Parent directories are loaded before child directories. Within the same directory, files load in the order `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, so the most specific instructions take precedence.
 
-Runtime tiers classify how a target is reached.
+To skip context-file loading for a single invocation:
 
-| Tier | What it is |
-| --- | --- |
-| `protocol` | HTTP targets that speak a supported model API protocol. |
-| `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
-| `local-native` | Local model runtimes reached through their native HTTP or SDK surface. |
-| `cli-stub` | CLI-backed runtimes launched through installed command-line tools. |
+```bash
+clio --no-context-files
+clio -nc run --agent scout "..."
+```
 
-That split is intentionally visible in `clio configure`, `clio targets`, and `clio models` so target configuration, health, and dispatch behavior stay understandable.
+Use these files to tell Clio Coder and other AI agents how to work in your repository.
 
----
+Example `AGENTS.md`:
 
-## Agents
+```markdown
+# Agent instructions
 
-Seven builtin agent specs ship in [`src/domains/agents/builtins/`](src/domains/agents/builtins/).
+- Use `npm run ci` before claiming the repo is healthy.
+- Prefer small, reviewable changes.
+- Do not edit generated files under `dist/`.
+- Do not change public APIs without an explicit plan.
+- Keep documentation examples synchronized with CLI behavior.
+- When uncertain, inspect the source instead of guessing.
+```
 
-| Agent | Purpose |
-| --- | --- |
-| `scout` | Fast repo exploration and context assembly. |
-| `planner` | Turns a goal into a reviewable implementation plan. |
-| `researcher` | Literature, documentation, and web-grounded investigation. |
-| `reviewer` | Reviews work against a plan and a coding standard. |
-| `delegate` | Routes work across multiple sub-agents. |
-| `context-builder` | Assembles focused context bundles for downstream agents. |
-| `worker` | Generic execution worker for bounded tasks. |
-
-Specs are plain Markdown with frontmatter. Drop new files into the same directory to register additional agents.
+This is the best place to encode repository-specific rules, test commands, style constraints, forbidden paths, review requirements, and release procedures.
 
 ---
 
 ## Safety model
 
-Three modes gate tool visibility and permission.
+Clio Coder is designed for supervised work. It does not treat the model as an unrestricted shell user.
 
-| Mode | What it allows |
+| Mode | Behavior |
 | --- | --- |
-| `default` | Read, write, edit, bash, search, and dispatch tools visible. |
-| `advise` | Read-oriented. No filesystem mutation. |
-| `super` | Privileged writes outside the working directory. Gated by the confirmation overlay (`Alt+S`). |
+| `default` | Read, write, edit, bash, search, and dispatch tools are visible. |
+| `advise` | Read-oriented mode. Filesystem mutation is disabled. |
+| `super` | Allows privileged writes outside the working directory. Requires explicit confirmation. |
 
-Hardcoded kill-switches for dangerous Bash patterns live in [`damage-control-rules.yaml`](damage-control-rules.yaml). The list includes `rm -rf /`, `git push --force main`, and raw `dd` writes to block devices.
+Key safety behavior:
 
----
+- `Alt+S` opens the super-mode confirmation overlay.
+- Dangerous Bash patterns are blocked by hardcoded damage-control rules.
+- Known blocked patterns include commands like `rm -rf /`, force-pushing `main`, and raw `dd` writes to block devices.
+- Bash subprocess abort escalates from `SIGTERM` to `SIGKILL` after a grace period.
+- Tool and bash activity is rendered into the transcript with status, elapsed time, and command previews.
 
-## Receipts and cost
+The damage-control rules live in:
 
-Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A receipt records token counts, USD cost, the model and target used, and a SHA-256 integrity hash over the receipt fields plus the matching run ledger entry.
-
-```bash
-/receipts                   # paginated list in the TUI
-/receipts verify <runId>    # re-hash the receipt + run ledger and report match / mismatch
-/cost                       # session-level token and USD totals
+```text
+damage-control-rules.yaml
 ```
 
-Receipts are the source of truth for cost accounting and the audit trail. Nothing else in the system is trusted to report cost.
+---
+
+## Sessions, replay, and context compaction
+
+Interactive sessions persist under:
+
+```text
+<dataDir>/sessions/
+```
+
+Sessions are append-only JSONL with tree metadata. This supports:
+
+- resuming previous sessions;
+- replaying rich transcript entries;
+- forking from earlier assistant turns;
+- compacting old context;
+- preserving bash, tool, summary, checkpoint, and branch entries when durable entries exist.
+
+Useful commands:
+
+```text
+/resume
+/new
+/tree
+/fork
+/compact
+```
+
+Automatic compaction can be enabled in settings:
+
+```yaml
+compaction:
+  threshold: 0.8
+  auto: true
+```
+
+Manual compaction:
+
+```text
+/compact summarize previous implementation details but keep API decisions and test failures
+```
 
 ---
 
-## Architecture at a glance
+## Receipts, cost, and auditability
 
-Core logic is split across [`src/domains/`](src/domains/), [`src/interactive/`](src/interactive/), [`src/engine/`](src/engine/), [`src/worker/`](src/worker/), and the contributor-facing self-dev harness in [`src/harness/`](src/harness/).
+Every completed run writes a receipt to:
 
-Three hard invariants are enforced by the boundary tests in [`tests/boundaries/check-boundaries.ts`](tests/boundaries/check-boundaries.ts):
+```text
+<dataDir>/receipts/<runId>.json
+```
 
-1. Only `src/engine/**` value-imports engine adapter packages.
-2. `src/worker/**` value-imports only the worker-safe provider runtime rehydration modules needed to rebuild runtime descriptors before entering the engine boundary.
-3. Cross-domain traffic goes through `SafeEventBus`.
+A receipt records:
 
-Contributor and review rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
-Agent-specific operating rules live in [`AGENTS.md`](AGENTS.md).
+- run id;
+- model and target;
+- token counts;
+- estimated USD cost;
+- tool statistics;
+- integrity metadata;
+- a SHA-256 hash over receipt fields plus the matching run ledger entry.
+
+Use:
+
+```text
+/receipts
+/receipts verify <runId>
+/cost
+```
+
+Clio Coder also writes structured audit rows under:
+
+```text
+<dataDir>/audit/YYYY-MM-DD.jsonl
+```
+
+Audit entries cover classified tool calls, mode transitions, run aborts, and session park/resume events.
+
+---
+
+## Keybindings
+
+| Binding | Action |
+| --- | --- |
+| `Shift+Tab` | Cycle thinking level. |
+| `Alt+M` | Cycle mode: `default` / `advise`. |
+| `Alt+S` | Open the super-mode confirmation overlay. |
+| `Alt+T` | Open the session tree navigator. |
+| `Ctrl+L` | Open the model selector. |
+| `Ctrl+P` | Cycle the scoped model set forward. |
+| `Shift+Ctrl+P` | Cycle the scoped model set backward. |
+| `Ctrl+B` | Toggle the dispatch-board overlay. |
+| `Ctrl+O` | Toggle the most recent tool segment between collapsed subline and full body. |
+| `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
+| `Ctrl+D` | Exit. |
+| `Esc` | Cancel a stream or close the active overlay. |
+
+Run this inside the TUI for the resolved binding table:
+
+```text
+/hotkeys
+```
+
+---
+
+## Troubleshooting
+
+| Problem | Try this |
+| --- | --- |
+| `clio: command not found` | Run `npm run build && npm link` from the Clio Coder source tree. |
+| No model target is available | Run `clio configure`, then `clio targets --probe`. |
+| Local model does not respond | Confirm the local runtime is running and that the target URL is correct. |
+| Cloud model auth fails | Check `clio auth status <target>` and verify the relevant API key or login flow. |
+| Source changes do not appear | Re-run `npm run build`; the linked CLI points at `dist/`. |
+| Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
+| State appears corrupted | Run `clio doctor`; if needed, run `clio doctor --fix`. |
+| You need a clean start | Use `clio reset --state`, `--auth`, `--config`, or `--all` depending on what you want to remove. |
+
+For issue reports, include:
+
+```bash
+clio --version
+node --version
+clio doctor
+clio targets
+```
+
+Redact secrets and private repository content.
+
+---
+
+## For AI agents and coding assistants reading this README
+
+You are reading the product README for **Clio Coder**.
+
+Use these instructions when helping a user with this repository or with Clio Coder itself:
+
+1. Refer to the product as **Clio Coder** and the CLI binary as `clio`.
+2. Treat the project as alpha software. Do not imply production stability.
+3. Prefer the source install path unless npm availability has been explicitly confirmed.
+4. Do not invent unsupported commands, runtimes, plugins, or capabilities.
+5. When explaining configuration, use the target-first model: `targets[]`, then `orchestrator`, then `workers.default`.
+6. When helping with a repository that uses Clio Coder, inspect `AGENTS.md` and `CODEX.md` before proposing changes.
+7. Keep safety modes distinct: `default`, `advise`, and `super`.
+8. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
+9. For repo edits, prefer small, reviewable patches and state which command should validate the change.
+10. Do not tell users to paste API keys, private source code, or proprietary prompts into public issues.
+11. If asked to summarize this README, preserve the alpha status, install path, model-target concept, safety model, and receipt/audit features.
+12. If asked to generate documentation for Clio Coder, keep the tone technical and direct. Avoid hype.
 
 ---
 
 ## Development
 
+Most users do not need this section. It is for contributors.
+
 | Script | Purpose |
 | --- | --- |
-| `npm run ci` | Full repo gate: typecheck, lint, unit/integration/boundary tests, build, then e2e tests. |
+| `npm run ci` | Full repo gate: typecheck, lint, tests, build, and e2e tests. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run format` | Biome formatting pass. |
 | `npm run lint` | Biome checks. |
 | `npm run test` | Unit, integration, and boundary tests. |
 | `npm run test:e2e` | Build first, then run end-to-end tests. |
-| `npm run build` | Production bundle via `tsup`. |
+| `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |
-| `npm run hooks:install` | Opt-in pre-commit hook enforcing format and boundaries. |
+| `npm run hooks:install` | Install the optional pre-commit hook. |
 
-Recent contributor work also added a self-dev harness in `src/harness/` with hot-reload for some code paths and restart-required signals for the rest. Treat it as a developer convenience layer, not a polished public interface yet.
+Core source areas:
+
+```text
+src/cli/           CLI entry points
+src/interactive/   terminal UI
+src/engine/        model/provider engine boundary
+src/worker/        worker dispatch and runtime rehydration
+src/domains/       domain logic and built-in agent specs
+src/harness/       contributor-facing self-development harness
+tests/             unit, integration, boundary, and e2e tests
+```
+
+Contributor rules live in:
+
+```text
+CONTRIBUTING.md
+AGENTS.md
+```
+
+---
+
+## Architecture notes
+
+Clio Coder keeps model execution, worker dispatch, interactive UI state, and domain logic separated.
+
+Boundary tests enforce three important rules:
+
+1. Only `src/engine/**` value-imports engine adapter packages.
+2. `src/worker/**` imports only worker-safe provider runtime rehydration modules needed before entering the engine boundary.
+3. Cross-domain traffic goes through `SafeEventBus`.
+
+This is intended to keep provider-specific code contained and make the system easier to reason about as more runtimes and agents are added.
 
 ---
 
 ## Roadmap
 
-- **v0.1.2 (current)**: experimental patch release. Adds transient provider retry with persistent transcript visibility, hardens bash subprocess abort with SIGKILL escalation, tightens tool/bash transcript rendering with status and elapsed time, and ships a five-arm `audit.jsonl` (tool calls, mode transitions, run aborts, session park/resume) so sessions leave a complete on-disk trail.
-- **v0.1.1**: experimental patch release. Durable transcript replay now preserves rich session entries across resume and fork, and interactive prompts load deterministic `AGENTS.md`/`CODEX.md` project context.
-- **v0.1.0-exp**: experimental first release. Target-first config, interactive TUI, receipts and cost ledger, auth and configure flows, model and session controls, dispatchable workers, and an early self-dev harness.
-- **Next**: broader runtime hardening, MCP support, richer agent library, deeper developer ergonomics, and more complete context/resource loading.
-- **Longer horizon**: first-class CLIO Core integration, multi-agent coding workflows composed at the CLIO Agent layer, scientific-computing recipes.
+Current release:
+
+- **v0.1.2** (alpha). Highlights: transient provider/stream retry with cancel-aware countdowns and persisted recovery, bash abort that escalates `SIGTERM` to `SIGKILL` after a grace period, structured tool and bash transcript rendering with `Ctrl+O` expand toggle and edit-tool diff preview, mode-colored editor rails, slash-command autocomplete, welcome dashboard at TUI launch, per-tool stats in run receipts, five-arm audit JSONL (tool calls, mode changes, run aborts, session park/resume), reasoning probe state surfaced in `clio targets --json`, provider catalog aligned with pi SDK 0.70.2, and `/thinking` plus `clio run` working against local `openai-compat` and LM Studio backends.
+
+Near-term direction:
+
+- broader runtime hardening;
+- MCP support;
+- richer built-in agent library;
+- better first-run and target setup ergonomics;
+- more complete context and resource loading;
+- stronger docs for local model workflows;
+- expanded CLIO Core and CLIO Agent integration.
+
+Longer horizon:
+
+- first-class multi-agent coding workflows;
+- deeper scientific-computing recipes;
+- composition with CLIO Agent;
+- integration with CLIO Core context storage.
 
 ---
 
-## Lineage and credits
+## Lineage
 
-### CLIO family
+Clio Coder is part of the IOWarp CLIO family.
 
-Clio Coder is a first-class IOWarp product and a coding specialization of the [CLIO Agent](https://iowarp.ai) framework. The CLIO platform is built by the [Gnosis Research Center](https://grc.iit.edu/) at the Illinois Institute of Technology. Companion projects:
+Related projects:
 
-- [clio-core](https://github.com/iowarp/clio-core): the Chimaera-based context storage runtime.
-- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific data (HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, Zarr, and more).
+- [clio-core](https://github.com/iowarp/clio-core): Chimaera-based context storage runtime.
+- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific data, including HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, Zarr, and more.
 
-Clio Coder is the code-centric sibling of those systems. It is designed to be used standalone and to be composed as a coding primitive inside multi-agent scientific workflows orchestrated by CLIO Agent.
+Clio Coder is the code-focused sibling: usable as a standalone terminal coding harness and designed to compose into broader CLIO Agent workflows.
 
 ---
 
