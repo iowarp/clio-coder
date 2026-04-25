@@ -127,7 +127,18 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
 
 	if (parsed.json) {
-		process.stdout.write(`${JSON.stringify(filtered.map(serializeStatus), null, 2)}\n`);
+		const settings = readSettings();
+		const candidateFor = (status: EndpointStatus): string | null => {
+			const orchestratorModel =
+				settings.orchestrator?.endpoint === status.endpoint.id ? (settings.orchestrator?.model ?? null) : null;
+			return orchestratorModel ?? status.endpoint.defaultModel ?? null;
+		};
+		const rows = filtered.map((status) => {
+			const candidate = candidateFor(status);
+			const detectedReasoning = candidate ? providers.getDetectedReasoning(status.endpoint.id, candidate) : null;
+			return serializeStatus(status, { detectedReasoning, candidateModelId: candidate });
+		});
+		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
 	} else if (filtered.length === 0) {
 		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
 	} else {
@@ -477,7 +488,7 @@ function compareStatusByTier(a: EndpointStatus, b: EndpointStatus): number {
 	);
 }
 
-function serializeStatus(status: EndpointStatus): {
+interface SerializedStatus {
 	target: EndpointStatus["endpoint"];
 	runtime: EndpointStatus["runtime"];
 	available: boolean;
@@ -487,8 +498,18 @@ function serializeStatus(status: EndpointStatus): {
 	probeCapabilities?: EndpointStatus["probeCapabilities"];
 	discoveredModels: EndpointStatus["discoveredModels"];
 	tier: ProviderOutputTier;
-} {
-	const out = {
+	detectedReasoning: boolean | null;
+	reasoningCandidateModelId: string | null;
+}
+
+function serializeStatus(
+	status: EndpointStatus,
+	extras: { detectedReasoning: boolean | null; candidateModelId: string | null } = {
+		detectedReasoning: null,
+		candidateModelId: null,
+	},
+): SerializedStatus {
+	const out: SerializedStatus = {
 		target: status.endpoint,
 		runtime: status.runtime,
 		available: status.available,
@@ -497,9 +518,11 @@ function serializeStatus(status: EndpointStatus): {
 		capabilities: status.capabilities,
 		discoveredModels: status.discoveredModels,
 		tier: statusTier(status),
+		detectedReasoning: extras.detectedReasoning,
+		reasoningCandidateModelId: extras.candidateModelId,
 	};
 	if (status.probeCapabilities !== undefined) {
-		return { ...out, probeCapabilities: status.probeCapabilities };
+		out.probeCapabilities = status.probeCapabilities;
 	}
 	return out;
 }
