@@ -153,4 +153,101 @@ describe("renderers/tool-execution", () => {
 			ok(stripAnsi(line).length <= 40, `line too wide: ${line.length}`);
 		}
 	});
+
+	it("suppresses the args body when the header captured the primary arg", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "read",
+				args: { path: "README.md" },
+				result: "hello",
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		const headerIdx = plain.findIndex((l) => l.startsWith("tool: read(README.md)"));
+		const resultIdx = plain.indexOf("  result:");
+		ok(headerIdx >= 0 && resultIdx >= 0, JSON.stringify(plain));
+		strictEqual(resultIdx, headerIdx + 1, `expected result block immediately after header, got ${JSON.stringify(plain)}`);
+		ok(!plain.some((l) => l.includes(`"path"`)), `args body leaked into output: ${JSON.stringify(plain)}`);
+	});
+
+	it("retains the args body for unknown tools so users see what was invoked", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "mystery",
+				args: { x: 1, y: "z" },
+				result: "ok",
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(
+			plain.some((l) => l.includes(`"x": 1`)),
+			`expected args body for unknown tool, got: ${JSON.stringify(plain)}`,
+		);
+	});
+
+	it("unwraps pi-agent-core text-content envelopes before rendering", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "read",
+				args: { path: "a.ts" },
+				result: { content: [{ type: "text", text: "hello\nworld" }] },
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(plain.includes("  hello"), JSON.stringify(plain));
+		ok(plain.includes("  world"), JSON.stringify(plain));
+		ok(
+			!plain.some((l) => l.includes(`"content"`) || l.includes(`"type"`)),
+			`envelope leaked into output: ${JSON.stringify(plain)}`,
+		);
+	});
+
+	it("unwraps bare text-content arrays as well as envelope objects", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "read",
+				args: { path: "a.ts" },
+				result: [
+					{ type: "text", text: "first chunk" },
+					{ type: "text", text: " second chunk" },
+				],
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(plain.includes("  first chunk second chunk"), JSON.stringify(plain));
+	});
+
+	it("caps long results at 12 visible lines with a hidden-count marker", () => {
+		const result = Array.from({ length: 30 }, (_, i) => `line${i + 1}`).join("\n");
+		const lines = renderToolExecution(
+			{
+				toolCallId: "t1",
+				toolName: "read",
+				args: { path: "a.ts" },
+				result,
+				isError: false,
+			},
+			80,
+		);
+		const plain = lines.map(stripAnsi);
+		ok(plain.includes("  line1"), JSON.stringify(plain));
+		ok(plain.includes("  line12"), JSON.stringify(plain));
+		ok(!plain.some((l) => l.includes("line13")), `expected line13 to be hidden, got: ${JSON.stringify(plain)}`);
+		ok(
+			plain.some((l) => l.includes("18 more lines hidden")),
+			`expected hidden-count marker, got: ${JSON.stringify(plain)}`,
+		);
+	});
 });
