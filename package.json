@@ -72,7 +72,7 @@
 		"prepublishOnly": "npm run typecheck && npm run lint && npm run build && node scripts/check-dist.mjs"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.2.119",
+		"@anthropic-ai/claude-agent-sdk": "^0.2.120",
 		"@lmstudio/sdk": "1.5.0",
 		"@mariozechner/pi-agent-core": "0.69.0",
 		"@mariozechner/pi-ai": "0.69.0",
