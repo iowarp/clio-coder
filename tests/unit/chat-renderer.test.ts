@@ -252,7 +252,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		rehydrateChatPanelFromTurns(panel, entries);
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("clio: [error] rate limit 429"), text);
-		ok(text.includes("[retry] scheduled 1/3 in 2s: rate limit 429"), text);
+		ok(text.includes("[retry] attempt 1/3 scheduled in 2s: rate limit 429"), text);
 		ok(text.includes("clio: ok now"), text);
 
 		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));

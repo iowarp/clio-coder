@@ -1,5 +1,6 @@
 import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import { formatRetryStatus } from "./renderers/retry-status.js";
 
 const TOOL_PREVIEW_LIMIT = 96;
 
@@ -204,21 +205,6 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 	const prefixed = `${CLIO_PREFIX}${first}`;
 	const wrappedFirst = wrapTextWithAnsi(prefixed, width);
 	return [...wrappedFirst, ...lines.slice(1)];
-}
-
-function formatRetryStatus(status: RetryStatusPayload): string {
-	const suffix = status.errorMessage ? `: ${shorten(status.errorMessage, 120)}` : "";
-	if (status.phase === "waiting") {
-		return `[retry] attempt ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
-	}
-	if (status.phase === "scheduled") {
-		const seconds = Math.ceil((status.delayMs ?? 0) / 1000);
-		return `[retry] attempt ${status.attempt}/${status.maxAttempts} scheduled in ${seconds}s${suffix}`;
-	}
-	if (status.phase === "retrying") return `[retry] attempt ${status.attempt}/${status.maxAttempts} running${suffix}`;
-	if (status.phase === "cancelled") return `[retry] cancelled attempt ${status.attempt}/${status.maxAttempts}${suffix}`;
-	if (status.phase === "exhausted") return `[retry] exhausted after ${status.attempt} attempt(s)${suffix}`;
-	return `[retry] recovered after ${status.attempt} attempt(s)`;
 }
 
 function toolStatusLabel(seg: ToolSegment): string {

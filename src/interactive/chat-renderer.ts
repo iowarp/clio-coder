@@ -26,10 +26,11 @@ import type {
 } from "../domains/session/entries.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent } from "./chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
+import { formatRetryStatus } from "./renderers/retry-status.js";
 
 const DEFAULT_COALESCE_MS = 16;
 
@@ -302,16 +303,30 @@ function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): str
 
 function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 	const data = payloadObject(entry.data);
-	const phase = typeof data?.phase === "string" ? data.phase : "status";
-	const attempt = typeof data?.attempt === "number" ? data.attempt : null;
-	const maxAttempts = typeof data?.maxAttempts === "number" ? data.maxAttempts : null;
-	const errorMessage =
-		typeof data?.errorMessage === "string" && data.errorMessage.length > 0 ? `: ${data.errorMessage}` : "";
-	const delayMs = typeof data?.delayMs === "number" ? data.delayMs : null;
-	const prefix =
-		attempt !== null && maxAttempts !== null ? `[retry] ${phase} ${attempt}/${maxAttempts}` : `[retry] ${phase}`;
-	const delay = delayMs !== null && phase === "scheduled" ? ` in ${Math.ceil(delayMs / 1000)}s` : "";
-	return wrapTextWithAnsi(`${prefix}${delay}${errorMessage}`, width);
+	if (!data) return wrapTextWithAnsi("[retry] status", width);
+	const rawPhase = data.phase;
+	if (
+		rawPhase !== "scheduled" &&
+		rawPhase !== "waiting" &&
+		rawPhase !== "retrying" &&
+		rawPhase !== "cancelled" &&
+		rawPhase !== "exhausted" &&
+		rawPhase !== "recovered"
+	) {
+		return wrapTextWithAnsi("[retry] status", width);
+	}
+	const attempt = typeof data.attempt === "number" ? data.attempt : null;
+	const maxAttempts = typeof data.maxAttempts === "number" ? data.maxAttempts : null;
+	if (attempt === null || maxAttempts === null) return wrapTextWithAnsi("[retry] status", width);
+	const status: RetryStatusPayload = {
+		phase: rawPhase,
+		attempt,
+		maxAttempts,
+		...(typeof data.errorMessage === "string" && data.errorMessage.length > 0 ? { errorMessage: data.errorMessage } : {}),
+		...(typeof data.delayMs === "number" ? { delayMs: data.delayMs } : {}),
+		...(typeof data.seconds === "number" ? { seconds: data.seconds } : {}),
+	};
+	return wrapTextWithAnsi(formatRetryStatus(status), width);
 }
 
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
