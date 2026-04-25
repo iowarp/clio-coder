@@ -26,7 +26,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	}
 	const findings: DoctorFinding[] = [];
 	const version = getVersionInfo();
-	findings.push({ ok: true, name: "clio version", detail: version.clio });
+	findings.push({ ok: true, name: "Clio Coder version", detail: version.clio });
 	findings.push({ ok: true, name: "node version", detail: version.node });
 	findings.push({ ok: true, name: "platform", detail: version.platform });
 	const engineReady = Boolean(version.piAgentCore && version.piAi && version.piTui);

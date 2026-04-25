@@ -1,5 +1,6 @@
-import { Box, type Component, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
-import type { ClioKeybindingManager } from "../keybinding-manager.js";
+import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
+import type { ClioKeybindingManager, PlatformKeybindingWarning } from "../keybinding-manager.js";
+import { formatKeybindingDetailLines } from "./keybinding-detail.js";
 
 export const HOTKEYS_OVERLAY_WIDTH = 74;
 
@@ -7,6 +8,8 @@ export interface HotkeyEntry {
 	keys: string;
 	action: string;
 	scope: "global" | "overlay" | "editor";
+	id?: string;
+	source?: "default" | "user";
 }
 
 /**
@@ -63,9 +66,11 @@ function formatKey(raw: string): string {
 
 export function buildHotkeyEntries(manager: ClioKeybindingManager): ReadonlyArray<HotkeyEntry> {
 	const dynamic: HotkeyEntry[] = manager.hotkeyEntries().map((row) => ({
+		id: row.id,
 		keys: formatKey(row.keys),
 		action: row.description,
 		scope: "global" as const,
+		source: row.source,
 	}));
 	return [...dynamic, ...SLASH_HOTKEYS];
 }
@@ -78,37 +83,100 @@ function pad(text: string, width: number): string {
 export function formatHotkeysLines(
 	entries: ReadonlyArray<HotkeyEntry>,
 	contentWidth: number = HOTKEYS_OVERLAY_WIDTH - 4,
+	options: { selectedIndex?: number; warnings?: ReadonlyArray<PlatformKeybindingWarning> } = {},
 ): string[] {
-	const keysCol = 26;
-	const actionCol = Math.max(10, contentWidth - keysCol - 2);
+	const keysCol = 24;
+	const actionCol = Math.max(10, contentWidth - keysCol - 5);
 	const lines: string[] = [];
 	lines.push(`┌${" Hotkeys ".padEnd(contentWidth + 2, "─")}┐`);
+	for (const warning of options.warnings ?? []) {
+		const keys = warning.keys.map(formatKey).join(" / ");
+		lines.push(`│ ${pad(`! ${warning.id}: ${keys} needs CSI-u (${warning.terminal})`, contentWidth)} │`);
+	}
+	if ((options.warnings ?? []).length > 0) {
+		lines.push(`│ ${pad("", contentWidth)} │`);
+	}
 	let lastScope: string | null = null;
-	for (const hk of entries) {
+	entries.forEach((hk, index) => {
 		if (hk.scope !== lastScope) {
 			lastScope = hk.scope;
 			lines.push(`│ ${pad(`── ${hk.scope.toUpperCase()}`, contentWidth)} │`);
 		}
-		const row = `${pad(hk.keys, keysCol)}  ${pad(hk.action, actionCol)}`;
+		const marker = index === options.selectedIndex ? ">" : " ";
+		const row = `${marker} ${pad(hk.keys, keysCol)}  ${pad(hk.action, actionCol)}`;
 		lines.push(`│ ${pad(row, contentWidth)} │`);
-	}
-	lines.push(`│ ${pad("[Esc] close", contentWidth)} │`);
+	});
+	lines.push(`│ ${pad("[Up/Down] select  [E] details  [Esc] close", contentWidth)} │`);
 	lines.push(`└${"─".repeat(contentWidth + 2)}┘`);
 	return lines;
 }
 
 class HotkeysView implements Component {
-	constructor(private readonly entries: ReadonlyArray<HotkeyEntry>) {}
+	private selectedIndex = 0;
+	private detailEntry: HotkeyEntry | null = null;
+
+	constructor(
+		private readonly entries: ReadonlyArray<HotkeyEntry>,
+		private readonly warnings: ReadonlyArray<PlatformKeybindingWarning>,
+		private readonly onChange: () => void,
+	) {}
 
 	render(width: number): string[] {
-		return formatHotkeysLines(this.entries, Math.max(10, width - 4));
+		const contentWidth = Math.max(10, width - 4);
+		if (this.detailEntry) {
+			const warnings = this.warnings
+				.filter((warning) => warning.id === this.detailEntry?.id)
+				.map((warning) => `${warning.keys.map(formatKey).join(" / ")} may not fire: ${warning.reason}`);
+			const detail = {
+				id: this.detailEntry.id ?? this.detailEntry.keys,
+				keys: this.detailEntry.keys,
+				action: this.detailEntry.action,
+				warnings,
+			};
+			return formatKeybindingDetailLines(
+				this.detailEntry.source ? { ...detail, source: this.detailEntry.source } : detail,
+				contentWidth,
+			);
+		}
+		return formatHotkeysLines(this.entries, contentWidth, {
+			selectedIndex: this.selectedIndex,
+			warnings: this.warnings,
+		});
+	}
+
+	handleInput(data: string): void {
+		if (this.detailEntry) {
+			if (matchesKey(data, "backspace") || data === "q") {
+				this.detailEntry = null;
+				this.onChange();
+			}
+			return;
+		}
+		if (matchesKey(data, "up")) {
+			this.selectedIndex = this.selectedIndex === 0 ? this.entries.length - 1 : this.selectedIndex - 1;
+			this.onChange();
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			this.selectedIndex = this.selectedIndex === this.entries.length - 1 ? 0 : this.selectedIndex + 1;
+			this.onChange();
+			return;
+		}
+		if (data.toLowerCase() === "e" || matchesKey(data, "enter")) {
+			this.detailEntry = this.entries[this.selectedIndex] ?? null;
+			this.onChange();
+		}
 	}
 
 	invalidate(): void {}
 }
 
 export function openHotkeysOverlay(tui: TUI, manager: ClioKeybindingManager): OverlayHandle {
-	const box = new Box(0, 0);
-	box.addChild(new HotkeysView(buildHotkeyEntries(manager)));
-	return tui.showOverlay(box, { anchor: "center", width: HOTKEYS_OVERLAY_WIDTH });
+	return tui.showOverlay(
+		new HotkeysView(buildHotkeyEntries(manager), manager.platformWarnings(), () => tui.requestRender()),
+		{
+			anchor: "center",
+			width: HOTKEYS_OVERLAY_WIDTH,
+		},
+	);
 }

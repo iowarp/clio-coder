@@ -15,6 +15,13 @@ Keep a Changelog.
 - Settings overlay exposes retry controls (`retry.enabled`, `retry.maxRetries`,
   `retry.baseDelayMs`, `retry.maxDelayMs`) so users can tune retry behavior
   without hand-editing settings.yaml.
+- The interactive TUI now opens with a Clio Coder dashboard showing target,
+  model-registry, context, latency, and worker-profile status; interactive
+  startup no longer prints a separate legacy banner above the dashboard.
+- `/hotkeys` now supports row selection, a read-only keybinding detail panel,
+  and legacy-terminal warnings when user bindings require CSI-u support.
+- Editor prompt rails now reflect the active mode: default uses the terminal
+  foreground, advise uses amber, and super uses red.
 
 ### Fixed
 
@@ -42,6 +49,8 @@ Keep a Changelog.
   the partial output and the terminal error indicator together.
 - Failed turns with empty usage no longer write zero-token rows to the
   observability ledger.
+- User-facing product labels now consistently say Clio Coder instead of mixing
+  lowercase command-name branding into headers, prompts, and status text.
 
 ## 0.1.1 — 2026-04-24
 

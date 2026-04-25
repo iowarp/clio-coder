@@ -6,10 +6,6 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { type BootOptions, bootOrchestrator } from "../entry/orchestrator.js";
 import { runConfigureCommand } from "./configure.js";
 
-function shouldRunInteractive(): boolean {
-	return process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
-}
-
 function hasUsableDefaultTarget(): boolean {
 	const settings = readSettings();
 	const targetId = settings.orchestrator.endpoint;
@@ -34,7 +30,7 @@ export async function runClioCommand(options: BootOptions = {}): Promise<number>
 	if (process.env.CLIO_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_INTERACTIVE = "1";
 	}
-	if (shouldRunInteractive()) {
+	if (process.env.CLIO_INTERACTIVE === "1") {
 		initializeClioHome();
 		if (!hasUsableDefaultTarget()) {
 			process.stdout.write("No usable default target is configured. Starting `clio configure`.\n");

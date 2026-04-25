@@ -11,7 +11,7 @@
  * `TRACED_CHANNELS` list if a future front needs to observe them.
  *
  * Ordering invariant: the first `[clio:bus] shutdown.requested` line must
- * never reach stderr before the `clio: received <SIGNAL>, shutting down...`
+ * never reach stderr before the `Clio Coder: received <SIGNAL>, shutting down...`
  * notice written by termination.installSignalHandlers in
  * src/core/termination.ts. The Front 1 diag (scripts/diag-interactive.ts)
  * asserts the SIGINT notice is present on stderr before the bus trace lines,

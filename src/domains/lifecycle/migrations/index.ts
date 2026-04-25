@@ -1,5 +1,5 @@
 /**
- * Clio state migration runner.
+ * Clio Coder state migration runner.
  *
  * A migration is a versioned state-shape change keyed by a stable id of the
  * form `YYYY-MM-DD-<slug>`. The registry is a static, ordered list compiled
@@ -9,7 +9,7 @@
  *
  * Applied migration ids are persisted to `<dir>/state/migrations.json`. A
  * migration whose id already appears in that manifest is skipped. `up()` is
- * invoked at most once per Clio state tree for a given id.
+ * invoked at most once per Clio Coder state tree for a given id.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

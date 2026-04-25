@@ -3,7 +3,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio doctor [--fix]
 
-Diagnose Clio state without creating files. Use --fix to create or repair missing state.
+Diagnose Clio Coder state without creating files. Use --fix to create or repair missing state.
 `;
 
 export function runDoctorCommand(args: ReadonlyArray<string> = []): number {

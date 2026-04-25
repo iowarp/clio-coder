@@ -189,7 +189,7 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 		const tokens = deps.getSessionTokens ? tokensSegment(deps.getSessionTokens()) : null;
 		const tokensPart = tokens ? `${SEP}${tokens}` : "";
 
-		let text = `clio${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
+		let text = `Clio Coder${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
 		if (deps.getHarnessState) {
 			const indicator = formatHarnessIndicator(deps.getHarnessState());
 			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;

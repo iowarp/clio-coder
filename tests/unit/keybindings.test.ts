@@ -7,8 +7,12 @@ import {
 } from "../../src/domains/config/keybindings.js";
 import {
 	createKeybindingManagerForTesting,
+	detectPlatformKeybindingWarnings,
+	detectTerminalKeySupport,
 	formatInvalidKeybindingNotice,
+	formatPlatformKeybindingNotice,
 	isValidKeyId,
+	keyRequiresCsiU,
 	validateKeybindings,
 } from "../../src/interactive/keybinding-manager.js";
 
@@ -87,10 +91,68 @@ describe("interactive/keybinding-manager defaults", () => {
 		ok(thinking);
 		strictEqual(thinking.keys, "shift+tab");
 		strictEqual(thinking.description, "Cycle orchestrator thinking level");
+		strictEqual(thinking.source, "default");
 	});
 
 	it("reports zero overrides when no user keybindings are configured", () => {
 		strictEqual(manager.overrideCount(), 0);
+	});
+});
+
+describe("interactive/keybinding-manager platform warnings", () => {
+	it("detects CSI-u capable and legacy terminals from env", () => {
+		strictEqual(detectTerminalKeySupport({ KITTY_WINDOW_ID: "1", TERM: "xterm-kitty" }).supportsCsiU, true);
+		strictEqual(detectTerminalKeySupport({ TERM_PROGRAM: "WezTerm" }).supportsCsiU, true);
+		const legacy = detectTerminalKeySupport({ TERM: "xterm-256color" });
+		strictEqual(legacy.supportsCsiU, false);
+		ok(legacy.reason.includes("CSI-u"));
+	});
+
+	it("identifies shift+ctrl printable bindings as CSI-u dependent", () => {
+		strictEqual(keyRequiresCsiU("shift+ctrl+p"), true);
+		strictEqual(keyRequiresCsiU("ctrl+shift+1"), true);
+		strictEqual(keyRequiresCsiU("shift+tab"), false);
+		strictEqual(keyRequiresCsiU("ctrl+p"), false);
+	});
+
+	it("warns only for user bindings that cannot fire on legacy terminals", () => {
+		const { valid } = validateKeybindings({
+			"clio.model.cycleBackward": "shift+ctrl+p",
+			"clio.exit": "ctrl+d",
+		});
+		const warnings = detectPlatformKeybindingWarnings(valid, {
+			name: "xterm-256color",
+			supportsCsiU: false,
+			reason: "CSI-u support not detected",
+		});
+		strictEqual(warnings.length, 1);
+		strictEqual(warnings[0]?.id, "clio.model.cycleBackward");
+		deepStrictEqual([...(warnings[0]?.keys ?? [])], ["shift+ctrl+p"]);
+	});
+
+	it("does not warn on CSI-u capable terminals", () => {
+		const manager = createKeybindingManagerForTesting(
+			{ "clio.model.cycleBackward": "shift+ctrl+p" },
+			{ KITTY_WINDOW_ID: "1" },
+		);
+		strictEqual(manager.platformWarnings().length, 0);
+		const entry = manager.hotkeyEntries().find((row) => row.id === "clio.model.cycleBackward");
+		strictEqual(entry?.source, "user");
+	});
+
+	it("formats platform warnings as one boot diagnostic", () => {
+		const notice = formatPlatformKeybindingNotice([
+			{
+				id: "clio.model.cycleBackward",
+				keys: ["shift+ctrl+p"],
+				terminal: "xterm-256color",
+				reason: "CSI-u support not detected",
+			},
+		]);
+		ok(notice.startsWith("Clio Coder: 1 keybinding may not fire"), notice);
+		ok(notice.includes(`clio.model.cycleBackward="shift+ctrl+p"`), notice);
+		ok(notice.includes("/hotkeys"), notice);
+		ok(notice.endsWith("\n"));
 	});
 });
 
@@ -196,7 +258,7 @@ describe("interactive/keybinding-manager validation", () => {
 			{ id: "clio.exit", keys: ["banana"] },
 			{ id: "clio.session.tree", keys: ["wasabi"] },
 		]);
-		ok(notice.startsWith("clio: 2 invalid keybindings"), notice);
+		ok(notice.startsWith("Clio Coder: 2 invalid keybindings"), notice);
 		ok(notice.includes(`clio.exit="banana"`), notice);
 		ok(notice.includes(`clio.session.tree="wasabi"`), notice);
 		ok(notice.includes("settings.yaml"), notice);

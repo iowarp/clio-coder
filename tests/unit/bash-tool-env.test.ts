@@ -16,7 +16,6 @@ describe("bash tool environment", () => {
 		process.env.CLIO_DEV = "1";
 		process.env.CLIO_SELF_DEV = "1";
 		process.env.CLIO_INTERACTIVE = "1";
-		process.env.CLIO_PHASE1_INTERACTIVE = "1";
 		process.env.CLIO_RESUME_SESSION_ID = "session-123";
 
 		const env = buildToolEnv();
@@ -24,7 +23,6 @@ describe("bash tool environment", () => {
 		strictEqual(env.CLIO_DEV, undefined);
 		strictEqual(env.CLIO_SELF_DEV, undefined);
 		strictEqual(env.CLIO_INTERACTIVE, undefined);
-		strictEqual(env.CLIO_PHASE1_INTERACTIVE, undefined);
 		strictEqual(env.CLIO_RESUME_SESSION_ID, undefined);
 	});
 
@@ -93,14 +91,14 @@ describe("bash tool environment", () => {
 			},
 			{ signal: controller.signal },
 		);
-		setTimeout(() => controller.abort(), 20);
+		setTimeout(() => controller.abort(), 250);
 		const result = await started;
 		const elapsedMs = Date.now() - startedAt;
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
-		ok(elapsedMs >= 4500, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
-		ok(elapsedMs < 7500, `expected abort escalation within 7.5s, got ${elapsedMs}ms`);
+		ok(elapsedMs >= 5000, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
+		ok(elapsedMs < 8000, `expected abort escalation within 8s, got ${elapsedMs}ms`);
 	});
 
 	it("reports output cap exits explicitly", async () => {

@@ -141,7 +141,7 @@ class TerminationCoordinator {
 
 	installSignalHandlers(): void {
 		const handler = (signal: NodeJS.Signals): void => {
-			process.stderr.write(`\nclio: received ${signal}, shutting down...\n`);
+			process.stderr.write(`\nClio Coder: received ${signal}, shutting down...\n`);
 			void this.shutdown(signal === "SIGINT" ? 130 : 143);
 		};
 		process.once("SIGINT", handler);

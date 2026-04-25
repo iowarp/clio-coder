@@ -67,6 +67,12 @@ Recent focus in this dev cycle:
 - deterministic project context loading from `AGENTS.md` and `CODEX.md`
 - target-oriented auth and configuration flows across the CLI and interactive UI
 - target controls, model selection, scoped-model cycling, session navigation, and better live response UX in the TUI
+- a startup TUI dashboard with target/model, model-registry, context, latency,
+  and worker-profile status at a glance
+- mode-colored prompt rails: default stays neutral, advise is amber, and super
+  is red
+- `/hotkeys` now shows resolved keybindings, legacy-terminal warnings for
+  CSI-u-only user bindings, and per-binding settings guidance
 - an experimental self-dev harness for hot-reload and restart-required feedback while working on Clio Coder itself
 
 ---
@@ -113,7 +119,7 @@ Bare `clio` bootstraps config, data, and cache automatically. If it is running i
 
 For a non-interactive run, `clio run --agent scout "summarize the repo layout"` dispatches a worker and writes a receipt. Use `--target`, `--model`, `--thinking`, and `--require` when you want a one-off override without changing defaults.
 
-Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Clio Coder`. The current surface includes target and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
+Start the interactive TUI with bare `clio`. The banner renders as `Clio Coder`. The current surface includes target and model controls, session navigation, receipts and cost overlays, and the slash-command parser documented below.
 
 ---
 
@@ -130,8 +136,8 @@ Start the interactive TUI with bare `clio`. The banner renders as `◆ clio  Cli
 | `clio models [search] [--target <id>]` | List discovered or known models for targets. |
 | `clio auth list|status|login|logout [target-or-runtime]` | Inspect, add, or remove stored auth. |
 | `clio doctor [--fix]` | Diagnose without creating files; `--fix` creates or repairs state. |
-| `clio reset [--state|--auth|--config|--all]` | Recover or wipe Clio state while keeping the binary installed. |
-| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio state and print package-manager removal guidance. |
+| `clio reset [--state|--auth|--config|--all]` | Recover or wipe Clio Coder state while keeping the binary installed. |
+| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print package-manager removal guidance. |
 | `clio agents` | List builtin agent specs. |
 | `clio run [flags] "<task>"` | Dispatch a single worker non-interactively and persist a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
@@ -219,6 +225,10 @@ compaction overrides remain direct `settings.yaml` fields.
 | `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
 | `Ctrl+D` | Exit. |
 | `Esc` | Cancel a stream or close the active overlay. |
+
+Run `/hotkeys` for the resolved binding table. Use Up/Down and `E` there to
+inspect a binding's action id, current keys, source, and `settings.yaml`
+override guidance.
 
 ---
 

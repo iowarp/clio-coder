@@ -44,7 +44,13 @@ import type { Model } from "../engine/types.js";
 import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { startInteractive } from "../interactive/index.js";
-import { formatInvalidKeybindingNotice, validateKeybindings } from "../interactive/keybinding-manager.js";
+import {
+	detectPlatformKeybindingWarnings,
+	detectTerminalKeySupport,
+	formatInvalidKeybindingNotice,
+	formatPlatformKeybindingNotice,
+	validateKeybindings,
+} from "../interactive/keybinding-manager.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry } from "../tools/registry.js";
 import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
@@ -64,7 +70,7 @@ export interface BootOptions {
 function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
-  ${chalk.cyan("◆ clio")}  Clio Coder
+  ${chalk.cyan("Clio Coder")}
   ${chalk.dim(`v${clio} · supervised repository work · ready`)}
 `;
 }
@@ -257,14 +263,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
 
-	process.stdout.write(buildBanner());
-	if (selfDev) {
-		process.stdout.write(
-			`  ${chalk.magenta(`${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`)}\n`,
-		);
-	}
-	if (process.env.CLIO_TIMING === "1") {
-		process.stdout.write(`${timer.report()}\n`);
+	const interactive = process.env.CLIO_INTERACTIVE === "1";
+	const selfDevLine = selfDev
+		? `${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`
+		: undefined;
+	if (!interactive) {
+		process.stdout.write(buildBanner());
+		if (selfDevLine) process.stdout.write(`  ${chalk.magenta(selfDevLine)}\n`);
+		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
 	}
 
 	const config = result.getContract<ConfigContract>("config");
@@ -272,7 +278,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	if (options.apiKey) {
 		if (!providers) {
-			process.stderr.write("clio: --api-key supplied but providers domain unavailable; ignoring.\n");
+			process.stderr.write("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
 			const settingsNow = config?.get() ?? readSettings();
 			const activeEndpointId = settingsNow.orchestrator?.endpoint;
@@ -281,13 +287,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (endpoint && runtime) {
 				providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
 			} else {
-				process.stderr.write("clio: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
+				process.stderr.write("Clio Coder: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
 			}
 		}
 	}
 
-	const runInteractive = process.env.CLIO_INTERACTIVE === "1" || process.env.CLIO_PHASE1_INTERACTIVE === "1";
-	if (!runInteractive) {
+	if (!interactive) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
@@ -298,7 +303,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const safety = result.getContract<SafetyContract>("safety");
 	if (!modes || !providers || !dispatch || !observability || !safety) {
 		process.stderr.write(
-			"clio: interactive mode requires safety + modes + providers + dispatch + observability contracts; aborting.\n",
+			"Clio Coder: interactive mode requires safety + modes + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
@@ -316,9 +321,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
 
-	const invalidBindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {}).invalid;
+	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
+	const invalidBindings = validatedKeybindings.invalid;
 	if (invalidBindings.length > 0) {
 		process.stderr.write(formatInvalidKeybindingNotice(invalidBindings));
+	}
+	const platformWarnings = detectPlatformKeybindingWarnings(
+		validatedKeybindings.valid,
+		detectTerminalKeySupport(process.env),
+	);
+	if (platformWarnings.length > 0) {
+		process.stderr.write(formatPlatformKeybindingNotice(platformWarnings));
 	}
 	const persistSettings = (next: ClioSettings): void => {
 		if (config?.set) {
@@ -339,7 +352,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session.resume(resumeId);
 		} catch (err) {
 			process.stderr.write(
-				`clio: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
+				`Clio Coder: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
 			);
 		}
 	}
@@ -451,6 +464,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			});
 		},
 		writeSettings: (next) => persistSettings(next),
+		selfDev: Boolean(selfDev),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {

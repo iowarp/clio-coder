@@ -24,7 +24,7 @@ describe("chat-panel active entry update", () => {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "llo", partialText: "hello" });
 		const text = strip(panel.render(80).join("\n"));
 		ok(text.includes("you: hi"), `expected user line, got: ${text}`);
-		ok(text.includes("clio: hello"), `expected accumulated assistant line, got: ${text}`);
+		ok(text.includes("Clio Coder: hello"), `expected accumulated assistant line, got: ${text}`);
 	});
 
 	it("filters thinking_delta out of the visible chat stream", () => {
@@ -41,7 +41,7 @@ describe("chat-panel active entry update", () => {
 		const text = strip(panel.render(80).join("\n"));
 		ok(!text.includes("pondering"), `thinking leaked into visible stream: ${text}`);
 		ok(!text.includes("ponder"), `thinking leaked into visible stream: ${text}`);
-		ok(text.includes("clio: answer"), `expected assistant text, got: ${text}`);
+		ok(text.includes("Clio Coder: answer"), `expected assistant text, got: ${text}`);
 	});
 
 	it("renders tool calls in turn order relative to assistant text", () => {
@@ -113,7 +113,7 @@ describe("chat-panel active entry update", () => {
 	it("renders tool call inline even when only post-tool text is emitted", () => {
 		// Some models skip the pre-tool narration. In that case the tool
 		// block is the first rendered segment and the post-tool summary
-		// follows it; there must be no stray placeholder or `clio:` prefix
+		// follows it; there must be no stray placeholder or `Clio Coder:` prefix
 		// duplicated between them.
 		const panel = createChatPanel();
 		panel.appendUser("read it");
@@ -142,7 +142,7 @@ describe("chat-panel active entry update", () => {
 		const summaryIdx = text.indexOf("Summary here.");
 		ok(toolIdx >= 0, `missing tool line: ${text}`);
 		ok(summaryIdx > toolIdx, `post-tool summary must follow tool call: ${text}`);
-		ok(!text.includes("clio: [working]"), `placeholder must not appear once output exists: ${text}`);
+		ok(!text.includes("Clio Coder: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
 	it("renders tool status and bash command previews", () => {
@@ -199,7 +199,7 @@ describe("chat-panel active entry update", () => {
 			} as never,
 		});
 		const text = strip(panel.render(90).join("\n"));
-		ok(text.includes("clio: [error] provider returned 503"), text);
+		ok(text.includes("Clio Coder: [error] provider returned 503"), text);
 	});
 
 	it("renders assistant partial text and terminal errors together", () => {
@@ -214,7 +214,7 @@ describe("chat-panel active entry update", () => {
 			} as never,
 		});
 		const text = strip(panel.render(90).join("\n"));
-		ok(text.includes("clio: partial output"), text);
+		ok(text.includes("Clio Coder: partial output"), text);
 		ok(text.includes("[error] provider returned 503"), text);
 	});
 
@@ -225,7 +225,7 @@ describe("chat-panel active entry update", () => {
 			message: { role: "assistant", content: [] } as never,
 		});
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("clio: [working]"), `expected working placeholder, got: ${text}`);
+		ok(text.includes("Clio Coder: [working]"), `expected working placeholder, got: ${text}`);
 	});
 
 	it("renders prior user + assistant entries unchanged after a new user turn", () => {
@@ -242,9 +242,9 @@ describe("chat-panel active entry update", () => {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "reply-2", partialText: "reply-2" });
 		const text = strip(panel.render(80).join("\n"));
 		ok(text.includes("you: first"), text);
-		ok(text.includes("clio: reply-1"), text);
+		ok(text.includes("Clio Coder: reply-1"), text);
 		ok(text.includes("you: second"), text);
-		ok(text.includes("clio: reply-2"), text);
+		ok(text.includes("Clio Coder: reply-2"), text);
 	});
 
 	it("reset() clears the transcript", () => {
@@ -276,7 +276,7 @@ describe("chat-panel active entry update", () => {
 		});
 		const lines = panel.render(80).map(strip);
 		const joined = lines.join("\n");
-		ok(joined.includes("clio: Here's the code:"), `missing pre-fence narration: ${joined}`);
+		ok(joined.includes("Clio Coder: Here's the code:"), `missing pre-fence narration: ${joined}`);
 		ok(
 			lines.some((line) => line.trimEnd() === "```js"),
 			`fence open missing or malformed: ${JSON.stringify(lines)}`,
@@ -314,7 +314,7 @@ describe("chat-panel active entry update", () => {
 		});
 		const lines = panel.render(80).map(strip);
 		const joined = lines.join("\n");
-		ok(joined.includes("clio: Items:"), `missing list preamble: ${joined}`);
+		ok(joined.includes("Clio Coder: Items:"), `missing list preamble: ${joined}`);
 		ok(
 			lines.some((line) => line.startsWith("- alpha")),
 			`alpha bullet missing or un-normalized: ${JSON.stringify(lines)}`,
@@ -349,11 +349,11 @@ describe("chat-panel active entry update", () => {
 		ok(!joined.includes("`bar`"), `literal inline-code delimiters leaked: ${joined}`);
 	});
 
-	it("never emits a line wider than the requested render width, even with the clio: prefix", () => {
+	it("never emits a line wider than the requested render width, even with the Clio Coder: prefix", () => {
 		// Regression guard. pi-tui's Markdown renderer right-pads every line to
 		// the requested width so background colors extend edge-to-edge. Before
-		// this fix, renderEntryLines prepended the 6-char "clio: " tag to the
-		// already-padded first line, producing a visible width of `width + 6`.
+		// this fix, renderEntryLines prepended the assistant label to the
+		// already-padded first line, producing a visible width over `width`.
 		// TUI.doRender asserts every rendered line fits `width` and throws
 		// `Rendered line N exceeds terminal width (W > width)`, which killed
 		// the TUI before /compact's no-session notice could surface (observed
@@ -372,10 +372,9 @@ describe("chat-panel active entry update", () => {
 		for (const line of lines) {
 			ok(visibleWidth(line) <= width, `line exceeds width (${visibleWidth(line)} > ${width}): ${JSON.stringify(line)}`);
 		}
-		ok(
-			strip(lines.join("\n")).includes("clio: [/compact] no current session"),
-			`expected clio-labeled notice, got: ${JSON.stringify(lines.map(strip))}`,
-		);
+		const stripped = lines.map(strip);
+		ok(stripped[0]?.startsWith("Clio Coder: [/compact] no current"), `expected label, got: ${JSON.stringify(stripped)}`);
+		ok(stripped.some((line) => line.includes("session to compact")), `expected wrapped notice, got: ${JSON.stringify(stripped)}`);
 	});
 
 	it("leaves streaming text (pre-message_end) as plain lines to avoid partial-markdown garbage", () => {
