@@ -151,13 +151,17 @@ Source: [`src/cli/`](src/cli/).
 
 Available inside the interactive TUI.
 
+Typing `/` at the start of the prompt opens the autocomplete dropdown for all
+built-in slash commands. Keep typing to filter command names, such as `/m` for
+`/model`, and press `Tab` to complete the selected command.
+
 | Command | What it does |
 | --- | --- |
 | `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
 | `/targets` | Overlay target health, auth, runtime, model, and capabilities. |
 | `/connect [target]` | Connect to a target or runtime; auth-backed runtimes prompt for credentials, local targets are probed. |
 | `/disconnect [target]` | Disconnect a target or runtime when Clio owns stored connection state. |
-| `/model` or `/models` | Open the model selector for the orchestrator target. |
+| `/model [pattern[:thinking]]` | Open the model selector, or set the orchestrator model directly. |
 | `/scoped-models` | Edit the scoped list used by model cycling. |
 | `/thinking` | Open the thinking-level selector. |
 | `/settings` | Open interactive settings controls. |
@@ -165,8 +169,7 @@ Available inside the interactive TUI.
 | `/tree` and `/fork` | Navigate the session tree or branch from an earlier assistant turn. |
 | `/compact [instructions]` | Compact earlier session context. |
 | `/cost` | Overlay session token totals and USD cost accumulated from completed runs. |
-| `/receipts` | Paginated list of run receipts persisted under `<dataDir>/receipts/`. |
-| `/receipt verify <runId>` | Read a receipt and report whether its integrity hash matches the persisted run ledger. |
+| `/receipts [verify <runId>]` | Browse saved run receipts, or verify one receipt against the persisted run ledger. |
 | `/help` | Show the slash-command reference. |
 | `/hotkeys` | Show the current keyboard and slash-command reference. |
 | `/quit` | Exit the TUI cleanly. |
@@ -358,7 +361,7 @@ Every completed run writes a receipt to `<dataDir>/receipts/<runId>.json`. A rec
 
 ```bash
 /receipts                   # paginated list in the TUI
-/receipt verify <runId>     # re-hash the receipt + run ledger and report match / mismatch
+/receipts verify <runId>    # re-hash the receipt + run ledger and report match / mismatch
 /cost                       # session-level token and USD totals
 ```
 

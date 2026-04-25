@@ -5,6 +5,9 @@
  */
 
 export type {
+	AutocompleteItem,
+	AutocompleteProvider,
+	AutocompleteSuggestions,
 	Component,
 	DefaultTextStyle,
 	EditorOptions,
