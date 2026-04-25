@@ -560,6 +560,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return synth as unknown as Model<never>;
 	};
 
+	/**
+	 * Mirror of pi-coding-agent's setThinkingLevel clamp: when the resolved
+	 * model lacks reasoning capability, force "off" so providers do not see a
+	 * thinking budget they cannot honor. The orchestrator's requested level is
+	 * preserved on settings; this only governs what reaches pi-agent-core.
+	 */
+	const clampThinkingLevelForModel = (model: Model<never>, requested: ThinkingLevel): ThinkingLevel => {
+		const reasons = (model as unknown as { reasoning?: unknown }).reasoning === true;
+		return reasons ? requested : "off";
+	};
+
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
@@ -577,18 +588,40 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return runtime;
 		}
 
+		// Same endpoint+runtime, new wireModelId: hot-swap the model in place on
+		// the live agent. Mirrors the pi-coding-agent setModel pattern (mutate
+		// `agent.state.model`, re-clamp thinking level, persist) so the runtime
+		// keeps its conversation, subscribers, and pending tool calls. Local
+		// runtimes (LM Studio, Ollama) manage their own resident-model lifecycle
+		// via JIT load and TTL; Clio does not micromanage server-side eviction.
+		if (
+			runtime &&
+			runtime.endpointId === target.endpoint.id &&
+			runtime.runtimeId === target.runtime.id &&
+			runtime.wireModelId !== target.wireModelId
+		) {
+			const nextModel = synthesizeModel(target);
+			runtime.agent.state.model = nextModel;
+			runtime.wireModelId = target.wireModelId;
+			runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(nextModel, target.thinkingLevel);
+			return runtime;
+		}
+
 		const model = synthesizeModel(target);
+		const initialThinkingLevel = clampThinkingLevelForModel(model, target.thinkingLevel);
 		const tools = resolveRuntimeTools(deps);
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
 		// prompts contract is absent (tests, degraded boot).
 		const priorMessages = runtime ? [...runtime.agent.state.messages] : [...replayedContextMessages];
+		// Drop any in-flight stream on the prior agent before discarding it.
+		runtime?.agent.abort();
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
 				model,
-				thinkingLevel: target.thinkingLevel,
+				thinkingLevel: initialThinkingLevel,
 				tools,
 				messages: priorMessages,
 			},
