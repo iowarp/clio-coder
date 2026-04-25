@@ -183,6 +183,8 @@ async function main(): Promise<void> {
 				set: () => {},
 				remove: () => {},
 			},
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: null,
 		};
 

@@ -14,13 +14,10 @@ function entryType(stat: Stats): "d" | "f" | "l" {
 
 export const lsTool: ToolSpec = {
 	name: ToolNames.Ls,
-	description: "List directory entries as one line per item with type, size, and name.",
-	parameters: Type.Object(
-		{
-			path: Type.Optional(Type.String({ description: "Directory to list. Defaults to the orchestrator cwd." })),
-		},
-		{ additionalProperties: false },
-	),
+	description: "List directory entries. Prefer this over `bash ls` for file exploration.",
+	parameters: Type.Object({
+		path: Type.Optional(Type.String({ description: "Directory to list. Defaults to the orchestrator cwd." })),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {

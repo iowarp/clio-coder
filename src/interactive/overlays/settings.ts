@@ -51,9 +51,15 @@ export function buildSettingItems(
 	const retry = settings.retry;
 	const terminal = settings.terminal;
 	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
+	const detectedReasoning =
+		options?.providers && settings.orchestrator.endpoint && settings.orchestrator.model
+			? options.providers.getDetectedReasoning(settings.orchestrator.endpoint, settings.orchestrator.model)
+			: null;
 	const availableThinking = status
 		? availableThinkingLevels(
-				resolveModelCapabilities(status, settings.orchestrator.model, options?.providers?.knowledgeBase ?? null),
+				resolveModelCapabilities(status, settings.orchestrator.model, options?.providers?.knowledgeBase ?? null, {
+					detectedReasoning,
+				}),
 				{
 					runtimeId: status.runtime?.id ?? status.endpoint.runtime,
 					...(settings.orchestrator.model ? { modelId: settings.orchestrator.model } : {}),

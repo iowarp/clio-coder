@@ -155,6 +155,8 @@ function stubContext(
 			set: () => {},
 			remove: () => {},
 		},
+		getDetectedReasoning: () => null,
+		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 	};
 

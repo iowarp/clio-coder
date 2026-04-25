@@ -55,6 +55,12 @@ export interface ProbeResult {
 	discoveredCapabilities?: Partial<CapabilityFlags>;
 }
 
+export interface ReasoningProbeResult {
+	reasoning: boolean;
+	latencyMs: number;
+	error?: string;
+}
+
 export interface RuntimeDescriptor {
 	id: string;
 	displayName: string;
@@ -71,6 +77,15 @@ export interface RuntimeDescriptor {
 	defaultCapabilities: CapabilityFlags;
 	probe?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
 	probeModels?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]>;
+	/**
+	 * Optional per-model reasoning capability probe. Local servers (LM Studio,
+	 * llama.cpp, ...) advertise themselves as openai-compatible regardless of
+	 * whether the loaded model supports thinking. Implementations here send a
+	 * one-shot priming request and look at `reasoning_content` / `reasoning` /
+	 * `reasoning_text` in the response. Result is cached per (endpoint, model)
+	 * by the providers domain so /thinking can surface the correct level set.
+	 */
+	probeReasoning?(endpoint: EndpointDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
 	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
 	complete?(endpoint: EndpointDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
 	infill?(endpoint: EndpointDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;

@@ -8,14 +8,12 @@ const ALLOWED_BASENAME = "PLAN.md";
 
 export const writePlanTool: ToolSpec = {
 	name: ToolNames.WritePlan,
-	description: "Write a planning document to PLAN.md at the project root. Any other path is rejected.",
-	parameters: Type.Object(
-		{
-			content: Type.String({ description: "Full plan contents in Markdown. Must be non-empty." }),
-			path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "PLAN.md" at the project root.' })),
-		},
-		{ additionalProperties: false },
-	),
+	description:
+		"Write a planning document to PLAN.md at the project root. Any other path is rejected. This is the advise-mode terminal action.",
+	parameters: Type.Object({
+		content: Type.String({ description: "Full plan contents in Markdown. Must be non-empty." }),
+		path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "PLAN.md" at the project root.' })),
+	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {

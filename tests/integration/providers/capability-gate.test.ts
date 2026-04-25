@@ -102,6 +102,8 @@ function setupHarness(
 			set: () => {},
 			remove: () => {},
 		},
+		getDetectedReasoning: () => null,
+		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 	};
 

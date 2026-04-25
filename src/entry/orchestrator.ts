@@ -444,11 +444,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onCycleThinking: () => {
 			const current = getCurrentSettings();
 			const status = providers.list().find((entry) => entry.endpoint.id === current.orchestrator.endpoint);
+			const detectedReasoning =
+				current.orchestrator.endpoint && current.orchestrator.model
+					? providers.getDetectedReasoning(current.orchestrator.endpoint, current.orchestrator.model)
+					: null;
 			const available = status
-				? availableThinkingLevels(resolveModelCapabilities(status, current.orchestrator.model, providers.knowledgeBase), {
-						runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-						...(current.orchestrator.model ? { modelId: current.orchestrator.model } : {}),
-					})
+				? availableThinkingLevels(
+						resolveModelCapabilities(status, current.orchestrator.model, providers.knowledgeBase, {
+							detectedReasoning,
+						}),
+						{
+							runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+							...(current.orchestrator.model ? { modelId: current.orchestrator.model } : {}),
+						},
+					)
 				: (["off"] as ThinkingLevel[]);
 			updateSettings((next) => {
 				next.orchestrator.thinkingLevel = advanceThinkingLevel(next.orchestrator.thinkingLevel ?? "off", available);

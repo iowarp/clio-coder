@@ -557,7 +557,39 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
 		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
+		const detectedReasoning = deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId);
+		if (detectedReasoning === true && (synth as { reasoning?: unknown }).reasoning !== true) {
+			(synth as { reasoning: boolean }).reasoning = true;
+		}
 		return synth as unknown as Model<never>;
+	};
+
+	const ensureReasoningProbe = (target: ChatLoopTarget): void => {
+		if (deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId) !== null) return;
+		void deps.providers
+			.probeReasoningForModel(target.endpoint.id, target.wireModelId)
+			.then((reasoning) => {
+				if (
+					reasoning === true &&
+					runtime &&
+					runtime.endpointId === target.endpoint.id &&
+					runtime.wireModelId === target.wireModelId
+				) {
+					const liveModel = runtime.agent.state.model as { reasoning?: boolean } | undefined;
+					if (liveModel && liveModel.reasoning !== true) liveModel.reasoning = true;
+					const requested = deps.getSettings().orchestrator.thinkingLevel ?? "off";
+					if (requested !== "off") {
+						runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(
+							runtime.agent.state.model as Model<never>,
+							requested,
+						);
+					}
+				}
+			})
+			.catch(() => {
+				// Probe failures are non-fatal; the cache stays cold and /thinking
+				// keeps showing the runtime defaults until the next probe attempt.
+			});
 	};
 
 	/**
@@ -612,6 +644,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// thinkingLevel since the last call (the user invoked /thinking
 			// or Alt+T); reconcile the clamped level so the next prompt
 			// dispatches under the current intent without forcing a rebuild.
+			ensureReasoningProbe(target);
 			const desiredLevel = clampThinkingLevelForModel(runtime.agent.state.model as Model<never>, target.thinkingLevel);
 			if (runtime.agent.state.thinkingLevel !== desiredLevel) {
 				runtime.agent.state.thinkingLevel = desiredLevel;
@@ -636,6 +669,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.wireModelId = target.wireModelId;
 			runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(nextModel, target.thinkingLevel);
 			appendModelChangeEntry(target);
+			ensureReasoningProbe(target);
 			return runtime;
 		}
 
@@ -745,6 +779,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// `meta.model` (written by `session.create()` in submit()) captures
 		// the first model and a marker would be redundant.
 		if (hadPriorRuntime) appendModelChangeEntry(target);
+		ensureReasoningProbe(target);
 		return runtime;
 	};
 

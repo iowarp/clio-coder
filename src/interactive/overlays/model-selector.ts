@@ -172,7 +172,10 @@ export function buildModelItems(deps: {
 			continue;
 		}
 		for (const wireModel of wireModels) {
-			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase);
+			const detectedReasoning = deps.providers.getDetectedReasoning(endpoint.id, wireModel);
+			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase, {
+				detectedReasoning,
+			});
 			const badges = capabilityBadges(rowCaps);
 			const scopeHit = scopeSet.has(endpoint.id) || scopeSet.has(`${endpoint.id}/${wireModel}`);
 			const scopedMark = scopeHit ? "★" : " ";

@@ -131,6 +131,8 @@ describe("interactive/model-selector", () => {
 				set: () => undefined,
 				remove: () => undefined,
 			},
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: null,
 		};
 
@@ -222,6 +224,8 @@ describe("interactive/model-selector", () => {
 				set: () => undefined,
 				remove: () => undefined,
 			},
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
 			knowledgeBase: {
 				lookup: (modelId) =>
 					modelId.includes("Qwen3.6")

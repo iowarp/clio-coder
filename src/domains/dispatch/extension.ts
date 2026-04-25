@@ -418,7 +418,12 @@ export function createDispatchBundle(
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
 			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
 			: null;
-		const apiKey = auth?.apiKey;
+		// pi-ai's openai-completions provider refuses to stream without an apiKey
+		// even when the target is a local server that ignores Authorization headers.
+		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
+		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
+		// requiring the user to invent a credential.
+		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
 
 		let workerSlotHeld = false;

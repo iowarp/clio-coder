@@ -25,24 +25,22 @@ function truncate(text: string, maxBytes: number): string {
 
 export const webFetchTool: ToolSpec = {
 	name: ToolNames.WebFetch,
-	description: "Fetch a URL over HTTP(S). Returns the response body as text on 2xx.",
-	parameters: Type.Object(
-		{
-			url: Type.String({ description: "Fully-qualified http:// or https:// URL." }),
-			method: Type.Optional(Type.String({ description: "HTTP method. Defaults to GET. Case-insensitive." })),
-			headers: Type.Optional(
-				Type.Record(Type.String(), Type.String(), {
-					description: "Request headers as a string→string map.",
-				}),
-			),
-			body: Type.Optional(Type.String({ description: "Request body as a UTF-8 string (used with POST/PUT/etc.)." })),
-			timeout_ms: Type.Optional(Type.Number({ description: "Abort after this many milliseconds. Defaults to 30000." })),
-			max_bytes: Type.Optional(
-				Type.Number({ description: "Truncate response body at this many bytes. Defaults to 2000000." }),
-			),
-		},
-		{ additionalProperties: false },
-	),
+	description:
+		"Fetch a URL over HTTP(S). Returns the response body as text on 2xx; non-2xx becomes an error. Body is truncated at max_bytes (default 2 MB).",
+	parameters: Type.Object({
+		url: Type.String({ description: "Fully-qualified http:// or https:// URL." }),
+		method: Type.Optional(Type.String({ description: "HTTP method. Defaults to GET. Case-insensitive." })),
+		headers: Type.Optional(
+			Type.Record(Type.String(), Type.String(), {
+				description: "Request headers as a string→string map.",
+			}),
+		),
+		body: Type.Optional(Type.String({ description: "Request body as a UTF-8 string (used with POST/PUT/etc.)." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Abort after this many milliseconds. Defaults to 30000." })),
+		max_bytes: Type.Optional(
+			Type.Number({ description: "Truncate response body at this many bytes. Defaults to 2000000." }),
+		),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
