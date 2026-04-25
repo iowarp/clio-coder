@@ -157,6 +157,7 @@ const RECEIPT_REQUIRED_KEYS = [
 	"platform",
 	"nodeVersion",
 	"toolCalls",
+	"toolStats",
 	"sessionId",
 	"integrity",
 ] as const;
@@ -169,6 +170,39 @@ function isIso8601(value: unknown): value is string {
 
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function validateToolStats(value: unknown): ReceiptVerifyResult {
+	if (!Array.isArray(value)) {
+		return { ok: false, reason: `toolStats not an array: ${String(value)}` };
+	}
+	for (let i = 0; i < value.length; i++) {
+		const entry = value[i];
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+			return { ok: false, reason: `toolStats[${i}] not an object` };
+		}
+		const stat = entry as Record<string, unknown>;
+		if (!isNonEmptyString(stat.tool)) {
+			return { ok: false, reason: `toolStats[${i}].tool invalid: ${String(stat.tool)}` };
+		}
+		for (const key of ["count", "ok", "errors", "blocked"] as const) {
+			if (!isNonNegativeInteger(stat[key])) {
+				return { ok: false, reason: `toolStats[${i}].${key} invalid: ${String(stat[key])}` };
+			}
+		}
+		if (!isNonNegativeFiniteNumber(stat.totalDurationMs)) {
+			return { ok: false, reason: `toolStats[${i}].totalDurationMs invalid: ${String(stat.totalDurationMs)}` };
+		}
+	}
+	return { ok: true };
 }
 
 function isNullableString(value: unknown): value is string | null {
@@ -296,6 +330,8 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (typeof r.toolCalls !== "number" || !Number.isInteger(r.toolCalls) || r.toolCalls < 0) {
 		return { ok: false, reason: `toolCalls out of range: ${String(r.toolCalls)}` };
 	}
+	const toolStatsCheck = validateToolStats(r.toolStats);
+	if (!toolStatsCheck.ok) return toolStatsCheck;
 	if (!isNullableString(r.compiledPromptHash)) {
 		return { ok: false, reason: `compiledPromptHash invalid: ${String(r.compiledPromptHash)}` };
 	}

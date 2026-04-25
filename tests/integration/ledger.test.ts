@@ -170,6 +170,7 @@ describe("dispatch/ledger", () => {
 			platform: process.platform,
 			nodeVersion: process.version,
 			toolCalls: 0,
+			toolStats: [],
 			sessionId: null,
 		});
 		const receiptPath = join(scratch, "data", "receipts", `${env.id}.json`);

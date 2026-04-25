@@ -74,6 +74,7 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 		platform: receipt.platform,
 		nodeVersion: receipt.nodeVersion,
 		toolCalls: receipt.toolCalls,
+		toolStats: receipt.toolStats,
 		sessionId: receipt.sessionId,
 	};
 }

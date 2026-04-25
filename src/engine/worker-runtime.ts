@@ -23,7 +23,8 @@ import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
-import { createWorkerToolRegistry, resolveAgentTools } from "./worker-tools.js";
+import type { ClioWorkerEvent } from "./worker-events.js";
+import { createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -51,7 +52,7 @@ export interface WorkerRunHandle {
 	abort(): void;
 }
 
-export type WorkerEventEmit = (event: AgentEvent) => void;
+export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
 
 function isAssistantMessage(
 	message: AgentMessage | undefined,
@@ -143,9 +144,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const mode: ModeName = input.mode ?? "default";
 	const registry = createWorkerToolRegistry(mode);
+	const telemetry: ToolTelemetry = {
+		onStart(event) {
+			emit({ type: "clio_tool_start", payload: event });
+		},
+		onFinish(event) {
+			emit({ type: "clio_tool_finish", payload: event });
+		},
+	};
 	const tools = resolveAgentTools({
 		registry,
 		mode,
+		telemetry,
 		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
 	});
 	if (tools.length === 0 && (input.allowedTools?.length ?? 0) > 0) {

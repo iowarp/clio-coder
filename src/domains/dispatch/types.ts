@@ -37,6 +37,20 @@ export interface RunEnvelope {
 	costUsd: number;
 }
 
+/**
+ * Per-tool aggregates folded into a receipt at run completion. Sourced from
+ * the worker's ToolTelemetry stream (`clio_tool_finish` IPC events). Sorted
+ * by tool name on write so digests are deterministic across runs.
+ */
+export interface ToolCallStat {
+	tool: string;
+	count: number;
+	ok: number;
+	errors: number;
+	blocked: number;
+	totalDurationMs: number;
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -57,6 +71,7 @@ export interface RunReceipt {
 	platform: string;
 	nodeVersion: string;
 	toolCalls: number;
+	toolStats: ToolCallStat[];
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }
