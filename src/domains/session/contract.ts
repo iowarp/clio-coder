@@ -17,6 +17,26 @@ export type ClioSessionMetaExtension = {
 	name?: string;
 	/** Latest non-empty turn labels discovered from sessionInfo entries. */
 	labels?: string[];
+	/**
+	 * First user-message text discovered while scanning current.jsonl. Used
+	 * by the /resume picker as the row's primary identifier so users can
+	 * recognize a session by its opening prompt instead of by uuid prefix.
+	 * Whitespace-collapsed but otherwise unmodified; the renderer truncates.
+	 */
+	firstMessagePreview?: string;
+	/**
+	 * Count of user-role message entries (legacy or v2). Approximates "how
+	 * many things did I ask?" for the picker; tool calls and bookkeeping
+	 * entries do not contribute. Discovered alongside firstMessagePreview.
+	 */
+	messageCount?: number;
+	/**
+	 * Latest entry timestamp seen in current.jsonl, falling back to the
+	 * file's mtime. Lets the picker rank sessions by last-activity rather
+	 * than creation time so a long-running session moves up after each
+	 * turn.
+	 */
+	lastActivityAt?: string;
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;

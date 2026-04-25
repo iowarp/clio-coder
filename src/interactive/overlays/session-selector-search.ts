@@ -13,9 +13,11 @@ function getSessionSearchText(meta: SessionMeta): string {
 	const cwd = meta.cwd ?? "";
 	const created = meta.createdAt ?? "";
 	const ended = meta.endedAt ?? "";
+	const lastActivity = meta.lastActivityAt ?? "";
 	const name = meta.name ?? "";
 	const labels = meta.labels?.join(" ") ?? "";
-	return `${meta.id} ${created} ${ended} ${endpoint}/${model} ${cwd} ${name} ${labels}`;
+	const preview = meta.firstMessagePreview ?? "";
+	return `${meta.id} ${created} ${ended} ${lastActivity} ${endpoint}/${model} ${cwd} ${name} ${labels} ${preview}`;
 }
 
 /**
