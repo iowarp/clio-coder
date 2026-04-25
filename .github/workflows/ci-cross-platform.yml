@@ -1,0 +1,49 @@
+name: ci-cross-platform
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci-macos:
+    name: ci (macos-14)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run ci
+
+      - name: file or update flake-tracking issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -e
+          existing=$(gh issue list --state open --search 'in:title "ci-cross-platform failure tracking"' --json number --jq '.[0].number')
+          ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          body="Failed on \`$SHA\` ($ts): $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "ci-cross-platform failure tracking" --body "$body"
+          fi
