@@ -98,7 +98,10 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 	});
 
 	it("clio --dev enables the self-development banner", async () => {
-		const result = await runCli(["--dev"], { env: { CLIO_HOME: home }, timeoutMs: 15_000 });
+		const result = await runCli(["--dev"], {
+			env: { CLIO_HOME: home, CLIO_DEV_ALLOW_PROTECTED_BRANCH: "1" },
+			timeoutMs: 15_000,
+		});
 		strictEqual(result.code, 0);
 		ok(result.stdout.includes("--dev | CLIO_SELF_DEV=1"), result.stdout);
 		ok(result.stdout.includes("watching src/"), result.stdout);
@@ -108,7 +111,12 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		const readToolPath = join(REPO_ROOT, "src", "tools", "read.ts");
 		const original = readFileSync(readToolPath, "utf8");
 		const pty = spawnClioPty({
-			env: { CLIO_HOME: home, CLIO_SELF_DEV: "1", ANTHROPIC_API_KEY: "sk-test" },
+			env: {
+				CLIO_HOME: home,
+				CLIO_SELF_DEV: "1",
+				CLIO_DEV_ALLOW_PROTECTED_BRANCH: "1",
+				ANTHROPIC_API_KEY: "sk-test",
+			},
 		});
 		try {
 			await pty.expect(/DEV MODE/, 8000);

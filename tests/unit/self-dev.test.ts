@@ -280,6 +280,36 @@ describe("core/self-dev branch enforcement", () => {
 		strictEqual(gitCalls.length, 1);
 		ok(stderrBuffer.includes("detached HEAD"), stderrBuffer);
 	});
+
+	it("returns the input mode unchanged when CLIO_DEV_ALLOW_PROTECTED_BRANCH=1", async () => {
+		const previous = process.env.CLIO_DEV_ALLOW_PROTECTED_BRANCH;
+		process.env.CLIO_DEV_ALLOW_PROTECTED_BRANCH = "1";
+		try {
+			const promptCalls: number[] = [];
+			const gitCalls: string[][] = [];
+			const m = mode({ branch: "main" });
+			const result = await ensureSelfDevBranch(m, {
+				readBranch: () => "main",
+				promptSlug: async () => {
+					promptCalls.push(1);
+					return "x";
+				},
+				runGit: (_root, args) => {
+					gitCalls.push([...args]);
+				},
+			});
+			strictEqual(result, m);
+			strictEqual(promptCalls.length, 0);
+			strictEqual(gitCalls.length, 0);
+			strictEqual(stderrBuffer, "");
+		} finally {
+			if (previous === undefined) {
+				Reflect.deleteProperty(process.env, "CLIO_DEV_ALLOW_PROTECTED_BRANCH");
+			} else {
+				process.env.CLIO_DEV_ALLOW_PROTECTED_BRANCH = previous;
+			}
+		}
+	});
 });
 
 describe("core/self-dev prompt", () => {
