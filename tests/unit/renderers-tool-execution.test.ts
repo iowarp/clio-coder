@@ -513,4 +513,56 @@ describe("renderers/tool-execution", () => {
 		ok(text.includes("(no output yet)"), text);
 		ok(text.includes("(running...)"), text);
 	});
+
+	it("renders a bash success result with $ <cmd> on its own line then the output", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "b1",
+				toolName: "bash",
+				args: { command: "ls -la /tmp" },
+				result: "total 0\ndrwxrwxrwt 8 root root 4096 Apr 27 12:00 .\n",
+				isError: false,
+			},
+			80,
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(text.includes(HEADER_PREFIX), text);
+		ok(text.includes("bash"), text);
+		ok(text.includes(`${RAIL}$ ls -la /tmp`), text);
+		ok(text.includes(`${RAIL}total 0`), text);
+		ok(text.includes(STATUS_OK), text);
+	});
+
+	it("falls back to the standard result block for bash errors", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "b2",
+				toolName: "bash",
+				args: { command: "false" },
+				result: "exit 1",
+				isError: true,
+			},
+			80,
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(!text.includes(`${RAIL}$ false`), text);
+		ok(text.includes(STATUS_ERROR), text);
+	});
+
+	it("falls through to the standard block when bash args lack a string command", () => {
+		const lines = renderToolExecution(
+			{
+				toolCallId: "b3",
+				toolName: "bash",
+				args: { command: 42 },
+				result: "weird",
+				isError: false,
+			},
+			80,
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(!text.includes(`${RAIL}$ 42`), text);
+		ok(!text.includes(`${RAIL}$ `), text);
+		ok(text.includes(`${RAIL}weird`), text);
+	});
 });
