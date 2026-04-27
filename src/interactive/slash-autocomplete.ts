@@ -1,3 +1,6 @@
+import { statSync } from "node:fs";
+import { delimiter, join } from "node:path";
+
 import {
 	type AutocompleteItem,
 	type AutocompleteProvider,
@@ -12,6 +15,32 @@ export type SlashAutocompleteCommand = SlashCommand;
 export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
+}
+
+// pi-tui's @-prefix completion only works through `fd`. The Debian/Ubuntu
+// `fd-find` apt package ships the binary as `fdfind` to avoid colliding with
+// an unrelated `fd` package, so we accept either name. Returns an absolute
+// path so spawn() does not depend on PATH at call time.
+export function resolveFdBinary(): string | null {
+	return findExecutableOnPath("fd") ?? findExecutableOnPath("fdfind");
+}
+
+function findExecutableOnPath(name: string): string | null {
+	const pathEnv = process.env.PATH;
+	if (!pathEnv) return null;
+	for (const dir of pathEnv.split(delimiter)) {
+		if (!dir) continue;
+		const candidate = join(dir, name);
+		try {
+			const stat = statSync(candidate);
+			if (stat.isFile() && (stat.mode & 0o111) !== 0) {
+				return candidate;
+			}
+		} catch {
+			// not present or not stat-able in this directory
+		}
+	}
+	return null;
 }
 
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
@@ -78,6 +107,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 	return new ClioAutocompleteProvider(
 		buildSlashAutocompleteCommands(),
 		options.basePath ?? process.cwd(),
-		options.fdPath === undefined ? "fd" : options.fdPath,
+		options.fdPath === undefined ? resolveFdBinary() : options.fdPath,
 	);
 }
