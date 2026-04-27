@@ -67,6 +67,11 @@ Keep a Changelog.
 - `llamacpp-completion` and `llamacpp-anthropic` probes report a
   diagnostic note when the configured wire model id does not match
   the server's single loaded model.
+- CI now installs `fd-find` on `ubuntu-latest` so slash-autocomplete
+  `@path` completion is exercised on every push.
+- CI gains a `clean-clone-smoke` job that runs the full gate against
+  a fresh shallow checkout with no npm cache, so dev-tree-only test
+  passes surface before tagging.
 
 ### Fixed
 
