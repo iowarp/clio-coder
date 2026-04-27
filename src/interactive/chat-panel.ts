@@ -1,4 +1,4 @@
-import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, Markdown, type MarkdownTheme, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
@@ -102,14 +102,22 @@ type TranscriptEntry =
 			role: "assistant";
 			segments: AssistantSegment[];
 			/**
-			 * Raw thinking content from `thinking_delta` events. Intentionally
-			 * NOT rendered into the visible chat stream: leaking the model's
-			 * chain-of-thought alongside the real response disorients users and
-			 * was flagged in Row 47 of the TUI rubric. Kept on the entry so
-			 * downstream surfaces (future `/think` viewer, session replay) can
-			 * still recover it.
+			 * Raw thinking content from `thinking_delta` events plus any
+			 * `thinking` blocks captured on `message_end`. Rendered as a dim
+			 * one-line preview by default once the turn settles; expanded into
+			 * a rail-prefixed body via `toggleLastThinking()` (Ctrl+T). Stays
+			 * suppressed while `pending === true` so streaming chain-of-thought
+			 * does not flicker into the visible stream before the turn
+			 * finalizes (Row 47 of the TUI rubric).
 			 */
 			thinking: string;
+			/**
+			 * Whether the thinking block renders as the full body (true) or
+			 * the one-line dim preview (false/undefined). Toggled by
+			 * `toggleLastThinking()`. Default collapsed; new thinking does not
+			 * auto-expand during streaming.
+			 */
+			expandedThinking?: boolean;
 			pending: boolean;
 	  }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
@@ -119,6 +127,14 @@ export interface ChatPanel extends Component {
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
 	toggleLastToolExpanded(): boolean;
+	/**
+	 * Flip the most recent thinking-bearing assistant turn between the
+	 * one-line dim preview and the full rail-prefixed body. Returns `true`
+	 * when an assistant entry with non-empty thinking was found and
+	 * toggled, `false` if the transcript has no candidate (mirrors
+	 * `toggleLastToolExpanded()`).
+	 */
+	toggleLastThinking(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -209,6 +225,47 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 	return [...wrappedFirst, ...lines.slice(1)];
 }
 
+/**
+ * Total visible width budget for the collapsed `thinking: <preview>...` line.
+ * Includes the `thinking: ` label so the truncation hugs ~60 columns total.
+ */
+const THINKING_PREVIEW_WIDTH = 60;
+const THINKING_PREVIEW_LABEL = "thinking: ";
+const THINKING_LINE_LIMIT = 12;
+
+/**
+ * Render the assistant turn's thinking block. Collapsed (default) returns a
+ * single dim line `thinking: <preview>...` with the preview clipped to
+ * `THINKING_PREVIEW_WIDTH` visible columns. Expanded returns the full body
+ * dimmed and prefixed with a dim `│ ` rail, capped at `THINKING_LINE_LIMIT`
+ * lines with a tail `... N more lines hidden` overflow message. Mirrors the
+ * tool toggle's lab-notebook minimalism: no colored glyphs, no boxes.
+ */
+function renderThinkingLines(thinking: string, expanded: boolean, width: number): string[] {
+	if (thinking.length === 0) return [];
+	const dimWrap = (s: string): string => `${ANSI_DIM}${s}${ANSI_RESET}`;
+	if (!expanded) {
+		const collapsed = thinking.replace(/\s+/g, " ").trim();
+		const contentBudget = Math.max(1, THINKING_PREVIEW_WIDTH - THINKING_PREVIEW_LABEL.length);
+		const preview = truncateToWidth(collapsed, contentBudget, "...", false);
+		return [dimWrap(`${THINKING_PREVIEW_LABEL}${preview}`)];
+	}
+	const splitLines = thinking.split("\n");
+	const visible: string[] =
+		splitLines.length > THINKING_LINE_LIMIT
+			? [...splitLines.slice(0, THINKING_LINE_LIMIT), `... ${splitLines.length - THINKING_LINE_LIMIT} more lines hidden`]
+			: splitLines;
+	const out: string[] = [];
+	const bodyWidth = Math.max(1, width - 2);
+	for (const raw of visible) {
+		const wrappedLines = raw.length === 0 ? [""] : wrapTextWithAnsi(raw, bodyWidth);
+		for (const wrapped of wrappedLines) {
+			out.push(`${dimWrap("│ ")}${dimWrap(wrapped)}`);
+		}
+	}
+	return out;
+}
+
 function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: string | undefined): string[] {
 	if (!seg.expanded) {
 		return renderToolSubline(
@@ -258,6 +315,15 @@ function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: stri
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
 	}
 	const lines: string[] = [];
+	// Thinking renders BEFORE assistant text/tool segments so the dim preview
+	// or expanded rail sits above the response, matching the order the
+	// pi-coding-agent reference uses. Suppressed while `pending === true` so
+	// streaming `thinking_delta` events do not flicker into the visible
+	// stream before the turn finalizes (see Row 47 of the TUI rubric and the
+	// existing "filters thinking_delta out of the visible chat stream" test).
+	if (entry.thinking.length > 0 && entry.pending === false) {
+		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width));
+	}
 	let labeled = false;
 	for (const seg of entry.segments) {
 		if (seg.kind === "text") {
@@ -378,6 +444,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					markDirty();
 					return true;
 				}
+			}
+			return false;
+		},
+		toggleLastThinking(): boolean {
+			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
+				const entry = transcript[entryIndex];
+				if (entry?.role !== "assistant") continue;
+				if (entry.thinking.length === 0) continue;
+				entry.expandedThinking = entry.expandedThinking !== true;
+				markDirty();
+				return true;
 			}
 			return false;
 		},
