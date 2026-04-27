@@ -44,13 +44,33 @@ function normalizeBaseUrl(url: string): string {
 // the sole resident model, skip the listLoaded round-trip on the next prompt
 // inside the TTL. Eviction races (another client mutates LM Studio's resident
 // set) self-heal on the first request after the TTL expires.
-const RESIDENT_TTL_MS = 60_000;
+export const RESIDENT_TTL_MS = 60_000;
 const residentCache = new Map<string, { modelId: string; at: number }>();
 
-async function ensureResidentModel(client: LMStudioClient, baseUrl: string, modelId: string): Promise<void> {
+export function resetResidentCache(): void {
+	residentCache.clear();
+}
+
+export interface ResidentModelEntry {
+	readonly modelKey: string;
+	unload(): Promise<void>;
+}
+
+export interface ResidentModelClient {
+	llm: {
+		listLoaded(): Promise<ReadonlyArray<ResidentModelEntry>>;
+	};
+}
+
+export async function ensureResidentModel(
+	client: ResidentModelClient,
+	baseUrl: string,
+	modelId: string,
+	now: () => number = Date.now,
+): Promise<void> {
 	const cached = residentCache.get(baseUrl);
-	if (cached && cached.modelId === modelId && Date.now() - cached.at < RESIDENT_TTL_MS) return;
-	let loaded: Awaited<ReturnType<LMStudioClient["llm"]["listLoaded"]>>;
+	if (cached && cached.modelId === modelId && now() - cached.at < RESIDENT_TTL_MS) return;
+	let loaded: ReadonlyArray<ResidentModelEntry>;
 	try {
 		loaded = await client.llm.listLoaded();
 	} catch {
@@ -60,7 +80,7 @@ async function ensureResidentModel(client: LMStudioClient, baseUrl: string, mode
 	if (stale.length > 0) {
 		await Promise.all(stale.map((entry) => entry.unload().catch(() => undefined)));
 	}
-	residentCache.set(baseUrl, { modelId, at: Date.now() });
+	residentCache.set(baseUrl, { modelId, at: now() });
 }
 
 function toolToLmStudio(tool: Tool): LLMTool {
