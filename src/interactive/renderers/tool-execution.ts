@@ -348,6 +348,47 @@ function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 	return out;
 }
 
+interface BashArgs {
+	command: string;
+}
+
+/**
+ * Defensive shape check: bash-tool args must carry a string `command` for the
+ * `$ <cmd>` echo line to render. Anything else falls through to the standard
+ * result block so the dispatch is opportunistic and never throws.
+ */
+function asBashArgs(args: unknown): BashArgs | null {
+	if (!isPlainObject(args)) return null;
+	const command = args.command;
+	if (typeof command !== "string") return null;
+	return { command };
+}
+
+/**
+ * Bash subrenderer: emits `$ <cmd>` (full command) on its own line under the
+ * rail, then the unwrapped output via the same chain as `renderResultBlock`.
+ * Mirrors pi-coding-agent's bash component shape so users see exactly what
+ * was executed before the output. Errors stay on the standard result path so
+ * the red rail remains the dominant signal for bash failures.
+ */
+function renderBashResultBlock(args: BashArgs, result: unknown, width: number): string[] {
+	const out: string[] = [];
+	const commandLine = `${cyanBold("$")} ${args.command}`;
+	out.push(...indentAndWrap(commandLine, width, false));
+	const unwrapped = unwrapResultEnvelope(result);
+	if (isEmptyResult(unwrapped)) {
+		out.push(...indentAndWrap(dim("(no output)"), width, false));
+		return out;
+	}
+	const preview = previewResult(unwrapped);
+	const lines = capResultLines(preview.split("\n"));
+	for (const raw of lines) {
+		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
+		out.push(...indentAndWrap(styled, width, false));
+	}
+	return out;
+}
+
 function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
@@ -433,6 +474,18 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 		const editArgs = asEditDiffArgs(finished.args);
 		if (editArgs !== null) {
 			out.push(...renderEditDiffBlock(editArgs, width));
+			return out;
+		}
+	}
+
+	// Bash-tool dispatch: when the tool succeeded and `args.command` is a
+	// string, prefix the result body with `$ <cmd>` on its own line so the
+	// user sees the full executed command above its output. Errors stay on
+	// the standard path so the red rail remains the dominant failure signal.
+	if (finished.toolName === "bash" && finished.isError === false) {
+		const bashArgs = asBashArgs(finished.args);
+		if (bashArgs !== null) {
+			out.push(...renderBashResultBlock(bashArgs, finished.result, width));
 			return out;
 		}
 	}
