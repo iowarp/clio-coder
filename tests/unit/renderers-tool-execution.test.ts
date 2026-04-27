@@ -4,6 +4,7 @@ import {
 	renderToolCallHeader,
 	renderToolExecution,
 	renderToolResultOnly,
+	renderToolStreamingExecution,
 	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
 
@@ -484,5 +485,32 @@ describe("renderers/tool-execution", () => {
 		const plain = lines.map(stripAnsi).join("\n");
 		ok(plain.includes("(alt+x)"), `expected rebinding to surface, got: ${plain}`);
 		ok(!plain.includes("(ctrl+o)"), `default key must not leak when a rebind is supplied: ${plain}`);
+	});
+
+	it("renders an expanded in-flight tool block with partial output and a running marker", () => {
+		const lines = renderToolStreamingExecution(
+			{ toolCallId: "t1", toolName: "bash", args: { command: "npm test" } },
+			80,
+			"running test 1\nrunning test 2\n",
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(text.includes("▸"), text);
+		ok(text.includes("bash"), text);
+		ok(text.includes("│ running test 1"), text);
+		ok(text.includes("│ running test 2"), text);
+		ok(text.includes("(running...)"), text);
+		ok(!text.includes(STATUS_OK), text);
+		ok(!text.includes(STATUS_ERROR), text);
+	});
+
+	it("renders an empty-partial in-flight tool block as `(no output yet)` plus running marker", () => {
+		const lines = renderToolStreamingExecution(
+			{ toolCallId: "t1", toolName: "bash", args: { command: "sleep 5" } },
+			80,
+			"",
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(text.includes("(no output yet)"), text);
+		ok(text.includes("(running...)"), text);
 	});
 });
