@@ -289,7 +289,7 @@ export function unwrapResultEnvelope(result: unknown): unknown {
 	return parts.join("");
 }
 
-function previewResult(result: unknown): string {
+export function previewResult(result: unknown): string {
 	if (typeof result === "string") return truncate(result, RESULT_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(result), RESULT_PREVIEW_LIMIT);
 }
