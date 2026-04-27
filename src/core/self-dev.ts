@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCachedDefaultRulePacks } from "../domains/safety/rule-pack-loader.js";
 
 export type SelfDevActivationSource = "--dev" | "CLIO_DEV=1" | "CLIO_SELF_DEV=1";
 
@@ -158,18 +159,18 @@ export function evaluateSelfDevWritePath(mode: SelfDevMode, target: string): Sel
 	};
 }
 
+/**
+ * Evaluate a bash command against the dev rule pack loaded from
+ * damage-control-rules.yaml. Returns the rule description on a match,
+ * null when the command is allowed. The rule list lives in the yaml file
+ * under packs[id=dev]; this function is a thin lookup over it so adding
+ * a new self-dev block is a one-line yaml change.
+ */
 export function evaluateSelfDevBashCommand(command: string): string | null {
-	const checks: Array<{ pattern: RegExp; reason: string }> = [
-		{ pattern: /(?:^|[;&|]\s*)git\s+push\b/, reason: "self-dev: git push is blocked" },
-		{ pattern: /\bgit\b[^;&|]*\s--force(?:-with-lease)?\b/, reason: "self-dev: git force flags are blocked" },
-		{ pattern: /\bgit\b[^;&|]*\s-f(?:\s|$)/, reason: "self-dev: git force shorthand is blocked" },
-		{ pattern: /\bgit\s+reset\s+--hard\b/, reason: "self-dev: git reset --hard is blocked" },
-		{ pattern: /\bgit\s+clean\b[^;&|]*\s-[A-Za-z]*f[A-Za-z]*\b/, reason: "self-dev: git clean with force is blocked" },
-		{ pattern: /\bgit\s+checkout\s+--(?:\s|$)/, reason: "self-dev: destructive git checkout syntax is blocked" },
-		{ pattern: /\bgh\s+pr\s+merge\b/, reason: "self-dev: hosted PR merge commands are blocked" },
-	];
-	for (const check of checks) {
-		if (check.pattern.test(command)) return check.reason;
+	if (command.length === 0) return null;
+	const packs = getCachedDefaultRulePacks();
+	for (const rule of packs.dev.rules) {
+		if (rule.pattern.test(command)) return rule.description;
 	}
 	return null;
 }

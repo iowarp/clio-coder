@@ -72,6 +72,16 @@ describe("core/self-dev bash policy", () => {
 	});
 });
 
+describe("core/self-dev bash policy uses the dev rule pack", () => {
+	it("evaluateSelfDevBashCommand resolves block reasons from the dev pack, not a local list", () => {
+		// Asserts the wiring: the rule descriptions in damage-control-rules.yaml
+		// (packs[id=dev]) are the source of truth. If self-dev-guards held its
+		// own local regex array, the description text below would diverge.
+		const reason = evaluateSelfDevBashCommand("git push origin HEAD");
+		strictEqual(reason, "self-dev: git push is blocked");
+	});
+});
+
 describe("core/self-dev prompt", () => {
 	it("states the repository, branch, CI gate, and engine restart rule", () => {
 		const prompt = buildSelfDevPrompt(mode({ dirtySummary: "2 changed path(s): src/a.ts; tests/b.ts" }));
