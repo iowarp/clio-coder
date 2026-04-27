@@ -14,6 +14,7 @@ import {
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
 } from "../domains/providers/index.js";
+import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
@@ -492,6 +493,14 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	if (!url && support.supportsCustomUrl) {
 		url = defaultUrlFor(runtime.id);
 	}
+	if (url && runtime.id === "openai-compat") {
+		const fingerprint = await fingerprintNativeRuntime(url);
+		if (fingerprint) {
+			process.stdout.write(
+				`note: detected ${fingerprint.displayName} at ${url}; consider \`clio targets convert ${args.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle\n`,
+			);
+		}
+	}
 	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	const apiKeyEnv = args.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar;
 	const apiKeyRef =
@@ -625,22 +634,42 @@ async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<Runt
 	}
 }
 
+async function maybeSteerToNativeRuntime(
+	rl: ReturnType<typeof createInterface>,
+	currentRuntime: RuntimeDescriptor,
+	url: string,
+): Promise<RuntimeDescriptor> {
+	if (currentRuntime.id !== "openai-compat") return currentRuntime;
+	const fingerprint = await fingerprintNativeRuntime(url);
+	if (!fingerprint) return currentRuntime;
+	const native = getRuntimeRegistry().get(fingerprint.runtimeId);
+	if (!native) return currentRuntime;
+	process.stdout.write(`\nDetected ${fingerprint.displayName} at ${url}.\n`);
+	const switchIt = await askYesNo(rl, `Use ${fingerprint.runtimeId} runtime instead of openai-compat?`, true);
+	if (!switchIt) return currentRuntime;
+	process.stdout.write(`Using ${fingerprint.runtimeId} runtime.\n`);
+	return native;
+}
+
 async function runInteractive(
 	rl: ReturnType<typeof createInterface>,
 	preselectedRuntime: RuntimeDescriptor | null,
 	defaults: ParsedArgs,
 ): Promise<number> {
-	const runtime = preselectedRuntime ?? (await pickRuntime(rl));
+	let runtime = preselectedRuntime ?? (await pickRuntime(rl));
 	if (!runtime) {
 		printError("configuration cancelled");
 		return 0;
 	}
 	const auth = openAuthStorage();
 	const settings = readSettings();
-	const support = buildProviderSupportEntry(runtime);
-	const existingForRuntime = configuredEndpointsForRuntime(settings, runtime.id);
+	let support = buildProviderSupportEntry(runtime);
+	const initialRuntimeId = runtime.id;
+	const existingForRuntime = configuredEndpointsForRuntime(settings, initialRuntimeId);
 	const existing =
-		(defaults.id ? settings.endpoints.find((entry) => entry.id === defaults.id && entry.runtime === runtime.id) : null) ??
+		(defaults.id
+			? settings.endpoints.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId)
+			: null) ??
 		existingForRuntime[0] ??
 		null;
 	if (existingForRuntime.length > 0) {
@@ -674,6 +703,14 @@ async function runInteractive(
 		if (urlInput.length > 0) url = normalizeUrl(urlInput, runtime.id);
 	} else if (defaults.url) {
 		url = normalizeUrl(defaults.url, runtime.id);
+	}
+
+	if (url) {
+		const steered = await maybeSteerToNativeRuntime(rl, runtime, url);
+		if (steered.id !== runtime.id) {
+			runtime = steered;
+			support = buildProviderSupportEntry(runtime);
+		}
 	}
 
 	let apiKeyEnv: string | undefined;

@@ -29,6 +29,7 @@ import {
 	type RetrySettings,
 } from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
@@ -680,6 +681,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(nextModel, target.thinkingLevel);
 			appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
+			// Ollama pins the active model with keep_alive=-1; fire a one-shot
+			// keep_alive=0 sweep against any other resident model so the prior
+			// pinned weight releases VRAM. Fire-and-forget so a slow server
+			// never blocks the model swap.
+			if (target.runtime.id === "ollama-native" && target.endpoint.url) {
+				void evictOtherOllamaModels(target.endpoint.url, target.wireModelId, target.endpoint.auth?.headers);
+			}
 			return runtime;
 		}
 

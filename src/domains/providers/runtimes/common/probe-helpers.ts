@@ -1,5 +1,6 @@
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
+import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult } from "../../types/runtime-descriptor.js";
 
 export interface OpenAIModelsResponse {
@@ -31,6 +32,27 @@ interface LlamaCppProps {
 export interface LlamaCppPropsEnrichment {
 	discoveredCapabilities?: Partial<CapabilityFlags>;
 	serverVersion?: string;
+}
+
+/**
+ * llama.cpp serves a single fixed model per process. Compare the configured
+ * wire model id against `/v1/models` so a mismatch surfaces as a probe note
+ * instead of producing 404s or, worse, silent serves from the wrong weights.
+ * Returns null when the comparison is inconclusive (probe failed, no default
+ * model configured, server returned nothing).
+ */
+export async function detectModelMismatch(
+	base: string,
+	endpoint: EndpointDescriptor,
+	ctx: ProbeContext,
+): Promise<string | null> {
+	const expected = endpoint.defaultModel?.trim();
+	if (!expected) return null;
+	const ids = await probeOpenAIModels(base, ctx);
+	if (ids.length === 0) return null;
+	if (ids.includes(expected)) return null;
+	const loaded = ids[0] ?? "(unknown)";
+	return `wire model id ${expected} does not match server's loaded model ${loaded}; llama.cpp serves a single fixed model`;
 }
 
 export async function probeLlamaCppProps(base: string, ctx: ProbeContext): Promise<LlamaCppPropsEnrichment> {

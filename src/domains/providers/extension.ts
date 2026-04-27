@@ -145,7 +145,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		previous?: EndpointStatus,
 	): EndpointStatus {
 		if (!desc) {
-			return {
+			const out: EndpointStatus = {
 				endpoint,
 				runtime: null,
 				available: false,
@@ -155,10 +155,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				probeCapabilities: previous?.probeCapabilities ?? null,
 				discoveredModels: previous?.discoveredModels ?? [],
 			};
+			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
+			return out;
 		}
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
 		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
+		const probeNotes = probe?.notes && probe.notes.length > 0 ? probe.notes : previous?.probeNotes;
 		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? desc.knownModels ?? []);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
@@ -172,7 +175,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 					};
 		const available = availability.available && (probe === null || probe.ok);
 		const reason = probe !== null && !probe.ok ? (probe.error ?? "probe failed") : availability.reason;
-		return {
+		const out: EndpointStatus = {
 			endpoint,
 			runtime: desc,
 			available,
@@ -182,6 +185,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			probeCapabilities,
 			discoveredModels,
 		};
+		if (probeNotes && probeNotes.length > 0) out.probeNotes = probeNotes;
+		return out;
 	}
 
 	async function probeEndpointInternal(endpoint: EndpointDescriptor, live: boolean): Promise<EndpointStatus> {
