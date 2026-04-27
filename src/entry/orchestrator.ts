@@ -4,7 +4,12 @@ import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
-import { buildSelfDevPrompt, resolveSelfDevMode, selfDevActivationSource } from "../core/self-dev.js";
+import {
+	buildSelfDevPrompt,
+	ensureSelfDevBranch,
+	resolveSelfDevMode,
+	selfDevActivationSource,
+} from "../core/self-dev.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -242,11 +247,21 @@ function cycleScoped(
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
-	const selfDev = resolveSelfDevMode({ cliDev: options.dev === true });
-	if (selfDev === null && selfDevActivationSource({ cliDev: options.dev === true }) !== null) {
+	const cliDev = options.dev === true;
+	const userSignalledDev = selfDevActivationSource({ cliDev }) !== null;
+	let selfDev = resolveSelfDevMode({ cliDev });
+	if (selfDev === null && userSignalledDev) {
 		// resolveSelfDevMode already wrote a clear stderr message; surface the
 		// gate failure as exit 1 instead of silently continuing in default mode.
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
+	}
+	if (selfDev) {
+		selfDev = await ensureSelfDevBranch(selfDev);
+		if (selfDev === null) {
+			// Branch step refused or failed; ensureSelfDevBranch already wrote the
+			// reason. The user explicitly signalled dev mode, so exit 1.
+			return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
+		}
 	}
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
