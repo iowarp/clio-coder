@@ -9,6 +9,7 @@ import {
 } from "../domains/providers/index.js";
 import { Text } from "../engine/tui.js";
 import type { HarnessSnapshot } from "../harness/state.js";
+import { getCurrentBranch } from "../utils/git.js";
 
 const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";
@@ -147,8 +148,10 @@ export function formatHarnessIndicator(state: HarnessSnapshot): string | null {
 export function buildFooter(deps: FooterDeps): FooterPanel {
 	const view = new Text("");
 	let streamingFrame = 0;
+	let branchSlot: string | null = null;
 	const refresh = (): void => {
 		const mode = deps.modes.current().toLowerCase();
+		const branchPart = branchSlot ? `${SEP}${branchSlot}` : "";
 		const settings = deps.getSettings?.();
 		const target = settings ? resolveOrchestratorTarget(deps.providers, settings) : null;
 		let targetLabel: string;
@@ -193,7 +196,7 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 		const tokens = deps.getSessionTokens ? tokensSegment(deps.getSessionTokens()) : null;
 		const tokensPart = tokens ? `${SEP}${tokens}` : "";
 
-		let text = `Clio Coder${SEP}${mode}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
+		let text = `Clio Coder${SEP}${mode}${branchPart}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
 		if (deps.getHarnessState) {
 			const indicator = formatHarnessIndicator(deps.getHarnessState());
 			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;
@@ -202,5 +205,10 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 		view.invalidate();
 	};
 	refresh();
+	void getCurrentBranch(process.cwd()).then((name) => {
+		if (name === null) return;
+		branchSlot = `${ANSI_DIM}branch:${name}${ANSI_RESET}`;
+		refresh();
+	});
 	return { view, refresh };
 }
