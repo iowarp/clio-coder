@@ -213,6 +213,7 @@ describe("chat-panel active entry update", () => {
 		text = strip(panel.render(90).join("\n"));
 		ok(text.includes("│ running test 1"), text);
 		ok(text.includes("│ running test 2"), text);
+		strictEqual((text.match(/running test 1/g) ?? []).length, 1);
 
 		// tool_execution_end clears the partial and switches to the final form.
 		panel.applyEvent({
@@ -226,6 +227,30 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("(running...)"), text);
 		ok(text.includes("│ all tests passed"), text);
 		ok(text.includes("✓"), text);
+	});
+
+	it("renders non-string partialResult envelopes via previewResult instead of [object Object]", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "task-stream",
+			toolName: "task",
+			args: { prompt: "do thing" },
+		});
+		strictEqual(panel.toggleLastToolExpanded(), true);
+
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "task-stream",
+			toolName: "task",
+			args: { prompt: "do thing" },
+			partialResult: { elapsedTimeSeconds: 3, taskId: "abc" },
+		});
+		const text = strip(panel.render(90).join("\n"));
+		ok(!text.includes("[object Object]"), text);
+		ok(text.includes("elapsedTimeSeconds"), text);
+		ok(text.includes("(running...)"), text);
 	});
 
 	it("toggleLastToolExpanded returns false when no tool segment exists", () => {

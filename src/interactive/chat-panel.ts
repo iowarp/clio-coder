@@ -2,6 +2,7 @@ import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
+	previewResult,
 	renderToolCallHeader,
 	renderToolExecution,
 	renderToolStreamingExecution,
@@ -439,7 +440,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				);
 				if (tool) {
 					const unwrapped = unwrapResultEnvelope(event.partialResult);
-					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : String(unwrapped ?? "");
+					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : previewResult(unwrapped);
 				}
 				markDirty();
 				return;
