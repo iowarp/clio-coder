@@ -1,47 +1,88 @@
-version: 1
-rules:
-  - id: rm-rf-root
-    description: "rm -rf / or close to it"
-    pattern: "\\brm\\s+-rf?\\s+/(?![a-z0-9]*tmp/)"
-    class: system_modify
-    block: true
-  - id: dd-of-dev
-    description: "dd writing to /dev/sd*"
-    pattern: "\\bdd\\b.*\\bof=/dev/(sd|nvme|xvd)"
-    class: system_modify
-    block: true
-  - id: mkfs-any
-    description: "filesystem creation"
-    pattern: "\\bmkfs(\\.\\w+)?\\s+/dev/"
-    class: system_modify
-    block: true
-  - id: fork-bomb
-    description: "classic fork bomb pattern"
-    pattern: ":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\}"
-    class: execute
-    block: true
-  - id: git-push-force-main
-    description: "force push to protected branches"
-    pattern: "\\bgit\\s+push\\s+(--force|-f)\\s+\\S+\\s+(main|master|production)\\b"
-    class: git_destructive
-    block: true
-  - id: git-reset-hard-head
-    description: "git reset --hard on a ref that's not local WIP"
-    pattern: "\\bgit\\s+reset\\s+--hard\\s+(origin/|upstream/)"
-    class: git_destructive
-    block: true
-  - id: curl-pipe-shell
-    description: "curl ... | sh — remote exec"
-    pattern: "\\bcurl\\b[^|]*\\|\\s*(sudo\\s+)?(sh|bash|zsh)\\b"
-    class: execute
-    block: true
-  - id: wget-pipe-shell
-    description: "wget ... | sh"
-    pattern: "\\bwget\\b[^|]*\\|\\s*(sudo\\s+)?(sh|bash|zsh)\\b"
-    class: execute
-    block: true
-  - id: chmod-recursive-root
-    description: "chmod -R on / or system roots"
-    pattern: "\\bchmod\\s+-R\\s+[0-7]{3,4}\\s+/(?:(etc|usr|bin|sbin|var)(?:/|\\s|$)|(?:\\s|$))"
-    class: system_modify
-    block: true
+version: 2
+packs:
+  - id: base
+    rules:
+      - id: rm-rf-root
+        description: "rm -rf / or close to it"
+        pattern: "\\brm\\s+-rf?\\s+/(?![a-z0-9]*tmp/)"
+        class: system_modify
+        block: true
+      - id: dd-of-dev
+        description: "dd writing to /dev/sd*"
+        pattern: "\\bdd\\b.*\\bof=/dev/(sd|nvme|xvd)"
+        class: system_modify
+        block: true
+      - id: mkfs-any
+        description: "filesystem creation"
+        pattern: "\\bmkfs(\\.\\w+)?\\s+/dev/"
+        class: system_modify
+        block: true
+      - id: fork-bomb
+        description: "classic fork bomb pattern"
+        pattern: ":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\}"
+        class: execute
+        block: true
+      - id: git-push-force-main
+        description: "force push to protected branches"
+        pattern: "\\bgit\\s+push\\s+(--force|-f)\\s+\\S+\\s+(main|master|production)\\b"
+        class: git_destructive
+        block: true
+      - id: git-reset-hard-head
+        description: "git reset --hard on a ref that's not local WIP"
+        pattern: "\\bgit\\s+reset\\s+--hard\\s+(origin/|upstream/)"
+        class: git_destructive
+        block: true
+      - id: curl-pipe-shell
+        description: "curl ... | sh — remote exec"
+        pattern: "\\bcurl\\b[^|]*\\|\\s*(sudo\\s+)?(sh|bash|zsh)\\b"
+        class: execute
+        block: true
+      - id: wget-pipe-shell
+        description: "wget ... | sh"
+        pattern: "\\bwget\\b[^|]*\\|\\s*(sudo\\s+)?(sh|bash|zsh)\\b"
+        class: execute
+        block: true
+      - id: chmod-recursive-root
+        description: "chmod -R on / or system roots"
+        pattern: "\\bchmod\\s+-R\\s+[0-7]{3,4}\\s+/(?:(etc|usr|bin|sbin|var)(?:/|\\s|$)|(?:\\s|$))"
+        class: system_modify
+        block: true
+  - id: dev
+    rules:
+      - id: selfdev-git-push
+        description: "self-dev: git push is blocked"
+        pattern: "(?:^|[;&|]\\s*)git\\s+push\\b"
+        class: git_destructive
+        block: true
+      - id: selfdev-git-force
+        description: "self-dev: git force flags are blocked"
+        pattern: "\\bgit\\b[^;&|]*\\s--force(?:-with-lease)?\\b"
+        class: git_destructive
+        block: true
+      - id: selfdev-git-force-shorthand
+        description: "self-dev: git force shorthand is blocked"
+        pattern: "\\bgit\\b[^;&|]*\\s-f(?:\\s|$)"
+        class: git_destructive
+        block: true
+      - id: selfdev-git-reset-hard
+        description: "self-dev: git reset --hard is blocked"
+        pattern: "\\bgit\\s+reset\\s+--hard\\b"
+        class: git_destructive
+        block: true
+      - id: selfdev-git-clean-force
+        description: "self-dev: git clean with force is blocked"
+        pattern: "\\bgit\\s+clean\\b[^;&|]*\\s-[A-Za-z]*f[A-Za-z]*\\b"
+        class: git_destructive
+        block: true
+      - id: selfdev-git-checkout-discard
+        description: "self-dev: destructive git checkout syntax is blocked"
+        pattern: "\\bgit\\s+checkout\\s+--(?:\\s|$)"
+        class: git_destructive
+        block: true
+      - id: selfdev-gh-pr-merge
+        description: "self-dev: hosted PR merge commands are blocked"
+        pattern: "\\bgh\\s+pr\\s+merge\\b"
+        class: git_destructive
+        block: true
+  - id: super
+    rules: []
