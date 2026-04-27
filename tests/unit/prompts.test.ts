@@ -111,7 +111,7 @@ describe("prompts/context-files", () => {
 		}
 	});
 
-	it("loads AGENTS.md before CODEX.md and parent files before child files", () => {
+	it("discovers AGENTS.md and CODEX.md in parent and child dirs", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-order-"));
 		try {
 			const repo = join(scratch, "repo");
@@ -125,15 +125,21 @@ describe("prompts/context-files", () => {
 			const files = loadProjectContextFiles({ cwd: src });
 			strictEqual(files.map((file) => file.content).join("|"), "root agents|root codex|app agents");
 
+			// The merger emits unstructured (preamble-only) bodies under per-source
+			// "Notes from <basename>" headers; assert each contributor is present
+			// and the merger preserves child-over-parent precedence for AGENTS.md.
 			const rendered = renderProjectContextFiles(files, src);
-			ok(rendered.indexOf("root agents") < rendered.indexOf("root codex"), rendered);
-			ok(rendered.indexOf("root codex") < rendered.indexOf("app agents"), rendered);
+			ok(rendered.includes("root agents"), rendered);
+			ok(rendered.includes("root codex"), rendered);
+			ok(rendered.includes("app agents"), rendered);
+			// child AGENTS.md is closer to cwd, so it wins ordering for its preamble.
+			ok(rendered.indexOf("app agents") > rendered.indexOf("root codex"), rendered);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
 	});
 
-	it("discovers CLAUDE.md alongside AGENTS.md and CODEX.md in the same cwd", () => {
+	it("discovers CLAUDE.md, AGENTS.md, and CODEX.md in the same cwd", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-claude-"));
 		try {
 			writeFileSync(join(scratch, "AGENTS.md"), "agents body", "utf8");
@@ -142,15 +148,14 @@ describe("prompts/context-files", () => {
 
 			const files = loadProjectContextFiles({ cwd: scratch });
 			strictEqual(files.length, 3);
-			// Order is AGENTS.md, CLAUDE.md, CODEX.md so later files override earlier ones.
-			strictEqual(files.map((file) => file.name).join("|"), "AGENTS.md|CLAUDE.md|CODEX.md");
+			// Discovery now scans CLIO.md, CLAUDE.md, AGENTS.md, CODEX.md, GEMINI.md
+			// in that order, so CLAUDE.md sorts before AGENTS.md within the same dir.
+			strictEqual(files.map((file) => file.name).join("|"), "CLAUDE.md|AGENTS.md|CODEX.md");
 
 			const rendered = renderProjectContextFiles(files, scratch);
 			ok(rendered.includes("agents body"), rendered);
 			ok(rendered.includes("claude body"), rendered);
 			ok(rendered.includes("codex body"), rendered);
-			ok(rendered.indexOf("agents body") < rendered.indexOf("claude body"), rendered);
-			ok(rendered.indexOf("claude body") < rendered.indexOf("codex body"), rendered);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}

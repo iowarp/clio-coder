@@ -2,32 +2,49 @@
  * project context-file loader for the prompts domain.
  *
  * walks from the filesystem root down to `cwd` and reads every matching
- * filename in `DEFAULT_CONTEXT_FILE_NAMES` (`["AGENTS.md", "CLAUDE.md",
- * "CODEX.md"]`). order matters: broader scope first, more specific later, so
- * `renderProjectContextFiles` can let later files override earlier ones.
+ * filename in `DEFAULT_CONTEXT_FILE_NAMES`. each file is classified by
+ * filename into an InstructionSourceKind so the merger can apply the
+ * conflict policy (CLIO.md wins; CLIO-dev.md overrides CLIO.md; among
+ * the rest, child-closest-to-cwd wins).
  *
- * deliberate divergence from pi-coding-agent's `loadContextFileFromDir`, which
- * picks the first matching filename per directory. clio loads ALL matching
- * files in each directory so AGENTS.md, CLAUDE.md, and CODEX.md can coexist.
+ * `renderProjectContextFiles` is now a thin wrapper around the merger;
+ * callers receive a single deterministic block keyed by canonical
+ * section header rather than a per-file concatenation.
  */
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+import {
+	type InstructionSource,
+	type InstructionSourceKind,
+	mergeInstructions,
+	parseSections,
+} from "./instruction-merge.js";
 
-export const DEFAULT_CONTEXT_FILE_NAMES = ["AGENTS.md", "CLAUDE.md", "CODEX.md"] as const;
+export const DEFAULT_CONTEXT_FILE_NAMES = ["CLIO.md", "CLAUDE.md", "AGENTS.md", "CODEX.md", "GEMINI.md"] as const;
+
+const FILENAME_TO_KIND: Record<string, InstructionSourceKind> = {
+	"CLIO.md": "clio",
+	"CLAUDE.md": "claude",
+	"AGENTS.md": "agents",
+	"CODEX.md": "codex",
+	"GEMINI.md": "gemini",
+};
+
+const DEV_FILE_NAME = "CLIO-dev.md";
 
 export interface ProjectContextFile {
 	path: string;
 	name: string;
 	content: string;
+	kind: InstructionSourceKind;
 }
 
 export interface LoadProjectContextFilesInput {
 	cwd: string;
 	fileNames?: ReadonlyArray<string>;
-}
-
-function normalizePath(filePath: string): string {
-	return filePath.split(path.sep).join("/");
+	/** Optional repo root: when set, CLIO-dev.md is loaded from this path or the XDG fallback. */
+	devRepoRoot?: string;
 }
 
 function candidateDirs(cwd: string): string[] {
@@ -51,6 +68,13 @@ function readFileIfPresent(filePath: string): string | null {
 	}
 }
 
+function classifyByName(name: string): InstructionSourceKind {
+	const kind = FILENAME_TO_KIND[name];
+	if (kind) return kind;
+	// Caller passed a custom filename; treat as agents-tier (low priority).
+	return "agents";
+}
+
 export function loadProjectContextFiles(input: LoadProjectContextFilesInput): ProjectContextFile[] {
 	const fileNames = input.fileNames ?? DEFAULT_CONTEXT_FILE_NAMES;
 	const seen = new Set<string>();
@@ -62,25 +86,40 @@ export function loadProjectContextFiles(input: LoadProjectContextFilesInput): Pr
 			seen.add(filePath);
 			const content = readFileIfPresent(filePath);
 			if (content === null) continue;
-			out.push({ path: filePath, name, content });
+			out.push({ path: filePath, name, content, kind: classifyByName(name) });
 		}
 	}
 	return out;
 }
 
-export function renderProjectContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd: string): string {
-	const parts: string[] = [];
-	for (const file of files) {
-		const relPath = normalizePath(path.relative(path.resolve(cwd), file.path)) || file.name;
-		const content = file.content.trim();
-		if (content.length === 0) continue;
-		parts.push([`## ${relPath}`, "", content].join("\n"));
+/**
+ * Resolve the dev-mode supplement. Looks first at <repoRoot>/CLIO-dev.md,
+ * then falls back to ~/.config/clio/CLIO-dev.md. Returns null when neither
+ * exists.
+ */
+export function loadDevContextFile(repoRoot: string): ProjectContextFile | null {
+	const candidates = [path.join(repoRoot, DEV_FILE_NAME), path.join(homedir(), ".config", "clio", DEV_FILE_NAME)];
+	for (const filePath of candidates) {
+		if (!existsSync(filePath)) continue;
+		const content = readFileIfPresent(filePath);
+		if (content === null) continue;
+		return { path: filePath, name: DEV_FILE_NAME, content, kind: "clio-dev" };
 	}
-	if (parts.length === 0) return "";
+	return null;
+}
+
+function toInstructionSources(files: ReadonlyArray<ProjectContextFile>): InstructionSource[] {
+	return files.map((file) => ({ path: file.path, kind: file.kind, sections: parseSections(file.content) }));
+}
+
+export function renderProjectContextFiles(files: ReadonlyArray<ProjectContextFile>, _cwd: string): string {
+	if (files.length === 0) return "";
+	const merged = mergeInstructions(toInstructionSources(files));
+	if (merged.text.length === 0) return "";
 	return [
 		"Earlier files are broader repository context; later files are more specific.",
-		"When files conflict, follow the later file unless higher-priority Clio instructions say otherwise.",
+		"CLIO.md wins on conflicts; CLIO-dev.md (when present) overrides CLIO.md.",
 		"",
-		...parts,
-	].join("\n\n");
+		merged.text,
+	].join("\n");
 }
