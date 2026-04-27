@@ -263,6 +263,13 @@ export async function ensureSelfDevBranch(
 	if (!isProtectedBranch(branch)) {
 		return mode;
 	}
+	if (process.env.CLIO_DEV_ALLOW_PROTECTED_BRANCH === "1") {
+		// Opt-out for tests and advanced users that take responsibility for the
+		// branch they are on. Mirrors CLIO_DEV_ALLOW_ENGINE_WRITES. The
+		// evaluateSelfDevWritePath guard still blocks tool-driven writes under
+		// src/ on protected branches, so this only relaxes the boot prompt.
+		return mode;
+	}
 
 	process.stderr.write(
 		`clio --dev: refusing to operate on ${branch ?? "detached HEAD"}; will create a selfdev/ branch\n`,
