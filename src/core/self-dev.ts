@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { getCachedDefaultRulePacks } from "../domains/safety/rule-pack-loader.js";
 import { clioConfigDir } from "./xdg.js";
@@ -198,6 +199,100 @@ export function evaluateSelfDevBashCommand(command: string): string | null {
 		if (rule.pattern.test(command)) return rule.description;
 	}
 	return null;
+}
+
+export interface EnsureSelfDevBranchOptions {
+	/** Override how the current branch is read. Default uses git rev-parse on the repo. */
+	readBranch?: (repoRoot: string) => string | null;
+	/** Override how a slug is collected. Default uses node:readline/promises on stdin/stderr. */
+	promptSlug?: () => Promise<string | null>;
+	/** Override how the new branch is created. Default invokes git switch -c via execFileSync. */
+	runGit?: (repoRoot: string, args: string[]) => void;
+	/** Override the date stamp used in the new branch name. Default is today's ISO date. */
+	now?: () => Date;
+}
+
+function defaultPromptSlug(): Promise<string | null> {
+	if (!process.stdin.isTTY) return Promise.resolve(null);
+	const rl = createInterface({ input: process.stdin, output: process.stderr });
+	return rl.question("clio --dev: enter a slug for the new selfdev/ branch (blank to cancel): ").then(
+		(answer) => {
+			rl.close();
+			return answer;
+		},
+		() => {
+			rl.close();
+			return null;
+		},
+	);
+}
+
+function defaultRunGit(repoRoot: string, args: string[]): void {
+	execFileSync("git", ["-C", repoRoot, ...args], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+}
+
+export function sanitizeSelfDevSlug(input: string): string {
+	return input
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 40)
+		.replace(/-+$/g, "");
+}
+
+/**
+ * When self-dev resolves on main/master/trunk (or detached HEAD), prompt the
+ * user for a slug and create a `selfdev/YYYY-MM-DD-<slug>` branch via
+ * `git switch -c`. Returns the input mode unchanged on a non-protected
+ * branch. Returns null on cancellation or git failure; the orchestrator
+ * surfaces that as an exit-1 boot.
+ */
+export async function ensureSelfDevBranch(
+	mode: SelfDevMode,
+	opts: EnsureSelfDevBranchOptions = {},
+): Promise<SelfDevMode | null> {
+	const readBranchFn = opts.readBranch ?? readBranch;
+	const promptSlug = opts.promptSlug ?? defaultPromptSlug;
+	const runGit = opts.runGit ?? defaultRunGit;
+	const now = opts.now ?? (() => new Date());
+
+	const branch = readBranchFn(mode.repoRoot);
+	if (!isProtectedBranch(branch)) {
+		return mode;
+	}
+
+	process.stderr.write(
+		`clio --dev: refusing to operate on ${branch ?? "detached HEAD"}; will create a selfdev/ branch\n`,
+	);
+
+	let raw: string | null;
+	try {
+		raw = await promptSlug();
+	} catch {
+		raw = null;
+	}
+	if (raw === null) {
+		process.stderr.write("clio --dev: cancelled, no slug supplied\n");
+		return null;
+	}
+	const slug = sanitizeSelfDevSlug(raw);
+	if (slug.length === 0) {
+		process.stderr.write("clio --dev: cancelled, no slug supplied\n");
+		return null;
+	}
+	const date = now().toISOString().slice(0, 10);
+	const newBranch = `selfdev/${date}-${slug}`;
+	try {
+		runGit(mode.repoRoot, ["switch", "-c", newBranch]);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		process.stderr.write(`clio --dev: git switch -c ${newBranch} failed: ${message}\n`);
+		return null;
+	}
+	return { ...mode, branch: newBranch };
 }
 
 export function buildSelfDevPrompt(mode: SelfDevMode): string {

@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildSelfDevPrompt,
+	ensureSelfDevBranch,
 	evaluateSelfDevBashCommand,
 	evaluateSelfDevWritePath,
 	resolveSelfDevMode,
 	type SelfDevMode,
+	sanitizeSelfDevSlug,
 } from "../../src/core/self-dev.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 
@@ -151,6 +153,132 @@ describe("core/self-dev activation gate", () => {
 		writeFileSync(join(process.env.CLIO_CONFIG_DIR ?? "", "CLIO-dev.md"), "# dev supplement\n", "utf8");
 		const mode = resolveSelfDevMode();
 		ok(mode !== null);
+	});
+});
+
+describe("core/self-dev slug sanitization", () => {
+	it("kebab-cases, trims, and caps at 40 chars", () => {
+		strictEqual(sanitizeSelfDevSlug("Add Cool Feature!"), "add-cool-feature");
+		strictEqual(sanitizeSelfDevSlug("  multiple   spaces  "), "multiple-spaces");
+		strictEqual(sanitizeSelfDevSlug("a".repeat(60)).length, 40);
+		// trailing/leading punctuation collapses cleanly
+		strictEqual(sanitizeSelfDevSlug("---"), "");
+		strictEqual(sanitizeSelfDevSlug(""), "");
+		strictEqual(sanitizeSelfDevSlug("***"), "");
+	});
+});
+
+describe("core/self-dev branch enforcement", () => {
+	let stderrBuffer: string;
+	let originalStderrWrite: typeof process.stderr.write;
+
+	beforeEach(() => {
+		stderrBuffer = "";
+		originalStderrWrite = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: unknown) => {
+			stderrBuffer += typeof chunk === "string" ? chunk : String(chunk);
+			return true;
+		}) as typeof process.stderr.write;
+	});
+	afterEach(() => {
+		process.stderr.write = originalStderrWrite;
+	});
+
+	it("returns the input mode unchanged on a non-protected branch", async () => {
+		const promptCalls: number[] = [];
+		const gitCalls: string[][] = [];
+		const m = mode({ branch: "feat/foo" });
+		const result = await ensureSelfDevBranch(m, {
+			readBranch: () => "feat/foo",
+			promptSlug: async () => {
+				promptCalls.push(1);
+				return "x";
+			},
+			runGit: (_root, args) => {
+				gitCalls.push([...args]);
+			},
+		});
+		ok(result !== null);
+		strictEqual(result, m);
+		strictEqual(promptCalls.length, 0);
+		strictEqual(gitCalls.length, 0);
+	});
+
+	it("creates selfdev/<date>-<slug> on a protected branch", async () => {
+		const gitCalls: string[][] = [];
+		const m = mode({ branch: "main" });
+		const result = await ensureSelfDevBranch(m, {
+			readBranch: () => "main",
+			promptSlug: async () => "Add Auto Branch",
+			runGit: (_root, args) => {
+				gitCalls.push([...args]);
+			},
+			now: () => new Date("2026-04-27T10:00:00Z"),
+		});
+		ok(result !== null);
+		strictEqual(result?.branch, "selfdev/2026-04-27-add-auto-branch");
+		strictEqual(gitCalls.length, 1);
+		strictEqual(gitCalls[0]?.[0], "switch");
+		strictEqual(gitCalls[0]?.[1], "-c");
+		strictEqual(gitCalls[0]?.[2], "selfdev/2026-04-27-add-auto-branch");
+	});
+
+	it("returns null and warns when the prompt resolves to null", async () => {
+		const gitCalls: string[][] = [];
+		const result = await ensureSelfDevBranch(mode({ branch: "main" }), {
+			readBranch: () => "main",
+			promptSlug: async () => null,
+			runGit: (_root, args) => {
+				gitCalls.push([...args]);
+			},
+		});
+		strictEqual(result, null);
+		strictEqual(gitCalls.length, 0);
+		ok(stderrBuffer.includes("cancelled"), stderrBuffer);
+	});
+
+	it("returns null when sanitization swallows the entire input", async () => {
+		const gitCalls: string[][] = [];
+		const result = await ensureSelfDevBranch(mode({ branch: "master" }), {
+			readBranch: () => "master",
+			promptSlug: async () => "***",
+			runGit: (_root, args) => {
+				gitCalls.push([...args]);
+			},
+		});
+		strictEqual(result, null);
+		strictEqual(gitCalls.length, 0);
+		ok(stderrBuffer.includes("cancelled"), stderrBuffer);
+	});
+
+	it("returns null and surfaces the git error when git switch fails", async () => {
+		const result = await ensureSelfDevBranch(mode({ branch: "trunk" }), {
+			readBranch: () => "trunk",
+			promptSlug: async () => "feat",
+			runGit: () => {
+				throw new Error("fatal: a branch named 'selfdev/...' already exists");
+			},
+			now: () => new Date("2026-04-27T10:00:00Z"),
+		});
+		strictEqual(result, null);
+		ok(stderrBuffer.includes("git switch -c"), stderrBuffer);
+		ok(stderrBuffer.includes("already exists"), stderrBuffer);
+	});
+
+	it("treats detached HEAD as a protected branch", async () => {
+		const gitCalls: string[][] = [];
+		const result = await ensureSelfDevBranch(mode({ branch: null }), {
+			readBranch: () => null,
+			promptSlug: async () => "hotfix",
+			runGit: (_root, args) => {
+				gitCalls.push([...args]);
+			},
+			now: () => new Date("2026-04-27T10:00:00Z"),
+		});
+		ok(result !== null);
+		strictEqual(result?.branch, "selfdev/2026-04-27-hotfix");
+		strictEqual(gitCalls.length, 1);
+		ok(stderrBuffer.includes("detached HEAD"), stderrBuffer);
 	});
 });
 
