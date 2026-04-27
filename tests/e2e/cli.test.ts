@@ -114,15 +114,34 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stdout, /settings.yaml\s+missing/);
 	});
 
-	it("targets --json returns an array", async () => {
+	it("doctor --json emits a machine-readable report", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const result = await runCli(["doctor", "--json"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0);
+		const parsed = JSON.parse(result.stdout) as {
+			ok: boolean;
+			fix: boolean;
+			findings: Array<{ ok: boolean; name: string; detail: string }>;
+		};
+		strictEqual(parsed.ok, true);
+		strictEqual(parsed.fix, false);
+		ok(Array.isArray(parsed.findings) && parsed.findings.length > 0, "expected non-empty findings");
+		ok(
+			parsed.findings.every((f) => typeof f.ok === "boolean" && typeof f.name === "string"),
+			"each finding has ok+name",
+		);
+	});
+
+	it("targets --json returns an object with a targets array", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		seedTargets(join(scratch.dir, "config"));
 		const result = await runCli(["targets", "--json"], { env: scratch.env, timeoutMs: 20_000 });
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout);
-		ok(Array.isArray(parsed), "targets --json should emit an array");
+		ok(parsed && typeof parsed === "object" && !Array.isArray(parsed), "targets --json should emit an object");
+		ok(Array.isArray(parsed.targets), "targets --json should expose a targets array");
 		ok(
-			parsed.every((row) => row.tier === "cloud"),
+			parsed.targets.every((row: { tier: string }) => row.tier === "cloud"),
 			"seeded cloud targets should include a top-level tier",
 		);
 	});
@@ -132,13 +151,15 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		seedTargets(join(scratch.dir, "config"));
 		const result = await runCli(["targets", "--json"], { env: scratch.env, timeoutMs: 20_000 });
 		strictEqual(result.code, 0);
-		const parsed = JSON.parse(result.stdout) as Array<{
-			detectedReasoning: boolean | null;
-			reasoningCandidateModelId: string | null;
-			target: { id: string; defaultModel?: string | null };
-		}>;
-		ok(Array.isArray(parsed) && parsed.length > 0, "expected at least one seeded target");
-		for (const row of parsed) {
+		const parsed = JSON.parse(result.stdout) as {
+			targets: Array<{
+				detectedReasoning: boolean | null;
+				reasoningCandidateModelId: string | null;
+				target: { id: string; defaultModel?: string | null };
+			}>;
+		};
+		ok(Array.isArray(parsed.targets) && parsed.targets.length > 0, "expected at least one seeded target");
+		for (const row of parsed.targets) {
 			ok(
 				Object.hasOwn(row, "detectedReasoning"),
 				`target ${row.target.id} must include detectedReasoning (was ${JSON.stringify(row)})`,

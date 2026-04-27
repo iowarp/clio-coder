@@ -138,7 +138,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 			const detectedReasoning = candidate ? providers.getDetectedReasoning(status.endpoint.id, candidate) : null;
 			return serializeStatus(status, { detectedReasoning, candidateModelId: candidate });
 		});
-		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify({ targets: rows }, null, 2)}\n`);
 	} else if (filtered.length === 0) {
 		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
 	} else {
