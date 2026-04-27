@@ -13,75 +13,159 @@ Keep a Changelog.
 
 ## 0.1.3 — 2026-04-27
 
-### Added
+Polish release on top of v0.1.2. Four user-visible TUI improvements
+(live tool output, bash echo, Ctrl+T thinking, footer git branch),
+local-runtime hardening for LM Studio and Ollama, CLIO.md as the
+canonical project instruction file, identity alignment with IOWarp's
+CLIO ecosystem of agentic science, self-development mode hardening,
+two CI substrate fixes, and a clean-clone smoke job to catch
+dev-env-only test passes before the next tag. No breaking changes.
+No settings migration required. Sessions, receipts, and audit JSONL
+written by v0.1.2 remain readable.
 
-- CLIO.md is auto-loaded as the canonical project instruction file.
-  The loader merges sections from CLAUDE.md, AGENTS.md, CODEX.md, and
-  GEMINI.md into the same compiled prompt, with CLIO.md winning on
-  conflicts. `--no-context-files` still skips the entire chain.
-- `clio targets convert <id> --runtime <runtimeId>` rewrites an existing
-  endpoint's runtime in-place. Used to migrate `openai-compat` targets
-  pointing at LM Studio or Ollama onto their native runtimes.
-- `clio doctor` now fingerprints `openai-compat` URLs and warns when
+### Added — interactive TUI
+
+- Live tool output. `tool_execution_update` events stream into the
+  expanded tool block as they arrive, with a dim `(running...)`
+  marker that disappears on `tool_execution_end`. Long-running
+  `bash`, `grep`, and shell commands no longer leave the block empty
+  until exit. Capped at 12 visible lines with `... N more lines
+  hidden` overflow; latest output is preserved.
+- Bash command echo. Successful `bash` results render
+  `$ <full-command>` on its own line under the rail before the
+  output, matching what you would see in a real terminal. Errors
+  stay on the standard red-rail path so the failure signal is not
+  diluted.
+- `Ctrl+T` toggles the most recent assistant turn's thinking block
+  between a one-line dim preview and the full rail-prefixed body.
+  Symmetric with the existing `Ctrl+O` tool-segment toggle.
+  Registered as `clio.thinking.expand` (default `ctrl+t`); rebindable
+  via `settings.yaml` and surfaced in `/hotkeys`.
+- Footer git-branch slot. The status footer reads `branch:<name>`
+  when launched from inside a git repository. Resolves once at boot
+  via a new `src/utils/git.ts` helper with a 1s timeout and a null
+  fallback for non-repos, missing `git`, or timeouts. No live
+  refresh in v0.1.x; cwd changes during a session leave the slot
+  stale until the next boot.
+
+### Added — project context loading
+
+- CLIO.md is the canonical project instruction file and is
+  auto-loaded by walking from the working directory upward. The
+  loader merges CLAUDE.md, AGENTS.md, CODEX.md, and GEMINI.md into
+  the same compiled prompt, with CLIO.md winning on conflicts.
+  `--no-context-files` (alias `-nc`) still skips the entire chain.
+
+### Added — local runtimes and discovery
+
+- `clio targets convert <id> --runtime <runtimeId>` rewrites an
+  existing endpoint's runtime in place. Use it to migrate
+  `openai-compat` targets pointing at LM Studio or Ollama onto
+  their native runtimes without re-entering credentials.
+- `clio doctor` fingerprints `openai-compat` URLs and warns when
   the URL responds as LM Studio or Ollama, suggesting the convert
   command.
-- `clio configure` and `clio targets add` detect native local servers
-  on the entered URL and offer to switch the runtime to the native
-  counterpart.
-- Live tool output streaming: `tool_execution_update` events now
-  accumulate into the expanded tool block with a dim `(running...)`
-  marker. Previously partial output was invisible until the call
-  finished.
-- Bash success results render `$ <command>` on its own line under
-  the rail before the output, matching the experience of a real
-  terminal.
-- `Ctrl+T` toggles the most recent assistant turn's thinking block
-  between a one-line dim preview and a full rail-prefixed body.
-  Symmetric with the existing `Ctrl+O` tool-segment toggle
-  (`clio.thinking.expand`, default `ctrl+t`).
-- Footer shows the current git branch as `branch:<name>` when
-  launched from inside a repository. One-shot at boot via a new
-  `src/utils/git.ts` helper.
+- `clio configure` and `clio targets add` detect native local
+  servers on the entered URL and offer to switch the runtime to the
+  native counterpart at setup time.
+- Native local-server residency and routing become the default for
+  detected local targets, replacing the prior generic openai-compat
+  path.
 
-### Changed
+### Added — self-development mode
 
-- Identity messaging aligns Clio Coder with its position in IOWarp's
-  CLIO ecosystem of agentic science. The system prompt fragment, the
-  CLIO.md identity section, the README opening, the package.json
-  description and keywords, the CLI help text, the orchestrator
-  banner subtitle, and the chat-loop fallback identity now reflect
-  the HPC and scientific-software focus and the NSF-funded IOWarp
-  project. Architecture, engine boundaries, runtime selection, and
-  test surfaces are unchanged. No behavior changes.
-- `package.json` `files` no longer references AGENTS.md, STATUS.md,
-  or GOVERNANCE.md (the files were never shipped). CLIO.md is
-  published instead.
-- README.md and CONTRIBUTING.md document CLIO.md instead of
-  AGENTS.md.
-- `lmstudio-native` evicts non-target loaded models before each prompt
-  (within a 60-second cache) so the active model owns VRAM and does
-  not spill into system RAM.
+- `clio --dev` requires a project-level `CLIO-dev.md` rule pack to
+  activate. Resolution checks `<repoRoot>/CLIO-dev.md` first, then
+  `<clioConfigDir>/CLIO-dev.md` (the XDG fallback respects
+  `CLIO_HOME` and `CLIO_CONFIG_DIR` for dev sandboxing). Missing
+  files fail boot with an explanatory stderr message naming the
+  expected paths.
+- On activation against a protected branch (`main`, `master`,
+  `trunk`, or detached HEAD), `clio --dev` prompts for a slug and
+  runs `git switch -c selfdev/YYYY-MM-DD-<slug>` before any engine
+  write. Cancellation or git failure surfaces as exit 1 instead of
+  silently editing the protected branch.
+
+### Changed — local runtimes
+
+- `lmstudio-native` evicts non-target loaded models before each
+  prompt (within a 60-second cache) so the active model owns VRAM
+  and does not spill into system RAM.
+- `lmstudio-native` passes `verbose: false` to the LM Studio SDK by
+  default so the runtime no longer prints upstream JIT-load progress
+  lines on every prompt. Set `CLIO_RUNTIME_VERBOSE=1` to restore the
+  verbose stream.
 - `ollama-native` pins the active model with `keep_alive: -1`. The
   chat-loop hot-swap path fires a one-shot `keep_alive: 0` sweep
   against other resident models so the prior pinned weights release.
 - `llamacpp-completion` and `llamacpp-anthropic` probes report a
   diagnostic note when the configured wire model id does not match
   the server's single loaded model.
-- CI now installs `fd-find` on `ubuntu-latest` so slash-autocomplete
-  `@path` completion is exercised on every push.
-- CI gains a `clean-clone-smoke` job that runs the full gate against
-  a fresh shallow checkout with no npm cache, so dev-tree-only test
-  passes surface before tagging.
+
+### Changed — identity
+
+- Clio Coder is positioned as the coding agent inside IOWarp's CLIO
+  ecosystem of agentic science, targeting HPC and scientific-
+  software developers across the NSF-funded IOWarp project. The
+  system prompt fragment, CLIO.md identity section, README,
+  package.json description and keywords, CLI help text, orchestrator
+  banner subtitle, and chat-loop fallback identity all reflect the
+  new positioning. Architecture, engine boundaries, runtime
+  selection, and test surfaces are unchanged.
+
+### Changed — packaging and docs
+
+- `package.json` `files` no longer references AGENTS.md, STATUS.md,
+  or GOVERNANCE.md (the files were never shipped). CLIO.md is
+  published instead.
+- README.md and CONTRIBUTING.md document CLIO.md instead of
+  AGENTS.md.
+
+### Changed — safety rule packs
+
+- `damage-control-rules.yaml` is restructured under schema v2 as a
+  named `packs[]` list (`base`, `dev`, `super`). Historic kill-
+  switches stay under `base` (always-on); the dev pack carries every
+  regex previously inlined in the bash guard. The bash guard reads
+  the dev pack only when self-dev mode is active, so the base pack
+  is the sole source of truth in normal operation.
+
+### Changed — CI
+
+- The runner installs `fd-find` on `ubuntu-latest` so slash-
+  autocomplete `@path` completion is exercised on every push.
+- A new `clean-clone-smoke` job runs the full gate against a fresh
+  shallow checkout with no npm cache, catching dev-tree-only test
+  passes before tagging instead of after.
 
 ### Fixed
 
-- Slash-autocomplete `@path` completion now resolves `fd` or `fdfind`
-  from PATH instead of hardcoding `fd`, fixing CI on `ubuntu-latest`
-  and Debian/Ubuntu users with the `fd-find` apt package.
+- Slash-autocomplete `@path` completion resolves `fd` or `fdfind`
+  from PATH instead of hardcoding `fd`. Fixes the autocomplete on CI
+  and on Debian/Ubuntu users who installed the `fd-find` apt
+  package.
 - `clio --dev` accepts `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` as a
   boot-time opt-out for the protected-branch guard. Mirrors the
   existing `CLIO_DEV_ALLOW_ENGINE_WRITES=1` pattern; the per-write
   guard remains in force.
+- `clio doctor --json` returns `{ok, fix, findings}`; `clio targets
+  --json` returns `{targets: [...]}`. Both are now stable JSON
+  envelopes with room for forward-compatible top-level fields.
+- The streaming partial path coerces non-text `partialResult`
+  envelopes through `previewResult` instead of `String(...)`. Tools
+  that emit non-text partials (e.g. Task partials carrying
+  `{ elapsedTimeSeconds, taskId }`) no longer render as
+  `[object Object]` under the rail.
+
+### Notes
+
+- Pi SDK pin remains at `0.70.x` (current lock: `0.70.2`). Engine
+  boundary, worker isolation, and domain independence invariants
+  unchanged.
+- Default safety mode remains `default`; `advise` and `super` modes
+  unchanged from v0.1.2.
+- v0.1.x runtime tier is still `native` only; `sdk` and `cli` tiers
+  remain scaffolded and rejected by dispatch until v0.2.
 
 ## 0.1.2 — 2026-04-25
 
