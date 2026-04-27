@@ -5,15 +5,32 @@ import type { ConfigContract } from "../config/contract.js";
 import type { ModesContract } from "../modes/contract.js";
 import type { ModeName } from "../modes/index.js";
 import { compile } from "./compiler.js";
-import { loadProjectContextFiles, renderProjectContextFiles } from "./context-files.js";
+import {
+	loadDevContextFile,
+	loadProjectContextFiles,
+	type ProjectContextFile,
+	renderProjectContextFiles,
+} from "./context-files.js";
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 
+function withDev(files: ReadonlyArray<ProjectContextFile>, repoRoot: string): ProjectContextFile[] {
+	const dev = loadDevContextFile(repoRoot);
+	if (!dev) return [...files];
+	return [...files, dev];
+}
+
 export interface PromptsBundleOptions {
 	/** When true, the dynamic context.files fragment renders the empty string
-	 * even if AGENTS.md / CLAUDE.md / CODEX.md exist on disk. Set by the
-	 * top-level `--no-context-files` (alias `-nc`) startup flag. */
+	 * even if CLIO.md / CLAUDE.md / AGENTS.md / CODEX.md / GEMINI.md exist on
+	 * disk. Set by the top-level `--no-context-files` (alias `-nc`) startup
+	 * flag. */
 	noContextFiles?: boolean;
+	/** When set, CLIO-dev.md is loaded from <devRepoRoot>/CLIO-dev.md (or the
+	 * ~/.config/clio/CLIO-dev.md fallback) and threaded into the merger as the
+	 * highest-priority source. Set by the orchestrator when self-development
+	 * mode resolves. */
+	devRepoRoot?: string;
 }
 
 export function createPromptsBundle(
@@ -22,6 +39,8 @@ export function createPromptsBundle(
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
 	const suppressContextFiles = options.noContextFiles === true;
+	const devRepoRoot =
+		typeof options.devRepoRoot === "string" && options.devRepoRoot.length > 0 ? options.devRepoRoot : null;
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -59,7 +78,12 @@ export function createPromptsBundle(
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.safetyLevel ?? settings?.safetyLevel ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
-			const contextFiles = suppressContextFiles ? "" : renderProjectContextFiles(loadProjectContextFiles({ cwd }), cwd);
+			let contextFiles = "";
+			if (!suppressContextFiles) {
+				const discovered = loadProjectContextFiles({ cwd });
+				const allFiles = devRepoRoot ? withDev(discovered, devRepoRoot) : discovered;
+				contextFiles = renderProjectContextFiles(allFiles, cwd);
+			}
 			const dynamicInputs = contextFiles.length > 0 ? { ...input.dynamicInputs, contextFiles } : input.dynamicInputs;
 			return compile(table, {
 				identity: "identity.clio",

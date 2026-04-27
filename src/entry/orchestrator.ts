@@ -256,7 +256,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		ModesDomainModule,
-		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
+		createPromptsDomainModule({
+			noContextFiles: options.noContextFiles === true,
+			...(selfDev ? { devRepoRoot: selfDev.repoRoot } : {}),
+		}),
 		AgentsDomainModule,
 		SessionDomainModule,
 		ObservabilityDomainModule,

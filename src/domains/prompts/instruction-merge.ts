@@ -19,6 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
+import path from "node:path";
 
 export type InstructionSourceKind = "clio" | "clio-dev" | "claude" | "agents" | "codex" | "gemini";
 
@@ -131,6 +132,26 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 		}
 	}
 
+	// Preamble (content before the first H2) is emitted per-source so an
+	// unstructured AGENTS.md or CLAUDE.md still surfaces. Conflict policy
+	// only applies to H2 sections.
+	const preamblePicks: SectionPick[] = [];
+	const preambleHashes = new Set<string>();
+	const orderForPreamble: InstructionSource[] = [];
+	if (clio) orderForPreamble.push(clio);
+	for (const src of others) orderForPreamble.push(src);
+	if (dev) orderForPreamble.push(dev);
+	for (const src of orderForPreamble) {
+		const body = src.sections.get(PREAMBLE_KEY);
+		if (body === undefined || body.length === 0) continue;
+		const h = hashBody(body);
+		if (preambleHashes.has(h)) continue;
+		preambleHashes.add(h);
+		const header = `Notes from ${path.basename(src.path)}`;
+		preamblePicks.push({ header, body, contributorPath: src.path });
+		recordContributor(src.path, header);
+	}
+
 	for (const header of sectionOrder) {
 		if (seenHeaders.has(header)) continue;
 		// Priority: dev override -> clio -> last-among-others (closest-to-cwd wins)
@@ -166,8 +187,12 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 		}
 	}
 
-	// Render output
+	// Render output: preambles first (one block per contributing source),
+	// then merged H2 sections in CLIO.md order.
 	const parts: string[] = [];
+	for (const pick of preamblePicks) {
+		parts.push(`## ${pick.header}\n\n${pick.body}`);
+	}
 	for (const pick of picks) {
 		parts.push(`## ${pick.header}\n\n${pick.body}`);
 	}
@@ -193,6 +218,6 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 		contributors.push(entry);
 	}
 
-	const text = picks.length > 0 ? `${parts.join("\n\n")}\n${provenance.join("\n")}` : "";
+	const text = parts.length > 0 ? `${parts.join("\n\n")}\n${provenance.join("\n")}` : "";
 	return { text, contributors };
 }
