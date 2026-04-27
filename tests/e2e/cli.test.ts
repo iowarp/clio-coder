@@ -40,7 +40,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 	it("--version exits 0 and prints only the Clio Coder version", async () => {
 		const result = await runCli(["--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
 	});
 
 	it("--help exits 0 and prints usage", async () => {
@@ -55,13 +55,13 @@ describe("clio cli e2e", { concurrency: false }, () => {
 	it("--no-context-files is accepted at the top level without breaking subcommand parsing", async () => {
 		const result = await runCli(["--no-context-files", "--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
 	});
 
 	it("-nc alias is accepted at the top level", async () => {
 		const result = await runCli(["-nc", "--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.2\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
 	});
 
 	it("--no-context-files boots the orchestrator (non-interactive) and exits 0", async () => {

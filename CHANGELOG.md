@@ -7,6 +7,14 @@ Keep a Changelog.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.1.3 — 2026-04-27
+
+### Added
+
 - CLIO.md is auto-loaded as the canonical project instruction file.
   The loader merges sections from CLAUDE.md, AGENTS.md, CODEX.md, and
   GEMINI.md into the same compiled prompt, with CLIO.md winning on
@@ -20,6 +28,20 @@ Keep a Changelog.
 - `clio configure` and `clio targets add` detect native local servers
   on the entered URL and offer to switch the runtime to the native
   counterpart.
+- Live tool output streaming: `tool_execution_update` events now
+  accumulate into the expanded tool block with a dim `(running...)`
+  marker. Previously partial output was invisible until the call
+  finished.
+- Bash success results render `$ <command>` on its own line under
+  the rail before the output, matching the experience of a real
+  terminal.
+- `Ctrl+T` toggles the most recent assistant turn's thinking block
+  between a one-line dim preview and a full rail-prefixed body.
+  Symmetric with the existing `Ctrl+O` tool-segment toggle
+  (`clio.thinking.expand`, default `ctrl+t`).
+- Footer shows the current git branch as `branch:<name>` when
+  launched from inside a repository. One-shot at boot via a new
+  `src/utils/git.ts` helper.
 
 ### Changed
 
@@ -45,6 +67,16 @@ Keep a Changelog.
 - `llamacpp-completion` and `llamacpp-anthropic` probes report a
   diagnostic note when the configured wire model id does not match
   the server's single loaded model.
+
+### Fixed
+
+- Slash-autocomplete `@path` completion now resolves `fd` or `fdfind`
+  from PATH instead of hardcoding `fd`, fixing CI on `ubuntu-latest`
+  and Debian/Ubuntu users with the `fd-find` apt package.
+- `clio --dev` accepts `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` as a
+  boot-time opt-out for the protected-branch guard. Mirrors the
+  existing `CLIO_DEV_ALLOW_ENGINE_WRITES=1` pattern; the per-write
+  guard remains in force.
 
 ## 0.1.2 — 2026-04-25
 
