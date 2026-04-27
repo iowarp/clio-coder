@@ -1,11 +1,12 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.1.2",
-	"description": "Agentic coding harness for supervised repository work, model-target orchestration, worker dispatch, and self-development.",
+	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
 	"keywords": [
 		"ai",
 		"agentic-ai",
 		"agentic-coding",
+		"agentic-science",
 		"coding",
 		"repository",
 		"terminal",
@@ -16,7 +17,11 @@
 		"multi-agent",
 		"coding-agents",
 		"software-engineering",
-		"research-software"
+		"research-software",
+		"scientific-computing",
+		"hpc",
+		"clio",
+		"iowarp"
 	],
 	"type": "module",
 	"license": "Apache-2.0",
