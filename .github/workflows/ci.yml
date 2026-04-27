@@ -32,3 +32,22 @@ jobs:
           sudo apt-get install -y --no-install-recommends fd-find
       - run: npm ci --prefer-offline --no-audit --no-fund
       - run: npm run ci
+
+  clean-clone-smoke:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install fd-find
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fd-find
+      - run: npm ci --no-audit --no-fund
+      - run: npm run ci
