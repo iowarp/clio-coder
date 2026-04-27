@@ -133,6 +133,26 @@ with these env vars:
 Tests that touch the filesystem must use a scratch XDG home and call
 `resetXdgCache()` from `src/core/xdg.js` after setting the env vars.
 
+### Local model runtime selection
+
+Multi-model local servers carry their own resident-model lifecycle, so the
+native runtime owns chat transport whenever one is available. `openai-compat`
+is the documented fallback for servers without a native SDK.
+
+- LM Studio: prefer `lmstudio-native`. The runtime evicts non-target models
+  on each prompt so VRAM does not spill to system RAM.
+- Ollama: prefer `ollama-native`. The runtime pins the active model with
+  `keep_alive: -1` and fires a one-shot `keep_alive: 0` sweep against any
+  prior pinned model on hot-swap.
+- llama.cpp: pick the apiFamily-specific runtime (`llamacpp-completion`,
+  `llamacpp-anthropic`). The probe warns when the configured wire model id
+  does not match the server's loaded weights.
+- vLLM, SGLang, generic OpenAI-API hosts: `openai-compat` is correct.
+
+`clio doctor` warns when an `openai-compat` target points at a fingerprinted
+LM Studio or Ollama URL. Migrate with
+`clio targets convert <id> --runtime <native>`.
+
 ## Code style
 
 - TypeScript strict, with `noUncheckedIndexedAccess` and

@@ -1,15 +1,20 @@
 import { accessSync, chmodSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { readSettings } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
+import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import { readStateInfo } from "./state.js";
 import { getVersionInfo } from "./version.js";
+
+export type DoctorLevel = "ok" | "warn" | "error";
 
 export interface DoctorFinding {
 	ok: boolean;
 	name: string;
 	detail: string;
+	level?: DoctorLevel;
 }
 
 export interface DoctorOptions {
@@ -98,8 +103,43 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 export function formatDoctorReport(findings: DoctorFinding[]): string {
 	const lines = findings.map((f) => {
-		const badge = f.ok ? "OK" : "!! ";
-		return `${badge} ${f.name.padEnd(22)} ${f.detail}`;
+		const level = f.level ?? (f.ok ? "ok" : "error");
+		const badge = level === "ok" ? "OK" : level === "warn" ? "WARN" : "!! ";
+		return `${badge.padEnd(4)} ${f.name.padEnd(22)} ${f.detail}`;
 	});
 	return lines.join("\n");
+}
+
+/**
+ * Asynchronous doctor sweep: walks settings.endpoints and fingerprints any
+ * `openai-compat` URL that responds as a known native server (LM Studio,
+ * Ollama). Emits a WARN finding so the user knows to switch to the native
+ * runtime for proper resident-model lifecycle management. Network-bound and
+ * therefore not part of the synchronous `runDoctor()` core; CI calls the
+ * core, the CLI optionally invokes this on top.
+ */
+export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
+	let settings: ReturnType<typeof readSettings>;
+	try {
+		settings = readSettings();
+	} catch {
+		return [];
+	}
+	const candidates = settings.endpoints.filter((entry) => entry.runtime === "openai-compat" && Boolean(entry.url));
+	if (candidates.length === 0) return [];
+	const results = await Promise.all(
+		candidates.map(async (endpoint): Promise<DoctorFinding | null> => {
+			const url = endpoint.url;
+			if (!url) return null;
+			const fingerprint = await fingerprintNativeRuntime(url);
+			if (!fingerprint) return null;
+			return {
+				ok: true,
+				level: "warn",
+				name: `target ${endpoint.id}`,
+				detail: `${fingerprint.displayName} detected at ${url}; run \`clio targets convert ${endpoint.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
+			};
+		}),
+	);
+	return results.filter((finding): finding is DoctorFinding => finding !== null);
 }

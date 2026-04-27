@@ -5,6 +5,8 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
@@ -24,6 +26,7 @@ Usage:
   clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]
   clio targets workers [--json]
   clio targets worker <profile> <id> [--model <id>] [--thinking <level>]
+  clio targets convert <id> --runtime <runtimeId>
   clio targets remove <id>
   clio targets rename <old> <new>
 `;
@@ -90,6 +93,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	if (subcommand === "worker") return runWorker(args.slice(1));
 	if (subcommand === "remove") return runRemove(args.slice(1));
 	if (subcommand === "rename") return runRename(args.slice(1));
+	if (subcommand === "convert") return runConvert(args.slice(1));
 	if (subcommand === "--help" || subcommand === "-h") {
 		process.stdout.write(HELP);
 		return 0;
@@ -330,6 +334,60 @@ function runRename(args: ReadonlyArray<string>): number {
 	return runTargetRename(args[0], args[1]);
 }
 
+function runConvert(args: ReadonlyArray<string>): number {
+	const id = args[0];
+	if (!id || id.startsWith("-")) {
+		printError("usage: clio targets convert <id> --runtime <runtimeId>");
+		return 2;
+	}
+	let runtimeId: string | undefined;
+	for (let i = 1; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === "--runtime") {
+			const value = args[i + 1];
+			if (!value) {
+				printError("--runtime requires a value");
+				return 2;
+			}
+			runtimeId = value;
+			i += 1;
+			continue;
+		}
+		if (arg === "--help" || arg === "-h") {
+			process.stdout.write("usage: clio targets convert <id> --runtime <runtimeId>\n");
+			return 0;
+		}
+		printError(`unknown convert argument: ${arg}`);
+		return 2;
+	}
+	if (!runtimeId) {
+		printError("--runtime is required");
+		return 2;
+	}
+	ensureClioState();
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	if (!registry.get(runtimeId)) {
+		printError(`unknown runtime id: ${runtimeId} (run \`clio configure --list\` to see registered runtimes)`);
+		return 2;
+	}
+	const settings = readSettings();
+	const target = settings.endpoints.find((entry) => entry.id === id);
+	if (!target) {
+		printError(`no target with id ${id}`);
+		return 1;
+	}
+	if (target.runtime === runtimeId) {
+		printOk(`target ${id} already uses runtime ${runtimeId}`);
+		return 0;
+	}
+	const previousRuntime = target.runtime;
+	target.runtime = runtimeId;
+	writeSettings(settings);
+	printOk(`converted target ${id}: ${previousRuntime} -> ${runtimeId}`);
+	return 0;
+}
+
 function pad(value: string, width: number): string {
 	if (value.length >= width) return `${value.slice(0, Math.max(0, width - 1))} `;
 	return value.padEnd(width);
@@ -427,6 +485,7 @@ function formatNotes(status: EndpointStatus): string {
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
 	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
 	if (!status.available && status.reason) parts.push(status.reason);
+	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
 	return parts.join(" ");
 }
 
@@ -496,6 +555,7 @@ interface SerializedStatus {
 	health: EndpointStatus["health"];
 	capabilities: EndpointStatus["capabilities"];
 	probeCapabilities?: EndpointStatus["probeCapabilities"];
+	probeNotes?: EndpointStatus["probeNotes"];
 	discoveredModels: EndpointStatus["discoveredModels"];
 	tier: ProviderOutputTier;
 	detectedReasoning: boolean | null;
@@ -523,6 +583,9 @@ function serializeStatus(
 	};
 	if (status.probeCapabilities !== undefined) {
 		out.probeCapabilities = status.probeCapabilities;
+	}
+	if (status.probeNotes !== undefined) {
+		out.probeNotes = status.probeNotes;
 	}
 	return out;
 }

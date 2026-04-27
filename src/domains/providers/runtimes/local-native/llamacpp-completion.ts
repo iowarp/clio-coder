@@ -7,7 +7,7 @@ import type { CompleteOptions, CompletionChunk, InfillOptions } from "../../type
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
-import { probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
+import { detectModelMismatch, probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: false,
@@ -142,6 +142,8 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 		const enriched: ProbeResult = { ...health };
 		if (props.discoveredCapabilities) enriched.discoveredCapabilities = props.discoveredCapabilities;
 		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
+		const note = await detectModelMismatch(base, endpoint, ctx);
+		if (note) enriched.notes = [note];
 		return enriched;
 	},
 	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {

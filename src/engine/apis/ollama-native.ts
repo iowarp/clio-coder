@@ -95,6 +95,9 @@ function buildRequest(
 		model: model.id,
 		messages: buildMessages(context),
 		stream: true,
+		// Pin the active model resident; chat-loop fires a `keep_alive: 0` sweep
+		// on hot-swap to evict any previously-pinned models.
+		keep_alive: -1,
 	};
 	if (context.tools && context.tools.length > 0) req.tools = context.tools.map(toolToOllama);
 	const opts: Partial<OllamaOptions> = {};
@@ -102,6 +105,34 @@ function buildRequest(
 	if (options?.maxTokens !== undefined) opts.num_predict = options.maxTokens;
 	if (Object.keys(opts).length > 0) req.options = opts;
 	return req;
+}
+
+/**
+ * Eviction sweep for an Ollama server: queries `/api/ps` for all currently
+ * resident models and fires `keep_alive: 0` against any that are not the
+ * keep target. Used by chat-loop on hot-swap so the prior pinned model
+ * releases VRAM instead of lingering forever (`-1` keep_alive).
+ */
+export async function evictOtherOllamaModels(
+	baseUrl: string,
+	keepModelId: string,
+	headers?: Record<string, string>,
+): Promise<void> {
+	const client = new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
+	let resident: Awaited<ReturnType<typeof client.ps>>;
+	try {
+		resident = await client.ps();
+	} catch {
+		return;
+	}
+	const stale = resident.models.filter((entry) => entry.model !== keepModelId && entry.name !== keepModelId);
+	await Promise.all(
+		stale.map((entry) =>
+			client
+				.generate({ model: entry.model || entry.name, prompt: "", keep_alive: 0, stream: false })
+				.catch(() => undefined),
+		),
+	);
 }
 
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {

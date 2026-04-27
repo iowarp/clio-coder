@@ -1,4 +1,4 @@
-import { formatDoctorReport, runDoctor } from "../domains/lifecycle/doctor.js";
+import { formatDoctorReport, runDoctor, runDoctorRuntimeChecks } from "../domains/lifecycle/doctor.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio doctor [--fix] [--json]
@@ -7,7 +7,7 @@ Diagnose Clio Coder state without creating files. Use --fix to create or repair 
 Pass --json to emit a machine-readable report on stdout.
 `;
 
-export function runDoctorCommand(args: ReadonlyArray<string> = []): number {
+export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
@@ -21,11 +21,13 @@ export function runDoctorCommand(args: ReadonlyArray<string> = []): number {
 		return 2;
 	}
 	const findings = runDoctor({ fix });
-	const ok = findings.every((f) => f.ok);
+	const runtimeChecks = await runDoctorRuntimeChecks();
+	const all = [...findings, ...runtimeChecks];
+	const ok = all.every((f) => f.ok);
 	if (json) {
-		process.stdout.write(`${JSON.stringify({ ok, fix, findings }, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);
 	} else {
-		process.stdout.write(`${formatDoctorReport(findings)}\n`);
+		process.stdout.write(`${formatDoctorReport(all)}\n`);
 	}
 	return ok ? 0 : 1;
 }

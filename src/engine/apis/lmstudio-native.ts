@@ -40,6 +40,29 @@ function normalizeBaseUrl(url: string): string {
 	return trimmed;
 }
 
+// Per-runtime cache: when a (baseUrl, modelId) pair was last confirmed to be
+// the sole resident model, skip the listLoaded round-trip on the next prompt
+// inside the TTL. Eviction races (another client mutates LM Studio's resident
+// set) self-heal on the first request after the TTL expires.
+const RESIDENT_TTL_MS = 60_000;
+const residentCache = new Map<string, { modelId: string; at: number }>();
+
+async function ensureResidentModel(client: LMStudioClient, baseUrl: string, modelId: string): Promise<void> {
+	const cached = residentCache.get(baseUrl);
+	if (cached && cached.modelId === modelId && Date.now() - cached.at < RESIDENT_TTL_MS) return;
+	let loaded: Awaited<ReturnType<LMStudioClient["llm"]["listLoaded"]>>;
+	try {
+		loaded = await client.llm.listLoaded();
+	} catch {
+		return;
+	}
+	const stale = loaded.filter((entry) => entry.modelKey !== modelId);
+	if (stale.length > 0) {
+		await Promise.all(stale.map((entry) => entry.unload().catch(() => undefined)));
+	}
+	residentCache.set(baseUrl, { modelId, at: Date.now() });
+}
+
 function toolToLmStudio(tool: Tool): LLMTool {
 	const fn: LLMTool["function"] = {
 		name: tool.name,
@@ -207,12 +230,12 @@ function runStream(
 	(async () => {
 		try {
 			if (aborted) throw new Error("Request was aborted");
-			const clientOpts: ConstructorParameters<typeof LMStudioClient>[0] = {
-				baseUrl: normalizeBaseUrl(model.baseUrl),
-			};
+			const baseUrl = normalizeBaseUrl(model.baseUrl);
+			const clientOpts: ConstructorParameters<typeof LMStudioClient>[0] = { baseUrl };
 			const passkey = options?.apiKey;
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = new LMStudioClient(clientOpts);
+			await ensureResidentModel(client, baseUrl, model.id);
 			const llm = await client.llm.model(model.id, { signal: controller.signal });
 			stream.push({ type: "start", partial: output });
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };

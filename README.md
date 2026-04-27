@@ -136,6 +136,17 @@ clio models
 clio doctor
 ```
 
+For LM Studio and Ollama, prefer the native runtimes so Clio can manage the
+resident-model lifecycle (eviction, `keep_alive`, GPU placement):
+
+```bash
+clio configure --runtime lmstudio-native --id lmstudio --url http://127.0.0.1:1234 --model your-model
+clio configure --runtime ollama-native --id ollama --url http://127.0.0.1:11434 --model your-model
+```
+
+Existing `openai-compat` targets pointing at LM Studio or Ollama can be
+migrated with `clio targets convert <id> --runtime <native>`.
+
 A good first non-interactive test is:
 
 ```bash

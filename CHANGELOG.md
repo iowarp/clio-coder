@@ -11,6 +11,15 @@ Keep a Changelog.
   The loader merges sections from CLAUDE.md, AGENTS.md, CODEX.md, and
   GEMINI.md into the same compiled prompt, with CLIO.md winning on
   conflicts. `--no-context-files` still skips the entire chain.
+- `clio targets convert <id> --runtime <runtimeId>` rewrites an existing
+  endpoint's runtime in-place. Used to migrate `openai-compat` targets
+  pointing at LM Studio or Ollama onto their native runtimes.
+- `clio doctor` now fingerprints `openai-compat` URLs and warns when
+  the URL responds as LM Studio or Ollama, suggesting the convert
+  command.
+- `clio configure` and `clio targets add` detect native local servers
+  on the entered URL and offer to switch the runtime to the native
+  counterpart.
 
 ### Changed
 
@@ -19,6 +28,15 @@ Keep a Changelog.
   published instead.
 - README.md and CONTRIBUTING.md document CLIO.md instead of
   AGENTS.md.
+- `lmstudio-native` evicts non-target loaded models before each prompt
+  (within a 60-second cache) so the active model owns VRAM and does
+  not spill into system RAM.
+- `ollama-native` pins the active model with `keep_alive: -1`. The
+  chat-loop hot-swap path fires a one-shot `keep_alive: 0` sweep
+  against other resident models so the prior pinned weights release.
+- `llamacpp-completion` and `llamacpp-anthropic` probes report a
+  diagnostic note when the configured wire model id does not match
+  the server's single loaded model.
 
 ## 0.1.2 — 2026-04-25
 
