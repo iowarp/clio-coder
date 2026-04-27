@@ -256,7 +256,8 @@ function runStream(
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = new LMStudioClient(clientOpts);
 			await ensureResidentModel(client, baseUrl, model.id);
-			const llm = await client.llm.model(model.id, { signal: controller.signal });
+			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
+			const llm = await client.llm.model(model.id, { signal: controller.signal, verbose });
 			stream.push({ type: "start", partial: output });
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };
 			const activeThinkingRef: { block: ThinkingContent | null; idx: number } = { block: null, idx: -1 };

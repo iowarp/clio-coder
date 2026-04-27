@@ -128,6 +128,7 @@ with these env vars:
 | `CLIO_CACHE_DIR` | Transient cache. |
 | `CLIO_DEV` / `CLIO_SELF_DEV` | Equivalent to `clio --dev`. Activates the self-development harness when a `CLIO-dev.md` file is present at the repo root or `~/.config/clio/CLIO-dev.md`. |
 | `CLIO_DEV_ALLOW_ENGINE_WRITES` | Opt-in for `src/engine/**` writes during self-development. Requires a Clio restart afterward. |
+| `CLIO_RUNTIME_VERBOSE` | Opt-in for native local-runtime SDK progress logs (LM Studio JIT load progress, etc.). Off by default; set to `1` when triaging eviction or load behavior. |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ... | Provider credentials referenced by `targets[].auth.apiKeyEnvVar`. |
 
 Tests that touch the filesystem must use a scratch XDG home and call
