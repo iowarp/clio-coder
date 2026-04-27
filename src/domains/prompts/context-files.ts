@@ -12,8 +12,8 @@
  * section header rather than a per-file concatenation.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { clioConfigDir } from "../../core/xdg.js";
 import {
 	type InstructionSource,
 	type InstructionSourceKind,
@@ -98,7 +98,7 @@ export function loadProjectContextFiles(input: LoadProjectContextFilesInput): Pr
  * exists.
  */
 export function loadDevContextFile(repoRoot: string): ProjectContextFile | null {
-	const candidates = [path.join(repoRoot, DEV_FILE_NAME), path.join(homedir(), ".config", "clio", DEV_FILE_NAME)];
+	const candidates = [path.join(repoRoot, DEV_FILE_NAME), path.join(clioConfigDir(), DEV_FILE_NAME)];
 	for (const filePath of candidates) {
 		if (!existsSync(filePath)) continue;
 		const content = readFileIfPresent(filePath);
