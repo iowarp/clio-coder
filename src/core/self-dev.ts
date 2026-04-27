@@ -3,6 +3,13 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCachedDefaultRulePacks } from "../domains/safety/rule-pack-loader.js";
+import { clioConfigDir } from "./xdg.js";
+
+export const DEV_FILE_NAME = "CLIO-dev.md";
+
+export function devSupplementCandidates(repoRoot: string): string[] {
+	return [join(repoRoot, DEV_FILE_NAME), join(clioConfigDir(), DEV_FILE_NAME)];
+}
 
 export type SelfDevActivationSource = "--dev" | "CLIO_DEV=1" | "CLIO_SELF_DEV=1";
 
@@ -59,15 +66,33 @@ function readDirtySummary(repoRoot: string): string {
 	return `${lines.length} changed path(s): ${sample}${suffix}`;
 }
 
+/**
+ * Returns the activation source the user signalled, or null when no
+ * dev-mode signal is present. Used by the orchestrator to detect "user
+ * intended dev mode but the gate failed" and exit 1 instead of
+ * silently continuing.
+ */
+export function selfDevActivationSource(options: { cliDev?: boolean } = {}): SelfDevActivationSource | null {
+	if (options.cliDev === true) return "--dev";
+	if (process.env.CLIO_DEV === "1") return "CLIO_DEV=1";
+	if (process.env.CLIO_SELF_DEV === "1") return "CLIO_SELF_DEV=1";
+	return null;
+}
+
 export function resolveSelfDevMode(options: { cliDev?: boolean } = {}): SelfDevMode | null {
-	let source: SelfDevActivationSource | null = null;
-	if (options.cliDev === true) source = "--dev";
-	else if (process.env.CLIO_DEV === "1") source = "CLIO_DEV=1";
-	else if (process.env.CLIO_SELF_DEV === "1") source = "CLIO_SELF_DEV=1";
+	const source = selfDevActivationSource(options);
 	if (!source) return null;
 
 	const repoRoot = resolveRepoRoot(process.cwd()) ?? resolveRepoRoot();
 	if (!repoRoot) return null;
+
+	const candidates = devSupplementCandidates(repoRoot);
+	if (!candidates.some((path) => existsSync(path))) {
+		process.stderr.write(
+			`clio --dev: requires ${DEV_FILE_NAME} at ${candidates[0]} or ${candidates[1]}; create one to enable dev mode\n`,
+		);
+		return null;
+	}
 
 	process.env.CLIO_DEV = "1";
 	process.env.CLIO_SELF_DEV = "1";

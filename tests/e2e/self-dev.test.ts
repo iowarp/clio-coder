@@ -55,6 +55,10 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		home = mkdtempSync(join(tmpdir(), "clio-selfdev-e2e-"));
 		await runCli(["doctor", "--fix"], { env: { CLIO_HOME: home } });
 		writeTargetFixture(home);
+		// CLIO-dev.md must exist for the activation gate. The XDG fallback
+		// resolves under CLIO_HOME, so seeding it here keeps the test
+		// independent of the developer's real ~/.config/clio.
+		writeFileSync(join(home, "CLIO-dev.md"), "# dev supplement (e2e)\n", "utf8");
 	});
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });

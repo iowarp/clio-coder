@@ -1,11 +1,16 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildSelfDevPrompt,
 	evaluateSelfDevBashCommand,
 	evaluateSelfDevWritePath,
+	resolveSelfDevMode,
 	type SelfDevMode,
 } from "../../src/core/self-dev.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 
 function mode(overrides: Partial<SelfDevMode> = {}): SelfDevMode {
 	return {
@@ -79,6 +84,73 @@ describe("core/self-dev bash policy uses the dev rule pack", () => {
 		// own local regex array, the description text below would diverge.
 		const reason = evaluateSelfDevBashCommand("git push origin HEAD");
 		strictEqual(reason, "self-dev: git push is blocked");
+	});
+});
+
+describe("core/self-dev activation gate", () => {
+	const ORIGINAL_ENV = { ...process.env };
+	let scratch: string;
+	let originalCwd: string;
+	let stderrBuffer: string;
+	let originalStderrWrite: typeof process.stderr.write;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-selfdev-gate-"));
+		// Build a fake repo: package.json + src/ so resolveRepoRoot finds it.
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "package.json"), '{"name":"fake"}', "utf8");
+		// Sandbox CLIO_HOME so the XDG fallback for CLIO-dev.md does not see
+		// the developer's real ~/.config/clio/CLIO-dev.md.
+		process.env.CLIO_HOME = scratch;
+		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_DATA_DIR = join(scratch, "data");
+		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+		mkdirSync(process.env.CLIO_CONFIG_DIR, { recursive: true });
+		resetXdgCache();
+		originalCwd = process.cwd();
+		process.chdir(scratch);
+		stderrBuffer = "";
+		originalStderrWrite = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: unknown) => {
+			stderrBuffer += typeof chunk === "string" ? chunk : String(chunk);
+			return true;
+		}) as typeof process.stderr.write;
+	});
+	afterEach(() => {
+		process.stderr.write = originalStderrWrite;
+		process.chdir(originalCwd);
+		for (const k of Object.keys(process.env)) {
+			if (!(k in ORIGINAL_ENV)) Reflect.deleteProperty(process.env, k);
+		}
+		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
+			if (v !== undefined) process.env[k] = v;
+		}
+		resetXdgCache();
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it("returns null and writes a clear stderr error when CLIO_DEV=1 but no CLIO-dev.md exists", () => {
+		process.env.CLIO_DEV = "1";
+		Reflect.deleteProperty(process.env, "CLIO_SELF_DEV");
+		const mode = resolveSelfDevMode();
+		strictEqual(mode, null);
+		ok(stderrBuffer.includes("CLIO-dev.md"), stderrBuffer);
+		ok(stderrBuffer.includes("create one to enable dev mode"), stderrBuffer);
+	});
+
+	it("returns a SelfDevMode when CLIO_DEV=1 and <repoRoot>/CLIO-dev.md exists", () => {
+		process.env.CLIO_DEV = "1";
+		writeFileSync(join(scratch, "CLIO-dev.md"), "# dev supplement\n", "utf8");
+		const mode = resolveSelfDevMode();
+		ok(mode !== null);
+		strictEqual(mode?.repoRoot, scratch);
+	});
+
+	it("returns a SelfDevMode when only the XDG fallback CLIO-dev.md exists", () => {
+		process.env.CLIO_DEV = "1";
+		writeFileSync(join(process.env.CLIO_CONFIG_DIR ?? "", "CLIO-dev.md"), "# dev supplement\n", "utf8");
+		const mode = resolveSelfDevMode();
+		ok(mode !== null);
 	});
 });
 
