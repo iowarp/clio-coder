@@ -45,13 +45,11 @@
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",
-		"GOVERNANCE.md",
 		"SECURITY.md",
 		"CODE_OF_CONDUCT.md",
 		"NOTICE",
 		"LICENSE",
-		"STATUS.md",
-		"AGENTS.md",
+		"CLIO.md",
 		"damage-control-rules.yaml"
 	],
 	"publishConfig": {
