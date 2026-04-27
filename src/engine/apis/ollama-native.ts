@@ -107,6 +107,27 @@ function buildRequest(
 	return req;
 }
 
+export interface EvictResidentEntry {
+	readonly model: string;
+	readonly name: string;
+}
+
+export interface EvictResidentResponse {
+	readonly models: ReadonlyArray<EvictResidentEntry>;
+}
+
+export interface EvictGenerateRequest {
+	readonly model: string;
+	readonly prompt: string;
+	readonly keep_alive: number;
+	readonly stream: false;
+}
+
+export interface OllamaEvictClient {
+	ps(): Promise<EvictResidentResponse>;
+	generate(req: EvictGenerateRequest): Promise<unknown>;
+}
+
 /**
  * Eviction sweep for an Ollama server: queries `/api/ps` for all currently
  * resident models and fires `keep_alive: 0` against any that are not the
@@ -117,18 +138,19 @@ export async function evictOtherOllamaModels(
 	baseUrl: string,
 	keepModelId: string,
 	headers?: Record<string, string>,
+	client?: OllamaEvictClient,
 ): Promise<void> {
-	const client = new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
-	let resident: Awaited<ReturnType<typeof client.ps>>;
+	const evictClient: OllamaEvictClient = client ?? new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
+	let resident: EvictResidentResponse;
 	try {
-		resident = await client.ps();
+		resident = await evictClient.ps();
 	} catch {
 		return;
 	}
 	const stale = resident.models.filter((entry) => entry.model !== keepModelId && entry.name !== keepModelId);
 	await Promise.all(
 		stale.map((entry) =>
-			client
+			evictClient
 				.generate({ model: entry.model || entry.name, prompt: "", keep_alive: 0, stream: false })
 				.catch(() => undefined),
 		),
