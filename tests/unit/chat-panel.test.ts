@@ -145,6 +145,82 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("Clio Coder: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
+	it("renders a dim thinking preview line by default and expands via toggleLastThinking", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "Considering whether to read the file or grep first.",
+			partialThinking: "Considering whether to read the file or grep first.",
+		});
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "Let me read it.", partialText: "Let me read it." });
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "Considering whether to read the file or grep first." },
+					{ type: "text", text: "Let me read it." },
+				],
+			} as never,
+		});
+		panel.applyEvent({ type: "agent_end", messages: [] });
+
+		let text = strip(panel.render(90).join("\n"));
+		ok(text.includes("thinking: Considering"), text);
+		// Full body must NOT appear when collapsed (only the truncated preview).
+		ok(!text.includes("thinking: Considering whether to read the file or grep first."), text);
+
+		strictEqual(panel.toggleLastThinking(), true);
+		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("│ Considering whether to read the file or grep first."), text);
+
+		strictEqual(panel.toggleLastThinking(), true);
+		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("thinking: Considering"), text);
+		ok(!text.includes("│ Considering whether"), text);
+	});
+
+	it("toggleLastThinking returns false when no thinking entry exists", () => {
+		const panel = createChatPanel();
+		strictEqual(panel.toggleLastThinking(), false);
+	});
+
+	it("renders the thinking block BEFORE the assistant text segments", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "thought-marker-XYZ",
+			partialThinking: "thought-marker-XYZ",
+		});
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "text-marker-ABC",
+			partialText: "text-marker-ABC",
+		});
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "thought-marker-XYZ" },
+					{ type: "text", text: "text-marker-ABC" },
+				],
+			} as never,
+		});
+		panel.applyEvent({ type: "agent_end", messages: [] });
+		const text = strip(panel.render(90).join("\n"));
+		const thinkingIdx = text.indexOf("thinking: thought-marker-XYZ");
+		const textIdx = text.indexOf("text-marker-ABC");
+		ok(thinkingIdx >= 0, text);
+		ok(textIdx >= 0, text);
+		ok(thinkingIdx < textIdx, `thinking must appear before text: thinkingIdx=${thinkingIdx} textIdx=${textIdx}: ${text}`);
+	});
+
 	it("renders bash tool calls as collapsed sublines by default", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({
@@ -501,6 +577,7 @@ describe("createCoalescingChatRenderer", () => {
 			appendReplayBlock: () => {},
 			reset: () => {},
 			toggleLastToolExpanded: () => false,
+			toggleLastThinking: () => false,
 			applyEvent: (event: ChatLoopEvent) => {
 				applied.push(event);
 			},

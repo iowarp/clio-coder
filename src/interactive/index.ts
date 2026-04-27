@@ -1606,6 +1606,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
+		if (overlayState === "closed" && keybindings.matches(data, "clio.thinking.expand") && !isKeyRelease(data)) {
+			if (chatPanel.toggleLastThinking()) tui.requestRender();
+			return { consume: true };
+		}
+
 		if (harness) {
 			const snap = harness.state.snapshot();
 			if (snap.kind === "restart-required" && keybindings.matches(data, "clio.harness.restart")) {

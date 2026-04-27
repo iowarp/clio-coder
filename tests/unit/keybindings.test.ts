@@ -35,8 +35,14 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 11 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 11);
+	it("app id list is exactly 12 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 12);
+	});
+
+	it("registers clio.thinking.expand with default ctrl+t", () => {
+		ok("clio.thinking.expand" in CLIO_APP_KEYBINDINGS);
+		const def = CLIO_APP_KEYBINDINGS["clio.thinking.expand"];
+		strictEqual(def.defaultKeys, "ctrl+t");
 	});
 });
 
@@ -77,6 +83,10 @@ describe("interactive/keybinding-manager defaults", () => {
 
 	it("matches Ctrl+R against clio.harness.restart", () => {
 		strictEqual(manager.matches("\x12", "clio.harness.restart"), true);
+	});
+
+	it("matches Ctrl+T against clio.thinking.expand", () => {
+		strictEqual(manager.matches("\x14", "clio.thinking.expand"), true);
 	});
 
 	it("rejects unrelated keystrokes for a specific binding", () => {

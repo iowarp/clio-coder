@@ -29,6 +29,7 @@ export interface ClioAppKeybindings {
 	"clio.model.cycleBackward": true;
 	"clio.harness.restart": true;
 	"clio.tool.expand": true;
+	"clio.thinking.expand": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -96,6 +97,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.tool.expand": {
 		defaultKeys: "ctrl+o",
 		description: "Toggle the most recent tool segment between collapsed subline and full body",
+	},
+	"clio.thinking.expand": {
+		defaultKeys: "ctrl+t",
+		description: "Toggle the most recent assistant turn's thinking block between collapsed preview and full body",
 	},
 } as const satisfies KeybindingDefinitions;
 
