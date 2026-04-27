@@ -271,7 +271,7 @@ function renderArgsBody(args: unknown, width: number, isError: boolean): string[
  * text segments and treat the join as the real result; otherwise return the
  * value untouched so callers stringify it normally.
  */
-function unwrapResultEnvelope(result: unknown): unknown {
+export function unwrapResultEnvelope(result: unknown): unknown {
 	if (typeof result === "string" || result === null || result === undefined) return result;
 	const blocks = Array.isArray(result)
 		? result
@@ -459,5 +459,36 @@ export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status), width));
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
+	return out;
+}
+
+/**
+ * Streaming render for an in-flight tool call whose expanded block should
+ * surface the latest partial output. Used by the chat panel between
+ * `tool_execution_start` and `tool_execution_end` when the user has expanded
+ * the tool segment. The header carries no status glyph (still running), the
+ * args body is suppressed when the header captures the primary arg, the
+ * partial output renders under the rail capped at `RESULT_LINE_LIMIT` lines,
+ * and a dim `(running...)` marker on the trailing line communicates that the
+ * block is still being written. An empty `partialOutput` renders
+ * `(no output yet)` so the user can distinguish a slow start from a stalled
+ * call.
+ */
+export function renderToolStreamingExecution(call: ToolExecutionStart, width: number, partialOutput: string): string[] {
+	const out: string[] = [];
+	out.push(...wrap(headerLine(call.toolName, call.args, undefined), width));
+	if (capturedPrimaryArg(call.toolName, call.args) === null) {
+		out.push(...renderArgsBody(call.args, width, false));
+	}
+	if (partialOutput.length === 0) {
+		out.push(...indentAndWrap(dim("(no output yet)"), width, false));
+	} else {
+		const lines = capResultLines(partialOutput.split("\n"));
+		for (const raw of lines) {
+			const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
+			out.push(...indentAndWrap(styled, width, false));
+		}
+	}
+	out.push(...indentAndWrap(dim("(running...)"), width, false));
 	return out;
 }

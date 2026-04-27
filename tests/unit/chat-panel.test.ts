@@ -178,6 +178,56 @@ describe("chat-panel active entry update", () => {
 		ok(text.includes("│ ok"), text);
 	});
 
+	it("streams tool_execution_update partials into the expanded tool block", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "bash-stream",
+			toolName: "bash",
+			args: { command: "npm test" },
+		});
+		strictEqual(panel.toggleLastToolExpanded(), true);
+
+		// First cumulative snapshot.
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "bash-stream",
+			toolName: "bash",
+			args: { command: "npm test" },
+			partialResult: { content: [{ type: "text", text: "running test 1\n" }] },
+		});
+		let text = strip(panel.render(90).join("\n"));
+		ok(text.includes("│ running test 1"), text);
+		ok(text.includes("(running...)"), text);
+		ok(!text.includes("✓"), text);
+
+		// Second cumulative snapshot includes BOTH lines (replace semantics).
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "bash-stream",
+			toolName: "bash",
+			args: { command: "npm test" },
+			partialResult: { content: [{ type: "text", text: "running test 1\nrunning test 2\n" }] },
+		});
+		text = strip(panel.render(90).join("\n"));
+		ok(text.includes("│ running test 1"), text);
+		ok(text.includes("│ running test 2"), text);
+
+		// tool_execution_end clears the partial and switches to the final form.
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "bash-stream",
+			toolName: "bash",
+			result: "all tests passed",
+			isError: false,
+		});
+		text = strip(panel.render(90).join("\n"));
+		ok(!text.includes("(running...)"), text);
+		ok(text.includes("│ all tests passed"), text);
+		ok(text.includes("✓"), text);
+	});
+
 	it("toggleLastToolExpanded returns false when no tool segment exists", () => {
 		const panel = createChatPanel();
 		strictEqual(panel.toggleLastToolExpanded(), false);

@@ -1,7 +1,13 @@
 import { type Component, Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
-import { renderToolCallHeader, renderToolExecution, renderToolSubline } from "./renderers/tool-execution.js";
+import {
+	renderToolCallHeader,
+	renderToolExecution,
+	renderToolStreamingExecution,
+	renderToolSubline,
+	unwrapResultEnvelope,
+} from "./renderers/tool-execution.js";
 
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
@@ -76,6 +82,14 @@ type ToolSegment = {
 	isError: boolean;
 	/** When true, render the full structured block instead of the collapsed subline. */
 	expanded: boolean;
+	/**
+	 * Latest cumulative partial output from `tool_execution_update`. Cleared
+	 * back to `undefined` on `tool_execution_end` so the finished `result`
+	 * takes over. Only consumed when `!finished && expanded`. The explicit
+	 * `| undefined` is required under `exactOptionalPropertyTypes: true` so
+	 * the clear path can re-assign `undefined` without a `delete`.
+	 */
+	partialOutput?: string | undefined;
 };
 type AssistantSegment = TextSegment | ToolSegment;
 type ReplayBlockRenderer = (width: number) => string[];
@@ -211,6 +225,13 @@ function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: stri
 		);
 	}
 	if (!seg.finished) {
+		if (seg.partialOutput !== undefined) {
+			return renderToolStreamingExecution(
+				{ toolCallId: seg.id, toolName: seg.name, args: seg.args },
+				width,
+				seg.partialOutput,
+			);
+		}
 		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
 	}
 	return renderToolExecution(
@@ -401,10 +422,25 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_update") {
-				// Partial results no longer surface in the rendered tool block; the
-				// structured renderer shows the final result on `tool_execution_end`
-				// instead. Still mark dirty so a future renderer revision can pick
-				// up partial output without changing the event wiring.
+				// pi-agent emits `partialResult` as a cumulative tool-result envelope
+				// (the bash tool concatenates its rolling tail buffer on every tick).
+				// Unwrap with the same helper the finished-result path uses, then
+				// REPLACE `partialOutput` rather than appending: the upstream
+				// semantics are cumulative, so appending would double-print every
+				// snapshot. Render dispatch picks up the new buffer on the next
+				// frame via `renderToolSegmentLines`.
+				const assistant = transcript[transcript.length - 1];
+				if (!assistant || assistant.role !== "assistant") {
+					markDirty();
+					return;
+				}
+				const tool = assistant.segments.find(
+					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
+				);
+				if (tool) {
+					const unwrapped = unwrapResultEnvelope(event.partialResult);
+					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : String(unwrapped ?? "");
+				}
 				markDirty();
 				return;
 			}
@@ -417,6 +453,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.result = event.result;
 					tool.isError = event.isError;
 					tool.finished = true;
+					// Drop the streaming buffer once the final result has landed; the
+					// expanded render switches to `renderToolExecution` and stays
+					// stable instead of churning through partial-frame layout.
+					tool.partialOutput = undefined;
 				}
 				markDirty();
 				return;
