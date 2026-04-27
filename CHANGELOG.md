@@ -5,6 +5,21 @@ Keep a Changelog.
 
 ## Unreleased
 
+### Added
+
+- CLIO.md is auto-loaded as the canonical project instruction file.
+  The loader merges sections from CLAUDE.md, AGENTS.md, CODEX.md, and
+  GEMINI.md into the same compiled prompt, with CLIO.md winning on
+  conflicts. `--no-context-files` still skips the entire chain.
+
+### Changed
+
+- `package.json` `files` no longer references AGENTS.md, STATUS.md,
+  or GOVERNANCE.md (the files were never shipped). CLIO.md is
+  published instead.
+- README.md and CONTRIBUTING.md document CLIO.md instead of
+  AGENTS.md.
+
 ## 0.1.2 — 2026-04-25
 
 ### Added
