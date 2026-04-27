@@ -23,6 +23,14 @@ Keep a Changelog.
 
 ### Changed
 
+- Identity messaging aligns Clio Coder with its position in IOWarp's
+  CLIO ecosystem of agentic science. The system prompt fragment, the
+  CLIO.md identity section, the README opening, the package.json
+  description and keywords, the CLI help text, the orchestrator
+  banner subtitle, and the chat-loop fallback identity now reflect
+  the HPC and scientific-software focus and the NSF-funded IOWarp
+  project. Architecture, engine boundaries, runtime selection, and
+  test surfaces are unchanged. No behavior changes.
 - `package.json` `files` no longer references AGENTS.md, STATUS.md,
   or GOVERNANCE.md (the files were never shipped). CLIO.md is
   published instead.

@@ -78,7 +78,7 @@ function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
   ${chalk.cyan("Clio Coder")}
-  ${chalk.dim(`v${clio} · supervised repository work · ready`)}
+  ${chalk.dim(`v${clio} · IOWarp CLIO · HPC and scientific software · ready`)}
 `;
 }
 

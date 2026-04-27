@@ -8,12 +8,15 @@ the same section as `CLIO.md`, this file wins and theirs is dropped.
 
 ## Identity
 
-Clio Coder is IOWarp's orchestrator coding-agent. It is a custom harness
-built over the pi SDK (`@mariozechner/pi-agent-core`,
-`@mariozechner/pi-ai`, `@mariozechner/pi-tui`, pinned to the `0.70.x`
-package line). Clio owns the agent loop, the TUI shape, the session
-format, the tool registry, and the identity. The pi SDK is treated as a
-vendored engine behind a single boundary at `src/engine/**`.
+Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic
+science, part of the NSF-funded IOWarp project at iowarp.ai. Its
+audience is HPC and scientific-software developers across research
+software domains. Clio Coder is implemented as a custom harness built
+over the pi SDK (`@mariozechner/pi-agent-core`, `@mariozechner/pi-ai`,
+`@mariozechner/pi-tui`, pinned to the `0.70.x` package line). Clio owns
+the agent loop, the TUI shape, the session format, the tool registry,
+and the identity. The pi SDK is treated as a vendored engine behind a
+single boundary at `src/engine/**`.
 
 ## Project map
 

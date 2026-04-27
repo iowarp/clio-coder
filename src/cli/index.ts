@@ -14,7 +14,7 @@ import { runVersionCommand } from "./version.js";
 
 const HELP = `Clio Coder command line
 
-AI coding harness for supervised repository work.
+Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosystem of agentic science.
 
 Usage:
   clio                      start interactive repository chat

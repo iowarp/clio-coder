@@ -1,16 +1,16 @@
 <p align="center">
   <picture>
     <source srcset="assets/banner.webp" type="image/webp" />
-    <img src="assets/banner.png" alt="Clio Coder, AI coding harness for supervised repository work" width="100%" />
+    <img src="assets/banner.png" alt="Clio Coder, the coding agent in IOWarp's CLIO ecosystem of agentic science" width="100%" />
   </picture>
 </p>
 
 <h1 align="center">Clio Coder</h1>
 
-<p align="center"><strong>A supervised AI coding harness for real repository work.</strong></p>
+<p align="center"><strong>The coding agent in IOWarp's CLIO ecosystem of agentic science.</strong></p>
 
 <p align="center">
-  Terminal-first. Model-flexible. Agent-aware. Built for developers who want AI assistance without giving up review, control, or auditability.
+  Terminal-first. Model-flexible. Agent-aware. Built for HPC and scientific-software developers who want AI assistance on real research code without giving up review, control, or auditability.
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 ## What is Clio Coder?
 
-Clio Coder is an AI coding harness for supervised work inside software repositories.
+Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, part of the NSF-funded IOWarp project at [iowarp.ai](https://iowarp.ai). It targets HPC and scientific-software developers across research-software domains and runs as a supervised AI coding harness inside their repositories.
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
