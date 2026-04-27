@@ -120,7 +120,7 @@ Review rubric:
 
 Agents should:
 
-- Read `AGENTS.md`, `CHANGELOG.md`, and this file before broad
+- Read `CLIO.md`, `CHANGELOG.md`, and this file before broad
   edits.
 - Prefer `rg` for search.
 - Use existing modules and helpers before adding abstractions.
