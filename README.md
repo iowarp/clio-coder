@@ -69,7 +69,7 @@ Good alpha feedback includes the command you ran, what target/model you used, wh
 | Target-first model configuration | Route chat and workers through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
 | Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `worker`, and other focused agents. |
 | Persistent sessions | Resume, fork, compact, and replay coding sessions. |
-| Project context files | Automatically load `AGENTS.md`, `CLAUDE.md`, and `CODEX.md` from the current directory upward. |
+| Project context files | Automatically load `CLIO.md` (canonical) plus any `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, or `GEMINI.md` found from the current directory upward. |
 | Safety modes | Use default, advise, or super mode to gate which tools the assistant can see. |
 | Receipts and audit logs | Track completed runs, token usage, cost, tool activity, mode changes, aborts, and session park/resume events. |
 | Local + cloud model support | Use a local model for private repo exploration, a cloud model for deeper reasoning, or both. |
@@ -215,7 +215,7 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
-| `clio --no-context-files` (alias `-nc`) | Top-level flag that skips `AGENTS.md` / `CLAUDE.md` / `CODEX.md` injection for one invocation. |
+| `clio --no-context-files` (alias `-nc`) | Top-level flag that skips the entire `CLIO.md` / `CLAUDE.md` / `AGENTS.md` / `CODEX.md` / `GEMINI.md` chain for one invocation. |
 
 Example:
 
@@ -391,17 +391,19 @@ clio auth login <target-or-runtime>
 
 Before each interactive turn, Clio Coder looks for project context files from the current working directory upward to the filesystem root.
 
-Supported names:
+Supported names, in priority order:
 
 ```text
-AGENTS.md
+CLIO.md
 CLAUDE.md
+AGENTS.md
 CODEX.md
+GEMINI.md
 ```
 
-Parent directories are loaded before child directories. Within the same directory, files load in the order `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, so the most specific instructions take precedence.
+Clio Coder walks every directory between the working directory and the filesystem root, parses each file into sections, and merges them into a single instruction block. `CLIO.md` is the canonical source: when two files define the same section header, `CLIO.md` wins and the other file's body is dropped. For files of equal priority, child directories override parent directories. The merged block carries a short provenance footer listing every file that contributed.
 
-To skip context-file loading for a single invocation:
+To skip the entire context-file chain for a single invocation:
 
 ```bash
 clio --no-context-files
@@ -410,7 +412,7 @@ clio -nc run --agent scout "..."
 
 Use these files to tell Clio Coder and other AI agents how to work in your repository.
 
-Example `AGENTS.md`:
+Example `CLIO.md`:
 
 ```markdown
 # Agent instructions
@@ -593,7 +595,7 @@ Use these instructions when helping a user with this repository or with Clio Cod
 3. Prefer the source install path unless npm availability has been explicitly confirmed.
 4. Do not invent unsupported commands, runtimes, plugins, or capabilities.
 5. When explaining configuration, use the target-first model: `targets[]`, then `orchestrator`, then `workers.default`.
-6. When helping with a repository that uses Clio Coder, inspect `AGENTS.md` and `CODEX.md` before proposing changes.
+6. When helping with a repository that uses Clio Coder, inspect `CLIO.md` (and any other context files such as `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`) before proposing changes.
 7. Keep safety modes distinct: `default`, `advise`, and `super`.
 8. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
 9. For repo edits, prefer small, reviewable patches and state which command should validate the change.
@@ -636,7 +638,7 @@ Contributor rules live in:
 
 ```text
 CONTRIBUTING.md
-AGENTS.md
+CLIO.md
 ```
 
 ---
