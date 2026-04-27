@@ -114,6 +114,25 @@ Biome enforces formatting plus a curated rule set. Pre-existing warnings
 on test files are tracked separately; the goal is zero new warnings from
 your change.
 
+## Environment
+
+Clio Coder reads its config from XDG paths by default
+(`~/.config/clio/settings.yaml` on Linux). Sandbox a development install
+with these env vars:
+
+| Var | Effect |
+|---|---|
+| `CLIO_HOME` | Single-tree override. Sets every directory below to subdirs of this path. |
+| `CLIO_CONFIG_DIR` | Location of `settings.yaml`. |
+| `CLIO_DATA_DIR` | Receipts (`<dataDir>/receipts/<runId>.json`), audit JSONL (`<dataDir>/audit/YYYY-MM-DD.jsonl`), sessions, and ledger live here. |
+| `CLIO_CACHE_DIR` | Transient cache. |
+| `CLIO_DEV` / `CLIO_SELF_DEV` | Equivalent to `clio --dev`. Activates the self-development harness when a `CLIO-dev.md` file is present at the repo root or `~/.config/clio/CLIO-dev.md`. |
+| `CLIO_DEV_ALLOW_ENGINE_WRITES` | Opt-in for `src/engine/**` writes during self-development. Requires a Clio restart afterward. |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ... | Provider credentials referenced by `targets[].auth.apiKeyEnvVar`. |
+
+Tests that touch the filesystem must use a scratch XDG home and call
+`resetXdgCache()` from `src/core/xdg.js` after setting the env vars.
+
 ## Code style
 
 - TypeScript strict, with `noUncheckedIndexedAccess` and
@@ -155,16 +174,16 @@ pattern.
 
 ## Testing workflow
 
-1. Write the code.
-2. `npm run typecheck && npm run lint`.
-3. `npm run test` (unit + integration + boundaries + prompt fragments).
-4. If you touched `src/cli/`, `src/interactive/`, or
-   `src/entry/orchestrator.ts`: `npm run test:e2e` (rebuilds first).
-5. For one-off interactive exploration, drop a probe under `/tmp/`
-   using the `spawnClioPty` harness. Never add exploratory scripts under
+The Test section above maps each change site to the right suite. The
+loop is:
+
+1. Write code, then `npm run typecheck && npm run lint`.
+2. Run the suite the change site demands. `npm run ci` is the final
+   gate before any commit.
+3. For one-off interactive exploration, drop a probe under `/tmp/` using
+   the `spawnClioPty` harness. Never add exploratory scripts under
    `tests/` or `scripts/`; the `scripts/diag-*.ts` and
    `scripts/verify-*.ts` patterns were deliberately eradicated.
-6. `npm run ci` before committing.
 
 For new unit tests, use `node:test` + `node:assert/strict`, group with
 `describe`, and place the file next to the closest existing one. Don't
