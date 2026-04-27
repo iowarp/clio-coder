@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.2-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.3-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,7 +30,15 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.2**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.3**.
+
+### What's new in v0.1.3
+
+- **Live tool output.** Long-running bash, grep, and shell commands now stream their output into the expanded tool block as it arrives, with a dim `(running...)` marker that disappears when the call finishes. Previously the block was empty until the command exited.
+- **Bash command echo.** Successful `bash` results print `$ <command>` on its own line under the rail before the output, matching what you would see in a real terminal.
+- **Thinking expansion (`Ctrl+T`).** Each assistant turn that emitted a thinking block now shows a one-line dim preview by default; press `Ctrl+T` to expand the most recent one and read the full reasoning chain. Symmetric with `Ctrl+O` for tool segments.
+- **Footer git branch.** The status footer now shows `branch:<name>` when you launch from inside a git repository. One-shot at boot; no live refresh yet.
+- **CI hardening.** The runner now installs `fd-find` so slash-autocomplete `@path` completion is exercised every push. The self-development mode adds a `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts and tests.
 
 Use it if you want to:
 
@@ -672,6 +680,7 @@ This is intended to keep provider-specific code contained and make the system ea
 
 Current release:
 
+- **v0.1.3** (alpha). Highlights: live tool-output streaming inside the expanded tool block with a dim `(running...)` marker, bash subrenderer that echoes `$ <command>` before its output, `Ctrl+T` to expand an assistant turn's thinking block (symmetric with `Ctrl+O`), footer git-branch indicator resolved once at boot, autocomplete `fd`/`fdfind` resolver fix, and a self-dev `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts.
 - **v0.1.2** (alpha). Highlights: transient provider/stream retry with cancel-aware countdowns and persisted recovery, bash abort that escalates `SIGTERM` to `SIGKILL` after a grace period, structured tool and bash transcript rendering with `Ctrl+O` expand toggle and edit-tool diff preview, mode-colored editor rails, slash-command autocomplete, welcome dashboard at TUI launch, per-tool stats in run receipts, five-arm audit JSONL (tool calls, mode changes, run aborts, session park/resume), reasoning probe state surfaced in `clio targets --json`, provider catalog aligned with pi SDK 0.70.2, and `/thinking` plus `clio run` working against local `openai-compat` and LM Studio backends.
 
 Near-term direction:
