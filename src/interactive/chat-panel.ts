@@ -248,7 +248,13 @@ function renderThinkingLines(thinking: string, expanded: boolean, width: number)
 		const collapsed = thinking.replace(/\s+/g, " ").trim();
 		const contentBudget = Math.max(1, THINKING_PREVIEW_WIDTH - THINKING_PREVIEW_LABEL.length);
 		const preview = truncateToWidth(collapsed, contentBudget, "...", false);
-		return [dimWrap(`${THINKING_PREVIEW_LABEL}${preview}`)];
+		// Clip the composed line to the actual terminal width so very narrow
+		// terminals (e.g. 33 cols) do not overflow pi-tui's render check. The
+		// inner preview budget hugs the ~60-col target on wide terminals; the
+		// outer truncate is a safety net for the narrow case.
+		const composed = `${THINKING_PREVIEW_LABEL}${preview}`;
+		const lineBudget = Math.max(1, width);
+		return [dimWrap(truncateToWidth(composed, lineBudget, "...", false))];
 	}
 	const splitLines = thinking.split("\n");
 	const visible: string[] =
