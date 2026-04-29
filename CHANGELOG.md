@@ -7,6 +7,14 @@ Keep a Changelog.
 
 ### Added
 
+- `clio components` lists read-only harness components with stable ids,
+  SHA-256 content hashes, authority, reload class, and owner metadata.
+  `clio components --json` emits a stable snapshot envelope, and
+  `clio components snapshot --out <path>` writes that envelope to disk.
+  `clio components diff --from <snapshot-a.json> --to <snapshot-b.json>`
+  compares two snapshots and summarizes added, removed, changed, and
+  unchanged components.
+
 ### Changed
 
 ### Fixed

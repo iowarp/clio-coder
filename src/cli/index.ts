@@ -1,6 +1,7 @@
 import { runAgentsCommand } from "./agents.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
+import { runComponentsCommand } from "./components.js";
 import { runConfigureCommand } from "./configure.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runModelsCommand } from "./models.js";
@@ -36,6 +37,7 @@ Usage:
   clio uninstall            remove Clio Coder state and print package removal guidance
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
+  clio components           list, snapshot, or diff harness components
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
 `;
@@ -73,6 +75,8 @@ async function main(argv: string[]): Promise<number> {
 			return runModelsCommand(subArgs);
 		case "agents":
 			return runAgentsCommand(subArgs);
+		case "components":
+			return runComponentsCommand(subArgs);
 		case "run":
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":

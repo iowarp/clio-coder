@@ -187,6 +187,55 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		ok(Array.isArray(parsed) && parsed.length > 0, "expected at least one builtin agent");
 	});
 
+	it("components --json lists harness components in a stable envelope", async () => {
+		const result = await runCli(["components", "--json"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(result.code, 0);
+		const parsed = JSON.parse(result.stdout) as {
+			version: number;
+			generatedAt: string;
+			root: string;
+			components: Array<{ id: string; kind: string; contentHash: string }>;
+		};
+		strictEqual(parsed.version, 1);
+		ok(parsed.root.length > 0);
+		ok(/\d{4}-\d{2}-\d{2}T/.test(parsed.generatedAt));
+		ok(parsed.components.some((component) => component.id === "context-file:CLIO.md"));
+		ok(parsed.components.some((component) => component.id === "safety-rule-pack:base"));
+		ok(parsed.components.every((component) => component.contentHash.length === 64));
+	});
+
+	it("components snapshot --out writes the JSON snapshot", async () => {
+		const outPath = join(scratch.dir, "components", "snapshot.json");
+		const result = await runCli(["components", "snapshot", "--out", outPath], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		match(result.stdout, /ok: wrote /);
+		const parsed = JSON.parse(readFileSync(outPath, "utf8")) as {
+			version: number;
+			components: Array<{ id: string }>;
+		};
+		strictEqual(parsed.version, 1);
+		ok(parsed.components.some((component) => component.id === "context-file:CLIO.md"));
+	});
+
+	it("components diff --from --to summarizes snapshot changes", async () => {
+		const fromPath = join(scratch.dir, "components-from.json");
+		const toPath = join(scratch.dir, "components-to.json");
+		writeFileSync(fromPath, `${JSON.stringify(componentSnapshot("a", "b"), null, 2)}\n`, "utf8");
+		writeFileSync(toPath, `${JSON.stringify(componentSnapshot("c", "b", true), null, 2)}\n`, "utf8");
+		const result = await runCli(["components", "diff", "--from", fromPath, "--to", toPath], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		match(result.stdout, /1 added, 0 removed, 1 changed, 1 unchanged/);
+		match(result.stdout, /\+ prompt-fragment/);
+		match(result.stdout, /~ context-file/);
+		match(result.stdout, /\[contentHash\]/);
+	});
+
 	it("models --json returns every wire model across targets", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		seedTargets(join(scratch.dir, "config"));
@@ -276,3 +325,46 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		}
 	});
 });
+
+function componentSnapshot(contextHashSeed: string, docHashSeed: string, includeAdded = false): object {
+	const components = [
+		{
+			id: "context-file:CLIO.md",
+			kind: "context-file",
+			path: "CLIO.md",
+			ownerDomain: "repository",
+			mutable: true,
+			authority: "advisory",
+			reloadClass: "hot",
+			contentHash: contextHashSeed.repeat(64),
+		},
+		{
+			id: "doc-spec:docs/specs/base.md",
+			kind: "doc-spec",
+			path: "docs/specs/base.md",
+			ownerDomain: "docs",
+			mutable: true,
+			authority: "descriptive",
+			reloadClass: "static",
+			contentHash: docHashSeed.repeat(64),
+		},
+	];
+	if (includeAdded) {
+		components.push({
+			id: "prompt-fragment:src/domains/prompts/fragments/new.md",
+			kind: "prompt-fragment",
+			path: "src/domains/prompts/fragments/new.md",
+			ownerDomain: "prompts",
+			mutable: true,
+			authority: "advisory",
+			reloadClass: "hot",
+			contentHash: "d".repeat(64),
+		});
+	}
+	return {
+		version: 1,
+		generatedAt: "2026-04-29T00:00:00.000Z",
+		root: "/repo",
+		components,
+	};
+}
