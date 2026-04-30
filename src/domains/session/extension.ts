@@ -14,9 +14,9 @@ import {
 	startSession,
 } from "./manager.js";
 import { forkFromState } from "./tree/fork.js";
-import { probeWorkspace } from "./workspace/index.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
+import { probeWorkspace } from "./workspace/index.js";
 
 type ParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
 type ResumeVia = "resume" | "switch_branch";
