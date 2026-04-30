@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { calculateContextTokens } from "../../src/domains/session/compaction/tokens.js";
 import {
+	contextUsageSnapshot,
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
 	extractReasoningTokens,
@@ -103,5 +104,29 @@ describe("session/context-accounting", () => {
 		strictEqual(extractReasoningTokens({ outputDetails: { reasoningTokens: 42 } }), 42);
 		strictEqual(extractReasoningTokens({ completion_tokens_details: { reasoning_tokens: 13 } }), 13);
 		strictEqual(extractReasoningTokens({ input: 1, output: 2 }), null);
+	});
+});
+
+describe("contextUsageSnapshot", () => {
+	it("returns percent=null when window is zero and tokens are positive", () => {
+		const snap = contextUsageSnapshot(500, 0);
+		strictEqual(snap.percent, null);
+		strictEqual(snap.tokens, 500);
+		strictEqual(snap.contextWindow, 0);
+	});
+
+	it("returns percent=null when both inputs are null/undefined", () => {
+		const snap = contextUsageSnapshot(null, null);
+		strictEqual(snap.percent, null);
+	});
+
+	it("clamps percent to 100 when tokens exceed window", () => {
+		const snap = contextUsageSnapshot(1500, 500);
+		strictEqual(snap.percent, 100);
+	});
+
+	it("computes the expected mid-percent for normal inputs", () => {
+		const snap = contextUsageSnapshot(50, 200);
+		strictEqual(snap.percent, 25);
 	});
 });
