@@ -8,4 +8,11 @@ export const SafetyDomainModule: DomainModule = {
 };
 
 export type { SafetyContract, SafetyDecision } from "./contract.js";
+export type { FinishContractAssessment, FinishContractEvidence, FinishContractInput } from "./finish-contract.js";
+export {
+	assessFinishContract,
+	FINISH_CONTRACT_ADVISORY_MESSAGE,
+	hasCompletionClaim,
+	hasExplicitLimitation,
+} from "./finish-contract.js";
 export { SafetyManifest } from "./manifest.js";

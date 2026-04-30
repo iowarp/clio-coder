@@ -25,6 +25,9 @@ export type {
 	MessageEntry,
 	MessageRole,
 	ModelChangeEntry,
+	ProtectedArtifactEntry,
+	ProtectedArtifactEntryArtifact,
+	ProtectedArtifactEntrySource,
 	SessionEntry,
 	SessionEntryKind,
 	SessionInfoEntry,
@@ -37,6 +40,11 @@ export {
 } from "./entries.js";
 export { SessionManifest } from "./manifest.js";
 export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";
+export {
+	protectedArtifactEntryFromArtifact,
+	protectedArtifactFromSessionEntry,
+	protectedArtifactStateFromSessionEntries,
+} from "./protected-artifacts.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).

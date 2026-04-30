@@ -259,4 +259,42 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(!serialized.includes("rate limit 429"), serialized);
 		ok(serialized.includes("ok now"), serialized);
 	});
+
+	it("replays protected artifact entries without injecting them into model context", () => {
+		const panel = createChatPanel();
+		const entries: SessionEntry[] = [
+			{
+				kind: "protectedArtifact",
+				turnId: "pa1",
+				parentTurnId: null,
+				timestamp: "2026-04-24T00:00:00.000Z",
+				action: "protect",
+				artifact: {
+					path: "dist/report.txt",
+					protectedAt: "2026-04-24T00:00:00.000Z",
+					reason: "validation passed",
+					validationCommand: "npm test",
+					validationExitCode: 0,
+					source: "session",
+				},
+			},
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: "pa1",
+				timestamp: "2026-04-24T00:00:01.000Z",
+				role: "user",
+				payload: { text: "continue" },
+			},
+		];
+
+		rehydrateChatPanelFromTurns(panel, entries);
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("[protected] dist/report.txt after npm test exit 0: validation passed"), text);
+		ok(text.includes("you: continue"), text);
+
+		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
+		ok(!serialized.includes("dist/report.txt"), serialized);
+		ok(serialized.includes("continue"), serialized);
+	});
 });

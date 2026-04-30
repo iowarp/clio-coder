@@ -66,6 +66,7 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 		case "thinkingLevelChange":
 		case "fileEntry":
 		case "sessionInfo":
+		case "protectedArtifact":
 			return false;
 	}
 }
