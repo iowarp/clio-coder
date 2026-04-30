@@ -1,7 +1,9 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 function seedTargets(configDir: string): void {
@@ -40,7 +42,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 	it("--version exits 0 and prints only the Clio Coder version", async () => {
 		const result = await runCli(["--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.4\n");
 	});
 
 	it("--help exits 0 and prints usage", async () => {
@@ -55,13 +57,13 @@ describe("clio cli e2e", { concurrency: false }, () => {
 	it("--no-context-files is accepted at the top level without breaking subcommand parsing", async () => {
 		const result = await runCli(["--no-context-files", "--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.4\n");
 	});
 
 	it("-nc alias is accepted at the top level", async () => {
 		const result = await runCli(["-nc", "--version"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		strictEqual(result.stdout, "Clio Coder 0.1.3\n");
+		strictEqual(result.stdout, "Clio Coder 0.1.4\n");
 	});
 
 	it("--no-context-files boots the orchestrator (non-interactive) and exits 0", async () => {
@@ -236,6 +238,242 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stdout, /\[contentHash\]/);
 	});
 
+	it("evolve manifest init prints a valid deterministic template", async () => {
+		const first = await runCli(["evolve", "manifest", "init"], { env: scratch.env, timeoutMs: 20_000 });
+		const second = await runCli(["evolve", "manifest", "init"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(first.code, 0);
+		strictEqual(second.code, 0);
+		strictEqual(first.stdout, second.stdout);
+		const parsed = JSON.parse(first.stdout) as {
+			version: number;
+			iterationId: string;
+			changes: Array<{ evidenceRefs: string[] }>;
+		};
+		strictEqual(parsed.version, 1);
+		strictEqual(parsed.iterationId, "exploratory-1");
+		ok(Array.isArray(parsed.changes[0]?.evidenceRefs));
+	});
+
+	it("evolve manifest validate accepts valid manifests and rejects invalid ones", async () => {
+		const validPath = join(scratch.dir, "change-manifest.json");
+		const invalidPath = join(scratch.dir, "invalid-change-manifest.json");
+		writeFileSync(validPath, `${JSON.stringify(changeManifest(), null, 2)}\n`, "utf8");
+		writeFileSync(
+			invalidPath,
+			`${JSON.stringify(
+				changeManifest({
+					changes: [
+						{
+							...manifestChange(),
+							authorityLevel: "cli",
+							predictedRegressions: [],
+						},
+					],
+				}),
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		const valid = await runCli(["evolve", "manifest", "validate", validPath], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(valid.code, 0);
+		match(valid.stdout, /ok: manifest valid \(1 change\)/);
+
+		const invalid = await runCli(["evolve", "manifest", "validate", invalidPath], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(invalid.code, 1);
+		match(invalid.stderr, /manifest invalid/);
+		match(invalid.stderr, /high-authority changes require an entry/);
+	});
+
+	it("evolve manifest summarize prints compact manifest details", async () => {
+		const manifestPath = join(scratch.dir, "summary-change-manifest.json");
+		writeFileSync(manifestPath, `${JSON.stringify(changeManifest(), null, 2)}\n`, "utf8");
+
+		const result = await runCli(["evolve", "manifest", "summarize", manifestPath], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		match(result.stdout, /iteration: iter-2026-04-29/);
+		match(result.stdout, /base sha: abc123/);
+		match(result.stdout, /changes: 1/);
+		match(result.stdout, /authority levels: cli/);
+		match(result.stdout, /components: cli:src\/cli\/evolve.ts/);
+		match(result.stdout, /files changed: src\/cli\/evolve.ts/);
+		match(result.stdout, /predicted regressions: command parser rejects valid legacy input/);
+		match(result.stdout, /validation steps: 2/);
+	});
+
+	it("evidence build, inspect, and list operate on run ledger receipts", async () => {
+		const fixture = seedEvidenceFixture(join(scratch.dir, "data"));
+		const build = await runCli(["evidence", "build", "--run", fixture.runId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(build.code, 0);
+		match(build.stdout, new RegExp(`ok: wrote ${fixture.evidenceId}`));
+
+		const inspect = await runCli(["evidence", "inspect", fixture.evidenceId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(inspect.code, 0);
+		match(inspect.stdout, new RegExp(`evidence: ${fixture.evidenceId}`));
+		match(inspect.stdout, /source: run e2e-run/);
+		match(inspect.stdout, /blocked tools: 1/);
+		match(inspect.stdout, /tags: blocked-tool, session-missing/);
+		match(inspect.stdout, /findings: 2/);
+
+		const list = await runCli(["evidence", "list"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(list.code, 0);
+		match(list.stdout, /1 evidence artifacts/);
+		match(list.stdout, new RegExp(fixture.evidenceId));
+	});
+
+	it("memory commands propose from evidence and manage approval state", async () => {
+		const fixture = seedEvidenceFixture(join(scratch.dir, "data"));
+		await runCli(["evidence", "build", "--run", fixture.runId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+
+		const help = await runCli(["memory", "--help"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(help.code, 0);
+		match(help.stdout, /clio memory propose --from-evidence/);
+
+		const empty = await runCli(["memory", "list"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(empty.code, 0);
+		match(empty.stdout, /0 memory records/);
+
+		const missing = await runCli(["memory", "propose", "--from-evidence", "missing-evidence"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(missing.code, 1);
+		match(missing.stderr, /evidence artifact not found: missing-evidence/);
+
+		const propose = await runCli(["memory", "propose", "--from-evidence", fixture.evidenceId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(propose.code, 0, `stdout=${propose.stdout} stderr=${propose.stderr}`);
+		match(propose.stdout, /status: proposed/);
+		match(propose.stdout, new RegExp(`evidence: ${fixture.evidenceId}`));
+		const memoryId = propose.stdout.match(/^memory: (mem-[a-f0-9]{16})$/m)?.[1];
+		ok(memoryId, `missing memory id in stdout: ${propose.stdout}`);
+
+		const approve = await runCli(["memory", "approve", memoryId], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(approve.code, 0);
+		match(approve.stdout, new RegExp(`approved ${memoryId}`));
+
+		const approvedList = await runCli(["memory", "list"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(approvedList.code, 0);
+		match(approvedList.stdout, new RegExp(`${memoryId}\\s+approved\\s+repo`));
+
+		const reject = await runCli(["memory", "reject", memoryId], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(reject.code, 0);
+		match(reject.stdout, new RegExp(`rejected ${memoryId}`));
+
+		const rejectedList = await runCli(["memory", "list"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(rejectedList.code, 0);
+		match(rejectedList.stdout, new RegExp(`${memoryId}\\s+rejected\\s+repo`));
+
+		const prune = await runCli(["memory", "prune", "--stale"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(prune.code, 0);
+		match(prune.stdout, /pruned 0 stale memory records/);
+	});
+
+	it("eval run, report, help, and compare routing are wired", async () => {
+		const taskFile = join(scratch.dir, "tasks.yaml");
+		writeFileSync(
+			taskFile,
+			[
+				"version: 1",
+				"tasks:",
+				"  - id: cli-pass",
+				'    prompt: "Run the verifier."',
+				'    cwd: "."',
+				"    setup: []",
+				"    verifier:",
+				'      - "true"',
+				"    timeoutMs: 10000",
+				"    tags:",
+				'      - "cli"',
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const help = await runCli(["eval", "--help"], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(help.code, 0);
+		match(help.stdout, /clio eval run --task-file/);
+		match(help.stdout, /clio eval report/);
+
+		const run = await runCli(["eval", "run", "--task-file", taskFile, "--repeat", "1"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(run.code, 0, `stdout=${run.stdout} stderr=${run.stderr}`);
+		match(run.stdout, /passed: 1/);
+		const evalId = run.stdout.match(/^eval: (eval-[^\n]+)$/m)?.[1];
+		ok(evalId, `missing eval id in stdout: ${run.stdout}`);
+		const evidenceId = run.stdout.match(/^evidence: (eval-[^\n]+)$/m)?.[1];
+		ok(evidenceId, `missing evidence id in stdout: ${run.stdout}`);
+
+		const report = await runCli(["eval", "report", evalId], { env: scratch.env, timeoutMs: 20_000 });
+		strictEqual(report.code, 0);
+		match(report.stdout, new RegExp(`eval: ${evalId}`));
+		match(report.stdout, new RegExp(`evidence: ${evidenceId}`));
+		match(report.stdout, /tokens: 0/);
+		match(report.stdout, /cost USD: 0\.000000/);
+
+		const inspectEvidence = await runCli(["evidence", "inspect", evidenceId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(inspectEvidence.code, 0);
+		match(inspectEvidence.stdout, new RegExp(`evidence: ${evidenceId}`));
+		match(inspectEvidence.stdout, new RegExp(`source: eval ${evalId}`));
+		match(inspectEvidence.stdout, /tool calls: 1/);
+
+		const rebuildEvidence = await runCli(["evidence", "build", "--eval", evalId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(rebuildEvidence.code, 0);
+		match(rebuildEvidence.stdout, new RegExp(`ok: wrote ${evidenceId}`));
+
+		const compare = await runCli(["eval", "compare", evalId, evalId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(compare.code, 0);
+		match(compare.stdout, new RegExp(`baseline eval: ${evalId}`));
+		match(compare.stdout, new RegExp(`candidate eval: ${evalId}`));
+		match(compare.stdout, /matching: taskId\+repeatIndex/);
+		match(compare.stdout, /matched: 1/);
+		match(compare.stdout, /added: 0/);
+		match(compare.stdout, /missing: 0/);
+		match(compare.stdout, /regressions: 0/);
+
+		const missingCompare = await runCli(["eval", "compare", "missing-eval", evalId], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(missingCompare.code, 1);
+		match(missingCompare.stderr, /eval artifact not found: missing-eval/);
+	});
+
 	it("models --json returns every wire model across targets", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		seedTargets(join(scratch.dir, "config"));
@@ -367,4 +605,97 @@ function componentSnapshot(contextHashSeed: string, docHashSeed: string, include
 		root: "/repo",
 		components,
 	};
+}
+
+function changeManifest(overrides: object = {}): object {
+	return {
+		version: 1,
+		iterationId: "iter-2026-04-29",
+		baseGitSha: "abc123",
+		createdAt: "2026-04-29T00:00:00.000Z",
+		changes: [manifestChange()],
+		...overrides,
+	};
+}
+
+function manifestChange(overrides: object = {}): object {
+	return {
+		id: "change-1",
+		componentIds: ["cli:src/cli/evolve.ts"],
+		filesChanged: ["src/cli/evolve.ts"],
+		authorityLevel: "cli",
+		evidenceRefs: ["manual:e2e"],
+		rootCause: "The evolution plane lacks a typed manifest command.",
+		targetedFix: "Add clio evolve manifest commands.",
+		predictedFixes: ["Change proposals become inspectable."],
+		predictedRegressions: ["command parser rejects valid legacy input"],
+		validationPlan: ["npm run test", "npm run test:e2e"],
+		rollbackPlan: "Revert src/cli/evolve.ts and src/domains/evolution.",
+		expectedBudgetImpact: {
+			risk: "same",
+		},
+		...overrides,
+	};
+}
+
+function seedEvidenceFixture(dataDir: string): { runId: string; evidenceId: string } {
+	const runId = "e2e-run";
+	const receiptPath = join(dataDir, "receipts", `${runId}.json`);
+	const envelope: RunEnvelope = {
+		id: runId,
+		agentId: "scout",
+		task: "inspect blocked tool evidence",
+		endpointId: "local",
+		wireModelId: "model-a",
+		runtimeId: "openai",
+		runtimeKind: "http",
+		startedAt: "2026-04-29T00:00:00.000Z",
+		endedAt: "2026-04-29T00:00:02.000Z",
+		status: "completed",
+		exitCode: 0,
+		pid: null,
+		heartbeatAt: null,
+		receiptPath,
+		sessionId: "session-e2e",
+		cwd: "/repo",
+		tokenCount: 10,
+		costUsd: 0.01,
+	};
+	const receiptDraft: RunReceiptDraft = {
+		runId,
+		agentId: "scout",
+		task: envelope.task,
+		endpointId: "local",
+		wireModelId: "model-a",
+		runtimeId: "openai",
+		runtimeKind: "http",
+		startedAt: envelope.startedAt,
+		endedAt: "2026-04-29T00:00:02.000Z",
+		exitCode: 0,
+		tokenCount: 10,
+		costUsd: 0.01,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.1.3-e2e",
+		piMonoVersion: "0.70.2",
+		platform: "linux",
+		nodeVersion: "v22.0.0",
+		toolCalls: 1,
+		toolStats: [
+			{
+				tool: "bash",
+				count: 1,
+				ok: 0,
+				errors: 0,
+				blocked: 1,
+				totalDurationMs: 25,
+			},
+		],
+		sessionId: "session-e2e",
+	};
+	mkdirSync(join(dataDir, "state"), { recursive: true });
+	mkdirSync(join(dataDir, "receipts"), { recursive: true });
+	writeFileSync(join(dataDir, "state", "runs.json"), `${JSON.stringify([envelope], null, 2)}\n`, "utf8");
+	writeFileSync(receiptPath, `${JSON.stringify(withReceiptIntegrity(receiptDraft, envelope), null, 2)}\n`, "utf8");
+	return { runId, evidenceId: "run-e2e-run" };
 }
