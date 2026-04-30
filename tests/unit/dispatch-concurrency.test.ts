@@ -13,6 +13,7 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import { BUILTIN_MIDDLEWARE_RULE_IDS, createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
@@ -196,6 +197,7 @@ function stubContext(
 		confirmSuper: () => "super",
 		elevatedModeFor: () => null,
 	};
+	const middleware = createMiddlewareBundle().contract;
 
 	const bus = createSafeEventBus();
 	const getContract = ((name: string) => {
@@ -205,6 +207,7 @@ function stubContext(
 		if (name === "modes") return modes;
 		if (name === "scheduling") return scheduling;
 		if (name === "providers") return providers;
+		if (name === "middleware") return middleware;
 		return undefined;
 	}) as DomainContext["getContract"];
 
@@ -374,6 +377,10 @@ describe("dispatch concurrency gate", () => {
 			strictEqual(spec.wireModelId, "claude-sonnet-4-6");
 			strictEqual(spec.mode, "default");
 			deepStrictEqual(spec.allowedTools, ["read"]);
+			deepStrictEqual(
+				spec.middlewareSnapshot?.rules.map((rule) => rule.id),
+				[...BUILTIN_MIDDLEWARE_RULE_IDS],
+			);
 			strictEqual(spec.thinkingLevel, "off");
 			strictEqual(captured.opts?.cwd, dataDir);
 			strictEqual(run?.runtimeKind, "subprocess");

@@ -9,6 +9,7 @@
  */
 
 import type { ToolName } from "../core/tool-names.js";
+import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { EndpointDescriptor } from "../domains/providers/index.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -28,6 +29,7 @@ interface WorkerSpec {
 	thinkingLevel?: WorkerRunInput["thinkingLevel"];
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
+	middlewareSnapshot?: MiddlewareSnapshot;
 }
 
 async function main(): Promise<number> {
@@ -53,6 +55,7 @@ async function main(): Promise<number> {
 	if (spec.sessionId) input.sessionId = spec.sessionId;
 	if (spec.apiKey) input.apiKey = spec.apiKey;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
+	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
 	if (spec.allowedTools !== undefined) {
 		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
 	} else {

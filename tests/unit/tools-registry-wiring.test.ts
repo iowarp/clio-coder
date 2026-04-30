@@ -1,10 +1,16 @@
-import { ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import type { ToolName } from "../../src/core/tool-names.js";
+import {
+	createMiddlewareSnapshot,
+	type MiddlewareContract,
+	type MiddlewareEffect,
+	type MiddlewareHookInput,
+} from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { ModeName } from "../../src/domains/modes/matrix.js";
 import type { Classification, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
@@ -18,7 +24,12 @@ import {
 	type ToolFinishEvent,
 	type ToolStartEvent,
 } from "../../src/engine/worker-tools.js";
-import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import {
+	createRegistry,
+	type ProtectedArtifactRegistryEvent,
+	type ToolRegistry,
+	type ToolSpec,
+} from "../../src/tools/registry.js";
 
 function makeModes(
 	initial: ModeName,
@@ -65,6 +76,38 @@ function registerWriteTool(registry: ToolRegistry, run: ToolSpec["run"]): void {
 		allowedModes: ["default"],
 		run,
 	});
+}
+
+function registerBashTool(registry: ToolRegistry, run: ToolSpec["run"]): void {
+	registry.register({
+		name: "bash",
+		description: "test bash",
+		parameters: Type.Object({
+			command: Type.String(),
+		}),
+		baseActionClass: "execute",
+		allowedModes: ["default"],
+		run,
+	});
+}
+
+function makeMiddleware(
+	inputs: MiddlewareHookInput[],
+	effectsForInput: (input: MiddlewareHookInput) => ReadonlyArray<MiddlewareEffect> = () => [],
+): MiddlewareContract {
+	return {
+		runHook(input) {
+			inputs.push(input);
+			return {
+				hook: input.hook,
+				input,
+				effects: effectsForInput(input),
+				ruleIds: [],
+			};
+		},
+		listRules: () => [],
+		snapshot: () => createMiddlewareSnapshot([]),
+	};
 }
 
 describe("engine/worker-tools registry wiring", () => {
@@ -189,6 +232,308 @@ describe("engine/worker-tools registry wiring", () => {
 		strictEqual(finishes.length, 1);
 		strictEqual(finishes[0]?.tool, "write");
 		strictEqual(finishes[0]?.outcome, "ok");
+	});
+
+	it("runs before_tool and after_tool middleware around admitted tool execution", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => action === "write", ["write"]),
+			middleware: makeMiddleware(hooks),
+		});
+		registerWriteTool(registry, async () => ({ kind: "ok", output: "wrote" }));
+
+		const verdict = await registry.invoke(
+			{ tool: "write", args: { path: "a", content: "b" } },
+			{
+				runId: "run-1",
+				sessionId: "session-1",
+				turnId: "turn-1",
+				toolCallId: "tool-call-1",
+				correlationId: "corr-1",
+			},
+		);
+
+		strictEqual(verdict.kind, "ok");
+		deepStrictEqual(
+			hooks.map((hook) => hook.hook),
+			["before_tool", "after_tool"],
+		);
+		deepStrictEqual(hooks[0], {
+			hook: "before_tool",
+			toolName: "write",
+			runId: "run-1",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			toolCallId: "tool-call-1",
+			correlationId: "corr-1",
+			metadata: {
+				mode: "default",
+				actionClass: "write",
+				decisionKind: "allow",
+			},
+		});
+		deepStrictEqual(hooks[1], {
+			hook: "after_tool",
+			toolName: "write",
+			runId: "run-1",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			toolCallId: "tool-call-1",
+			correlationId: "corr-1",
+			metadata: {
+				mode: "default",
+				actionClass: "write",
+				decisionKind: "allow",
+				resultKind: "ok",
+			},
+		});
+	});
+
+	it("runs after_tool middleware when the admitted tool reports an error", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => action === "write", ["write"]),
+			middleware: makeMiddleware(hooks),
+		});
+		registerWriteTool(registry, async () => {
+			throw new Error("tool failed");
+		});
+
+		const verdict = await registry.invoke({ tool: "write", args: { path: "a", content: "b" } });
+
+		strictEqual(verdict.kind, "ok");
+		if (verdict.kind === "ok") strictEqual(verdict.result.kind, "error");
+		deepStrictEqual(
+			hooks.map((hook) => hook.hook),
+			["before_tool", "after_tool"],
+		);
+		deepStrictEqual(hooks[1]?.metadata, {
+			mode: "default",
+			actionClass: "write",
+			decisionKind: "allow",
+			resultKind: "error",
+			errorMessage: "tool failed",
+		});
+	});
+
+	it("does not run before_tool or after_tool for blocked admission", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => false, ["write"]),
+			middleware: makeMiddleware(hooks),
+		});
+		registerWriteTool(registry, async () => ({ kind: "ok", output: "wrote" }));
+
+		const verdict = await registry.invoke({ tool: "write", args: { path: "a", content: "b" } });
+
+		strictEqual(verdict.kind, "blocked");
+		deepStrictEqual(hooks, []);
+	});
+
+	it("enforces middleware block_tool effects before running an admitted tool", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		let runCalls = 0;
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => action === "write", ["write"]),
+			middleware: makeMiddleware(hooks, (input) =>
+				input.hook === "before_tool"
+					? [{ kind: "block_tool", reason: "middleware policy blocked write", severity: "hard-block" }]
+					: [],
+			),
+		});
+		registerWriteTool(registry, async () => {
+			runCalls += 1;
+			return { kind: "ok", output: "wrote" };
+		});
+
+		const verdict = await registry.invoke({ tool: "write", args: { path: "a", content: "b" } });
+
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind === "blocked") strictEqual(verdict.reason, "middleware policy blocked write");
+		strictEqual(runCalls, 0);
+		deepStrictEqual(
+			hooks.map((hook) => hook.hook),
+			["before_tool"],
+		);
+	});
+
+	it("applies middleware annotate_tool_result effects deterministically", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", (action) => action === "write", ["write"]),
+			middleware: makeMiddleware(hooks, (input) =>
+				input.hook === "after_tool"
+					? [{ kind: "annotate_tool_result", message: "validation is still required", severity: "warn" }]
+					: [],
+			),
+		});
+		registerWriteTool(registry, async () => ({ kind: "ok", output: "wrote" }));
+
+		const verdict = await registry.invoke({ tool: "write", args: { path: "a", content: "b" } });
+
+		strictEqual(verdict.kind, "ok");
+		if (verdict.kind === "ok") {
+			deepStrictEqual(verdict.result, {
+				kind: "ok",
+				output: "wrote\n\n[middleware:warn] validation is still required",
+			});
+		}
+		deepStrictEqual(
+			hooks.map((hook) => hook.hook),
+			["before_tool", "after_tool"],
+		);
+	});
+
+	it("honors middleware protect_path effects and blocks later protected writes", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		let runCalls = 0;
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => true, ["write"]),
+			middleware: makeMiddleware(hooks, (input) =>
+				input.hook === "after_tool" && input.toolName === "write"
+					? [{ kind: "protect_path", path: "artifact.txt", reason: "validated output" }]
+					: [],
+			),
+		});
+		registerWriteTool(registry, async () => {
+			runCalls += 1;
+			return { kind: "ok", output: "wrote" };
+		});
+
+		const first = await registry.invoke({ tool: "write", args: { path: "artifact.txt", content: "ok" } });
+		strictEqual(first.kind, "ok");
+		strictEqual(runCalls, 1);
+
+		const blocked = await registry.invoke({ tool: "write", args: { path: "artifact.txt", content: "again" } });
+		strictEqual(blocked.kind, "blocked");
+		if (blocked.kind === "blocked") {
+			strictEqual(blocked.reason, "protected artifact blocked: write would modify protected path artifact.txt");
+		}
+		strictEqual(runCalls, 1);
+
+		const sibling = await registry.invoke({ tool: "write", args: { path: "artifact-copy.txt", content: "ok" } });
+		strictEqual(sibling.kind, "ok");
+		strictEqual(runCalls, 2);
+	});
+
+	it("lets before_tool protect_path effects block the current destructive bash command", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		let runCalls = 0;
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "execute", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => true, ["bash"]),
+			middleware: makeMiddleware(hooks, (input) =>
+				input.hook === "before_tool" ? [{ kind: "protect_path", path: "artifact.txt", reason: "validated output" }] : [],
+			),
+		});
+		registerBashTool(registry, async () => {
+			runCalls += 1;
+			return { kind: "ok", output: "removed" };
+		});
+
+		const verdict = await registry.invoke({ tool: "bash", args: { command: "rm -f artifact.txt" } });
+
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind === "blocked") {
+			strictEqual(verdict.reason, "protected artifact blocked: rm would affect artifact.txt");
+		}
+		strictEqual(runCalls, 0);
+		deepStrictEqual(
+			hooks.map((hook) => hook.hook),
+			["before_tool"],
+		);
+	});
+
+	it("threads validation command metadata so middleware can protect artifacts after validation", async () => {
+		const decisions: ClassifierCall[] = [];
+		const hooks: MiddlewareHookInput[] = [];
+		let bashCalls = 0;
+		let writeCalls = 0;
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "execute", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => true, ["bash", "write"]),
+			middleware: makeMiddleware(hooks, (input) =>
+				input.hook === "after_tool" &&
+				input.toolName === "bash" &&
+				input.metadata?.validationCommand === "npm test" &&
+				input.metadata.validationExitCode === 0
+					? [{ kind: "protect_path", path: "validated.txt", reason: "validation command passed" }]
+					: [],
+			),
+		});
+		registerBashTool(registry, async () => {
+			bashCalls += 1;
+			return { kind: "ok", output: "tests passed" };
+		});
+		registerWriteTool(registry, async () => {
+			writeCalls += 1;
+			return { kind: "ok", output: "wrote" };
+		});
+
+		const validation = await registry.invoke({ tool: "bash", args: { command: "npm test" } });
+		strictEqual(validation.kind, "ok");
+		strictEqual(bashCalls, 1);
+
+		const blocked = await registry.invoke({ tool: "write", args: { path: "validated.txt", content: "again" } });
+		strictEqual(blocked.kind, "blocked");
+		strictEqual(writeCalls, 0);
+	});
+
+	it("emits protected-artifact events and rehydrates protected state into another registry", async () => {
+		const decisions: ClassifierCall[] = [];
+		const events: ProtectedArtifactRegistryEvent[] = [];
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, decisions),
+			modes: makeModes("default", () => true, ["write"]),
+			middleware: makeMiddleware([], (input) =>
+				input.hook === "after_tool" ? [{ kind: "protect_path", path: "dist/report.txt", reason: "validated report" }] : [],
+			),
+			onProtectedArtifactEvent: (event) => events.push(event),
+		});
+		registerWriteTool(registry, async () => ({ kind: "ok", output: "wrote" }));
+
+		const first = await registry.invoke(
+			{ tool: "write", args: { path: "dist/report.txt", content: "ok" } },
+			{ runId: "run-1", sessionId: "session-1", turnId: "turn-1", toolCallId: "call-1", correlationId: "corr-1" },
+		);
+
+		strictEqual(first.kind, "ok");
+		strictEqual(events.length, 1);
+		strictEqual(events[0]?.artifact.path, "dist/report.txt");
+		strictEqual(events[0]?.artifact.reason, "validated report");
+		strictEqual(events[0]?.toolName, "write");
+		strictEqual(events[0]?.toolCallId, "call-1");
+		strictEqual(registry.protectedArtifacts().artifacts.length, 1);
+
+		const rehydrated = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, []),
+			modes: makeModes("default", () => true, ["write"]),
+			protectedArtifacts: registry.protectedArtifacts(),
+		});
+		registerWriteTool(rehydrated, async () => ({ kind: "ok", output: "should not run" }));
+
+		const blocked = await rehydrated.invoke({ tool: "write", args: { path: "dist/report.txt", content: "again" } });
+		strictEqual(blocked.kind, "blocked");
+		if (blocked.kind === "blocked") {
+			strictEqual(blocked.reason, "protected artifact blocked: write would modify protected path dist/report.txt");
+		}
+
+		rehydrated.replaceProtectedArtifacts({ artifacts: [] });
+		const allowed = await rehydrated.invoke({ tool: "write", args: { path: "dist/report.txt", content: "again" } });
+		strictEqual(allowed.kind, "ok");
 	});
 
 	it("worker registry rejects write-like system modifications before spec.run", async () => {

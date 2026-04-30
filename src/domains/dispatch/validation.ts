@@ -17,6 +17,7 @@ export interface JobSpec {
 	thinkingLevel?: JobThinkingLevel;
 	requiredCapabilities?: ReadonlyArray<string>;
 	cwd?: string;
+	memorySection?: string;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -31,6 +32,7 @@ const KNOWN_KEYS = new Set([
 	"thinkingLevel",
 	"requiredCapabilities",
 	"cwd",
+	"memorySection",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
@@ -103,6 +105,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("memorySection" in spec && spec.memorySection !== undefined) {
+		if (typeof spec.memorySection !== "string") {
+			errors.push("memorySection must be a string");
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -120,5 +128,6 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
 	}
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
+	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
 	return { ok: true, spec: out };
 }

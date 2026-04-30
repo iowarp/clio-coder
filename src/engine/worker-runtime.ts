@@ -10,6 +10,7 @@
  */
 
 import type { ToolName } from "../core/tool-names.js";
+import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
@@ -19,6 +20,7 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import { registerFauxFromEnv } from "./ai.js";
+import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
@@ -39,6 +41,8 @@ export interface WorkerRunInput {
 	allowedTools?: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
 	mode?: ModeName;
+	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
+	middlewareSnapshot?: MiddlewareSnapshot;
 	signal?: AbortSignal;
 }
 
@@ -100,6 +104,11 @@ function getKnowledgeBase(): KnowledgeBase {
  * function; the promise resolves when `agent.waitForIdle()` returns.
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
+	// pi-ai is process-local. The orchestrator registers Clio API providers in
+	// providers/extension.ts, but the worker subprocess starts a fresh process,
+	// so it must register them here before any agent.prompt() touches a local
+	// runtime (lmstudio-native, ollama-native).
+	registerClioApiProviders();
 	const fauxModel = registerFauxFromEnv();
 
 	if (input.runtime.kind === "subprocess") {
@@ -143,7 +152,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const model = input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>);
 
 	const mode: ModeName = input.mode ?? "default";
-	const registry = createWorkerToolRegistry(mode);
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });

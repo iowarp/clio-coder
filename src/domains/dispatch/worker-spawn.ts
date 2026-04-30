@@ -14,6 +14,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { MiddlewareSnapshot } from "../middleware/index.js";
 import type { EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
 
 export interface WorkerSpec {
@@ -27,6 +28,7 @@ export interface WorkerSpec {
 	thinkingLevel?: ThinkingLevel;
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
+	middlewareSnapshot?: MiddlewareSnapshot;
 }
 
 export interface SpawnedWorker {
