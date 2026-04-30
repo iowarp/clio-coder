@@ -53,6 +53,7 @@ Non-interactive flags:
 `;
 
 const DEFAULT_PORTS: Record<string, number> = {
+	llamacpp: 8080,
 	"llamacpp-anthropic": 8080,
 	"llamacpp-completion": 8080,
 	"llamacpp-embed": 8080,

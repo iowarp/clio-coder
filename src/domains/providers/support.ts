@@ -44,6 +44,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
 	"lmstudio-native": "LM Studio native API",
+	llamacpp: "llama.cpp server (auto-detect surface)",
 };
 
 function groupPriority(group: ProviderSupportGroup): number {

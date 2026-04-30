@@ -132,6 +132,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	defaultCapabilities,
+	hidden: true,
 	async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
