@@ -88,7 +88,13 @@ describe("bash tool environment", () => {
 		// SIGTERM arrives before the trap is installed, bash dies at the
 		// default disposition and the escalation path never runs. Wait long
 		// enough for the trap to take effect on the slowest runners we see.
-		const startedAt = Date.now();
+		// Use `performance.now()` for the elapsed measurement: WSL2 (and any
+		// hypervisor that re-syncs its guest clock) can jump `Date.now()`
+		// backwards by seconds at a time, which made this assertion appear to
+		// fail when the actual SIGKILL escalation fired on the correct
+		// monotonic schedule. libuv-backed `setTimeout` already uses the
+		// monotonic clock; the test just needs to read the same source.
+		const startedAt = performance.now();
 		const started = bashTool.run(
 			{
 				command: 'trap "" TERM; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
@@ -98,7 +104,7 @@ describe("bash tool environment", () => {
 		);
 		setTimeout(() => controller.abort(), 1500);
 		const result = await started;
-		const elapsedMs = Date.now() - startedAt;
+		const elapsedMs = performance.now() - startedAt;
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
