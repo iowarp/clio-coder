@@ -1,8 +1,8 @@
+import { strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { strictEqual } from "node:assert/strict";
 import { detectProjectType } from "../../../src/domains/session/workspace/project-type.js";
 
 function tmp(): { dir: string; cleanup: () => void } {

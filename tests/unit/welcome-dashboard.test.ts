@@ -173,10 +173,7 @@ describe("interactive/welcome-dashboard", () => {
 		});
 
 		it("renders branch, remote, and project type for a git repo", () => {
-			const lines = buildWelcomeDashboardLines(
-				deriveWelcomeDashboardStats(deps({ workspace: baseSnapshot() })),
-				112,
-			);
+			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: baseSnapshot() })), 112);
 			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 			ok(/Workspace/.test(text), text);
 			ok(/main/.test(text), text);
@@ -185,10 +182,7 @@ describe("interactive/welcome-dashboard", () => {
 		});
 
 		it("omits the panel when snapshot is null", () => {
-			const lines = buildWelcomeDashboardLines(
-				deriveWelcomeDashboardStats(deps({ workspace: null })),
-				112,
-			);
+			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: null })), 112);
 			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 			ok(!/Workspace/.test(text), text);
 		});
@@ -205,10 +199,7 @@ describe("interactive/welcome-dashboard", () => {
 				cwd: "/some/dir",
 				projectType: "python",
 			});
-			const lines = buildWelcomeDashboardLines(
-				deriveWelcomeDashboardStats(deps({ workspace: snap })),
-				112,
-			);
+			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: snap })), 112);
 			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 			ok(/Workspace/.test(text), text);
 			ok(/python/.test(text), text);

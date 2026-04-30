@@ -262,7 +262,11 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			lines.push(`git: ${ws.branch ?? "(detached)"} (${dirty})${remote}`);
 		}
 		out.push(`│ ${padAnsi("", content)} │`);
-		for (const line of framedPanel("Workspace", lines.map((l) => truncateToWidth(l, content - 4, "…", true)), content)) {
+		for (const line of framedPanel(
+			"Workspace",
+			lines.map((l) => truncateToWidth(l, content - 4, "…", true)),
+			content,
+		)) {
 			out.push(`│ ${padAnsi(line, content)} │`);
 		}
 	}

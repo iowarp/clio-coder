@@ -1,5 +1,5 @@
-import type { SessionContract } from "../domains/session/contract.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
+import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { bashTool } from "./bash.js";
 import { editTool } from "./edit.js";
