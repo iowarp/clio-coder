@@ -1,6 +1,7 @@
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
 import type { SessionEntry } from "./entries.js";
 import type { TreeSnapshot } from "./tree/navigator.js";
+import type { WorkspaceSnapshot } from "./workspace/index.js";
 
 /**
  * Domain-level session metadata. Extends the engine's on-disk meta with
@@ -37,6 +38,12 @@ export type ClioSessionMetaExtension = {
 	 * turn.
 	 */
 	lastActivityAt?: string;
+	/**
+	 * Workspace snapshot captured at session bind. Populated by probeWorkspace
+	 * during create(); read-only thereafter. Omitted on resumed sessions that
+	 * pre-date this field; the workspace_context tool lazy-fills then.
+	 */
+	workspace?: WorkspaceSnapshot;
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;
