@@ -14,6 +14,7 @@ import {
 	startSession,
 } from "./manager.js";
 import { forkFromState } from "./tree/fork.js";
+import { probeWorkspace } from "./workspace/index.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
 
@@ -87,6 +88,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				void prior.writer.close();
 			}
 			const next = startSession(startInput);
+			next.meta.workspace = probeWorkspace(cwd);
 			state = next;
 			return next.meta;
 		},
