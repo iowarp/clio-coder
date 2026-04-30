@@ -1571,10 +1571,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			handleCtrlC();
 			return { consume: true };
 		}
-		if (data === ESC && deps.chat.isStreaming()) {
-			cancelActiveRun();
-			return { consume: true };
-		}
 
 		const overlayConsumed = routeOverlayKey(
 			data,
@@ -1598,6 +1594,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			(input, id) => keybindings.matches(input, id),
 		);
 		if (overlayConsumed) {
+			return { consume: true };
+		}
+
+		// No overlay consumed the input. Esc now falls through to cancel an
+		// active run when one is in flight; before this fall-through Esc was
+		// short-circuited above the overlay router and stole the keystroke
+		// from any open modal, forcing the user to press Esc twice to dismiss
+		// modals that opened mid-stream.
+		if (data === ESC && deps.chat.isStreaming()) {
+			cancelActiveRun();
 			return { consume: true };
 		}
 
