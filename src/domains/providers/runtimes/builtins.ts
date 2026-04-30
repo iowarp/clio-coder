@@ -27,6 +27,7 @@ import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
 import lemonadeAnthropic from "./local-native/lemonade-anthropic.js";
 import lemonadeOpenai from "./local-native/lemonade-openai.js";
+import llamacpp from "./local-native/llamacpp.js";
 import llamacppAnthropic from "./local-native/llamacpp-anthropic.js";
 import llamacppCompletion from "./local-native/llamacpp-completion.js";
 import llamacppEmbed from "./local-native/llamacpp-embed.js";
@@ -55,6 +56,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openCodeCli,
 	lemonadeAnthropic,
 	lemonadeOpenai,
+	llamacpp,
 	llamacppAnthropic,
 	llamacppCompletion,
 	llamacppEmbed,

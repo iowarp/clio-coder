@@ -29,6 +29,7 @@ const lemonadeAnthropicRuntime: RuntimeDescriptor = {
 	apiFamily: "anthropic-messages",
 	auth: "api-key",
 	defaultCapabilities,
+	hidden: true,
 	async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = endpointBase(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
