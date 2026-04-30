@@ -105,9 +105,7 @@ describe("doctor legacy runtime migration", () => {
 		strictEqual(mini?.runtime, "llamacpp");
 
 		const second = runDoctor();
-		const stillWarning = second.find(
-			(finding) => finding.name === "target mini" && finding.detail.includes("--fix"),
-		);
+		const stillWarning = second.find((finding) => finding.name === "target mini" && finding.detail.includes("--fix"));
 		strictEqual(stillWarning, undefined, "expected the warning to disappear after --fix");
 	});
 
