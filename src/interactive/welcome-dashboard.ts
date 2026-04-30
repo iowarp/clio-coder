@@ -3,6 +3,7 @@ import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
+import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { styleForMode } from "./mode-theme.js";
 
@@ -28,6 +29,7 @@ export interface WelcomeDashboardDeps {
 	observability: ObservabilityContract;
 	getContextUsage?: () => ContextUsageSnapshot;
 	getSettings?: () => Readonly<ClioSettings>;
+	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	selfDev: boolean;
 }
 
@@ -46,6 +48,7 @@ export interface WelcomeDashboardStats {
 	avgLatencyMs: number | null;
 	mode: string;
 	selfDev: boolean;
+	workspace: WorkspaceSnapshot | null;
 }
 
 function color(text: string, fn: string): string {
@@ -149,6 +152,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		.map((status) => status.health.latencyMs)
 		.filter((value): value is number => typeof value === "number");
 	const avgLatencyMs = latencies.length > 0 ? latencies.reduce((sum, value) => sum + value, 0) / latencies.length : null;
+	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	return {
 		activeTargets: statuses.filter(activeStatus).length,
 		totalTargets: statuses.length,
@@ -165,6 +169,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		avgLatencyMs,
 		mode: deps.modes.current().toLowerCase(),
 		selfDev: deps.selfDev,
+		workspace,
 	};
 }
 
@@ -246,6 +251,20 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		content,
 	)) {
 		out.push(`│ ${padAnsi(line, content)} │`);
+	}
+	if (stats.workspace) {
+		const ws = stats.workspace;
+		const cwdLabel = ws.projectType === "unknown" ? ws.cwd : `${ws.cwd} · ${ws.projectType}`;
+		const lines: string[] = [cwdLabel];
+		if (ws.isGit) {
+			const dirty = ws.dirty ? "dirty" : "clean";
+			const remote = ws.remoteUrl ? ` · remote: ${ws.remoteUrl.replace(/^https?:\/\//, "")}` : "";
+			lines.push(`git: ${ws.branch ?? "(detached)"} (${dirty})${remote}`);
+		}
+		out.push(`│ ${padAnsi("", content)} │`);
+		for (const line of framedPanel("Workspace", lines.map((l) => truncateToWidth(l, content - 4, "…", true)), content)) {
+			out.push(`│ ${padAnsi(line, content)} │`);
+		}
 	}
 	out.push(`╰${"─".repeat(content + 2)}╯`);
 	return out.map((line) => (visibleWidth(line) > width ? truncateToWidth(line, width, "", true) : line));

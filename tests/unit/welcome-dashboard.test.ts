@@ -5,6 +5,7 @@ import type { ModesContract } from "../../src/domains/modes/index.js";
 import type { ObservabilityContract } from "../../src/domains/observability/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/index.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { WorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	__welcomeDashboardTest,
@@ -66,7 +67,9 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 	} as EndpointStatus;
 }
 
-function deps(options: { selfDev?: boolean; contextTokens?: number | null } = {}): WelcomeDashboardDeps {
+function deps(
+	options: { selfDev?: boolean; contextTokens?: number | null; workspace?: WorkspaceSnapshot | null } = {},
+): WelcomeDashboardDeps {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.orchestrator.endpoint = "mini";
 	settings.orchestrator.model = "qwen";
@@ -102,6 +105,7 @@ function deps(options: { selfDev?: boolean; contextTokens?: number | null } = {}
 					: { tokens: options.contextTokens, contextWindow: 1000, percent: (options.contextTokens / 1000) * 100 },
 		getSettings: () => settings,
 		selfDev: options.selfDev ?? false,
+		...(options.workspace !== undefined ? { getWorkspaceSnapshot: () => options.workspace ?? null } : {}),
 	};
 }
 
@@ -151,5 +155,64 @@ describe("interactive/welcome-dashboard", () => {
 		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps()), 72);
 		strictEqual(lines.length, 1);
 		ok(__welcomeDashboardTest.stripAnsi(lines[0] ?? "").includes("Clio Coder"));
+	});
+
+	describe("workspace panel", () => {
+		const baseSnapshot = (overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot => ({
+			cwd: "/repo",
+			isGit: true,
+			branch: "main",
+			dirty: false,
+			ahead: 0,
+			behind: 0,
+			recentCommits: [{ sha: "abc1234", subject: "x" }],
+			remoteUrl: "https://github.com/akougkas/clio-coder",
+			projectType: "node",
+			capturedAt: "2026-04-30T00:00:00Z",
+			...overrides,
+		});
+
+		it("renders branch, remote, and project type for a git repo", () => {
+			const lines = buildWelcomeDashboardLines(
+				deriveWelcomeDashboardStats(deps({ workspace: baseSnapshot() })),
+				112,
+			);
+			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+			ok(/Workspace/.test(text), text);
+			ok(/main/.test(text), text);
+			ok(/akougkas\/clio-coder/.test(text), text);
+			ok(/node/.test(text), text);
+		});
+
+		it("omits the panel when snapshot is null", () => {
+			const lines = buildWelcomeDashboardLines(
+				deriveWelcomeDashboardStats(deps({ workspace: null })),
+				112,
+			);
+			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+			ok(!/Workspace/.test(text), text);
+		});
+
+		it("shows project type only when cwd is not a git repo", () => {
+			const snap = baseSnapshot({
+				isGit: false,
+				branch: null,
+				dirty: null,
+				ahead: null,
+				behind: null,
+				recentCommits: [],
+				remoteUrl: null,
+				cwd: "/some/dir",
+				projectType: "python",
+			});
+			const lines = buildWelcomeDashboardLines(
+				deriveWelcomeDashboardStats(deps({ workspace: snap })),
+				112,
+			);
+			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+			ok(/Workspace/.test(text), text);
+			ok(/python/.test(text), text);
+			ok(!/main/.test(text), text);
+		});
 	});
 });

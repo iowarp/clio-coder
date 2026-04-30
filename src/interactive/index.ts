@@ -640,6 +640,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		providers: deps.providers,
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
+		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? null,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		selfDev: deps.selfDev,
 	});
