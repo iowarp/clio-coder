@@ -81,6 +81,21 @@ describe("sumRunUsage", () => {
 		strictEqual(summary.cacheRead, 10);
 		strictEqual(summary.cacheWrite, 5);
 	});
+
+	it("tracks reasoning tokens when a provider exposes them", () => {
+		const messages = [
+			{
+				role: "assistant",
+				content: [],
+				stopReason: "stop",
+				timestamp: 0,
+				usage: { input: 100, output: 50, output_tokens_details: { reasoning_tokens: 12 } },
+			},
+		];
+		const summary = sumRunUsage(messages as never);
+		strictEqual(summary.hadReasoning, true);
+		strictEqual(summary.reasoning, 12);
+	});
 });
 
 describe("aggregateCostEntries", () => {

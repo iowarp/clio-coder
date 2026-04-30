@@ -18,7 +18,12 @@ import {
 import { assessFinishContract } from "../domains/safety/finish-contract.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
-import { calculateContextTokens } from "../domains/session/compaction/tokens.js";
+import {
+	type ContextUsageSnapshot,
+	contextUsageSnapshot,
+	estimateAgentContextTokens,
+	extractReasoningTokens,
+} from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
@@ -33,10 +38,12 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
-import type { AgentEvent, AgentMessage, Model } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
+import type { AgentStatusEvent } from "./status/types.js";
 
 type AssistantDeltaEvent =
 	| {
@@ -68,7 +75,7 @@ export interface RetryStatusEvent {
 	status: RetryStatusPayload;
 }
 
-export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent;
+export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | AgentStatusEvent;
 
 export interface ChatLoop {
 	submit(text: string): Promise<void>;
@@ -76,6 +83,7 @@ export interface ChatLoop {
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
 	isStreaming(): boolean;
+	contextUsage(): ContextUsageSnapshot;
 	/**
 	 * Force-run the compaction flow for the current session, swap the agent's
 	 * in-memory `state.messages` for a single bridge message carrying the
@@ -316,6 +324,8 @@ interface RunUsageSummary {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	reasoning: number;
+	hadReasoning: boolean;
 	hadUsage: boolean;
 }
 
@@ -337,6 +347,8 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		output: 0,
 		cacheRead: 0,
 		cacheWrite: 0,
+		reasoning: 0,
+		hadReasoning: false,
 		hadUsage: false,
 	};
 	for (const raw of messages) {
@@ -366,6 +378,11 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		summary.output += output;
 		summary.cacheRead += cacheRead;
 		summary.cacheWrite += cacheWrite;
+		const reasoning = extractReasoningTokens(usage);
+		if (reasoning !== null) {
+			summary.reasoning += reasoning;
+			summary.hadReasoning = true;
+		}
 		if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) {
 			summary.tokens += usage.totalTokens;
 		} else {
@@ -377,26 +394,38 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 	return summary;
 }
 
-/**
- * Bridge message injected into the agent's in-memory `state.messages` after
- * a compaction run. Prior turns are dropped; the single synthetic user
- * message frames the summary as "prior context" and instructs the LLM to
- * continue from there. pi-agent-core appends the real user text next so the
- * final prompt sent to the model is [bridge, newUserText].
- */
-function buildCompactionBridgeMessage(summary: string): AgentMessage {
-	const text = [
-		"<prior-context-summary>",
-		summary,
-		"</prior-context-summary>",
-		"",
-		"The above summary replaces earlier conversation to save tokens. Continue from here.",
-	].join("\n");
-	return {
-		role: "user",
-		content: [{ type: "text", text }],
-		timestamp: Date.now(),
-	} as AgentMessage;
+function assistantSessionPayload(
+	message: AgentMessage,
+	failure: TerminalAssistantFailure | null,
+): Record<string, unknown> {
+	const text = extractText(message).trim();
+	const thinking = extractThinking(message).trim();
+	const payload: Record<string, unknown> = { text };
+	const raw = message as unknown as Record<string, unknown>;
+	if (Array.isArray(raw.content)) payload.content = raw.content;
+	if (thinking.length > 0) payload.thinking = thinking;
+	for (const key of ["usage", "api", "provider", "model", "responseId"]) {
+		if (raw[key] !== undefined) payload[key] = raw[key];
+	}
+	if (failure) {
+		payload.stopReason = failure.stopReason;
+		payload.errorMessage = failure.errorMessage;
+	} else {
+		const stopReason = raw.stopReason;
+		if (stopReason !== undefined) payload.stopReason = stopReason;
+	}
+	return payload;
+}
+
+function hasPersistableAssistantContent(
+	payload: Record<string, unknown>,
+	failure: TerminalAssistantFailure | null,
+): boolean {
+	if (failure) return true;
+	if (typeof payload.text === "string" && payload.text.trim().length > 0) return true;
+	if (typeof payload.thinking === "string" && payload.thinking.trim().length > 0) return true;
+	if (Array.isArray(payload.content) && payload.content.length > 0) return true;
+	return false;
 }
 
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
@@ -422,15 +451,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
-		const text = extractText(message).trim();
 		const failure = terminalFailureFromAssistantMessage(message);
-		if (!deps.session || (text.length === 0 && !failure)) return;
+		const payload = assistantSessionPayload(message, failure);
+		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
-		const payload: Record<string, unknown> = { text };
-		if (failure) {
-			payload.stopReason = failure.stopReason;
-			payload.errorMessage = failure.errorMessage;
-		}
 		const turn = deps.session.append({
 			kind: "assistant",
 			parentId: lastTurnId,
@@ -915,6 +939,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	): Promise<void> => {
 		let compacted = false;
 		try {
+			pruneFailedAssistantFromContext(agentRuntime.agent);
+			const mutableState = agentRuntime.agent.state as MutableAgentState;
+			mutableState.errorMessage = undefined;
 			compacted = await runAutoCompact(agentRuntime, true, undefined, "overflow");
 		} catch (compactErr) {
 			emitNotice(
@@ -1108,10 +1135,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Evaluate the auto-compaction trigger against the current session and,
-	 * when it fires, swap `agent.state.messages` for a single bridge message
-	 * carrying the summary. Returns true when compaction ran AND produced a
-	 * non-empty summary; false otherwise (no deps wired, threshold not
-	 * crossed, no-op compaction, etc.). Throws are caller-contained.
+	 * when it fires, rebuild `agent.state.messages` from the live session view
+	 * so the agent state mirrors the compaction summary plus the kept suffix.
+	 * Returns true when compaction ran AND produced a non-empty summary; false
+	 * otherwise (no deps wired, threshold not crossed, no-op compaction, etc.).
+	 * Throws are caller-contained.
 	 *
 	 * `force = true` bypasses the threshold check. Used for:
 	 *   - CLIO_FORCE_COMPACT=1 (deterministic drills / e2e tests).
@@ -1122,6 +1150,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		force: boolean,
 		instructions?: string,
 		triggerOverride?: CompactionTrigger,
+		pendingUserText?: string,
 	): Promise<boolean> => {
 		if (!deps.autoCompact || !deps.readSessionEntries) return false;
 		const settings = deps.getSettings();
@@ -1133,16 +1162,35 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
 			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
 			const threshold = typeof cfg?.threshold === "number" ? cfg.threshold : 0.8;
-			const entries = deps.readSessionEntries();
-			const tokens = calculateContextTokens(entries);
+			const estimateInput = {
+				systemPrompt: agentRuntime.agent.state.systemPrompt,
+				messages: agentRuntime.agent.state.messages,
+				...(pendingUserText !== undefined ? { pendingUserText } : {}),
+			};
+			const tokens = estimateAgentContextTokens(estimateInput);
 			if (!shouldCompact(tokens, threshold, contextWindow)) return false;
 		}
 
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
-		const result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
+		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+		let result: CompactResult | null = null;
+		try {
+			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
+		} finally {
+			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+		}
 		if (!result || result.summary.length === 0) return false;
 
-		agentRuntime.agent.state.messages = [buildCompactionBridgeMessage(result.summary)];
+		// Rebuild agent state from the live session view. The orchestrator's
+		// compaction flow already appended a `compactionSummary` entry; reading
+		// the entries again and feeding them through `buildReplayAgentMessagesFromTurns`
+		// produces the canonical [summary-as-context, ...kept suffix] message
+		// list, mirroring pi-coding-agent's `agent.replaceMessages(buildSessionContext().messages)`
+		// contract. The replay builder also filters out error-stopReason
+		// assistant entries, which subsumes the pre-compaction prune of failed
+		// assistant tails on the overflow path.
+		const refreshedEntries = deps.readSessionEntries();
+		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries);
 
 		emitNotice(
 			renderCompactionSummaryLine({
@@ -1187,7 +1235,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// oversized; the overflow-recovery path will catch that.
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
 			try {
-				await runAutoCompact(agentRuntime, forceNow);
+				await runAutoCompact(agentRuntime, forceNow, undefined, undefined, text);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -1292,6 +1340,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		isStreaming(): boolean {
 			return streaming;
+		},
+		contextUsage(): ContextUsageSnapshot {
+			if (!runtime) return contextUsageSnapshot(null, 0);
+			const modelState = runtime.agent.state.model as { contextWindow?: number } | undefined;
+			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+			const tokens = estimateAgentContextTokens({
+				systemPrompt: runtime.agent.state.systemPrompt,
+				messages: runtime.agent.state.messages,
+			});
+			return contextUsageSnapshot(tokens > 0 ? tokens : null, contextWindow);
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			runtime?.agent.abort();

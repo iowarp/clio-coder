@@ -532,4 +532,192 @@ describe("interactive/chat-loop transient retry", () => {
 		strictEqual(continueCalls, 0);
 		deepStrictEqual(agentState.messages, replay);
 	});
+
+	it("pre-submit auto-compaction uses the live provider-bound context, not only persisted session text", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.retry.enabled = false;
+		settings.compaction.threshold = 0.8;
+		const { session } = sessionHarness();
+		const agentState = {
+			systemPrompt: "system prompt",
+			model: { id: "stub-model", provider: "stub-runtime", contextWindow: 1000 } as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [
+				userMessage("prior"),
+				{
+					role: "toolResult",
+					content: [{ type: "text", text: "x".repeat(5000) }],
+					toolCallId: "call-1",
+					toolName: "read",
+					isError: false,
+					timestamp: 0,
+				} as AgentMessage,
+			],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+		let autoCompactCalls = 0;
+		let promptSawSummary = false;
+		let promptSawKeptSuffix = false;
+		let entriesPostCompact: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-24T00:00:00.000Z",
+				role: "user",
+				payload: { text: "tiny persisted transcript" },
+			},
+		];
+
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: modes(),
+			providers: providers(settings),
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			readSessionEntries: () => entriesPostCompact,
+			autoCompact: async () => {
+				autoCompactCalls += 1;
+				// Production orchestrator appends a compactionSummary entry to
+				// the session before returning. Mirror that here so the
+				// chat-loop's post-compaction rebuild sees the summary plus
+				// the kept suffix.
+				entriesPostCompact = [
+					{
+						kind: "compactionSummary",
+						turnId: "c1",
+						parentTurnId: "u1",
+						timestamp: "2026-04-24T00:00:01.000Z",
+						summary: "compacted live provider context",
+						tokensBefore: 1300,
+						firstKeptTurnId: "u2",
+					},
+					{
+						kind: "message",
+						turnId: "u2",
+						parentTurnId: "c1",
+						timestamp: "2026-04-24T00:00:02.000Z",
+						role: "user",
+						payload: { text: "kept recent user turn" },
+					},
+				];
+				return {
+					summary: "compacted live provider context",
+					firstKeptEntryIndex: 0,
+					firstKeptTurnId: "u2",
+					tokensBefore: 1300,
+					messagesSummarized: 1,
+					isSplitTurn: false,
+				};
+			},
+			createAgent: () =>
+				({
+					agent: {
+						state: agentState,
+						sessionId: undefined,
+						subscribe: () => () => {},
+						prompt: async (text: string) => {
+							strictEqual(text, "continue");
+							const serialized = JSON.stringify(agentState.messages);
+							promptSawSummary = serialized.includes("compacted live provider context");
+							promptSawKeptSuffix = serialized.includes("kept recent user turn");
+							agentState.messages.push(userMessage(text));
+						},
+						abort: () => {},
+					},
+					state: () => agentState,
+				}) as unknown as EngineAgentHandle,
+		});
+
+		await loop.submit("continue");
+
+		strictEqual(autoCompactCalls, 1);
+		strictEqual(promptSawSummary, true, "prompt should run after the compaction summary is rebuilt into agent state");
+		strictEqual(
+			promptSawKeptSuffix,
+			true,
+			"prompt should also see the kept suffix entries, not just the compaction summary",
+		);
+		ok(agentState.messages.length >= 2, "rebuild must surface summary and the kept suffix together");
+	});
+
+	it("overflow recovery prunes the failed assistant before compaction and retries the same user request", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.retry.enabled = false;
+		const { session } = sessionHarness();
+		const agentState = {
+			systemPrompt: "",
+			model: { id: "stub-model", provider: "stub-runtime", contextWindow: 1000 } as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined as string | undefined,
+		};
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		const promptTexts: string[] = [];
+		let autoCompactSawFailedTail = false;
+
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: modes(),
+			providers: providers(settings),
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			readSessionEntries: () => [],
+			autoCompact: async () => {
+				const tail = agentState.messages.at(-1);
+				autoCompactSawFailedTail = tail?.role === "assistant" && (tail as { stopReason?: unknown }).stopReason === "error";
+				return {
+					summary: "compacted after overflow",
+					firstKeptEntryIndex: 0,
+					firstKeptTurnId: null,
+					tokensBefore: 2000,
+					messagesSummarized: 1,
+					isSplitTurn: false,
+				};
+			},
+			createAgent: () =>
+				({
+					agent: {
+						state: agentState,
+						sessionId: undefined,
+						subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+							subscribeCb = cb;
+							return () => {};
+						},
+						prompt: async (text: string) => {
+							promptTexts.push(text);
+							if (promptTexts.length === 1) {
+								agentState.messages.push(userMessage(text));
+								const failed = errorMessage("400 request (1268979 tokens) exceeds the available context size (262144 tokens)");
+								agentState.messages.push(failed);
+								agentState.errorMessage = (failed as { errorMessage: string }).errorMessage;
+								await subscribeCb?.({ type: "message_end", message: failed });
+								await subscribeCb?.({ type: "agent_end", messages: [failed] });
+								return;
+							}
+							strictEqual(JSON.stringify(agentState.messages).includes("compacted after overflow"), true);
+							agentState.messages.push(userMessage(text));
+							const okMessage = assistantMessage("retry kept the request");
+							agentState.messages.push(okMessage);
+							agentState.errorMessage = undefined;
+							await subscribeCb?.({ type: "message_end", message: okMessage });
+							await subscribeCb?.({ type: "agent_end", messages: [okMessage] });
+						},
+						abort: () => {},
+					},
+					state: () => agentState,
+				}) as unknown as EngineAgentHandle,
+		});
+
+		await loop.submit("finish v0.1.4");
+
+		deepStrictEqual(promptTexts, ["finish v0.1.4", "finish v0.1.4"]);
+		strictEqual(autoCompactSawFailedTail, false, "failed overflow assistant must be removed before summarization");
+	});
 });

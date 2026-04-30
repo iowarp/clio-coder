@@ -90,7 +90,7 @@ describe("listSessionsForCwd enriches metadata for the /resume picker", () => {
 		ok(meta);
 		ok(meta.firstMessagePreview, "expected a preview");
 		ok(meta.firstMessagePreview && meta.firstMessagePreview.length <= 240, "preview must respect the cap");
-		ok(meta.firstMessagePreview && meta.firstMessagePreview.endsWith("…"), "long previews are ellipsis-tagged");
+		ok(meta.firstMessagePreview?.endsWith("…"), "long previews are ellipsis-tagged");
 		ok(meta.firstMessagePreview && !/\s{2,}/.test(meta.firstMessagePreview), "whitespace must be collapsed");
 	});
 

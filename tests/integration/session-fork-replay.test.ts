@@ -149,7 +149,8 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		const serialized = JSON.stringify(replayMessages);
 		ok(serialized.includes("abandoned branch edited src/app.ts"), serialized);
 		ok(serialized.includes("second"), serialized);
-		ok(serialized.includes("Tool call: bash"), serialized);
-		ok(serialized.includes("Tool result: tests passed"), serialized);
+		ok(serialized.includes('"type":"toolCall"'), serialized);
+		ok(serialized.includes('"role":"toolResult"'), serialized);
+		ok(serialized.includes("tests passed"), serialized);
 	});
 });

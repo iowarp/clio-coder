@@ -9,6 +9,7 @@ import {
 	renderToolSubline,
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
+import type { StatusPhase, VerbRender } from "./status/index.js";
 
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
@@ -94,6 +95,7 @@ type ToolSegment = {
 };
 type AssistantSegment = TextSegment | ToolSegment;
 type ReplayBlockRenderer = (width: number) => string[];
+type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
 
 type TranscriptEntry =
 	| { role: "user"; text: string }
@@ -119,6 +121,8 @@ type TranscriptEntry =
 			 */
 			expandedThinking?: boolean;
 			pending: boolean;
+			statusLine?: AssistantStatusLine | null | undefined;
+			summaryLine?: string | null | undefined;
 	  }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
@@ -126,13 +130,14 @@ export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
+	setStatusLine(line: AssistantStatusLine | null): void;
+	setSummaryLine(line: string | null): void;
 	toggleLastToolExpanded(): boolean;
 	/**
-	 * Flip the most recent thinking-bearing assistant turn between the
-	 * one-line dim preview and the full rail-prefixed body. Returns `true`
-	 * when an assistant entry with non-empty thinking was found and
-	 * toggled, `false` if the transcript has no candidate (mirrors
-	 * `toggleLastToolExpanded()`).
+	 * Flip thinking-bearing assistant turns between the one-line dim preview
+	 * and the full rail-prefixed body. The target visibility is derived from
+	 * the most recent thinking block, then applied to prior thinking history
+	 * so Ctrl+T behaves like a transcript-level thinking visibility toggle.
 	 */
 	toggleLastThinking(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
@@ -187,6 +192,11 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
 	}
 	return false;
+}
+
+function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
+	const tail = entry.segments[entry.segments.length - 1];
+	return tail?.kind === "text" && !tail.finalized && tail.text.trim().length > 0;
 }
 
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
@@ -346,8 +356,21 @@ function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: stri
 		}
 		lines.push(...renderToolSegmentLines(seg, width, expandKey));
 	}
+	const shouldRenderStatus =
+		entry.pending &&
+		entry.statusLine !== null &&
+		entry.statusLine !== undefined &&
+		!(entry.statusLine.phase === "writing" && hasStreamingText(entry));
 	if (!labeled && !hasVisibleOutput(entry)) {
-		lines.push(entry.pending ? `${CLIO_PREFIX}[working]` : CLIO_PREFIX);
+		lines.push(CLIO_PREFIX);
+		if (shouldRenderStatus) {
+			lines.push(`  ${ANSI_DIM}${entry.statusLine?.verb ?? ""}${ANSI_RESET}`);
+		}
+	} else if (shouldRenderStatus) {
+		lines.push(`  ${ANSI_DIM}${entry.statusLine?.verb ?? ""}${ANSI_RESET}`);
+	}
+	if (entry.summaryLine && !entry.pending) {
+		lines.push(`  ${ANSI_DIM}· ${entry.summaryLine}${ANSI_RESET}`);
 	}
 	return lines;
 }
@@ -454,21 +477,32 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return false;
 		},
 		toggleLastThinking(): boolean {
+			let nextExpanded: boolean | null = null;
+			let found = false;
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
 				if (entry.thinking.length === 0) continue;
-				entry.expandedThinking = entry.expandedThinking !== true;
-				markDirty();
-				return true;
+				nextExpanded = entry.expandedThinking !== true;
+				break;
 			}
-			return false;
+			if (nextExpanded === null) return false;
+			for (const entry of transcript) {
+				if (entry.role !== "assistant" || entry.thinking.length === 0) continue;
+				entry.expandedThinking = nextExpanded;
+				found = true;
+			}
+			if (found) markDirty();
+			return found;
 		},
 		reset(): void {
 			transcript.length = 0;
 			markDirty();
 		},
 		applyEvent(event: ChatLoopEvent): void {
+			if (event.type === "agent_status") {
+				return;
+			}
 			if (event.type === "text_delta") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
@@ -571,8 +605,37 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = transcript[transcript.length - 1];
 				if (assistant && assistant.role === "assistant" && assistant.pending) {
 					assistant.pending = false;
+					assistant.statusLine = null;
 					markDirty();
 				}
+			}
+		},
+		setStatusLine(line): void {
+			if (line) {
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				assistant.statusLine = line;
+				markDirty();
+				return;
+			}
+			const last = transcript[transcript.length - 1];
+			if (last && last.role === "assistant") {
+				last.statusLine = null;
+				markDirty();
+			}
+		},
+		setSummaryLine(line): void {
+			if (line) {
+				const assistant = ensureAssistant();
+				assistant.pending = false;
+				assistant.summaryLine = line;
+				markDirty();
+				return;
+			}
+			const last = transcript[transcript.length - 1];
+			if (last && last.role === "assistant") {
+				last.summaryLine = null;
+				markDirty();
 			}
 		},
 		render,

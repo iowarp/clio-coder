@@ -60,8 +60,11 @@ function payloadChars(payload: unknown): number {
 	}
 	if (payload && typeof payload === "object") {
 		const p = payload as Record<string, unknown>;
+		if (Array.isArray(p.content)) {
+			const contentChars = payloadChars(p.content);
+			if (contentChars > 0) return contentChars;
+		}
 		if (typeof p.text === "string") return p.text.length;
-		if (Array.isArray(p.content)) return payloadChars(p.content);
 		return JSON.stringify(payload).length;
 	}
 	return 0;

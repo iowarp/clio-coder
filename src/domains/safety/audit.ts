@@ -18,6 +18,8 @@ import { clioDataDir } from "../../core/xdg.js";
  *     consumers know which session was suspended and why.
  *   - `session_resume`: emitted on every BusChannels.SessionResumed event so
  *     /audit consumers know which session was reopened and how.
+ *   - `agent_status_change`: emitted for alarmable agent-status transitions
+ *     such as stuck, tool_blocked, retrying, and cancelled turns.
  *
  * Older audit files written before the discriminator existed have rows with
  * the tool_call shape but no `kind` field. Any future reader should treat a
@@ -80,12 +82,25 @@ export interface SessionResumeAuditRecord {
 	via: SessionResumeVia;
 }
 
+export interface AgentStatusChangeAuditRecord {
+	kind: "agent_status_change";
+	ts: string;
+	correlationId: string;
+	runId: string | null;
+	phase: string;
+	prevPhase: string;
+	elapsedFromStart: number;
+	watchdogTier: number;
+	metadata?: Record<string, unknown>;
+}
+
 export type AuditRecord =
 	| ToolCallAuditRecord
 	| ModeChangeAuditRecord
 	| AbortAuditRecord
 	| SessionParkAuditRecord
-	| SessionResumeAuditRecord;
+	| SessionResumeAuditRecord
+	| AgentStatusChangeAuditRecord;
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
@@ -234,6 +249,30 @@ export function buildModeChangeAuditRecord(input: {
 	};
 	if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;
 	if (input.requiresConfirmation !== undefined) record.requiresConfirmation = input.requiresConfirmation;
+	return record;
+}
+
+export function buildAgentStatusChangeAuditRecord(input: {
+	runId: string | null;
+	phase: string;
+	prevPhase: string;
+	elapsedFromStart: number;
+	watchdogTier: number;
+	metadata?: Record<string, unknown>;
+	now?: Date;
+}): AgentStatusChangeAuditRecord {
+	const now = input.now ?? new Date();
+	const record: AgentStatusChangeAuditRecord = {
+		kind: "agent_status_change",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		runId: input.runId,
+		phase: input.phase,
+		prevPhase: input.prevPhase,
+		elapsedFromStart: Math.max(0, Math.floor(input.elapsedFromStart)),
+		watchdogTier: Math.max(0, Math.floor(input.watchdogTier)),
+	};
+	if (input.metadata !== undefined) record.metadata = redactArgs(input.metadata) as Record<string, unknown>;
 	return record;
 }
 

@@ -20,7 +20,6 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
 import { initializeClioHome } from "../../src/core/init.js";

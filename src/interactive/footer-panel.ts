@@ -10,6 +10,8 @@ import {
 import { Text } from "../engine/tui.js";
 import type { HarnessSnapshot } from "../harness/state.js";
 import { getCurrentBranch } from "../utils/git.js";
+import type { AgentStatus } from "./status/index.js";
+import { resolveFooterVerb, spinnerFrame } from "./status/index.js";
 
 const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";
@@ -24,6 +26,8 @@ export interface FooterDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getHarnessState?: () => HarnessSnapshot;
 	getStreaming?: () => boolean;
+	getAgentStatus?: () => AgentStatus;
+	getTerminalColumns?: () => number;
 	/**
 	 * Running session-level token totals. Drives the input/output footer
 	 * segment. Invoked on every refresh so late-arriving `message_end` usage
@@ -179,11 +183,20 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 			}
 		}
 
-		const streaming = deps.getStreaming?.() ?? false;
-		const streamingPart = streaming
-			? `${SEP}${STREAMING_FRAMES[streamingFrame % STREAMING_FRAMES.length]} responding`
-			: "";
-		if (streaming) {
+		const status = deps.getAgentStatus?.();
+		const statusVerb = status
+			? resolveFooterVerb(status, Date.now(), deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80)
+			: null;
+		const legacyStreaming = statusVerb === null && (deps.getStreaming?.() ?? false);
+		const streamingPart =
+			statusVerb && status
+				? `${SEP}${status.phase === "ended" ? "" : `${spinnerFrame(streamingFrame)} `}${statusVerb.text}`
+				: legacyStreaming
+					? `${SEP}${STREAMING_FRAMES[streamingFrame % STREAMING_FRAMES.length]} responding`
+					: "";
+		if (statusVerb !== null && status?.phase !== "ended") {
+			streamingFrame = (streamingFrame + 1) % 10;
+		} else if (legacyStreaming) {
 			streamingFrame = (streamingFrame + 1) % STREAMING_FRAMES.length;
 		} else {
 			streamingFrame = 0;

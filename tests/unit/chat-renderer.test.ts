@@ -95,6 +95,29 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(text.includes("Clio Coder: structured-assistant"), text);
 	});
 
+	it("rehydrates persisted assistant thinking content instead of reducing the turn to text", () => {
+		const panel = createChatPanel();
+		const turns: ClioTurnRecord[] = [
+			mkTurn({ id: "u1", kind: "user", payload: { text: "inspect this" } }),
+			mkTurn({
+				id: "a1",
+				kind: "assistant",
+				payload: {
+					content: [
+						{ type: "thinking", thinking: "Need to read the exact payload shape." },
+						{ type: "text", text: "I will inspect the payload." },
+					],
+					text: "I will inspect the payload.",
+					thinking: "Need to read the exact payload shape.",
+				},
+			}),
+		];
+		rehydrateChatPanelFromTurns(panel, turns);
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("thinking: Need to read"), text);
+		ok(text.includes("Clio Coder: I will inspect the payload."), text);
+	});
+
 	it("skips empty-text turns silently without producing blank entries", () => {
 		const panel = createChatPanel();
 		const turns: ClioTurnRecord[] = [
@@ -258,6 +281,64 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
 		ok(!serialized.includes("rate limit 429"), serialized);
 		ok(serialized.includes("ok now"), serialized);
+	});
+
+	it("replays rich assistant content and real tool results without duplicating sidecar tool_call entries", () => {
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-24T00:00:00.000Z",
+				role: "user",
+				payload: { text: "read package" },
+			},
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp: "2026-04-24T00:00:01.000Z",
+				role: "assistant",
+				payload: {
+					text: "I will read it.",
+					content: [
+						{ type: "thinking", thinking: "Need package metadata." },
+						{ type: "text", text: "I will read it." },
+						{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "package.json" } },
+					],
+					usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0 } },
+				},
+			},
+			{
+				kind: "message",
+				turnId: "tc1",
+				parentTurnId: "a1",
+				timestamp: "2026-04-24T00:00:02.000Z",
+				role: "tool_call",
+				payload: { toolCallId: "call-1", name: "read", args: { path: "package.json" } },
+			},
+			{
+				kind: "message",
+				turnId: "tr1",
+				parentTurnId: "tc1",
+				timestamp: "2026-04-24T00:00:03.000Z",
+				role: "tool_result",
+				payload: {
+					toolCallId: "call-1",
+					toolName: "read",
+					result: { content: [{ type: "text", text: '{"name":"clio-coder"}' }] },
+					isError: false,
+				},
+			},
+		];
+
+		const messages = buildReplayAgentMessagesFromTurns(entries);
+		const serialized = JSON.stringify(messages);
+		ok(serialized.includes("Need package metadata."), serialized);
+		ok(serialized.includes('"type":"toolCall"'), serialized);
+		ok(serialized.includes('"role":"toolResult"'), serialized);
+		ok(serialized.includes("clio-coder"), serialized);
+		strictEqual((serialized.match(/"type":"toolCall"/g) ?? []).length, 1, serialized);
 	});
 
 	it("replays protected artifact entries without injecting them into model context", () => {
