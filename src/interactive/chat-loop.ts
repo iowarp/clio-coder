@@ -1345,6 +1345,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!runtime) return contextUsageSnapshot(null, 0);
 			const modelState = runtime.agent.state.model as { contextWindow?: number } | undefined;
 			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+			if (runtime.agent.state.messages.length <= replayedContextMessages.length) {
+				return contextUsageSnapshot(null, contextWindow);
+			}
 			const tokens = estimateAgentContextTokens({
 				systemPrompt: runtime.agent.state.systemPrompt,
 				messages: runtime.agent.state.messages,
