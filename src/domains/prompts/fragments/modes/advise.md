@@ -10,7 +10,7 @@ description: Advise mode behavior
 Advise mode is read-only with two structured-output exceptions. Diagnosis,
 planning, explanation, and review work belong here. Code changes do not.
 
-Available tools: read, grep, glob, ls, web_fetch, write_plan, write_review.
+Available tools: read, grep, glob, ls, web_fetch, write_plan, write_review, workspace_context.
 Not available in this mode: write, edit, bash. The runtime registry blocks
 those names; do not announce them as options to the user, do not attempt to
 call them, and do not propose them as next steps. If the user asks for an

@@ -11,7 +11,7 @@ Default mode is the standard tool set for normal work inside the current
 working directory. Make the change, run the needed commands, and verify
 the result locally before reporting success.
 
-Available tools: read, write, edit, bash, grep, glob, ls, web_fetch.
+Available tools: read, write, edit, bash, grep, glob, ls, web_fetch, workspace_context.
 Not available in this mode: write_plan, write_review (those are advise-mode
 exits). Privileged system_modify and git_destructive operations stay out
 of bounds even here; the runtime parks system_modify until super-mode
