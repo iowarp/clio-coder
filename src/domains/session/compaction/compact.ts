@@ -13,7 +13,7 @@
 import { stream } from "../../../engine/ai.js";
 import type { Model } from "../../../engine/types.js";
 import type { SessionEntry } from "../entries.js";
-import { prepareBranchEntries, serializeConversation } from "./branch-summary.js";
+import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import { calculateContextTokens, getLastAssistantUsage } from "./tokens.js";
@@ -64,6 +64,17 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+export const COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE = `The messages above are the beginning of the currently active user turn. They will be removed from the live context because the retained suffix starts in the middle of that turn.
+
+Summarize ONLY the active-turn details needed for another LLM to continue the same request:
+
+- the user's active request
+- tool calls already made in this turn
+- tool results, file paths, commands, errors, and decisions already observed
+- what should happen next
+
+Do NOT answer the user. Do NOT summarize unrelated older history.`;
+
 export interface CompactInput {
 	/** Ordered session entries to compact. The caller reads these from the session domain. */
 	entries: ReadonlyArray<SessionEntry>;
@@ -100,19 +111,29 @@ export interface CompactResult {
 	isSplitTurn: boolean;
 }
 
-/** Minimal shape of a UserMessage inside pi-ai's `Context.messages`. */
-interface ContextUserMessage {
+function buildUserMessage(text: string): {
 	role: "user";
 	content: Array<{ type: "text"; text: string }>;
 	timestamp: number;
-}
-
-function buildUserMessage(text: string): ContextUserMessage {
+} {
 	return {
 		role: "user",
 		content: [{ type: "text", text }],
 		timestamp: Date.now(),
 	};
+}
+
+/**
+ * Walk entries from newest to oldest and return the index of the most recent
+ * `compactionSummary` entry, or -1 when none is present. Mirrors pi-coding-agent's
+ * `prevCompactionIndex` discovery in compaction.ts:613-618 so iterative
+ * compactions do not re-summarize content already captured in a prior summary.
+ */
+function findLatestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i]?.kind === "compactionSummary") return i;
+	}
+	return -1;
 }
 
 function buildUserText(conversationText: string, instructions?: string): string {
@@ -121,39 +142,18 @@ function buildUserText(conversationText: string, instructions?: string): string 
 	return `<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${suffix}`;
 }
 
-/**
- * Run the compaction pipeline: find the cut, serialize the history portion,
- * ask the model for a summary, and return the result. The caller decides
- * what to do with `summary` and `firstKeptTurnId`; typically they persist a
- * `compactionSummary` entry via `session.appendEntry` and swap the live
- * message list for `entries.slice(firstKeptEntryIndex)`.
- */
-export async function compact(input: CompactInput): Promise<CompactResult> {
-	const reserveTokens = input.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
-	const keepRecentTokens = input.keepRecentTokens ?? DEFAULT_KEEP_RECENT_TOKENS;
-	const lastUsage = getLastAssistantUsage(input.entries);
-	const tokensBefore = calculateContextTokens(input.entries, lastUsage);
-	const cut = findCutPoint(input.entries, keepRecentTokens);
-	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
-	const { pre } = prepareBranchEntries(input.entries, historyEnd);
-	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
+function buildTurnPrefixUserText(conversationText: string, instructions?: string): string {
+	const focus = instructions?.trim();
+	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
+	return `<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${suffix}`;
+}
 
-	if (pre.length === 0) {
-		return {
-			summary: "",
-			firstKeptEntryIndex: cut.firstKeptEntryIndex,
-			firstKeptTurnId: firstKept?.turnId ?? null,
-			tokensBefore,
-			messagesSummarized: 0,
-			isSplitTurn: cut.isSplitTurn,
-		};
-	}
-
-	const conversationText = serializeConversation(pre);
-	const userText = buildUserText(conversationText, input.instructions);
-	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
-	const maxTokens = Math.max(1024, Math.floor(reserveTokens * 0.8));
-
+async function runSummaryStream(
+	input: CompactInput,
+	userText: string,
+	systemPrompt: string,
+	maxTokens: number,
+): Promise<string> {
 	const options: Record<string, unknown> = { maxTokens };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.headers !== undefined) options.headers = input.headers;
@@ -164,9 +164,6 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		messages: [buildUserMessage(userText)],
 	};
 
-	// `stream` is typed against pi-ai's Model/Context surface. Our Model<never>
-	// and locally-typed Context literal are structurally compatible; the cast
-	// keeps the call site free of pi-ai type imports (engine boundary).
 	const events = stream(
 		input.model as unknown as Parameters<typeof stream>[0],
 		context as unknown as Parameters<typeof stream>[1],
@@ -184,13 +181,76 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 			throw new Error(`compaction stream failed: ${reason}`);
 		}
 	}
+	return summary.trim();
+}
+
+/**
+ * Run the compaction pipeline: find the cut, serialize the history portion,
+ * ask the model for a summary, and return the result. The caller decides
+ * what to do with `summary` and `firstKeptTurnId`; typically they persist a
+ * `compactionSummary` entry via `session.appendEntry` and swap the live
+ * message list for `entries.slice(firstKeptEntryIndex)`.
+ */
+export async function compact(input: CompactInput): Promise<CompactResult> {
+	const reserveTokens = input.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
+	const keepRecentTokens = input.keepRecentTokens ?? DEFAULT_KEEP_RECENT_TOKENS;
+	// Iterative compaction: when a prior `compactionSummary` exists, the
+	// summary is canonical history. Restrict the cut search and the pre-slice
+	// to entries strictly after that boundary so the next summary builds on
+	// the previous one instead of re-summarizing it. Mirrors pi-coding-agent's
+	// `boundaryStart = prevCompactionIndex + 1` and `usageStart = prevCompactionIndex`
+	// in compaction.ts:619-628.
+	const prevCompactionIndex = findLatestCompactionIndex(input.entries);
+	const boundaryStart = prevCompactionIndex + 1;
+	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
+	const usageEntries = input.entries.slice(usageStart);
+	const lastUsage = getLastAssistantUsage(usageEntries);
+	const tokensBefore = calculateContextTokens(usageEntries, lastUsage);
+	const cut = findCutPoint(input.entries, keepRecentTokens, { startIndex: boundaryStart });
+	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
+	const pre = input.entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
+	const turnPrefix = cut.isSplitTurn
+		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
+		: [];
+	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
+
+	if (pre.length === 0 && turnPrefix.length === 0) {
+		return {
+			summary: "",
+			firstKeptEntryIndex: cut.firstKeptEntryIndex,
+			firstKeptTurnId: firstKept?.turnId ?? null,
+			tokensBefore,
+			messagesSummarized: 0,
+			isSplitTurn: cut.isSplitTurn,
+		};
+	}
+
+	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
+	const maxTokens = Math.max(1024, Math.floor(reserveTokens * 0.8));
+	const summaryParts: string[] = [];
+	if (pre.length > 0) {
+		const conversationText = serializeConversation(pre);
+		const userText = buildUserText(conversationText, input.instructions);
+		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
+		if (historySummary.length > 0) summaryParts.push(historySummary);
+	}
+	if (turnPrefix.length > 0) {
+		const conversationText = serializeConversation(turnPrefix);
+		const userText = buildTurnPrefixUserText(conversationText, input.instructions);
+		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
+		if (prefixSummary.length > 0) {
+			summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary}`);
+		}
+	}
+
+	const summary = summaryParts.join("\n\n---\n\n").trim();
 
 	return {
-		summary: summary.trim(),
+		summary,
 		firstKeptEntryIndex: cut.firstKeptEntryIndex,
 		firstKeptTurnId: firstKept?.turnId ?? null,
 		tokensBefore,
-		messagesSummarized: pre.length,
+		messagesSummarized: pre.length + turnPrefix.length,
 		isSplitTurn: cut.isSplitTurn,
 	};
 }

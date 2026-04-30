@@ -187,6 +187,35 @@ describe("chat-panel active entry update", () => {
 		strictEqual(panel.toggleLastThinking(), false);
 	});
 
+	it("toggleLastThinking applies the thinking visibility mode to prior thinking history", () => {
+		const panel = createChatPanel();
+		for (const label of ["first", "second"]) {
+			panel.appendUser(`${label} prompt`);
+			panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
+			panel.applyEvent({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: `${label} hidden detail` },
+						{ type: "text", text: `${label} answer` },
+					],
+				} as never,
+			});
+			panel.applyEvent({ type: "agent_end", messages: [] });
+		}
+
+		strictEqual(panel.toggleLastThinking(), true);
+		let text = strip(panel.render(96).join("\n"));
+		ok(text.includes("│ first hidden detail"), text);
+		ok(text.includes("│ second hidden detail"), text);
+
+		strictEqual(panel.toggleLastThinking(), true);
+		text = strip(panel.render(96).join("\n"));
+		ok(!text.includes("│ first hidden detail"), text);
+		ok(!text.includes("│ second hidden detail"), text);
+	});
+
 	it("renders the thinking block BEFORE the assistant text segments", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
@@ -384,14 +413,23 @@ describe("chat-panel active entry update", () => {
 		ok(text.includes("[error] provider returned 503"), text);
 	});
 
-	it("shows a working placeholder after assistant message_start before first token", () => {
+	it("shows only the assistant label after message_start before status arrives", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({
 			type: "message_start",
 			message: { role: "assistant", content: [] } as never,
 		});
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("Clio Coder: [working]"), `expected working placeholder, got: ${text}`);
+		ok(text.includes("Clio Coder:"), `expected assistant label, got: ${text}`);
+		ok(!text.includes("[working]"), `legacy working placeholder must not render: ${text}`);
+	});
+
+	it("renders statusLine below an empty pending assistant turn", () => {
+		const panel = createChatPanel();
+		panel.setStatusLine({ phase: "thinking", verb: "⠋ Thinking · 1s", toneHint: "normal" });
+		const text = strip(panel.render(80).join("\n"));
+		ok(text.includes("Clio Coder:"), text);
+		ok(text.includes("Thinking · 1s"), text);
 	});
 
 	it("renders prior user + assistant entries unchanged after a new user turn", () => {
@@ -581,6 +619,8 @@ describe("createCoalescingChatRenderer", () => {
 			applyEvent: (event: ChatLoopEvent) => {
 				applied.push(event);
 			},
+			setStatusLine: () => {},
+			setSummaryLine: () => {},
 			render: () => [],
 			invalidate: () => {},
 		};

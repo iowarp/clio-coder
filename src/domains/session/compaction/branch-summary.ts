@@ -65,6 +65,26 @@ function truncate(text: string, max: number): string {
 	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters truncated]`;
 }
 
+function payloadObject(payload: unknown): Record<string, unknown> | null {
+	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
+}
+
+function stringifyPreview(value: unknown): string {
+	if (value === undefined || value === null) return "";
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+function contentBlocks(payload: unknown): ReadonlyArray<Record<string, unknown>> {
+	const content = payloadObject(payload)?.content;
+	if (!Array.isArray(content)) return [];
+	return content.filter((block): block is Record<string, unknown> => !!block && typeof block === "object");
+}
+
 /**
  * Flatten a MessageEntry payload into plain text. Accepts three payload
  * shapes in use today:
@@ -80,16 +100,58 @@ function messageText(entry: MessageEntry): string {
 	if (!payload || typeof payload !== "object") return "";
 	const p = payload as Record<string, unknown>;
 	if (typeof p.text === "string") return p.text;
-	if (Array.isArray(p.content)) {
-		const parts: string[] = [];
-		for (const block of p.content) {
-			if (!block || typeof block !== "object") continue;
-			const b = block as Record<string, unknown>;
-			if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
-		}
-		return parts.join("\n");
-	}
+	const parts = contentBlocks(payload)
+		.filter((block) => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text as string);
+	if (parts.length > 0) return parts.join("\n");
 	return "";
+}
+
+function assistantThinkingText(entry: MessageEntry): string {
+	const payload = entry.payload;
+	const explicit = payloadObject(payload)?.thinking;
+	if (typeof explicit === "string" && explicit.length > 0) return explicit;
+	return contentBlocks(payload)
+		.filter((block) => block.type === "thinking" && typeof block.thinking === "string")
+		.map((block) => block.thinking as string)
+		.join("\n");
+}
+
+function assistantToolCallsText(entry: MessageEntry): string {
+	const calls = contentBlocks(entry.payload)
+		.filter((block) => block.type === "toolCall")
+		.map((block) => {
+			const name = typeof block.name === "string" && block.name.length > 0 ? block.name : "tool";
+			const args = block.arguments ?? block.args ?? block.input;
+			const suffix = args === undefined ? "" : `(${stringifyPreview(args)})`;
+			return `${name}${suffix}`;
+		});
+	return calls.join("; ");
+}
+
+function toolCallText(entry: MessageEntry): string {
+	const obj = payloadObject(entry.payload);
+	if (!obj) return messageText(entry);
+	const name = typeof obj.name === "string" ? obj.name : typeof obj.toolName === "string" ? obj.toolName : "tool";
+	const args = obj.args ?? obj.arguments ?? obj.input;
+	if (args !== undefined) return `${name}(${stringifyPreview(args)})`;
+	return messageText(entry) || name;
+}
+
+function toolResultText(entry: MessageEntry): string {
+	const obj = payloadObject(entry.payload);
+	const result = obj?.result ?? obj?.output ?? obj?.out ?? obj?.content;
+	if (Array.isArray(payloadObject(result)?.content)) {
+		const parts = contentBlocks(result)
+			.filter((block) => block.type === "text" && typeof block.text === "string")
+			.map((block) => block.text as string);
+		if (parts.length > 0) return parts.join("\n");
+	}
+	const textResult = payloadObject(result)?.text;
+	if (typeof textResult === "string") return textResult;
+	const text = messageText(entry);
+	if (text.length > 0) return text;
+	return stringifyPreview(result ?? entry.payload);
 }
 
 /**
@@ -107,21 +169,27 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 	for (const entry of entries) {
 		if (entry.kind === "message") {
 			const text = messageText(entry).trim();
-			if (text.length === 0) continue;
 			switch (entry.role) {
 				case "user":
+					if (text.length === 0) break;
 					parts.push(`[User]: ${text}`);
 					break;
-				case "assistant":
-					parts.push(`[Assistant]: ${text}`);
+				case "assistant": {
+					const thinking = assistantThinkingText(entry).trim();
+					const calls = assistantToolCallsText(entry).trim();
+					if (thinking.length > 0) parts.push(`[Assistant thinking]: ${thinking}`);
+					if (text.length > 0) parts.push(`[Assistant]: ${text}`);
+					if (calls.length > 0) parts.push(`[Assistant tool calls]: ${calls}`);
 					break;
+				}
 				case "tool_call":
-					parts.push(`[Assistant tool call]: ${text}`);
+					parts.push(`[Assistant tool calls]: ${toolCallText(entry).trim()}`);
 					break;
 				case "tool_result":
-					parts.push(`[Tool result]: ${truncate(text, TOOL_RESULT_MAX_CHARS)}`);
+					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), TOOL_RESULT_MAX_CHARS)}`);
 					break;
 				case "system":
+					if (text.length === 0) break;
 					parts.push(`[System]: ${text}`);
 					break;
 				case "checkpoint":

@@ -66,7 +66,7 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 	} as EndpointStatus;
 }
 
-function deps(options: { selfDev?: boolean } = {}): WelcomeDashboardDeps {
+function deps(options: { selfDev?: boolean; contextTokens?: number | null } = {}): WelcomeDashboardDeps {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.orchestrator.endpoint = "mini";
 	settings.orchestrator.model = "qwen";
@@ -94,6 +94,12 @@ function deps(options: { selfDev?: boolean } = {}): WelcomeDashboardDeps {
 			costEntries: () => [],
 			recordTokens: () => {},
 		} as ObservabilityContract,
+		getContextUsage: () =>
+			options.contextTokens === undefined
+				? { tokens: null, contextWindow: 1000, percent: null }
+				: options.contextTokens === null
+					? { tokens: null, contextWindow: 1000, percent: null }
+					: { tokens: options.contextTokens, contextWindow: 1000, percent: (options.contextTokens / 1000) * 100 },
 		getSettings: () => settings,
 		selfDev: options.selfDev ?? false,
 	};
@@ -101,7 +107,7 @@ function deps(options: { selfDev?: boolean } = {}): WelcomeDashboardDeps {
 
 describe("interactive/welcome-dashboard", () => {
 	it("derives target, model, and context stats from live contracts", () => {
-		const stats = deriveWelcomeDashboardStats(deps());
+		const stats = deriveWelcomeDashboardStats(deps({ contextTokens: 250 }));
 		strictEqual(stats.activeTargets, 3);
 		strictEqual(stats.totalTargets, 3);
 		strictEqual(stats.workerProfiles, 2);
@@ -112,7 +118,7 @@ describe("interactive/welcome-dashboard", () => {
 	});
 
 	it("renders a wide dashboard without exceeding the viewport", () => {
-		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps()), 112);
+		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ contextTokens: 250 })), 112);
 		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 		ok(text.includes("Clio Coder"), text);
 		ok(!text.includes("Welcome Dashboard"), text);
@@ -122,6 +128,14 @@ describe("interactive/welcome-dashboard", () => {
 		for (const line of lines) {
 			ok(visibleWidth(line) <= 112, `line too wide: ${visibleWidth(line)} ${line}`);
 		}
+	});
+
+	it("does not derive context usage from cumulative session token billing", () => {
+		const stats = deriveWelcomeDashboardStats(deps());
+		strictEqual(stats.contextPercent, null);
+		const lines = buildWelcomeDashboardLines(stats, 112);
+		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+		ok(text.includes("Context usage: idle"), text);
 	});
 
 	it("renders self-development as a magenta mode badge", () => {

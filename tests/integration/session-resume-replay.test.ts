@@ -156,8 +156,9 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		const serialized = JSON.stringify(replayMessages);
 		ok(serialized.includes("Old context and answer were summarized."), serialized);
 		ok(serialized.includes("kept question"), serialized);
-		ok(serialized.includes("Tool call: read"), serialized);
-		ok(serialized.includes("Tool result: read ok"), serialized);
+		ok(serialized.includes('"type":"toolCall"'), serialized);
+		ok(serialized.includes('"role":"toolResult"'), serialized);
+		ok(serialized.includes("read ok"), serialized);
 		ok(serialized.includes("Ran `npm test`"), serialized);
 		ok(!serialized.includes("old context"), serialized);
 		strictEqual(contract.tree(meta.id).leafId, a2.id, "trailing sessionInfo must not become the resume leaf");

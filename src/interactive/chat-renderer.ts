@@ -156,6 +156,84 @@ function makeTextMessage(role: "user" | "assistant", text: string, timestamp: st
 	return message as unknown as AgentMessage;
 }
 
+function cloneContentBlocks(content: unknown): unknown[] | null {
+	if (!Array.isArray(content)) return null;
+	return content
+		.filter((block) => !!block && typeof block === "object")
+		.map((block) => ({ ...(block as Record<string, unknown>) }));
+}
+
+function richMessageFromEntry(entry: MessageEntry): AgentMessage | null {
+	if (entry.role !== "user" && entry.role !== "assistant") return null;
+	const obj = payloadObject(entry.payload);
+	const content = cloneContentBlocks(obj?.content);
+	const text = extractTurnText(entry.payload);
+	if (!content && text.length === 0 && !messageFailure(entry)) return null;
+	const message: Record<string, unknown> = {
+		role: entry.role,
+		content: content ?? [{ type: "text", text }],
+		timestamp: timestampMillis(entry.timestamp),
+	};
+	if (entry.role === "assistant") {
+		const failure = messageFailure(entry);
+		message.stopReason = failure?.stopReason ?? (typeof obj?.stopReason === "string" ? obj.stopReason : "stop");
+		if (failure) message.errorMessage = failure.errorMessage;
+		for (const key of ["usage", "api", "provider", "model", "responseId"]) {
+			if (obj?.[key] !== undefined) message[key] = obj[key];
+		}
+	}
+	return message as unknown as AgentMessage;
+}
+
+function recordToolCallsFromMessage(message: AgentMessage, seen: Set<string>): void {
+	const content = (message as { content?: unknown }).content;
+	if (!Array.isArray(content)) return;
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		const b = block as Record<string, unknown>;
+		if (b.type !== "toolCall") continue;
+		if (typeof b.id === "string" && b.id.length > 0) seen.add(b.id);
+	}
+}
+
+function toolCallMessageFromEntry(entry: MessageEntry): AgentMessage {
+	const call = extractToolCall(entry);
+	const block: Record<string, unknown> = { type: "toolCall", id: call.id, name: call.name };
+	if (call.args !== undefined) block.arguments = call.args;
+	return {
+		role: "assistant",
+		content: [block],
+		stopReason: "toolUse",
+		timestamp: timestampMillis(entry.timestamp),
+	} as unknown as AgentMessage;
+}
+
+function toolResultContent(result: unknown): unknown[] {
+	const obj = payloadObject(result);
+	if (Array.isArray(obj?.content)) {
+		return cloneContentBlocks(obj.content) ?? [];
+	}
+	if (isTextResult(result)) return [{ type: "text", text: result.text }];
+	if (typeof result === "string") return [{ type: "text", text: result }];
+	return [{ type: "text", text: stringifyPreview(result, 10_000) }];
+}
+
+function isTextResult(value: unknown): value is { text: string } {
+	return payloadObject(value)?.text !== undefined && typeof (value as { text?: unknown }).text === "string";
+}
+
+function toolResultMessageFromEntry(entry: MessageEntry): AgentMessage {
+	const result = extractToolResult(entry);
+	return {
+		role: "toolResult",
+		content: toolResultContent(result.result),
+		toolCallId: result.id ?? entry.turnId,
+		toolName: result.name,
+		isError: result.isError,
+		timestamp: timestampMillis(entry.timestamp),
+	} as AgentMessage;
+}
+
 function textBlockFromEntry(entry: MessageEntry): string {
 	const text = extractTurnText(entry.payload);
 	if (text.length > 0) return text;
@@ -454,19 +532,27 @@ export function buildReplayAgentMessagesFromTurns(
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
 	const out: AgentMessage[] = [];
+	const seenToolCalls = new Set<string>();
 	for (const entry of selectReplayEntries(turns, options)) {
 		switch (entry.kind) {
 			case "message": {
 				const text = textBlockFromEntry(entry);
 				if (entry.role === "user" || entry.role === "assistant") {
 					if (entry.role === "assistant" && messageFailure(entry)) break;
-					appendContextMessage(out, entry.role, chatMessageText(entry), entry.timestamp);
+					const message = richMessageFromEntry(entry);
+					if (message) {
+						out.push(message);
+						recordToolCallsFromMessage(message, seenToolCalls);
+					}
 				} else if (entry.role === "tool_call") {
 					const call = extractToolCall(entry);
-					appendContextMessage(out, "assistant", `Tool call: ${call.name}(${stringifyPreview(call.args)})`, entry.timestamp);
+					if (!seenToolCalls.has(call.id)) {
+						const message = toolCallMessageFromEntry(entry);
+						out.push(message);
+						recordToolCallsFromMessage(message, seenToolCalls);
+					}
 				} else if (entry.role === "tool_result") {
-					const result = extractToolResult(entry);
-					appendContextMessage(out, "user", `Tool result: ${stringifyPreview(result.result)}`, entry.timestamp);
+					out.push(toolResultMessageFromEntry(entry));
 				} else if (entry.role === "system") {
 					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
 				}
@@ -528,8 +614,9 @@ export function rehydrateChatPanelFromTurns(
 				if (entry.role === "assistant") {
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
-					if (text.length > 0 || failure) {
-						const message = makeTextMessage("assistant", text, entry.timestamp);
+					const richMessage = richMessageFromEntry(entry);
+					if (richMessage || text.length > 0 || failure) {
+						const message = richMessage ?? makeTextMessage("assistant", text, entry.timestamp);
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;

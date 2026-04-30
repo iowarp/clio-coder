@@ -60,6 +60,13 @@ import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
+import {
+	createStatusController,
+	formatStatusElapsed,
+	resolveInlineVerb,
+	spinnerFrame,
+	type TurnSummary,
+} from "./status/index.js";
 import { renderSuperOverlayLines } from "./super-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
@@ -632,6 +639,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		modes: deps.modes,
 		providers: deps.providers,
 		observability: deps.observability,
+		getContextUsage: () => deps.chat.contextUsage(),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		selfDev: deps.selfDev,
 	});
@@ -646,6 +654,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
 	});
+	const statusController = createStatusController({
+		chat: deps.chat,
+		providers: deps.providers,
+		bus: deps.bus,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
 	const harness = deps.harness;
 	const footer = buildFooter({
 		modes: deps.modes,
@@ -653,6 +667,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
 		getStreaming: () => deps.chat.isStreaming(),
+		getAgentStatus: () => statusController.current(),
+		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => deps.observability.sessionTokens(),
 	});
 	const editor = new Editor(tui, {
@@ -689,6 +705,51 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		requestRender: () => tui.requestRender(),
 	});
 	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
+	let statusInlineFrame = 0;
+	const formatSummaryLine = (summary: TurnSummary): string => {
+		const stopGlyph =
+			summary.stopReason === "stop" || summary.stopReason === "toolUse" || summary.stopReason === "length"
+				? "✓"
+				: summary.stopReason === "cancelled" || summary.stopReason === "aborted"
+					? "⊘"
+					: "✗";
+		const tools =
+			summary.toolCount > 0
+				? ` · ${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}${
+						summary.toolErrorCount > 0 ? ` (${summary.toolErrorCount} ✗)` : ""
+					}`
+				: "";
+		const slow = summary.watchdogPeak >= 2 ? " · slow turn" : "";
+		const reasoning =
+			typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0
+				? ` · reasoning:${summary.reasoningTokens}`
+				: "";
+		const model =
+			summary.endpointId.length > 0 || summary.modelId.length > 0
+				? `${summary.endpointId || "endpoint"}/${summary.modelId || "model"}`
+				: "unknown-model";
+		return `${formatStatusElapsed(summary.elapsedMs)} · ${model} · ↑${summary.inputTokens} ↓${summary.outputTokens}${reasoning}${tools} ${stopGlyph}${slow}`;
+	};
+	const unsubscribeStatus = statusController.subscribe((status) => {
+		if (status.phase === "idle") {
+			chatPanel.setStatusLine(null);
+		} else if (status.phase === "ended") {
+			chatPanel.setStatusLine(null);
+			chatPanel.setSummaryLine(status.summary ? formatSummaryLine(status.summary) : null);
+		} else {
+			chatPanel.setSummaryLine(null);
+			const verb = resolveInlineVerb(status, Date.now(), terminal.columns);
+			if (verb) {
+				const frame = terminal.columns < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
+				chatPanel.setStatusLine({ phase: status.phase, verb: `${frame}${verb.text}`, toneHint: verb.toneHint });
+				statusInlineFrame = (statusInlineFrame + 1) % 10;
+			} else {
+				chatPanel.setStatusLine(null);
+			}
+		}
+		footer.refresh();
+		tui.requestRender();
+	});
 	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.70.x
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
@@ -783,7 +844,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let footerTicker: NodeJS.Timeout | null = null;
 	footerTicker = setInterval(() => {
 		const harnessActive = harness ? harness.state.snapshot().kind !== "idle" : false;
-		if (!deps.chat.isStreaming() && !harnessActive) return;
+		const statusActive = statusController.current().phase !== "idle";
+		if (!deps.chat.isStreaming() && !harnessActive && !statusActive) return;
 		footer.refresh();
 		tui.requestRender();
 	}, 120);
@@ -1163,6 +1225,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// result or a clean rejection instead of a hung promise.
 	const unsubscribeSuperRequired =
 		deps.toolRegistry?.onSuperRequired(() => {
+			deps.bus.emit(BusChannels.SuperRequired, { requestedBy: "tool", at: Date.now() });
 			if (overlayState === "super-confirm") return;
 			openSuperOverlay("tool");
 		}) ?? (() => {});
@@ -1500,6 +1563,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
+		unsubscribeStatus();
+		statusController.dispose();
 		unsubscribeProgress();
 		unsubscribeFooterTokens();
 		unsubscribeModeTheme();

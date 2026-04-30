@@ -6,6 +6,7 @@ import {
 	type AuditRecord,
 	type AuditWriter,
 	buildAbortAuditRecord,
+	buildAgentStatusChangeAuditRecord,
 	buildAuditRecord,
 	buildModeChangeAuditRecord,
 	buildSessionParkAuditRecord,
@@ -71,6 +72,16 @@ interface SessionResumedPayload {
 	at?: number;
 }
 
+interface AgentStatusChangedPayload {
+	runId: string | null;
+	phase: string;
+	prevPhase: string;
+	at?: number;
+	elapsedFromStart: number;
+	watchdogTier: number;
+	metadata?: Record<string, unknown>;
+}
+
 const PARK_REASONS = new Set<SessionParkReason>([
 	"create_new",
 	"resume_other",
@@ -97,6 +108,23 @@ function isSessionResumedPayload(value: unknown): value is SessionResumedPayload
 	return true;
 }
 
+function isAgentStatusChangedPayload(value: unknown): value is AgentStatusChangedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (p.runId !== null && typeof p.runId !== "string") return false;
+	if (typeof p.phase !== "string" || typeof p.prevPhase !== "string") return false;
+	if (typeof p.elapsedFromStart !== "number" || !Number.isFinite(p.elapsedFromStart)) return false;
+	if (typeof p.watchdogTier !== "number" || !Number.isFinite(p.watchdogTier)) return false;
+	if (p.metadata !== undefined && (!p.metadata || typeof p.metadata !== "object" || Array.isArray(p.metadata)))
+		return false;
+	return true;
+}
+
+function isAlarmableStatus(payload: AgentStatusChangedPayload): boolean {
+	if (payload.phase === "stuck" || payload.phase === "tool_blocked" || payload.phase === "retrying") return true;
+	return payload.phase === "ended" && payload.metadata?.reason === "cancelled";
+}
+
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let writer: AuditWriter | null = null;
 	let ruleset: DamageControlRuleset | null = null;
@@ -106,6 +134,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let unsubscribeRunAborted: (() => void) | null = null;
 	let unsubscribeSessionParked: (() => void) | null = null;
 	let unsubscribeSessionResumed: (() => void) | null = null;
+	let unsubscribeAgentStatusChanged: (() => void) | null = null;
 
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
@@ -147,6 +176,19 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				if (!isSessionResumedPayload(payload)) return;
 				writeAudit(buildSessionResumeAuditRecord({ sessionId: payload.sessionId, via: payload.via }));
 			});
+			unsubscribeAgentStatusChanged = context.bus.on(BusChannels.AgentStatusChanged, (payload) => {
+				if (!isAgentStatusChangedPayload(payload) || !isAlarmableStatus(payload)) return;
+				writeAudit(
+					buildAgentStatusChangeAuditRecord({
+						runId: payload.runId,
+						phase: payload.phase,
+						prevPhase: payload.prevPhase,
+						elapsedFromStart: payload.elapsedFromStart,
+						watchdogTier: payload.watchdogTier,
+						...(payload.metadata ? { metadata: payload.metadata } : {}),
+					}),
+				);
+			});
 		},
 		async stop() {
 			unsubscribeModeChanged?.();
@@ -157,6 +199,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			unsubscribeSessionParked = null;
 			unsubscribeSessionResumed?.();
 			unsubscribeSessionResumed = null;
+			unsubscribeAgentStatusChanged?.();
+			unsubscribeAgentStatusChanged = null;
 			await writer?.close();
 			writer = null;
 		},

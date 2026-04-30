@@ -2,6 +2,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
+import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { styleForMode } from "./mode-theme.js";
 
@@ -25,6 +26,7 @@ export interface WelcomeDashboardDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	observability: ObservabilityContract;
+	getContextUsage?: () => ContextUsageSnapshot;
 	getSettings?: () => Readonly<ClioSettings>;
 	selfDev: boolean;
 }
@@ -141,10 +143,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	}
 	const targetLabel = current?.endpoint.id ?? settings?.orchestrator?.endpoint ?? "not configured";
 	const modelLabel = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? "not configured";
-	const contextWindow = current?.capabilities.contextWindow ?? 0;
-	const tokenTotal = deps.observability.sessionTokens().totalTokens;
-	const contextPercent =
-		contextWindow > 0 && tokenTotal > 0 ? Math.min(100, (tokenTotal / contextWindow) * 100) : tokenTotal > 0 ? 0 : null;
+	const usage = deps.getContextUsage?.() ?? null;
+	const contextPercent = typeof usage?.percent === "number" && Number.isFinite(usage.percent) ? usage.percent : null;
 	const latencies = statuses
 		.map((status) => status.health.latencyMs)
 		.filter((value): value is number => typeof value === "number");

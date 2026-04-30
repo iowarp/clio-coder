@@ -7,6 +7,7 @@ import {
 	prepareBranchEntries,
 	serializeConversation,
 } from "../../src/domains/session/compaction/branch-summary.js";
+import { compact } from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint, findTurnStartIndex } from "../../src/domains/session/compaction/cut-point.js";
 import {
 	DEFAULT_COMPACTION_SETTINGS,
@@ -21,8 +22,9 @@ import {
 	getLastAssistantUsage,
 } from "../../src/domains/session/compaction/tokens.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
 import type { ClioTurnRecord } from "../../src/engine/session.js";
-import type { Usage } from "../../src/engine/types.js";
+import type { Model, Usage } from "../../src/engine/types.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
 // ---------------------------------------------------------------------------
@@ -406,6 +408,121 @@ describe("session/compaction/branch-summary serializeConversation", () => {
 	it("serializes prior compaction summaries inline", () => {
 		const entries = [compactionSummary("c1", "prior work done", "u1")];
 		strictEqual(serializeConversation(entries), "[Prior summary]: prior work done");
+	});
+
+	it("preserves assistant thinking, assistant tool calls, and real tool result envelopes", () => {
+		const assistant = assistantMessage("a1", "", "u1");
+		(assistant as { payload: unknown }).payload = {
+			content: [
+				{ type: "thinking", thinking: "Need exact package metadata." },
+				{ type: "text", text: "I will inspect package.json." },
+				{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "package.json" } },
+			],
+		};
+		const result = toolResult("tr1", "", "a1");
+		(result as { payload: unknown }).payload = {
+			toolCallId: "call-1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: '{"name":"clio-coder"}' }] },
+			isError: false,
+		};
+		const out = serializeConversation([assistant, result]);
+		ok(out.includes("[Assistant thinking]: Need exact package metadata."), out);
+		ok(out.includes("[Assistant]: I will inspect package.json."), out);
+		ok(out.includes('[Assistant tool calls]: read({"path":"package.json"})'), out);
+		ok(out.includes('[Tool result]: {"name":"clio-coder"}'), out);
+	});
+});
+
+describe("session/compaction/compact split-turn handling", () => {
+	it("adds a split-turn prefix summary so the active request is not dropped", async () => {
+		const faux = registerFauxProvider({
+			provider: "faux-compaction-split-turn",
+			models: [{ id: "faux-compactor", contextWindow: 200_000 }],
+		});
+		try {
+			faux.setResponses([
+				fauxAssistantMessage("## Goal\nSummarize older history.", { stopReason: "stop" }),
+				fauxAssistantMessage("Active request: preserve the user's current task and tool result.", {
+					stopReason: "stop",
+				}),
+			]);
+			const model = faux.getModel() as unknown as Model<never>;
+			const entries = [
+				userMessage("u1", "old context ".repeat(2000), null),
+				assistantMessage("a1", "old answer ".repeat(2000), "u1"),
+				userMessage("u2", "active task: finish v0.1.4 quality sprint", "a1"),
+				toolCall("tc2", "read(src/interactive/chat-loop.ts)", "u2"),
+				toolResult("tr2", "important active tool result", "tc2"),
+				assistantMessage("a2", "tail response", "tr2"),
+			];
+
+			const result = await compact({ entries, model, keepRecentTokens: 3 });
+			ok(result.isSplitTurn, "fixture should cut inside the active turn");
+			ok(result.summary.includes("## Goal\nSummarize older history."), result.summary);
+			ok(result.summary.includes("Turn Context (split turn)"), result.summary);
+			ok(result.summary.includes("Active request: preserve the user's current task"), result.summary);
+			ok(result.messagesSummarized > 2, "split-turn prefix entries should count as summarized context");
+		} finally {
+			faux.unregister();
+		}
+	});
+});
+
+describe("session/compaction/compact iterative compaction", () => {
+	it("does not re-summarize entries already captured by a prior compactionSummary", async () => {
+		const faux = registerFauxProvider({
+			provider: "faux-compaction-iterative",
+			models: [{ id: "faux-compactor-iter", contextWindow: 200_000 }],
+		});
+		try {
+			const observedConversations: string[] = [];
+			const recordAndReply = (label: string) => (ctx: { messages: Array<{ content?: unknown }> }) => {
+				const last = ctx.messages.at(-1);
+				const blocks = (last as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content;
+				if (Array.isArray(blocks)) {
+					observedConversations.push(
+						blocks
+							.filter((b) => b?.type === "text" && typeof b.text === "string")
+							.map((b) => b.text as string)
+							.join("\n"),
+					);
+				}
+				return fauxAssistantMessage(label, { stopReason: "stop" });
+			};
+			faux.setResponses([
+				recordAndReply("## Goal\nIterative history summary."),
+				recordAndReply("Active turn prefix summary."),
+			]);
+			const model = faux.getModel() as unknown as Model<never>;
+			const entries: SessionEntry[] = [
+				userMessage("u-old", "ancient request that lives only in the prior summary", null),
+				assistantMessage("a-old", "ancient assistant reply already captured", "u-old"),
+				compactionSummary("c-prior", "prior structured summary text", "u-recent"),
+				userMessage("u-recent", "x".repeat(4_000), "c-prior"),
+				assistantMessage("a-recent", "y".repeat(4_000), "u-recent"),
+				userMessage("u-tail", "z".repeat(4_000), "a-recent"),
+				assistantMessage("a-tail", "tail reply ".repeat(200), "u-tail"),
+			];
+
+			const result = await compact({ entries, model, keepRecentTokens: 200 });
+			ok(result.summary.length > 0, "iterative compaction should still produce a new summary");
+			const allObserved = observedConversations.join("\n\n");
+			ok(
+				!allObserved.includes("ancient request that lives only in the prior summary"),
+				"iterative compaction must not feed the pre-prior-summary user back into the prompt",
+			);
+			ok(
+				!allObserved.includes("ancient assistant reply already captured"),
+				"iterative compaction must not feed the pre-prior-summary assistant back into the prompt",
+			);
+			ok(
+				!allObserved.includes("prior structured summary text"),
+				"iterative compaction must not re-summarize the prior compactionSummary's body",
+			);
+		} finally {
+			faux.unregister();
+		}
 	});
 });
 
