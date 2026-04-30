@@ -12,7 +12,20 @@ import {
 } from "../../engine/tui.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
+const MODEL_OVERLAY_MIN_WIDTH = 60;
+const MODEL_OVERLAY_MAX_WIDTH = 120;
+const MODEL_OVERLAY_TERMINAL_PADDING = 8;
 const VISIBLE_ROWS = 12;
+
+function resolveOverlayWidth(terminalColumns: number): number {
+	// Default 82 fits a typical 80-col terminal with margin. On wider
+	// terminals grow the overlay so the description column does not lose
+	// the trailing endpoint=<id>/auth=<source> segments to mid-word cuts.
+	if (!Number.isFinite(terminalColumns) || terminalColumns <= 0) return MODEL_OVERLAY_WIDTH;
+	const available = terminalColumns - MODEL_OVERLAY_TERMINAL_PADDING;
+	if (available <= MODEL_OVERLAY_WIDTH) return Math.max(MODEL_OVERLAY_MIN_WIDTH, available);
+	return Math.min(MODEL_OVERLAY_MAX_WIDTH, available);
+}
 
 const IDENTITY = (s: string): string => s;
 
@@ -163,14 +176,21 @@ export function buildModelItems(deps: {
 				})()
 			: "unknown";
 		if (wireModels.length === 0) {
+			const reasonSegment = status.reason ? `  ${status.reason}` : "";
+			const noModelsAuthSegment = authText === "not-required" ? "" : `  auth=${authText}`;
 			items.push({
 				value: endpoint.id,
 				label: `${healthGlyph(status)}  ${runtimeName}`,
-				description: `endpoint=${endpoint.id}  auth=${authText}  ${status.reason}`,
+				description: `endpoint=${endpoint.id}${noModelsAuthSegment}${reasonSegment}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
 			continue;
 		}
+		// "not-required" is the common case for local-tier endpoints and
+		// provides no useful information beyond what the runtime label
+		// already says. Suppress it so endpoint=<id> stays on screen at the
+		// default 82-col overlay width.
+		const authSegment = authText === "not-required" ? "" : `  auth=${authText}`;
 		for (const wireModel of wireModels) {
 			const detectedReasoning = deps.providers.getDetectedReasoning(endpoint.id, wireModel);
 			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase, {
@@ -183,7 +203,7 @@ export function buildModelItems(deps: {
 			items.push({
 				value: `${endpoint.id}/${wireModel}`,
 				label: `${healthGlyph(status)}${scopedMark} ${wireModel}`,
-				description: `${contextWindowLabel(rowCaps)}  ${badges}  ${runtimeName}  endpoint=${endpoint.id}  auth=${authText}${stateText}`,
+				description: `${contextWindowLabel(rowCaps)}  ${badges}  ${runtimeName}  endpoint=${endpoint.id}${authSegment}${stateText}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: wireModel });
 		}
@@ -226,5 +246,6 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const box = new ModelOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: MODEL_OVERLAY_WIDTH });
+	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
+	return tui.showOverlay(box, { anchor: "center", width: overlayWidth });
 }
