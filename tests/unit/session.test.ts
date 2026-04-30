@@ -15,6 +15,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";
 import { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "../../src/domains/session/migrations/index.js";
 import { migrateV1ToV2 } from "../../src/domains/session/migrations/v1-to-v2.js";
+import { protectedArtifactStateFromSessionEntries } from "../../src/domains/session/protected-artifacts.js";
 import { resolveLabelMap } from "../../src/domains/session/tree/manager.js";
 import { buildTreeSnapshot, computeLeafId } from "../../src/domains/session/tree/navigator.js";
 import type { ClioTurnRecord, SessionTreeNode } from "../../src/engine/session.js";
@@ -52,6 +53,7 @@ describe("session/entries union", () => {
 				"branchSummary",
 				"compactionSummary",
 				"sessionInfo",
+				"protectedArtifact",
 			],
 		);
 	});
@@ -128,6 +130,72 @@ describe("session/entries union", () => {
 		const entry = fromLegacyTurn(legacy);
 		deepStrictEqual(entry.dynamicInputs, { cwd: "/tmp" });
 		strictEqual(entry.renderedPromptHash, "deadbeef");
+	});
+
+	it("rehydrates protected artifact state from session entries deterministically", () => {
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "m1",
+				parentTurnId: null,
+				timestamp: "2026-04-17T00:00:00.000Z",
+				role: "user",
+				payload: { text: "validate" },
+			},
+			{
+				kind: "protectedArtifact",
+				turnId: "p2",
+				parentTurnId: "m1",
+				timestamp: "2026-04-17T00:00:02.000Z",
+				action: "protect",
+				artifact: {
+					path: "b.txt",
+					protectedAt: "2026-04-17T00:00:02.000Z",
+					reason: "older duplicate",
+					source: "middleware",
+				},
+			},
+			{
+				kind: "protectedArtifact",
+				turnId: "p1",
+				parentTurnId: "m1",
+				timestamp: "2026-04-17T00:00:01.000Z",
+				action: "protect",
+				artifact: {
+					path: "a.txt",
+					protectedAt: "2026-04-17T00:00:01.000Z",
+					reason: "validated",
+					validationCommand: "npm test",
+					validationExitCode: 0,
+					source: "middleware",
+				},
+			},
+			{
+				kind: "protectedArtifact",
+				turnId: "p3",
+				parentTurnId: "m1",
+				timestamp: "2026-04-17T00:00:03.000Z",
+				action: "protect",
+				artifact: {
+					path: "b.txt",
+					protectedAt: "2026-04-17T00:00:03.000Z",
+					reason: "newer duplicate",
+					source: "session",
+				},
+			},
+		];
+
+		const state = protectedArtifactStateFromSessionEntries(entries);
+
+		deepStrictEqual(
+			state.artifacts.map((artifact) => [artifact.path, artifact.reason, artifact.source]),
+			[
+				["a.txt", "validated", "middleware"],
+				["b.txt", "newer duplicate", "session"],
+			],
+		);
+		strictEqual(state.artifacts[0]?.validationCommand, "npm test");
+		strictEqual(state.artifacts[0]?.validationExitCode, 0);
 	});
 });
 

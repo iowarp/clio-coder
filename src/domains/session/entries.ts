@@ -117,6 +117,27 @@ export interface SessionInfoEntry extends BaseSessionEntry {
 	label?: string;
 }
 
+export type ProtectedArtifactEntrySource = "validation" | "middleware" | "user" | "session";
+
+export interface ProtectedArtifactEntryArtifact {
+	path: string;
+	protectedAt: string;
+	reason: string;
+	validationCommand?: string;
+	validationExitCode?: number;
+	source: ProtectedArtifactEntrySource;
+}
+
+export interface ProtectedArtifactEntry extends BaseSessionEntry {
+	kind: "protectedArtifact";
+	action: "protect";
+	artifact: ProtectedArtifactEntryArtifact;
+	toolName?: string;
+	toolCallId?: string;
+	runId?: string;
+	correlationId?: string;
+}
+
 export type SessionEntry =
 	| MessageEntry
 	| BashExecutionEntry
@@ -126,7 +147,8 @@ export type SessionEntry =
 	| FileEntryEntry
 	| BranchSummaryEntry
 	| CompactionSummaryEntry
-	| SessionInfoEntry;
+	| SessionInfoEntry
+	| ProtectedArtifactEntry;
 
 /**
  * Canonical list of entry kinds. Exposed so consumers that switch on
@@ -144,6 +166,7 @@ export const SESSION_ENTRY_KINDS = [
 	"branchSummary",
 	"compactionSummary",
 	"sessionInfo",
+	"protectedArtifact",
 ] as const;
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];

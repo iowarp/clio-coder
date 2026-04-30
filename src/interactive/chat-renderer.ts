@@ -20,6 +20,7 @@ import type {
 	FileEntryEntry,
 	MessageEntry,
 	ModelChangeEntry,
+	ProtectedArtifactEntry,
 	SessionEntry,
 	SessionInfoEntry,
 	ThinkingLevelChangeEntry,
@@ -332,9 +333,17 @@ function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
+	if (entry.customType === "finishContractAdvisory") return renderFinishContractAdvisoryEntry(entry, width);
 	const body = stringifyPreview(entry.data);
 	const suffix = body.length > 0 ? ` ${body}` : "";
 	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
+}
+
+function renderFinishContractAdvisoryEntry(entry: CustomEntry, width: number): string[] {
+	const data = payloadObject(entry.data);
+	const message =
+		typeof data?.message === "string" && data.message.length > 0 ? data.message : "finish-contract advisory";
+	return wrapTextWithAnsi(message, width);
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
@@ -349,6 +358,14 @@ function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: numbe
 function renderFileEntry(entry: FileEntryEntry, width: number): string[] {
 	const bytes = typeof entry.bytes === "number" ? `, ${entry.bytes} bytes` : "";
 	return wrapTextWithAnsi(`[file ${entry.operation}] ${entry.path}${bytes}`, width);
+}
+
+function renderProtectedArtifactEntry(entry: ProtectedArtifactEntry, width: number): string[] {
+	const validation =
+		entry.artifact.validationCommand === undefined
+			? ""
+			: ` after ${entry.artifact.validationCommand}${entry.artifact.validationExitCode === undefined ? "" : ` exit ${entry.artifact.validationExitCode}`}`;
+	return wrapTextWithAnsi(`[protected] ${entry.artifact.path}${validation}: ${entry.artifact.reason}`, width);
 }
 
 function renderSessionInfoEntry(entry: SessionInfoEntry, width: number): string[] {
@@ -469,6 +486,7 @@ export function buildReplayAgentMessagesFromTurns(
 			case "thinkingLevelChange":
 			case "fileEntry":
 			case "sessionInfo":
+			case "protectedArtifact":
 				break;
 		}
 	}
@@ -586,6 +604,9 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			case "fileEntry":
 				chatPanel.appendReplayBlock((width) => renderFileEntry(entry, width));
+				break;
+			case "protectedArtifact":
+				chatPanel.appendReplayBlock((width) => renderProtectedArtifactEntry(entry, width));
 				break;
 			case "branchSummary":
 				if (entry.summary.trim().length > 0) {

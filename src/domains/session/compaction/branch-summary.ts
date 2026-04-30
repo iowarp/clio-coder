@@ -98,8 +98,9 @@ function messageText(entry: MessageEntry): string {
  * stable for a given input. Tests rely on this determinism.
  *
  * Non-context-bearing kinds (modelChange, thinkingLevelChange, fileEntry,
- * sessionInfo, custom) are skipped: they never contribute to the replayed
- * LLM context, so summarizing them would waste tokens on bookkeeping.
+ * sessionInfo, protectedArtifact, custom) are skipped: they never contribute
+ * to the replayed LLM context, so summarizing them would waste tokens on
+ * bookkeeping.
  */
 export function serializeConversation(entries: ReadonlyArray<SessionEntry>): string {
 	const parts: string[] = [];
@@ -140,8 +141,8 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 		if (entry.kind === "compactionSummary") {
 			parts.push(`[Prior summary]: ${entry.summary}`);
 		}
-		// custom, modelChange, thinkingLevelChange, fileEntry, sessionInfo
-		// do not project into the serialized conversation.
+		// custom, modelChange, thinkingLevelChange, fileEntry, sessionInfo,
+		// protectedArtifact do not project into the serialized conversation.
 	}
 	return parts.join("\n\n");
 }
