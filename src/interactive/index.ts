@@ -16,6 +16,7 @@ import {
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
+import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
@@ -635,12 +636,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// so editor/select components honor overrides without explicit plumbing.
 	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
 
+	const bootWorkspace = probeWorkspace(process.cwd());
+
 	const banner = createWelcomeDashboard({
 		modes: deps.modes,
 		providers: deps.providers,
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
-		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? null,
+		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		selfDev: deps.selfDev,
 	});
