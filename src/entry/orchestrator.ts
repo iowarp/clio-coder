@@ -408,7 +408,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 	});
-	registerAllTools(toolRegistry);
+	registerAllTools(toolRegistry, session ? { session } : {});
 	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
