@@ -14,6 +14,7 @@ export const ToolNames = {
 	WebFetch: "web_fetch",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
+	WorkspaceContext: "workspace_context",
 } as const;
 
 export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
