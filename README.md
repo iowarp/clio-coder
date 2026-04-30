@@ -117,13 +117,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
+git checkout v0.1.4
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.4` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -245,6 +246,13 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | `clio reset [--state\|--auth\|--config\|--all]` | Reset selected Clio Coder state. |
 | `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio agents` | List built-in agent specs. |
+| `clio components [--json]` | List behavior-affecting harness components. |
+| `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
+| `clio components diff --from <a> --to <b>` | Compare two component snapshots. |
+| `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
+| `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
+| `clio eval run\|report\|compare` | Run local eval task files and compare results. |
+| `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
@@ -303,6 +311,14 @@ Clio Coder ships with built-in agent specs for common coding workflows.
 | `delegate` | Routing work across multiple sub-agents. |
 | `context-builder` | Building focused context bundles for downstream agents. |
 | `worker` | General bounded execution tasks. |
+| `memory-curator` | Proposing scoped memory records from evidence artifacts. |
+| `debugger` | Explaining a failing run, session, or evidence id. |
+| `regression-scout` | Finding likely regressions and targeted negative tests. |
+| `middleware-author` | Drafting declarative middleware rules for review. |
+| `attributor` | Mapping eval changes to keep, rollback, or inconclusive calls. |
+| `evolver` | Drafting change manifests and minimal implementation plans. |
+| `benchmark-runner` | Running eval suites and summarizing budget and failures. |
+| `scientific-validator` | Drafting validation contracts for scientific artifacts. |
 
 Examples:
 
@@ -368,7 +384,7 @@ You can isolate state with environment variables:
 | --- | --- |
 | `CLIO_HOME` | Optional single-tree root for all Clio Coder state. |
 | `CLIO_CONFIG_DIR` | Location of `settings.yaml`. |
-| `CLIO_DATA_DIR` | Receipts, ledgers, sessions, and audit logs. |
+| `CLIO_DATA_DIR` | Receipts, ledgers, sessions, audit logs, evidence, evals, and memory. |
 | `CLIO_CACHE_DIR` | Transient cache location. |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed targets when configured. |
 | `OPENAI_API_KEY` | Enables OpenAI-backed targets when configured. |
@@ -694,6 +710,7 @@ This is intended to keep provider-specific code contained and make the system ea
 
 Current release:
 
+- **v0.1.4** (alpha). Highlights: component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory, worker memory injection, middleware rule metadata with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, and the scientific-validation spec.
 - **v0.1.3** (alpha). Highlights: live tool-output streaming inside the expanded tool block with a dim `(running...)` marker, bash subrenderer that echoes `$ <command>` before its output, `Ctrl+T` to expand an assistant turn's thinking block (symmetric with `Ctrl+O`), footer git-branch indicator resolved once at boot, autocomplete `fd`/`fdfind` resolver fix, and a self-dev `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts.
 - **v0.1.2** (alpha). Highlights: transient provider/stream retry with cancel-aware countdowns and persisted recovery, bash abort that escalates `SIGTERM` to `SIGKILL` after a grace period, structured tool and bash transcript rendering with `Ctrl+O` expand toggle and edit-tool diff preview, mode-colored editor rails, slash-command autocomplete, welcome dashboard at TUI launch, per-tool stats in run receipts, five-arm audit JSONL (tool calls, mode changes, run aborts, session park/resume), reasoning probe state surfaced in `clio targets --json`, provider catalog aligned with pi SDK 0.70.2, and `/thinking` plus `clio run` working against local `openai-compat` and LM Studio backends.
 
@@ -701,7 +718,6 @@ Near-term direction:
 
 - broader runtime hardening;
 - MCP support;
-- richer built-in agent library;
 - better first-run and target setup ergonomics;
 - more complete context and resource loading;
 - stronger docs for local model workflows;
