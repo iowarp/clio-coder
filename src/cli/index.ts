@@ -26,14 +26,14 @@ Usage:
   clio --dev                start self-development mode for this checkout
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
-  clio --no-context-files, -nc  Skip AGENTS.md/CLAUDE.md/CODEX.md context-file injection.
+  clio --no-context-files, -nc  skip AGENTS.md/CLAUDE.md/CODEX.md context-file injection
   clio configure            interactive first-run/configuration wizard
   clio targets              list configured targets, health, auth, and capabilities
   clio targets add          add a target interactively or via flags
   clio targets use <id>     set chat and worker defaults to a target
   clio targets worker       set a named worker profile
   clio targets remove <id>  remove a target
-  clio targets rename <old> <new>
+  clio targets rename <old> <new>  rename a target
   clio models [search]      list models for configured targets
   clio auth list|status|login|logout [target-or-runtime]
   clio doctor [--fix]       diagnose state; --fix creates or repairs it

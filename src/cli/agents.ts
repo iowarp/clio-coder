@@ -8,7 +8,19 @@ import { ensureClioState } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 
+const HELP = `clio agents [--json]
+
+List discovered agent recipes (id, mode, description) from built-in and project agent fragments.
+
+Flags:
+  --json   emit recipes as JSON instead of the formatted table
+`;
+
 export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
 	const json = args.includes("--json");
 	ensureClioState();
 	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, ModesDomainModule, AgentsDomainModule]);

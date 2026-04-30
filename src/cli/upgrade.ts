@@ -11,18 +11,34 @@ import { printError, printHeader, printOk } from "./shared.js";
 const CHANNELS = ["latest", "beta", "dev"] as const;
 type Channel = (typeof CHANNELS)[number];
 
+const HELP = `clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
+
+Reinstall Clio Coder via npm and apply any pending data-dir migrations.
+
+Flags:
+  --dry-run             print planned actions without changing anything
+  --channel=<chan>      npm dist-tag to install (latest|beta|dev). Defaults to latest.
+  --skip-migrations     skip migrations after the npm install step
+`;
+
 interface UpgradeOptions {
 	dryRun: boolean;
 	channel: Channel;
 	skipMigrations: boolean;
+	help: boolean;
 }
 
 function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let dryRun = false;
 	let channel: Channel = "latest";
 	let skipMigrations = false;
+	let help = false;
 	for (const arg of argv) {
 		if (arg === "upgrade") continue;
+		if (arg === "--help" || arg === "-h") {
+			help = true;
+			continue;
+		}
 		if (arg === "--dry-run") {
 			dryRun = true;
 			continue;
@@ -41,7 +57,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		}
 		throw new Error(`unknown upgrade argument: ${arg}`);
 	}
-	return { dryRun, channel, skipMigrations };
+	return { dryRun, channel, skipMigrations, help };
 }
 
 function streamPrefixed(source: NodeJS.ReadableStream, sink: NodeJS.WritableStream): void {
@@ -83,6 +99,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	} catch (err) {
 		printError(err instanceof Error ? err.message : String(err));
 		return 2;
+	}
+	if (opts.help) {
+		process.stdout.write(HELP);
+		return 0;
 	}
 
 	const before = getVersionInfo().clio;

@@ -18,7 +18,22 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] "<task>"\n';
+	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] [--json] "<task>"\n';
+
+const HELP = `clio run [flags] "<task>"
+
+Dispatch a one-shot worker against a target and print the run receipt.
+
+Flags:
+  --worker-profile <name>   named worker profile to dispatch under
+  --worker-runtime <id>     pick the first profile whose endpoint uses this runtime
+  --target <id>             explicit endpoint id (takes precedence over profile/runtime)
+  --model <wireId>          override the wire model id for this run
+  --thinking <level>        thinking level: off|minimal|low|medium|high|xhigh
+  --agent <recipe-id>       agent recipe (defaults to scout)
+  --require <capability>    capability the target must advertise (repeatable)
+  --json                    stream events and the final receipt as JSON
+`;
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -93,6 +108,10 @@ export async function runClioRun(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean } = {},
 ): Promise<number> {
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
 	const parsed = parseArgs(args);
 	if (parsed === null) {
 		process.stderr.write(USAGE);
