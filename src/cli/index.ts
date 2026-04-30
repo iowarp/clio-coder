@@ -4,6 +4,10 @@ import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
 import { runConfigureCommand } from "./configure.js";
 import { runDoctorCommand } from "./doctor.js";
+import { runEvalCommand } from "./eval.js";
+import { runEvidenceCommand } from "./evidence.js";
+import { runEvolveCommand } from "./evolve.js";
+import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
@@ -38,6 +42,10 @@ Usage:
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
   clio components           list, snapshot, or diff harness components
+  clio evidence             build, list, or inspect evidence artifacts
+  clio eval                 run, report, or compare local eval task files
+  clio memory               list, propose, approve, reject, or prune memory
+  clio evolve manifest      create, validate, or summarize change manifests
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
 `;
@@ -77,6 +85,14 @@ async function main(argv: string[]): Promise<number> {
 			return runAgentsCommand(subArgs);
 		case "components":
 			return runComponentsCommand(subArgs);
+		case "evidence":
+			return runEvidenceCommand(subArgs);
+		case "eval":
+			return runEvalCommand(subArgs);
+		case "memory":
+			return runMemoryCommand(subArgs);
+		case "evolve":
+			return runEvolveCommand(subArgs);
 		case "run":
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":
