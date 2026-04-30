@@ -16,6 +16,7 @@
 
 import type { TSchema } from "typebox";
 import type { ToolName } from "../core/tool-names.js";
+import { createMiddlewareContractFromSnapshot, type MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
@@ -212,10 +213,11 @@ function createWorkerSafety(): SafetyContract {
 	};
 }
 
-export function createWorkerToolRegistry(mode: ModeName): ToolRegistry {
+export function createWorkerToolRegistry(mode: ModeName, middlewareSnapshot?: MiddlewareSnapshot): ToolRegistry {
 	const registry = createRegistry({
 		safety: createWorkerSafety(),
 		modes: createWorkerModes(mode),
+		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
 	registerAllTools(registry);
 	return registry;

@@ -15,6 +15,7 @@ import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
+import type { MiddlewareContract } from "../middleware/contract.js";
 import type { ModesContract } from "../modes/contract.js";
 import {
 	type CapabilityFlags,
@@ -76,10 +77,12 @@ function pickWorkerScope(safety: SafetyContract, recipe: AgentRecipe | null): Sc
 	return safety.scopes.default;
 }
 
-function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
-	if (req.systemPrompt && req.systemPrompt.length > 0) return req.systemPrompt;
-	if (recipe) return recipe.body;
-	return "";
+export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
+	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
+	const memory = req.memorySection?.trim() ?? "";
+	if (memory.length === 0) return base;
+	if (base.length === 0) return memory;
+	return `${memory}\n\n${base}`;
 }
 
 interface ResolvedTarget {
@@ -233,14 +236,17 @@ export function createDispatchBundle(
 	const maybeAgents = context.getContract<AgentsContract>("agents");
 	const maybeModes = context.getContract<ModesContract>("modes");
 	const maybeProviders = context.getContract<ProvidersContract>("providers");
+	const maybeMiddleware = context.getContract<MiddlewareContract>("middleware");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
 	if (!maybeModes) throw new Error("dispatch domain requires 'modes' contract");
 	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
+	if (!maybeMiddleware) throw new Error("dispatch domain requires 'middleware' contract");
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const modes: ModesContract = maybeModes;
 	const providers: ProvidersContract = maybeProviders;
+	const middleware: MiddlewareContract = maybeMiddleware;
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
@@ -420,6 +426,7 @@ export function createDispatchBundle(
 			thinkingLevel: target.thinkingLevel,
 			allowedTools,
 			mode: workerMode,
+			middlewareSnapshot: middleware.snapshot(),
 		};
 		if (apiKey) spec.apiKey = apiKey;
 		let worker: SpawnedWorker;
