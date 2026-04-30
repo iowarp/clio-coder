@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { extractCommandWriteTargets } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -148,6 +149,24 @@ export function classify(call: ClassifierCall): Classification {
 		const sysHit = matchFirst(SYSTEM_MODIFY_PATTERNS, scan);
 		if (sysHit) {
 			return { actionClass: "system_modify", reasons: [`pattern:${sysHit.name}`] };
+		}
+		// Apply the same path-class gate we use for the write tool to every
+		// shell write-target the command exposes (redirects, tee, cp/mv
+		// destinations). Without this the model can dodge the write tool's
+		// super-mode gate by emitting `echo X > /tmp/foo.txt` after the user
+		// cancels the original write call.
+		const command = typeof call.args?.command === "string" ? call.args.command : null;
+		if (command !== null) {
+			const targetReasons: string[] = [];
+			for (const target of extractCommandWriteTargets(command)) {
+				const decision = writePathClass(target);
+				if (decision.cls === "system_modify") {
+					targetReasons.push(decision.reason ?? `bash-write-target: ${target}`);
+				}
+			}
+			if (targetReasons.length > 0) {
+				return { actionClass: "system_modify", reasons: targetReasons };
+			}
 		}
 		return { actionClass: "execute", reasons };
 	}

@@ -863,10 +863,20 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			}
 			if (deps.toolRegistry) {
 				if (cancelled) {
-					deps.toolRegistry.cancelParkedCalls("super mode confirmation cancelled");
+					deps.toolRegistry.cancelParkedCalls(
+						"User cancelled this tool call from the super-mode confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
+					);
 				} else {
 					void deps.toolRegistry.resumeParkedCalls();
 				}
+			}
+			// Hard-stop the entire agent turn on a super cancel so the model
+			// cannot reach the same target through a different tool (e.g.
+			// write -> bash redirection). Without this the SDK auto-continues
+			// after the blocked tool result and the agent treats the
+			// cancellation as "use a different approach".
+			if (cancelled && deps.chat.isStreaming()) {
+				cancelActiveRun();
 			}
 		}
 		// If a parked call arrived while an unrelated overlay was open, the

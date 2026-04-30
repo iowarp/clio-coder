@@ -47,6 +47,16 @@ packs:
         pattern: "\\bchmod\\s+-R\\s+[0-7]{3,4}\\s+/(?:(etc|usr|bin|sbin|var)(?:/|\\s|$)|(?:\\s|$))"
         class: system_modify
         block: true
+      - id: redirect-system-root
+        description: "shell redirect into /etc /usr /var (excluding /var/tmp) /bin /sbin"
+        pattern: ">>?\\s*\"?/(?:etc|usr|bin|sbin|var(?!/tmp))(?:/|\\s|\"|$)"
+        class: system_modify
+        block: true
+      - id: tee-system-root
+        description: "tee writing into /etc /usr /var (excluding /var/tmp) /bin /sbin"
+        pattern: "\\btee\\s+(?:-[A-Za-z]+\\s+)*\"?/(?:etc|usr|bin|sbin|var(?!/tmp))(?:/|\\s|\"|$)"
+        class: system_modify
+        block: true
   - id: dev
     rules:
       - id: selfdev-git-push
