@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.3-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.4-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,7 +30,21 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.3**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.4**.
+
+## What's new in 0.1.4
+
+- `clio components` lists, snapshots, and diffs every behavior-affecting harness artifact.
+- `clio evolve manifest init|validate|summarize` requires typed change proposals before high-authority edits.
+- `clio evidence build|inspect|list` builds a deterministic evidence corpus from receipts, runs, sessions, and audit rows.
+- `clio eval run|report|compare` runs repo-local YAML eval suites with per-task budgets and regression-vs-baseline diffs.
+- `clio memory list|propose|approve|reject|prune` curates scoped, approved, evidence-linked long-term memory under a fixed prompt-injection budget.
+- Workers receive the same gated memory section the orchestrator does, so `clio run` and the chat-loop see the same lessons.
+- Eight new built-in agent recipes ship for debugging, evolution, attribution, regression scouting, middleware authoring, memory curation, benchmark execution, and scientific validation.
+- A scientific-validation pack ships as a docs/spec plus three declarative middleware rules covering existence-vs-validation, checkpoint preservation, and unit-vs-scheduler distinctions.
+- An advisory finish-contract check warns when an assistant claims completion without recent validation evidence.
+
+See [CHANGELOG.md](CHANGELOG.md) for full detail.
 
 ### What's new in v0.1.3
 
