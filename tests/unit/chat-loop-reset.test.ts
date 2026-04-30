@@ -4,10 +4,12 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { EngineAgentHandle } from "../../src/engine/agent.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import type { ToolRegistry } from "../../src/tools/registry.js";
 
 /**
  * Verifies chat-loop.resetForSession wipes the two pieces of in-memory state
@@ -138,6 +140,26 @@ describe("interactive/chat-loop resetForSession", () => {
 		};
 
 		let subscribeCb: ((event: unknown) => void | Promise<void>) | null = null;
+		let sessionEntriesForProtectedArtifacts: SessionEntry[] = [];
+		const replacedProtectedArtifactPaths: string[][] = [];
+		const toolRegistry = {
+			register: () => {},
+			listVisible: () => [],
+			listAll: () => [],
+			get: () => undefined,
+			listForMode: () => [],
+			invoke: async () => {
+				throw new Error("unused in this test");
+			},
+			protectedArtifacts: () => ({ artifacts: [] }),
+			replaceProtectedArtifacts: (state: { artifacts: ReadonlyArray<{ path: string }> }) => {
+				replacedProtectedArtifactPaths.push(state.artifacts.map((artifact) => artifact.path));
+			},
+			hasParkedCalls: () => false,
+			resumeParkedCalls: async () => {},
+			cancelParkedCalls: () => {},
+			onSuperRequired: () => () => {},
+		} as unknown as ToolRegistry;
 
 		const loop = createChatLoop({
 			getSettings: () => settings,
@@ -155,6 +177,8 @@ describe("interactive/chat-loop resetForSession", () => {
 			providers,
 			knownEndpoints: () => new Set([endpoint.id]),
 			session,
+			readSessionEntries: () => sessionEntriesForProtectedArtifacts,
+			toolRegistry,
 			createAgent: () => {
 				const agent = {
 					state: agentState,
@@ -205,6 +229,7 @@ describe("interactive/chat-loop resetForSession", () => {
 		// null so a freshly-forked branch does not carry stale lineage.
 		loop.resetForSession(null);
 		deepStrictEqual(agentState.messages, [], "agent messages cleared on reset");
+		deepStrictEqual(replacedProtectedArtifactPaths.at(-1), [], "protected artifact state cleared on fresh reset");
 
 		await loop.submit("turn two");
 		strictEqual(appended.length, 4);
@@ -218,8 +243,28 @@ describe("interactive/chat-loop resetForSession", () => {
 			role: "user",
 			content: [{ type: "text", text: "replayed context" }],
 		} as AgentMessage;
+		sessionEntriesForProtectedArtifacts = [
+			{
+				kind: "protectedArtifact",
+				turnId: "pa1",
+				parentTurnId: "leaf-from-disk",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				action: "protect",
+				artifact: {
+					path: "validated.txt",
+					protectedAt: "2026-04-23T00:00:02.000Z",
+					reason: "validation passed",
+					source: "session",
+				},
+			},
+		];
 		loop.resetForSession("leaf-from-disk", [replayed]);
 		deepStrictEqual(agentState.messages, [replayed], "agent messages replaced with replayed context");
+		deepStrictEqual(
+			replacedProtectedArtifactPaths.at(-1),
+			["validated.txt"],
+			"protected artifact state rehydrated from resumed session entries",
+		);
 		await loop.submit("turn three");
 		strictEqual(appended.length, 6);
 		strictEqual(appended[4]?.kind, "user");

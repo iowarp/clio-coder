@@ -22,6 +22,9 @@ import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
+import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
+import type { MiddlewareContract } from "../domains/middleware/index.js";
+import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -44,6 +47,10 @@ import { collectSessionEntries } from "../domains/session/compaction/session-ent
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import {
+	protectedArtifactEntryFromArtifact,
+	protectedArtifactStateFromSessionEntries,
+} from "../domains/session/protected-artifacts.js";
 import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
 import { type HarnessHandle, startHarness } from "../harness/index.js";
@@ -57,7 +64,7 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { createRegistry } from "../tools/registry.js";
+import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
 
 export interface BootResult {
@@ -149,6 +156,35 @@ async function resolveCompactionModel(
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
 	return collectSessionEntries(reader.turns());
+}
+
+function protectedArtifactStateForCurrentSession(
+	session: SessionContract,
+): ReturnType<typeof protectedArtifactStateFromSessionEntries> {
+	const meta = session.current();
+	if (!meta) return { artifacts: [] };
+	return protectedArtifactStateFromSessionEntries(readSessionEntriesForCompact(meta.id));
+}
+
+function appendProtectedArtifactRegistryEvent(
+	session: SessionContract | undefined,
+	event: ProtectedArtifactRegistryEvent,
+): void {
+	if (!session?.current()) return;
+	try {
+		session.appendEntry(
+			protectedArtifactEntryFromArtifact(event.artifact, {
+				parentTurnId: event.turnId ?? null,
+				toolName: event.toolName,
+				...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
+				...(event.runId !== undefined ? { runId: event.runId } : {}),
+				...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
+			}),
+		);
+	} catch {
+		// Protected state is already live in memory. Session persistence is
+		// best-effort so a transient write failure cannot change tool behavior.
+	}
 }
 
 async function runCompactionFlow(
@@ -281,6 +317,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(selfDev ? { devRepoRoot: selfDev.repoRoot } : {}),
 		}),
 		AgentsDomainModule,
+		MiddlewareDomainModule,
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
@@ -339,16 +376,38 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const modes = result.getContract<ModesContract>("modes");
+	const middleware = result.getContract<MiddlewareContract>("middleware");
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
-	if (!modes || !providers || !dispatch || !observability || !safety) {
+	const session = result.getContract<SessionContract>("session");
+	const prompts = result.getContract<PromptsContract>("prompts");
+	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
-			"Clio Coder: interactive mode requires safety + modes + providers + dispatch + observability contracts; aborting.\n",
+			"Clio Coder: interactive mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
-	const toolRegistry = createRegistry({ safety, modes });
+
+	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
+	if (resumeId && session) {
+		try {
+			session.resume(resumeId);
+		} catch (err) {
+			process.stderr.write(
+				`Clio Coder: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
+	}
+	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
+
+	const toolRegistry = createRegistry({
+		safety,
+		modes,
+		middleware,
+		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
+		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
+	});
 	registerAllTools(toolRegistry);
 	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
 
@@ -357,8 +416,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (spec.allowedModes) allowedModesByName.set(spec.name, spec.allowedModes);
 	}
 
-	const session = result.getContract<SessionContract>("session");
-	const prompts = result.getContract<PromptsContract>("prompts");
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
 
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
@@ -386,18 +443,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSettings(current);
 	};
 
-	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
-	if (resumeId && session) {
-		try {
-			session.resume(resumeId);
-		} catch (err) {
-			process.stderr.write(
-				`Clio Coder: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
-			);
-		}
-	}
-	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
-
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
@@ -408,6 +453,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(selfDev ? { selfDevPrompt: buildSelfDevPrompt(selfDev) } : {}),
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
+		getMemorySection: () => {
+			try {
+				const records = loadMemoryRecordsSync(clioDataDir());
+				return buildMemoryPromptSection(records).section;
+			} catch {
+				return "";
+			}
+		},
 		...(session
 			? {
 					readSessionEntries: (): ReadonlyArray<SessionEntry> => {

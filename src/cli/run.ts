@@ -1,5 +1,6 @@
 import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -7,6 +8,8 @@ import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
+import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
@@ -120,6 +123,7 @@ export async function runClioRun(
 		ModesDomainModule,
 		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
 		AgentsDomainModule,
+		MiddlewareDomainModule,
 		DispatchDomainModule,
 		SessionDomainModule,
 		LifecycleDomainModule,
@@ -174,6 +178,17 @@ export async function runClioRun(
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
+
+	let memorySection = "";
+	try {
+		const records = loadMemoryRecordsSync(clioDataDir());
+		memorySection = buildMemoryPromptSection(records).section;
+	} catch (err) {
+		process.stderr.write(
+			`clio run: memory load failed: ${err instanceof Error ? err.message : String(err)}; continuing without memory\n`,
+		);
+	}
+	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
 	try {
 		const handle = await dispatch.dispatch(dispatchReq);

@@ -286,3 +286,49 @@ describe("prompts/compiler context files", () => {
 		}
 	});
 });
+
+describe("prompts/compiler memory section", () => {
+	it("omits the memory fragment when no memory section is supplied", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: {},
+		});
+
+		strictEqual(result.text.includes("# Memory"), false);
+		strictEqual(
+			result.fragmentManifest.some((entry) => entry.id === "memory.dynamic"),
+			false,
+		);
+	});
+
+	it("injects the memory section in a deterministic position with a stable hash delta", () => {
+		const memorySection = "# Memory\n\n- [mem-0000000000000000] (scope=repo) Use cited evidence. Evidence: ev-1.";
+		const noMemory = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: {},
+		});
+		const withMemory = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			memory: "memory.dynamic",
+			providers: "providers.dynamic",
+			session: "session.dynamic",
+			dynamicInputs: { memorySection },
+		});
+
+		ok(withMemory.text.includes("# Memory"), withMemory.text);
+		ok(withMemory.text.includes("[mem-0000000000000000]"), withMemory.text);
+		ok(withMemory.text.indexOf("# Memory") < withMemory.text.indexOf("# Provider runtime"), withMemory.text);
+		ok(withMemory.fragmentManifest.some((entry) => entry.id === "memory.dynamic"));
+		notStrictEqual(withMemory.renderedPromptHash, noMemory.renderedPromptHash);
+	});
+});
