@@ -133,8 +133,16 @@ export function compareProviderSupportEntries(a: ProviderSupportEntry, b: Provid
 	);
 }
 
-export function listProviderSupportEntries(runtimes: ReadonlyArray<RuntimeDescriptor>): ProviderSupportEntry[] {
-	return runtimes.map((runtime) => buildProviderSupportEntry(runtime)).sort(compareProviderSupportEntries);
+export interface ListProviderSupportOptions {
+	includeHidden?: boolean;
+}
+
+export function listProviderSupportEntries(
+	runtimes: ReadonlyArray<RuntimeDescriptor>,
+	options: ListProviderSupportOptions = {},
+): ProviderSupportEntry[] {
+	const filtered = options.includeHidden ? runtimes : runtimes.filter((runtime) => runtime.hidden !== true);
+	return filtered.map((runtime) => buildProviderSupportEntry(runtime)).sort(compareProviderSupportEntries);
 }
 
 export function configuredEndpointsForRuntime(

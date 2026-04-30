@@ -46,6 +46,21 @@ export interface ProbeContext {
 	signal?: AbortSignal;
 }
 
+/**
+ * Map of which inference surfaces a probe found at the endpoint.
+ * Composite local descriptors (llamacpp, lemonade) populate this from a
+ * batched HEAD/GET sweep; fields are absent when the surface did not respond.
+ * Values are the path the probe used so callers can cite it in errors.
+ */
+export interface ProbeSurfaceMap {
+	anthropicMessages?: string;
+	openaiChat?: string;
+	embeddings?: string;
+	rerank?: string;
+	completion?: string;
+	infill?: string;
+}
+
 export interface ProbeResult {
 	ok: boolean;
 	latencyMs?: number;
@@ -59,6 +74,14 @@ export interface ProbeResult {
 	 * weights (single-model server, so there is no eviction recourse).
 	 */
 	notes?: ReadonlyArray<string>;
+	/**
+	 * Composite descriptors set this to the api family they will use for chat.
+	 * `synthesizeModel` reads it back out of the cached probe state to choose
+	 * which provider implementation pi-ai routes to. Absent when the descriptor
+	 * is single-surface or no chat surface was reachable.
+	 */
+	chatApiFamily?: RuntimeApiFamily;
+	surfaces?: ProbeSurfaceMap;
 }
 
 export interface ReasoningProbeResult {
@@ -81,6 +104,13 @@ export interface RuntimeDescriptor {
 	headlessCommand?: string;
 	outputParser?: string;
 	defaultCapabilities: CapabilityFlags;
+	/**
+	 * When true, this id stays in the registry for back-compat resolution but
+	 * is hidden from `clio configure --list` and the interactive wizard. Used
+	 * for legacy surface-specific aliases (e.g. `llamacpp-anthropic`) after a
+	 * composite descriptor takes over the user-visible slot.
+	 */
+	hidden?: boolean;
 	probe?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
 	probeModels?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**

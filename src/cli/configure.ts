@@ -28,7 +28,8 @@ Configure model targets for chat and worker dispatch.
 
 Usage:
   clio configure                   interactive wizard
-  clio configure --list            list target runtimes
+  clio configure --list            list target runtimes (user-facing only)
+  clio configure --list --all      list every registered runtime including aliases
   clio configure --id <targetId> [flags] --runtime <runtimeId>
 
 Non-interactive flags:
@@ -69,6 +70,7 @@ interface ParsedArgs {
 	positional: string[];
 	help: boolean;
 	list: boolean;
+	all: boolean;
 	remove?: string;
 	renameOld?: string;
 	renameNew?: string;
@@ -95,6 +97,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		positional: [],
 		help: false,
 		list: false,
+		all: false,
 		gateway: false,
 		setOrchestrator: false,
 		setWorkerDefault: false,
@@ -114,6 +117,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--list":
 				out.list = true;
+				break;
+			case "--all":
+				out.all = true;
 				break;
 			case "--remove":
 				out.remove = need();
@@ -217,11 +223,11 @@ function defaultUrlFor(runtimeId: string): string {
 	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
-function printRuntimeList(): void {
+function printRuntimeList(includeHidden: boolean): void {
 	const settings = readSettings();
 	const auth = openAuthStorage();
 	let lastGroup: ProviderSupportEntry["group"] | null = null;
-	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list())) {
+	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list(), { includeHidden })) {
 		if (entry.group !== lastGroup) {
 			if (lastGroup !== null) process.stdout.write("\n");
 			lastGroup = entry.group;
@@ -936,7 +942,7 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 	ensureRegistryPopulated();
 
 	if (args.list) {
-		printRuntimeList();
+		printRuntimeList(args.all);
 		return 0;
 	}
 	if (args.remove) return runTargetRemove(args.remove);
