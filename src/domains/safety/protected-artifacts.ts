@@ -157,6 +157,63 @@ export function detectValidationCommand(command: string): ValidationCommandDetec
 	return { kind: "none" };
 }
 
+/**
+ * Returns every path the command would write to: shell redirect targets
+ * (`>`, `>>`), all path arguments to `tee`, and the destination argument
+ * of `cp` and `mv`. Standard descriptors like `/dev/null` and fd
+ * references like `&1` are filtered out so callers only see real
+ * filesystem targets.
+ *
+ * Used by the action classifier to escalate bash calls that write to a
+ * system root or out-of-cwd path through the same super-mode gate as the
+ * write tool. The classifier is the only safety lever for these patterns;
+ * pi-mono executes the bash command verbatim, so the registry-side check
+ * has to happen before the shell runs.
+ */
+export function extractCommandWriteTargets(command: string): string[] {
+	const tokens = tokenizeShellLike(command);
+	const targets: string[] = [];
+	for (const segment of splitSegments(tokens)) {
+		collectRedirectTargets(segment, targets);
+		collectInvokedWriteTargets(segment, targets);
+	}
+	return targets.filter(isInterestingWriteTarget);
+}
+
+const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
+
+function collectRedirectTargets(segment: ReadonlyArray<string>, out: string[]): void {
+	for (let index = 0; index < segment.length - 1; index += 1) {
+		const token = segment[index];
+		if (token !== ">" && token !== ">>") continue;
+		const target = segment[index + 1];
+		if (target !== undefined) out.push(target);
+	}
+}
+
+function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[]): void {
+	const cmdIndex = commandTokenIndex(segment);
+	if (cmdIndex === null) return;
+	const executable = basenameToken(segment[cmdIndex]);
+	if (executable === "tee") {
+		for (const arg of pathArgs(segment, cmdIndex)) out.push(arg);
+		return;
+	}
+	if (executable === "cp" || executable === "mv") {
+		const args = pathArgs(segment, cmdIndex);
+		const destination = args.at(-1);
+		if (args.length >= 2 && destination !== undefined) out.push(destination);
+	}
+}
+
+function isInterestingWriteTarget(target: string): boolean {
+	if (target.length === 0) return false;
+	if (target.startsWith("&")) return false;
+	if (STANDARD_DEV_TARGETS.has(target)) return false;
+	if (target.startsWith("/dev/fd/")) return false;
+	return true;
+}
+
 function classifyRedirect(
 	segment: ReadonlyArray<string>,
 	artifacts: ReadonlyArray<NormalizedArtifact>,
