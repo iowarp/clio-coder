@@ -9,5 +9,6 @@ export const DispatchDomainModule: DomainModule = {
 
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export { DispatchManifest } from "./manifest.js";
-export type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
+export { verifyReceiptIntegrity } from "./receipt-integrity.js";
+export type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "./types.js";
 export type { JobSpec } from "./validation.js";
