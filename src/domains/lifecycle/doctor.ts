@@ -1,12 +1,32 @@
 import { accessSync, chmodSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { readSettings } from "../../core/config.js";
+import { readSettings, writeSettings } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import { readStateInfo } from "./state.js";
 import { getVersionInfo } from "./version.js";
+
+/**
+ * Endpoints in settings.yaml that pin a legacy surface-specific id route
+ * to a hidden alias descriptor. Only `llamacpp-completion` is auto-migrated
+ * by `--fix`; the runtime declared chat=false and tools=false but pi-ai
+ * dispatched chat to its `/v1/chat/completions` surface anyway, so the
+ * unified `llamacpp` descriptor is a strict capability upgrade. Other
+ * legacy ids encode intent (anthropic-messages, embed-only, rerank-only)
+ * that the unified descriptor does not preserve, so they are warn-only.
+ */
+const LEGACY_RUNTIME_AUTO_MIGRATE: Readonly<Record<string, string>> = {
+	"llamacpp-completion": "llamacpp",
+};
+
+const LEGACY_RUNTIME_MANUAL_HINTS: Readonly<Record<string, string>> = {
+	"llamacpp-anthropic": "switch to runtime: llamacpp if you no longer need the anthropic-messages tool format",
+	"llamacpp-embed": "embed-only target; keep this runtime if your server is embeddings-only",
+	"llamacpp-rerank": "rerank-only target; keep this runtime if your server is rerank-only",
+	"lemonade-anthropic": "switch to runtime: lemonade if you no longer need the anthropic-messages tool format",
+};
 
 export type DoctorLevel = "ok" | "warn" | "error";
 
@@ -98,6 +118,56 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		detail: state ? `${state.version} @ ${state.installedAt}` : "missing",
 	});
 
+	for (const finding of legacyRuntimeFindings(options.fix === true)) {
+		findings.push(finding);
+	}
+
+	return findings;
+}
+
+function legacyRuntimeFindings(fix: boolean): DoctorFinding[] {
+	let settings: ReturnType<typeof readSettings>;
+	try {
+		settings = readSettings();
+	} catch {
+		return [];
+	}
+	const findings: DoctorFinding[] = [];
+	let mutated = false;
+	for (const endpoint of settings.endpoints) {
+		const replacement = LEGACY_RUNTIME_AUTO_MIGRATE[endpoint.runtime];
+		if (replacement) {
+			if (fix) {
+				const previous = endpoint.runtime;
+				endpoint.runtime = replacement;
+				mutated = true;
+				findings.push({
+					ok: true,
+					level: "warn",
+					name: `target ${endpoint.id}`,
+					detail: `migrated runtime ${previous} to ${replacement}`,
+				});
+			} else {
+				findings.push({
+					ok: false,
+					level: "warn",
+					name: `target ${endpoint.id}`,
+					detail: `runtime ${endpoint.runtime} is now an alias; rerun with --fix to migrate to ${replacement}`,
+				});
+			}
+			continue;
+		}
+		const hint = LEGACY_RUNTIME_MANUAL_HINTS[endpoint.runtime];
+		if (hint) {
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: `target ${endpoint.id}`,
+				detail: `runtime ${endpoint.runtime} is hidden from the menu; ${hint}`,
+			});
+		}
+	}
+	if (mutated) writeSettings(settings);
 	return findings;
 }
 
