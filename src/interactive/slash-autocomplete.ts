@@ -82,7 +82,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		// pi-tui returns fuzzy-ranked matches for slash commands. Clio narrows to
 		// strict prefix matches so /m surfaces /model only, not every command
 		// containing 'm'. Tests under tests/unit/slash-autocomplete.test.ts pin
-		// this UX intentionally — keep this filter even though it overlaps with
+		// this UX intentionally. Keep this filter even though it overlaps with
 		// pi-tui's own ranking.
 		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));
 		return items.length > 0 ? { ...suggestions, items } : null;
