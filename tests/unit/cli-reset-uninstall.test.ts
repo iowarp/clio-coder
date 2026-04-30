@@ -64,6 +64,8 @@ describe("cli reset and uninstall", () => {
 		ok(existsSync(settingsPath));
 		ok(readFileSync(settingsPath, "utf8").includes("targets: []"));
 		ok(existsSync(join(scratch, "data", "install.json")));
+		ok(existsSync(join(scratch, "data", "evidence")));
+		ok(existsSync(join(scratch, "data", "memory")));
 		ok(existsSync(join(scratch, "cache")));
 	});
 
@@ -77,10 +79,17 @@ describe("cli reset and uninstall", () => {
 		const settingsPath = join(scratch, "settings.yaml");
 		const dataDir = join(scratch, "data");
 		const cacheDir = join(scratch, "cache");
+		ok(existsSync(join(dataDir, "evidence")));
+		ok(existsSync(join(dataDir, "memory")));
 		const code = runUninstallCommand(["--keep-config", "--force"]);
 		strictEqual(code, 0);
 		ok(existsSync(settingsPath));
 		ok(!existsSync(dataDir));
 		ok(!existsSync(cacheDir));
+	});
+
+	it("initializeClioHome creates evidence and memory data directories", () => {
+		ok(existsSync(join(scratch, "data", "evidence")));
+		ok(existsSync(join(scratch, "data", "memory")));
 	});
 });

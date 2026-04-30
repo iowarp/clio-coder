@@ -19,7 +19,7 @@ export interface InitReport {
 	touchedSettings: boolean;
 }
 
-const SUBDIRS = ["sessions", "audit", "state", "agents", "prompts", "receipts"] as const;
+const SUBDIRS = ["sessions", "audit", "state", "agents", "prompts", "receipts", "evidence", "evals", "memory"] as const;
 
 export function initializeClioHome(): InitReport {
 	const configDir = clioConfigDir();

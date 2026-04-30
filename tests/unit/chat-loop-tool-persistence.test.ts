@@ -1,10 +1,11 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { EngineAgentHandle } from "../../src/engine/agent.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../src/engine/session.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -220,6 +221,141 @@ describe("interactive/chat-loop tool persistence", () => {
 		strictEqual(appended[4]?.parentId, appended[3]?.id);
 		strictEqual((appended[2]?.payload as { name?: string }).name, "read");
 		strictEqual((appended[3]?.payload as { toolCallId?: string }).toolCallId, "call-1");
+	});
+
+	it("surfaces a finish-contract advisory through chat events and session entries", async () => {
+		const { settings, providers } = createProviders();
+		let currentMeta: ClioSessionMeta | null = fakeMeta("session-1");
+		const entries: SessionEntry[] = [];
+		const session: SessionContract = {
+			current: () => currentMeta,
+			create: () => {
+				currentMeta = fakeMeta("session-1");
+				return currentMeta;
+			},
+			append: (input) => {
+				const rec: ClioTurnRecord = {
+					id: `turn-${entries.length}`,
+					parentId: input.parentId ?? null,
+					at: "2026-04-29T00:00:00.000Z",
+					kind: input.kind,
+					payload: input.payload,
+				};
+				entries.push({
+					kind: "message",
+					turnId: rec.id,
+					parentTurnId: rec.parentId,
+					timestamp: rec.at,
+					role: rec.kind,
+					payload: rec.payload,
+				});
+				return rec;
+			},
+			appendEntry: (input: SessionEntryInput) => {
+				const entry = {
+					...input,
+					turnId: input.turnId ?? `entry-${entries.length}`,
+					timestamp: input.timestamp ?? "2026-04-29T00:00:00.000Z",
+				} as SessionEntry;
+				entries.push(entry);
+				return entry;
+			},
+			async checkpoint() {},
+			resume: () => fakeMeta("session-1"),
+			fork: () => fakeMeta("session-2"),
+			tree: () => {
+				throw new Error("unused in this test");
+			},
+			switchBranch: () => fakeMeta("session-1"),
+			editLabel: () => {},
+			deleteSession: () => {},
+			history: () => [],
+			async close() {},
+		};
+
+		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+		const messages: string[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: {
+				current: () => "default",
+				setMode: () => "default",
+				cycleNormal: () => "default",
+				visibleTools: () => new Set(),
+				isToolVisible: () => false,
+				isActionAllowed: () => true,
+				requestSuper: () => {},
+				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
+			},
+			providers,
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			session,
+			readSessionEntries: () => entries,
+			createAgent: () => {
+				const agent = {
+					state: agentState,
+					sessionId: undefined as string | undefined,
+					subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+						subscribeCb = cb;
+						return () => {
+							subscribeCb = null;
+						};
+					},
+					prompt: async () => {
+						const reply: AgentMessage = {
+							role: "assistant",
+							content: [{ type: "text", text: "Done, the fix is complete." }],
+							stopReason: "stop",
+							timestamp: 0,
+						} as AgentMessage;
+						await subscribeCb?.({ type: "message_end", message: reply });
+						await subscribeCb?.({ type: "agent_end", messages: [reply] });
+					},
+					abort: () => {},
+				};
+				return {
+					agent: agent as unknown as EngineAgentHandle["agent"],
+					state: () => agent.state,
+				} as unknown as EngineAgentHandle;
+			},
+		});
+		loop.onEvent((event) => {
+			if (event.type !== "message_end") return;
+			const content = event.message.content;
+			if (!Array.isArray(content)) return;
+			const text = content
+				.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")
+				.map((item) => item.text)
+				.join("");
+			messages.push(text);
+		});
+
+		await loop.submit("finish this");
+
+		deepStrictEqual(messages, [
+			"Done, the fix is complete.",
+			"[Clio Coder] finish-contract advisory: completion claim found, but no recent validation evidence or explicit limitation was recorded. Run validation or state what could not be verified.",
+		]);
+		const advisory = entries.find((entry) => entry.kind === "custom" && entry.customType === "finishContractAdvisory");
+		strictEqual(advisory?.kind, "custom");
+		if (advisory?.kind === "custom") {
+			deepStrictEqual(advisory.data, {
+				message:
+					"[Clio Coder] finish-contract advisory: completion claim found, but no recent validation evidence or explicit limitation was recorded. Run validation or state what could not be verified.",
+			});
+			strictEqual(advisory.parentTurnId, "turn-1");
+		}
 	});
 
 	it("skips zero-usage observability records for failed turns", async () => {

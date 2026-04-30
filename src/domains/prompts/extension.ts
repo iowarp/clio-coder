@@ -85,11 +85,13 @@ export function createPromptsBundle(
 				contextFiles = renderProjectContextFiles(allFiles, cwd);
 			}
 			const dynamicInputs = contextFiles.length > 0 ? { ...input.dynamicInputs, contextFiles } : input.dynamicInputs;
+			const memorySection = input.dynamicInputs.memorySection?.trim() ?? "";
 			return compile(table, {
 				identity: "identity.clio",
 				mode: `modes.${currentMode}`,
 				safety: `safety.${safety}`,
 				...(contextFiles.length > 0 ? { context: "context.files" } : {}),
+				...(memorySection.length > 0 ? { memory: "memory.dynamic" } : {}),
 				providers: "providers.dynamic",
 				session: "session.dynamic",
 				dynamicInputs,

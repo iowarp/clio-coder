@@ -10,7 +10,7 @@ Remove Clio Coder state and print package-manager removal guidance. This does no
 
 Flags:
   --keep-config  keep settings.yaml and credentials.yaml
-  --keep-data    keep sessions, receipts, and other data
+  --keep-data    keep sessions, receipts, evidence, memory, and other data
   --dry-run      print what would be removed without changing anything
   --force        required for destructive execution
 `;

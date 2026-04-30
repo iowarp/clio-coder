@@ -15,11 +15,13 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import { assessFinishContract } from "../domains/safety/finish-contract.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import { calculateContextTokens } from "../domains/session/compaction/tokens.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import {
 	computeRetryDelayMs,
 	createRetryCountdown,
@@ -155,6 +157,14 @@ export interface CreateChatLoopDeps {
 	 * to construct a bus.
 	 */
 	bus?: SafeEventBus;
+	/**
+	 * Build the approved-memory prompt section for the current turn. Returns
+	 * the empty string when no approved, evidence-linked, in-scope memory
+	 * applies; otherwise returns a compact markdown section that the prompt
+	 * compiler injects via the memory dynamic fragment. Optional so unit
+	 * tests omit it when memory is irrelevant.
+	 */
+	getMemorySection?: () => string;
 }
 
 interface ChatLoopTarget {
@@ -240,6 +250,25 @@ function terminalFailureFromAssistantMessage(message: AgentMessage | undefined):
 				? "request aborted"
 				: "provider returned an error";
 	return { stopReason, errorMessage, message };
+}
+
+function finalAssistantStopMessage(messages: ReadonlyArray<AgentMessage>): AgentMessage | null {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (
+			!message ||
+			typeof message !== "object" ||
+			message === null ||
+			!("role" in message) ||
+			message.role !== "assistant"
+		) {
+			continue;
+		}
+		const stopReason = (message as { stopReason?: unknown }).stopReason;
+		if (stopReason !== undefined && stopReason !== "stop") continue;
+		return message;
+	}
+	return null;
 }
 
 function noticeMessage(text: string): AgentMessage {
@@ -444,6 +473,44 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const message = noticeMessage(text);
 		emit({ type: "message_end", message });
 		emit({ type: "agent_end", messages: [message] });
+	};
+
+	const appendFinishContractAdvisory = (message: string): void => {
+		if (!deps.session?.current()) return;
+		try {
+			deps.session.appendEntry({
+				kind: "custom",
+				parentTurnId: lastTurnId,
+				customType: "finishContractAdvisory",
+				display: true,
+				data: { message },
+			});
+		} catch {
+			// Advisory persistence is best-effort; the live notice still
+			// reaches the operator through the existing chat event path.
+		}
+	};
+
+	const emitFinishContractAdvisory = (messages: ReadonlyArray<AgentMessage>): void => {
+		if (!deps.session?.current() || !deps.readSessionEntries) return;
+		const message = finalAssistantStopMessage(messages);
+		if (message === null) return;
+		const text = extractText(message).trim();
+		if (text.length === 0) return;
+		let entries: ReadonlyArray<SessionEntry>;
+		try {
+			entries = deps.readSessionEntries();
+		} catch {
+			return;
+		}
+		const assessment = assessFinishContract({
+			assistantText: text,
+			sessionEntries: entries,
+			assistantTurnId: lastTurnId,
+		});
+		if (assessment.kind !== "advisory") return;
+		appendFinishContractAdvisory(assessment.message);
+		emitNotice(assessment.message);
 	};
 
 	const retrySettings = (): RetrySettings => {
@@ -789,6 +856,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					);
 				}
 			}
+			if (event.type === "agent_end") {
+				emitFinishContractAdvisory(event.messages);
+			}
 		});
 
 		runtime = localRuntime;
@@ -999,6 +1069,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			thinkingBudget: runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off",
 			turnCount: 0,
 		};
+		if (deps.getMemorySection) {
+			try {
+				const memorySection = deps.getMemorySection();
+				if (memorySection.length > 0) dynamicInputs.memorySection = memorySection;
+			} catch (err) {
+				emitNotice(
+					`[Clio Coder] memory load failed; continuing without memory injection: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
 		const safetyLevel = settings.safetyLevel ?? "auto-edit";
 		try {
 			const result = deps.prompts.compileForTurn({
@@ -1221,6 +1301,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];
 			if (runtime) {
 				runtime.agent.state.messages = [...replayedContextMessages];
+			}
+			if (deps.toolRegistry) {
+				try {
+					const entries = deps.readSessionEntries ? deps.readSessionEntries() : [];
+					deps.toolRegistry.replaceProtectedArtifacts(protectedArtifactStateFromSessionEntries(entries));
+				} catch {
+					deps.toolRegistry.replaceProtectedArtifacts({ artifacts: [] });
+				}
 			}
 		},
 		async compact(instructions?: string): Promise<void> {
