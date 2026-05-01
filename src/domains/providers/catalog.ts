@@ -71,6 +71,7 @@ export interface CatalogBackedSynthesisInput {
 	provider: string;
 	api: Api;
 	defaultBaseUrl: string;
+	defaultHeaders?: Record<string, string>;
 }
 
 export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput): Model<Api> {
@@ -101,8 +102,9 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
-	if (endpointHeaders) {
-		model.headers = { ...(builtin?.headers ?? {}), ...endpointHeaders };
+	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(endpointHeaders ?? {}) };
+	if (Object.keys(headers).length > 0) {
+		model.headers = headers;
 	}
 	return model;
 }

@@ -247,19 +247,26 @@ describe("cli configure and targets", () => {
 
 	it("keeps the selected OpenRouter model as the worker default", async () => {
 		const model = "nvidia/nemotron-3-super-120b-a12b:free";
-		const code = await runConfigureCommand([
-			"--runtime",
-			"openrouter",
-			"--id",
-			"openrouter-live",
-			"--model",
-			model,
-			"--api-key-env",
-			"OPENROUTER_API_KEY",
-			"--set-orchestrator",
-			"--set-worker-default",
-		]);
-		strictEqual(code, 0);
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ data: [{ id: model }] }), { status: 200 })) as typeof fetch;
+		try {
+			const code = await runConfigureCommand([
+				"--runtime",
+				"openrouter",
+				"--id",
+				"openrouter-live",
+				"--model",
+				model,
+				"--api-key-env",
+				"OPENROUTER_API_KEY",
+				"--set-orchestrator",
+				"--set-worker-default",
+			]);
+			strictEqual(code, 0);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 
 		const settings = readSettings();
 		const target = settings.endpoints.find((entry) => entry.id === "openrouter-live");

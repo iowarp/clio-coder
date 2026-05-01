@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
@@ -223,5 +223,45 @@ describe("providers/runtimes built-in descriptors", () => {
 		strictEqual(model.contextWindow, 123456);
 		strictEqual(model.maxTokens, 789);
 		strictEqual(model.input.includes("image"), false);
+	});
+
+	it("openrouter synthesizes attribution headers and probes live model ids", async () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		const openrouter = byId.get("openrouter");
+		ok(openrouter, "missing openrouter runtime");
+		strictEqual(openrouter.defaultCapabilities.thinkingFormat, "openrouter");
+
+		const model = openrouter.synthesizeModel({ id: "or", runtime: "openrouter" }, "tencent/hy3-preview:free", null);
+		strictEqual(model.headers?.["HTTP-Referer"], "https://github.com/iowarp/clio-coder");
+		strictEqual(model.headers?.["X-OpenRouter-Title"], "Clio Coder");
+		strictEqual(model.reasoning, true);
+		strictEqual(model.contextWindow, 262144);
+		strictEqual(model.maxTokens, 262144);
+
+		const originalFetch = globalThis.fetch;
+		const originalKey = process.env.OPENROUTER_API_KEY;
+		let capturedUrl = "";
+		let capturedAuthorization = "";
+		globalThis.fetch = (async (input, init) => {
+			capturedUrl = String(input);
+			const headers = init?.headers as Record<string, string> | undefined;
+			capturedAuthorization = headers?.authorization ?? "";
+			return new Response(JSON.stringify({ data: [{ id: "tencent/hy3-preview:free" }] }), { status: 200 });
+		}) as typeof fetch;
+		process.env.OPENROUTER_API_KEY = "sk-or";
+		try {
+			const result = await openrouter.probe?.(
+				{ id: "or", runtime: "openrouter", defaultModel: "tencent/hy3-preview:free" },
+				{ credentialsPresent: new Set(["OPENROUTER_API_KEY"]), httpTimeoutMs: 1000 },
+			);
+			strictEqual(result?.ok, true);
+			deepStrictEqual(result?.models, ["tencent/hy3-preview:free"]);
+			strictEqual(capturedUrl, "https://openrouter.ai/api/v1/models");
+			strictEqual(capturedAuthorization, "Bearer sk-or");
+		} finally {
+			globalThis.fetch = originalFetch;
+			if (originalKey === undefined) Reflect.deleteProperty(process.env, "OPENROUTER_API_KEY");
+			else process.env.OPENROUTER_API_KEY = originalKey;
+		}
 	});
 });
