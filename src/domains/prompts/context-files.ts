@@ -1,5 +1,5 @@
 /**
- * project context-file loader for the prompts domain.
+ * one-shot legacy context-file loader for bootstrap.
  *
  * walks from the filesystem root down to `cwd` and reads every matching
  * filename in `DEFAULT_CONTEXT_FILE_NAMES`. each file is classified by
@@ -7,9 +7,9 @@
  * conflict policy (CLIO.md wins; CLIO-dev.md overrides CLIO.md; among
  * the rest, child-closest-to-cwd wins).
  *
- * `renderProjectContextFiles` is now a thin wrapper around the merger;
- * callers receive a single deterministic block keyed by canonical
- * section header rather than a per-file concatenation.
+ * This module is no longer used during normal prompt compilation. `runBootstrap`
+ * reads sibling agent-context files once, distills them into CLIO.md, and then
+ * Clio uses only CLIO.md for project context on later turns.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";

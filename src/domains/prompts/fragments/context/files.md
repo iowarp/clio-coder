@@ -6,6 +6,4 @@ description: Project context files
 dynamic: true
 ---
 
-# Project context
-
 {{contextFiles}}

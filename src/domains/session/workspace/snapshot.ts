@@ -1,5 +1,5 @@
 import { probeGit } from "./git-probe.js";
-import { detectProjectType } from "./project-type.js";
+import { detectProjectType, type ProjectType } from "./project-type.js";
 
 /**
  * Workspace snapshot captured at session bind. Read-only for the session's
@@ -20,7 +20,7 @@ export interface WorkspaceSnapshot {
 	behind: number | null;
 	recentCommits: ReadonlyArray<WorkspaceCommit>;
 	remoteUrl: string | null;
-	projectType: "node" | "python" | "rust" | "go" | "dotfiles" | "unknown";
+	projectType: ProjectType;
 	capturedAt: string;
 }
 

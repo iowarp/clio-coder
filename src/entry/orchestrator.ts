@@ -17,6 +17,7 @@ import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import { type ContextContract, ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
@@ -77,7 +78,7 @@ export interface BootOptions {
 	apiKey?: string;
 	/** Enable Clio self-development mode for the current process. */
 	dev?: boolean;
-	/** Suppress AGENTS.md / CLAUDE.md / CODEX.md context-file injection for this run. */
+	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
 }
 
@@ -309,6 +310,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const result = await loadDomains([
 		ConfigDomainModule,
+		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		ModesDomainModule,
@@ -381,6 +383,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
+	const contextDomain = result.getContract<ContextContract>("context");
 	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
 			"Clio Coder: interactive mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -528,6 +531,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
+		...(contextDomain
+			? {
+					onInit: async () => {
+						await contextDomain.runBootstrap({
+							cwd: process.cwd(),
+							io: {
+								stdout: (s) => process.stdout.write(s),
+								stderr: (s) => process.stderr.write(s),
+							},
+							confirmGitignore: () => true,
+						});
+					},
+				}
+			: {}),
 		onSetThinkingLevel: (level) => {
 			updateSettings((current) => {
 				current.orchestrator.thinkingLevel = level;

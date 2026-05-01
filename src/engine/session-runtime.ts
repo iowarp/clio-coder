@@ -43,7 +43,16 @@ export interface SessionRuntimeSession {
 	startedAt: number;
 }
 
+export interface SessionRuntimeLifecycleContext {
+	threadId: string;
+	session: SessionRuntimeSession;
+}
+
+export type SessionRuntimeHook = (ctx: SessionRuntimeLifecycleContext) => Promise<void>;
+
 export interface SessionfulRuntime {
+	onSessionStart(hook: SessionRuntimeHook): () => void;
+	onSessionEnd(hook: SessionRuntimeHook): () => void;
 	startSession(input: SessionRuntimeStartInput, emit: (event: AgentEvent) => void): Promise<SessionRuntimeSession>;
 	sendTurn(input: SessionRuntimeSendTurnInput): Promise<SessionRuntimeTurnHandle>;
 	interruptTurn(threadId: string, turnId?: string): Promise<void>;

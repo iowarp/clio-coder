@@ -3,6 +3,17 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## Unreleased
+
+### Added
+
+- Added `clio init` and `/init` to bootstrap a checked-in `CLIO.md` plus local `.clio/state.json` fingerprint state.
+- Added CLIO.md parsing, serialization, project fingerprinting, and session lifecycle state refresh for project context.
+
+### Changed
+
+- Project context injection now loads `CLIO.md` only. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and `CODEX.md` are read during `/init` and folded into `CLIO.md`; they are no longer walked and merged on every turn.
+
 ## 0.1.4 — 2026-04-30
 
 The v0.1 evolution-plane release. v0.1.4 lands the components registry

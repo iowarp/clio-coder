@@ -3,6 +3,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import { ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -137,6 +138,7 @@ export async function runClioRun(
 	ensureClioState();
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		ModesDomainModule,

@@ -194,6 +194,66 @@ describe("Claude Code SDK runtime", () => {
 		strictEqual(controls.setPermissionModeCalls[0], "plan");
 	});
 
+	it("runs lifecycle hooks in start and stop order", async () => {
+		const controls: FakeQueryControls = {
+			setModelCalls: [],
+			setPermissionModeCalls: [],
+			interruptCalls: 0,
+			closed: false,
+		};
+		const seen: string[] = [];
+		const sdk = createClaudeCodeSdkRuntime({
+			createQuery: ({ prompt }) => makeFakeQuery(prompt, [], controls),
+		});
+		sdk.onSessionStart(async () => {
+			seen.push("start-hook");
+		});
+		sdk.onSessionEnd(async () => {
+			seen.push("end-hook");
+		});
+		const session = await sdk.startSession(
+			{
+				systemPrompt: "",
+				endpoint,
+				runtime,
+				wireModelId: "claude-sonnet-4-6",
+			},
+			(event) => seen.push(event.type),
+		);
+		await sdk.stopSession(session.threadId);
+		strictEqual(seen.join("|"), "start-hook|agent_start|end-hook");
+	});
+
+	it("propagates lifecycle hook failures", async () => {
+		const controls: FakeQueryControls = {
+			setModelCalls: [],
+			setPermissionModeCalls: [],
+			interruptCalls: 0,
+			closed: false,
+		};
+		const sdk = createClaudeCodeSdkRuntime({
+			createQuery: ({ prompt }) => makeFakeQuery(prompt, [], controls),
+		});
+		sdk.onSessionStart(async () => {
+			throw new Error("hook failed");
+		});
+		const outcome = await sdk
+			.startSession(
+				{
+					systemPrompt: "",
+					endpoint,
+					runtime,
+					wireModelId: "claude-sonnet-4-6",
+				},
+				() => undefined,
+			)
+			.then(
+				() => "resolved",
+				(err: unknown) => (err instanceof Error ? err.message : String(err)),
+			);
+		strictEqual(outcome, "hook failed");
+	});
+
 	it("denies unsupported native user-input hooks through canUseTool", async () => {
 		let capturedOptions: ClaudeQueryOptions | undefined;
 		const controls: FakeQueryControls = {
