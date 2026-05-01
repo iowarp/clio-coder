@@ -3,7 +3,7 @@ import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ModesContract } from "../domains/modes/contract.js";
-import type { ModeName } from "../domains/modes/matrix.js";
+import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import {
@@ -113,11 +113,10 @@ export interface ToolRegistry {
 	/** Lookup by tool id. */
 	get(name: ToolName): ToolSpec | undefined;
 	/**
-	 * Tool names admissible in `mode`. A tool qualifies when its `allowedModes`
-	 * list includes `mode`, or when `allowedModes` is undefined (meaning every
-	 * mode). This is the mode-filter primitive workers use to resolve the
-	 * per-run tool set without pulling in the live ModesContract; the mode
-	 * matrix remains authoritative for interactive visibility.
+	 * Tool names admissible in `mode`. A tool qualifies only when the mode
+	 * matrix exposes it and its per-spec `allowedModes` permits that mode.
+	 * Workers use this primitive to resolve per-run tools without a live
+	 * ModesContract, so the matrix must stay authoritative here too.
 	 */
 	listForMode(mode: ModeName): ReadonlyArray<ToolName>;
 	/**
@@ -316,7 +315,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		},
 		listForMode: (mode) =>
 			Array.from(tools.values())
-				.filter((t) => !t.allowedModes || t.allowedModes.includes(mode))
+				.filter((t) => MODE_MATRIX[mode].tools.has(t.name) && (!t.allowedModes || t.allowedModes.includes(mode)))
 				.map((t) => t.name),
 		listVisible: () => {
 			const visible = deps.modes.visibleTools();

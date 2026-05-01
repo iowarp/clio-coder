@@ -216,6 +216,25 @@ function formatLatency(ms: number | null): string {
 	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+function gitStatusLabel(ws: WorkspaceSnapshot): string {
+	if (ws.dirty === null) return "unknown";
+	return ws.dirty ? "dirty" : "clean";
+}
+
+function aheadBehindLabel(ws: WorkspaceSnapshot): string {
+	const parts: string[] = [];
+	if (typeof ws.ahead === "number" && ws.ahead > 0) parts.push(`ahead ${ws.ahead}`);
+	if (typeof ws.behind === "number" && ws.behind > 0) parts.push(`behind ${ws.behind}`);
+	return parts.length > 0 ? `, ${parts.join(", ")}` : "";
+}
+
+function recentCommitLines(ws: WorkspaceSnapshot): string[] {
+	return ws.recentCommits.slice(0, 2).map((commit) => {
+		const sha = commit.sha.length > 7 ? commit.sha.slice(0, 7) : commit.sha;
+		return `commit: ${sha} ${commit.subject}`;
+	});
+}
+
 export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: number): string[] {
 	if (width < 84) return compactLine(stats, width);
 	const inner = Math.min(118, Math.max(84, width));
@@ -257,9 +276,11 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		const cwdLabel = ws.projectType === "unknown" ? ws.cwd : `${ws.cwd} · ${ws.projectType}`;
 		const lines: string[] = [cwdLabel];
 		if (ws.isGit) {
-			const dirty = ws.dirty ? "dirty" : "clean";
+			const dirty = gitStatusLabel(ws);
+			const position = aheadBehindLabel(ws);
 			const remote = ws.remoteUrl ? ` · remote: ${ws.remoteUrl.replace(/^https?:\/\//, "")}` : "";
-			lines.push(`git: ${ws.branch ?? "(detached)"} (${dirty})${remote}`);
+			lines.push(`git: ${ws.branch ?? "(detached)"} (${dirty}${position})${remote}`);
+			lines.push(...recentCommitLines(ws));
 		}
 		out.push(`│ ${padAnsi("", content)} │`);
 		for (const line of framedPanel(

@@ -1,9 +1,11 @@
 import { v7 as uuidv7 } from "uuid";
 import {
+	atomicWrite,
 	type ClioSessionWriter,
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
 	resumeSession as engineResumeSession,
+	sessionPaths,
 } from "../../engine/session.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { SessionEntry } from "./entries.js";
@@ -11,9 +13,9 @@ import { runMigrations } from "./migrations/index.js";
 
 /**
  * Wraps engine/session.ts so the session domain can track the single in-memory
- * current writer + meta. The manager never persists on its own. Writes go
- * through the engine writer (`append` / `appendEntry`) or through the helpers
- * in checkpoint.ts which call writer.persistTree and atomicWrite.
+ * current writer + meta. Turn writes go through the engine writer (`append` /
+ * `appendEntry`); metadata-only updates use `persistSessionMeta` so domain
+ * extensions can make newly attached metadata durable without closing.
  */
 
 export interface SessionManagerState {
@@ -41,6 +43,10 @@ export function startSession(input: {
 		endpoint: input.endpoint ?? null,
 	});
 	return { meta: meta as SessionMeta, writer };
+}
+
+export function persistSessionMeta(state: SessionManagerState): void {
+	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
 }
 
 export function resumeSessionState(sessionId: string): SessionManagerState {

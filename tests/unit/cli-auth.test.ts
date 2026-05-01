@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { runAuthCommand } from "../../src/cli/auth.js";
+import { type ConnectableProviderRow, renderConnectableProviderRows } from "../../src/cli/provider-target.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import {
@@ -103,7 +104,7 @@ describe("cli auth commands", () => {
 
 		const status = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));
 		strictEqual(status.result, 0);
-		ok(status.stdout.includes(`${TEST_PROVIDER_ID}\toauth\tpresent`));
+		ok(new RegExp(`${TEST_PROVIDER_ID}\\s+Clio CLI OAuth\\s+oauth\\s+present`).test(status.stdout), status.stdout);
 
 		const logout = await captureOutput(() => runAuthCommand(["logout", TEST_PROVIDER_ID]));
 		strictEqual(logout.result, 0);
@@ -111,7 +112,7 @@ describe("cli auth commands", () => {
 
 		const after = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));
 		strictEqual(after.result, 1);
-		ok(after.stdout.includes(`${TEST_PROVIDER_ID}\t-\tabsent`));
+		ok(new RegExp(`${TEST_PROVIDER_ID}\\s+Clio CLI OAuth\\s+-\\s+absent`).test(after.stdout), after.stdout);
 	});
 
 	it("auth status probes Claude native CLI auth without storing Clio credentials", async () => {
@@ -122,7 +123,7 @@ describe("cli auth commands", () => {
 
 		const status = await captureOutput(() => runAuthCommand(["status", "claude-code-cli"]));
 		strictEqual(status.result, 0);
-		ok(status.stdout.includes("claude-code-cli\tcli\tauthenticated"));
+		ok(/claude-code-cli\s+Claude Code CLI\s+cli\s+authenticated/.test(status.stdout), status.stdout);
 		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
 	});
 
@@ -131,5 +132,62 @@ describe("cli auth commands", () => {
 		strictEqual(login.result, 0);
 		ok(login.stdout.includes("claude auth login"));
 		strictEqual(openAuthStorage().get("claude-code-cli"), undefined);
+	});
+
+	it("auth list --help prints usage instead of provider rows", async () => {
+		const help = await captureOutput(() => runAuthCommand(["list", "--help"]));
+		strictEqual(help.result, 0);
+		ok(help.stdout.includes("usage: clio auth list"), help.stdout);
+		ok(!help.stdout.includes("targets="), help.stdout);
+	});
+
+	it("renders auth provider rows with dynamic columns for long display names", () => {
+		const rows: ConnectableProviderRow[] = [
+			{
+				entry: {
+					runtimeId: "short",
+					label: "Short",
+					group: "cloud-api",
+					summary: "short",
+					modelHints: [],
+					featured: false,
+					connectable: true,
+					supportsCustomUrl: false,
+				},
+				status: {
+					providerId: "short",
+					available: false,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				},
+				targetCount: 0,
+			},
+			{
+				entry: {
+					runtimeId: "google",
+					label: "Google Generative AI",
+					group: "cloud-api",
+					summary: "gemini",
+					modelHints: [],
+					featured: false,
+					connectable: true,
+					supportsCustomUrl: false,
+				},
+				status: {
+					providerId: "google",
+					available: false,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				},
+				targetCount: 12,
+			},
+		];
+		const rendered = renderConnectableProviderRows(rows);
+		const rowLines = rendered.split("\n").filter((line) => line.startsWith("  "));
+		strictEqual(rowLines.length, 2);
+		strictEqual(rowLines[0]?.indexOf("disconnected"), rowLines[1]?.indexOf("disconnected"));
+		ok(!rendered.includes("\t"), rendered);
 	});
 });

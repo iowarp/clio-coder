@@ -9,6 +9,7 @@ import {
 	appendEntry,
 	appendTurn,
 	newTurnId,
+	persistSessionMeta,
 	resumeSessionState,
 	type SessionManagerState,
 	startSession,
@@ -89,6 +90,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			}
 			const next = startSession(startInput);
 			next.meta.workspace = probeWorkspace(cwd);
+			persistSessionMeta(next);
 			state = next;
 			return next.meta;
 		},

@@ -9,6 +9,7 @@
  * behind the engine boundary.
  */
 
+import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
@@ -65,6 +66,14 @@ interface DispatchBundleOptions {
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
+
+function sha256(input: string): string {
+	return createHash("sha256").update(input, "utf8").digest("hex");
+}
+
+function promptHash(systemPrompt: string): string | null {
+	return systemPrompt.length > 0 ? sha256(systemPrompt) : null;
+}
 
 function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined): ScopeSpec {
 	if (mode === "super") return safety.scopes.super;
@@ -384,6 +393,7 @@ export function createDispatchBundle(
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
+		const compiledPromptHash = promptHash(systemPrompt);
 
 		const recipeTools = recipe?.tools;
 		const allowedTools =
@@ -554,7 +564,7 @@ export function createDispatchBundle(
 					exitCode: receiptExitCode,
 					tokenCount,
 					costUsd,
-					compiledPromptHash: null,
+					compiledPromptHash,
 					staticCompositionHash: null,
 					clioVersion: readClioVersion(),
 					piMonoVersion: readPiMonoVersion(),

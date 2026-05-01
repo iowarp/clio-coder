@@ -552,7 +552,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 
 		const status = await runCli(["auth", "status", "openai"], { env: scratch.env, timeoutMs: 15_000 });
 		strictEqual(status.code, 0);
-		match(status.stdout, /openai\s+api_key\s+present/);
+		match(status.stdout, /openai\s+OpenAI\s+api_key\s+present/);
 	});
 
 	it("old lifecycle command names are rejected", async () => {

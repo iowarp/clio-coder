@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
-import type { ToolName } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	createMiddlewareSnapshot,
 	type MiddlewareContract,
@@ -24,6 +24,7 @@ import {
 	type ToolFinishEvent,
 	type ToolStartEvent,
 } from "../../src/engine/worker-tools.js";
+import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import {
 	createRegistry,
 	type ProtectedArtifactRegistryEvent,
@@ -575,6 +576,29 @@ describe("engine/worker-tools registry wiring", () => {
 		const adviseByName = new Map(adviseTools.map((tool) => [tool.name, tool]));
 		strictEqual(adviseByName.get("write_plan")?.executionMode, "sequential");
 		strictEqual(adviseByName.get("write_review")?.executionMode, "sequential");
+	});
+
+	it("validates the built-in worker tool catalog against the mode matrix and classifier", () => {
+		const registry = createWorkerToolRegistry("default");
+		deepStrictEqual(validateBuiltinToolPolicy(registry.listAll()), []);
+	});
+
+	it("listForMode intersects spec allowedModes with MODE_MATRIX", () => {
+		const registry = createRegistry({
+			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, []),
+			modes: makeModes("default", () => true, [ToolNames.WritePlan]),
+		});
+		registry.register({
+			name: ToolNames.WritePlan,
+			description: "drifted write plan",
+			parameters: Type.Object({ content: Type.String() }),
+			baseActionClass: "write",
+			allowedModes: ["default", "advise", "super"],
+			run: async () => ({ kind: "ok", output: "wrote" }),
+		});
+
+		deepStrictEqual(registry.listForMode("default"), []);
+		deepStrictEqual(registry.listForMode("advise"), [ToolNames.WritePlan]);
 	});
 
 	it("write_plan and write_review set terminate=true on successful advise-mode writes", async () => {

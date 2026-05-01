@@ -12,10 +12,13 @@ import {
 } from "../../engine/tui.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
-const MODEL_OVERLAY_MIN_WIDTH = 60;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
 const MODEL_OVERLAY_TERMINAL_PADDING = 8;
 const VISIBLE_ROWS = 12;
+const MODEL_PRIMARY_MIN_WIDTH = 28;
+const MODEL_PRIMARY_DEFAULT_MIN_WIDTH = 40;
+const MODEL_PRIMARY_DEFAULT_MAX_WIDTH = 60;
+const MODEL_DESCRIPTION_MIN_WIDTH = 12;
 
 function resolveOverlayWidth(terminalColumns: number): number {
 	// Default 82 fits a typical 80-col terminal with margin. On wider
@@ -23,7 +26,7 @@ function resolveOverlayWidth(terminalColumns: number): number {
 	// the trailing endpoint=<id>/auth=<source> segments to mid-word cuts.
 	if (!Number.isFinite(terminalColumns) || terminalColumns <= 0) return MODEL_OVERLAY_WIDTH;
 	const available = terminalColumns - MODEL_OVERLAY_TERMINAL_PADDING;
-	if (available <= MODEL_OVERLAY_WIDTH) return Math.max(MODEL_OVERLAY_MIN_WIDTH, available);
+	if (available <= MODEL_OVERLAY_WIDTH) return Math.max(1, available);
 	return Math.min(MODEL_OVERLAY_MAX_WIDTH, available);
 }
 
@@ -37,11 +40,18 @@ const MODEL_THEME: SelectListTheme = {
 	noMatch: IDENTITY,
 };
 
-const MODEL_LAYOUT: SelectListLayoutOptions = {
-	minPrimaryColumnWidth: 40,
-	maxPrimaryColumnWidth: 60,
-	truncatePrimary: ({ text, maxWidth }) => truncateModelLabel(text, maxWidth),
-};
+function modelLayoutForWidth(width: number): SelectListLayoutOptions {
+	const descriptionBudget = MODEL_DESCRIPTION_MIN_WIDTH + 4;
+	const maxPrimaryColumnWidth = Math.max(
+		MODEL_PRIMARY_MIN_WIDTH,
+		Math.min(MODEL_PRIMARY_DEFAULT_MAX_WIDTH, width - descriptionBudget),
+	);
+	return {
+		minPrimaryColumnWidth: Math.min(MODEL_PRIMARY_DEFAULT_MIN_WIDTH, maxPrimaryColumnWidth),
+		maxPrimaryColumnWidth,
+		truncatePrimary: ({ text, maxWidth }) => truncateModelLabel(text, maxWidth),
+	};
+}
 
 export interface ModelSelection {
 	endpoint: string;
@@ -226,7 +236,8 @@ class ModelOverlayBox extends Box {
 export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayHandle {
 	const { items, refs } = buildModelItems({ settings: deps.settings, providers: deps.providers });
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
-	const list = new SelectList(items, visible, MODEL_THEME, MODEL_LAYOUT);
+	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
+	const list = new SelectList(items, visible, MODEL_THEME, modelLayoutForWidth(overlayWidth));
 	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim();
 	const activeModel = deps.settings.orchestrator?.model?.trim();
 	if (activeEndpoint && activeModel) {
@@ -246,6 +257,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const box = new ModelOverlayBox(list);
 	box.addChild(list);
-	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
 	return tui.showOverlay(box, { anchor: "center", width: overlayWidth });
 }
+
+export const __modelSelectorTest = { modelLayoutForWidth, resolveOverlayWidth, truncateModelLabel };
