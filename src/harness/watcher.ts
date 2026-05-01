@@ -1,8 +1,10 @@
 import { existsSync, type FSWatcher, statSync, watch } from "node:fs";
-import { join, resolve } from "node:path";
+import { extname, join, basename as pathBasename, resolve } from "node:path";
+import { ROOT_CONFIG_FILES } from "./classifier.js";
 
 export interface FileChangeEvent {
 	path: string;
+	kind: "change" | "rename" | "delete";
 }
 
 export interface WatchOptions {
@@ -14,20 +16,15 @@ export interface WatchHandle {
 }
 
 const DEFAULT_DEBOUNCE_MS = 50;
-const ROOT_FILES = [
-	"package.json",
-	"package-lock.json",
-	"tsconfig.json",
-	"tsconfig.tests.json",
-	"tsup.config.ts",
-	"biome.json",
-];
-
 function isSidecar(name: string): boolean {
 	if (name.endsWith("~")) return true;
 	if (name.endsWith(".swp") || name.endsWith(".swx") || name === "4913") return true;
 	if (name.startsWith(".")) return true;
 	return false;
+}
+
+function looksLikeFilePath(absPath: string): boolean {
+	return extname(absPath).length > 0 || ROOT_CONFIG_FILES.has(pathBasename(absPath));
 }
 
 /**
@@ -43,7 +40,7 @@ export function watchRepo(
 	const pending = new Map<string, NodeJS.Timeout>();
 	const watchers: FSWatcher[] = [];
 
-	const fire = (absPath: string): void => {
+	const fire = (absPath: string, kind: FileChangeEvent["kind"]): void => {
 		const existing = pending.get(absPath);
 		if (existing) clearTimeout(existing);
 		const timer = setTimeout(() => {
@@ -55,9 +52,11 @@ export function watchRepo(
 				const stat = statSync(absPath);
 				if (!stat.isFile()) return;
 			} catch {
+				if (!looksLikeFilePath(absPath)) return;
+				onChange({ path: absPath, kind: "delete" });
 				return;
 			}
-			onChange({ path: absPath });
+			onChange({ path: absPath, kind });
 		}, debounceMs);
 		pending.set(absPath, timer);
 	};
@@ -70,7 +69,7 @@ export function watchRepo(
 				const name = filename.toString();
 				const basename = name.split(/[\\/]/).pop() ?? name;
 				if (isSidecar(basename)) return;
-				fire(resolve(srcDir, name));
+				fire(resolve(srcDir, name), _event === "rename" ? "rename" : "change");
 			});
 			watchers.push(w);
 		} catch {
@@ -78,14 +77,25 @@ export function watchRepo(
 		}
 	}
 
-	for (const root of ROOT_FILES) {
-		const p = join(repoRoot, root);
-		if (!existsSync(p)) continue;
-		try {
-			const w = watch(p, () => fire(p));
-			watchers.push(w);
-		} catch {
-			// ignore
+	try {
+		const rootWatcher = watch(repoRoot, (_event, filename) => {
+			if (!filename) return;
+			const name = filename.toString();
+			if (name.includes("/") || name.includes("\\")) return;
+			if (!ROOT_CONFIG_FILES.has(name)) return;
+			fire(resolve(repoRoot, name), _event === "rename" ? "rename" : "change");
+		});
+		watchers.push(rootWatcher);
+	} catch {
+		for (const root of ROOT_CONFIG_FILES) {
+			const p = join(repoRoot, root);
+			if (!existsSync(p)) continue;
+			try {
+				const w = watch(p, (_event) => fire(p, _event === "rename" ? "rename" : "change"));
+				watchers.push(w);
+			} catch {
+				// ignore
+			}
 		}
 	}
 

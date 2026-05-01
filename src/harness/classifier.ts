@@ -7,8 +7,7 @@ export interface ClassifyResult {
 	reason: string;
 }
 
-const HOT_TOOL_EXCLUSIONS = new Set(["registry.ts", "bootstrap.ts", "truncate-utf8.ts"]);
-const ROOT_CONFIG_FILES = new Set([
+export const ROOT_CONFIG_FILES = new Set([
 	"package.json",
 	"package-lock.json",
 	"tsconfig.json",
@@ -16,6 +15,23 @@ const ROOT_CONFIG_FILES = new Set([
 	"tsup.config.ts",
 	"biome.json",
 	".gitignore",
+	"damage-control-rules.yaml",
+]);
+
+const HOT_TOOL_FILES = new Set([
+	"src/tools/bash.ts",
+	"src/tools/edit.ts",
+	"src/tools/glob.ts",
+	"src/tools/grep.ts",
+	"src/tools/ls.ts",
+	"src/tools/read.ts",
+	"src/tools/web-fetch.ts",
+	"src/tools/write-plan.ts",
+	"src/tools/write-review.ts",
+	"src/tools/write.ts",
+	"src/tools/codewiki/entry-points.ts",
+	"src/tools/codewiki/find-symbol.ts",
+	"src/tools/codewiki/where-is.ts",
 ]);
 const IGNORE_EXTENSIONS = new Set([".md", ".mdx"]);
 
@@ -63,16 +79,13 @@ export function classifyChange(absPath: string, repoRoot: string): ClassifyResul
 
 	if (rel.startsWith("src/tools/")) {
 		const basename = rel.slice("src/tools/".length);
-		if (basename.includes("/")) {
-			return { class: "restart", reason: `nested tool file ${basename} is not a flat tool spec` };
-		}
 		if (!basename.endsWith(".ts")) {
 			return { class: "ignore", reason: `non-ts tool file ${basename}` };
 		}
-		if (HOT_TOOL_EXCLUSIONS.has(basename)) {
-			return { class: "restart", reason: `${basename} is registry/bootstrap/utility, shape changes affect every tool` };
+		if (HOT_TOOL_FILES.has(rel)) {
+			return { class: "hot", reason: `tool spec ${basename} is self-contained and re-registerable` };
 		}
-		return { class: "hot", reason: `tool spec ${basename} is self-contained and re-registerable` };
+		return { class: "restart", reason: `${basename} is tool infrastructure or an unregistered tool module` };
 	}
 
 	if (rel.startsWith("src/worker/")) {

@@ -36,7 +36,7 @@ export function startHarness(deps: HarnessDeps): HarnessHandle {
 
 	const watch = watchRepo(deps.repoRoot, async (event) => {
 		const verdict = classifyChange(event.path, deps.repoRoot);
-		deps.bus.emit(BusChannels.HarnessFileChanged, { path: event.path, class: verdict.class });
+		deps.bus.emit(BusChannels.HarnessFileChanged, { path: event.path, kind: event.kind, class: verdict.class });
 
 		if (verdict.class === "ignore") return;
 		if (verdict.class === "restart") {

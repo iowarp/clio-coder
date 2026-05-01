@@ -8,7 +8,7 @@ function pathArg(args: Record<string, unknown>): string | null {
 
 function appendRestartNotice(result: ToolResult, relativePath: string): ToolResult {
 	if (result.kind !== "ok") return result;
-	const notice = `self-dev: ${relativePath} touches src/engine; restart Clio before trusting the running process`;
+	const notice = `self-dev: ${relativePath} requires restarting Clio before trusting the running process`;
 	return { ...result, output: result.output.length > 0 ? `${result.output}\n${notice}` : notice };
 }
 

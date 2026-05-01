@@ -143,6 +143,8 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const domainsRoot = path.join(srcRoot, "domains");
 	const providersDomainRoot = path.join(domainsRoot, "providers");
 	const harnessRoot = path.join(srcRoot, "harness");
+	const toolsRoot = path.join(srcRoot, "tools");
+	const toolRegistryFile = path.join(toolsRoot, "registry.ts");
 
 	const violations: string[] = [];
 
@@ -195,9 +197,15 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 					);
 					return;
 				}
-				if (isWithin(resolved, domainsRoot) && !typeOnly && !isWithin(resolved, providersDomainRoot)) {
+				if (isWithin(resolved, domainsRoot) && !typeOnly) {
 					violations.push(
 						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (harness may only value-import src/core, src/tools/registry.ts, and node)`,
+					);
+					return;
+				}
+				if (isWithin(resolved, toolsRoot) && !isWithin(resolved, toolRegistryFile) && !typeOnly) {
+					violations.push(
+						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves outside src/tools/registry.ts (harness may only value-import src/core, src/tools/registry.ts, and node)`,
 					);
 					return;
 				}

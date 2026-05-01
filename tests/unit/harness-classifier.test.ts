@@ -12,9 +12,20 @@ function classify(rel: string) {
 describe("classifyChange", () => {
 	it("hot: src/tools/read.ts", () => strictEqual(classify("src/tools/read.ts").class, "hot"));
 	it("hot: src/tools/edit.ts", () => strictEqual(classify("src/tools/edit.ts").class, "hot"));
+	it("hot: nested codewiki tool specs", () => {
+		strictEqual(classify("src/tools/codewiki/find-symbol.ts").class, "hot");
+		strictEqual(classify("src/tools/codewiki/entry-points.ts").class, "hot");
+		strictEqual(classify("src/tools/codewiki/where-is.ts").class, "hot");
+	});
 	it("restart: src/tools/registry.ts", () => strictEqual(classify("src/tools/registry.ts").class, "restart"));
 	it("restart: src/tools/bootstrap.ts", () => strictEqual(classify("src/tools/bootstrap.ts").class, "restart"));
 	it("restart: src/tools/truncate-utf8.ts", () => strictEqual(classify("src/tools/truncate-utf8.ts").class, "restart"));
+	it("restart: tool infrastructure and session-bound tool factories", () => {
+		strictEqual(classify("src/tools/policy.ts").class, "restart");
+		strictEqual(classify("src/tools/self-dev-guards.ts").class, "restart");
+		strictEqual(classify("src/tools/workspace-context.ts").class, "restart");
+		strictEqual(classify("src/tools/codewiki/shared.ts").class, "restart");
+	});
 	it("restart: src/engine/agent.ts", () => strictEqual(classify("src/engine/agent.ts").class, "restart"));
 	it("restart: src/core/config.ts", () => strictEqual(classify("src/core/config.ts").class, "restart"));
 	it("restart: src/domains/session/extension.ts", () =>
@@ -33,6 +44,7 @@ describe("classifyChange", () => {
 	it("ignore: docs/README.md", () => strictEqual(classify("docs/README.md").class, "ignore"));
 	it("ignore: src/tools/README.md", () => strictEqual(classify("src/tools/README.md").class, "ignore"));
 	it("restart: package.json", () => strictEqual(classify("package.json").class, "restart"));
+	it("restart: damage-control-rules.yaml", () => strictEqual(classify("damage-control-rules.yaml").class, "restart"));
 	it("restart: tsconfig.json", () => strictEqual(classify("tsconfig.json").class, "restart"));
 	it("restart: tsup.config.ts", () => strictEqual(classify("tsup.config.ts").class, "restart"));
 	it("ignore: dist/cli/index.js", () => strictEqual(classify("dist/cli/index.js").class, "ignore"));
@@ -45,6 +57,8 @@ describe("classifyChange", () => {
 		const paths = [
 			"src/tools/read.ts", // hot
 			"src/tools/registry.ts", // restart (tool exclusion)
+			"src/tools/codewiki/find-symbol.ts", // hot (nested tool spec)
+			"src/tools/codewiki/shared.ts", // restart (nested helper)
 			"src/tools/README.md", // ignore (markdown)
 			"src/engine/agent.ts", // restart (engine)
 			"src/core/config.ts", // restart (core)

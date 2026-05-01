@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -60,6 +60,46 @@ describe("watchRepo", () => {
 			writeFileSync(join(repo, "src", "tools", "baz.ts~"), "backup");
 			await delay(200);
 			ok(!events.some((e) => e.path.endsWith(".swp") || e.path.endsWith("~")));
+		} finally {
+			handle.close();
+		}
+	});
+
+	it("emits delete events for removed source files", async () => {
+		const target = join(repo, "src", "tools", "gone.ts");
+		writeFileSync(target, "export const x = 1;\n");
+		const events: { path: string; kind: string }[] = [];
+		const handle = watchRepo(repo, (event) => events.push({ path: event.path, kind: event.kind }), { debounceMs: 50 });
+		try {
+			await delay(50);
+			events.length = 0;
+			unlinkSync(target);
+			await delay(250);
+			ok(
+				events.some((e) => e.path.endsWith("gone.ts") && e.kind === "delete"),
+				`expected a gone.ts delete event, got ${JSON.stringify(events)}`,
+			);
+		} finally {
+			handle.close();
+		}
+	});
+
+	it("watches root config creation including dotfiles", async () => {
+		const events: { path: string }[] = [];
+		const handle = watchRepo(repo, (event) => events.push({ path: event.path }));
+		try {
+			await delay(50);
+			writeFileSync(join(repo, ".gitignore"), ".clio/\n");
+			writeFileSync(join(repo, "damage-control-rules.yaml"), "version: 2\npacks: []\n");
+			await delay(250);
+			ok(
+				events.some((e) => e.path.endsWith(".gitignore")),
+				`expected .gitignore event, got ${JSON.stringify(events)}`,
+			);
+			ok(
+				events.some((e) => e.path.endsWith("damage-control-rules.yaml")),
+				`expected damage-control event, got ${JSON.stringify(events)}`,
+			);
 		} finally {
 			handle.close();
 		}

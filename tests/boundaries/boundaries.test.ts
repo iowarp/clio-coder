@@ -93,4 +93,32 @@ describe("boundaries", () => {
 			result.violations.join("\n"),
 		);
 	});
+
+	it("rejects harness value imports from domains, including providers", () => {
+		const root = fixtureProject({
+			"src/harness/index.ts": 'import { ProvidersDomainModule } from "../domains/providers/index.js";',
+			"src/domains/providers/index.ts": "export const ProvidersDomainModule = {};",
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule4")),
+			result.violations.join("\n"),
+		);
+	});
+
+	it("rejects harness value imports from tool modules other than registry", () => {
+		const root = fixtureProject({
+			"src/harness/index.ts": 'import { readTool } from "../tools/read.js";',
+			"src/tools/read.ts": "export const readTool = {};",
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule4")),
+			result.violations.join("\n"),
+		);
+	});
 });
