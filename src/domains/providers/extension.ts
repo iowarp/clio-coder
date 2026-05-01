@@ -7,6 +7,7 @@ import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
+import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { resolveProvidersModelsDir } from "./knowledge-base-path.js";
@@ -71,8 +72,12 @@ function capabilitiesFor(
 	kb: KnowledgeBase,
 ): CapabilityFlags {
 	const kbHit = endpoint.defaultModel ? kb.lookup(endpoint.defaultModel) : null;
-	return mergeCapabilities(
+	const base = capabilitiesFromCatalogModel(
 		desc.defaultCapabilities,
+		endpoint.defaultModel ? getCatalogModelForRuntime(desc.id, endpoint.defaultModel) : undefined,
+	);
+	return mergeCapabilities(
+		base,
 		kbHit?.entry.capabilities ?? null,
 		probe?.discoveredCapabilities ?? null,
 		endpoint.capabilities ?? null,

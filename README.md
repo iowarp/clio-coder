@@ -171,6 +171,22 @@ clio configure --runtime ollama-native --id ollama --url http://127.0.0.1:11434 
 Existing `openai-compat` targets pointing at LM Studio or Ollama can be
 migrated with `clio targets convert <id> --runtime <native>`.
 
+For llama.cpp, vLLM, and SGLang, use the runtime that matches the server you
+started:
+
+```bash
+clio configure --runtime llamacpp --id llamacpp --url http://127.0.0.1:8080 --model your-model
+clio configure --runtime vllm --id vllm --url http://127.0.0.1:8000 --model your-model
+clio configure --runtime sglang --id sglang --url http://127.0.0.1:30000 --model your-model
+```
+
+For OpenRouter free-model testing:
+
+```bash
+clio configure --runtime openrouter --id openrouter-free --model tencent/hy3-preview:free --api-key-env OPENROUTER_API_KEY --set-orchestrator --set-worker-default
+clio targets --probe --target openrouter-free
+```
+
 A good first non-interactive test is:
 
 ```bash
@@ -345,7 +361,7 @@ Clio Coder is target-first. A target describes how to reach a model and what cap
 | --- | --- |
 | Featured / subscription | `openai-codex` |
 | Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock`, `deepseek` |
-| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp-completion`, `vllm`, `sglang`, `lemonade` |
+| Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp`, `vllm`, `sglang`, `lemonade` |
 | CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli`, `copilot-cli`, `opencode-cli` |
 | SDK runtimes | `claude-code-sdk` (Claude Agent SDK worker path) |
 
@@ -356,8 +372,8 @@ Runtime tiers:
 | `protocol` | HTTP targets that speak a supported model API protocol. |
 | `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
 | `local-native` | Local model runtimes reached through native HTTP or SDK surfaces. |
-| `cli-stub` | CLI-backed runtimes launched through installed command-line tools. |
-| `sdk` | In-process SDK worker paths (scaffolded in v0.1.x, admitted by dispatch in a later release). |
+| `cli-gold`, `cli-silver`, `cli-bronze`, `cli` | CLI-backed runtimes launched through installed command-line tools. |
+| `sdk` | In-process SDK worker paths such as the Claude Agent SDK. |
 
 Inspect target state with:
 
@@ -389,6 +405,7 @@ You can isolate state with environment variables:
 | `CLIO_CACHE_DIR` | Transient cache location. |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed targets when configured. |
 | `OPENAI_API_KEY` | Enables OpenAI-backed targets when configured. |
+| `OPENROUTER_API_KEY` | Enables OpenRouter-backed targets when configured. |
 
 Example local target configuration:
 

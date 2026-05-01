@@ -13,6 +13,7 @@ import type { ConfigContract } from "../../../src/domains/config/contract.js";
 import { openAuthStorage } from "../../../src/domains/providers/auth/index.js";
 import { createProvidersBundle } from "../../../src/domains/providers/extension.js";
 import { getRuntimeRegistry } from "../../../src/domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../../../src/domains/providers/runtimes/builtins.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
 
@@ -155,6 +156,30 @@ describe("providers domain endpoint lifecycle", () => {
 		ok(entry);
 		strictEqual(entry.available, true);
 		strictEqual(entry.reason, "store:oauth:synthetic-oauth");
+	});
+
+	it("list() uses catalog capabilities for cloud endpoint default models", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		settings.endpoints = [
+			{
+				id: "or",
+				runtime: "openrouter",
+				defaultModel: "tencent/hy3-preview:free",
+				auth: { apiKeyEnvVar: "OPENROUTER_API_KEY" },
+			},
+		];
+		const registry = getRuntimeRegistry();
+		registerBuiltinRuntimes(registry);
+
+		const bundle = createProvidersBundle(stubContext(settings));
+		await bundle.contract.probeAll();
+		const entry = bundle.contract.list()[0];
+		ok(entry);
+		strictEqual(entry.available, false);
+		strictEqual(entry.capabilities.reasoning, true);
+		strictEqual(entry.capabilities.thinkingFormat, "openrouter");
+		strictEqual(entry.capabilities.contextWindow, 262144);
+		strictEqual(entry.capabilities.maxTokens, 262144);
 	});
 
 	it("getEndpoint returns the descriptor for known ids and null for unknown", () => {
