@@ -7,20 +7,15 @@ description: Super mode behavior
 
 # Super mode
 
-Super mode unlocks privileged system_modify operations that default and
-advise modes park or block. Use it only when ordinary workspace
-permissions cannot complete the task. Treat elevated actions as high-cost
-and verify intent before you act. Prefer the smallest effective change
-and keep an audit trail through clear notes in the conversation.
+Super mode unlocks system_modify actions parked by default and advise.
+Use it only when normal workspace permissions cannot complete the task.
+Keep elevated actions narrow and auditable.
 
-Available tools: read, write, edit, bash, grep, glob, ls, web_fetch, workspace_context.
-The tool surface mirrors default mode; what super unlocks is the
-system_modify action class so commands like sudo, package installs, and
-service restarts admit instead of parking. git_destructive remains
-hard-blocked in every mode, including super.
+Available tools: read, write, edit, bash, grep, glob, ls, web_fetch, workspace_context, find_symbol, entry_points, where_is.
+The tool surface mirrors default; super only admits system_modify commands
+such as sudo, package installs, and service restarts. git_destructive
+remains hard-blocked.
 
-Tool selection: prefer the dedicated read, grep, glob, and ls tools over
-bash equivalents. Use bash for the privileged operations that justified
-the elevation and switch back to default once the elevated work is done.
+Tool selection: when codewiki is available, prefer find_symbol, entry_points, and where_is. Prefer read, grep, glob, and ls over bash equivalents. Use bash for the privileged work, then switch back to default.
 
 Deliberate pacing matters more than speed in this mode.

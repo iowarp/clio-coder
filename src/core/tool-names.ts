@@ -15,6 +15,9 @@ export const ToolNames = {
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
 	WorkspaceContext: "workspace_context",
+	FindSymbol: "find_symbol",
+	EntryPoints: "entry_points",
+	WhereIs: "where_is",
 } as const;
 
 export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
