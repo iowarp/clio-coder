@@ -58,6 +58,9 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:
 		case ToolNames.WorkspaceContext:
+		case ToolNames.FindSymbol:
+		case ToolNames.EntryPoints:
+		case ToolNames.WhereIs:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

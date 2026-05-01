@@ -91,9 +91,32 @@ function fakeProviders(): ProvidersContract {
 }
 
 const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = {
-	default: ["bash", "edit", "glob", "grep", "ls", "read", "web_fetch", "write"],
-	advise: ["glob", "grep", "ls", "read", "web_fetch", "write_plan", "write_review"],
-	super: ["bash", "edit", "glob", "grep", "ls", "read", "web_fetch", "write"],
+	default: [
+		"bash",
+		"edit",
+		"entry_points",
+		"find_symbol",
+		"glob",
+		"grep",
+		"ls",
+		"read",
+		"web_fetch",
+		"where_is",
+		"write",
+	],
+	advise: [
+		"entry_points",
+		"find_symbol",
+		"glob",
+		"grep",
+		"ls",
+		"read",
+		"web_fetch",
+		"where_is",
+		"write_plan",
+		"write_review",
+	],
+	super: ["bash", "edit", "entry_points", "find_symbol", "glob", "grep", "ls", "read", "web_fetch", "where_is", "write"],
 };
 
 function liveMutableModes(initial: ModeName): ModesContract & { __set: (m: ModeName) => void } {
@@ -263,11 +286,11 @@ describe("interactive/chat-loop mode-aware tool resolution", () => {
 			},
 		});
 
-		// First submit: still default. State.tools must be the 8-tool set.
+		// First submit: still default. State.tools must be the default tool set.
 		await loop.submit("first turn");
 		// Toggle.
 		modes.__set("advise");
-		// Second submit: must reflect advise's 7 tools.
+		// Second submit: must reflect advise's tool set.
 		await loop.submit("second turn");
 
 		strictEqual(promptToolSnapshots.length, 2);

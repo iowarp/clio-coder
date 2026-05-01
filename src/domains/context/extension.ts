@@ -1,8 +1,15 @@
+import { existsSync } from "node:fs";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { runBootstrap } from "./bootstrap.js";
-import { renderProjectContextFragment, renderProjectTypeFragment, tryReadClioMd } from "./clio-md.js";
+import {
+	type ParsedClioMd,
+	renderProjectContextFragment,
+	renderProjectTypeFragment,
+	tryReadClioMd,
+} from "./clio-md.js";
+import { buildCodewiki, codewikiPath, writeCodewiki } from "./codewiki/indexer.js";
 import type { ContextContract, ProjectPromptContext } from "./contract.js";
 import { computeFingerprint, isStale } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
@@ -12,12 +19,20 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 	const pieces = [renderProjectTypeFragment(projectType)];
 	const warnings: string[] = [];
 	const clio = tryReadClioMd(cwd);
+	let clioMd: ParsedClioMd | null = null;
 	if (clio?.ok) {
+		clioMd = clio.value;
 		pieces.push(renderProjectContextFragment(clio.value));
-		return { text: pieces.join("\n\n"), clioMd: clio.value, warnings };
 	}
 	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
-	return { text: pieces.join("\n\n"), clioMd: null, warnings };
+	const state = readClioState(cwd);
+	if (state && existsSync(codewikiPath(cwd))) {
+		const current = computeFingerprint(cwd);
+		if (state.fingerprint.treeHash === current.treeHash) {
+			pieces.push("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>");
+		}
+	}
+	return { text: pieces.join("\n\n"), clioMd, warnings };
 }
 
 function emitStartupHints(cwd: string): void {
@@ -59,13 +74,19 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 		stop() {
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
+			const fingerprint = computeFingerprint(lastCwd);
+			let lastIndexedAt = state?.lastIndexedAt;
+			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !existsSync(codewikiPath(lastCwd))) {
+				lastIndexedAt = new Date().toISOString();
+				writeCodewiki(lastCwd, buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
+			}
 			writeClioState(lastCwd, {
 				version: 1,
 				projectType,
-				fingerprint: computeFingerprint(lastCwd),
+				fingerprint,
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
 				lastSessionAt: new Date().toISOString(),
-				...(state?.lastIndexedAt ? { lastIndexedAt: state.lastIndexedAt } : {}),
+				...(lastIndexedAt ? { lastIndexedAt } : {}),
 			});
 		},
 	};

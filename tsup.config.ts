@@ -15,5 +15,5 @@ export default defineConfig({
 	shims: false,
 	outDir: "dist",
 	banner: ({ format }) => (format === "esm" ? { js: "#!/usr/bin/env node" } : {}),
-	external: ["@mariozechner/pi-agent-core", "@mariozechner/pi-ai", "@mariozechner/pi-tui"],
+	external: ["@mariozechner/pi-agent-core", "@mariozechner/pi-ai", "@mariozechner/pi-tui", "typescript"],
 });

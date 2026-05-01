@@ -2,6 +2,9 @@ import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { bashTool } from "./bash.js";
+import { entryPointsTool } from "./codewiki/entry-points.js";
+import { findSymbolTool } from "./codewiki/find-symbol.js";
+import { whereIsTool } from "./codewiki/where-is.js";
 import { editTool } from "./edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
@@ -43,6 +46,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({ ...webFetchTool, allowedModes: everyMode });
 	registry.register({ ...writePlanTool, allowedModes: adviseOnly });
 	registry.register({ ...writeReviewTool, allowedModes: adviseOnly });
+	registry.register({ ...findSymbolTool, allowedModes: everyMode });
+	registry.register({ ...entryPointsTool, allowedModes: everyMode });
+	registry.register({ ...whereIsTool, allowedModes: everyMode });
 
 	const session = deps.session;
 	if (session) {

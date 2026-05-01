@@ -4,9 +4,10 @@ import { dirname, join, parse } from "node:path";
 import { loadProjectContextFiles } from "../prompts/context-files.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { type ClioMdFingerprintFooter, parseClioMd, serializeClioMd } from "./clio-md.js";
+import { buildCodewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
 import { loadSiblingContextFiles, type SiblingContextFile } from "./sibling-files.js";
-import { writeClioState } from "./state.js";
+import { readClioState, writeClioState } from "./state.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
@@ -284,13 +285,12 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	const siblingFiles = loadBootstrapSiblingFiles(cwd);
 	const output = (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles });
 	await ensureGitignore(cwd, input);
-	const paths = writeArtifacts(
-		cwd,
-		projectType,
-		input.modelId ?? "local-bootstrap",
-		input.now?.() ?? new Date(),
-		output,
-	);
+	const now = input.now?.() ?? new Date();
+	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output);
+	const indexedAt = now.toISOString();
+	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
+	const state = readClioState(cwd);
+	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
 
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const summary =

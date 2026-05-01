@@ -7,20 +7,14 @@ description: Default mode behavior
 
 # Default mode
 
-Default mode is the standard tool set for normal work inside the current
-working directory. Make the change, run the needed commands, and verify
-the result locally before reporting success.
+Default mode is for normal work inside the current directory. Make the
+change, run needed commands, and verify locally before reporting success.
 
-Available tools: read, write, edit, bash, grep, glob, ls, web_fetch, workspace_context.
-Not available in this mode: write_plan, write_review (those are advise-mode
-exits). Privileged system_modify and git_destructive operations stay out
-of bounds even here; the runtime parks system_modify until super-mode
-confirmation and hard-blocks git_destructive in every mode.
+Available tools: read, write, edit, bash, grep, glob, ls, web_fetch, workspace_context, find_symbol, entry_points, where_is.
+Not available: write_plan, write_review. Privileged system_modify parks
+until super confirmation, and git_destructive is always hard-blocked.
 
-Tool selection: prefer the dedicated read, grep, glob, and ls tools over
-bash equivalents like cat, rg, find, and ls. Use bash to run commands,
-scripts, builds, and tests. When a tool result already answers the
-question, do not re-issue the same call.
+Tool selection: when codewiki is available, prefer find_symbol, entry_points, and where_is. Prefer read, grep, glob, and ls over bash equivalents. Use bash for commands, scripts, builds, and tests. Do not repeat a tool call when its result already answers.
 
 Escalate to super only when the sandbox blocks a command that matters to
 the task. Keep scope tight and report concrete outcomes.
