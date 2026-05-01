@@ -28,6 +28,33 @@ export type SelfDevPathDecision =
 	| { allowed: true; absolutePath: string; relativePath: string; restartRequired: boolean }
 	| { allowed: false; absolutePath: string; relativePath: string; reason: string };
 
+const SELF_DEV_RESTART_ROOT_FILES = new Set([
+	"package.json",
+	"package-lock.json",
+	"tsconfig.json",
+	"tsconfig.tests.json",
+	"tsup.config.ts",
+	"biome.json",
+	".gitignore",
+	"damage-control-rules.yaml",
+]);
+
+const SELF_DEV_HOT_TOOL_FILES = new Set([
+	"src/tools/bash.ts",
+	"src/tools/edit.ts",
+	"src/tools/glob.ts",
+	"src/tools/grep.ts",
+	"src/tools/ls.ts",
+	"src/tools/read.ts",
+	"src/tools/web-fetch.ts",
+	"src/tools/write-plan.ts",
+	"src/tools/write-review.ts",
+	"src/tools/write.ts",
+	"src/tools/codewiki/entry-points.ts",
+	"src/tools/codewiki/find-symbol.ts",
+	"src/tools/codewiki/where-is.ts",
+]);
+
 export function resolveRepoRoot(start: string = dirname(fileURLToPath(import.meta.url))): string | null {
 	let cursor = resolve(start);
 	for (let i = 0; i < 12; i++) {
@@ -124,6 +151,24 @@ function isProtectedBranch(branch: string | null): boolean {
 	return branch === null || branch === "main" || branch === "master" || branch === "trunk";
 }
 
+function selfDevRestartRequired(rel: string): boolean {
+	if (SELF_DEV_RESTART_ROOT_FILES.has(rel)) return true;
+	if (rel.startsWith("src/tools/")) {
+		return rel.endsWith(".ts") && !SELF_DEV_HOT_TOOL_FILES.has(rel);
+	}
+	if (rel.startsWith("src/worker/")) return false;
+	return (
+		rel.startsWith("src/engine/") ||
+		rel.startsWith("src/core/") ||
+		rel.startsWith("src/domains/") ||
+		rel.startsWith("src/interactive/") ||
+		rel.startsWith("src/entry/") ||
+		rel.startsWith("src/cli/") ||
+		rel.startsWith("src/harness/") ||
+		rel.startsWith("src/")
+	);
+}
+
 export function evaluateSelfDevWritePath(mode: SelfDevMode, target: string): SelfDevPathDecision {
 	const resolved = repoRelative(mode.repoRoot, target);
 	if (!resolved.inside) {
@@ -181,7 +226,7 @@ export function evaluateSelfDevWritePath(mode: SelfDevMode, target: string): Sel
 		allowed: true,
 		absolutePath: resolved.absolutePath,
 		relativePath: rel,
-		restartRequired: rel.startsWith("src/engine/"),
+		restartRequired: selfDevRestartRequired(rel),
 	};
 }
 
@@ -317,7 +362,7 @@ export function buildSelfDevPrompt(mode: SelfDevMode): string {
 		"3. Do not push, force, reset hard, clean with force, or bypass git safety rails.",
 		"4. Do not write test fixtures or boundary audit records.",
 		"5. Do not write src/engine/ unless the user explicitly opted in with CLIO_DEV_ALLOW_ENGINE_WRITES=1.",
-		"6. If src/engine/ changes, tell the user the running Clio process needs a restart.",
+		"6. If a write touches restart-required source, tool infrastructure, or root config, tell the user the running Clio process needs a restart.",
 		"7. Run npm run ci successfully before proposing merge or handoff.",
 		"8. Treat OpenAI Codex OAuth as the preferred provider path for self-development when it is configured.",
 	].join("\n");

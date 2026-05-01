@@ -34,6 +34,32 @@ describe("core/self-dev path policy", () => {
 		if (decision.allowed) strictEqual(decision.restartRequired, false);
 	});
 
+	it("marks non-hot-reloadable source writes as restart-required", () => {
+		const paths = [
+			"/repo/clio-coder/src/core/config.ts",
+			"/repo/clio-coder/src/domains/session/extension.ts",
+			"/repo/clio-coder/src/interactive/index.ts",
+			"/repo/clio-coder/src/tools/policy.ts",
+			"/repo/clio-coder/src/tools/codewiki/shared.ts",
+			"/repo/clio-coder/src/harness/classifier.ts",
+			"/repo/clio-coder/damage-control-rules.yaml",
+		];
+		for (const path of paths) {
+			const decision = evaluateSelfDevWritePath(mode({ engineWritesAllowed: true }), path);
+			strictEqual(decision.allowed, true, path);
+			if (decision.allowed) strictEqual(decision.restartRequired, true, path);
+		}
+	});
+
+	it("does not require restart for hot-reloadable nested tool specs or worker changes", () => {
+		const hot = evaluateSelfDevWritePath(mode(), "/repo/clio-coder/src/tools/codewiki/find-symbol.ts");
+		const worker = evaluateSelfDevWritePath(mode(), "/repo/clio-coder/src/worker/entry.ts");
+		strictEqual(hot.allowed, true);
+		if (hot.allowed) strictEqual(hot.restartRequired, false);
+		strictEqual(worker.allowed, true);
+		if (worker.allowed) strictEqual(worker.restartRequired, false);
+	});
+
 	it("blocks writes outside the repository", () => {
 		const decision = evaluateSelfDevWritePath(mode(), "/tmp/outside.txt");
 		strictEqual(decision.allowed, false);

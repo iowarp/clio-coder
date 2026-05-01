@@ -41,29 +41,81 @@ describe("startHarness", () => {
 	});
 
 	it("hot-swaps a changed tool file and updates registry + state", async () => {
-		const source = join(repo, "src", "tools", "fake.ts");
+		const source = join(repo, "src", "tools", "read.ts");
 		writeFileSync(
 			source,
-			`export const fakeTool = { name: "fake", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "v1" }; } };\n`,
+			`export const readTool = { name: "read", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "v1" }; } };\n`,
 		);
 		const registry = fakeRegistry();
 		const bus = createSafeEventBus();
-		const allowedModesByName = new Map<string, ReadonlyArray<string>>([["fake", ["default"]]]);
+		const allowedModesByName = new Map<string, ReadonlyArray<string>>([["read", ["default"]]]);
 		const handle = startHarness({ repoRoot: repo, cacheRoot: cache, toolRegistry: registry, bus, allowedModesByName });
 		try {
 			await delay(100);
 			writeFileSync(
 				source,
-				`export const fakeTool = { name: "fake", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "v2" }; } };\n`,
+				`export const readTool = { name: "read", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "v2" }; } };\n`,
 			);
 			await delay(400);
-			const spec = registry.get("fake" as ToolName);
-			ok(spec, "expected fake to be registered");
+			const spec = registry.get("read" as ToolName);
+			ok(spec, "expected read to be registered");
 			const run = await spec?.run({});
 			strictEqual(run?.kind, "ok");
 			if (run?.kind === "ok") strictEqual(run.output, "v2");
 			const snap = handle.state.snapshot();
 			ok(snap.kind === "hot-ready" || snap.kind === "idle", `unexpected state ${snap.kind}`);
+		} finally {
+			handle.stop();
+		}
+	});
+
+	it("hot-swaps nested registered tool specs", async () => {
+		mkdirSync(join(repo, "src", "tools", "codewiki"), { recursive: true });
+		const source = join(repo, "src", "tools", "codewiki", "find-symbol.ts");
+		writeFileSync(
+			source,
+			`export const findSymbolTool = { name: "find_symbol", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "nested-v1" }; } };\n`,
+		);
+		const registry = fakeRegistry();
+		const bus = createSafeEventBus();
+		const allowedModesByName = new Map<string, ReadonlyArray<string>>([["find_symbol", ["default"]]]);
+		const handle = startHarness({ repoRoot: repo, cacheRoot: cache, toolRegistry: registry, bus, allowedModesByName });
+		try {
+			await delay(100);
+			writeFileSync(
+				source,
+				`export const findSymbolTool = { name: "find_symbol", description: "f", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "nested-v2" }; } };\n`,
+			);
+			await delay(400);
+			const spec = registry.get("find_symbol" as ToolName);
+			ok(spec, "expected nested tool to be registered");
+			const run = await spec?.run({});
+			strictEqual(run?.kind, "ok");
+			if (run?.kind === "ok") strictEqual(run.output, "nested-v2");
+		} finally {
+			handle.stop();
+		}
+	});
+
+	it("requires restart for tool helpers that cannot be reloaded alone", async () => {
+		mkdirSync(join(repo, "src", "tools", "codewiki"), { recursive: true });
+		const helper = join(repo, "src", "tools", "codewiki", "shared.ts");
+		writeFileSync(helper, "export const x = 1;\n");
+		const registry = fakeRegistry();
+		const bus = createSafeEventBus();
+		const handle = startHarness({
+			repoRoot: repo,
+			cacheRoot: cache,
+			toolRegistry: registry,
+			bus,
+			allowedModesByName: new Map(),
+		});
+		try {
+			await delay(100);
+			writeFileSync(helper, "export const x = 2;\n");
+			await delay(400);
+			const snap = handle.state.snapshot();
+			strictEqual(snap.kind, "restart-required");
 		} finally {
 			handle.stop();
 		}
