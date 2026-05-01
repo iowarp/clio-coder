@@ -614,7 +614,20 @@ async function askYesNo(
 async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
 	const registry = getRuntimeRegistry();
 	const entries = listProviderSupportEntries(registry.list());
-	process.stdout.write("\nSupported runtimes:\n");
+	return pickRuntimeFromEntries(rl, entries, "\nSupported runtimes:");
+}
+
+async function pickRuntimeFromEntries(
+	rl: ReturnType<typeof createInterface>,
+	entries: ReadonlyArray<ProviderSupportEntry>,
+	heading: string,
+): Promise<RuntimeDescriptor | null> {
+	const registry = getRuntimeRegistry();
+	if (entries.length === 0) {
+		process.stderr.write("no runtimes available in this category\n");
+		return null;
+	}
+	process.stdout.write(`${heading}\n`);
 	let lastGroup: ProviderSupportEntry["group"] | null = null;
 	for (const [index, entry] of entries.entries()) {
 		if (entry.group !== lastGroup) {
@@ -623,6 +636,7 @@ async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<Runt
 		}
 		process.stdout.write(`    ${String(index + 1).padStart(2)}. ${entry.runtimeId.padEnd(22)} ${entry.summary}\n`);
 	}
+	const allowedIds = new Set(entries.map((entry) => entry.runtimeId));
 	for (;;) {
 		const answer = await ask(rl, "\nSelection (number or runtime id)", entries[0]?.runtimeId ?? "");
 		if (answer === null) return null;
@@ -635,10 +649,97 @@ async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<Runt
 				if (runtime) return runtime;
 			}
 		}
-		const match = registry.get(answer);
-		if (match) return match;
-		process.stderr.write(`unknown runtime id: ${answer}\n`);
+		if (allowedIds.has(answer)) {
+			const match = registry.get(answer);
+			if (match) return match;
+		}
+		process.stderr.write(`unknown runtime id for this category: ${answer}\n`);
 	}
+}
+
+export type ConfigureCategory = "local-app" | "local-http" | "chatgpt" | "cloud-api" | "all";
+
+const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio-native"]);
+
+export function runtimesForCategory(
+	entries: ReadonlyArray<ProviderSupportEntry>,
+	category: ConfigureCategory,
+): ProviderSupportEntry[] {
+	switch (category) {
+		case "local-app":
+			return entries.filter((entry) => LOCAL_APP_RUNTIME_IDS.has(entry.runtimeId));
+		case "local-http":
+			return entries.filter((entry) => entry.group === "local-http" && !LOCAL_APP_RUNTIME_IDS.has(entry.runtimeId));
+		case "chatgpt":
+			return entries.filter((entry) => entry.runtimeId === "openai-codex");
+		case "cloud-api":
+			return entries
+				.filter((entry) => entry.group === "cloud-api")
+				.slice()
+				.sort((a, b) => a.label.localeCompare(b.label) || a.runtimeId.localeCompare(b.runtimeId));
+		case "all":
+			return entries.slice();
+	}
+}
+
+async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<ConfigureCategory | null> {
+	process.stdout.write("\nHow will you connect Clio to a model?\n\n");
+	process.stdout.write("  1. Local app          Ollama or LM Studio (recommended for new users)\n");
+	process.stdout.write("  2. Local HTTP server  llama.cpp / vLLM / SGLang / OpenAI-compatible\n");
+	process.stdout.write("  3. ChatGPT plan       Plus or Pro via Codex OAuth\n");
+	process.stdout.write(
+		"  4. Cloud API key      Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral, Bedrock\n\n",
+	);
+	process.stdout.write("  5. All runtimes       advanced (full list)\n");
+	for (;;) {
+		const answer = await ask(rl, "\nSelection", "1");
+		if (answer === null) return null;
+		if (answer.length === 0) continue;
+		const lc = answer.toLowerCase();
+		if (lc === "1" || lc === "local-app" || lc === "local") return "local-app";
+		if (lc === "2" || lc === "local-http" || lc === "http") return "local-http";
+		if (lc === "3" || lc === "chatgpt" || lc === "codex") return "chatgpt";
+		if (lc === "4" || lc === "cloud-api" || lc === "cloud") return "cloud-api";
+		if (lc === "5" || lc === "a" || lc === "all") return "all";
+		process.stderr.write(`invalid choice: ${answer}\n`);
+	}
+}
+
+async function pickRuntimeViaCategory(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
+	const registry = getRuntimeRegistry();
+	const allEntries = listProviderSupportEntries(registry.list());
+	const category = await pickCategory(rl);
+	if (category === null) return null;
+	if (category === "all") return pickRuntime(rl);
+	const filtered = runtimesForCategory(allEntries, category);
+	if (filtered.length === 0) {
+		process.stderr.write("no runtimes available for that category; falling back to full list\n");
+		return pickRuntime(rl);
+	}
+	if (category === "chatgpt") {
+		const only = filtered[0];
+		if (only) {
+			const runtime = registry.get(only.runtimeId);
+			if (runtime) {
+				process.stdout.write(`\nUsing ${runtime.id} (${only.summary}).\n`);
+				return runtime;
+			}
+		}
+		return pickRuntime(rl);
+	}
+	if (filtered.length === 1) {
+		const only = filtered[0];
+		if (only) {
+			const runtime = registry.get(only.runtimeId);
+			if (runtime) {
+				process.stdout.write(`\nUsing ${runtime.id} (${only.summary}).\n`);
+				return runtime;
+			}
+		}
+	}
+	const heading =
+		category === "local-app" ? "\nLocal apps:" : category === "local-http" ? "\nLocal HTTP servers:" : "\nCloud APIs:";
+	return pickRuntimeFromEntries(rl, filtered, heading);
 }
 
 async function maybeSteerToNativeRuntime(
@@ -663,7 +764,7 @@ async function runInteractive(
 	preselectedRuntime: RuntimeDescriptor | null,
 	defaults: ParsedArgs,
 ): Promise<number> {
-	let runtime = preselectedRuntime ?? (await pickRuntime(rl));
+	let runtime = preselectedRuntime ?? (await pickRuntimeViaCategory(rl));
 	if (!runtime) {
 		printError("configuration cancelled");
 		return 0;
