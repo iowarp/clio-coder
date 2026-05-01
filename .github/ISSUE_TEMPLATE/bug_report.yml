@@ -16,7 +16,7 @@ body:
       label: Reproduce
       description: Minimal commands, config shape, or session steps.
       placeholder: |
-        npm run ci
+        clio doctor
         clio targets
         clio run --agent scout "..."
     validations:
@@ -25,12 +25,21 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, Node version, package version, target/runtime.
+      description: Output of `clio --version`, `node --version`, OS, shell, target id, runtime, and model.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: clio doctor output
+      description: Paste the output of `clio doctor` (without `--fix`). Redact any secrets.
+      render: text
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Logs
-      description: Paste only relevant logs. Remove secrets.
+      label: Logs and receipt
+      description: Paste only the relevant log lines, plus the receipt id from `<dataDir>/receipts/<runId>.json` if a run was involved. Remove API keys and private source.
       render: text

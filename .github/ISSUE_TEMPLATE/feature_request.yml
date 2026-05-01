@@ -4,17 +4,17 @@ title: "feat: "
 labels: ["enhancement"]
 body:
   - type: textarea
-    id: goal
+    id: problem
     attributes:
-      label: Goal
-      description: What user or agent workflow should improve?
+      label: User problem
+      description: What concrete user or agent workflow is blocked or awkward today? Describe the problem before the solution.
     validations:
       required: true
   - type: textarea
     id: shape
     attributes:
       label: Proposed shape
-      description: CLI, TUI, runtime, provider, session, docs, or test surface.
+      description: Which surface changes? CLI, TUI, runtime, provider, session, docs, or test surface. Sketch the command, flag, or tool name if you have one.
     validations:
       required: true
   - type: textarea
@@ -23,6 +23,13 @@ body:
       label: Acceptance criteria
       description: Concrete checks a reviewer can apply.
       placeholder: |
-        - Command exits 0.
-        - Config is backwards-compatible.
-        - Test covers the changed path.
+        - Command exits 0 on the documented happy path.
+        - Existing settings.yaml continues to load without migration.
+        - A unit or integration test covers the changed path.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you ruled out, and why.
