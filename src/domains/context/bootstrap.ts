@@ -114,6 +114,23 @@ function allContextText(files: ReadonlyArray<SiblingContextFile>): string {
 	return files.map((file) => file.content).join("\n\n");
 }
 
+function readReadmeSummary(cwd: string): string | null {
+	let readme: string;
+	try {
+		readme = readFileSync(join(cwd, "README.md"), "utf8");
+	} catch {
+		return null;
+	}
+	const paragraphs = readme
+		.split(/\n\s*\n/)
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0 && !part.startsWith("#") && !part.startsWith("```"));
+	const first = paragraphs[0];
+	if (!first) return null;
+	const cleaned = first.replace(/\s+/g, " ").replace(/\.$/, "").trim();
+	return cleaned.length > 0 ? cleaned : null;
+}
+
 function defaultIdentity(cwd: string, projectType: ProjectType, files: ReadonlyArray<SiblingContextFile>): string {
 	const name = projectName(cwd);
 	const context = allContextText(files);
@@ -125,16 +142,38 @@ function defaultIdentity(cwd: string, projectType: ProjectType, files: ReadonlyA
 		].join(" ");
 	}
 	const pkg = readJsonFile(join(cwd, "package.json"));
-	const description = stringField(pkg, "description");
-	const role = description
-		? `It is ${description.replace(/\.$/, "")}.`
-		: `It is a ${projectTypeLabel(projectType)} project.`;
-	return `${name} is a ${projectTypeLabel(projectType)} project. ${role}`.slice(0, 600);
+	const description = stringField(pkg, "description") ?? readReadmeSummary(cwd);
+	const stack = projectTypeLabel(projectType);
+	const head = `${name} is a ${stack} project.`;
+	if (!description) return head.slice(0, 600);
+	const cleaned = description.replace(/\.$/, "").trim();
+	const role = /^[a-z]/.test(cleaned) ? `It is ${cleaned}.` : `${cleaned}.`;
+	return `${head} ${role}`.slice(0, 600);
 }
 
 function pushUnique(target: string[], value: string): void {
 	if (target.includes(value)) return;
 	target.push(value);
+}
+
+const RULE_KEYWORDS = /\b(always|never|must|should|prefer|avoid|do not|don't|use)\b/i;
+const SKIP_BULLET_PATTERNS = [/^marker\s*[:=]/i, /marker[-_:]\s*\w+-\w+/i, /^todo\b/i, /^note\b/i, /^example\b/i];
+
+function harvestSiblingBullets(files: ReadonlyArray<SiblingContextFile>): string[] {
+	const out: string[] = [];
+	for (const file of files) {
+		for (const rawLine of file.content.split("\n")) {
+			const match = /^[\s>]*[-*]\s+(.+?)\s*$/.exec(rawLine);
+			if (!match) continue;
+			const bullet = match[1]?.trim();
+			if (!bullet || bullet.length < 5) continue;
+			if (bullet.length > 200) continue;
+			if (SKIP_BULLET_PATTERNS.some((re) => re.test(bullet))) continue;
+			if (!RULE_KEYWORDS.test(bullet)) continue;
+			out.push(bullet);
+		}
+	}
+	return out;
 }
 
 function inferConventions(cwd: string, projectType: ProjectType, files: ReadonlyArray<SiblingContextFile>): string[] {
@@ -162,6 +201,7 @@ function inferConventions(cwd: string, projectType: ProjectType, files: Readonly
 			"Commit subjects are imperative, lowercase, conventional, at most 72 characters, and end without a period.",
 		);
 	}
+	for (const bullet of harvestSiblingBullets(files)) pushUnique(conventions, bullet);
 	return conventions.slice(0, 6);
 }
 
