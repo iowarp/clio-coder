@@ -16,6 +16,7 @@ import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import type {
 	SessionfulRuntime,
+	SessionRuntimeHook,
 	SessionRuntimeSendTurnInput,
 	SessionRuntimeSession,
 	SessionRuntimeStartInput,
@@ -119,8 +120,33 @@ export function mapClioModeToClaudePermission(
 
 class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 	private readonly sessions = new Map<string, ClaudeCodeSdkSessionContext>();
+	private readonly sessionStartHooks: SessionRuntimeHook[] = [];
+	private readonly sessionEndHooks: SessionRuntimeHook[] = [];
 
 	constructor(private readonly createQuery: CreateClaudeQuery) {}
+
+	onSessionStart(hook: SessionRuntimeHook): () => void {
+		this.sessionStartHooks.push(hook);
+		return () => {
+			const index = this.sessionStartHooks.indexOf(hook);
+			if (index >= 0) this.sessionStartHooks.splice(index, 1);
+		};
+	}
+
+	onSessionEnd(hook: SessionRuntimeHook): () => void {
+		this.sessionEndHooks.push(hook);
+		return () => {
+			const index = this.sessionEndHooks.indexOf(hook);
+			if (index >= 0) this.sessionEndHooks.splice(index, 1);
+		};
+	}
+
+	private async runSessionHooks(
+		hooks: ReadonlyArray<SessionRuntimeHook>,
+		session: SessionRuntimeSession,
+	): Promise<void> {
+		for (const hook of hooks) await hook({ threadId: session.threadId, session });
+	}
 
 	async startSession(
 		input: SessionRuntimeStartInput,
@@ -160,6 +186,12 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 		};
 		context.pumpDone = this.consumeMessages(context);
 		this.sessions.set(threadId, context);
+		try {
+			await this.runSessionHooks(this.sessionStartHooks, session);
+		} catch (err) {
+			await this.stopSession(threadId).catch(() => undefined);
+			throw err;
+		}
 		emit({ type: "agent_start" });
 		return session;
 	}
@@ -217,6 +249,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 		this.finalizeActiveTurn(context, "aborted", "session stopped");
 		await context.pumpDone.catch(() => undefined);
 		this.sessions.delete(threadId);
+		await this.runSessionHooks(this.sessionEndHooks, context.session);
 	}
 
 	listSessions(): ReadonlyArray<SessionRuntimeSession> {

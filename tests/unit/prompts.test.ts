@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { ContextContract } from "../../src/domains/context/index.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadProjectContextFiles, renderProjectContextFiles } from "../../src/domains/prompts/context-files.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
@@ -189,7 +190,7 @@ describe("prompts/compiler context files", () => {
 			dynamicInputs: {},
 		});
 
-		strictEqual(result.text.includes("# Project context"), false);
+		strictEqual(result.text.includes("<project-context>"), false);
 		strictEqual(
 			result.fragmentManifest.some((entry) => entry.id === "context.files"),
 			false,
@@ -212,23 +213,39 @@ describe("prompts/compiler context files", () => {
 			context: "context.files",
 			providers: "providers.dynamic",
 			session: "session.dynamic",
-			dynamicInputs: { contextFiles: "## AGENTS.md\n\nRepo rules" },
+			dynamicInputs: {
+				contextFiles: "<project-type>typescript</project-type>\n\n<project-context>\nRepo rules\n</project-context>",
+			},
 		});
 
-		ok(withContext.text.includes("# Project context"), withContext.text);
+		ok(withContext.text.includes("<project-type>typescript</project-type>"), withContext.text);
+		ok(withContext.text.includes("<project-context>"), withContext.text);
 		ok(withContext.text.includes("Repo rules"), withContext.text);
-		ok(withContext.text.indexOf("# Project context") < withContext.text.indexOf("# Provider runtime"), withContext.text);
+		ok(withContext.text.indexOf("<project-type>") < withContext.text.indexOf("# Provider runtime"), withContext.text);
 		ok(withContext.fragmentManifest.some((entry) => entry.id === "context.files"));
 		notStrictEqual(withContext.renderedPromptHash, noContext.renderedPromptHash);
 	});
 
-	it("prompt extension loads context files from the supplied cwd", async () => {
+	it("prompt extension loads project context from the context domain", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-extension-"));
 		try {
-			writeFileSync(join(scratch, "AGENTS.md"), "extension-loaded agents", "utf8");
+			const contextContract: ContextContract = {
+				async runBootstrap() {
+					throw new Error("not used");
+				},
+				renderPromptContext(cwd) {
+					strictEqual(cwd, scratch);
+					return {
+						text: "<project-type>typescript</project-type>\n\n<project-context>\nextension-loaded clio\n</project-context>",
+						clioMd: null,
+						warnings: [],
+					};
+				},
+			};
 			const bundle = createPromptsBundle({
 				bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
-				getContract: () => undefined,
+				getContract: <T extends object>(name: string): T | undefined =>
+					name === "context" ? (contextContract as T) : undefined,
 			});
 			await bundle.extension.start?.();
 			const result = bundle.contract.compileForTurn({
@@ -243,7 +260,7 @@ describe("prompts/compiler context files", () => {
 				overrideMode: "default",
 				safetyLevel: "auto-edit",
 			});
-			ok(result.text.includes("extension-loaded agents"), result.text);
+			ok(result.text.includes("extension-loaded clio"), result.text);
 			ok(result.fragmentManifest.some((entry) => entry.id === "context.files"));
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
@@ -253,13 +270,23 @@ describe("prompts/compiler context files", () => {
 	it("prompt extension suppresses the context.files fragment when noContextFiles is set", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-suppress-"));
 		try {
-			writeFileSync(join(scratch, "AGENTS.md"), "should-not-appear agents", "utf8");
-			writeFileSync(join(scratch, "CLAUDE.md"), "should-not-appear claude", "utf8");
-			writeFileSync(join(scratch, "CODEX.md"), "should-not-appear codex", "utf8");
+			const contextContract: ContextContract = {
+				async runBootstrap() {
+					throw new Error("not used");
+				},
+				renderPromptContext() {
+					return {
+						text: "<project-context>\nshould-not-appear\n</project-context>",
+						clioMd: null,
+						warnings: [],
+					};
+				},
+			};
 			const bundle = createPromptsBundle(
 				{
 					bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
-					getContract: () => undefined,
+					getContract: <T extends object>(name: string): T | undefined =>
+						name === "context" ? (contextContract as T) : undefined,
 				},
 				{ noContextFiles: true },
 			);

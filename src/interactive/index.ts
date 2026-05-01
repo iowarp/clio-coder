@@ -147,6 +147,8 @@ export interface InteractiveDeps {
 	 * hook; 12d adds the auto-trigger and overflow-recovery path.
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
+	/** Run /init for the current working directory. */
+	onInit?: () => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -817,6 +819,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				const msg = err instanceof Error ? err.message : String(err);
 				io.stderr(`[/compact] ${msg}\n`);
 			});
+		},
+		runInit: () => {
+			if (!deps.onInit) {
+				io.stderr("[/init] init not wired; pass onInit to startInteractive\n");
+				return;
+			}
+			void deps
+				.onInit()
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/init] ${msg}\n`);
+				})
+				.finally(() => tui.requestRender());
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {

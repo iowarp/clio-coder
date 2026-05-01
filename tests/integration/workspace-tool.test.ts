@@ -46,7 +46,7 @@ describe("workspaceContextTool", () => {
 			strictEqual(lazyCalled, 0);
 			if (result.kind === "ok") {
 				const parsed = JSON.parse(result.output) as WorkspaceSnapshot;
-				strictEqual(parsed.projectType, "node");
+				strictEqual(parsed.projectType, "typescript");
 				strictEqual(parsed.branch, "main");
 			}
 		} finally {

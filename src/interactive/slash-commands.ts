@@ -15,6 +15,7 @@ import { resolveModelReference } from "../domains/providers/index.js";
 export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
+	| { kind: "init" }
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
@@ -189,6 +190,7 @@ export interface SlashCommandContext {
 	workerDefault: () => { endpoint?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
+	runInit: () => void;
 	openProviders: () => void;
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
@@ -269,6 +271,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return `  ${usage.padEnd(28)} ${entry.description}`;
 			});
 			ctx.io.stdout(`\ncommands:\n${rows.join("\n")}\n\nRun /hotkeys for the full keyboard + slash-command reference.\n`);
+		},
+	},
+	{
+		name: "init",
+		description: "Bootstrap or refresh CLIO.md",
+		kinds: ["init"],
+		match(trimmed) {
+			return trimmed === "/init" ? { kind: "init" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.runInit();
 		},
 	},
 	{

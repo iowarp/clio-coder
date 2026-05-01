@@ -33,6 +33,6 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!**/dist", "!**/node_modules", "!**/*.log"]
+		"includes": ["**", "!**/.claude", "!**/.clio", "!**/dist", "!**/node_modules", "!**/*.log"]
 	}
 }

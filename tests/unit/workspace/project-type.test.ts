@@ -20,11 +20,11 @@ describe("detectProjectType", () => {
 		}
 	});
 
-	it("returns 'node' when package.json is present", () => {
+	it("returns 'typescript' when package.json is present", () => {
 		const t = tmp();
 		try {
 			writeFileSync(join(t.dir, "package.json"), "{}");
-			strictEqual(detectProjectType(t.dir), "node");
+			strictEqual(detectProjectType(t.dir), "typescript");
 		} finally {
 			t.cleanup();
 		}
@@ -81,12 +81,12 @@ describe("detectProjectType", () => {
 		}
 	});
 
-	it("prefers 'node' over 'dotfiles' when both signals exist", () => {
+	it("prefers 'typescript' over 'dotfiles' when both signals exist", () => {
 		const t = tmp();
 		try {
 			writeFileSync(join(t.dir, "package.json"), "{}");
 			mkdirSync(join(t.dir, "dot-bashrc"));
-			strictEqual(detectProjectType(t.dir), "node");
+			strictEqual(detectProjectType(t.dir), "typescript");
 		} finally {
 			t.cleanup();
 		}

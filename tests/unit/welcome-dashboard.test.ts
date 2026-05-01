@@ -167,7 +167,7 @@ describe("interactive/welcome-dashboard", () => {
 			behind: 0,
 			recentCommits: [{ sha: "abc1234", subject: "x" }],
 			remoteUrl: "https://github.com/akougkas/clio-coder",
-			projectType: "node",
+			projectType: "typescript",
 			capturedAt: "2026-04-30T00:00:00Z",
 			...overrides,
 		});
@@ -178,7 +178,7 @@ describe("interactive/welcome-dashboard", () => {
 			ok(/Workspace/.test(text), text);
 			ok(/main/.test(text), text);
 			ok(/akougkas\/clio-coder/.test(text), text);
-			ok(/node/.test(text), text);
+			ok(/typescript/.test(text), text);
 			ok(/commit: abc1234 x/.test(text), text);
 		});
 

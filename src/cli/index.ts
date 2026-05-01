@@ -7,6 +7,7 @@ import { runDoctorCommand } from "./doctor.js";
 import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
 import { runEvolveCommand } from "./evolve.js";
+import { runInitCommand } from "./init.js";
 import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
 import { runResetCommand } from "./reset.js";
@@ -26,7 +27,7 @@ Usage:
   clio --dev                start self-development mode for this checkout
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
-  clio --no-context-files, -nc  skip AGENTS.md/CLAUDE.md/CODEX.md context-file injection
+  clio --no-context-files, -nc  skip CLIO.md project-context injection
   clio configure            interactive first-run/configuration wizard
   clio targets              list configured targets, health, auth, and capabilities
   clio targets add          add a target interactively or via flags
@@ -46,6 +47,7 @@ Usage:
   clio eval                 run, report, or compare local eval task files
   clio memory               list, propose, approve, reject, or prune memory
   clio evolve manifest      create, validate, or summarize change manifests
+  clio init [--yes]         bootstrap or refresh CLIO.md for this project
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
 `;
@@ -93,6 +95,8 @@ async function main(argv: string[]): Promise<number> {
 			return runMemoryCommand(subArgs);
 		case "evolve":
 			return runEvolveCommand(subArgs);
+		case "init":
+			return runInitCommand(subArgs);
 		case "run":
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":

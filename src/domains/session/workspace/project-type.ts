@@ -1,14 +1,16 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-export type ProjectType = "node" | "python" | "rust" | "go" | "dotfiles" | "unknown";
+export type ProjectType = "typescript" | "python" | "rust" | "go" | "c++" | "polyglot" | "dotfiles" | "unknown";
 
-const FILE_MARKERS: ReadonlyArray<{ file: string; type: ProjectType }> = [
-	{ file: "package.json", type: "node" },
+const FILE_MARKERS: ReadonlyArray<{ file: string; type: Exclude<ProjectType, "dotfiles" | "unknown" | "polyglot"> }> = [
+	{ file: "package.json", type: "typescript" },
 	{ file: "pyproject.toml", type: "python" },
 	{ file: "setup.py", type: "python" },
 	{ file: "Cargo.toml", type: "rust" },
 	{ file: "go.mod", type: "go" },
+	{ file: "CMakeLists.txt", type: "c++" },
+	{ file: "compile_commands.json", type: "c++" },
 ];
 
 function looksLikeDotfiles(cwd: string): boolean {
@@ -32,9 +34,13 @@ function looksLikeDotfiles(cwd: string): boolean {
 }
 
 export function detectProjectType(cwd: string): ProjectType {
+	const found = new Set<ProjectType>();
 	for (const marker of FILE_MARKERS) {
-		if (existsSync(join(cwd, marker.file))) return marker.type;
+		if (existsSync(join(cwd, marker.file))) found.add(marker.type);
 	}
+	if (found.size > 1) return "polyglot";
+	const first = [...found][0];
+	if (first) return first;
 	if (looksLikeDotfiles(cwd)) return "dotfiles";
 	return "unknown";
 }

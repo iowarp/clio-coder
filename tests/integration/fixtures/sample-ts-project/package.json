@@ -1,0 +1,11 @@
+{
+	"name": "sample-ts-project",
+	"type": "module",
+	"scripts": {
+		"test": "node --import tsx --test 'tests/**/*.test.ts'"
+	},
+	"devDependencies": {
+		"typescript": "6.0.3",
+		"tsx": "4.21.0"
+	}
+}

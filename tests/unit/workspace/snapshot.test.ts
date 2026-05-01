@@ -21,7 +21,7 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 describe("probeWorkspace", () => {
-	it("aggregates git + project-type for a node repo", () => {
+	it("aggregates git + project-type for a TypeScript repo", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-pw-"));
 		try {
 			git(dir, "init", "--initial-branch=main", "-q");
@@ -32,7 +32,7 @@ describe("probeWorkspace", () => {
 			strictEqual(snap.cwd, dir);
 			strictEqual(snap.isGit, true);
 			strictEqual(snap.branch, "main");
-			strictEqual(snap.projectType, "node");
+			strictEqual(snap.projectType, "typescript");
 			ok(snap.recentCommits.length === 1);
 			ok(typeof snap.capturedAt === "string");
 		} finally {
