@@ -25,12 +25,11 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 		pieces.push(renderProjectContextFragment(clio.value));
 	}
 	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
-	const state = readClioState(cwd);
-	if (state && existsSync(codewikiPath(cwd))) {
-		const current = computeFingerprint(cwd);
-		if (state.fingerprint.treeHash === current.treeHash) {
-			pieces.push("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>");
-		}
+	if (existsSync(codewikiPath(cwd))) {
+		const state = readClioState(cwd);
+		const stale = state ? state.fingerprint.treeHash !== computeFingerprint(cwd).treeHash : true;
+		const suffix = stale ? " (stale; run /init to refresh)" : "";
+		pieces.push(`<codewiki>available${suffix}; use find_symbol, entry_points, where_is</codewiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
 }
