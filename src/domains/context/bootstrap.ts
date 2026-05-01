@@ -313,6 +313,7 @@ function writeArtifacts(
 		version: 1,
 		projectType,
 		fingerprint: finalFingerprint,
+		bootstrapFingerprint: finalFingerprint,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 	});

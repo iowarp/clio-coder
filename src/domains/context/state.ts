@@ -8,6 +8,7 @@ export interface ClioProjectState {
 	version: 1;
 	projectType?: ProjectType;
 	fingerprint: Fingerprint;
+	bootstrapFingerprint?: Fingerprint;
 	lastInitAt?: string;
 	lastSessionAt?: string;
 	lastIndexedAt?: string;
@@ -31,7 +32,15 @@ function isFingerprint(value: unknown): value is Fingerprint {
 function isProjectState(value: unknown): value is ClioProjectState {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
-	return obj.version === 1 && isFingerprint(obj.fingerprint);
+	if (obj.version !== 1 || !isFingerprint(obj.fingerprint)) return false;
+	if (
+		"bootstrapFingerprint" in obj &&
+		obj.bootstrapFingerprint !== undefined &&
+		!isFingerprint(obj.bootstrapFingerprint)
+	) {
+		return false;
+	}
+	return true;
 }
 
 export function statePath(cwd: string): string {
