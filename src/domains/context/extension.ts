@@ -53,8 +53,9 @@ function emitStartupHints(cwd: string): void {
 	}
 	const state = readClioState(cwd);
 	if (!state) return;
+	const reference = state.bootstrapFingerprint ?? state.fingerprint;
 	const current = computeFingerprint(cwd);
-	if (isStale(state.fingerprint, current)) {
+	if (isStale(reference, current)) {
 		process.stderr.write("clio: CLIO.md fingerprint differs from current project state. Run /init to refresh.\n");
 	}
 }
@@ -83,6 +84,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				version: 1,
 				projectType,
 				fingerprint,
+				...(state?.bootstrapFingerprint ? { bootstrapFingerprint: state.bootstrapFingerprint } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
 				lastSessionAt: new Date().toISOString(),
 				...(lastIndexedAt ? { lastIndexedAt } : {}),
