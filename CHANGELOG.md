@@ -3,29 +3,25 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## Unreleased
+## 0.1.4 — 2026-04-30
 
-### Added
-
-### Changed
-
-### Fixed
-
-## 0.1.4 — 2026-04-29
-
-Foundation release for the v0.1 evolution plane. v0.1.4 lands the
-component registry (M1), change manifests (M2), the evidence corpus
-builder (M3), the middleware domain plus tool-surface enforcement
-(M4), protected-artifact safety logic and persistence (M5), the
-advisory finish-contract check (M6), the local eval runner with
-baseline/candidate comparison (M7), the long-term memory domain with
-prompt injection through a dedicated fragment slot (M8), eight new
-agent recipes (M9), and a scientific-validation pack seed covering
-HPC and scientific repositories (M10). Workers now receive the same
-gated memory section the orchestrator does, so `clio run` and the
-chat-loop see identical lessons. No breaking changes. No settings
-migration required. Sessions, receipts, and audit JSONL written by
-v0.1.3 remain readable.
+The v0.1 evolution-plane release. v0.1.4 lands the components registry
+(M1), typed change manifests (M2), the deterministic evidence corpus
+builder (M3), the middleware domain with tool-surface enforcement (M4),
+protected-artifact safety logic and persistence (M5), the advisory
+finish-contract check (M6), the local eval runner with baseline and
+candidate comparison (M7), the long-term memory domain with bounded
+prompt injection (M8), eight new specialist agent recipes (M9), and a
+scientific-validation pack covering HPC and scientific repositories
+(M10). The same gated memory section reaches both interactive turns and
+worker subprocesses, so `clio run` and the chat-loop see identical
+lessons. A workspace-orientation pass surfaces cwd, project type,
+branch, dirty flag, and recent commits in the welcome dashboard and
+exposes the same snapshot to agents through a new `workspace_context`
+tool. Engine fidelity gains pi-parity compaction, anchored context
+accounting, a status-indicator domain, and a richer chat-loop replay
+path. No breaking changes. No settings migration required. Sessions,
+receipts, and audit JSONL written by v0.1.3 remain readable.
 
 ### Added — components
 
@@ -138,6 +134,27 @@ v0.1.3 remain readable.
   evidence or explicit limitation. Recorded in evidence and consumed
   through the middleware `before_finish` and `after_finish` hooks.
 
+### Added — workspace orientation
+
+- `src/domains/workspace/` ships three pure probes: a git probe (branch,
+  dirty flag, remote URL, recent commits) with scratch-repo tests, a
+  project-type detector that reads manifest files, and a `probeWorkspace`
+  aggregator that returns a stable snapshot.
+- The session domain captures a workspace snapshot at session bind so
+  resume and fork replay see the same orientation the first turn saw.
+- A new `workspace_context` tool exposes that snapshot to the model in
+  one call. Prompts that previously fabricated workspace facts or
+  hand-rolled `.git/HEAD` reads now invoke the tool once and finish in
+  roughly five seconds with correct facts.
+- The interactive welcome dashboard renders a workspace panel showing
+  cwd, project type, branch, dirty flag, and remote URL. Idle context
+  usage shows `idle` with a dim bar before the first user turn instead
+  of a stale percent.
+- Mode prompt fragments and `MODE_MATRIX` enumerate the new tool so it
+  is visible in `default`, `advise`, and `super` modes; the
+  action-classifier admits it; and the boundary test
+  `tests/boundaries/mode-fragments-tool-truth.test.ts` enforces parity.
+
 ### Added — agents
 
 - Eight new built-in agent recipes ship under
@@ -189,6 +206,81 @@ v0.1.3 remain readable.
   defaults. The worker isolation invariant is unchanged because no
   new `src/domains/**` import enters `src/worker/**`.
 
+### Changed — providers and runtimes
+
+- A unified `llamacpp` runtime replaces the four surface-specific
+  variants in the configure menu. The unified descriptor defaults to
+  `/v1/chat/completions`, the universal surface for any modern `--jinja`
+  llama-server build. The legacy ids (`llamacpp-anthropic`,
+  `llamacpp-completion`, `llamacpp-embed`, `llamacpp-rerank`, and
+  `lemonade-anthropic`) stay registered for back-compat with existing
+  `settings.yaml` but are marked hidden. The Local HTTP menu drops from
+  eleven entries to seven (`openai-compat`, `lemonade`, `llamacpp`,
+  `lmstudio-native`, `ollama-native`, `sglang`, `vllm`). Power users can
+  still see hidden ids with `clio configure --list --all`.
+- `clio doctor` warns on every endpoint pinned to a legacy hidden alias
+  and rewrites `runtime: llamacpp-completion` to `runtime: llamacpp`
+  when `--fix` is on. The other legacy ids encode intent the unified
+  descriptor does not preserve, so they get a warn-only manual hint.
+- `RuntimeDescriptor` gains a `hidden` flag; `ProbeResult` gains
+  `chatApiFamily` and a `ProbeSurfaceMap` so composite local descriptors
+  record which inference surfaces they probed and which they will use
+  for chat. `listProviderSupportEntries` accepts a new
+  `ListProviderSupportOptions` so `clio configure --list --all` can
+  surface hidden aliases.
+
+### Changed — interactive TUI
+
+- The `/model` picker scales between 60 and 120 columns based on
+  `terminal.columns` so descriptions no longer truncate mid-word on wide
+  terminals. The picker also suppresses the `auth=not-required` badge
+  for local-tier endpoints where it is always redundant.
+- Idle context usage shows `idle` with a dim bar when no user traffic
+  has occurred, matching the welcome-dashboard contract.
+- Pressing Esc while a modal overlay is open now closes the overlay
+  instead of falling through to cancel the active run. Previously the
+  inline cancel path stole the keystroke and required a second press,
+  and in some flows the super-mode overlay's orphaned state silently
+  elevated the session. Ctrl+C is unchanged.
+- The thinking preview clips to terminal width instead of wrapping into
+  the rail prefix, fixing layout drift on narrow terminals.
+- Every subcommand accepts `--help` consistently. `clio components list`
+  is now an explicit alias of `clio components`. `clio agents --help`,
+  `clio components --help`, `clio upgrade --help`, and `clio run --help`
+  all print full usage instead of defaulting to top-level help.
+
+### Changed — engine parity
+
+- Compaction now mirrors pi `prepareCompaction`: split-turn compaction
+  summarizes pre and turn-prefix separately through a turn-prefix prompt
+  template; iterative compaction respects the prior `compactionSummary`
+  as a lower bound so prior summaries are never re-fed to the
+  summarizer; and after compact, `agent.state.messages` is rebuilt via
+  `buildReplayAgentMessagesFromTurns(deps.readSessionEntries())` to
+  preserve the kept suffix, mirroring pi `_runAutoCompaction`'s
+  `agent.replaceMessages(buildSessionContext().messages)`. Overflow
+  recovery prunes the failed assistant before compact and re-prompts
+  with the same user request.
+- Context accounting moves to `src/domains/session/context-accounting.ts`
+  with a provider-bound `estimateAgentContextTokens` that anchors on the
+  last assistant usage and guards with `max(projection, anchored)`. The
+  welcome dashboard percent now derives from live agent state instead of
+  cumulative billing tokens. `extractReasoningTokens` handles the
+  scattered provider shapes (`reasoningTokens`,
+  `output_tokens_details.reasoning_tokens`,
+  `completion_tokens_details`).
+- A new `src/interactive/status/` controller adds a phase state machine,
+  watchdog tiering, and an overlay frame stack for tool, retry, compact,
+  and dispatch states. The footer and chat panels surface the agent verb
+  plus a turn summary line. Safety audits alarmable status transitions
+  (`stuck`, `tool_blocked`, `retrying`, `cancelled`).
+- Rich assistant payload persistence carries content blocks, usage, api,
+  provider, model, and `responseId`. Provider-shaped replay reconstructs
+  `AgentMessages` from session entries with full content shape preserved.
+  Ctrl+T thinking visibility now applies across the entire transcript
+  instead of toggling only the most recent block. Reasoning tokens
+  surface only when usage payloads expose them.
+
 ### Changed
 
 - Tool registry middleware hooks enforce generic tool-surface
@@ -212,9 +304,28 @@ v0.1.3 remain readable.
 ### Fixed
 
 - Worker subprocesses register the Clio API providers
-  (`lmstudio-native`, `ollama-native`) before any agent run, so
-  `clio run` against a local-server target no longer fails with `No
-  API provider registered for api: lmstudio-native`.
+  (`lmstudio-native`, `ollama-native`) before any agent run, so `clio
+  run` against a local-server target no longer fails with `No API
+  provider registered for api: lmstudio-native`.
+- `workspace_context` is reachable end-to-end. `MODE_MATRIX` for
+  `default`, `advise`, and `super` enumerates the tool, the
+  action-classifier admits it, and prompts that previously fabricated
+  workspace facts now invoke the tool once and answer from real data.
+- Cancelling a write through the super-mode confirmation overlay now
+  blocks the same write through bash redirection, `tee`, `cp`, and `mv`.
+  `extractCommandWriteTargets` parses shell write-targets out of bash
+  commands; the action-classifier feeds each through the same
+  `writePathClass` gate the write tool uses; `damage-control-rules.yaml`
+  gains belt-and-suspenders kill switches for shell redirect or `tee`
+  into `/etc`, `/usr`, `/var` (excluding `/var/tmp`), `/bin`, and
+  `/sbin`. The active agent run is hard-stopped on super-mode cancel so
+  pi-agent-core does not auto-continue past the parked-call rejection.
+- The bash subprocess abort grace measures elapsed time on a monotonic
+  clock so the SIGTERM-to-SIGKILL escalation no longer drifts under
+  wall-clock adjustments.
+- A dead `providers-overlay.diag.ts` (224 LOC of TUI-mocking code that
+  violated the project's "don't mock pi-tui" rule, never bundled by
+  tsup, never referenced) is removed.
 
 ### Notes
 
@@ -226,12 +337,15 @@ v0.1.3 remain readable.
 - v0.1.x runtime tier is still `native` only; `sdk` and `cli` tiers
   remain scaffolded and rejected by dispatch until v0.2.
 - Memory is intentionally not domain-modulated. The chat-loop and the
-  worker dispatch path are the two consumers of `buildMemoryPromptSection`.
+  worker dispatch path are the two consumers of
+  `buildMemoryPromptSection`.
 - Middleware effects honored by the tool registry this slice are
   `block_tool`, `annotate_tool_result`, and `protect_path`.
-  `record_memory_candidate` is declarative metadata only; future
-  slices wire memory candidate emission through the
-  `memory-curator` agent recipe.
+  `record_memory_candidate` is declarative metadata only; future slices
+  wire memory candidate emission through the `memory-curator` agent
+  recipe.
+- Test counts at tag time: 944 unit, integration, and boundary tests
+  green; 53 e2e tests green. Lint covers 477 source files.
 
 ## 0.1.3 — 2026-04-27
 
