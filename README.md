@@ -34,6 +34,7 @@ Clio Coder is currently in **alpha**. The current release is **v0.1.4**.
 
 ## What's new in 0.1.4
 
+- The interactive welcome dashboard renders cwd, project type, branch, dirty flag, and recent commits at boot. A new `workspace_context` tool exposes the same snapshot to agents in one call so prompts orient from real data instead of fabricating it.
 - `clio components` lists, snapshots, and diffs every behavior-affecting harness artifact.
 - `clio evolve manifest init|validate|summarize` requires typed change proposals before high-authority edits.
 - `clio evidence build|inspect|list` builds a deterministic evidence corpus from receipts, runs, sessions, and audit rows.
@@ -696,13 +697,13 @@ CLIO.md
 
 Clio Coder keeps model execution, worker dispatch, interactive UI state, and domain logic separated.
 
-Boundary tests enforce three important rules:
+Boundary tests enforce three rules at build time:
 
-1. Only `src/engine/**` value-imports engine adapter packages.
-2. `src/worker/**` imports only worker-safe provider runtime rehydration modules needed before entering the engine boundary.
-3. Cross-domain traffic goes through `SafeEventBus`.
+1. **Engine boundary.** Only `src/engine/**` value-imports `@mariozechner/pi-*`. Type-only imports are allowed anywhere.
+2. **Worker isolation.** `src/worker/**` never imports `src/domains/**` except `src/domains/providers`, which carries pure runtime descriptors the worker rehydrates from stdin.
+3. **Domain independence.** `src/domains/<x>/**` never imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
 
-This is intended to keep provider-specific code contained and make the system easier to reason about as more runtimes and agents are added.
+This keeps provider-specific code contained and the system easier to reason about as more runtimes and agents are added.
 
 ---
 
@@ -710,7 +711,7 @@ This is intended to keep provider-specific code contained and make the system ea
 
 Current release:
 
-- **v0.1.4** (alpha). Highlights: component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory, worker memory injection, middleware rule metadata with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, and the scientific-validation spec.
+- **v0.1.4** (alpha). Highlights: workspace orientation in the welcome dashboard plus a `workspace_context` tool, component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory injected into orchestrator and workers under a fixed budget, declarative middleware with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, doctor migration from `llamacpp-completion` to `llamacpp`, pi-fidelity compaction parity, and consistent `--help` across every subcommand.
 - **v0.1.3** (alpha). Highlights: live tool-output streaming inside the expanded tool block with a dim `(running...)` marker, bash subrenderer that echoes `$ <command>` before its output, `Ctrl+T` to expand an assistant turn's thinking block (symmetric with `Ctrl+O`), footer git-branch indicator resolved once at boot, autocomplete `fd`/`fdfind` resolver fix, and a self-dev `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts.
 - **v0.1.2** (alpha). Highlights: transient provider/stream retry with cancel-aware countdowns and persisted recovery, bash abort that escalates `SIGTERM` to `SIGKILL` after a grace period, structured tool and bash transcript rendering with `Ctrl+O` expand toggle and edit-tool diff preview, mode-colored editor rails, slash-command autocomplete, welcome dashboard at TUI launch, per-tool stats in run receipts, five-arm audit JSONL (tool calls, mode changes, run aborts, session park/resume), reasoning probe state surfaced in `clio targets --json`, provider catalog aligned with pi SDK 0.70.2, and `/thinking` plus `clio run` working against local `openai-compat` and LM Studio backends.
 
