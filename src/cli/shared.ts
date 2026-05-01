@@ -14,6 +14,32 @@ export function printHeader(message: string): void {
 	process.stdout.write(`${chalk.cyan(message)}\n`);
 }
 
+export function columnWidths(rows: ReadonlyArray<ReadonlyArray<string>>): number[] {
+	const widths: number[] = [];
+	for (const row of rows) {
+		for (let i = 0; i < row.length; i += 1) {
+			widths[i] = Math.max(widths[i] ?? 0, row[i]?.length ?? 0);
+		}
+	}
+	return widths;
+}
+
+export function formatColumnRow(row: ReadonlyArray<string>, widths: ReadonlyArray<number>, gap = 2): string {
+	return row
+		.map((cell, index) => {
+			if (index === row.length - 1) return cell;
+			return cell.padEnd((widths[index] ?? cell.length) + gap);
+		})
+		.join("")
+		.trimEnd();
+}
+
+export function formatColumns(rows: ReadonlyArray<ReadonlyArray<string>>, gap = 2): string {
+	if (rows.length === 0) return "";
+	const widths = columnWidths(rows);
+	return `${rows.map((row) => formatColumnRow(row, widths, gap)).join("\n")}\n`;
+}
+
 export function parseFlags(argv: string[]): { flags: Set<string>; positional: string[] } {
 	const flags = new Set<string>();
 	const positional: string[] = [];

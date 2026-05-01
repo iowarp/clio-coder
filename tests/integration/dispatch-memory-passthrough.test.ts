@@ -14,6 +14,7 @@ import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worke
 import { MEMORY_VERSION } from "../../src/domains/memory/types.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
+import { sha256 } from "../../src/domains/prompts/hash.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
@@ -234,6 +235,7 @@ describe("dispatch memory passthrough", () => {
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 0);
+			strictEqual(receipt.compiledPromptHash, sha256(captured.spec.systemPrompt));
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -270,7 +272,8 @@ describe("dispatch memory passthrough", () => {
 			ok(captured.spec);
 			strictEqual(captured.spec.systemPrompt, "");
 			exit.resolve({ exitCode: 0, signal: null });
-			await handle.finalPromise;
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.compiledPromptHash, null);
 		} finally {
 			await bundle.extension.stop?.();
 		}

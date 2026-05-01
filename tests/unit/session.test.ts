@@ -18,7 +18,7 @@ import { migrateV1ToV2 } from "../../src/domains/session/migrations/v1-to-v2.js"
 import { protectedArtifactStateFromSessionEntries } from "../../src/domains/session/protected-artifacts.js";
 import { resolveLabelMap } from "../../src/domains/session/tree/manager.js";
 import { buildTreeSnapshot, computeLeafId } from "../../src/domains/session/tree/navigator.js";
-import type { ClioTurnRecord, SessionTreeNode } from "../../src/engine/session.js";
+import { type ClioTurnRecord, type SessionTreeNode, sessionPaths } from "../../src/engine/session.js";
 
 function buildMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
 	return {
@@ -424,6 +424,14 @@ describe("session/contract tree + switchBranch + editLabel + deleteSession", () 
 		strictEqual(snap.leafId, turn.id);
 		deepStrictEqual(snap.rootIds, [turn.id]);
 		strictEqual(snap.nodesById[turn.id]?.kind, "user");
+	});
+
+	it("persists the workspace snapshot to meta.json at session create time", () => {
+		const meta = contract.create({ cwd: scratch });
+		const persisted = JSON.parse(readFileSync(sessionPaths(meta).meta, "utf8")) as SessionMeta;
+		strictEqual(persisted.workspace?.cwd, scratch);
+		strictEqual(persisted.workspace?.isGit, false);
+		strictEqual(persisted.workspace?.projectType, "unknown");
 	});
 
 	it("switchBranch() makes the target session current", () => {

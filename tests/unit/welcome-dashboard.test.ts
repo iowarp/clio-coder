@@ -179,6 +179,7 @@ describe("interactive/welcome-dashboard", () => {
 			ok(/main/.test(text), text);
 			ok(/akougkas\/clio-coder/.test(text), text);
 			ok(/node/.test(text), text);
+			ok(/commit: abc1234 x/.test(text), text);
 		});
 
 		it("omits the panel when snapshot is null", () => {

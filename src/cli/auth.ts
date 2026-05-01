@@ -13,7 +13,7 @@ import {
 	renderConnectableProviderRows,
 	resolveCliProviderReference,
 } from "./provider-target.js";
-import { printError, printOk } from "./shared.js";
+import { formatColumns, printError, printOk } from "./shared.js";
 
 const USAGE = `usage: clio auth list
        clio auth status [target-or-runtime]
@@ -50,16 +50,41 @@ function parseAuthTargetArgs(args: ReadonlyArray<string>, verb: string): ParsedA
 	return parsed;
 }
 
-function printStatusLine(id: string, type: string | null, present: boolean, source: string): void {
-	process.stdout.write(`${id}\t${type ?? "-"}\t${present ? "present" : "absent"}\t${source}\n`);
+function printStatusLine(id: string, label: string, type: string | null, present: boolean, source: string): void {
+	process.stdout.write(formatColumns([[id, label, type ?? "-", present ? "present" : "absent", source]]));
 }
 
 function printNativeStatusLine(
 	id: string,
+	label: string,
 	state: "authenticated" | "unauthenticated" | "unknown" | "not-required",
 	detail: string,
 ): void {
-	process.stdout.write(`${id}\tcli\t${state}\t${detail}\n`);
+	process.stdout.write(formatColumns([[id, label, "cli", state, detail]]));
+}
+
+function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
+	return formatColumns(
+		rows.map((row) => {
+			const status = row.status;
+			if (status === null) {
+				return [
+					row.entry.runtimeId,
+					row.entry.label,
+					"cli",
+					"unknown",
+					"native CLI auth; target status probes when supported",
+				];
+			}
+			return [
+				row.entry.runtimeId,
+				row.entry.label,
+				status.credentialType ?? "-",
+				status.available ? "present" : "absent",
+				status.detail ?? status.source,
+			];
+		}),
+	);
 }
 
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
@@ -292,12 +317,13 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 		}
 		if (resolved.runtime.auth === "cli") {
 			const status = await nativeCliAuthStatus(resolved.runtime);
-			printNativeStatusLine(resolved.runtime.id, status.state, status.detail);
+			printNativeStatusLine(resolved.runtime.id, resolved.runtime.displayName, status.state, status.detail);
 			return status.exitCode;
 		}
 		const status = statusForResolvedTarget(resolved, auth);
 		printStatusLine(
 			resolved.authTarget.providerId,
+			resolved.runtime.displayName,
 			status.credentialType,
 			status.available,
 			status.detail ?? status.source,
@@ -305,18 +331,7 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 		return status.available ? 0 : 1;
 	}
 
-	for (const row of listConnectableProviderRows()) {
-		const status = row.status;
-		if (status === null) {
-			printNativeStatusLine(
-				row.entry.runtimeId,
-				"unknown",
-				"native CLI auth; run targeted status to probe when supported",
-			);
-		} else {
-			printStatusLine(row.entry.runtimeId, status.credentialType, status.available, status.detail ?? status.source);
-		}
-	}
+	process.stdout.write(renderStatusRows(listConnectableProviderRows()));
 	return 0;
 }
 
@@ -381,6 +396,10 @@ export async function runAuthCommand(args: ReadonlyArray<string>): Promise<numbe
 	const subcommand = args[0] ?? "status";
 	const rest = args.slice(1);
 	if (subcommand === "list") {
+		if (rest.includes("--help") || rest.includes("-h")) {
+			process.stdout.write(USAGE);
+			return 0;
+		}
 		if (rest.length > 0 && rest.some((arg) => arg !== "--help" && arg !== "-h")) {
 			printError("auth list does not accept target arguments");
 			process.stderr.write(USAGE);

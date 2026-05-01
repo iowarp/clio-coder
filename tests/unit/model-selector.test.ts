@@ -4,7 +4,12 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import { buildModelItems, modelsForEndpoint } from "../../src/interactive/overlays/model-selector.js";
+import { SelectList, visibleWidth } from "../../src/engine/tui.js";
+import {
+	__modelSelectorTest,
+	buildModelItems,
+	modelsForEndpoint,
+} from "../../src/interactive/overlays/model-selector.js";
 
 describe("interactive/model-selector", () => {
 	it("uses known runtime models for openai-codex when probes are empty", () => {
@@ -260,5 +265,36 @@ describe("interactive/model-selector", () => {
 		ok(result.items[0]?.description?.includes("R") ?? false);
 		ok(result.items[1]?.label.includes("gemma-4-26B-A4B-it-Q4_K_M") ?? false);
 		ok(result.items[1]?.description?.includes("8kctx") ?? false);
+	});
+
+	it("keeps a usable description column for long model ids on narrow overlays", () => {
+		const longModel = "Qwen3.6-35B-A3B-UD-Q4_K_XL-extra-long-local-build";
+		const list = new SelectList(
+			[
+				{
+					value: `mini/${longModel}`,
+					label: `●  ${longModel}`,
+					description: "262kctx  TR  LM Studio (native SDK)  endpoint=mini  auth=stored-api-key",
+				},
+			],
+			1,
+			{
+				selectedPrefix: (s) => s,
+				selectedText: (s) => s,
+				description: (s) => s,
+				scrollInfo: (s) => s,
+				noMatch: (s) => s,
+			},
+			__modelSelectorTest.modelLayoutForWidth(72),
+		);
+		const [line] = list.render(72);
+		ok(line, "SelectList rendered a row");
+		ok(line.includes("262kctx"), line);
+		ok(visibleWidth(line) <= 72, line);
+	});
+
+	it("does not choose an overlay wider than a narrow terminal budget", () => {
+		strictEqual(__modelSelectorTest.resolveOverlayWidth(80), 72);
+		strictEqual(__modelSelectorTest.resolveOverlayWidth(64), 56);
 	});
 });

@@ -11,6 +11,7 @@ import {
 } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { columnWidths, formatColumnRow } from "./shared.js";
 
 export interface ConnectableProviderRow {
 	entry: ProviderSupportEntry;
@@ -75,11 +76,7 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
 	let lastGroup: ProviderSupportEntry["group"] | null = null;
 	const lines: string[] = [];
-	for (const row of rows) {
-		if (row.entry.group !== lastGroup) {
-			lastGroup = row.entry.group;
-			lines.push(`${supportGroupLabel(row.entry.group)}:`);
-		}
+	const renderedRows = rows.map((row) => {
 		const status = row.status?.available
 			? row.status.source === "environment"
 				? `env${row.status.detail ? `:${row.status.detail}` : ""}`
@@ -87,9 +84,18 @@ export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectablePro
 			: row.entry.runtimeId.endsWith("-cli") || row.entry.runtimeId.endsWith("-sdk")
 				? "native-cli"
 				: "disconnected";
-		lines.push(
-			`  ${row.entry.runtimeId.padEnd(22)} ${row.entry.label.padEnd(18)} ${status.padEnd(20)} targets=${row.targetCount}`,
-		);
+		return {
+			group: row.entry.group,
+			cells: [row.entry.runtimeId, row.entry.label, status, `targets=${row.targetCount}`],
+		};
+	});
+	const widths = columnWidths(renderedRows.map((row) => row.cells));
+	for (const row of renderedRows) {
+		if (row.group !== lastGroup) {
+			lastGroup = row.group;
+			lines.push(`${supportGroupLabel(row.group)}:`);
+		}
+		lines.push(`  ${formatColumnRow(row.cells, widths)}`);
 	}
 	return `${lines.join("\n")}\n`;
 }

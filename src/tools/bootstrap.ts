@@ -6,6 +6,7 @@ import { editTool } from "./edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
+import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
 import { webFetchTool } from "./web-fetch.js";
@@ -58,4 +59,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			allowedModes: everyMode,
 		});
 	}
+
+	assertBuiltinToolPolicy(registry.listAll(), { includeSessionTools: Boolean(session) });
 }
