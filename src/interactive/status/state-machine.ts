@@ -222,9 +222,16 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		}
 		case "message_update":
 		case "tool_execution_update":
-		case "tool_execution_end":
 		case "message_end":
 			return refreshMeaningful(prev, ctx);
+		case "tool_execution_end": {
+			const next = refreshMeaningful(prev, ctx);
+			if (prev.phase === "tool_running") return { ...next, phase: "preparing", tool: undefined };
+			if (prev.phase === "stuck" && prev.resumePhase === "tool_running") {
+				return { ...next, phase: "preparing", resumePhase: undefined, tool: undefined };
+			}
+			return next;
+		}
 		case "thinking_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);

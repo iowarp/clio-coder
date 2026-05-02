@@ -7,6 +7,7 @@ import { createStatusController } from "../../src/interactive/status/controller.
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { buildSummary } from "../../src/interactive/status/summary.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
+import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 
 describe("status/reduceStatus", () => {
 	it("idle transitions to preparing on agent_start", () => {
@@ -56,15 +57,41 @@ describe("status/reduceStatus", () => {
 		strictEqual(next.tool?.toolName, "bash");
 	});
 
-	it("tool_execution_end refreshes lastMeaningfulAt without changing phase", () => {
-		const tool = { ...INITIAL_STATUS, phase: "tool_running" as const, since: 100, lastMeaningfulAt: 200 };
+	it("tool_execution_end clears the running tool phase", () => {
+		const tool = {
+			...INITIAL_STATUS,
+			phase: "tool_running" as const,
+			since: 100,
+			lastMeaningfulAt: 200,
+			tool: { toolName: "bash", toolPreview: "npm test" },
+		};
 		const next = reduceStatus(
 			tool,
 			{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: {}, isError: false },
 			{ now: 1000, localRuntime: false },
 		);
-		strictEqual(next.phase, "tool_running");
+		strictEqual(next.phase, "preparing");
+		strictEqual(next.tool, undefined);
 		strictEqual(next.lastMeaningfulAt, 1000);
+	});
+
+	it("watchdog after tool_execution_end does not claim the tool is still running", () => {
+		const tool = {
+			...INITIAL_STATUS,
+			phase: "tool_running" as const,
+			since: 100,
+			lastMeaningfulAt: 200,
+			tool: { toolName: "bash", toolPreview: "npm test" },
+		};
+		const done = reduceStatus(
+			tool,
+			{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: {}, isError: true },
+			{ now: 1000, localRuntime: false },
+		);
+		const watched = reduceStatus(done, { type: "watchdog_tick" }, { now: 1000 + 90_000, localRuntime: false });
+		const footer = resolveFooterVerb(watched, 1000 + 90_000, 120);
+		strictEqual(footer?.text.includes("bash"), false);
+		strictEqual(footer?.text.includes("still running"), false);
 	});
 
 	it("retry_status scheduled pushes retrying overlay with resumePhase", () => {
