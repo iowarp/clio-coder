@@ -32,6 +32,9 @@ import type {
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 
+const EMPTY_TOOL_ARGUMENTS_ERROR =
+	"LM Studio SDK returned empty tool-call arguments; this model's chat template may not be compatible. Try the openai-compat runtime against the same gateway.";
+
 function normalizeBaseUrl(url: string): string {
 	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;
 	if (trimmed.startsWith("ws://") || trimmed.startsWith("wss://")) return trimmed;
@@ -95,6 +98,45 @@ function toolToLmStudio(tool: Tool): LLMTool {
 type UserPart = ChatMessagePartTextData | ChatMessagePartFileData;
 type AssistantPart = ChatMessagePartTextData | ChatMessagePartFileData | ChatMessagePartToolCallRequestData;
 
+interface PredictionStatsLike {
+	promptTokensCount?: number;
+	predictedTokensCount?: number;
+	totalTokensCount?: number;
+	stopReason?: LLMPredictionStopReason;
+}
+
+interface PredictionResultLike {
+	stats: PredictionStatsLike;
+}
+
+interface OngoingPredictionLike {
+	result(): Promise<PredictionResultLike>;
+}
+
+interface LmStudioPredictionHandle {
+	respond(history: ChatHistoryData, opts: LLMRespondOpts<unknown>): OngoingPredictionLike;
+}
+
+interface LmStudioRunClient {
+	files: {
+		prepareImageBase64(fileName: string, contentBase64: string): Promise<FileHandle>;
+	};
+	llm: {
+		listLoaded(): Promise<ReadonlyArray<ResidentModelEntry>>;
+		model(modelId: string, opts: { signal: AbortSignal; verbose: boolean }): Promise<LmStudioPredictionHandle>;
+	};
+}
+
+export interface LmStudioRunDeps {
+	createClient(opts: ConstructorParameters<typeof LMStudioClient>[0]): LmStudioRunClient;
+	ensureResident(client: ResidentModelClient, baseUrl: string, modelId: string): Promise<void>;
+}
+
+const defaultRunDeps: LmStudioRunDeps = {
+	createClient: (opts) => new LMStudioClient(opts),
+	ensureResident: ensureResidentModel,
+};
+
 function fileHandleToPart(handle: FileHandle): ChatMessagePartFileData {
 	return {
 		type: "file",
@@ -113,7 +155,7 @@ function imageFileName(mimeType: string, index: number): string {
 }
 
 async function userMessage(
-	client: LMStudioClient,
+	client: Pick<LmStudioRunClient, "files">,
 	content: string | (TextContent | ImageContent)[],
 	imageCounter: { next: number },
 ): Promise<ChatMessageData> {
@@ -175,7 +217,7 @@ function toolResultMessage(msg: Extract<Message, { role: "toolResult" }>): ChatM
 	return { role: "tool", content: [result] };
 }
 
-async function buildChatHistory(client: LMStudioClient, context: Context): Promise<ChatHistoryData> {
+async function buildChatHistory(client: Pick<LmStudioRunClient, "files">, context: Context): Promise<ChatHistoryData> {
 	const messages: ChatMessageData[] = [];
 	const imageCounter = { next: 0 };
 	if (context.systemPrompt && context.systemPrompt.length > 0) {
@@ -216,10 +258,33 @@ interface PendingToolCall {
 	toolCallSlot: ToolCall;
 }
 
-function runStream(
+class LmStudioToolCallExtractionError extends Error {
+	constructor() {
+		super(EMPTY_TOOL_ARGUMENTS_ERROR);
+		this.name = "LmStudioToolCallExtractionError";
+	}
+}
+
+function hasNonEmptyGeneratedContent(output: AssistantMessage): boolean {
+	return output.content.some((block) => {
+		if (block.type === "text") return block.text.trim().length > 0;
+		if (block.type === "thinking") return block.thinking.trim().length > 0;
+		return false;
+	});
+}
+
+function hasEmptyToolArguments(value: unknown): boolean {
+	if (value === undefined || value === null) return true;
+	if (typeof value === "string") return value.trim().length === 0;
+	if (value && typeof value === "object" && !Array.isArray(value)) return Object.keys(value).length === 0;
+	return false;
+}
+
+export function runStream(
 	model: Model<"lmstudio-native">,
 	context: Context,
 	options: StreamOptions | undefined,
+	deps: LmStudioRunDeps = defaultRunDeps,
 ): AssistantMessageEventStream {
 	const stream: AssistantMessageEventStream = createAssistantMessageEventStream();
 	const output: AssistantMessage = {
@@ -254,8 +319,8 @@ function runStream(
 			const clientOpts: ConstructorParameters<typeof LMStudioClient>[0] = { baseUrl };
 			const passkey = options?.apiKey;
 			if (passkey) clientOpts.clientPasskey = passkey;
-			const client = new LMStudioClient(clientOpts);
-			await ensureResidentModel(client, baseUrl, model.id);
+			const client = deps.createClient(clientOpts);
+			await deps.ensureResident(client, baseUrl, model.id);
 			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
 			const llm = await client.llm.model(model.id, { signal: controller.signal, verbose });
 			stream.push({ type: "start", partial: output });
@@ -286,6 +351,7 @@ function runStream(
 				activeThinkingRef.idx = -1;
 			};
 			const pending = new Map<number, PendingToolCall>();
+			let toolExtractionError: LmStudioToolCallExtractionError | null = null;
 			const predictionOpts: LLMRespondOpts<unknown> = {
 				signal: controller.signal,
 				onPredictionFragment: (fragment) => {
@@ -376,6 +442,11 @@ function runStream(
 					if (!entry) return;
 					const req = info.toolCallRequest;
 					entry.toolCallSlot.name = req.name || entry.name || "";
+					if (hasEmptyToolArguments(req.arguments) && entry.argBuffer.length === 0 && hasNonEmptyGeneratedContent(output)) {
+						toolExtractionError = new LmStudioToolCallExtractionError();
+						pending.delete(callId);
+						return;
+					}
 					entry.toolCallSlot.arguments =
 						req.arguments && typeof req.arguments === "object"
 							? (req.arguments as Record<string, unknown>)
@@ -405,6 +476,7 @@ function runStream(
 			closeActiveText();
 			closeActiveThinking();
 			if (aborted) throw new Error("Request was aborted");
+			if (toolExtractionError) throw toolExtractionError;
 			output.usage.input = result.stats.promptTokensCount ?? 0;
 			output.usage.output = result.stats.predictedTokensCount ?? 0;
 			output.usage.totalTokens = result.stats.totalTokensCount ?? output.usage.input + output.usage.output;
