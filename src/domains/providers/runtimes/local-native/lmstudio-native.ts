@@ -83,11 +83,11 @@ async function withTimeout<T>(task: Promise<T>, timeoutMs: number, signal?: Abor
 	});
 }
 
-interface LmStudioModelsResponse {
+interface LmStudioV0ModelsResponse {
 	data?: unknown;
 }
 
-interface LmStudioModelEntry {
+interface LmStudioV0ModelEntry {
 	id?: unknown;
 	loaded_context_length?: unknown;
 	max_context_length?: unknown;
@@ -95,42 +95,137 @@ interface LmStudioModelEntry {
 	capabilities?: unknown;
 }
 
-function modelEntries(payload: LmStudioModelsResponse | undefined): LmStudioModelEntry[] {
-	if (!Array.isArray(payload?.data)) return [];
-	return payload.data.filter((row): row is LmStudioModelEntry => row !== null && typeof row === "object");
+interface LmStudioV1ModelsResponse {
+	models?: unknown;
 }
 
-function modelId(entry: LmStudioModelEntry): string | null {
-	return typeof entry.id === "string" && entry.id.trim().length > 0 ? entry.id : null;
+interface LmStudioV1ModelEntry {
+	key?: unknown;
+	type?: unknown;
+	loaded_instances?: unknown;
+	max_context_length?: unknown;
+	capabilities?: unknown;
+}
+
+interface LmStudioModelSummary {
+	id: string;
+	loadedContextLength?: number;
+	maxContextLength?: number;
+	vision?: boolean;
+	tools?: boolean;
+	reasoning?: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function v0ModelEntries(payload: LmStudioV0ModelsResponse | undefined): LmStudioV0ModelEntry[] {
+	if (!Array.isArray(payload?.data)) return [];
+	return payload.data.filter((row): row is LmStudioV0ModelEntry => isRecord(row));
+}
+
+function v1ModelEntries(payload: LmStudioV1ModelsResponse | undefined): LmStudioV1ModelEntry[] {
+	if (!Array.isArray(payload?.models)) return [];
+	return payload.models.filter((row): row is LmStudioV1ModelEntry => isRecord(row));
 }
 
 function positiveNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+function loadedContextFromV1Instance(value: unknown): number | undefined {
+	if (!isRecord(value) || !isRecord(value.config)) return undefined;
+	return positiveNumber(value.config.context_length);
+}
+
+function firstLoadedContextFromV1(entry: LmStudioV1ModelEntry): number | undefined {
+	if (!Array.isArray(entry.loaded_instances)) return undefined;
+	for (const instance of entry.loaded_instances) {
+		const contextLength = loadedContextFromV1Instance(instance);
+		if (contextLength !== undefined) return contextLength;
+	}
+	return undefined;
+}
+
+function capabilityObject(entry: LmStudioV1ModelEntry): Record<string, unknown> | null {
+	return isRecord(entry.capabilities) ? entry.capabilities : null;
+}
+
+function v1Tools(entry: LmStudioV1ModelEntry): boolean | undefined {
+	const caps = capabilityObject(entry);
+	if (!caps) return undefined;
+	return caps.trained_for_tool_use === true;
+}
+
+function v1Vision(entry: LmStudioV1ModelEntry): boolean | undefined {
+	const caps = capabilityObject(entry);
+	if (caps && typeof caps.vision === "boolean") return caps.vision;
+	if (typeof entry.type === "string") return entry.type === "vlm";
+	return undefined;
+}
+
+function v1Reasoning(entry: LmStudioV1ModelEntry): boolean | undefined {
+	const caps = capabilityObject(entry);
+	if (!caps || !("reasoning" in caps)) return undefined;
+	const reasoning = caps.reasoning;
+	if (typeof reasoning === "boolean") return reasoning;
+	return isRecord(reasoning);
+}
+
+function summaryFromV1(entry: LmStudioV1ModelEntry): LmStudioModelSummary | null {
+	if (typeof entry.key !== "string" || entry.key.trim().length === 0) return null;
+	const summary: LmStudioModelSummary = { id: entry.key };
+	const loadedContextLength = firstLoadedContextFromV1(entry);
+	if (loadedContextLength !== undefined) summary.loadedContextLength = loadedContextLength;
+	const maxContextLength = positiveNumber(entry.max_context_length);
+	if (maxContextLength !== undefined) summary.maxContextLength = maxContextLength;
+	const vision = v1Vision(entry);
+	if (vision !== undefined) summary.vision = vision;
+	const tools = v1Tools(entry);
+	if (tools !== undefined) summary.tools = tools;
+	const reasoning = v1Reasoning(entry);
+	if (reasoning !== undefined) summary.reasoning = reasoning;
+	return summary;
+}
+
+function summaryFromV0(entry: LmStudioV0ModelEntry): LmStudioModelSummary | null {
+	if (typeof entry.id !== "string" || entry.id.trim().length === 0) return null;
+	const summary: LmStudioModelSummary = { id: entry.id };
+	const loadedContextLength = positiveNumber(entry.loaded_context_length);
+	if (loadedContextLength !== undefined) summary.loadedContextLength = loadedContextLength;
+	const maxContextLength = positiveNumber(entry.max_context_length);
+	if (maxContextLength !== undefined) summary.maxContextLength = maxContextLength;
+	if (typeof entry.type === "string") summary.vision = entry.type === "vlm";
+	if (Array.isArray(entry.capabilities)) {
+		summary.tools = entry.capabilities.some((capability) => capability === "tool_use");
+	}
+	return summary;
+}
+
 function selectCapabilityEntry(
-	entries: ReadonlyArray<LmStudioModelEntry>,
+	entries: ReadonlyArray<LmStudioModelSummary>,
 	endpoint: EndpointDescriptor,
-): LmStudioModelEntry | null {
+): LmStudioModelSummary | null {
 	const configured = endpoint.defaultModel?.trim();
 	if (configured) {
-		return entries.find((entry) => modelId(entry) === configured) ?? null;
+		return entries.find((entry) => entry.id === configured) ?? null;
 	}
 	return (
-		entries.find((entry) => positiveNumber(entry.loaded_context_length) !== undefined) ??
-		entries.find((entry) => positiveNumber(entry.max_context_length) !== undefined) ??
+		entries.find((entry) => entry.loadedContextLength !== undefined) ??
+		entries.find((entry) => entry.maxContextLength !== undefined) ??
 		entries[0] ??
 		null
 	);
 }
 
-function capabilitiesFromModelEntry(entry: LmStudioModelEntry | null): Partial<CapabilityFlags> | undefined {
+function capabilitiesFromModelEntry(entry: LmStudioModelSummary | null): Partial<CapabilityFlags> | undefined {
 	if (!entry) return undefined;
-	const caps: Partial<CapabilityFlags> = {
-		vision: entry.type === "vlm",
-		tools: Array.isArray(entry.capabilities) && entry.capabilities.some((capability) => capability === "tool_use"),
-	};
-	const contextWindow = positiveNumber(entry.loaded_context_length) ?? positiveNumber(entry.max_context_length);
+	const caps: Partial<CapabilityFlags> = {};
+	if (entry.vision !== undefined) caps.vision = entry.vision;
+	if (entry.tools !== undefined) caps.tools = entry.tools;
+	if (entry.reasoning !== undefined) caps.reasoning = entry.reasoning;
+	const contextWindow = entry.loadedContextLength ?? entry.maxContextLength;
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
 	return caps;
 }
@@ -147,21 +242,62 @@ function modelsProbeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Re
 
 async function probeApiModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 	if (!endpoint.url) return { ok: false, error: "endpoint has no url" };
+	const headers = modelsProbeHeaders(endpoint, ctx);
+	const v1 = await probeApiV1Models(endpoint, ctx, headers);
+	if (v1.ok) return v1;
+	const v0 = await probeApiV0Models(endpoint, ctx, headers);
+	return v0.ok ? v0 : v1;
+}
+
+async function probeApiV1Models(
+	endpoint: EndpointDescriptor,
+	ctx: ProbeContext,
+	headers: Record<string, string> | undefined,
+): Promise<ProbeResult> {
 	const opts: { url: string; timeoutMs: number; headers?: Record<string, string> } = {
-		url: `${toHttpUrl(endpoint.url)}/api/v0/models`,
+		url: `${toHttpUrl(endpoint.url ?? "")}/api/v1/models`,
 		timeoutMs: ctx.httpTimeoutMs,
 	};
-	const headers = modelsProbeHeaders(endpoint, ctx);
 	if (headers) opts.headers = headers;
 	const result = await (ctx.signal
-		? probeJson<LmStudioModelsResponse>({ ...opts, signal: ctx.signal })
-		: probeJson<LmStudioModelsResponse>(opts));
+		? probeJson<LmStudioV1ModelsResponse>({ ...opts, signal: ctx.signal })
+		: probeJson<LmStudioV1ModelsResponse>(opts));
 	if (!result.ok) return result;
-	const entries = modelEntries(result.data);
-	const models = entries.map(modelId).filter((id): id is string => id !== null);
+	const entries = v1ModelEntries(result.data)
+		.map(summaryFromV1)
+		.filter((entry): entry is LmStudioModelSummary => entry !== null);
+	return probeResultFromSummaries(entries, endpoint, result.latencyMs);
+}
+
+async function probeApiV0Models(
+	endpoint: EndpointDescriptor,
+	ctx: ProbeContext,
+	headers: Record<string, string> | undefined,
+): Promise<ProbeResult> {
+	const opts: { url: string; timeoutMs: number; headers?: Record<string, string> } = {
+		url: `${toHttpUrl(endpoint.url ?? "")}/api/v0/models`,
+		timeoutMs: ctx.httpTimeoutMs,
+	};
+	if (headers) opts.headers = headers;
+	const result = await (ctx.signal
+		? probeJson<LmStudioV0ModelsResponse>({ ...opts, signal: ctx.signal })
+		: probeJson<LmStudioV0ModelsResponse>(opts));
+	if (!result.ok) return result;
+	const entries = v0ModelEntries(result.data)
+		.map(summaryFromV0)
+		.filter((entry): entry is LmStudioModelSummary => entry !== null);
+	return probeResultFromSummaries(entries, endpoint, result.latencyMs);
+}
+
+function probeResultFromSummaries(
+	entries: ReadonlyArray<LmStudioModelSummary>,
+	endpoint: EndpointDescriptor,
+	latencyMs: number | undefined,
+): ProbeResult {
+	const models = entries.map((entry) => entry.id);
 	const discoveredCapabilities = capabilitiesFromModelEntry(selectCapabilityEntry(entries, endpoint));
 	const out: ProbeResult = { ok: true, models };
-	if (typeof result.latencyMs === "number") out.latencyMs = result.latencyMs;
+	if (typeof latencyMs === "number") out.latencyMs = latencyMs;
 	if (discoveredCapabilities) out.discoveredCapabilities = discoveredCapabilities;
 	return out;
 }

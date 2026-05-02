@@ -203,6 +203,7 @@
     runtimePreference:
       lmstudioNative: "Use when LM Studio SDK tool extraction is verified for the loaded template."
       openaiCompat: "Preferred fallback for LM Studio gateway tool calls."
+      anthropicCompat: "Do not select for the current mini llama.cpp target; /v1/messages returned 404 while /v1/models and OpenAI-compatible chat worked."
       llamaCpp: "OpenAI-compatible chat completions with --jinja. Current mini preset disables thinking in chat_template_kwargs."
     llamaCpp:
       ctxSize: 1048576
@@ -250,6 +251,7 @@
     gpuTiers:
       "16gb": "Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults."
     runtimePreference:
-      lmstudioNative: "Primary local laptop path."
-      openaiCompat: "Use when the native SDK produces thinking-only length stops or malformed tools."
-    serving: "LM Studio reports tool_use for the local qwopus3.5-9b-v3 target."
+      lmstudioNative: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
+      openaiCompat: "Verified through the LM Studio gateway for read and write_plan tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
+      anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the endpoint root as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
+    serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Native model override successfully switched residency to granite-4.0-h-350m through the SDK."

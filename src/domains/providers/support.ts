@@ -43,8 +43,10 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	"copilot-cli": "GitHub Copilot CLI",
 	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
-	"lmstudio-native": "LM Studio native API",
+	"lmstudio-native": "LM Studio SDK + native model management",
 	llamacpp: "llama.cpp server (auto-detect surface)",
+	"anthropic-compat": "Generic Anthropic-compatible REST",
+	"openai-compat": "Generic OpenAI-compatible REST",
 };
 
 function groupPriority(group: ProviderSupportGroup): number {
@@ -121,7 +123,8 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		featured: runtime.id === "openai-codex",
 		connectable: runtime.auth === "oauth" || runtime.auth === "api-key" || runtime.auth === "cli",
 		supportsCustomUrl:
-			runtime.kind === "http" && (classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat"),
+			runtime.kind === "http" &&
+			(classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat" || runtime.id === "anthropic-compat"),
 	};
 }
 

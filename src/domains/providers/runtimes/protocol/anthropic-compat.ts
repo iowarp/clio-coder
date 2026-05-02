@@ -1,106 +1,80 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 
-import { probeOpenAICompatReasoning } from "../../probe/reasoning.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type {
 	ProbeContext,
 	ProbeResult,
-	ReasoningProbeResult,
-	RuntimeApiFamily,
 	RuntimeAuth,
 	RuntimeDescriptor,
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
-import { endpointBase, synthLocalModel, withAsIs, withV1 } from "../common/local-synth.js";
+import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
 import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
-export interface OpenAICompatSpec {
+export interface AnthropicCompatSpec {
 	id: string;
 	displayName: string;
 	provider: string;
 	auth: RuntimeAuth;
 	tier: RuntimeTier;
 	defaultCapabilities: CapabilityFlags;
-	healthPath?: string;
+	hidden?: boolean;
+	messagesPath?: string;
 	modelsPath?: string;
-	apiFamily?: RuntimeApiFamily;
-	baseUrlStyle?: "v1" | "asIs";
 }
 
-export interface OpenAICompatSynthesisInput {
+export interface AnthropicCompatSynthesisInput {
 	endpoint: EndpointDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
-	apiFamily?: RuntimeApiFamily;
 	provider: string;
 	baseUrlForEndpoint?: (endpointUrl: string) => string;
 }
 
-export function synthesizeOpenAICompatModel(input: OpenAICompatSynthesisInput): Model<Api> {
+export function synthesizeAnthropicCompatModel(input: AnthropicCompatSynthesisInput): Model<Api> {
 	return synthLocalModel({
 		endpoint: input.endpoint,
 		wireModelId: input.wireModelId,
 		kb: input.kb,
 		defaultCapabilities: input.defaultCapabilities,
-		apiFamily: input.apiFamily ?? "openai-completions",
+		apiFamily: "anthropic-messages",
 		provider: input.provider,
-		baseUrlForEndpoint: input.baseUrlForEndpoint ?? withV1,
+		baseUrlForEndpoint: input.baseUrlForEndpoint ?? withAsIs,
 	});
 }
 
-export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescriptor {
-	const apiFamily = spec.apiFamily ?? "openai-completions";
-	const baseUrlForEndpoint = spec.baseUrlStyle === "asIs" ? withAsIs : withV1;
-	const healthPath = spec.healthPath ?? "/v1/models";
+export function makeAnthropicCompatRuntime(spec: AnthropicCompatSpec): RuntimeDescriptor {
+	const messagesPath = spec.messagesPath ?? "/v1/messages";
 	const modelsPath = spec.modelsPath ?? "/v1/models";
 	return {
 		id: spec.id,
 		displayName: spec.displayName,
 		kind: "http",
 		tier: spec.tier,
-		apiFamily,
+		apiFamily: "anthropic-messages",
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
+		...(spec.hidden === true ? { hidden: true } : {}),
 		async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = endpointBase(endpoint);
 			if (!base) return { ok: false, error: "endpoint has no url" };
-			return probeUrl(`${base}${healthPath}`, ctx);
+			return probeUrl(`${base}${messagesPath}`, ctx, "HEAD");
 		},
 		async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = endpointBase(endpoint);
 			if (!base) return [];
 			return probeOpenAIModels(base, ctx, modelsPath);
 		},
-		async probeReasoning(
-			endpoint: EndpointDescriptor,
-			modelId: string,
-			ctx: ProbeContext,
-		): Promise<ReasoningProbeResult> {
-			const base = endpointBase(endpoint);
-			if (!base) return { reasoning: false, latencyMs: 0, error: "endpoint has no url" };
-			const apiKeyEnv = endpoint.auth?.apiKeyEnvVar;
-			const apiKey = apiKeyEnv && ctx.credentialsPresent.has(apiKeyEnv) ? process.env[apiKeyEnv] : undefined;
-			const probeOpts: Parameters<typeof probeOpenAICompatReasoning>[0] = {
-				baseUrl: base,
-				modelId,
-				timeoutMs: Math.max(ctx.httpTimeoutMs, 8000),
-			};
-			if (apiKey) probeOpts.apiKey = apiKey;
-			if (ctx.signal) probeOpts.signal = ctx.signal;
-			return probeOpenAICompatReasoning(probeOpts);
-		},
 		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
-			return synthesizeOpenAICompatModel({
+			return synthesizeAnthropicCompatModel({
 				endpoint,
 				wireModelId,
 				kb,
 				defaultCapabilities: spec.defaultCapabilities,
-				apiFamily,
 				provider: spec.provider,
-				baseUrlForEndpoint,
 			});
 		},
 	};
@@ -108,7 +82,8 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
-	tools: false,
+	tools: true,
+	toolCallFormat: "anthropic",
 	reasoning: false,
 	vision: false,
 	audio: false,
@@ -119,10 +94,10 @@ const defaultCapabilities: CapabilityFlags = {
 	maxTokens: 4096,
 };
 
-export default makeOpenAICompatRuntime({
-	id: "openai-compat",
-	displayName: "Generic OpenAI-compatible",
-	provider: "openai-compat",
+export default makeAnthropicCompatRuntime({
+	id: "anthropic-compat",
+	displayName: "Generic Anthropic-compatible",
+	provider: "anthropic-compat",
 	auth: "api-key",
 	tier: "protocol",
 	defaultCapabilities,

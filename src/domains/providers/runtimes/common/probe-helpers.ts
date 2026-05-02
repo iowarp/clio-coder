@@ -12,8 +12,8 @@ export async function probeUrl(url: string, ctx: ProbeContext, method: "GET" | "
 	return ctx.signal ? probeHttp({ ...base, signal: ctx.signal }) : probeHttp(base);
 }
 
-export async function probeOpenAIModels(base: string, ctx: ProbeContext): Promise<string[]> {
-	const opts = { url: `${base}/v1/models`, timeoutMs: ctx.httpTimeoutMs } as const;
+export async function probeOpenAIModels(base: string, ctx: ProbeContext, modelsPath = "/v1/models"): Promise<string[]> {
+	const opts = { url: `${base}${modelsPath}`, timeoutMs: ctx.httpTimeoutMs } as const;
 	const result = await (ctx.signal
 		? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OpenAIModelsResponse>(opts));

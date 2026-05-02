@@ -17,14 +17,17 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 
 /**
  * Probes a URL for known native local-server fingerprints. Returns the
- * matching runtime id when LM Studio (`/api/v0/models`) or Ollama
- * (`/api/version`) responds, null otherwise. Used by doctor + configure
- * wizard to steer users onto native runtimes for resident-model lifecycle.
+ * matching runtime id when LM Studio (`/api/v1/models`, falling back to
+ * `/api/v0/models`) or Ollama (`/api/version`) responds, null otherwise. Used
+ * by doctor + configure wizard to steer users onto native runtimes for
+ * resident-model lifecycle.
  */
 export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeRuntimeFingerprint | null> {
 	const trimmed = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-	const lmStudio = await fetchWithTimeout(`${trimmed}/api/v0/models`, 750);
-	if (lmStudio?.ok) return { runtimeId: "lmstudio-native", displayName: "LM Studio" };
+	const lmStudioV1 = await fetchWithTimeout(`${trimmed}/api/v1/models`, 750);
+	if (lmStudioV1?.ok) return { runtimeId: "lmstudio-native", displayName: "LM Studio" };
+	const lmStudioV0 = await fetchWithTimeout(`${trimmed}/api/v0/models`, 750);
+	if (lmStudioV0?.ok) return { runtimeId: "lmstudio-native", displayName: "LM Studio" };
 	const ollama = await fetchWithTimeout(`${trimmed}/api/version`, 750);
 	if (ollama?.ok) {
 		try {

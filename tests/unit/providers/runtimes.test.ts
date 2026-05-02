@@ -268,7 +268,7 @@ describe("providers/runtimes built-in descriptors", () => {
 		}
 	});
 
-	it("lmstudio-native discovers loaded model capabilities from /api/v0/models", async () => {
+	it("lmstudio-native discovers loaded model capabilities from /api/v1/models", async () => {
 		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
 		const runtime = byId.get("lmstudio-native");
 		ok(runtime, "missing lmstudio-native runtime");
@@ -288,20 +288,20 @@ describe("providers/runtimes built-in descriptors", () => {
 			capturedUrl = String(input);
 			return new Response(
 				JSON.stringify({
-					data: [
+					models: [
 						{
-							id: "other-model",
-							loaded_context_length: 8192,
+							key: "other-model",
+							loaded_instances: [{ config: { context_length: 8192 } }],
 							max_context_length: 131072,
 							type: "llm",
-							capabilities: [],
+							capabilities: { vision: false, trained_for_tool_use: false },
 						},
 						{
-							id: "nemotron-omni",
-							loaded_context_length: 262144,
+							key: "nemotron-omni",
+							loaded_instances: [{ config: { context_length: 262144, flash_attention: true } }],
 							max_context_length: 1048576,
 							type: "vlm",
-							capabilities: ["tool_use"],
+							capabilities: { vision: true, trained_for_tool_use: true, reasoning: { allowed_options: ["on"] } },
 						},
 					],
 				}),
@@ -320,11 +320,12 @@ describe("providers/runtimes built-in descriptors", () => {
 				httpTimeoutMs: 1000,
 			});
 			strictEqual(result?.ok, true);
-			strictEqual(capturedUrl, "http://127.0.0.1:1234/api/v0/models");
+			strictEqual(capturedUrl, "http://127.0.0.1:1234/api/v1/models");
 			deepStrictEqual(result?.models, ["other-model", "nemotron-omni"]);
 			deepStrictEqual(result?.discoveredCapabilities, {
 				vision: true,
 				tools: true,
+				reasoning: true,
 				contextWindow: 262144,
 			});
 
@@ -335,5 +336,31 @@ describe("providers/runtimes built-in descriptors", () => {
 			proto.createPort = originalCreatePort;
 			globalThis.fetch = originalFetch;
 		}
+	});
+
+	it("registers generic Anthropic-compatible REST as a protocol runtime", () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		const runtime = byId.get("anthropic-compat");
+		ok(runtime, "missing anthropic-compat runtime");
+		strictEqual(runtime.apiFamily, "anthropic-messages");
+		strictEqual(runtime.tier, "protocol");
+		strictEqual(runtime.defaultCapabilities.toolCallFormat, "anthropic");
+
+		const model = runtime.synthesizeModel(
+			{ id: "ollama-anthropic", runtime: "anthropic-compat", url: "http://localhost:11434" },
+			"qwen3-coder",
+			null,
+		);
+		strictEqual(model.api, "anthropic-messages");
+		strictEqual(model.provider, "anthropic-compat");
+		strictEqual(model.baseUrl, "http://localhost:11434");
+		deepStrictEqual(model.compat, {
+			supportsEagerToolInputStreaming: false,
+			supportsLongCacheRetention: false,
+		});
+
+		const support = buildProviderSupportEntry(runtime);
+		strictEqual(support.group, "local-http");
+		strictEqual(support.supportsCustomUrl, true);
 	});
 });
