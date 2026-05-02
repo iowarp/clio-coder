@@ -134,13 +134,16 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 				.map((entry) => entry.family)
 				.sort(),
 			[
+				"gemma-4-31b-it-nvfp4-turbo",
 				"gemma4-26b-a4b",
+				"gemopus-4-31b-it",
 				"nemotron-3-nano-omni-30b-a3b-reasoning",
 				"nemotron-cascade-2-30b-a3b",
 				"qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled",
 				"qwen3.6-27b",
 				"qwen3.6-35b-a3b",
 				"qwopus3.5-9b-v3",
+				"qwopus3.6-27b-v1-preview",
 			],
 		);
 		const qwen = kb.lookup("Qwen3.6-35B-A3B-UD-Q4_K_XL");
