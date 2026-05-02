@@ -4,7 +4,7 @@
  * modes, prompts) need settings access before the domain loader has finished booting.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "./defaults.js";
@@ -655,6 +655,15 @@ export function readSettings(): ClioSettings {
 }
 
 export function writeSettings(settings: ClioSettings): void {
+	const tracePath = process.env.CLIO_TRACE_WRITESETTINGS;
+	if (tracePath && tracePath !== "0") {
+		const stack = new Error("writeSettings trace").stack ?? "";
+		const orchTarget = settings.orchestrator?.endpoint ?? "<null>";
+		const orchModel = settings.orchestrator?.model ?? "<null>";
+		const tCount = settings.endpoints?.length ?? 0;
+		const line = `\n[writeSettings @ ${new Date().toISOString()}] target=${orchTarget} model=${orchModel} endpoints=${tCount}\n${stack}\n`;
+		appendFileSync(tracePath, line);
+	}
 	writeFileSync(settingsPath(), stringifyYaml(serializeSettings(normalizeSettings(settings))), {
 		encoding: "utf8",
 		mode: 0o644,

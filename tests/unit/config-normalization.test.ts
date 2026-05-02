@@ -1,9 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { Value } from "typebox/value";
 import { normalizeSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
+import { SettingsSchema } from "../../src/domains/config/schema.js";
 
 describe("core/config normalizeSettings", () => {
 	it("normalizes target config and repairs stale pointers", () => {
@@ -59,6 +60,23 @@ describe("core/config normalizeSettings", () => {
 		});
 		deepStrictEqual(normalized.runtimePlugins, ["example-runtime"]);
 		deepStrictEqual(normalized.scope, ["codex-pro", "codex-pro/gpt-5.4-mini"]);
+	});
+
+	it("keeps endpoint lifecycle in sync with schema validation", () => {
+		const normalized = normalizeSettings({
+			targets: [
+				{
+					id: "mini",
+					runtime: "llamacpp",
+					url: "http://mini:8080",
+					defaultModel: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+					lifecycle: "clio-managed",
+				},
+			],
+		});
+
+		strictEqual(normalized.endpoints[0]?.lifecycle, "clio-managed");
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
 
 	it("classifies compaction setting changes as next-turn updates", () => {

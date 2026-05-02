@@ -273,6 +273,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
 		const next = new Map<string, EndpointStatus>();
+		reasoningCache.clear();
 		for (const endpoint of settings.endpoints) {
 			const desc = registry.get(endpoint.runtime);
 			const status = buildStatus(endpoint, desc, null, statuses.get(endpoint.id));
@@ -336,6 +337,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			const settings = readConfig();
 			const endpoint = settings.endpoints.find((ep) => ep.id === id);
 			if (!endpoint) return null;
+			for (const key of Array.from(reasoningCache.keys())) {
+				if (key.startsWith(`${id}:`)) reasoningCache.delete(key);
+			}
 			const status = buildStatus(endpoint, registry.get(endpoint.runtime), null);
 			statuses.set(endpoint.id, status);
 			context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
