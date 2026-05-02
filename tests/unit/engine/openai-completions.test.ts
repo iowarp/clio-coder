@@ -185,4 +185,148 @@ describe("engine/openai-completions", () => {
 			});
 		}
 	});
+
+	it("estimates reasoningTokens from streamed reasoning_content for openai-compat", async () => {
+		const reasoningChunk =
+			"Okay, let me think about this carefully. The user wants 17 times 23. " +
+			"I can split that as (10 + 7) * 23 = 230 + 161 = 391. Final answer is 391.";
+		let server: Server | null = createServer((_req, res) => {
+			res.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			});
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+					choices: [{ index: 0, delta: { reasoning_content: reasoningChunk } }],
+				})}\n\n`,
+			);
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+					choices: [{ index: 0, delta: { content: "391" } }],
+				})}\n\n`,
+			);
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+					choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+					usage: { prompt_tokens: 8, completion_tokens: 60, total_tokens: 68 },
+				})}\n\n`,
+			);
+			res.end("data: [DONE]\n\n");
+		});
+		await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+		const addr = server.address() as AddressInfo;
+		const model = {
+			id: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			name: "Qwen3-VL-30B-A3B-Thinking-UD-Q5_K_XL",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: `http://127.0.0.1:${addr.port}/v1`,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 131072,
+			maxTokens: 32768,
+			compat: { maxTokensField: "max_tokens", supportsUsageInStreaming: true },
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[0];
+		const context = {
+			messages: [{ role: "user", content: "what is 17 times 23?", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		try {
+			const events = openAICompletionsApiProvider.stream(model, context, { apiKey: "sk-test" });
+			let doneUsage: { reasoningTokens?: number; output?: number } | undefined;
+			for await (const event of events) {
+				if (event.type === "done") {
+					doneUsage = event.message.usage as { reasoningTokens?: number; output?: number };
+				}
+			}
+
+			ok(doneUsage, "expected a done event with usage");
+			const expected = Math.max(1, Math.round(reasoningChunk.length / 4));
+			strictEqual(doneUsage?.reasoningTokens, expected);
+			strictEqual(doneUsage?.output, 60);
+		} finally {
+			await new Promise<void>((resolve) => {
+				const active = server;
+				server = null;
+				active?.close(() => resolve());
+			});
+		}
+	});
+
+	it("leaves reasoningTokens absent when no reasoning content was streamed", async () => {
+		let server: Server | null = createServer((_req, res) => {
+			res.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			});
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "non-thinking-model",
+					choices: [{ index: 0, delta: { content: "Hello there." } }],
+				})}\n\n`,
+			);
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "non-thinking-model",
+					choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+					usage: { prompt_tokens: 4, completion_tokens: 5, total_tokens: 9 },
+				})}\n\n`,
+			);
+			res.end("data: [DONE]\n\n");
+		});
+		await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+		const addr = server.address() as AddressInfo;
+		const model = {
+			id: "non-thinking-model",
+			name: "non-thinking-model",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: `http://127.0.0.1:${addr.port}/v1`,
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 8192,
+			maxTokens: 2048,
+			compat: { maxTokensField: "max_tokens", supportsUsageInStreaming: true },
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[0];
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		try {
+			const events = openAICompletionsApiProvider.stream(model, context, { apiKey: "sk-test" });
+			let doneUsage: { reasoningTokens?: number } | undefined;
+			for await (const event of events) {
+				if (event.type === "done") doneUsage = event.message.usage as { reasoningTokens?: number };
+			}
+			strictEqual(doneUsage?.reasoningTokens, undefined);
+		} finally {
+			await new Promise<void>((resolve) => {
+				const active = server;
+				server = null;
+				active?.close(() => resolve());
+			});
+		}
+	});
 });

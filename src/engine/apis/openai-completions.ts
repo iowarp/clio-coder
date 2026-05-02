@@ -10,10 +10,20 @@ import {
 	type StreamOptions,
 	streamOpenAICompletions,
 	streamSimpleOpenAICompletions,
+	type ThinkingContent,
 	type Tool,
+	type Usage,
 } from "@mariozechner/pi-ai";
 
 import { remainingContextMaxTokens } from "./output-budget.js";
+
+/**
+ * Average characters-per-token for the English/code reasoning streams pi-ai
+ * surfaces from openai-compatible providers. The exact ratio depends on the
+ * upstream tokenizer; 4 matches GPT-2/BPE-style splits and is the same
+ * estimator other inference tools use when no authoritative count is exposed.
+ */
+const REASONING_CHARS_PER_TOKEN = 4;
 
 export { estimateInputTokensFromContext, remainingContextMaxTokens } from "./output-budget.js";
 
@@ -77,6 +87,60 @@ function finalErrorFromPartial(partial: AssistantMessage, message: string): Assi
 	};
 }
 
+function reasoningCharsFromContent(content: AssistantMessage["content"]): number {
+	let chars = 0;
+	for (const block of content) {
+		if (block.type === "thinking") {
+			chars += (block as ThinkingContent).thinking.length;
+		}
+	}
+	return chars;
+}
+
+function estimateReasoningTokens(content: AssistantMessage["content"]): number {
+	const chars = reasoningCharsFromContent(content);
+	if (chars === 0) return 0;
+	return Math.max(1, Math.round(chars / REASONING_CHARS_PER_TOKEN));
+}
+
+/**
+ * pi-ai's openai-compatible parseChunkUsage drops `completion_tokens_details.
+ * reasoning_tokens`, and llama.cpp's /v1/chat/completions doesn't surface that
+ * field at all. Without a per-fragment token count (the lmstudio-native SDK
+ * gives us one; openai-compat does not), we estimate from the cumulative
+ * thinking content surfaced as ThinkingContent blocks. The receipt and TUI
+ * footer would otherwise report `reasoningTokenCount = 0` even when the model
+ * emitted a chain-of-thought, hiding the real cost from the operator.
+ */
+function withReasoningTokenEstimate(
+	source: ReturnType<typeof streamOpenAICompletions>,
+): ReturnType<typeof streamOpenAICompletions> {
+	const annotated = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			for await (const event of source) {
+				if (event.type === "done") {
+					const reasoningTokens = estimateReasoningTokens(event.message.content);
+					if (reasoningTokens > 0) {
+						(event.message.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
+					}
+				} else if (event.type === "error") {
+					const reasoningTokens = estimateReasoningTokens(event.error.content);
+					if (reasoningTokens > 0) {
+						(event.error.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
+					}
+				}
+				annotated.push(event as AssistantMessageEvent);
+			}
+			annotated.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(message);
+		}
+	})();
+	return annotated;
+}
+
 function guardMalformedToolCalls(
 	source: ReturnType<typeof streamOpenAICompletions>,
 	model: Model<"openai-completions">,
@@ -136,13 +200,17 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 	api: "openai-completions",
 	stream: (model, context, options) =>
 		guardMalformedToolCalls(
-			streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			withReasoningTokenEstimate(
+				streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			),
 			model,
 			context,
 		),
 	streamSimple: (model, context, options?: SimpleStreamOptions) =>
 		guardMalformedToolCalls(
-			streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			withReasoningTokenEstimate(
+				streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			),
 			model,
 			context,
 		),
