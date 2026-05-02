@@ -35,6 +35,7 @@ import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderToolResultOnly } from "./renderers/tool-execution.js";
 
 const DEFAULT_COALESCE_MS = 16;
+const MAX_REPLAY_TEXT_CHARS = 20_000;
 
 /**
  * Event kinds whose render is deferred into a coalesce window. All other
@@ -141,6 +142,12 @@ function stringifyPreview(value: unknown, limit = 600): string {
 	}
 }
 
+function truncateReplayText(text: string, limit = MAX_REPLAY_TEXT_CHARS): string {
+	if (text.length <= limit) return text;
+	const omitted = text.length - limit;
+	return `${text.slice(0, limit)}\n\n[... ${omitted} more characters truncated from replay context]`;
+}
+
 function timestampMillis(timestamp: string): number {
 	const parsed = Date.parse(timestamp);
 	return Number.isNaN(parsed) ? 0 : parsed;
@@ -156,18 +163,25 @@ function makeTextMessage(role: "user" | "assistant", text: string, timestamp: st
 	return message as unknown as AgentMessage;
 }
 
-function cloneContentBlocks(content: unknown): unknown[] | null {
+function cloneContentBlocks(content: unknown, maxTextChars?: number): unknown[] | null {
 	if (!Array.isArray(content)) return null;
 	return content
 		.filter((block) => !!block && typeof block === "object")
-		.map((block) => ({ ...(block as Record<string, unknown>) }));
+		.map((block) => {
+			const cloned: Record<string, unknown> = { ...(block as Record<string, unknown>) };
+			if (typeof maxTextChars === "number") {
+				if (typeof cloned.text === "string") cloned.text = truncateReplayText(cloned.text, maxTextChars);
+				if (typeof cloned.thinking === "string") cloned.thinking = truncateReplayText(cloned.thinking, maxTextChars);
+			}
+			return cloned;
+		});
 }
 
-function richMessageFromEntry(entry: MessageEntry): AgentMessage | null {
+function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): AgentMessage | null {
 	if (entry.role !== "user" && entry.role !== "assistant") return null;
 	const obj = payloadObject(entry.payload);
-	const content = cloneContentBlocks(obj?.content);
-	const text = extractTurnText(entry.payload);
+	const content = cloneContentBlocks(obj?.content, maxTextChars);
+	const text = truncateReplayText(extractTurnText(entry.payload), maxTextChars);
 	if (!content && text.length === 0 && !messageFailure(entry)) return null;
 	const message: Record<string, unknown> = {
 		role: entry.role,
@@ -211,11 +225,52 @@ function toolCallMessageFromEntry(entry: MessageEntry): AgentMessage {
 function toolResultContent(result: unknown): unknown[] {
 	const obj = payloadObject(result);
 	if (Array.isArray(obj?.content)) {
-		return cloneContentBlocks(obj.content) ?? [];
+		return cloneContentBlocks(obj.content, MAX_REPLAY_TEXT_CHARS) ?? [];
 	}
-	if (isTextResult(result)) return [{ type: "text", text: result.text }];
-	if (typeof result === "string") return [{ type: "text", text: result }];
+	if (isTextResult(result)) return [{ type: "text", text: truncateReplayText(result.text) }];
+	if (typeof result === "string") return [{ type: "text", text: truncateReplayText(result) }];
 	return [{ type: "text", text: stringifyPreview(result, 10_000) }];
+}
+
+function displayReplayToolResult(result: unknown): unknown {
+	return toolResultContent(result);
+}
+
+function textFromContentBlocks(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		const b = block as Record<string, unknown>;
+		if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
+	}
+	return parts.join("");
+}
+
+function toolResultText(result: unknown): string {
+	const obj = payloadObject(result);
+	const contentText = textFromContentBlocks(obj?.content);
+	if (contentText.length > 0) return contentText;
+	if (isTextResult(result)) return result.text;
+	if (typeof result === "string") return result;
+	return stringifyPreview(result, 10_000);
+}
+
+function comparableReplayText(text: string): string {
+	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function messagePayloadComparableText(payload: unknown): string {
+	const text = extractTurnText(payload);
+	if (text.length > 0) return text;
+	return textFromContentBlocks(payloadObject(payload)?.content);
+}
+
+function isLegacyToolResultAssistantDuplicate(toolResult: MessageEntry, assistant: MessageEntry): boolean {
+	const priorText = comparableReplayText(toolResultText(extractToolResult(toolResult).result));
+	if (priorText.length === 0) return false;
+	const assistantText = comparableReplayText(messagePayloadComparableText(assistant.payload));
+	return assistantText.length > 0 && assistantText === priorText;
 }
 
 function isTextResult(value: unknown): value is { text: string } {
@@ -352,7 +407,7 @@ function renderReplayLine(text: string, width: number): string[] {
 }
 
 function appendReplayLine(chatPanel: ChatPanel, text: string): void {
-	chatPanel.appendReplayBlock((width) => renderReplayLine(text, width));
+	chatPanel.appendReplayBlock((width) => renderReplayLine(truncateReplayText(text), width));
 }
 
 const BASH_REPLAY_MAX_LINES = 12;
@@ -360,7 +415,7 @@ const BASH_REPLAY_MAX_LINES = 12;
 function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
 	const lines: string[] = [];
 	lines.push(...wrapTextWithAnsi(`bash: $ ${entry.command}`, width));
-	const output = entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "");
+	const output = truncateReplayText(entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, ""));
 	if (output.length > 0) {
 		const outputLines = output.split("\n");
 		const hidden = Math.max(0, outputLines.length - BASH_REPLAY_MAX_LINES);
@@ -478,7 +533,7 @@ export function selectReplayEntries(
 ): SessionEntry[] {
 	const entries = truncateAtTurn(collectSessionEntries(turns), options.uptoTurnId);
 	const compactionIndex = latestCompactionIndex(entries);
-	if (compactionIndex < 0) return entries;
+	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
 
 	const compaction = entries[compactionIndex] as CompactionSummaryEntry;
 	const selected: SessionEntry[] = [compaction];
@@ -489,7 +544,25 @@ export function selectReplayEntries(
 		selected.push(...entries.slice(firstKeptIndex, compactionIndex));
 	}
 	selected.push(...entries.slice(compactionIndex + 1));
-	return selected;
+	return dropLegacyToolResultAssistantDuplicates(selected);
+}
+
+function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {
+	const out: SessionEntry[] = [];
+	for (const entry of entries) {
+		const previous = out[out.length - 1];
+		if (
+			entry.kind === "message" &&
+			entry.role === "assistant" &&
+			previous?.kind === "message" &&
+			previous.role === "tool_result" &&
+			isLegacyToolResultAssistantDuplicate(previous, entry)
+		) {
+			continue;
+		}
+		out.push(entry);
+	}
+	return out;
 }
 
 function compactionContextText(entry: CompactionSummaryEntry): string {
@@ -514,7 +587,8 @@ function branchContextText(entry: BranchSummaryEntry): string {
 
 function bashContextText(entry: BashExecutionEntry): string {
 	let text = `Ran \`${entry.command}\`\n`;
-	text += entry.output.length > 0 ? `\`\`\`\n${entry.output}\n\`\`\`` : "(no output)";
+	const output = truncateReplayText(entry.output);
+	text += output.length > 0 ? `\`\`\`\n${output}\n\`\`\`` : "(no output)";
 	if (entry.cancelled) text += "\n\n(command cancelled)";
 	else if (entry.exitCode !== null && entry.exitCode !== 0) text += `\n\nCommand exited with code ${entry.exitCode}`;
 	if (entry.truncated && entry.fullOutputPath) text += `\n\n[Output truncated. Full output: ${entry.fullOutputPath}]`;
@@ -524,7 +598,7 @@ function bashContextText(entry: BashExecutionEntry): string {
 function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", text: string, timestamp: string): void {
 	const trimmed = text.trim();
 	if (trimmed.length === 0) return;
-	out.push(makeTextMessage(role, trimmed, timestamp));
+	out.push(makeTextMessage(role, truncateReplayText(trimmed), timestamp));
 }
 
 export function buildReplayAgentMessagesFromTurns(
@@ -539,7 +613,7 @@ export function buildReplayAgentMessagesFromTurns(
 				const text = textBlockFromEntry(entry);
 				if (entry.role === "user" || entry.role === "assistant") {
 					if (entry.role === "assistant" && messageFailure(entry)) break;
-					const message = richMessageFromEntry(entry);
+					const message = richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
 					if (message) {
 						out.push(message);
 						recordToolCallsFromMessage(message, seenToolCalls);
@@ -607,16 +681,16 @@ export function rehydrateChatPanelFromTurns(
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {
-					const text = chatMessageText(entry);
+					const text = truncateReplayText(chatMessageText(entry));
 					if (text.length > 0) chatPanel.appendUser(text);
 					break;
 				}
 				if (entry.role === "assistant") {
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
-					const richMessage = richMessageFromEntry(entry);
+					const richMessage = richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
 					if (richMessage || text.length > 0 || failure) {
-						const message = richMessage ?? makeTextMessage("assistant", text, entry.timestamp);
+						const message = richMessage ?? makeTextMessage("assistant", truncateReplayText(text), entry.timestamp);
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
@@ -647,7 +721,7 @@ export function rehydrateChatPanelFromTurns(
 							type: "tool_execution_end",
 							toolCallId: fallbackId,
 							toolName: result.name,
-							result: result.result,
+							result: displayReplayToolResult(result.result),
 							isError: result.isError,
 						});
 					} else {
@@ -656,7 +730,7 @@ export function rehydrateChatPanelFromTurns(
 								{
 									toolCallId: result.id ?? "",
 									toolName: result.name,
-									result: result.result,
+									result: displayReplayToolResult(result.result),
 									isError: result.isError,
 								},
 								width,
@@ -697,12 +771,16 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			case "branchSummary":
 				if (entry.summary.trim().length > 0) {
-					chatPanel.appendReplayBlock((width) => renderBranchSummaryEntry(entry, width));
+					chatPanel.appendReplayBlock((width) =>
+						renderBranchSummaryEntry({ ...entry, summary: truncateReplayText(entry.summary) }, width),
+					);
 				}
 				break;
 			case "compactionSummary":
 				if (entry.summary.trim().length > 0) {
-					chatPanel.appendReplayBlock((width) => renderCompactionSummaryEntry(entry, width));
+					chatPanel.appendReplayBlock((width) =>
+						renderCompactionSummaryEntry({ ...entry, summary: truncateReplayText(entry.summary) }, width),
+					);
 				}
 				break;
 			case "sessionInfo":
