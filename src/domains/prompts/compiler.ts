@@ -1,14 +1,11 @@
+import type { ThinkingMechanism } from "../providers/types/local-model-quirks.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
-import { canonicalJson, sha256 } from "./hash.js";
+import { sha256 } from "./hash.js";
 
 export interface CompileInputs {
 	identity: string;
 	mode: string;
 	safety: string;
-	context?: string;
-	memory?: string;
-	providers: string;
-	session: string;
 	dynamicInputs: DynamicInputs;
 }
 
@@ -17,6 +14,11 @@ export interface DynamicInputs {
 	model?: string | null;
 	contextWindow?: number | null;
 	thinkingBudget?: string | null;
+	thinkingMechanism?: ThinkingMechanism | null;
+	thinkingApplied?: "applied" | "ignored-on-off" | "always-on" | "unsupported" | null;
+	thinkingNotice?: string | null;
+	thinkingGuidance?: string | null;
+	familyGuidance?: string | null;
 	sessionNotes?: string;
 	contextFiles?: string;
 	memorySection?: string;
@@ -34,26 +36,10 @@ export interface FragmentManifestEntry {
 
 export interface CompileResult {
 	text: string;
-	staticCompositionHash: string;
 	renderedPromptHash: string;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
 	dynamicInputs: Readonly<DynamicInputs>;
 }
-
-const allowedPlaceholders: ReadonlySet<keyof DynamicInputs> = new Set<keyof DynamicInputs>([
-	"provider",
-	"model",
-	"contextWindow",
-	"thinkingBudget",
-	"sessionNotes",
-	"contextFiles",
-	"memorySection",
-	"turnCount",
-	"clioVersion",
-	"piMonoVersion",
-]);
-
-const placeholderRegex = /\{\{([A-Za-z][A-Za-z0-9]*)\}\}/g;
 
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {
 	const frag = table.byId.get(id);
@@ -63,92 +49,121 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
 	return frag;
 }
 
-function requireStatic(fragment: LoadedFragment, role: string): void {
-	if (fragment.dynamic) {
-		throw new Error(`prompts/compiler: ${role} fragment "${fragment.id}" must be static`);
-	}
-	if (/\{\{[A-Za-z][A-Za-z0-9]*\}\}/.test(fragment.body)) {
-		throw new Error(`prompts/compiler: ${role} fragment "${fragment.id}" contains template placeholders`);
-	}
-}
-
-function requireDynamic(fragment: LoadedFragment, role: string): void {
-	if (!fragment.dynamic) {
-		throw new Error(`prompts/compiler: ${role} fragment "${fragment.id}" must be dynamic`);
+function safetyOneLiner(level: string): string {
+	switch (level) {
+		case "suggest":
+			return "describe the work; do not modify files or run effectful commands.";
+		case "auto-edit":
+			return "edits inside the workspace are allowed; execute-class actions need confirmation.";
+		case "full-auto":
+			return "edits and local commands are allowed; system_modify and git_destructive remain gated.";
+		default:
+			return "follow the active safety contract.";
 	}
 }
 
-function renderDynamic(fragment: LoadedFragment, inputs: DynamicInputs): string {
-	return fragment.body.replace(placeholderRegex, (_match, rawName: string) => {
-		const name = rawName as keyof DynamicInputs;
-		if (!allowedPlaceholders.has(name)) {
-			throw new Error(`prompts/compiler: fragment "${fragment.id}" references unknown placeholder "{{${rawName}}}"`);
-		}
-		const value = inputs[name];
-		if (value === undefined || value === null) return "";
-		return String(value);
-	});
+function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
+	const oneLine = `Safety: ${level}. ${safetyOneLiner(level)}`;
+	const body = safetyFragment.body.trim();
+	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
+}
+
+function renderRuntimeBlock(inputs: DynamicInputs): string {
+	const lines: string[] = ["# Runtime"];
+	const provider = inputs.provider ?? "";
+	const model = inputs.model ?? "";
+	if (provider.length > 0) lines.push(`Provider: ${provider}`);
+	if (model.length > 0) lines.push(`Model: ${model}`);
+	if (typeof inputs.contextWindow === "number" && inputs.contextWindow > 0) {
+		lines.push(`Context window: ${inputs.contextWindow}`);
+	}
+	if (typeof inputs.thinkingBudget === "string" && inputs.thinkingBudget.length > 0) {
+		lines.push(`Thinking level: ${inputs.thinkingBudget}`);
+	}
+	if (typeof inputs.thinkingMechanism === "string" && inputs.thinkingMechanism.length > 0) {
+		lines.push(`Thinking mechanism: ${inputs.thinkingMechanism}`);
+	}
+	if (typeof inputs.thinkingApplied === "string" && inputs.thinkingApplied.length > 0) {
+		lines.push(`Thinking applied: ${inputs.thinkingApplied}`);
+	}
+	if (typeof inputs.thinkingNotice === "string" && inputs.thinkingNotice.length > 0) {
+		lines.push(`Note: ${inputs.thinkingNotice}`);
+	}
+	const guidance = inputs.thinkingGuidance?.trim();
+	if (guidance && guidance.length > 0) {
+		lines.push("");
+		lines.push(guidance);
+	}
+	const familyGuidance = inputs.familyGuidance?.trim();
+	if (familyGuidance && familyGuidance.length > 0) {
+		lines.push("");
+		lines.push(familyGuidance);
+	}
+	return lines.join("\n");
+}
+
+function renderProjectBlock(contextFiles: string | undefined): string {
+	const trimmed = contextFiles?.trim() ?? "";
+	if (trimmed.length === 0) return "";
+	return `# Project\n\n${trimmed}`;
+}
+
+function renderMemoryBlock(memorySection: string | undefined): string {
+	const trimmed = memorySection?.trim() ?? "";
+	if (trimmed.length === 0) return "";
+	return `# Memory\n\n${trimmed}`;
+}
+
+function renderSessionBlock(inputs: DynamicInputs): string {
+	const sessionNotes = inputs.sessionNotes?.trim() ?? "";
+	const turnCount = typeof inputs.turnCount === "number" ? inputs.turnCount : 0;
+	if (sessionNotes.length === 0 && turnCount === 0) return "";
+	const lines: string[] = ["# Session"];
+	if (turnCount > 0) lines.push(`Turn count: ${turnCount}`);
+	if (sessionNotes.length > 0) {
+		if (turnCount > 0) lines.push("");
+		lines.push(sessionNotes);
+	}
+	return lines.join("\n");
 }
 
 /**
  * Compile a Clio prompt from the supplied fragment table and inputs.
  *
- * Static fragments (identity, mode, safety) inject verbatim. Dynamic fragments
- * (providers, session) render by substituting `{{placeholder}}` with values
- * from `inputs.dynamicInputs`; missing values collapse to empty string, and
- * unknown placeholders throw.
+ * Identity and the active mode render verbatim from disk fragments. Safety
+ * renders a single one-line directive followed by the active mode's safety
+ * fragment body. Everything else renders inline from typed DynamicInputs:
+ * runtime metadata (provider, model, context window, thinking mechanism,
+ * thinking applied/notice/guidance, family guidance), project context,
+ * memory section, and session state.
  *
- * Two reproducibility hashes travel with the rendered text:
- *   - `staticCompositionHash` fingerprints the three static fragments by id,
- *     relPath, and contentHash via canonical JSON + sha256. It is invariant
- *     under dynamic input changes.
- *   - `renderedPromptHash` is sha256 over the final rendered text and therefore
- *     changes whenever dynamic inputs change the output.
+ * One reproducibility hash travels with the rendered text: `renderedPromptHash`
+ * is sha256 over the final text. Receipts written by older builds remain
+ * readable under the same field name.
  */
 export function compile(table: FragmentTable, inputs: CompileInputs): CompileResult {
 	const identity = lookupFragment(table, inputs.identity, "identity");
 	const mode = lookupFragment(table, inputs.mode, "mode");
 	const safety = lookupFragment(table, inputs.safety, "safety");
-	const context =
-		inputs.context && inputs.dynamicInputs.contextFiles?.trim() ? lookupFragment(table, inputs.context, "context") : null;
-	const memory =
-		inputs.memory && inputs.dynamicInputs.memorySection?.trim() ? lookupFragment(table, inputs.memory, "memory") : null;
-	const providers = lookupFragment(table, inputs.providers, "providers");
-	const session = lookupFragment(table, inputs.session, "session");
 
-	requireStatic(identity, "identity");
-	requireStatic(mode, "mode");
-	requireStatic(safety, "safety");
-	if (context) requireDynamic(context, "context");
-	if (memory) requireDynamic(memory, "memory");
-	requireDynamic(providers, "providers");
-	requireDynamic(session, "session");
+	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
+	const parts: string[] = [
+		identity.body.trim(),
+		mode.body.trim(),
+		renderSafetySection(safety, safetyLevel),
+		renderRuntimeBlock(inputs.dynamicInputs),
+	];
+	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles);
+	if (project.length > 0) parts.push(project);
+	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
+	if (memory.length > 0) parts.push(memory);
+	const session = renderSessionBlock(inputs.dynamicInputs);
+	if (session.length > 0) parts.push(session);
 
-	const contextRendered = context ? renderDynamic(context, inputs.dynamicInputs) : "";
-	const memoryRendered = memory ? renderDynamic(memory, inputs.dynamicInputs) : "";
-	const providersRendered = renderDynamic(providers, inputs.dynamicInputs);
-	const sessionRendered = renderDynamic(session, inputs.dynamicInputs);
-
-	const dynamicParts: string[] = [];
-	if (contextRendered.length > 0) dynamicParts.push(contextRendered);
-	if (memoryRendered.length > 0) dynamicParts.push(memoryRendered);
-	dynamicParts.push(providersRendered, sessionRendered);
-	const text = [identity.body, mode.body, safety.body, ...dynamicParts].join("\n\n");
-
-	const staticComposition = {
-		fragments: [identity, mode, safety].map((f) => ({
-			id: f.id,
-			relPath: f.relPath,
-			contentHash: f.contentHash,
-		})),
-	};
-	const staticCompositionHash = sha256(canonicalJson(staticComposition));
+	const text = parts.join("\n\n");
 	const renderedPromptHash = sha256(text);
 
 	const manifestFragments: LoadedFragment[] = [identity, mode, safety];
-	if (context) manifestFragments.push(context);
-	if (memory) manifestFragments.push(memory);
-	manifestFragments.push(providers, session);
 	const fragmentManifest: FragmentManifestEntry[] = manifestFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,
@@ -158,7 +173,6 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 
 	return {
 		text,
-		staticCompositionHash,
 		renderedPromptHash,
 		fragmentManifest,
 		dynamicInputs: { ...inputs.dynamicInputs },

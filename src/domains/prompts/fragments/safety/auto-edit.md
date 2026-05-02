@@ -1,7 +1,6 @@
 ---
 id: safety.auto-edit
 version: 1
-budgetTokens: 150
 description: Auto-edit safety level
 ---
 

@@ -65,14 +65,17 @@ describe("prompts/canonicalJson", () => {
 });
 
 describe("prompts/fragments identity.clio anti-leak content", () => {
-	it("loads identity.clio with the Clio repetition + vendor rejection clauses", () => {
+	it("loads identity.clio with vendor rejection clauses and no verbatim-reply directive", () => {
 		const table = loadFragments();
 		const identity = table.byId.get("identity.clio");
 		ok(identity, "identity.clio must be registered");
 		const body = identity?.body ?? "";
-		// Triple repetition anchors the name. Keeps Qwen3.6 from drifting to a
-		// Claude-synthetic self-image on the first turn.
-		ok(body.includes("You are Clio. You are Clio. You are Clio."), "identity must triple-assert the Clio name");
+		// The identity establishes the persona; small models will copy the
+		// most emphatic verbatim phrasing into their output, so the prompt must
+		// not contain a "reply with this exact string" directive.
+		ok(body.includes("You are Clio"), "identity must assert the Clio name");
+		ok(!body.includes('reply: "'), "identity must not contain a verbatim-reply template");
+		ok(!body.includes("You are Clio. You are Clio. You are Clio."), "identity must not triple-repeat the name");
 		// IOWarp is the organizational anchor. Without it the model hedges.
 		ok(body.includes("IOWarp"), "identity must anchor the IOWarp org");
 		// Explicit rejection list keeps Claude-synthetic output from bleeding
@@ -180,21 +183,16 @@ describe("prompts/context-files", () => {
 });
 
 describe("prompts/compiler context files", () => {
-	it("omits the context fragment when no context files are supplied", () => {
+	it("omits the project block when no context files are supplied", () => {
 		const result = compile(loadFragments(), {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: {},
 		});
 
 		strictEqual(result.text.includes("<project-context>"), false);
-		strictEqual(
-			result.fragmentManifest.some((entry) => entry.id === "context.files"),
-			false,
-		);
+		strictEqual(result.text.includes("# Project"), false);
 	});
 
 	it("injects context files in a deterministic prompt position", () => {
@@ -202,17 +200,12 @@ describe("prompts/compiler context files", () => {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: {},
 		});
 		const withContext = compile(loadFragments(), {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			context: "context.files",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: {
 				contextFiles: "<project-type>typescript</project-type>\n\n<project-context>\nRepo rules\n</project-context>",
 			},
@@ -221,8 +214,9 @@ describe("prompts/compiler context files", () => {
 		ok(withContext.text.includes("<project-type>typescript</project-type>"), withContext.text);
 		ok(withContext.text.includes("<project-context>"), withContext.text);
 		ok(withContext.text.includes("Repo rules"), withContext.text);
-		ok(withContext.text.indexOf("<project-type>") < withContext.text.indexOf("# Provider runtime"), withContext.text);
-		ok(withContext.fragmentManifest.some((entry) => entry.id === "context.files"));
+		ok(withContext.text.includes("# Project"), withContext.text);
+		// # Project block follows the # Runtime block.
+		ok(withContext.text.indexOf("# Runtime") < withContext.text.indexOf("# Project"), withContext.text);
 		notStrictEqual(withContext.renderedPromptHash, noContext.renderedPromptHash);
 	});
 
@@ -261,13 +255,13 @@ describe("prompts/compiler context files", () => {
 				safetyLevel: "auto-edit",
 			});
 			ok(result.text.includes("extension-loaded clio"), result.text);
-			ok(result.fragmentManifest.some((entry) => entry.id === "context.files"));
+			ok(result.text.includes("# Project"), result.text);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
 	});
 
-	it("prompt extension suppresses the context.files fragment when noContextFiles is set", async () => {
+	it("prompt extension suppresses the project block when noContextFiles is set", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-suppress-"));
 		try {
 			const contextContract: ContextContract = {
@@ -304,10 +298,7 @@ describe("prompts/compiler context files", () => {
 				safetyLevel: "auto-edit",
 			});
 			strictEqual(result.text.includes("should-not-appear"), false);
-			strictEqual(
-				result.fragmentManifest.some((entry) => entry.id === "context.files"),
-				false,
-			);
+			strictEqual(result.text.includes("# Project"), false);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
@@ -315,47 +306,112 @@ describe("prompts/compiler context files", () => {
 });
 
 describe("prompts/compiler memory section", () => {
-	it("omits the memory fragment when no memory section is supplied", () => {
+	it("omits the memory block when no memory section is supplied", () => {
 		const result = compile(loadFragments(), {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: {},
 		});
 
 		strictEqual(result.text.includes("# Memory"), false);
-		strictEqual(
-			result.fragmentManifest.some((entry) => entry.id === "memory.dynamic"),
-			false,
-		);
 	});
 
 	it("injects the memory section in a deterministic position with a stable hash delta", () => {
-		const memorySection = "# Memory\n\n- [mem-0000000000000000] (scope=repo) Use cited evidence. Evidence: ev-1.";
+		const memorySection = "- [mem-0000000000000000] (scope=repo) Use cited evidence. Evidence: ev-1.";
 		const noMemory = compile(loadFragments(), {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: {},
 		});
 		const withMemory = compile(loadFragments(), {
 			identity: "identity.clio",
 			mode: "modes.default",
 			safety: "safety.auto-edit",
-			memory: "memory.dynamic",
-			providers: "providers.dynamic",
-			session: "session.dynamic",
 			dynamicInputs: { memorySection },
 		});
 
 		ok(withMemory.text.includes("# Memory"), withMemory.text);
 		ok(withMemory.text.includes("[mem-0000000000000000]"), withMemory.text);
-		ok(withMemory.text.indexOf("# Memory") < withMemory.text.indexOf("# Provider runtime"), withMemory.text);
-		ok(withMemory.fragmentManifest.some((entry) => entry.id === "memory.dynamic"));
+		// Memory follows Runtime; if a Project block exists it sits before Memory.
+		ok(withMemory.text.indexOf("# Runtime") < withMemory.text.indexOf("# Memory"), withMemory.text);
 		notStrictEqual(withMemory.renderedPromptHash, noMemory.renderedPromptHash);
+	});
+});
+
+describe("prompts/compiler runtime block", () => {
+	it("renders provider, model, contextWindow, thinking mechanism + applied + notice", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "endpoint-1",
+				model: "qwen3.6-27b",
+				contextWindow: 262144,
+				thinkingBudget: "high",
+				thinkingMechanism: "budget-tokens",
+				thinkingApplied: "applied",
+				thinkingGuidance: "preserve thinking blocks across turns.",
+			},
+		});
+
+		ok(result.text.includes("# Runtime"), result.text);
+		ok(result.text.includes("Provider: endpoint-1"), result.text);
+		ok(result.text.includes("Model: qwen3.6-27b"), result.text);
+		ok(result.text.includes("Context window: 262144"), result.text);
+		ok(result.text.includes("Thinking level: high"), result.text);
+		ok(result.text.includes("Thinking mechanism: budget-tokens"), result.text);
+		ok(result.text.includes("Thinking applied: applied"), result.text);
+		ok(result.text.includes("preserve thinking blocks across turns."), result.text);
+	});
+
+	it("emits a coercion notice for on-off mechanisms and surfaces it in the prompt", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "endpoint-1",
+				model: "gemma-4-31b",
+				contextWindow: 122880,
+				thinkingBudget: "high",
+				thinkingMechanism: "on-off",
+				thinkingApplied: "ignored-on-off",
+				thinkingNotice: "model has on-off thinking; coerced to on",
+			},
+		});
+
+		ok(result.text.includes("Thinking mechanism: on-off"), result.text);
+		ok(result.text.includes("model has on-off thinking; coerced to on"), result.text);
+	});
+});
+
+describe("prompts/compiler one hash invariant", () => {
+	it("produces the same renderedPromptHash for byte-identical inputs", () => {
+		const a = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { provider: "p", model: "m" },
+		});
+		const b = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { provider: "p", model: "m" },
+		});
+		strictEqual(a.renderedPromptHash, b.renderedPromptHash);
+	});
+
+	it("CompileResult does not carry staticCompositionHash", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {},
+		});
+		strictEqual("staticCompositionHash" in result, false);
 	});
 });

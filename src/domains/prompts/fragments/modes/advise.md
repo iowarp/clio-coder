@@ -1,7 +1,6 @@
 ---
 id: modes.advise
 version: 1
-budgetTokens: 260
 description: Advise mode behavior
 ---
 
