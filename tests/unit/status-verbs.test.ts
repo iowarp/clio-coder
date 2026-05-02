@@ -17,13 +17,13 @@ describe("status/resolveFooterVerb", () => {
 		strictEqual(v?.text.includes("preparing"), true);
 	});
 
-	it("preparing tier 2 on local renders loading model", () => {
+	it("preparing tier 2 on local renders waiting on model", () => {
 		const v = resolveFooterVerb(
 			{ ...INITIAL_STATUS, phase: "preparing", since: 0, lastMeaningfulAt: 0, localRuntime: true, watchdogTier: 2 },
 			45_000,
 			120,
 		);
-		strictEqual(v?.text.includes("loading model"), true);
+		strictEqual(v?.text.includes("waiting on model"), true);
 	});
 
 	it("thinking tier 2 renders still thinking", () => {

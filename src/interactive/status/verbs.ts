@@ -33,7 +33,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "idle":
 			return null;
 		case "preparing":
-			return { text: tier >= 2 && status.localRuntime ? "loading model" : "preparing", toneHint: "normal" };
+			return { text: tier >= 2 && status.localRuntime ? "waiting on model" : "preparing", toneHint: "normal" };
 		case "thinking":
 			return { text: tier >= 2 ? "still thinking" : "thinking", toneHint: "normal" };
 		case "writing":
