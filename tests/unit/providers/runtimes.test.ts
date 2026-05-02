@@ -1,6 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { LMStudioClient } from "@lmstudio/sdk";
+
+import { mergeCapabilities } from "../../../src/domains/providers/capabilities.js";
 import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
 import { buildProviderSupportEntry } from "../../../src/domains/providers/support.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
@@ -262,6 +265,75 @@ describe("providers/runtimes built-in descriptors", () => {
 			globalThis.fetch = originalFetch;
 			if (originalKey === undefined) Reflect.deleteProperty(process.env, "OPENROUTER_API_KEY");
 			else process.env.OPENROUTER_API_KEY = originalKey;
+		}
+	});
+
+	it("lmstudio-native discovers loaded model capabilities from /api/v0/models", async () => {
+		const byId = new Map(BUILTIN_RUNTIMES.map((desc) => [desc.id, desc]));
+		const runtime = byId.get("lmstudio-native");
+		ok(runtime, "missing lmstudio-native runtime");
+
+		type CreatePort = (namespace: string, name: string, backendInterface: unknown) => unknown;
+		const proto = LMStudioClient.prototype as unknown as { createPort: CreatePort };
+		const originalCreatePort = proto.createPort;
+		const originalFetch = globalThis.fetch;
+		let capturedUrl = "";
+		proto.createPort = (namespace: string) => ({
+			callRpc: async (method: string) => {
+				if (namespace === "system" && method === "version") return { version: "0.3.30" };
+				return undefined;
+			},
+		});
+		globalThis.fetch = (async (input) => {
+			capturedUrl = String(input);
+			return new Response(
+				JSON.stringify({
+					data: [
+						{
+							id: "other-model",
+							loaded_context_length: 8192,
+							max_context_length: 131072,
+							type: "llm",
+							capabilities: [],
+						},
+						{
+							id: "nemotron-omni",
+							loaded_context_length: 262144,
+							max_context_length: 1048576,
+							type: "vlm",
+							capabilities: ["tool_use"],
+						},
+					],
+				}),
+				{ status: 200 },
+			);
+		}) as typeof fetch;
+		try {
+			const endpoint = {
+				id: "lm",
+				runtime: "lmstudio-native",
+				url: "http://127.0.0.1:1234",
+				defaultModel: "nemotron-omni",
+			};
+			const result = await runtime.probe?.(endpoint, {
+				credentialsPresent: new Set<string>(),
+				httpTimeoutMs: 1000,
+			});
+			strictEqual(result?.ok, true);
+			strictEqual(capturedUrl, "http://127.0.0.1:1234/api/v0/models");
+			deepStrictEqual(result?.models, ["other-model", "nemotron-omni"]);
+			deepStrictEqual(result?.discoveredCapabilities, {
+				vision: true,
+				tools: true,
+				contextWindow: 262144,
+			});
+
+			const merged = mergeCapabilities(runtime.defaultCapabilities, null, result?.discoveredCapabilities ?? null, null);
+			const model = runtime.synthesizeModel({ ...endpoint, capabilities: merged }, "nemotron-omni", null);
+			strictEqual(model.contextWindow, 262144);
+		} finally {
+			proto.createPort = originalCreatePort;
+			globalThis.fetch = originalFetch;
 		}
 	});
 });
