@@ -6,6 +6,17 @@ import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { RuntimeApiFamily } from "../../types/runtime-descriptor.js";
 
+export type LocalModelLifecycle = "user-managed" | "clio-managed";
+
+export interface ClioLocalModelMetadata {
+	clio?: {
+		targetId: string;
+		runtimeId: string;
+		lifecycle: LocalModelLifecycle;
+		gateway?: boolean;
+	};
+}
+
 export interface LocalSynthesisInput {
 	endpoint: EndpointDescriptor;
 	wireModelId: string;
@@ -14,6 +25,10 @@ export interface LocalSynthesisInput {
 	apiFamily: RuntimeApiFamily;
 	provider: string;
 	baseUrlForEndpoint: (endpointUrl: string) => string;
+}
+
+export function endpointLifecycle(endpoint: EndpointDescriptor): LocalModelLifecycle {
+	return endpoint.lifecycle ?? "user-managed";
 }
 
 function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["thinkingFormat"] | undefined {
@@ -55,7 +70,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	const baseUrl = rawUrl.length > 0 ? input.baseUrlForEndpoint(rawUrl) : "";
 	const pricing = endpoint.pricing;
 	const headers = endpoint.auth?.headers;
-	const model: Model<Api> = {
+	const model: Model<Api> & ClioLocalModelMetadata = {
 		id: wireModelId,
 		name: `${wireModelId} (${endpoint.id})`,
 		api: apiFamily,
@@ -71,6 +86,12 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		},
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
+		clio: {
+			targetId: endpoint.id,
+			runtimeId: endpoint.runtime,
+			lifecycle: endpointLifecycle(endpoint),
+			...(endpoint.gateway === true ? { gateway: true } : {}),
+		},
 	};
 	if (headers) model.headers = headers;
 	if (apiFamily === "openai-completions") {

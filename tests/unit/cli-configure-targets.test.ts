@@ -106,6 +106,8 @@ describe("cli configure and targets", () => {
 			"65536",
 			"--reasoning",
 			"true",
+			"--lifecycle",
+			"clio-managed",
 		]);
 		strictEqual(code, 0);
 
@@ -118,6 +120,7 @@ describe("cli configure and targets", () => {
 		strictEqual(target.capabilities?.contextWindow, 262144);
 		strictEqual(target.capabilities?.maxTokens, 65536);
 		strictEqual(target.capabilities?.reasoning, true);
+		strictEqual(target.lifecycle, "clio-managed");
 	});
 
 	it("targets use sets chat and worker defaults", async () => {

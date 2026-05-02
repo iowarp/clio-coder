@@ -133,7 +133,15 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 				.entries()
 				.map((entry) => entry.family)
 				.sort(),
-			["gemma4-26b-a4b", "nemotron-cascade-2-30b-a3b", "qwen3.5-35b-a3b", "qwen3.6-27b", "qwen3.6-35b-a3b"],
+			[
+				"gemma4-26b-a4b",
+				"nemotron-3-nano-omni-30b-a3b-reasoning",
+				"nemotron-cascade-2-30b-a3b",
+				"qwen3.5-35b-a3b",
+				"qwen3.6-27b",
+				"qwen3.6-35b-a3b",
+				"qwopus3.5-9b-v3",
+			],
 		);
 		const qwen = kb.lookup("Qwen3.6-35B-A3B-UD-Q4_K_XL");
 		ok(qwen, "expected Qwen3.6 MoE to match the production KB");
@@ -149,9 +157,26 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 
 		const nemotron = kb.lookup("Nemotron-Cascade-2-30B-A3B");
 		ok(nemotron, "expected Nemotron Cascade 2 to match the production KB");
-		strictEqual(nemotron.entry.capabilities.contextWindow, 262144);
+		strictEqual(nemotron.entry.capabilities.contextWindow, 1048576);
 		strictEqual(nemotron.entry.capabilities.maxTokens, 65536);
 		strictEqual(nemotron.entry.capabilities.vision, false);
+		ok(kb.lookup("Nemotron-Cascade-2-30B-A3B-i1-Q4_K_M"), "expected real mini Nemotron Cascade GGUF id to match");
+
+		const omni = kb.lookup("nvidia-nemotron-3-nano-omni-30b-a3b-reasoning");
+		ok(omni, "expected Nemotron Omni to match the production KB");
+		strictEqual(omni.entry.capabilities.contextWindow, 1048576);
+		strictEqual(omni.entry.capabilities.maxTokens, 131072);
+		strictEqual(omni.entry.capabilities.vision, true);
+		strictEqual(omni.entry.capabilities.audio, true);
+		ok(
+			kb.lookup("Nemotron-3-Nano-Omni-30B-A3B-Reasoning-UD-Q4_K_M"),
+			"expected real mini Nemotron Omni GGUF id to match",
+		);
+
+		const qwopus = kb.lookup("qwopus3.5-9b-v3");
+		ok(qwopus, "expected Qwopus 9B to match the production KB");
+		strictEqual(qwopus.entry.capabilities.contextWindow, 262144);
+		strictEqual(qwopus.entry.capabilities.maxTokens, 32768);
 		strictEqual(kb.lookup("claude-opus-4.5"), null);
 	});
 });

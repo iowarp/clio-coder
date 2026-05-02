@@ -7,7 +7,7 @@ import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
-import { stripTrailingSlash } from "../common/local-synth.js";
+import { type ClioLocalModelMetadata, endpointLifecycle, stripTrailingSlash } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	...EMPTY_CAPABILITIES,
@@ -225,7 +225,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		);
 		const baseUrl = endpoint.url ? toWebSocketUrl(endpoint.url) : "";
 		const pricing = endpoint.pricing;
-		const model: Model<Api> = {
+		const model: Model<Api> & ClioLocalModelMetadata = {
 			id: wireModelId,
 			name: `${wireModelId} (${endpoint.id})`,
 			api: "lmstudio-native",
@@ -241,6 +241,12 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			},
 			contextWindow: caps.contextWindow,
 			maxTokens: caps.maxTokens,
+			clio: {
+				targetId: endpoint.id,
+				runtimeId: endpoint.runtime,
+				lifecycle: endpointLifecycle(endpoint),
+				...(endpoint.gateway === true ? { gateway: true } : {}),
+			},
 		};
 		const headers = endpoint.auth?.headers;
 		if (headers) model.headers = headers;

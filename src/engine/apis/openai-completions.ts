@@ -1,79 +1,29 @@
 import {
 	type ApiProvider,
+	type AssistantMessage,
+	type AssistantMessageEvent,
 	type Context,
-	type ImageContent,
-	type Message,
+	createAssistantMessageEventStream,
 	type Model,
 	type OpenAICompletionsOptions,
 	type SimpleStreamOptions,
 	type StreamOptions,
 	streamOpenAICompletions,
 	streamSimpleOpenAICompletions,
-	type TextContent,
-	type ThinkingContent,
 	type Tool,
-	type ToolCall,
-	type ToolResultMessage,
 } from "@mariozechner/pi-ai";
 
-const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
-const IMAGE_ESTIMATE_BYTES = 4800;
+import { remainingContextMaxTokens } from "./output-budget.js";
 
-function byteLength(value: string): number {
-	return Buffer.byteLength(value, "utf8");
-}
+export { estimateInputTokensFromContext, remainingContextMaxTokens } from "./output-budget.js";
 
-function estimatePayloadBytes(payload: string | ReadonlyArray<TextContent | ImageContent>): number {
-	if (typeof payload === "string") return byteLength(payload);
-	let total = 0;
-	for (const block of payload) {
-		if (block.type === "text") total += byteLength(block.text);
-		else if (block.type === "image") total += IMAGE_ESTIMATE_BYTES;
-	}
-	return total;
-}
-
-function estimateAssistantBytes(block: TextContent | ThinkingContent | ToolCall): number {
-	if (block.type === "text") return byteLength(block.text);
-	if (block.type === "thinking") return byteLength(block.thinking);
-	return byteLength(block.name) + byteLength(JSON.stringify(block.arguments));
-}
-
-function estimateToolResultBytes(message: ToolResultMessage): number {
-	let total = byteLength(message.toolName);
-	for (const block of message.content) total += estimatePayloadBytes([block]);
-	return total;
-}
-
-function estimateMessageBytes(message: Message): number {
-	if (message.role === "user") return estimatePayloadBytes(message.content);
-	if (message.role === "assistant")
-		return message.content.reduce((sum, block) => sum + estimateAssistantBytes(block), 0);
-	return estimateToolResultBytes(message);
-}
-
-function estimateToolBytes(tool: Tool): number {
-	return byteLength(tool.name) + byteLength(tool.description) + byteLength(JSON.stringify(tool.parameters));
-}
-
-export function estimateInputTokensFromContext(context: Context): number {
-	let bytes = context.systemPrompt ? byteLength(context.systemPrompt) : 0;
-	for (const message of context.messages) bytes += estimateMessageBytes(message);
-	for (const tool of context.tools ?? []) bytes += estimateToolBytes(tool);
-	return Math.ceil(bytes / 4);
-}
-
-export function remainingContextMaxTokens(
-	model: Model<"openai-completions">,
-	context: Context,
-	options: StreamOptions | undefined,
-): number {
-	const safety = CONTEXT_BUDGET_SAFETY_TOKENS;
-	const inputTokens = estimateInputTokensFromContext(context);
-	const contextWindow = model.contextWindow ?? Number.POSITIVE_INFINITY;
-	const budget = Math.max(safety, contextWindow - inputTokens - safety);
-	const requested = options?.maxTokens ?? model.maxTokens ?? budget;
-	return Math.min(requested, budget);
+interface ClioRuntimeMetadata {
+	clio?: {
+		targetId: string;
+		runtimeId: string;
+		lifecycle: "user-managed" | "clio-managed";
+		gateway?: boolean;
+	};
 }
 
 function withRemainingContextBudget<TOptions extends StreamOptions>(
@@ -87,10 +37,113 @@ function withRemainingContextBudget<TOptions extends StreamOptions>(
 	} as TOptions;
 }
 
+function requiredToolArguments(tool: Tool): ReadonlyArray<string> {
+	const schema = tool.parameters as unknown;
+	if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return [];
+	const required = (schema as Record<string, unknown>).required;
+	if (!Array.isArray(required)) return [];
+	return required.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function hasEmptyArguments(args: Record<string, unknown>): boolean {
+	return Object.keys(args).length === 0;
+}
+
+function runtimeMetadata(model: Model<"openai-completions">): NonNullable<ClioRuntimeMetadata["clio"]> | undefined {
+	return (model as Model<"openai-completions"> & ClioRuntimeMetadata).clio;
+}
+
+function malformedToolArgsMessage(
+	model: Model<"openai-completions">,
+	toolName: string,
+	requiredFields: ReadonlyArray<string>,
+): string {
+	const metadata = runtimeMetadata(model);
+	const target = metadata?.targetId ?? model.provider;
+	const runtime = metadata?.runtimeId ?? model.provider;
+	const required = requiredFields.length > 0 ? ` Required fields: ${requiredFields.join(", ")}.` : "";
+	const workaround =
+		model.provider === "llamacpp" || runtime === "llamacpp"
+			? "For llama.cpp, verify --jinja, the model chat template, reasoning flags, and tool parser support for this model."
+			: "For LM Studio, use the verified openai-compat gateway fallback when native SDK tool extraction is unreliable.";
+	return `OpenAI-compatible runtime returned empty tool-call arguments for target '${target}' model '${model.id}' tool '${toolName}'.${required} ${workaround}`;
+}
+
+function finalErrorFromPartial(partial: AssistantMessage, message: string): AssistantMessage {
+	return {
+		...partial,
+		stopReason: "error",
+		errorMessage: message,
+	};
+}
+
+function guardMalformedToolCalls(
+	source: ReturnType<typeof streamOpenAICompletions>,
+	model: Model<"openai-completions">,
+	context: Context,
+): ReturnType<typeof streamOpenAICompletions> {
+	const requiredByTool = new Map<string, ReadonlyArray<string>>();
+	for (const tool of context.tools ?? []) {
+		const required = requiredToolArguments(tool);
+		if (required.length > 0) requiredByTool.set(tool.name, required);
+	}
+	if (requiredByTool.size === 0) return source;
+	const guarded = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			for await (const event of source) {
+				if (event.type === "toolcall_end") {
+					const required = requiredByTool.get(event.toolCall.name);
+					if (required && hasEmptyArguments(event.toolCall.arguments)) {
+						const message = malformedToolArgsMessage(model, event.toolCall.name, required);
+						const error = finalErrorFromPartial(event.partial, message);
+						guarded.push({ type: "error", reason: "error", error });
+						guarded.end(error);
+						return;
+					}
+				}
+				guarded.push(event as AssistantMessageEvent);
+			}
+			guarded.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			const error: AssistantMessage = {
+				role: "assistant",
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "error",
+				errorMessage: message,
+				timestamp: Date.now(),
+			};
+			guarded.push({ type: "error", reason: "error", error });
+			guarded.end(error);
+		}
+	})();
+	return guarded;
+}
+
 export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) =>
-		streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+		guardMalformedToolCalls(
+			streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			model,
+			context,
+		),
 	streamSimple: (model, context, options?: SimpleStreamOptions) =>
-		streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+		guardMalformedToolCalls(
+			streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, options)),
+			model,
+			context,
+		),
 };

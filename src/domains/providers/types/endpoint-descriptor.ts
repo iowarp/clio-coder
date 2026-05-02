@@ -14,6 +14,8 @@ export interface EndpointPricing {
 	cacheWrite?: number;
 }
 
+export type EndpointLifecycle = "user-managed" | "clio-managed";
+
 export interface EndpointDescriptor {
 	id: string;
 	runtime: string;
@@ -22,6 +24,7 @@ export interface EndpointDescriptor {
 	defaultModel?: string;
 	wireModels?: string[];
 	capabilities?: Partial<CapabilityFlags>;
+	lifecycle?: EndpointLifecycle;
 	gateway?: boolean;
 	pricing?: EndpointPricing;
 }

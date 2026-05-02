@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context, Model } from "@mariozechner/pi-ai";
 
 import { ollamaNativeApiProvider } from "../../../src/engine/apis/ollama-native.js";
+import { estimateInputTokensFromContext } from "../../../src/engine/apis/output-budget.js";
 
 interface NdjsonChunk {
 	done: boolean;
@@ -174,5 +175,24 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 		strictEqual(message.usage.cost.input, 2);
 		strictEqual(message.usage.cost.output, 6);
 		strictEqual(message.usage.cost.total, 8);
+	});
+
+	it("clamps num_predict to the remaining context budget", async () => {
+		respondWith = [{ done: true, done_reason: "stop" }];
+		const model = makeModel();
+		model.contextWindow = 2048;
+		model.maxTokens = 262144;
+		const context = makeContext();
+
+		const stream = ollamaNativeApiProvider.stream(model, context, { maxTokens: 262144 });
+		await collect(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
+
+		const body = JSON.parse(lastBodyString) as { options?: { num_predict?: unknown } };
+		const maxTokens = body.options?.num_predict;
+		if (typeof maxTokens !== "number") {
+			throw new TypeError(`expected numeric num_predict, got ${typeof maxTokens}`);
+		}
+		strictEqual(maxTokens, 1024);
+		ok(estimateInputTokensFromContext(context) + maxTokens <= model.contextWindow);
 	});
 });

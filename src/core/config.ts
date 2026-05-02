@@ -235,6 +235,7 @@ function normalizeEndpoint(value: unknown): ClioSettings["endpoints"][number] | 
 	if (defaultModel) endpoint.defaultModel = defaultModel;
 	if (wireModels.length > 0) endpoint.wireModels = wireModels;
 	if (capabilities) endpoint.capabilities = capabilities;
+	if (value.lifecycle === "user-managed" || value.lifecycle === "clio-managed") endpoint.lifecycle = value.lifecycle;
 	if (typeof value.gateway === "boolean") endpoint.gateway = value.gateway;
 	if (pricing) endpoint.pricing = pricing;
 	return endpoint;
@@ -290,6 +291,9 @@ function normalizeLegacyProviders(value: unknown): LegacyEndpointContext {
 		if (wireModels.length > 0) endpoint.wireModels = wireModels;
 		if (auth) endpoint.auth = auth;
 		if (capabilities) endpoint.capabilities = capabilities;
+		if (entry.endpointValue.lifecycle === "user-managed" || entry.endpointValue.lifecycle === "clio-managed") {
+			endpoint.lifecycle = entry.endpointValue.lifecycle;
+		}
 		if (typeof entry.endpointValue.gateway === "boolean") endpoint.gateway = entry.endpointValue.gateway;
 		endpoints.push(endpoint);
 		pairToEndpointId.set(`${entry.runtimeId}:${entry.legacyEndpointId}`, endpointId);
