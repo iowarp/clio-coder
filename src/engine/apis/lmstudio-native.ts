@@ -33,8 +33,11 @@ import type {
 	Usage,
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
+import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import { applyThinkingMechanism } from "./thinking-mechanism.js";
 
 const EMPTY_TOOL_ARGUMENTS_ERROR =
 	"LM Studio SDK returned empty tool-call arguments; this model's chat template may not be compatible. Try the openai-compat runtime against the same gateway.";
@@ -47,6 +50,7 @@ interface ClioRuntimeMetadata {
 		runtimeId: string;
 		lifecycle: RuntimeLifecycle;
 		gateway?: boolean;
+		quirks?: LocalModelQuirks;
 	};
 }
 
@@ -82,6 +86,10 @@ export interface ResidentModelEntry {
 	unload(): Promise<void>;
 }
 
+export interface ResidentModelStatus {
+	readonly state: "unknown" | "loaded" | "not-loaded";
+}
+
 export interface ResidentModelClient {
 	llm: {
 		listLoaded(): Promise<ReadonlyArray<ResidentModelEntry>>;
@@ -98,21 +106,27 @@ export async function ensureResidentModel(
 	modelId: string,
 	options: EnsureResidentOptions = {},
 	now: () => number = Date.now,
-): Promise<void> {
-	if (options.lifecycle !== "clio-managed") return;
+): Promise<ResidentModelStatus> {
+	if (options.lifecycle !== "clio-managed") return { state: "unknown" };
 	const cached = residentCache.get(baseUrl);
-	if (cached && cached.modelId === modelId && now() - cached.at < RESIDENT_TTL_MS) return;
+	if (cached && cached.modelId === modelId && now() - cached.at < RESIDENT_TTL_MS) return { state: "loaded" };
 	let loaded: ReadonlyArray<ResidentModelEntry>;
 	try {
 		loaded = await client.llm.listLoaded();
 	} catch {
-		return;
+		return { state: "unknown" };
 	}
+	const targetLoaded = loaded.some((entry) => entry.modelKey === modelId);
 	const stale = loaded.filter((entry) => entry.modelKey !== modelId);
 	if (stale.length > 0) {
 		await Promise.all(stale.map((entry) => entry.unload().catch(() => undefined)));
 	}
-	residentCache.set(baseUrl, { modelId, at: now() });
+	if (targetLoaded) {
+		residentCache.set(baseUrl, { modelId, at: now() });
+		return { state: "loaded" };
+	}
+	residentCache.delete(baseUrl);
+	return { state: "not-loaded" };
 }
 
 function toolToLmStudio(tool: Tool): LLMTool {
@@ -166,8 +180,19 @@ export interface LmStudioRunDeps {
 		baseUrl: string,
 		modelId: string,
 		options?: EnsureResidentOptions,
-	): Promise<void>;
+	): Promise<ResidentModelStatus | undefined>;
 	discoverLoadedContext(baseUrl: string, modelId: string, signal: AbortSignal): Promise<number | undefined>;
+}
+
+/**
+ * Out-of-band hints from the api-provider wrapper. `thinkingLevel` is the
+ * Clio ThinkingLevel for the in-flight turn; `runStream` resolves it through
+ * `applyThinkingMechanism` to pick the catalog sampling profile. The bare
+ * `stream` path (no SimpleStreamOptions) leaves it undefined, in which case
+ * the helper falls back to the model's `reasoning` capability flag.
+ */
+export interface RunStreamHints {
+	thinkingLevel?: ThinkingLevel;
 }
 
 const defaultRunDeps: LmStudioRunDeps = {
@@ -323,20 +348,58 @@ const MAX_AUTOMATIC_LOAD_CONTEXT = 262_144;
 const MIN_AUTOMATIC_LOAD_CONTEXT = 32_768;
 
 function automaticLoadContextLength(model: Model<"lmstudio-native">): number {
+	// When `model.contextWindow` is set (from a knowledge-base entry or an
+	// explicit `--context-window` override on the endpoint) it is the
+	// authoritative budget for the load. Earlier versions also clamped against
+	// `maxTokens * 2`, but agent workloads are dominated by *input* tokens, so
+	// that clamp silently undersized the KV cache (e.g. 262K → 65K).
+	if (model.contextWindow > 0) {
+		return Math.min(model.contextWindow, MAX_AUTOMATIC_LOAD_CONTEXT);
+	}
 	const requestedOutput = model.maxTokens > 0 ? model.maxTokens : MIN_AUTOMATIC_LOAD_CONTEXT;
 	const target = Math.max(MIN_AUTOMATIC_LOAD_CONTEXT, requestedOutput * 2);
-	const modelLimit = model.contextWindow > 0 ? model.contextWindow : target;
-	return Math.min(modelLimit, target, MAX_AUTOMATIC_LOAD_CONTEXT);
+	return Math.min(target, MAX_AUTOMATIC_LOAD_CONTEXT);
+}
+
+function clioQuirks(model: Model<Api>): LocalModelQuirks | undefined {
+	return (model as Model<Api> & ClioRuntimeMetadata).clio?.quirks;
+}
+
+function pickSamplingProfile(
+	quirks: LocalModelQuirks | undefined,
+	thinkingActive: boolean,
+): SamplingProfile | undefined {
+	const sampling = quirks?.sampling;
+	if (!sampling) return undefined;
+	return thinkingActive ? sampling.thinking : sampling.instruct;
+}
+
+function thinkingLevelFromHintOrModel(hints: RunStreamHints, model: Model<"lmstudio-native">): ThinkingLevel {
+	if (hints.thinkingLevel) return hints.thinkingLevel;
+	return model.reasoning === true ? "medium" : "off";
 }
 
 function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
-	return {
+	// LM Studio's REST `/api/v1/models/load` does not expose KV cache quant or
+	// fp16 KV options; those only round-trip through the SDK's WebSocket
+	// protocol (LLMLoadModelConfig.llama{K,V}CacheQuantizationType,
+	// useFp16ForKVCache). Honor catalog quirks here so dense gemma-4 NVFP4 loads
+	// fit at f16 KV with parallel=1 and drop to q8_0 KV at parallel=4 without
+	// the user editing settings.yaml by hand.
+	const config: LLMLoadModelConfig = {
 		contextLength: automaticLoadContextLength(model),
 		flashAttention: true,
 		gpu: { ratio: "max" },
 		gpuStrictVramCap: true,
 		offloadKVCacheToGpu: true,
 	};
+	const kvCache = clioQuirks(model)?.kvCache;
+	if (kvCache) {
+		if (kvCache.kQuant !== undefined) config.llamaKCacheQuantizationType = kvCache.kQuant;
+		if (kvCache.vQuant !== undefined) config.llamaVCacheQuantizationType = kvCache.vQuant;
+		if (kvCache.useFp16 !== undefined) config.useFp16ForKVCache = kvCache.useFp16;
+	}
+	return config;
 }
 
 interface LmStudioApiV0ModelEntry {
@@ -438,7 +501,14 @@ async function discoverLoadedContextFromV0(
 	return positiveNumber(entry?.loaded_context_length);
 }
 
-function runtimeMetadata(model: Model<Api>): Required<NonNullable<ClioRuntimeMetadata["clio"]>> {
+interface ResolvedRuntimeMetadata {
+	targetId: string;
+	runtimeId: string;
+	lifecycle: RuntimeLifecycle;
+	gateway: boolean;
+}
+
+function runtimeMetadata(model: Model<Api>): ResolvedRuntimeMetadata {
 	const metadata = (model as Model<Api> & ClioRuntimeMetadata).clio;
 	return {
 		targetId: metadata?.targetId ?? model.provider,
@@ -473,6 +543,7 @@ export function runStream(
 	context: Context,
 	options: StreamOptions | undefined,
 	deps: LmStudioRunDeps = defaultRunDeps,
+	hints: RunStreamHints = {},
 ): AssistantMessageEventStream {
 	const stream: AssistantMessageEventStream = createAssistantMessageEventStream();
 	const output: AssistantMessage = {
@@ -509,14 +580,28 @@ export function runStream(
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = deps.createClient(clientOpts);
 			const metadata = runtimeMetadata(model);
-			await deps.ensureResident(client, baseUrl, model.id, { lifecycle: metadata.lifecycle });
+			const residentStatus = await deps.ensureResident(client, baseUrl, model.id, { lifecycle: metadata.lifecycle });
 			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
 			const loadedContextWindow = await deps.discoverLoadedContext(baseUrl, model.id, controller.signal);
 			const budgetLimits = loadedContextWindow !== undefined ? { contextWindow: loadedContextWindow } : undefined;
 			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);
 			const loadConfig = loadModelConfig(model);
+			const requestedLoadContext = loadConfig.contextLength ?? model.contextWindow;
+			// Skip passing `config` to client.llm.model when the model is already
+			// resident. LM Studio can report residency through listLoaded while the
+			// REST model metadata still omits context length; passing config in that
+			// state triggers a no-progress reload wait in the SDK.
+			const residentModelLoaded = residentStatus?.state === "loaded";
+			const clioManagedLoadedUnknownContext =
+				metadata.lifecycle === "clio-managed" && residentModelLoaded && loadedContextWindow === undefined;
+			const clioManagedLoadedWithEnoughContext =
+				metadata.lifecycle === "clio-managed" &&
+				loadedContextWindow !== undefined &&
+				loadedContextWindow >= requestedLoadContext;
 			const modelOpenConfig =
-				metadata.lifecycle === "user-managed" && loadedContextWindow !== undefined ? undefined : loadConfig;
+				metadata.lifecycle === "user-managed" || clioManagedLoadedUnknownContext || clioManagedLoadedWithEnoughContext
+					? undefined
+					: loadConfig;
 			const modelOpenOpts: { signal: AbortSignal; verbose: boolean; config?: LLMLoadModelConfig } = {
 				signal: controller.signal,
 				verbose,
@@ -564,6 +649,137 @@ export function runStream(
 				activeThinkingRef.block = null;
 				activeThinkingRef.idx = -1;
 			};
+			const emitText = (chunk: string) => {
+				if (!chunk) return;
+				closeActiveThinking();
+				let current = activeTextRef.block;
+				if (!current) {
+					current = { type: "text", text: "" };
+					output.content.push(current);
+					activeTextRef.block = current;
+					activeTextRef.idx = output.content.length - 1;
+					stream.push({ type: "text_start", contentIndex: activeTextRef.idx, partial: output });
+				}
+				current.text += chunk;
+				stream.push({
+					type: "text_delta",
+					contentIndex: activeTextRef.idx,
+					delta: chunk,
+					partial: output,
+				});
+			};
+			const emitThinking = (chunk: string, tokensHint?: number) => {
+				if (!chunk) return;
+				closeActiveText();
+				let current = activeThinkingRef.block;
+				if (!current) {
+					current = { type: "thinking", thinking: "" };
+					output.content.push(current);
+					activeThinkingRef.block = current;
+					activeThinkingRef.idx = output.content.length - 1;
+					stream.push({ type: "thinking_start", contentIndex: activeThinkingRef.idx, partial: output });
+				}
+				current.thinking += chunk;
+				// When we have an upstream token count from the SDK use it; otherwise
+				// approximate at 1 token per 4 chars (the same chars/4 estimator the
+				// openai-compat wrapper uses for streamed thinking content).
+				reasoningTokensAccum += tokensHint ?? Math.ceil(chunk.length / 4);
+				stream.push({
+					type: "thinking_delta",
+					contentIndex: activeThinkingRef.idx,
+					delta: chunk,
+					partial: output,
+				});
+			};
+			// Buffered state machine for gemma-4 family chat-template channel markers.
+			// The model emits these as plain text fragments (reasoningType = "none")
+			// rather than tagging them as reasoning, so without re-classification the
+			// chain-of-thought leaks into the visible TUI text. The thought-start
+			// pattern is regex-based because gemma emits channel-name variants like
+			// `<|channel>thought\n`, `<|channel>own-thought\n`, `<|channel>own-think\n`.
+			// LM Studio can also strip the `<|channel>` prefix and leave only the
+			// bare channel label, e.g. `ownthought\n`, before a structured tool call.
+			// Orphan `<channel|>` close markers (where the open was already consumed
+			// via the SDK's reasoning-fragment path) are dropped in idle state.
+			const GEMMA_THOUGHT_START_RE = /<\|channel>[^\n]*\n/;
+			const GEMMA_BARE_THOUGHT_START_RE = /^\s*(?:thought|own[- ]?(?:thought|think))\s*\n/i;
+			const GEMMA_BARE_THOUGHT_ONLY_RE = /^\s*(?:thought|own[- ]?(?:thought|think))\s*$/i;
+			const GEMMA_THOUGHT_END = "<channel|>";
+			const GEMMA_TOOLCALL_START = "<tool_call|>";
+			const GEMMA_TOOLCALL_END = "<|tool_call|>";
+			const GEMMA_BUFFER_MAX = 64;
+			type GemmaState = "idle" | "thought" | "toolcall";
+			let gemmaPending = "";
+			let gemmaState: GemmaState = "idle";
+			const flushGemmaPending = () => {
+				if (gemmaPending.length === 0) return;
+				if (gemmaState === "thought") emitThinking(gemmaPending);
+				else if (gemmaState === "idle" && !GEMMA_BARE_THOUGHT_ONLY_RE.test(gemmaPending)) emitText(gemmaPending);
+				gemmaPending = "";
+			};
+			const routeNonReasoningChunk = (chunk: string) => {
+				gemmaPending += chunk;
+				while (true) {
+					if (gemmaState === "thought") {
+						const endIdx = gemmaPending.indexOf(GEMMA_THOUGHT_END);
+						if (endIdx === -1) {
+							if (gemmaPending.length > GEMMA_BUFFER_MAX) {
+								const safe = gemmaPending.slice(0, gemmaPending.length - GEMMA_BUFFER_MAX);
+								emitThinking(safe);
+								gemmaPending = gemmaPending.slice(gemmaPending.length - GEMMA_BUFFER_MAX);
+							}
+							return;
+						}
+						emitThinking(gemmaPending.slice(0, endIdx));
+						gemmaPending = gemmaPending.slice(endIdx + GEMMA_THOUGHT_END.length);
+						gemmaState = "idle";
+					} else if (gemmaState === "toolcall") {
+						// Discard SDK fallback text inside <tool_call|> regions; structured
+						// tool calls arrive via the toolcall callbacks instead.
+						const endIdx = gemmaPending.indexOf(GEMMA_TOOLCALL_END);
+						if (endIdx === -1) {
+							if (gemmaPending.length > GEMMA_BUFFER_MAX) {
+								gemmaPending = gemmaPending.slice(gemmaPending.length - GEMMA_BUFFER_MAX);
+							}
+							return;
+						}
+						gemmaPending = gemmaPending.slice(endIdx + GEMMA_TOOLCALL_END.length);
+						gemmaState = "idle";
+					} else {
+						const thoughtMatch = GEMMA_THOUGHT_START_RE.exec(gemmaPending);
+						const thoughtIdx = thoughtMatch?.index ?? -1;
+						const bareThoughtMatch = GEMMA_BARE_THOUGHT_START_RE.exec(gemmaPending);
+						const bareThoughtIdx = bareThoughtMatch ? 0 : -1;
+						const toolcallIdx = gemmaPending.indexOf(GEMMA_TOOLCALL_START);
+						// Orphan close marker: SDK consumed `<|channel>...` via a
+						// reasoning fragment, leaving only the standalone close in
+						// the plain-text stream. Drop it silently.
+						const orphanCloseIdx = gemmaPending.indexOf(GEMMA_THOUGHT_END);
+						const candidates = [
+							{ idx: thoughtIdx, kind: "thought" as const, advance: thoughtMatch?.[0].length ?? 0 },
+							{ idx: bareThoughtIdx, kind: "thought" as const, advance: bareThoughtMatch?.[0].length ?? 0 },
+							{ idx: toolcallIdx, kind: "toolcall" as const, advance: GEMMA_TOOLCALL_START.length },
+							{ idx: orphanCloseIdx, kind: "orphan" as const, advance: GEMMA_THOUGHT_END.length },
+						].filter((c) => c.idx !== -1);
+						if (candidates.length === 0) {
+							if (gemmaPending.length > GEMMA_BUFFER_MAX) {
+								const safe = gemmaPending.slice(0, gemmaPending.length - GEMMA_BUFFER_MAX);
+								emitText(safe);
+								gemmaPending = gemmaPending.slice(gemmaPending.length - GEMMA_BUFFER_MAX);
+							}
+							return;
+						}
+						candidates.sort((a, b) => a.idx - b.idx);
+						const next = candidates[0];
+						if (!next) return;
+						emitText(gemmaPending.slice(0, next.idx));
+						gemmaPending = gemmaPending.slice(next.idx + next.advance);
+						if (next.kind === "thought") gemmaState = "thought";
+						else if (next.kind === "toolcall") gemmaState = "toolcall";
+						// orphan stays in idle: just drop the marker bytes
+					}
+				}
+			};
 			const pending = new Map<number, PendingToolCall>();
 			let toolExtractionError: LmStudioToolCallExtractionError | null = null;
 			const predictionOpts: LLMRespondOpts<unknown> = {
@@ -584,43 +800,16 @@ export function runStream(
 						return;
 					}
 					if (fragment.reasoningType === "reasoning") {
+						flushGemmaPending();
 						reasoningTokensAccum += fragment.tokensCount ?? 0;
-						closeActiveText();
-						let current = activeThinkingRef.block;
-						if (!current) {
-							current = { type: "thinking", thinking: "" };
-							output.content.push(current);
-							activeThinkingRef.block = current;
-							activeThinkingRef.idx = output.content.length - 1;
-							stream.push({ type: "thinking_start", contentIndex: activeThinkingRef.idx, partial: output });
-						}
-						current.thinking += fragment.content;
-						stream.push({
-							type: "thinking_delta",
-							contentIndex: activeThinkingRef.idx,
-							delta: fragment.content,
-							partial: output,
-						});
+						emitThinking(fragment.content, 0);
 						return;
 					}
-					closeActiveThinking();
-					let current = activeTextRef.block;
-					if (!current) {
-						current = { type: "text", text: "" };
-						output.content.push(current);
-						activeTextRef.block = current;
-						activeTextRef.idx = output.content.length - 1;
-						stream.push({ type: "text_start", contentIndex: activeTextRef.idx, partial: output });
-					}
-					current.text += fragment.content;
-					stream.push({
-						type: "text_delta",
-						contentIndex: activeTextRef.idx,
-						delta: fragment.content,
-						partial: output,
-					});
+					routeNonReasoningChunk(fragment.content);
 				},
 				onToolCallRequestStart: (callId) => {
+					flushGemmaPending();
+					gemmaState = "idle";
 					closeActiveText();
 					closeActiveThinking();
 					const slot: ToolCall = { type: "toolCall", id: randomUUID(), name: "", arguments: {} };
@@ -684,11 +873,36 @@ export function runStream(
 				};
 			}
 			predictionOpts.maxTokens = requestedMaxTokens;
+			// Apply catalog sampling quirks first; explicit StreamOptions overrides
+			// (set on `options`) win where they are present. The catalog profile is
+			// chosen by thinking activity, derived through applyThinkingMechanism so
+			// the sampler choice matches the actual surface the model exposes
+			// (effort-levels, budget-tokens, on-off, always-on, none). The bare
+			// `stream` path leaves `hints.thinkingLevel` unset and falls back to
+			// medium when the model advertises reasoning.
+			const requestedThinkingLevel = thinkingLevelFromHintOrModel(hints, model);
+			const applied = applyThinkingMechanism(clioQuirks(model), requestedThinkingLevel, {
+				reasoning: model.reasoning === true,
+			});
+			// The LM Studio SDK has no separate thinking-budget channel; the budget
+			// from `applied.budgetTokens` is informational only here and surfaces
+			// through the prompt Runtime block. `maxPredictedTokens` stays driven
+			// by the remaining-context budget so a budget-tokens family does not
+			// unexpectedly truncate output.
+			const samplingProfile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
+			if (samplingProfile) {
+				if (samplingProfile.temperature !== undefined) predictionOpts.temperature = samplingProfile.temperature;
+				if (samplingProfile.topP !== undefined) predictionOpts.topPSampling = samplingProfile.topP;
+				if (samplingProfile.topK !== undefined) predictionOpts.topKSampling = samplingProfile.topK;
+				if (samplingProfile.minP !== undefined) predictionOpts.minPSampling = samplingProfile.minP;
+				if (samplingProfile.repeatPenalty !== undefined) predictionOpts.repeatPenalty = samplingProfile.repeatPenalty;
+			}
 			if (options?.temperature !== undefined) predictionOpts.temperature = options.temperature;
 			const history = await buildChatHistory(client, context);
 			if (aborted) throw new Error("Request was aborted");
 			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
+			flushGemmaPending();
 			closeActiveText();
 			closeActiveThinking();
 			// Write usage before any throw so the error path (tool-extraction failure,
@@ -751,8 +965,20 @@ function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions
 	return rest;
 }
 
+// pi-ai's SimpleStreamOptions.reasoning is the ThinkingLevel for this turn,
+// or undefined when thinking is off. The bare `stream` path cannot reach the
+// level so runStream falls back to the model's `reasoning` capability flag.
+function thinkingLevelFromSimple(options: SimpleStreamOptions | undefined): ThinkingLevel {
+	const reasoning = options?.reasoning;
+	if (reasoning === undefined) return "off";
+	return reasoning as ThinkingLevel;
+}
+
 export const lmstudioNativeApiProvider: ApiProvider<"lmstudio-native"> = {
 	api: "lmstudio-native",
 	stream: (model, context, options) => runStream(model, context, options),
-	streamSimple: (model, context, options?: SimpleStreamOptions) => runStream(model, context, stripReasoning(options)),
+	streamSimple: (model, context, options?: SimpleStreamOptions) =>
+		runStream(model, context, stripReasoning(options), defaultRunDeps, {
+			thinkingLevel: thinkingLevelFromSimple(options),
+		}),
 };
