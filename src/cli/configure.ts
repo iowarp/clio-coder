@@ -45,6 +45,8 @@ Non-interactive flags:
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
   --gateway                        mark the target as a gateway
+  --lifecycle <user-managed|clio-managed>
+                                  resident model lifecycle policy
   --set-orchestrator               use this target for chat
   --set-worker-default             use this target for workers
   --context-window <N>             capability override
@@ -86,6 +88,7 @@ interface ParsedArgs {
 	apiKeyEnv?: string;
 	apiKey?: string;
 	gateway: boolean;
+	lifecycle?: EndpointDescriptor["lifecycle"];
 	setOrchestrator: boolean;
 	setWorkerDefault: boolean;
 	contextWindow?: number;
@@ -162,6 +165,14 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			case "--gateway":
 				out.gateway = true;
 				break;
+			case "--lifecycle": {
+				const v = need();
+				if (v !== "user-managed" && v !== "clio-managed") {
+					throw new Error("--lifecycle must be user-managed or clio-managed");
+				}
+				out.lifecycle = v;
+				break;
+			}
 			case "--set-orchestrator":
 				out.setOrchestrator = true;
 				break;
@@ -337,6 +348,7 @@ function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, pr
 	if (descriptor.defaultModel) process.stdout.write(`  model      ${descriptor.defaultModel}\n`);
 	if (descriptor.auth?.apiKeyEnvVar) process.stdout.write(`  apiKeyEnv  ${descriptor.auth.apiKeyEnvVar}\n`);
 	if (descriptor.gateway) process.stdout.write("  gateway    true\n");
+	if (descriptor.lifecycle) process.stdout.write(`  lifecycle  ${descriptor.lifecycle}\n`);
 	if (probe) {
 		const line = probe.ok
 			? `probe ok${probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : ""}${probe.serverVersion ? ` ${probe.serverVersion}` : ""}`
@@ -362,6 +374,7 @@ function buildDescriptor(
 		apiKeyRef?: string;
 		oauthProfile?: string;
 		gateway?: boolean;
+		lifecycle?: EndpointDescriptor["lifecycle"];
 		contextWindow?: number;
 		maxTokens?: number;
 		reasoning?: boolean;
@@ -383,6 +396,7 @@ function buildDescriptor(
 	if (Object.keys(auth).length > 0) descriptor.auth = auth;
 	if (wireModels.length > 0) descriptor.wireModels = wireModels;
 	if (parts.gateway) descriptor.gateway = true;
+	if (parts.lifecycle) descriptor.lifecycle = parts.lifecycle;
 	const caps: NonNullable<EndpointDescriptor["capabilities"]> = {};
 	if (parts.contextWindow !== undefined) caps.contextWindow = parts.contextWindow;
 	if (parts.maxTokens !== undefined) caps.maxTokens = parts.maxTokens;
@@ -528,6 +542,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: args.gateway || existing?.gateway === true,
+		...(args.lifecycle !== undefined
+			? { lifecycle: args.lifecycle }
+			: existing?.lifecycle !== undefined
+				? { lifecycle: existing.lifecycle }
+				: {}),
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
@@ -543,6 +562,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: args.gateway || existing?.gateway === true,
+		...(args.lifecycle !== undefined
+			? { lifecycle: args.lifecycle }
+			: existing?.lifecycle !== undefined
+				? { lifecycle: existing.lifecycle }
+				: {}),
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
@@ -877,6 +901,11 @@ async function runInteractive(
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		gateway: defaults.gateway,
+		...(defaults.lifecycle !== undefined
+			? { lifecycle: defaults.lifecycle }
+			: existing?.lifecycle !== undefined
+				? { lifecycle: existing.lifecycle }
+				: {}),
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
@@ -910,6 +939,11 @@ async function runInteractive(
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
 		...(wireModels.length > 0 ? { wireModels } : {}),
 		gateway: gatewayAnswer,
+		...(defaults.lifecycle !== undefined
+			? { lifecycle: defaults.lifecycle }
+			: existing?.lifecycle !== undefined
+				? { lifecycle: existing.lifecycle }
+				: {}),
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
@@ -1077,6 +1111,7 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 			args.apiKey !== undefined ||
 			args.apiKeyEnv !== undefined ||
 			args.gateway ||
+			args.lifecycle !== undefined ||
 			args.setOrchestrator ||
 			args.setWorkerDefault ||
 			args.contextWindow !== undefined ||

@@ -52,7 +52,23 @@ describe("engine/lmstudio-native ensureResidentModel", () => {
 		resetResidentCache();
 	});
 
-	it("evicts non-target loaded models on first call", async () => {
+	it("leaves resident LM Studio models alone by default", async () => {
+		const stale = makeUnloadSpy();
+		const active = makeUnloadSpy();
+		const entries: ResidentModelEntry[] = [
+			{ modelKey: "stale", unload: stale.unload },
+			{ modelKey: "active", unload: active.unload },
+		];
+		const client = makeFakeLmStudio(entries);
+
+		await ensureResidentModel(client, "ws://test", "active");
+
+		strictEqual(stale.calls, 0, "user-managed endpoints must not unload stale models");
+		strictEqual(active.calls, 0, "active must never be unloaded");
+		strictEqual(client.listLoadedCalls, 0, "user-managed endpoints should not inspect resident models");
+	});
+
+	it("evicts non-target loaded models when Clio owns lifecycle", async () => {
 		const stale1 = makeUnloadSpy();
 		const stale2 = makeUnloadSpy();
 		const active = makeUnloadSpy();
@@ -63,7 +79,7 @@ describe("engine/lmstudio-native ensureResidentModel", () => {
 		];
 		const client = makeFakeLmStudio(entries);
 
-		await ensureResidentModel(client, "ws://test", "active");
+		await ensureResidentModel(client, "ws://test", "active", { lifecycle: "clio-managed" });
 
 		strictEqual(stale1.calls, 1, "stale-1 must be unloaded once");
 		strictEqual(stale2.calls, 1, "stale-2 must be unloaded once");
@@ -77,15 +93,15 @@ describe("engine/lmstudio-native ensureResidentModel", () => {
 		let nowMs = 1_000_000;
 		const now = (): number => nowMs;
 
-		await ensureResidentModel(client, "ws://cache", "active", now);
+		await ensureResidentModel(client, "ws://cache", "active", { lifecycle: "clio-managed" }, now);
 		strictEqual(client.listLoadedCalls, 1, "first call hits the server");
 
 		nowMs += 30_000;
-		await ensureResidentModel(client, "ws://cache", "active", now);
+		await ensureResidentModel(client, "ws://cache", "active", { lifecycle: "clio-managed" }, now);
 		strictEqual(client.listLoadedCalls, 1, "second call within TTL must skip listLoaded");
 
 		nowMs += 31_000;
-		await ensureResidentModel(client, "ws://cache", "active", now);
+		await ensureResidentModel(client, "ws://cache", "active", { lifecycle: "clio-managed" }, now);
 		strictEqual(client.listLoadedCalls, 2, "third call past TTL must refire listLoaded");
 	});
 });

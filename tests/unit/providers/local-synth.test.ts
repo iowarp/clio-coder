@@ -39,6 +39,14 @@ describe("providers/runtimes/local synthesis", () => {
 		strictEqual(model.maxTokens, 65536);
 		strictEqual(model.reasoning, true);
 		deepStrictEqual(model.input, ["text", "image"]);
+		const metadata = (
+			model as typeof model & {
+				clio?: { targetId: string; runtimeId: string; lifecycle: string };
+			}
+		).clio;
+		strictEqual(metadata?.targetId, "mini");
+		strictEqual(metadata?.runtimeId, "llamacpp-completion");
+		strictEqual(metadata?.lifecycle, "user-managed");
 		const compat = model.compat as OpenAICompletionsCompat | undefined;
 		strictEqual(compat?.maxTokensField, "max_tokens");
 		strictEqual(compat?.supportsDeveloperRole, false);

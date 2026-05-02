@@ -9,12 +9,14 @@ import {
 	type ChatMessagePartToolCallResultData,
 	type FileHandle,
 	type FunctionToolCallRequest,
+	type LLMLoadModelConfig,
 	type LLMPredictionStopReason,
 	type LLMRespondOpts,
 	type LLMTool,
 	LMStudioClient,
 } from "@lmstudio/sdk";
 import type {
+	Api,
 	ApiProvider,
 	AssistantMessage,
 	AssistantMessageEventStream,
@@ -31,9 +33,21 @@ import type {
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
+import { remainingContextMaxTokens } from "./output-budget.js";
 
 const EMPTY_TOOL_ARGUMENTS_ERROR =
 	"LM Studio SDK returned empty tool-call arguments; this model's chat template may not be compatible. Try the openai-compat runtime against the same gateway.";
+
+type RuntimeLifecycle = "user-managed" | "clio-managed";
+
+interface ClioRuntimeMetadata {
+	clio?: {
+		targetId: string;
+		runtimeId: string;
+		lifecycle: RuntimeLifecycle;
+		gateway?: boolean;
+	};
+}
 
 function normalizeBaseUrl(url: string): string {
 	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;
@@ -41,6 +55,14 @@ function normalizeBaseUrl(url: string): string {
 	if (trimmed.startsWith("https://")) return `wss://${trimmed.slice("https://".length)}`;
 	if (trimmed.startsWith("http://")) return `ws://${trimmed.slice("http://".length)}`;
 	return trimmed;
+}
+
+function normalizeHttpBaseUrl(url: string): string {
+	const trimmed = url.endsWith("/") ? url.slice(0, -1) : url;
+	if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+	if (trimmed.startsWith("ws://")) return `http://${trimmed.slice("ws://".length)}`;
+	if (trimmed.startsWith("wss://")) return `https://${trimmed.slice("wss://".length)}`;
+	return `http://${trimmed}`;
 }
 
 // Per-runtime cache: when a (baseUrl, modelId) pair was last confirmed to be
@@ -65,12 +87,18 @@ export interface ResidentModelClient {
 	};
 }
 
+export interface EnsureResidentOptions {
+	lifecycle?: RuntimeLifecycle;
+}
+
 export async function ensureResidentModel(
 	client: ResidentModelClient,
 	baseUrl: string,
 	modelId: string,
+	options: EnsureResidentOptions = {},
 	now: () => number = Date.now,
 ): Promise<void> {
+	if (options.lifecycle !== "clio-managed") return;
 	const cached = residentCache.get(baseUrl);
 	if (cached && cached.modelId === modelId && now() - cached.at < RESIDENT_TTL_MS) return;
 	let loaded: ReadonlyArray<ResidentModelEntry>;
@@ -123,18 +151,28 @@ interface LmStudioRunClient {
 	};
 	llm: {
 		listLoaded(): Promise<ReadonlyArray<ResidentModelEntry>>;
-		model(modelId: string, opts: { signal: AbortSignal; verbose: boolean }): Promise<LmStudioPredictionHandle>;
+		model(
+			modelId: string,
+			opts: { signal: AbortSignal; verbose: boolean; config?: LLMLoadModelConfig },
+		): Promise<LmStudioPredictionHandle>;
 	};
 }
 
 export interface LmStudioRunDeps {
 	createClient(opts: ConstructorParameters<typeof LMStudioClient>[0]): LmStudioRunClient;
-	ensureResident(client: ResidentModelClient, baseUrl: string, modelId: string): Promise<void>;
+	ensureResident(
+		client: ResidentModelClient,
+		baseUrl: string,
+		modelId: string,
+		options?: EnsureResidentOptions,
+	): Promise<void>;
+	discoverLoadedContext(baseUrl: string, modelId: string, signal: AbortSignal): Promise<number | undefined>;
 }
 
 const defaultRunDeps: LmStudioRunDeps = {
 	createClient: (opts) => new LMStudioClient(opts),
 	ensureResident: ensureResidentModel,
+	discoverLoadedContext: discoverLoadedContextLength,
 };
 
 function fileHandleToPart(handle: FileHandle): ChatMessagePartFileData {
@@ -280,6 +318,100 @@ function hasEmptyToolArguments(value: unknown): boolean {
 	return false;
 }
 
+const MAX_AUTOMATIC_LOAD_CONTEXT = 262_144;
+const MIN_AUTOMATIC_LOAD_CONTEXT = 32_768;
+
+function automaticLoadContextLength(model: Model<"lmstudio-native">): number {
+	const requestedOutput = model.maxTokens > 0 ? model.maxTokens : MIN_AUTOMATIC_LOAD_CONTEXT;
+	const target = Math.max(MIN_AUTOMATIC_LOAD_CONTEXT, requestedOutput * 2);
+	const modelLimit = model.contextWindow > 0 ? model.contextWindow : target;
+	return Math.min(modelLimit, target, MAX_AUTOMATIC_LOAD_CONTEXT);
+}
+
+function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
+	return {
+		contextLength: automaticLoadContextLength(model),
+		flashAttention: true,
+		gpu: { ratio: "max" },
+		gpuStrictVramCap: true,
+		offloadKVCacheToGpu: true,
+	};
+}
+
+interface LmStudioApiModelEntry {
+	id?: unknown;
+	loaded_context_length?: unknown;
+}
+
+interface LmStudioApiModelsResponse {
+	data?: unknown;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function apiModelEntries(payload: LmStudioApiModelsResponse | undefined): LmStudioApiModelEntry[] {
+	if (!Array.isArray(payload?.data)) return [];
+	return payload.data.filter((entry): entry is LmStudioApiModelEntry => {
+		return entry !== null && typeof entry === "object";
+	});
+}
+
+async function discoverLoadedContextLength(
+	baseUrl: string,
+	modelId: string,
+	signal: AbortSignal,
+): Promise<number | undefined> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 1500);
+	const onAbort = () => controller.abort();
+	if (signal.aborted) controller.abort();
+	else signal.addEventListener("abort", onAbort, { once: true });
+	try {
+		const response = await fetch(`${normalizeHttpBaseUrl(baseUrl)}/api/v0/models`, { signal: controller.signal });
+		if (!response.ok) return undefined;
+		const payload = (await response.json()) as LmStudioApiModelsResponse;
+		const entry = apiModelEntries(payload).find((row) => row.id === modelId);
+		return positiveNumber(entry?.loaded_context_length);
+	} catch {
+		return undefined;
+	} finally {
+		clearTimeout(timer);
+		signal.removeEventListener("abort", onAbort);
+	}
+}
+
+function runtimeMetadata(model: Model<Api>): Required<NonNullable<ClioRuntimeMetadata["clio"]>> {
+	const metadata = (model as Model<Api> & ClioRuntimeMetadata).clio;
+	return {
+		targetId: metadata?.targetId ?? model.provider,
+		runtimeId: metadata?.runtimeId ?? model.provider,
+		lifecycle: metadata?.lifecycle ?? "user-managed",
+		gateway: metadata?.gateway ?? false,
+	};
+}
+
+function describeLoadFailure(
+	baseUrl: string,
+	model: Model<"lmstudio-native">,
+	loadConfig: LLMLoadModelConfig | undefined,
+	requestedMaxTokens: number | false | undefined,
+	err: unknown,
+): string {
+	const metadata = runtimeMetadata(model);
+	const cause = err instanceof Error ? err.message : String(err);
+	const context = loadConfig?.contextLength ?? model.contextWindow;
+	const output = requestedMaxTokens === false || requestedMaxTokens === undefined ? model.maxTokens : requestedMaxTokens;
+	return [
+		`LM Studio could not load target '${metadata.targetId}' model '${model.id}' at ${baseUrl}.`,
+		`Requested context ${context} and output ${output}.`,
+		`Likely cause: VRAM pressure or a context length above the quantized model/server limit.`,
+		"Try a lower contextWindow/maxTokens override, a smaller quant/tier, or openai-compat against the same LM Studio gateway when the model is already user-managed.",
+		`SDK error: ${cause}`,
+	].join(" ");
+}
+
 export function runStream(
 	model: Model<"lmstudio-native">,
 	context: Context,
@@ -320,9 +452,26 @@ export function runStream(
 			const passkey = options?.apiKey;
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = deps.createClient(clientOpts);
-			await deps.ensureResident(client, baseUrl, model.id);
+			const metadata = runtimeMetadata(model);
+			await deps.ensureResident(client, baseUrl, model.id, { lifecycle: metadata.lifecycle });
 			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
-			const llm = await client.llm.model(model.id, { signal: controller.signal, verbose });
+			const loadedContextWindow = await deps.discoverLoadedContext(baseUrl, model.id, controller.signal);
+			const budgetLimits = loadedContextWindow !== undefined ? { contextWindow: loadedContextWindow } : undefined;
+			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);
+			const loadConfig = loadModelConfig(model);
+			const modelOpenConfig =
+				metadata.lifecycle === "user-managed" && loadedContextWindow !== undefined ? undefined : loadConfig;
+			const modelOpenOpts: { signal: AbortSignal; verbose: boolean; config?: LLMLoadModelConfig } = {
+				signal: controller.signal,
+				verbose,
+			};
+			if (modelOpenConfig !== undefined) modelOpenOpts.config = modelOpenConfig;
+			let llm: LmStudioPredictionHandle;
+			try {
+				llm = await client.llm.model(model.id, modelOpenOpts);
+			} catch (err) {
+				throw new Error(describeLoadFailure(baseUrl, model, modelOpenConfig, requestedMaxTokens, err));
+			}
 			stream.push({ type: "start", partial: output });
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };
 			const activeThinkingRef: { block: ThinkingContent | null; idx: number } = { block: null, idx: -1 };
@@ -467,7 +616,7 @@ export function runStream(
 					tools: context.tools.map(toolToLmStudio),
 				};
 			}
-			if (options?.maxTokens !== undefined) predictionOpts.maxTokens = options.maxTokens;
+			predictionOpts.maxTokens = requestedMaxTokens;
 			if (options?.temperature !== undefined) predictionOpts.temperature = options.temperature;
 			const history = await buildChatHistory(client, context);
 			if (aborted) throw new Error("Request was aborted");

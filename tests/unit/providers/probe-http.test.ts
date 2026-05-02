@@ -4,7 +4,11 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { probeHttp, probeJson } from "../../../src/domains/providers/probe/http.js";
-import { probeLlamaCppProps } from "../../../src/domains/providers/runtimes/common/probe-helpers.js";
+import {
+	parseLlamaCppServerFlags,
+	probeLlamaCppModelStatus,
+	probeLlamaCppProps,
+} from "../../../src/domains/providers/runtimes/common/probe-helpers.js";
 
 interface Spec {
 	status?: number;
@@ -133,5 +137,96 @@ describe("providers/probe llama.cpp props", () => {
 		strictEqual(result.discoveredCapabilities?.contextWindow, 262144);
 		strictEqual(result.discoveredCapabilities?.maxTokens, 65536);
 		strictEqual(result.discoveredCapabilities?.vision, true);
+	});
+
+	it("parses router status args into typed llama.cpp server flags", () => {
+		const flags = parseLlamaCppServerFlags([
+			"--jinja",
+			"--ctx-size",
+			"262144",
+			"--cache-type-k",
+			"q8_0",
+			"--cache-type-v",
+			"q8_0",
+			"--flash-attn",
+			"true",
+			"--reasoning",
+			"on",
+			"--reasoning-budget",
+			"4096",
+			"--temperature",
+			"0.3",
+			"--top-k",
+			"20",
+			"--top-p",
+			"0.9",
+			"--n-gpu-layers",
+			"99",
+			"--mmproj",
+			"/models/mmproj.gguf",
+		]);
+
+		strictEqual(flags.contextSize, 262144);
+		strictEqual(flags.cacheTypeK, "q8_0");
+		strictEqual(flags.cacheTypeV, "q8_0");
+		strictEqual(flags.flashAttention, true);
+		strictEqual(flags.jinja, true);
+		strictEqual(flags.reasoning, true);
+		strictEqual(flags.reasoningBudget, 4096);
+		strictEqual(flags.temperature, 0.3);
+		strictEqual(flags.topK, 20);
+		strictEqual(flags.topP, 0.9);
+		strictEqual(flags.nGpuLayers, 99);
+		strictEqual(flags.mmproj, "/models/mmproj.gguf");
+	});
+
+	it("uses /v1/models router status to enrich llama.cpp capabilities", async () => {
+		handler = (req, res) => {
+			if (req.url !== "/v1/models") {
+				res.statusCode = 404;
+				res.end();
+				return;
+			}
+			res.setHeader("content-type", "application/json");
+			res.end(
+				JSON.stringify({
+					data: [
+						{
+							id: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+							status: {
+								args: [
+									"--jinja",
+									"--ctx-size",
+									"262144",
+									"--flash-attn",
+									"true",
+									"--reasoning",
+									"on",
+									"--reasoning-budget",
+									"4096",
+									"--mmproj",
+									"/models/mmproj.gguf",
+								],
+							},
+						},
+					],
+				}),
+			);
+		};
+
+		const result = await probeLlamaCppModelStatus(
+			baseUrl,
+			{ id: "mini", runtime: "llamacpp", defaultModel: "Qwen3.6-35B-A3B-UD-Q4_K_XL" },
+			{
+				credentialsPresent: new Set<string>(),
+				httpTimeoutMs: 1000,
+			},
+		);
+
+		strictEqual(result.discoveredCapabilities?.contextWindow, 262144);
+		strictEqual(result.discoveredCapabilities?.reasoning, true);
+		strictEqual(result.discoveredCapabilities?.vision, true);
+		strictEqual(result.discoveredCapabilities?.tools, true);
+		strictEqual(result.serverFlags?.flashAttention, true);
 	});
 });

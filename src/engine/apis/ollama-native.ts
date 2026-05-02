@@ -24,6 +24,7 @@ import {
 	type ToolCall as OllamaToolCall,
 } from "ollama";
 import { calculateEngineCost } from "../ai.js";
+import { remainingContextMaxTokens } from "./output-budget.js";
 
 function toolToOllama(tool: Tool): OllamaTool {
 	const fn: OllamaTool["function"] = {
@@ -102,7 +103,7 @@ function buildRequest(
 	if (context.tools && context.tools.length > 0) req.tools = context.tools.map(toolToOllama);
 	const opts: Partial<OllamaOptions> = {};
 	if (options?.temperature !== undefined) opts.temperature = options.temperature;
-	if (options?.maxTokens !== undefined) opts.num_predict = options.maxTokens;
+	opts.num_predict = remainingContextMaxTokens(model, context, options);
 	if (Object.keys(opts).length > 0) req.options = opts;
 	return req;
 }
