@@ -2,6 +2,7 @@ import { LMStudioClient } from "@lmstudio/sdk";
 import type { Api, Model } from "@mariozechner/pi-ai";
 
 import { mergeCapabilities } from "../../capabilities.js";
+import { probeJson } from "../../probe/http.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
@@ -25,6 +26,14 @@ function toWebSocketUrl(url: string): string {
 	if (trimmed.startsWith("https://")) return `wss://${trimmed.slice("https://".length)}`;
 	if (trimmed.startsWith("http://")) return `ws://${trimmed.slice("http://".length)}`;
 	return `ws://${trimmed}`;
+}
+
+function toHttpUrl(url: string): string {
+	const trimmed = stripTrailingSlash(url);
+	if (trimmed.startsWith("ws://")) return `http://${trimmed.slice("ws://".length)}`;
+	if (trimmed.startsWith("wss://")) return `https://${trimmed.slice("wss://".length)}`;
+	if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+	return `http://${trimmed}`;
 }
 
 function buildClient(endpoint: EndpointDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
@@ -74,6 +83,89 @@ async function withTimeout<T>(task: Promise<T>, timeoutMs: number, signal?: Abor
 	});
 }
 
+interface LmStudioModelsResponse {
+	data?: unknown;
+}
+
+interface LmStudioModelEntry {
+	id?: unknown;
+	loaded_context_length?: unknown;
+	max_context_length?: unknown;
+	type?: unknown;
+	capabilities?: unknown;
+}
+
+function modelEntries(payload: LmStudioModelsResponse | undefined): LmStudioModelEntry[] {
+	if (!Array.isArray(payload?.data)) return [];
+	return payload.data.filter((row): row is LmStudioModelEntry => row !== null && typeof row === "object");
+}
+
+function modelId(entry: LmStudioModelEntry): string | null {
+	return typeof entry.id === "string" && entry.id.trim().length > 0 ? entry.id : null;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function selectCapabilityEntry(
+	entries: ReadonlyArray<LmStudioModelEntry>,
+	endpoint: EndpointDescriptor,
+): LmStudioModelEntry | null {
+	const configured = endpoint.defaultModel?.trim();
+	if (configured) {
+		return entries.find((entry) => modelId(entry) === configured) ?? null;
+	}
+	return (
+		entries.find((entry) => positiveNumber(entry.loaded_context_length) !== undefined) ??
+		entries.find((entry) => positiveNumber(entry.max_context_length) !== undefined) ??
+		entries[0] ??
+		null
+	);
+}
+
+function capabilitiesFromModelEntry(entry: LmStudioModelEntry | null): Partial<CapabilityFlags> | undefined {
+	if (!entry) return undefined;
+	const caps: Partial<CapabilityFlags> = {
+		vision: entry.type === "vlm",
+		tools: Array.isArray(entry.capabilities) && entry.capabilities.some((capability) => capability === "tool_use"),
+	};
+	const contextWindow = positiveNumber(entry.loaded_context_length) ?? positiveNumber(entry.max_context_length);
+	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
+	return caps;
+}
+
+function modelsProbeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
+	const headers: Record<string, string> = { ...(endpoint.auth?.headers ?? {}) };
+	const envName = endpoint.auth?.apiKeyEnvVar;
+	if (envName && ctx.credentialsPresent.has(envName)) {
+		const key = process.env[envName]?.trim();
+		if (key) headers.authorization = `Bearer ${key}`;
+	}
+	return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+async function probeApiModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	if (!endpoint.url) return { ok: false, error: "endpoint has no url" };
+	const opts: { url: string; timeoutMs: number; headers?: Record<string, string> } = {
+		url: `${toHttpUrl(endpoint.url)}/api/v0/models`,
+		timeoutMs: ctx.httpTimeoutMs,
+	};
+	const headers = modelsProbeHeaders(endpoint, ctx);
+	if (headers) opts.headers = headers;
+	const result = await (ctx.signal
+		? probeJson<LmStudioModelsResponse>({ ...opts, signal: ctx.signal })
+		: probeJson<LmStudioModelsResponse>(opts));
+	if (!result.ok) return result;
+	const entries = modelEntries(result.data);
+	const models = entries.map(modelId).filter((id): id is string => id !== null);
+	const discoveredCapabilities = capabilitiesFromModelEntry(selectCapabilityEntry(entries, endpoint));
+	const out: ProbeResult = { ok: true, models };
+	if (typeof result.latencyMs === "number") out.latencyMs = result.latencyMs;
+	if (discoveredCapabilities) out.discoveredCapabilities = discoveredCapabilities;
+	return out;
+}
+
 const lmstudioNativeRuntime: RuntimeDescriptor = {
 	id: "lmstudio-native",
 	displayName: "LM Studio (native SDK)",
@@ -88,9 +180,17 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		const client = built;
 		const started = Date.now();
 		try {
-			const version = await withTimeout(client.system.getLMStudioVersion(), ctx.httpTimeoutMs, ctx.signal);
+			const [version, apiModels] = await Promise.all([
+				withTimeout(client.system.getLMStudioVersion(), ctx.httpTimeoutMs, ctx.signal),
+				probeApiModels(endpoint, ctx),
+			]);
 			const latencyMs = Date.now() - started;
-			return { ok: true, latencyMs, serverVersion: version.version };
+			const result: ProbeResult = { ok: true, latencyMs, serverVersion: version.version };
+			if (apiModels.ok) {
+				if (apiModels.models) result.models = apiModels.models;
+				if (apiModels.discoveredCapabilities) result.discoveredCapabilities = apiModels.discoveredCapabilities;
+			}
+			return result;
 		} catch (err) {
 			return {
 				ok: false,
