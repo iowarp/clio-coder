@@ -4,10 +4,21 @@
 # https://huggingface.co/google/gemma-4-26B-A4B
 # https://huggingface.co/nvidia/Nemotron-Cascade-2-30B-A3B
 # https://huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF
+# https://huggingface.co/mradermacher/Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-i1-GGUF
 #
 # This knowledge base is intentionally narrow. It describes only the local
 # models used for Clio self-development and leaves cloud GPT models to pi-ai's
 # native OpenAI and openai-codex catalogs.
+#
+# Thinking semantics for these local families: the chain-of-thought is emitted
+# by the model's chat template (Qwen-style <think> blocks, Gemma 4 thinking
+# template, Nemotron reasoning template). LM Studio's SDK and llama.cpp's
+# OpenAI-compatible surface do not expose a reliable "no thinking" flag, so
+# Clio cannot disable template-driven reasoning at the API layer. With
+# `--thinking off` Clio simply does not request reasoning; if the model emits
+# it anyway, the chain-of-thought is captured into a ThinkingContent block,
+# counted as reasoning tokens (separate from output tokens) on the receipt
+# and TUI footer, and surfaced to the user truthfully rather than hidden.
 - family: nemotron-3-nano-omni-30b-a3b-reasoning
   matchPatterns:
     - nvidia-nemotron-3-nano-omni-30b-a3b-reasoning
@@ -215,6 +226,49 @@
       chatTemplateKwargs:
         enable_thinking: false
     serving: "NVIDIA card recommends vLLM with nemotron_v3 reasoning and qwen3_coder tool parsing."
+
+- family: qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled
+  matchPatterns:
+    - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled
+    - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1
+    - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1-q4_k_m
+    - qwen35-distilled
+    - qwen35-distilled-i1
+    - qwen35-distilled-i1-q4_k_m
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 32768
+  quirks:
+    sampling:
+      thinking:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        maxTokens: 16384
+        reasoningBudget: 4096
+      instruct:
+        temperature: 0.2
+        topP: 0.9
+        topK: 20
+        maxTokens: 4096
+    gpuTiers:
+      "32gb": "Distilled Opus-style reasoning at Qwen3.5 35B A3B scale. Use as a strong local main agent when GPU room is available."
+    runtimePreference:
+      lmstudioNative: "Verified usable on LM Studio when loaded with the Qwen-style preset."
+      openaiCompat: "Preferred fallback when SDK rawTools yield empty arguments for the distilled template."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Match qwen3 reasoning parser flags upstream."
+    serving: "Distilled from Claude 4.6 Opus reasoning traces; expect stronger thinking-then-answer behavior than vanilla Qwen3.5 35B A3B."
 
 - family: qwopus3.5-9b-v3
   matchPatterns:

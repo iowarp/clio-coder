@@ -30,6 +30,7 @@ import type {
 	ThinkingContent,
 	Tool,
 	ToolCall,
+	Usage,
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
@@ -528,6 +529,15 @@ export function runStream(
 				throw new Error(describeLoadFailure(baseUrl, model, modelOpenConfig, requestedMaxTokens, err));
 			}
 			stream.push({ type: "start", partial: output });
+			// LM Studio's `result.stats.predictedTokensCount` is the total of all generated
+			// tokens with no separate reasoning column. Sum the per-fragment `tokensCount`
+			// for any fragment whose `reasoningType` belongs to a reasoning block (the
+			// chain-of-thought content plus the literal start/end tag tokens) so the
+			// receipt and TUI footer can report `reasoningTokens` truthfully even when the
+			// model emits a chain-of-thought via its chat template that the SDK has no API
+			// to disable. Per-fragment counts are approximate per the SDK docs, but the
+			// per-run sum tracks the actual reasoning total closely.
+			let reasoningTokensAccum = 0;
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };
 			const activeThinkingRef: { block: ThinkingContent | null; idx: number } = { block: null, idx: -1 };
 			const closeActiveText = () => {
@@ -570,9 +580,11 @@ export function runStream(
 					// agent message is non-empty and pi-agent-core's loop can chain
 					// correctly when the model only emits reasoning + tool calls.
 					if (fragment.reasoningType === "reasoningStartTag" || fragment.reasoningType === "reasoningEndTag") {
+						reasoningTokensAccum += fragment.tokensCount ?? 0;
 						return;
 					}
 					if (fragment.reasoningType === "reasoning") {
+						reasoningTokensAccum += fragment.tokensCount ?? 0;
 						closeActiveText();
 						let current = activeThinkingRef.block;
 						if (!current) {
@@ -679,12 +691,17 @@ export function runStream(
 			const result = await prediction.result();
 			closeActiveText();
 			closeActiveThinking();
-			if (aborted) throw new Error("Request was aborted");
-			if (toolExtractionError) throw toolExtractionError;
+			// Write usage before any throw so the error path (tool-extraction failure,
+			// post-result aborts) still surfaces real token counts to dispatch and the TUI.
 			output.usage.input = result.stats.promptTokensCount ?? 0;
 			output.usage.output = result.stats.predictedTokensCount ?? 0;
 			output.usage.totalTokens = result.stats.totalTokensCount ?? output.usage.input + output.usage.output;
+			if (reasoningTokensAccum > 0) {
+				(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokensAccum;
+			}
 			calculateEngineCost(model, output.usage);
+			if (aborted) throw new Error("Request was aborted");
+			if (toolExtractionError) throw toolExtractionError;
 			const hadToolCall = output.content.some((block) => block.type === "toolCall");
 			output.stopReason = mapStopReason(result.stats.stopReason, aborted, hadToolCall);
 			if (output.stopReason === "error" || output.stopReason === "aborted") {

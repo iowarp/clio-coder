@@ -137,6 +137,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 				"gemma4-26b-a4b",
 				"nemotron-3-nano-omni-30b-a3b-reasoning",
 				"nemotron-cascade-2-30b-a3b",
+				"qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled",
 				"qwen3.6-27b",
 				"qwen3.6-35b-a3b",
 				"qwopus3.5-9b-v3",
