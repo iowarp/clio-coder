@@ -296,10 +296,14 @@ function probeResultFromSummaries(
 	latencyMs: number | undefined,
 ): ProbeResult {
 	const models = entries.map((entry) => entry.id);
-	const discoveredCapabilities = capabilitiesFromModelEntry(selectCapabilityEntry(entries, endpoint));
+	const capabilityEntry = selectCapabilityEntry(entries, endpoint);
+	const discoveredCapabilities = capabilitiesFromModelEntry(capabilityEntry);
 	const out: ProbeResult = { ok: true, models };
 	if (typeof latencyMs === "number") out.latencyMs = latencyMs;
-	if (discoveredCapabilities) out.discoveredCapabilities = discoveredCapabilities;
+	if (discoveredCapabilities) {
+		out.discoveredCapabilities = discoveredCapabilities;
+		if (capabilityEntry) out.capabilityModelId = capabilityEntry.id;
+	}
 	return out;
 }
 

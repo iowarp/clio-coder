@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { MiddlewareSnapshot } from "../middleware/index.js";
-import type { EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
+import type { CapabilityFlags, EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
 
 export interface WorkerSpec {
 	systemPrompt: string;
@@ -23,6 +23,7 @@ export interface WorkerSpec {
 	endpoint: EndpointDescriptor;
 	runtimeId: string;
 	wireModelId: string;
+	modelCapabilities?: Partial<CapabilityFlags>;
 	sessionId?: string;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;

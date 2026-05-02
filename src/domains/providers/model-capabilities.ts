@@ -12,9 +12,8 @@ function normalizedModelId(wireModelId: string | null | undefined): string | nul
 export interface ResolveModelCapabilitiesOptions {
 	/**
 	 * Per-(endpoint, model) reasoning detection result, typically supplied by
-	 * `providers.getDetectedReasoning(endpointId, modelId)`. When true, the
-	 * returned caps mark `reasoning = true` even if the runtime defaults,
-	 * knowledge-base entry, and probe-discovered caps would not. Null leaves
+	 * `providers.getDetectedReasoning(endpointId, modelId)`. When true or
+	 * false, the returned caps preserve that exact live result. Null leaves
 	 * the merged value untouched.
 	 */
 	detectedReasoning?: boolean | null;
@@ -25,8 +24,8 @@ export interface ResolveModelCapabilitiesOptions {
  *
  * EndpointStatus stores a merged endpoint-level view in `capabilities`, which
  * is adequate for health/readiness, but the model picker and thinking controls
- * need the selected row's own knowledge-base hit. When `probeCapabilities` is
- * present, rebuild the stack as:
+ * need the selected row's own knowledge-base hit. When model-keyed
+ * `probeCapabilities` are present for this same wire model, rebuild the stack as:
  *
  *   runtime defaults + knowledge-base(model) + live probe + endpoint override
  *
@@ -38,14 +37,14 @@ export interface ResolveModelCapabilitiesOptions {
  * actually do, without baking the detection into the runtime defaults.
  */
 export function resolveModelCapabilities(
-	status: Pick<EndpointStatus, "endpoint" | "runtime" | "capabilities" | "probeCapabilities">,
+	status: Pick<EndpointStatus, "endpoint" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelId">,
 	wireModelId: string | null | undefined,
 	knowledgeBase: KnowledgeBase | null,
 	options?: ResolveModelCapabilitiesOptions,
 ): CapabilityFlags {
 	const detectedReasoning = options?.detectedReasoning ?? null;
 	const applyDetected = (caps: CapabilityFlags): CapabilityFlags =>
-		detectedReasoning === true ? { ...caps, reasoning: true } : caps;
+		detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
 
 	if (!status.runtime) return applyDetected(status.capabilities);
 	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
@@ -63,11 +62,14 @@ export function resolveModelCapabilities(
 		);
 	}
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
+	const probeModelId = normalizedModelId(status.probeModelId);
+	const probeCapabilities =
+		probeModelId !== null && modelId !== null && probeModelId === modelId ? (status.probeCapabilities ?? null) : null;
 	return applyDetected(
 		mergeCapabilities(
 			baseCapabilities,
 			kbHit?.entry.capabilities ?? null,
-			status.probeCapabilities ?? null,
+			probeCapabilities,
 			status.endpoint.capabilities ?? null,
 		),
 	);

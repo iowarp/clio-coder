@@ -12,6 +12,7 @@ import {
 	type EndpointDescriptor,
 	type ProvidersContract,
 	type RuntimeDescriptor,
+	resolveModelCapabilities,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -455,6 +456,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
+		if (!message || message.role !== "assistant") return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
@@ -665,8 +667,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
 		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
 		const detectedReasoning = deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId);
-		if (detectedReasoning === true && (synth as { reasoning?: unknown }).reasoning !== true) {
-			(synth as { reasoning: boolean }).reasoning = true;
+		const mutable = synth as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
+		const status = deps.providers.list().find((entry) => entry.endpoint.id === target.endpoint.id);
+		if (status) {
+			const caps = resolveModelCapabilities(status, target.wireModelId, deps.providers.knowledgeBase, {
+				detectedReasoning,
+			});
+			mutable.contextWindow = caps.contextWindow;
+			mutable.maxTokens = caps.maxTokens;
+			mutable.reasoning = caps.reasoning;
+		} else if (detectedReasoning === true && mutable.reasoning !== true) {
+			mutable.reasoning = true;
 		}
 		return synth as unknown as Model<never>;
 	};
@@ -677,13 +688,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			.probeReasoningForModel(target.endpoint.id, target.wireModelId)
 			.then((reasoning) => {
 				if (
-					reasoning === true &&
+					reasoning !== null &&
 					runtime &&
 					runtime.endpointId === target.endpoint.id &&
 					runtime.wireModelId === target.wireModelId
 				) {
 					const liveModel = runtime.agent.state.model as { reasoning?: boolean } | undefined;
-					if (liveModel && liveModel.reasoning !== true) liveModel.reasoning = true;
+					if (liveModel && liveModel.reasoning !== reasoning) liveModel.reasoning = reasoning;
 					const requested = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 					if (requested !== "off") {
 						runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(

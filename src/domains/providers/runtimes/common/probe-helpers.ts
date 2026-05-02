@@ -80,6 +80,7 @@ export interface LlamaCppServerFlags {
 
 export interface LlamaCppStatusEnrichment {
 	discoveredCapabilities?: Partial<CapabilityFlags>;
+	modelId?: string;
 	serverFlags?: LlamaCppServerFlags;
 	notes?: string[];
 }
@@ -186,7 +187,7 @@ export async function probeLlamaCppModelStatus(
 	if (flags.reasoning === true || flags.reasoningBudget !== undefined) caps.reasoning = true;
 	if (flags.mmproj) caps.vision = true;
 	if (flags.jinja === true) caps.tools = true;
-	const enrichment: LlamaCppStatusEnrichment = { serverFlags: flags };
+	const enrichment: LlamaCppStatusEnrichment = { modelId: selected.id, serverFlags: flags };
 	if (Object.keys(caps).length > 0) enrichment.discoveredCapabilities = caps;
 	const notes = statusNotes(selected.id, selected.status);
 	if (notes.length > 0) enrichment.notes = notes;

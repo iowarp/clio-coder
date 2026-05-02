@@ -151,7 +151,10 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 			...(props.discoveredCapabilities ?? {}),
 			...(status.discoveredCapabilities ?? {}),
 		};
-		if (Object.keys(discoveredCapabilities).length > 0) enriched.discoveredCapabilities = discoveredCapabilities;
+		if (Object.keys(discoveredCapabilities).length > 0) {
+			enriched.discoveredCapabilities = discoveredCapabilities;
+			if (status.modelId) enriched.capabilityModelId = status.modelId;
+		}
 		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
 		const note = await detectModelMismatch(base, endpoint, ctx);
 		const notes = [...(status.notes ?? []), ...(note ? [note] : [])];

@@ -244,6 +244,66 @@ describe("dispatch capability gate", () => {
 		}
 	});
 
+	it("uses selected-model capabilities for capability gates and worker specs", async () => {
+		const endpoint: EndpointDescriptor = {
+			id: "model-gated",
+			runtime: "faux-runtime",
+			url: "http://faux.invalid",
+			defaultModel: "model-with-tools",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "faux-runtime",
+			displayName: "Faux",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			synthesizeModel: () => ({ id: "model-with-tools", provider: "faux" }) as never,
+		};
+		const status: EndpointStatus = {
+			endpoint,
+			runtime,
+			available: true,
+			reason: "test",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			probeCapabilities: { tools: false, reasoning: false },
+			probeModelId: "model-without-tools",
+			discoveredModels: ["model-with-tools", "model-without-tools"],
+		};
+		const harness = setupHarness(true, {}, [status]);
+		try {
+			await harness.bundle.extension.start();
+			await rejects(
+				harness.bundle.contract.dispatch({
+					agentId: "coder",
+					task: "needs selected tools",
+					endpoint: "model-gated",
+					model: "model-without-tools",
+					requiredCapabilities: ["tools"],
+				}),
+				(err: Error) =>
+					err.message.includes("admission denied") &&
+					err.message.includes("capability 'tools'") &&
+					err.message.includes("endpoint 'model-gated'"),
+			);
+
+			const result = await harness.bundle.contract.dispatch({
+				agentId: "coder",
+				task: "selected model no thinking",
+				endpoint: "model-gated",
+				model: "model-without-tools",
+				thinkingLevel: "high",
+			});
+			const receipt = await result.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "off");
+			strictEqual(harness.spawnCalls[0]?.modelCapabilities?.reasoning, false);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
 	it("admits dispatch when the endpoint declares the required capability", async () => {
 		const harness = setupHarness(true);
 		try {
@@ -285,7 +345,7 @@ describe("dispatch capability gate", () => {
 					available: true,
 					reason: "test",
 					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
-					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
 					discoveredModels: [],
 				},
 			],
@@ -332,7 +392,7 @@ describe("dispatch capability gate", () => {
 					available: true,
 					reason: "test",
 					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
-					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
 					discoveredModels: [],
 				},
 			],

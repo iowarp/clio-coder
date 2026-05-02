@@ -45,6 +45,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
+import { estimateAgentContextTokens } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
@@ -56,6 +57,7 @@ import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
 import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
+import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { startInteractive } from "../interactive/index.js";
 import {
 	detectPlatformKeybindingWarnings,
@@ -130,12 +132,29 @@ export function synthesizeOrchestratorModel(
 ): Model<never> | null {
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) return null;
+	let model: Model<never>;
 	try {
 		const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-		return runtime.synthesizeModel(endpoint, wireModelId, kbHit) as unknown as Model<never>;
+		model = runtime.synthesizeModel(endpoint, wireModelId, kbHit) as unknown as Model<never>;
 	} catch {
 		return null;
 	}
+	try {
+		const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+		if (status) {
+			const caps = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
+				detectedReasoning: providers.getDetectedReasoning(endpoint.id, wireModelId),
+			});
+			const mutable = model as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
+			mutable.contextWindow = caps.contextWindow;
+			mutable.maxTokens = caps.maxTokens;
+			mutable.reasoning = caps.reasoning;
+		}
+	} catch {
+		// Older test doubles and degraded provider bundles may not expose live
+		// status. The synthesized model still carries runtime and catalog caps.
+	}
+	return model;
 }
 
 async function resolveCompactionModel(
@@ -223,7 +242,7 @@ async function runCompactionFlow(
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
 		messagesSummarized: result.messagesSummarized,
 		isSplitTurn: result.isSplitTurn,
-		tokensAfter: estimateTokensFromSummary(result.summary),
+		tokensAfter: estimateTokensAfterCompaction(entries, result),
 	};
 	if (trigger !== undefined) entry.trigger = trigger;
 	session.appendEntry(entry);
@@ -237,6 +256,24 @@ function estimateTokensFromSummary(summary: string): number {
 	// have a model handle at the persistence layer.
 	if (summary.length === 0) return 0;
 	return Math.max(1, Math.ceil(summary.length / 4));
+}
+
+function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
+	const synthetic: CompactionSummaryEntry = {
+		kind: "compactionSummary",
+		turnId: "__pending_compaction__",
+		parentTurnId: result.firstKeptTurnId ?? null,
+		timestamp: new Date(0).toISOString(),
+		summary: result.summary,
+		tokensBefore: result.tokensBefore,
+		firstKeptTurnId: result.firstKeptTurnId ?? "",
+		messagesSummarized: result.messagesSummarized,
+		isSplitTurn: result.isSplitTurn,
+		tokensAfter: estimateTokensFromSummary(result.summary),
+	};
+	const messages = buildReplayAgentMessagesFromTurns([...entries, synthetic]);
+	const tokens = estimateAgentContextTokens({ messages });
+	return tokens > 0 ? tokens : estimateTokensFromSummary(result.summary);
 }
 
 /**
