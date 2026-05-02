@@ -16,7 +16,13 @@ describe("cli reset and uninstall", () => {
 
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-reset-"));
+		// Override all four env vars; CLIO_CONFIG_DIR/CLIO_DATA_DIR/CLIO_CACHE_DIR
+		// take precedence over CLIO_HOME, so leaving them set from the parent
+		// process leaks the test's writes into whatever sandbox the caller is in.
 		process.env.CLIO_HOME = scratch;
+		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_DATA_DIR = join(scratch, "data");
+		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 		resetXdgCache();
 		initializeClioHome();
 	});
@@ -33,8 +39,8 @@ describe("cli reset and uninstall", () => {
 	});
 
 	it("reset --config recreates default settings without removing credentials", () => {
-		const settingsPath = join(scratch, "settings.yaml");
-		const credentialsPath = join(scratch, "credentials.yaml");
+		const settingsPath = join(scratch, "config", "settings.yaml");
+		const credentialsPath = join(scratch, "config", "credentials.yaml");
 		writeFileSync(settingsPath, "identity: changed\n", "utf8");
 		writeFileSync(credentialsPath, "api_keys: {}\n", "utf8");
 
@@ -45,9 +51,9 @@ describe("cli reset and uninstall", () => {
 	});
 
 	it("reset --auth recreates credentials without changing settings", () => {
-		const settingsPath = join(scratch, "settings.yaml");
+		const settingsPath = join(scratch, "config", "settings.yaml");
 		const before = readFileSync(settingsPath, "utf8");
-		const credentialsPath = join(scratch, "credentials.yaml");
+		const credentialsPath = join(scratch, "config", "credentials.yaml");
 		writeFileSync(credentialsPath, "api_keys:\n  openai: sk-test\n", "utf8");
 
 		const code = runResetCommand(["--auth", "--force"]);
@@ -57,7 +63,7 @@ describe("cli reset and uninstall", () => {
 	});
 
 	it("reset --all recreates a fresh state tree", () => {
-		const settingsPath = join(scratch, "settings.yaml");
+		const settingsPath = join(scratch, "config", "settings.yaml");
 		writeFileSync(settingsPath, "identity: changed\n", "utf8");
 		const code = runResetCommand(["--all", "--force"]);
 		strictEqual(code, 0);
@@ -72,11 +78,13 @@ describe("cli reset and uninstall", () => {
 	it("uninstall removes selected state and keeps the binary intent separate from reset", () => {
 		const code = runUninstallCommand(["--force"]);
 		strictEqual(code, 0);
-		ok(!existsSync(scratch));
+		ok(!existsSync(join(scratch, "config")));
+		ok(!existsSync(join(scratch, "data")));
+		ok(!existsSync(join(scratch, "cache")));
 	});
 
 	it("uninstall --keep-config removes data and cache but leaves settings", () => {
-		const settingsPath = join(scratch, "settings.yaml");
+		const settingsPath = join(scratch, "config", "settings.yaml");
 		const dataDir = join(scratch, "data");
 		const cacheDir = join(scratch, "cache");
 		ok(existsSync(join(dataDir, "evidence")));

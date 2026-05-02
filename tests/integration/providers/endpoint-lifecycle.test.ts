@@ -191,6 +191,28 @@ describe("providers domain endpoint lifecycle", () => {
 		strictEqual(bundle.contract.getEndpoint("does-not-exist"), null);
 	});
 
+	it("clears detected reasoning cache on provider reset and disconnect", async () => {
+		const settings = syntheticSettings();
+		const registry = getRuntimeRegistry();
+		registry.register({
+			...syntheticRuntime(),
+			probeReasoning: async () => ({ reasoning: true, latencyMs: 1 }),
+		});
+		process.env.CLIO_SYNTHETIC_KEY = "sk-test";
+		const bundle = createProvidersBundle(stubContext(settings));
+
+		strictEqual(await bundle.contract.probeReasoningForModel("synthetic", "synthetic-model"), true);
+		strictEqual(bundle.contract.getDetectedReasoning("synthetic", "synthetic-model"), true);
+
+		await bundle.contract.probeAll();
+		strictEqual(bundle.contract.getDetectedReasoning("synthetic", "synthetic-model"), null);
+
+		strictEqual(await bundle.contract.probeReasoningForModel("synthetic", "synthetic-model"), true);
+		strictEqual(bundle.contract.getDetectedReasoning("synthetic", "synthetic-model"), true);
+		bundle.contract.disconnectEndpoint("synthetic");
+		strictEqual(bundle.contract.getDetectedReasoning("synthetic", "synthetic-model"), null);
+	});
+
 	it("credentials.set/get/remove round-trips through the temp CLIO_CONFIG_DIR", () => {
 		const settings = syntheticSettings();
 		const registry = getRuntimeRegistry();

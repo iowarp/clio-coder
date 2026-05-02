@@ -85,6 +85,7 @@ export function makeScratchHome(): { dir: string; env: NodeJS.ProcessEnv; cleanu
 			CLIO_DATA_DIR: join(dir, "data"),
 			CLIO_CONFIG_DIR: join(dir, "config"),
 			CLIO_CACHE_DIR: join(dir, "cache"),
+			CLIO_REQUIRE_HOME_PREFIX: "1",
 		},
 		cleanup() {
 			try {

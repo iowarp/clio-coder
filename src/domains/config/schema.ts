@@ -78,6 +78,8 @@ const EndpointAuthSchema = Type.Object({
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 });
 
+const EndpointLifecycleSchema = Type.Union([Type.Literal("user-managed"), Type.Literal("clio-managed")]);
+
 const EndpointDescriptorSchema = Type.Object({
 	id: Type.String({ minLength: 1 }),
 	runtime: Type.String({ minLength: 1 }),
@@ -86,6 +88,7 @@ const EndpointDescriptorSchema = Type.Object({
 	defaultModel: Type.Optional(Type.String({ minLength: 1 })),
 	wireModels: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 	capabilities: Type.Optional(EndpointCapabilitiesSchema),
+	lifecycle: Type.Optional(EndpointLifecycleSchema),
 	gateway: Type.Optional(Type.Boolean()),
 	pricing: Type.Optional(EndpointPricingSchema),
 });
