@@ -7,11 +7,54 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 
 const MAX_MATCHES = 100;
 const MAX_DEPTH = 8;
+const MAX_FILE_BYTES = 1_000_000;
+const BINARY_SAMPLE_BYTES = 8192;
+const IGNORED_DIRS = new Set([
+	".cache",
+	".clio",
+	".fallow",
+	".git",
+	".next",
+	".pytest_cache",
+	".turbo",
+	".venv",
+	"build",
+	"coverage",
+	"dist",
+	"node_modules",
+	"target",
+]);
+const BINARY_EXTENSIONS = new Set([
+	".7z",
+	".bin",
+	".bmp",
+	".class",
+	".dll",
+	".dylib",
+	".gif",
+	".gz",
+	".ico",
+	".jpeg",
+	".jpg",
+	".o",
+	".pdf",
+	".png",
+	".so",
+	".tar",
+	".wasm",
+	".webp",
+	".zip",
+]);
 
 interface FileEntry {
 	absPath: string;
 	relPath: string;
 	baseName: string;
+	stat: Stats;
+}
+
+interface WalkStats {
+	ignoredDirs: number;
 }
 
 function parseContext(value: unknown): number | null {
@@ -22,7 +65,7 @@ function parseContext(value: unknown): number | null {
 	return Math.floor(value);
 }
 
-function walkFiles(root: string, current: string, depth: number, out: FileEntry[]): void {
+function walkFiles(root: string, current: string, depth: number, out: FileEntry[], stats: WalkStats): void {
 	if (depth > MAX_DEPTH) return;
 
 	const entries = readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
@@ -30,7 +73,11 @@ function walkFiles(root: string, current: string, depth: number, out: FileEntry[
 		const absPath = path.join(current, entry.name);
 		const stat = lstatSync(absPath);
 		if (stat.isDirectory() && !stat.isSymbolicLink()) {
-			walkFiles(root, absPath, depth + 1, out);
+			if (IGNORED_DIRS.has(entry.name)) {
+				stats.ignoredDirs += 1;
+				continue;
+			}
+			walkFiles(root, absPath, depth + 1, out, stats);
 			continue;
 		}
 		if (stat.isFile()) {
@@ -38,9 +85,34 @@ function walkFiles(root: string, current: string, depth: number, out: FileEntry[
 				absPath,
 				relPath: normalizeGlobInput(path.relative(root, absPath)),
 				baseName: entry.name,
+				stat,
 			});
 		}
 	}
+}
+
+function hasBinaryExtension(filePath: string): boolean {
+	return BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function isLikelyBinary(buffer: Buffer): boolean {
+	const sampleLength = Math.min(buffer.length, BINARY_SAMPLE_BYTES);
+	if (sampleLength === 0) return false;
+	let suspicious = 0;
+	for (let i = 0; i < sampleLength; i += 1) {
+		const byte = buffer[i] ?? 0;
+		if (byte === 0) return true;
+		if (byte < 7 || (byte > 13 && byte < 32)) suspicious += 1;
+	}
+	return suspicious / sampleLength > 0.1;
+}
+
+function skippedSuffix(stats: { ignoredDirs: number; largeFiles: number; binaryFiles: number }): string {
+	const parts: string[] = [];
+	if (stats.ignoredDirs > 0) parts.push(`${stats.ignoredDirs} ignored dirs`);
+	if (stats.largeFiles > 0) parts.push(`${stats.largeFiles} large files`);
+	if (stats.binaryFiles > 0) parts.push(`${stats.binaryFiles} binary files`);
+	return parts.length > 0 ? `\n[skipped ${parts.join(", ")}]` : "";
 }
 
 export const grepTool: ToolSpec = {
@@ -110,8 +182,9 @@ export const grepTool: ToolSpec = {
 		}
 
 		const files: FileEntry[] = [];
+		const skipped = { ignoredDirs: 0, largeFiles: 0, binaryFiles: 0 };
 		try {
-			walkFiles(root, root, 0, files);
+			walkFiles(root, root, 0, files, skipped);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `grep: ${msg}` };
@@ -132,9 +205,23 @@ export const grepTool: ToolSpec = {
 				if (!fileFilter.test(candidate)) continue;
 			}
 
+			if (file.stat.size > MAX_FILE_BYTES) {
+				skipped.largeFiles += 1;
+				continue;
+			}
+			if (hasBinaryExtension(file.absPath)) {
+				skipped.binaryFiles += 1;
+				continue;
+			}
+
 			let text: string;
 			try {
-				text = readFileSync(file.absPath, "utf8");
+				const bytes = readFileSync(file.absPath);
+				if (isLikelyBinary(bytes)) {
+					skipped.binaryFiles += 1;
+					continue;
+				}
+				text = bytes.toString("utf8");
 			} catch {
 				continue;
 			}
@@ -161,12 +248,14 @@ export const grepTool: ToolSpec = {
 		}
 
 		if (output.length === 0 && !truncated) {
-			return { kind: "ok", output: "no matches" };
+			return { kind: "ok", output: `no matches${skippedSuffix(skipped)}` };
 		}
 
 		if (truncated) {
 			output.push("[more results truncated]");
 		}
+		const suffix = skippedSuffix(skipped);
+		if (suffix.length > 0) output.push(suffix.trim());
 
 		return { kind: "ok", output: output.join("\n") };
 	},
