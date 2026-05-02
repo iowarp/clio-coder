@@ -6,6 +6,7 @@ import { probeJson } from "../../probe/http.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
+import { extractLocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import { type ClioLocalModelMetadata, endpointLifecycle, stripTrailingSlash } from "../common/local-synth.js";
 
@@ -361,6 +362,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		);
 		const baseUrl = endpoint.url ? toWebSocketUrl(endpoint.url) : "";
 		const pricing = endpoint.pricing;
+		const quirks = extractLocalModelQuirks(kb?.entry.quirks);
 		const model: Model<Api> & ClioLocalModelMetadata = {
 			id: wireModelId,
 			name: `${wireModelId} (${endpoint.id})`,
@@ -382,6 +384,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 				runtimeId: endpoint.runtime,
 				lifecycle: endpointLifecycle(endpoint),
 				...(endpoint.gateway === true ? { gateway: true } : {}),
+				...(quirks ? { quirks } : {}),
 			},
 		};
 		const headers = endpoint.auth?.headers;

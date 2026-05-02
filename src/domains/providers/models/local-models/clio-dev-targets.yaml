@@ -2,6 +2,9 @@
 # https://huggingface.co/Qwen/Qwen3.6-35B-A3B
 # https://huggingface.co/Qwen/Qwen3.6-27B
 # https://huggingface.co/google/gemma-4-26B-A4B
+# https://huggingface.co/LilaRest/gemma-4-31B-it-NVFP4-turbo
+# https://huggingface.co/Jackrong/Gemopus-4-31B-it-GGUF
+# https://huggingface.co/Jackrong/Qwopus3.6-27B-v1-preview-GGUF
 # https://huggingface.co/nvidia/Nemotron-Cascade-2-30B-A3B
 # https://huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF
 # https://huggingface.co/mradermacher/Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-i1-GGUF
@@ -67,6 +70,16 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 4
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 1024
+        medium: 4096
+        high: 16384
+      guidance: |
+        Reasoning is template-driven; thinking blocks emit through the qwen
+        chat template. Preserve thinking across coding-task turns when the
+        chain matters; otherwise let the budget cap output growth.
     serving: "Use qwen3_coder tool parsing when served through OpenAI-compatible HTTP. LM Studio native uses SDK rawTools, but openai-compat remains the fallback for template-specific tool extraction issues."
 
 - family: qwen3.6-35b-a3b
@@ -111,6 +124,16 @@
       cacheTypeV: q8_0
       flashAttn: true
       nGpuLayers: 99
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 1024
+        medium: 4096
+        high: 16384
+      guidance: |
+        Qwen chat template emits thinking blocks. The card recommends at least
+        128K context for thinking quality. Preserve thinking blocks across
+        coding-task turns so iterative reasoning chains do not restart cold.
     serving: "Official card recommends at least 128K context for thinking quality. Use 262K when memory allows."
 
 - family: qwen3.6-27b
@@ -131,9 +154,219 @@
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 65536
+    maxTokens: 32768
   quirks:
-    serving: "Official card recommends preserving thinking context in iterative development workflows."
+    sampling:
+      thinking:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        presencePenalty: 1.5
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+    gpuTiers:
+      "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 (Q4_K_XL weights ~19.5 GB plus ~32 GB KV)."
+    runtimePreference:
+      lmstudioNative: "Primary path; standard <think> tagging works correctly with the SDK classifier."
+      openaiCompat: "Verified parity for tool calls; reasoning_content surfaces and completion_tokens_details.reasoning_tokens is reported."
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 1024
+        medium: 4096
+        high: 16384
+      guidance: |
+        Qwen chat template drives thinking via standard <think> blocks.
+        Coding sampler is the precise variant. Preserve thinking blocks across
+        turns when the workflow is iterative; the budget caps runaway chains.
+    serving: "Official Qwen card recommends max output 32768 tokens for standard queries (81920 only for math/code competitions). Coding sampler is the precise variant; preserve thinking blocks across turns for iterative workflows."
+
+- family: gemma-4-31b-it-nvfp4-turbo
+  matchPatterns:
+    - gemma-4-31b-it-nvfp4-turbo
+    - gemma-4-31b-it-nvfp4
+    - gemma-4-31b-it-turbo
+    - gemma-4-31b-it
+    - gemma-4-31b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 122880
+    maxTokens: 32768
+  quirks:
+    kvCache:
+      kQuant: q8_0
+      vQuant: q8_0
+    sampling:
+      thinking:
+        temperature: 1.0
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        maxTokens: 32768
+    chatTemplate: "gemma-channel"
+    leakageNote: |
+      LM Studio's gemma4 chat template emits chain-of-thought as plain text
+      bracketed by literal '<|channel>thought\n' and '<channel|>' markers
+      rather than reasoningType=reasoning fragments. Clio's lmstudio-native
+      adapter buffers and re-classifies these regions into ThinkingContent
+      so the markers do not leak into the visible TUI text and reasoning
+      tokens are accounted via the chars/4 estimator.
+    gpuTiers:
+      "48gb": "Fits at f16 KV when parallel=1 and ctx=122880; drop to q8_0 KV at parallel=4."
+      "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
+    runtimePreference:
+      lmstudioNative: "Verified path. Pin parallel=1 in the LM Studio per-model preset to give a single agent the full 122880 context."
+      openaiCompat: "Fallback path; the openai-compat surface does not expose the channel-marker classifier so visible text shows the raw markers."
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Gemma 4 chat template exposes thinking only as on or off; intermediate
+        levels coerce to on. NVFP4 quantization can corrupt JSON tool-call
+        output under aggressive sampling, so the instruct profile pins
+        temperature at 0.7. The lmstudio-native adapter re-classifies the
+        channel-marker thought region into ThinkingContent so markers do not
+        leak into visible text.
+    serving: "LilaRest publishes no per-model sampler; values inherit the gemma family default per the official Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4 weights."
+
+- family: gemopus-4-31b-it
+  matchPatterns:
+    - gemopus-4-31b-it
+    - gemopus-4-31b
+    - gemopus-4
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 122880
+    maxTokens: 32768
+  quirks:
+    kvCache:
+      kQuant: q8_0
+      vQuant: q8_0
+    sampling:
+      thinking:
+        temperature: 1.0
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        maxTokens: 32768
+    chatTemplate: "gemma-channel"
+    thinkingControl: |
+      Jackrong's distilled gemma-4 31B uses the same channel-marker template.
+      Thinking mode is gated by the literal '<|think|>' token in the system
+      prompt; Clio does not currently inject it, so the model emits an empty
+      thought region followed by the answer.
+    gpuTiers:
+      "48gb": "Fits at f16 KV with parallel=1; q8_0 KV recommended at parallel=4."
+      "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
+    runtimePreference:
+      lmstudioNative: "Verified path. Channel-marker handler in clio's adapter recovers reasoning tokens that the SDK classifier drops."
+      openaiCompat: "Fallback; reasoning_content is absent from the openai-compat reasoning probe for this family."
+    thinking:
+      mechanism: always-on
+      guidance: |
+        Distilled traces emit unconditionally. The thinking level setting is
+        ignored at the API surface; chain-of-thought arrives whether or not
+        Clio asks for it. Reasoning tokens are accounted via the channel-marker
+        re-classifier in lmstudio-native.
+    serving: "Distilled from Claude 4.6 Opus reasoning traces onto Google Gemma 4 31B; sampler matches the gemopus card values."
+
+- family: qwopus3.6-27b-v1-preview
+  matchPatterns:
+    - qwopus3.6-27b-v1-preview
+    - qwopus3.6-27b
+    - qwopus3.6
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 32768
+  quirks:
+    sampling:
+      thinking:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        presencePenalty: 1.5
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+    gpuTiers:
+      "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 thanks to the Q4_K_M weights (~16.5 GB)."
+    runtimePreference:
+      lmstudioNative: "Primary path; thinking is emitted via standard <think> tags so the SDK classifier accounts reasoning correctly."
+      openaiCompat: "Verified for tool-call extraction parity; reasoning_content surfaces."
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 1024
+        medium: 4096
+        high: 16384
+      guidance: |
+        Distilled Opus reasoning traces over Qwen3.6 27B; thinking emits via
+        standard <think> tags. Coding-task sampler is the precise variant.
+        Preserve thinking blocks across turns for iterative workflows.
+    serving: "Distilled from Claude 4.6 Opus reasoning traces onto Qwen3.6 27B. Coding-task sampler is the precise variant: temperature 0.6, top_p 0.95, top_k 20."
 
 - family: gemma4-26b-a4b
   matchPatterns:
@@ -179,6 +412,12 @@
       nGpuLayers: 99
       mmproj: true
     thinkingControl: "Gemma 4 exposes thinking through chat template enable_thinking support."
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Gemma 4 chat template exposes thinking only as on or off via
+        enable_thinking. Intermediate levels coerce to on. The MoE A4B variant
+        keeps the same template behavior as the dense gemma-4 family.
 
 - family: nemotron-cascade-2-30b-a3b
   matchPatterns:
@@ -225,6 +464,13 @@
       parallel: 4
       chatTemplateKwargs:
         enable_thinking: false
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Nemotron Cascade 2 chat template exposes thinking through
+        chat_template_kwargs.enable_thinking. Intermediate levels coerce to on.
+        The mini llama.cpp preset disables thinking in the template kwargs by
+        default; flip via the runtime override when reasoning is needed.
     serving: "NVIDIA card recommends vLLM with nemotron_v3 reasoning and qwen3_coder tool parsing."
 
 - family: qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled
@@ -268,6 +514,17 @@
       lmstudioNative: "Verified usable on LM Studio when loaded with the Qwen-style preset."
       openaiCompat: "Preferred fallback when SDK rawTools yield empty arguments for the distilled template."
       llamaCpp: "OpenAI-compatible chat completions with --jinja. Match qwen3 reasoning parser flags upstream."
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 1024
+        medium: 4096
+        high: 16384
+      guidance: |
+        Distilled Opus reasoning over Qwen3.5 35B A3B; thinking emits via the
+        qwen chat template. Preserve thinking blocks across coding-task turns;
+        the budget caps runaway chains while keeping iterative reasoning
+        coherent.
     serving: "Distilled from Claude 4.6 Opus reasoning traces; expect stronger thinking-then-answer behavior than vanilla Qwen3.5 35B A3B."
 
 - family: qwopus3.5-9b-v3
@@ -308,4 +565,15 @@
       lmstudioNative: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
       openaiCompat: "Verified through the LM Studio gateway for read and write_plan tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
       anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the endpoint root as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
+    thinking:
+      mechanism: budget-tokens
+      budgetByLevel:
+        low: 512
+        medium: 2048
+        high: 4096
+      guidance: |
+        Qwopus 9B distilled from Opus reasoning; thinking emits via the qwen
+        chat template. Output cap is tighter than the 32GB-class MoE families
+        because this is the 16GB emulation target. Keep thinking budgets
+        modest for tool-calling workflows.
     serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Native model override successfully switched residency to granite-4.0-h-350m through the SDK."

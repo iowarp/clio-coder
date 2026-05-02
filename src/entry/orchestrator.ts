@@ -123,7 +123,7 @@ async function resolveApiKeyForEndpoint(
 	return resolved.apiKey;
 }
 
-function synthesizeOrchestratorModel(
+export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	endpoint: EndpointDescriptor,
 	wireModelId: string,
@@ -131,7 +131,8 @@ function synthesizeOrchestratorModel(
 	const runtime = providers.getRuntime(endpoint.runtime);
 	if (!runtime) return null;
 	try {
-		return runtime.synthesizeModel(endpoint, wireModelId, null) as unknown as Model<never>;
+		const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+		return runtime.synthesizeModel(endpoint, wireModelId, kbHit) as unknown as Model<never>;
 	} catch {
 		return null;
 	}

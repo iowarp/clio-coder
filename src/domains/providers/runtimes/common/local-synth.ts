@@ -4,6 +4,7 @@ import { mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
+import { extractLocalModelQuirks, type LocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { RuntimeApiFamily } from "../../types/runtime-descriptor.js";
 
 export type LocalModelLifecycle = "user-managed" | "clio-managed";
@@ -14,6 +15,7 @@ export interface ClioLocalModelMetadata {
 		runtimeId: string;
 		lifecycle: LocalModelLifecycle;
 		gateway?: boolean;
+		quirks?: LocalModelQuirks;
 	};
 }
 
@@ -77,6 +79,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	const baseUrl = rawUrl.length > 0 ? input.baseUrlForEndpoint(rawUrl) : "";
 	const pricing = endpoint.pricing;
 	const headers = endpoint.auth?.headers;
+	const quirks = extractLocalModelQuirks(kb?.entry.quirks);
 	const model: Model<Api> & ClioLocalModelMetadata = {
 		id: wireModelId,
 		name: `${wireModelId} (${endpoint.id})`,
@@ -98,6 +101,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			runtimeId: endpoint.runtime,
 			lifecycle: endpointLifecycle(endpoint),
 			...(endpoint.gateway === true ? { gateway: true } : {}),
+			...(quirks ? { quirks } : {}),
 		},
 	};
 	if (headers) model.headers = headers;
