@@ -12,7 +12,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 
 describe("session/context-accounting", () => {
-	it("counts the same rich assistant and tool-result shapes that provider replay sends", () => {
+	it("counts provider replay after retained tool-result payloads are capped", () => {
 		const bigToolResult = "x".repeat(1_000_000);
 		const entries: SessionEntry[] = [
 			{
@@ -62,17 +62,17 @@ describe("session/context-accounting", () => {
 		];
 
 		const replayMessages = buildReplayAgentMessagesFromTurns(entries);
+		const serializedReplay = JSON.stringify(replayMessages);
 		const replayEstimate = estimateAgentContextTokens({
 			systemPrompt: "You are Clio.",
 			messages: replayMessages,
 			pendingUserText: "continue the active task",
 		});
 		const sessionEstimate = calculateContextTokens(entries);
-		ok(replayEstimate > 250_000, `expected huge provider-bound replay estimate, got ${replayEstimate}`);
-		ok(
-			replayEstimate >= sessionEstimate,
-			`provider-bound projection must not undercount the persisted transcript: replay=${replayEstimate} session=${sessionEstimate}`,
-		);
+		ok(sessionEstimate > 250_000, `expected raw persisted transcript to be huge, got ${sessionEstimate}`);
+		ok(replayEstimate < 20_000, `expected capped provider replay estimate, got ${replayEstimate}`);
+		ok(serializedReplay.includes("truncated from replay context"), serializedReplay);
+		ok(!serializedReplay.includes(bigToolResult), "uncapped tool result leaked into provider replay");
 	});
 
 	it("uses usage anchors conservatively without hiding a larger text projection", () => {

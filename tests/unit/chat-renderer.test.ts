@@ -239,6 +239,153 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(!serialized.includes("hidden old prompt"), serialized);
 	});
 
+	it("caps oversized retained rich content in model replay after compaction", () => {
+		const huge = "fragmentexisting".repeat(3000);
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				role: "user",
+				payload: { text: "old prompt" },
+			},
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: "u1",
+				timestamp: "2026-04-23T00:00:01.000Z",
+				summary: "Old work was compacted.",
+				tokensBefore: 50_000,
+				firstKeptTurnId: "a1",
+			},
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: "c1",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				role: "assistant",
+				payload: {
+					text: huge,
+					content: [{ type: "text", text: huge }],
+				},
+			},
+		];
+
+		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
+		ok(serialized.includes("Old work was compacted."), serialized);
+		ok(serialized.includes("truncated from replay context"), serialized);
+		ok(!serialized.includes(huge), "uncapped payload leaked into model replay");
+		ok(serialized.length < huge.length, `replay remained too large: ${serialized.length}`);
+	});
+
+	it("caps oversized retained rich content when rehydrating the visible chat panel", () => {
+		const panel = createChatPanel();
+		const huge = "fragmentexisting".repeat(3000);
+		const entries: SessionEntry[] = [
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:01.000Z",
+				summary: "Old work was compacted.",
+				tokensBefore: 50_000,
+				firstKeptTurnId: "a1",
+			},
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: "c1",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				role: "assistant",
+				payload: {
+					text: huge,
+					content: [{ type: "text", text: huge }],
+				},
+			},
+		];
+
+		rehydrateChatPanelFromTurns(panel, entries);
+		const rendered = strip(panel.render(120).join("\n"));
+		ok(rendered.includes("truncated from replay context"), rendered);
+		ok(!rendered.includes(huge), "uncapped payload leaked into visible replay");
+	});
+
+	it("caps oversized retained bash output in model replay and visible replay", () => {
+		const panel = createChatPanel();
+		const huge = "bash-output".repeat(100000);
+		const entries: SessionEntry[] = [
+			{
+				kind: "bashExecution",
+				turnId: "b1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				command: "npm test",
+				output: huge,
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+			},
+		];
+
+		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
+		ok(serialized.includes("truncated from replay context"), serialized);
+		ok(!serialized.includes(huge), "uncapped bash output leaked into model replay");
+
+		rehydrateChatPanelFromTurns(panel, entries);
+		const rendered = strip(panel.render(120).join("\n"));
+		ok(rendered.includes("truncated from replay context"), rendered);
+		ok(!rendered.includes(huge), "uncapped bash output leaked into visible replay");
+	});
+
+	it("drops legacy assistant duplicates created from persisted tool-result message_end events", () => {
+		const panel = createChatPanel();
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "tr1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				role: "tool_result",
+				payload: {
+					toolCallId: "call-1",
+					toolName: "read",
+					result: { content: [{ type: "text", text: "setup docs" }] },
+					isError: false,
+				},
+			},
+			{
+				kind: "message",
+				turnId: "a-dup",
+				parentTurnId: "tr1",
+				timestamp: "2026-04-23T00:00:01.000Z",
+				role: "assistant",
+				payload: {
+					text: "",
+					content: [{ type: "text", text: "setup docs" }],
+				},
+			},
+			{
+				kind: "message",
+				turnId: "a2",
+				parentTurnId: "a-dup",
+				timestamp: "2026-04-23T00:00:02.000Z",
+				role: "assistant",
+				payload: { text: "actual answer" },
+			},
+		];
+
+		const messages = buildReplayAgentMessagesFromTurns(entries) as Array<{ role?: string }>;
+		strictEqual(messages.filter((message) => message.role === "assistant").length, 1);
+		const serialized = JSON.stringify(messages);
+		ok(serialized.includes("actual answer"), serialized);
+
+		rehydrateChatPanelFromTurns(panel, entries);
+		const rendered = strip(panel.render(120).join("\n"));
+		ok(!rendered.includes("Clio Coder: setup docs"), rendered);
+		ok(rendered.includes("Clio Coder: actual answer"), rendered);
+	});
+
 	it("replays retry status entries and excludes failed assistant attempts from model context", () => {
 		const panel = createChatPanel();
 		const entries: SessionEntry[] = [
