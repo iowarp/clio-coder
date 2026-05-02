@@ -58,6 +58,7 @@ function buildEntries(): ProviderSupportEntry[] {
 		fakeRuntime("vllm", { auth: "none", displayName: "vLLM", probe: true }),
 		fakeRuntime("sglang", { auth: "none", displayName: "SGLang", probe: true }),
 		fakeRuntime("openai-compat", { auth: "none", displayName: "OpenAI compat", probe: true }),
+		fakeRuntime("anthropic-compat", { auth: "none", displayName: "Anthropic compat", probe: true }),
 		fakeRuntime("lemonade", { auth: "none", displayName: "Lemonade", probe: true }),
 		fakeRuntime("claude-code-cli", { kind: "subprocess", auth: "cli", displayName: "Claude Code CLI" }),
 	];
@@ -82,6 +83,7 @@ describe("configure category picker filtering", () => {
 		ok(ids.includes("vllm"));
 		ok(ids.includes("sglang"));
 		ok(ids.includes("openai-compat"));
+		ok(ids.includes("anthropic-compat"));
 		ok(ids.includes("lemonade"));
 	});
 

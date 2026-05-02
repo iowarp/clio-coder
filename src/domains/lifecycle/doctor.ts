@@ -182,11 +182,11 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
 
 /**
  * Asynchronous doctor sweep: walks settings.endpoints and fingerprints any
- * `openai-compat` URL that responds as a known native server (LM Studio,
+ * protocol-compatible URL that responds as a known native server (LM Studio,
  * Ollama). Emits a WARN finding so the user knows to switch to the native
  * runtime for proper resident-model lifecycle management. Network-bound and
- * therefore not part of the synchronous `runDoctor()` core; CI calls the
- * core, the CLI optionally invokes this on top.
+ * therefore not part of the synchronous `runDoctor()` core; CI calls the core,
+ * the CLI optionally invokes this on top.
  */
 export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 	let settings: ReturnType<typeof readSettings>;
@@ -195,7 +195,9 @@ export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 	} catch {
 		return [];
 	}
-	const candidates = settings.endpoints.filter((entry) => entry.runtime === "openai-compat" && Boolean(entry.url));
+	const candidates = settings.endpoints.filter(
+		(entry) => (entry.runtime === "openai-compat" || entry.runtime === "anthropic-compat") && Boolean(entry.url),
+	);
 	if (candidates.length === 0) return [];
 	const results = await Promise.all(
 		candidates.map(async (endpoint): Promise<DoctorFinding | null> => {

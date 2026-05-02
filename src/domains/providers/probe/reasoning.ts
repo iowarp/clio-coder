@@ -1,8 +1,8 @@
 /**
- * Reasoning-capability probe for openai-compatible HTTP endpoints.
+ * Reasoning-capability probe for OpenAI-compatible HTTP endpoints.
  *
  * Local servers (LM Studio, llama.cpp, sglang, vllm, ...) advertise themselves
- * as openai-compat regardless of whether the loaded model supports thinking.
+ * through an OpenAI-compatible surface regardless of whether the loaded model supports thinking.
  * Defaulting `caps.reasoning = false` means `/thinking` only ever surfaces
  * `["off"]` for these targets. Probing with a one-shot priming request reveals
  * the truth: a thinking-capable model emits a non-empty `reasoning_content`

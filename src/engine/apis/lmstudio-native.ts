@@ -338,24 +338,54 @@ function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
 	};
 }
 
-interface LmStudioApiModelEntry {
+interface LmStudioApiV0ModelEntry {
 	id?: unknown;
 	loaded_context_length?: unknown;
 }
 
-interface LmStudioApiModelsResponse {
+interface LmStudioApiV0ModelsResponse {
 	data?: unknown;
+}
+
+interface LmStudioApiV1ModelEntry {
+	key?: unknown;
+	loaded_instances?: unknown;
+}
+
+interface LmStudioApiV1ModelsResponse {
+	models?: unknown;
 }
 
 function positiveNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-function apiModelEntries(payload: LmStudioApiModelsResponse | undefined): LmStudioApiModelEntry[] {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function apiV0ModelEntries(payload: LmStudioApiV0ModelsResponse | undefined): LmStudioApiV0ModelEntry[] {
 	if (!Array.isArray(payload?.data)) return [];
-	return payload.data.filter((entry): entry is LmStudioApiModelEntry => {
-		return entry !== null && typeof entry === "object";
-	});
+	return payload.data.filter((entry): entry is LmStudioApiV0ModelEntry => isRecord(entry));
+}
+
+function apiV1ModelEntries(payload: LmStudioApiV1ModelsResponse | undefined): LmStudioApiV1ModelEntry[] {
+	if (!Array.isArray(payload?.models)) return [];
+	return payload.models.filter((entry): entry is LmStudioApiV1ModelEntry => isRecord(entry));
+}
+
+function loadedContextFromV1Instance(value: unknown): number | undefined {
+	if (!isRecord(value) || !isRecord(value.config)) return undefined;
+	return positiveNumber(value.config.context_length);
+}
+
+function loadedContextFromV1Entry(entry: LmStudioApiV1ModelEntry): number | undefined {
+	if (!Array.isArray(entry.loaded_instances)) return undefined;
+	for (const instance of entry.loaded_instances) {
+		const contextLength = loadedContextFromV1Instance(instance);
+		if (contextLength !== undefined) return contextLength;
+	}
+	return undefined;
 }
 
 async function discoverLoadedContextLength(
@@ -363,23 +393,48 @@ async function discoverLoadedContextLength(
 	modelId: string,
 	signal: AbortSignal,
 ): Promise<number | undefined> {
+	const base = normalizeHttpBaseUrl(baseUrl);
+	const v1 = await discoverLoadedContextFromV1(base, modelId, signal);
+	if (v1 !== undefined) return v1;
+	return discoverLoadedContextFromV0(base, modelId, signal);
+}
+
+async function fetchLmStudioJson<T>(url: string, signal: AbortSignal): Promise<T | undefined> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 1500);
 	const onAbort = () => controller.abort();
 	if (signal.aborted) controller.abort();
 	else signal.addEventListener("abort", onAbort, { once: true });
 	try {
-		const response = await fetch(`${normalizeHttpBaseUrl(baseUrl)}/api/v0/models`, { signal: controller.signal });
+		const response = await fetch(url, { signal: controller.signal });
 		if (!response.ok) return undefined;
-		const payload = (await response.json()) as LmStudioApiModelsResponse;
-		const entry = apiModelEntries(payload).find((row) => row.id === modelId);
-		return positiveNumber(entry?.loaded_context_length);
+		return (await response.json()) as T;
 	} catch {
 		return undefined;
 	} finally {
 		clearTimeout(timer);
 		signal.removeEventListener("abort", onAbort);
 	}
+}
+
+async function discoverLoadedContextFromV1(
+	baseUrl: string,
+	modelId: string,
+	signal: AbortSignal,
+): Promise<number | undefined> {
+	const payload = await fetchLmStudioJson<LmStudioApiV1ModelsResponse>(`${baseUrl}/api/v1/models`, signal);
+	const entry = apiV1ModelEntries(payload).find((row) => row.key === modelId);
+	return entry ? loadedContextFromV1Entry(entry) : undefined;
+}
+
+async function discoverLoadedContextFromV0(
+	baseUrl: string,
+	modelId: string,
+	signal: AbortSignal,
+): Promise<number | undefined> {
+	const payload = await fetchLmStudioJson<LmStudioApiV0ModelsResponse>(`${baseUrl}/api/v0/models`, signal);
+	const entry = apiV0ModelEntries(payload).find((row) => row.id === modelId);
+	return positiveNumber(entry?.loaded_context_length);
 }
 
 function runtimeMetadata(model: Model<Api>): Required<NonNullable<ClioRuntimeMetadata["clio"]>> {

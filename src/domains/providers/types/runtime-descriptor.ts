@@ -114,12 +114,13 @@ export interface RuntimeDescriptor {
 	probe?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
 	probeModels?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**
-	 * Optional per-model reasoning capability probe. Local servers (LM Studio,
-	 * llama.cpp, ...) advertise themselves as openai-compatible regardless of
-	 * whether the loaded model supports thinking. Implementations here send a
-	 * one-shot priming request and look at `reasoning_content` / `reasoning` /
-	 * `reasoning_text` in the response. Result is cached per (endpoint, model)
-	 * by the providers domain so /thinking can surface the correct level set.
+	 * Optional per-model reasoning capability probe. Protocol-compatible local
+	 * servers (LM Studio, llama.cpp, Ollama, ...) advertise an OpenAI or
+	 * Anthropic wire surface regardless of whether the loaded model supports
+	 * thinking. Implementations here send a one-shot priming request and look at
+	 * `reasoning_content` / `reasoning` / `reasoning_text` in the response.
+	 * Result is cached per (endpoint, model) by the providers domain so
+	 * /thinking can surface the correct level set.
 	 */
 	probeReasoning?(endpoint: EndpointDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
 	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;

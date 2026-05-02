@@ -1,4 +1,4 @@
-import type { Api, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
+import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 
 import { mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
@@ -58,6 +58,13 @@ function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {
 	return compat;
 }
 
+function localAnthropicCompat(): AnthropicMessagesCompat {
+	return {
+		supportsEagerToolInputStreaming: false,
+		supportsLongCacheRetention: false,
+	};
+}
+
 export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	const { endpoint, wireModelId, kb, defaultCapabilities, apiFamily, provider } = input;
 	const caps = mergeCapabilities(
@@ -96,6 +103,9 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	if (headers) model.headers = headers;
 	if (apiFamily === "openai-completions") {
 		(model as Model<"openai-completions">).compat = localOpenAICompat(caps);
+	}
+	if (apiFamily === "anthropic-messages") {
+		(model as Model<"anthropic-messages">).compat = localAnthropicCompat();
 	}
 	return model;
 }

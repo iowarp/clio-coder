@@ -66,6 +66,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 	sglang: 30000,
 	"lemonade-anthropic": 8000,
 	lemonade: 8000,
+	"anthropic-compat": 8000,
 	"openai-compat": 8000,
 };
 
@@ -514,7 +515,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	if (!url && support.supportsCustomUrl) {
 		url = defaultUrlFor(runtime.id);
 	}
-	if (url && runtime.id === "openai-compat") {
+	if (url && (runtime.id === "openai-compat" || runtime.id === "anthropic-compat")) {
 		const fingerprint = await fingerprintNativeRuntime(url);
 		if (fingerprint) {
 			process.stdout.write(
@@ -709,7 +710,7 @@ export function runtimesForCategory(
 async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<ConfigureCategory | null> {
 	process.stdout.write("\nHow will you connect Clio to a model?\n\n");
 	process.stdout.write("  1. Local app          Ollama or LM Studio (recommended for new users)\n");
-	process.stdout.write("  2. Local HTTP server  llama.cpp / vLLM / SGLang / OpenAI-compatible\n");
+	process.stdout.write("  2. Local HTTP server  llama.cpp / vLLM / SGLang / OpenAI/Anthropic-compatible\n");
 	process.stdout.write("  3. ChatGPT plan       Plus or Pro via Codex OAuth\n");
 	process.stdout.write(
 		"  4. Cloud API key      Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral, Bedrock\n\n",
@@ -771,13 +772,13 @@ async function maybeSteerToNativeRuntime(
 	currentRuntime: RuntimeDescriptor,
 	url: string,
 ): Promise<RuntimeDescriptor> {
-	if (currentRuntime.id !== "openai-compat") return currentRuntime;
+	if (currentRuntime.id !== "openai-compat" && currentRuntime.id !== "anthropic-compat") return currentRuntime;
 	const fingerprint = await fingerprintNativeRuntime(url);
 	if (!fingerprint) return currentRuntime;
 	const native = getRuntimeRegistry().get(fingerprint.runtimeId);
 	if (!native) return currentRuntime;
 	process.stdout.write(`\nDetected ${fingerprint.displayName} at ${url}.\n`);
-	const switchIt = await askYesNo(rl, `Use ${fingerprint.runtimeId} runtime instead of openai-compat?`, true);
+	const switchIt = await askYesNo(rl, `Use ${fingerprint.runtimeId} runtime instead of ${currentRuntime.id}?`, true);
 	if (!switchIt) return currentRuntime;
 	process.stdout.write(`Using ${fingerprint.runtimeId} runtime.\n`);
 	return native;

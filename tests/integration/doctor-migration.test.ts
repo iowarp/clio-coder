@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { resetXdgCache } from "../../src/core/xdg.js";
-import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
+import { runDoctor, runDoctorRuntimeChecks } from "../../src/domains/lifecycle/doctor.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -124,5 +124,35 @@ describe("doctor legacy runtime migration", () => {
 		const after = readFileSync(join(configDir, "settings.yaml"), "utf8");
 		const parsed = parseYaml(after) as { targets?: Array<{ runtime?: string }> };
 		strictEqual(parsed.targets?.[0]?.runtime, "llamacpp-anthropic");
+	});
+
+	it("warns when a generic Anthropic-compatible target is really LM Studio native", async () => {
+		const configDir = join(scratch, "config");
+		runDoctor({ fix: true });
+		writeFileSync(
+			join(configDir, "settings.yaml"),
+			LEGACY_SETTINGS.replace("runtime: llamacpp-completion", "runtime: anthropic-compat").replace(
+				"url: http://127.0.0.1:8080",
+				"url: http://127.0.0.1:1234",
+			),
+			"utf8",
+		);
+		const originalFetch = globalThis.fetch;
+		const seen: string[] = [];
+		globalThis.fetch = (async (input) => {
+			seen.push(String(input));
+			return new Response(JSON.stringify({ models: [] }), { status: 200 });
+		}) as typeof fetch;
+		try {
+			const findings = await runDoctorRuntimeChecks();
+			const target = findings.find((finding) => finding.name === "target mini");
+			ok(target, "expected target mini finding");
+			strictEqual(target.level, "warn");
+			ok(target.detail.includes("LM Studio detected"));
+			ok(target.detail.includes("--runtime lmstudio-native"));
+			strictEqual(seen[0], "http://127.0.0.1:1234/api/v1/models");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });

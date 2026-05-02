@@ -36,6 +36,7 @@ import lmstudioNative from "./local-native/lmstudio-native.js";
 import ollamaNative from "./local-native/ollama-native.js";
 import sglang from "./local-native/sglang.js";
 import vllm from "./local-native/vllm.js";
+import anthropicCompat from "./protocol/anthropic-compat.js";
 import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
@@ -63,6 +64,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	llamacppRerank,
 	lmstudioNative,
 	ollamaNative,
+	anthropicCompat,
 	openaiCompat,
 	sglang,
 	vllm,
