@@ -329,4 +329,217 @@ describe("engine/openai-completions", () => {
 			});
 		}
 	});
+
+	it("strips prior assistant thinking from upstream request body on replay", async () => {
+		// Capture the request body the wrapper sends upstream so we can assert
+		// no prior chain-of-thought leaks back into the next request via
+		// pi-ai's `assistantMsg[thinkingSignature] = thinking` path. With a
+		// thinking model on llama.cpp this is the difference between linear
+		// growth and exponential context blow-up across multi-turn sessions.
+		let capturedBody: string | null = null;
+		let server: Server | null = createServer((req, res) => {
+			let raw = "";
+			req.on("data", (chunk) => {
+				raw += chunk.toString("utf8");
+			});
+			req.on("end", () => {
+				capturedBody = raw;
+				res.writeHead(200, {
+					"content-type": "text/event-stream",
+					"cache-control": "no-cache",
+					connection: "keep-alive",
+				});
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-replay",
+						object: "chat.completion.chunk",
+						created: 1,
+						model: "Qwen35-Distilled-i1-Q4_K_M",
+						choices: [{ index: 0, delta: { content: "ok" } }],
+					})}\n\n`,
+				);
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-replay",
+						object: "chat.completion.chunk",
+						created: 1,
+						model: "Qwen35-Distilled-i1-Q4_K_M",
+						choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+						usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+					})}\n\n`,
+				);
+				res.end("data: [DONE]\n\n");
+			});
+		});
+		await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+		const addr = server.address() as AddressInfo;
+		const model = {
+			id: "Qwen35-Distilled-i1-Q4_K_M",
+			name: "Qwen35-Distilled-i1-Q4_K_M",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: `http://127.0.0.1:${addr.port}/v1`,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 131072,
+			maxTokens: 32768,
+			compat: { maxTokensField: "max_tokens", supportsUsageInStreaming: true },
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[0];
+		const priorThinking = "x".repeat(20_000);
+		const context = {
+			messages: [
+				{ role: "user", content: "hi", timestamp: 1 },
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: priorThinking, thinkingSignature: "reasoning_content" },
+						{ type: "text", text: "Hello!" },
+					],
+					api: "openai-completions",
+					provider: "llamacpp",
+					model: "Qwen35-Distilled-i1-Q4_K_M",
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: 2,
+				},
+				{ role: "user", content: "and again?", timestamp: 3 },
+			],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		try {
+			const events = openAICompletionsApiProvider.stream(model, context, { apiKey: "sk-test" });
+			for await (const _event of events) {
+				// drain
+			}
+			ok(capturedBody, "expected to capture an upstream request body");
+			ok(
+				!(capturedBody as string).includes(priorThinking),
+				"prior thinking must not appear verbatim in the upstream request",
+			);
+			ok(
+				!(capturedBody as string).includes("reasoning_content"),
+				"no reasoning_content key should be sent for replayed assistant turns",
+			);
+			ok((capturedBody as string).includes("Hello!"), "prior assistant text content must still be replayed");
+		} finally {
+			await new Promise<void>((resolve) => {
+				const active = server;
+				server = null;
+				active?.close(() => resolve());
+			});
+		}
+	});
+
+	it("on-off mechanism injects chat_template_kwargs.enable_thinking", async () => {
+		const model: Parameters<typeof openAICompletionsApiProvider.stream>[0] & {
+			clio: {
+				targetId: string;
+				runtimeId: string;
+				lifecycle: "user-managed";
+				quirks: { thinking: { mechanism: "on-off" } };
+			};
+		} = {
+			id: "Nemotron-Cascade-2-30B-A3B-i1-Q4_K_M",
+			name: "Nemotron-Cascade-2-30B-A3B-i1-Q4_K_M",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1234/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 65536,
+			compat: { maxTokensField: "max_tokens" },
+			clio: {
+				targetId: "mini",
+				runtimeId: "llamacpp",
+				lifecycle: "user-managed",
+				quirks: { thinking: { mechanism: "on-off" } },
+			},
+		};
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		let capturedPayload: unknown;
+		const events = openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "sk-test",
+			reasoning: "high",
+			onPayload: (payload) => {
+				capturedPayload = payload;
+				throw new Error("captured request body");
+			},
+		});
+
+		let errorMessage = "";
+		for await (const event of events) {
+			if (event.type === "error") errorMessage = event.error.errorMessage ?? "";
+		}
+
+		strictEqual(errorMessage, "captured request body");
+		const body = asRecord(capturedPayload);
+		ok(body.chat_template_kwargs && typeof body.chat_template_kwargs === "object", "chat_template_kwargs missing");
+		strictEqual((body.chat_template_kwargs as Record<string, unknown>).enable_thinking, true);
+	});
+
+	it("budget-tokens mechanism with qwen-chat-template thinkingFormat does not mutate the payload", async () => {
+		// Plan: openai-compat surfaces backed by qwen-chat-template / llama.cpp do
+		// not accept a structured thinking budget; the budget stays informational
+		// and surfaces only through the prompt. The payload must therefore not
+		// gain a `thinking` field.
+		const model: Parameters<typeof openAICompletionsApiProvider.stream>[0] & {
+			clio: {
+				targetId: string;
+				runtimeId: string;
+				lifecycle: "user-managed";
+				quirks: { thinking: { mechanism: "budget-tokens"; budgetByLevel: { high: 16384 } } };
+			};
+		} = {
+			id: "Qwen3.6-27B",
+			name: "Qwen3.6-27B",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1234/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: { maxTokensField: "max_tokens", thinkingFormat: "qwen-chat-template" },
+			clio: {
+				targetId: "mini",
+				runtimeId: "llamacpp",
+				lifecycle: "user-managed",
+				quirks: { thinking: { mechanism: "budget-tokens", budgetByLevel: { high: 16384 } } },
+			},
+		};
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		let capturedPayload: unknown;
+		const events = openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "sk-test",
+			reasoning: "high",
+			onPayload: (payload) => {
+				capturedPayload = payload;
+				throw new Error("captured request body");
+			},
+		});
+
+		for await (const _event of events) {
+			// drain
+		}
+
+		const body = asRecord(capturedPayload);
+		strictEqual(body.thinking, undefined, "qwen-chat-template surface must not gain a thinking field");
+	});
 });

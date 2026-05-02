@@ -61,11 +61,12 @@ describe("engine/lmstudio-native ensureResidentModel", () => {
 		];
 		const client = makeFakeLmStudio(entries);
 
-		await ensureResidentModel(client, "ws://test", "active");
+		const status = await ensureResidentModel(client, "ws://test", "active");
 
 		strictEqual(stale.calls, 0, "user-managed endpoints must not unload stale models");
 		strictEqual(active.calls, 0, "active must never be unloaded");
 		strictEqual(client.listLoadedCalls, 0, "user-managed endpoints should not inspect resident models");
+		deepStrictEqual(status, { state: "unknown" });
 	});
 
 	it("evicts non-target loaded models when Clio owns lifecycle", async () => {
@@ -79,12 +80,26 @@ describe("engine/lmstudio-native ensureResidentModel", () => {
 		];
 		const client = makeFakeLmStudio(entries);
 
-		await ensureResidentModel(client, "ws://test", "active", { lifecycle: "clio-managed" });
+		const status = await ensureResidentModel(client, "ws://test", "active", { lifecycle: "clio-managed" });
 
 		strictEqual(stale1.calls, 1, "stale-1 must be unloaded once");
 		strictEqual(stale2.calls, 1, "stale-2 must be unloaded once");
 		strictEqual(active.calls, 0, "active must never be unloaded");
 		strictEqual(client.listLoadedCalls, 1, "listLoaded must fire once on first call");
+		deepStrictEqual(status, { state: "loaded" });
+	});
+
+	it("does not cache the target as resident when only stale models were unloaded", async () => {
+		const stale = makeUnloadSpy();
+		const client = makeFakeLmStudio([{ modelKey: "stale", unload: stale.unload }]);
+
+		const first = await ensureResidentModel(client, "ws://cold", "active", { lifecycle: "clio-managed" });
+		const second = await ensureResidentModel(client, "ws://cold", "active", { lifecycle: "clio-managed" });
+
+		deepStrictEqual(first, { state: "not-loaded" });
+		deepStrictEqual(second, { state: "not-loaded" });
+		strictEqual(stale.calls, 2, "stale model remains reported loaded until the server updates");
+		strictEqual(client.listLoadedCalls, 2, "not-loaded results must not populate the resident cache");
 	});
 
 	it("skips listLoaded inside the 60s TTL and refires after expiry", async () => {

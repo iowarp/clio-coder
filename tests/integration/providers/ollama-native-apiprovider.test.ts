@@ -11,6 +11,7 @@ import { estimateInputTokensFromContext } from "../../../src/engine/apis/output-
 interface NdjsonChunk {
 	done: boolean;
 	text?: string;
+	thinking?: string;
 	toolCall?: {
 		name: string;
 		arguments: Record<string, unknown>;
@@ -45,6 +46,7 @@ beforeEach(async () => {
 					done: c.done,
 				};
 				const message: Record<string, unknown> = { role: "assistant", content: c.text ?? "" };
+				if (c.thinking) message.thinking = c.thinking;
 				if (c.toolCall) {
 					message.tool_calls = [{ function: { name: c.toolCall.name, arguments: c.toolCall.arguments } }];
 				}
@@ -194,5 +196,113 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 		}
 		strictEqual(maxTokens, 1024);
 		ok(estimateInputTokensFromContext(context) + maxTokens <= model.contextWindow);
+	});
+
+	it("maps thinking level and catalog sampler quirks onto the native chat request", async () => {
+		respondWith = [{ done: true, done_reason: "stop" }];
+		const model = {
+			...makeModel(),
+			reasoning: true,
+			clio: {
+				targetId: "mini",
+				runtimeId: "ollama-native",
+				lifecycle: "clio-managed",
+				quirks: {
+					thinking: { mechanism: "on-off" },
+					sampling: {
+						thinking: {
+							temperature: 0.6,
+							topP: 0.95,
+							topK: 20,
+							repeatPenalty: 1.05,
+							presencePenalty: 0.1,
+							frequencyPenalty: 0.2,
+						},
+					},
+				},
+			},
+		} as Model<"ollama-native">;
+
+		const stream = ollamaNativeApiProvider.streamSimple(model, makeContext(), { reasoning: "high" });
+		await collect(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
+
+		const body = JSON.parse(lastBodyString) as {
+			think?: unknown;
+			options?: Record<string, unknown>;
+		};
+		strictEqual(body.think, true);
+		strictEqual(body.options?.temperature, 0.6);
+		strictEqual(body.options?.top_p, 0.95);
+		strictEqual(body.options?.top_k, 20);
+		strictEqual(body.options?.repeat_penalty, 1.05);
+		strictEqual(body.options?.presence_penalty, 0.1);
+		strictEqual(body.options?.frequency_penalty, 0.2);
+	});
+
+	it("honors explicit temperature over the catalog sampler for ollama-native", async () => {
+		respondWith = [{ done: true, done_reason: "stop" }];
+		const model = {
+			...makeModel(),
+			reasoning: true,
+			clio: {
+				targetId: "mini",
+				runtimeId: "ollama-native",
+				lifecycle: "clio-managed",
+				quirks: {
+					thinking: { mechanism: "on-off" },
+					sampling: { thinking: { temperature: 0.6, topP: 0.95 } },
+				},
+			},
+		} as Model<"ollama-native">;
+
+		const stream = ollamaNativeApiProvider.streamSimple(model, makeContext(), {
+			reasoning: "high",
+			temperature: 0.2,
+		});
+		await collect(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
+
+		const body = JSON.parse(lastBodyString) as { options?: Record<string, unknown> };
+		strictEqual(body.options?.temperature, 0.2);
+		strictEqual(body.options?.top_p, 0.95);
+	});
+
+	it("surfaces streamed Ollama thinking as ThinkingContent and estimates reasoning tokens", async () => {
+		const thinking = "I should compute this carefully before answering.";
+		respondWith = [
+			{ done: false, thinking },
+			{ done: false, text: "42" },
+			{ done: true, done_reason: "stop", prompt_eval_count: 4, eval_count: 14 },
+		];
+		const model = {
+			...makeModel(),
+			reasoning: true,
+			clio: {
+				targetId: "mini",
+				runtimeId: "ollama-native",
+				lifecycle: "clio-managed",
+				quirks: { thinking: { mechanism: "on-off" } },
+			},
+		} as Model<"ollama-native">;
+
+		const stream = ollamaNativeApiProvider.streamSimple(model, makeContext(), { reasoning: "high" });
+		const events = await collectEvents(stream as AsyncIterable<{ type: string } & Record<string, unknown>>);
+
+		ok(
+			events.some((event) => event.type === "thinking_start"),
+			"expected thinking_start",
+		);
+		ok(
+			events.some((event) => event.type === "thinking_delta"),
+			"expected thinking_delta",
+		);
+		ok(
+			events.some((event) => event.type === "thinking_end"),
+			"expected thinking_end",
+		);
+		const done = events.find((event) => event.type === "done");
+		ok(done, "expected done event");
+		const message = done.message as { usage: { reasoningTokens?: number; output?: number } };
+		strictEqual(message.usage.reasoningTokens, Math.max(1, Math.round(thinking.length / 4)));
+		strictEqual(message.usage.output, 14);
 	});
 });
