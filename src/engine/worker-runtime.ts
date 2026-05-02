@@ -12,7 +12,12 @@
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModeName } from "../domains/modes/matrix.js";
-import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
+import type {
+	CapabilityFlags,
+	EndpointDescriptor,
+	RuntimeDescriptor,
+	ThinkingLevel,
+} from "../domains/providers/index.js";
 import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
 import {
 	FileKnowledgeBase,
@@ -35,6 +40,7 @@ export interface WorkerRunInput {
 	endpoint: EndpointDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
+	modelCapabilities?: Partial<CapabilityFlags>;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
 	/** Tool ids the agent is allowed to use. Defaults to the mode matrix. */
@@ -97,6 +103,21 @@ function getKnowledgeBase(): KnowledgeBase {
 	return kbSingleton;
 }
 
+function applyModelCapabilities(model: Model<never>, caps: Partial<CapabilityFlags> | undefined): Model<never> {
+	if (!caps) return model;
+	const mutable = model as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
+	if (typeof caps.contextWindow === "number") mutable.contextWindow = caps.contextWindow;
+	if (typeof caps.maxTokens === "number") mutable.maxTokens = caps.maxTokens;
+	if (typeof caps.reasoning === "boolean") mutable.reasoning = caps.reasoning;
+	return model;
+}
+
+function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLevel | undefined): ThinkingLevel {
+	const level = requested ?? "off";
+	const reasons = (model as { reasoning?: unknown }).reasoning === true;
+	return reasons ? level : "off";
+}
+
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -149,7 +170,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);
 	const synthesized = input.runtime.synthesizeModel(input.endpoint, input.wireModelId, kbHit);
-	const model = input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>);
+	const model = applyModelCapabilities(
+		input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>),
+		input.modelCapabilities,
+	);
 
 	const mode: ModeName = input.mode ?? "default";
 	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot);
@@ -172,17 +196,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			`[worker] warning: no tools resolved for mode=${mode} allowed=[${(input.allowedTools ?? []).join(",")}]\n`,
 		);
 	}
+	const effectiveThinkingLevel = clampThinkingLevelForModel(model, input.thinkingLevel);
 
 	const options: AgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
 			model,
-			thinkingLevel: input.thinkingLevel ?? "off",
+			thinkingLevel: effectiveThinkingLevel,
 			tools,
 			messages: [],
 		},
 		onPayload: async (payload, currentModel) =>
-			patchReasoningSummaryPayload(payload, currentModel as Model<never>, input.thinkingLevel ?? "off"),
+			patchReasoningSummaryPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
 		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;

@@ -76,12 +76,11 @@ function capabilitiesFor(
 		desc.defaultCapabilities,
 		endpoint.defaultModel ? getCatalogModelForRuntime(desc.id, endpoint.defaultModel) : undefined,
 	);
-	return mergeCapabilities(
-		base,
-		kbHit?.entry.capabilities ?? null,
-		probe?.discoveredCapabilities ?? null,
-		endpoint.capabilities ?? null,
-	);
+	const probeCaps =
+		!probe?.capabilityModelId || !endpoint.defaultModel || probe.capabilityModelId === endpoint.defaultModel
+			? (probe?.discoveredCapabilities ?? null)
+			: null;
+	return mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, endpoint.capabilities ?? null);
 }
 
 function uniqueModels(ids: ReadonlyArray<string>): string[] {
@@ -158,6 +157,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				health: previous?.health ?? emptyHealth(),
 				capabilities: previous?.capabilities ?? EMPTY_CAPABILITIES,
 				probeCapabilities: previous?.probeCapabilities ?? null,
+				probeModelId: previous?.probeModelId ?? null,
 				discoveredModels: previous?.discoveredModels ?? [],
 			};
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
@@ -166,6 +166,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
 		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
+		const probeModelId = probe?.capabilityModelId ?? previous?.probeModelId ?? null;
 		const probeNotes = probe?.notes && probe.notes.length > 0 ? probe.notes : previous?.probeNotes;
 		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? desc.knownModels ?? []);
 		const healthy = probe !== null ? probe.ok : null;
@@ -188,6 +189,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			health,
 			capabilities,
 			probeCapabilities,
+			probeModelId,
 			discoveredModels,
 		};
 		if (probeNotes && probeNotes.length > 0) out.probeNotes = probeNotes;
@@ -234,10 +236,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				try {
 					const result = await desc.probeReasoning(endpoint, candidateModelId, probeCtx);
 					reasoningCache.set(reasoningCacheKey(endpoint.id, candidateModelId), result.reasoning);
-					if (result.reasoning) {
+					const capabilityModelId = probeResult.capabilityModelId ?? null;
+					if (capabilityModelId === null || capabilityModelId === candidateModelId) {
 						probeResult = {
 							...probeResult,
-							discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: true },
+							discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: result.reasoning },
+							capabilityModelId: capabilityModelId ?? candidateModelId,
 						};
 					}
 				} catch {

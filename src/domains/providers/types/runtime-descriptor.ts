@@ -68,6 +68,8 @@ export interface ProbeResult {
 	serverVersion?: string;
 	models?: string[];
 	discoveredCapabilities?: Partial<CapabilityFlags>;
+	/** Wire model id those discovered capabilities describe, when known. */
+	capabilityModelId?: string;
 	/**
 	 * Free-form diagnostic notes from the probe. llama.cpp uses this to flag a
 	 * mismatch between the configured wire model id and the server's loaded

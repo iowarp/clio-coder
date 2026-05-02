@@ -23,6 +23,7 @@ import {
 	type EndpointDescriptor,
 	type ProvidersContract,
 	type RuntimeDescriptor,
+	resolveModelCapabilities,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
@@ -137,6 +138,7 @@ interface ResolvedTarget {
 	wireModelId: string;
 	thinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags | null;
+	modelCapabilities: CapabilityFlags | null;
 }
 
 interface WorkerTargetConfig {
@@ -149,6 +151,18 @@ type WorkerProfileMap = Record<string, WorkerTargetConfig>;
 
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
 	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
+}
+
+function capabilityInfoForModel(
+	providers: ProvidersContract,
+	endpointId: string,
+	wireModelId: string | null | undefined,
+): CapabilityFlags | null {
+	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
+	if (!status) return null;
+	const modelId = wireModelId ?? status.endpoint.defaultModel ?? null;
+	const detectedReasoning = modelId ? providers.getDetectedReasoning(endpointId, modelId) : null;
+	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, { detectedReasoning });
 }
 
 function runtimeIdForEndpoint(providers: ProvidersContract, endpointId: string): string | null {
@@ -180,14 +194,14 @@ function pickCapabilityMatchedWorker(
 	if (
 		workerDefault?.endpoint &&
 		(!runtimeId || runtimeIdForEndpoint(providers, workerDefault.endpoint) === runtimeId) &&
-		supportsRequiredCapabilities(capabilityInfoForEndpoint(providers, workerDefault.endpoint), required)
+		supportsRequiredCapabilities(capabilityInfoForModel(providers, workerDefault.endpoint, workerDefault.model), required)
 	) {
 		return workerDefault;
 	}
 	for (const profile of Object.values(workerProfiles)) {
 		if (!profile.endpoint) continue;
 		if (runtimeId && runtimeIdForEndpoint(providers, profile.endpoint) !== runtimeId) continue;
-		if (supportsRequiredCapabilities(capabilityInfoForEndpoint(providers, profile.endpoint), required)) {
+		if (supportsRequiredCapabilities(capabilityInfoForModel(providers, profile.endpoint, profile.model), required)) {
 			return profile;
 		}
 	}
@@ -253,6 +267,7 @@ function resolveDispatchTarget(
 		wireModelId,
 		thinkingLevel,
 		capabilities: capabilityInfoForEndpoint(providers, endpoint.id),
+		modelCapabilities: capabilityInfoForModel(providers, endpoint.id, wireModelId),
 	};
 }
 
@@ -426,7 +441,7 @@ export function createDispatchBundle(
 			};
 		}
 		const target = resolveDispatchTarget(req, recipe, workerDefault, workerProfiles, providers);
-		enforceCapabilityGate(target.endpoint.id, target.capabilities, req.requiredCapabilities);
+		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildSystemPrompt(req, recipe);
@@ -470,11 +485,12 @@ export function createDispatchBundle(
 			endpoint: target.endpoint,
 			runtimeId: target.runtime.id,
 			wireModelId: target.wireModelId,
-			thinkingLevel: target.thinkingLevel,
+			thinkingLevel: target.modelCapabilities?.reasoning === false ? "off" : target.thinkingLevel,
 			allowedTools,
 			mode: workerMode,
 			middlewareSnapshot: middleware.snapshot(),
 		};
+		if (target.modelCapabilities) spec.modelCapabilities = target.modelCapabilities;
 		if (apiKey) spec.apiKey = apiKey;
 		let worker: SpawnedWorker;
 		try {

@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
+import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -194,6 +194,16 @@ describe("interactive/chat-loop tool persistence", () => {
 							result: { content: [{ type: "text", text: "setup docs" }], details: { kind: "ok" } },
 							isError: false,
 						});
+						await subscribeCb?.({
+							type: "message_end",
+							message: {
+								role: "toolResult",
+								content: [{ type: "text", text: "setup docs" }],
+								toolCallId: "call-1",
+								toolName: "read",
+								timestamp: 0,
+							} as AgentMessage,
+						});
 						await subscribeCb?.({ type: "message_end", message: afterTool });
 						await subscribeCb?.({ type: "agent_end", messages: [beforeTool, afterTool] });
 					},
@@ -221,6 +231,103 @@ describe("interactive/chat-loop tool persistence", () => {
 		strictEqual(appended[4]?.parentId, appended[3]?.id);
 		strictEqual((appended[2]?.payload as { name?: string }).name, "read");
 		strictEqual((appended[3]?.payload as { toolCallId?: string }).toolCallId, "call-1");
+	});
+
+	it("creates the agent with resolved per-model local capabilities", async () => {
+		const { settings, providers: baseProviders } = createProviders();
+		settings.orchestrator.endpoint = "mini";
+		settings.orchestrator.model = "Qwen3.6-35B-A3B-UD-Q4_K_XL";
+		const endpoint = {
+			id: "mini",
+			runtime: "llamacpp",
+			defaultModel: "Nemotron-Cascade-2-30B-A3B-i1-Q4_K_M",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			tier: "local-native",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8192, maxTokens: 4096 },
+			synthesizeModel: () =>
+				({
+					id: settings.orchestrator.model,
+					provider: "llamacpp",
+					contextWindow: 8192,
+					maxTokens: 4096,
+					reasoning: false,
+				}) as never,
+		};
+		const status: EndpointStatus = {
+			endpoint,
+			runtime,
+			available: true,
+			reason: "ready",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: runtime.defaultCapabilities,
+			probeCapabilities: { contextWindow: 262144, maxTokens: 32768, reasoning: true },
+			probeModelId: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+			discoveredModels: [],
+		};
+		const providers: ProvidersContract = {
+			...baseProviders,
+			list: () => [status],
+			getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+			getRuntime: (id) => (id === runtime.id ? runtime : null),
+		};
+		let capturedModel: { contextWindow?: number; maxTokens?: number; reasoning?: boolean } | null = null;
+		const agentState = {
+			systemPrompt: "",
+			model: {} as never,
+			thinkingLevel: "off" as const,
+			tools: [],
+			messages: [] as AgentMessage[],
+			isStreaming: false,
+			pendingToolCalls: new Set<string>(),
+			errorMessage: undefined,
+		};
+
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: {
+				current: () => "default",
+				setMode: () => "default",
+				cycleNormal: () => "default",
+				visibleTools: () => new Set(),
+				isToolVisible: () => false,
+				isActionAllowed: () => true,
+				requestSuper: () => {},
+				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
+			},
+			providers,
+			knownEndpoints: () => new Set(["mini"]),
+			createAgent: (input) => {
+				if (!input?.initialState) throw new Error("expected initial agent state");
+				const initialState = input.initialState;
+				capturedModel = initialState.model as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
+				const agent = {
+					state: { ...agentState, model: initialState.model },
+					sessionId: undefined as string | undefined,
+					subscribe: () => () => {},
+					prompt: async () => {},
+					abort: () => {},
+				};
+				return {
+					agent: agent as unknown as EngineAgentHandle["agent"],
+					state: () => agent.state,
+				} as unknown as EngineAgentHandle;
+			},
+		});
+
+		await loop.submit("hello");
+
+		const captured = capturedModel as { contextWindow?: number; maxTokens?: number; reasoning?: boolean } | null;
+		if (!captured) throw new Error("expected createAgent to capture a model");
+		strictEqual(captured.contextWindow, 262144);
+		strictEqual(captured.maxTokens, 32768);
+		strictEqual(captured.reasoning, true);
 	});
 
 	it("surfaces a finish-contract advisory through chat events and session entries", async () => {

@@ -10,7 +10,7 @@
 
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
-import type { EndpointDescriptor } from "../domains/providers/index.js";
+import type { CapabilityFlags, EndpointDescriptor } from "../domains/providers/index.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
@@ -24,6 +24,7 @@ interface WorkerSpec {
 	endpoint: EndpointDescriptor;
 	runtimeId: string;
 	wireModelId: string;
+	modelCapabilities?: Partial<CapabilityFlags>;
 	sessionId?: string;
 	apiKey?: string;
 	thinkingLevel?: WorkerRunInput["thinkingLevel"];
@@ -52,6 +53,7 @@ async function main(): Promise<number> {
 		wireModelId: spec.wireModelId,
 		mode,
 	};
+	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;
 	if (spec.apiKey) input.apiKey = spec.apiKey;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;

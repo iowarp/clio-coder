@@ -148,6 +148,7 @@ describe("providers/model-capabilities catalog alignment", () => {
 				runtime,
 				capabilities: base({ reasoning: false, contextWindow: 128000, maxTokens: 8192 }),
 				probeCapabilities: null,
+				probeModelId: null,
 			},
 			"openai/gpt-5.4",
 			null,
@@ -157,5 +158,46 @@ describe("providers/model-capabilities catalog alignment", () => {
 		strictEqual(caps.vision, true);
 		strictEqual(caps.contextWindow, 1050000);
 		strictEqual(caps.maxTokens, 128000);
+	});
+
+	it("does not apply probe-only capabilities to a different selected wire model", () => {
+		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "llamacpp");
+		ok(runtime, "missing llamacpp runtime");
+
+		const caps = resolveModelCapabilities(
+			{
+				endpoint: { id: "mini", runtime: "llamacpp", defaultModel: "small-model" },
+				runtime,
+				capabilities: base({ reasoning: false, contextWindow: 8192, maxTokens: 4096 }),
+				probeCapabilities: { reasoning: true, contextWindow: 262144, maxTokens: 32768 },
+				probeModelId: "small-model",
+			},
+			"large-model",
+			null,
+		);
+
+		strictEqual(caps.reasoning, false);
+		strictEqual(caps.contextWindow, runtime.defaultCapabilities.contextWindow);
+		strictEqual(caps.maxTokens, runtime.defaultCapabilities.maxTokens);
+	});
+
+	it("treats detected reasoning=false as authoritative for the selected wire model", () => {
+		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "llamacpp");
+		ok(runtime, "missing llamacpp runtime");
+
+		const caps = resolveModelCapabilities(
+			{
+				endpoint: { id: "mini", runtime: "llamacpp", defaultModel: "reasoning-model" },
+				runtime,
+				capabilities: base({ reasoning: true, contextWindow: 8192, maxTokens: 4096 }),
+				probeCapabilities: null,
+				probeModelId: null,
+			},
+			"reasoning-model",
+			null,
+			{ detectedReasoning: false },
+		);
+
+		strictEqual(caps.reasoning, false);
 	});
 });
