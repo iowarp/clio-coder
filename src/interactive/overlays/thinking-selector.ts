@@ -5,6 +5,7 @@ import {
 	resolveModelCapabilities,
 	type ThinkingLevel,
 } from "../../domains/providers/index.js";
+import { extractLocalModelQuirks, type ThinkingMechanism } from "../../domains/providers/types/local-model-quirks.js";
 import {
 	Box,
 	type OverlayHandle,
@@ -87,6 +88,11 @@ export function readThinkingLevel(settings: Readonly<ClioSettings>): ThinkingLev
  * target's merged `CapabilityFlags` via `providers.list()` and gates the list
  * through `availableThinkingLevels`. Unknown or unconfigured targets return
  * `["off"]` so the overlay degrades to a no-op single-option picker.
+ *
+ * The level list is further constrained by the family's thinking mechanism:
+ * `on-off` collapses to {off, low}; `always-on` collapses to a single placeholder
+ * (`high`); `none` collapses to {off}. The overlay reads the same mechanism so
+ * the descriptions stay aligned with the row set.
  */
 export function resolveAvailableThinkingLevels(
 	providers: ProvidersContract,
@@ -98,11 +104,45 @@ export function resolveAvailableThinkingLevels(
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
 	if (!status) return ["off"];
 	const detectedReasoning = wireModelId ? providers.getDetectedReasoning(endpointId, wireModelId) : null;
-	return availableThinkingLevels(
+	const baseAvailable = availableThinkingLevels(
 		resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning }),
 		{
 			runtimeId: status.runtime?.id ?? status.endpoint.runtime,
 			...(wireModelId ? { modelId: wireModelId } : {}),
 		},
 	);
+	const mechanism = wireModelId ? mechanismForModel(providers, wireModelId) : null;
+	return restrictLevelsByMechanism(baseAvailable, mechanism);
+}
+
+/**
+ * Read the family thinking mechanism for a given wire model id. Returns null
+ * when the catalog does not annotate the family. Cheap: lookup is the only
+ * fs-touching call and the KB is loaded once per process.
+ */
+export function mechanismForModel(providers: ProvidersContract, wireModelId: string): ThinkingMechanism | null {
+	const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+	const quirks = extractLocalModelQuirks(kbHit?.entry.quirks);
+	return quirks?.thinking?.mechanism ?? null;
+}
+
+/**
+ * Collapse the available level list to the rows the overlay should show for
+ * a given mechanism. The overlay caller still passes through the resolved
+ * level on `onSelect`; the engine's `applyThinkingMechanism` re-coerces if
+ * the user picks an unsupported intermediate level via /thinking <level>.
+ */
+export function restrictLevelsByMechanism(
+	levels: ReadonlyArray<ThinkingLevel>,
+	mechanism: ThinkingMechanism | null,
+): ReadonlyArray<ThinkingLevel> {
+	if (mechanism === "none") return ["off"];
+	if (mechanism === "always-on") return ["high"];
+	if (mechanism === "on-off") {
+		const out: ThinkingLevel[] = [];
+		if (levels.includes("off")) out.push("off");
+		out.push("low");
+		return out;
+	}
+	return levels;
 }
