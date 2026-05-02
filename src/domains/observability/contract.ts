@@ -9,7 +9,7 @@ export interface ObservabilityContract {
 	metrics(): MetricsView;
 	/** Running session USD cost. */
 	sessionCost(): number;
-	/** Running session token totals broken down by kind (input/output/cache). */
+	/** Running session token totals broken down by kind, including reasoning when exposed. */
 	sessionTokens(): UsageBreakdown;
 	/** Per-dispatch cost log. */
 	costEntries(): ReadonlyArray<CostEntry>;
@@ -18,7 +18,7 @@ export interface ObservabilityContract {
 	 * `agent_end` handler. `breakdown` is optional for call sites (dispatch
 	 * bus payloads) that only know the total token count; callers with a
 	 * pi-ai `Usage` object should pass the full breakdown so
-	 * `sessionTokens()` can surface input/output separately.
+	 * `sessionTokens()` can surface input/output/reasoning separately.
 	 */
 	recordTokens(
 		providerId: string,

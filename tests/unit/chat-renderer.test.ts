@@ -95,7 +95,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(text.includes("Clio Coder: structured-assistant"), text);
 	});
 
-	it("rehydrates persisted assistant thinking content instead of reducing the turn to text", () => {
+	it("rehydrates persisted assistant thinking content as folded reasoning", () => {
 		const panel = createChatPanel();
 		const turns: ClioTurnRecord[] = [
 			mkTurn({ id: "u1", kind: "user", payload: { text: "inspect this" } }),
@@ -114,8 +114,12 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(96).join("\n"));
-		ok(text.includes("thinking: Need to read"), text);
+		ok(text.includes("Thinking..."), text);
+		ok(!text.includes("Need to read the exact payload shape."), text);
 		ok(text.includes("Clio Coder: I will inspect the payload."), text);
+		strictEqual(panel.toggleLastThinking(), true);
+		const expanded = strip(panel.render(96).join("\n"));
+		ok(expanded.includes("Need to read the exact payload shape."), expanded);
 	});
 
 	it("skips empty-text turns silently without producing blank entries", () => {

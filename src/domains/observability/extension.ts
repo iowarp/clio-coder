@@ -17,6 +17,7 @@ interface DispatchCostPayload {
 	endpointId?: string;
 	wireModelId?: string;
 	tokenCount?: number;
+	reasoningTokenCount?: number;
 	costUsd?: number;
 	durationMs?: number;
 }
@@ -30,11 +31,13 @@ function recordDispatchCost(
 		return;
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
-	// Dispatch bus payloads carry only the total token count; no per-kind
-	// breakdown is available, so sessionTokens() will show the total under
-	// totalTokens and leave input/output at zero for dispatch runs. Chat-loop
-	// runs pass the full Usage breakdown through recordTokens().
-	cost.accumulate(payload.endpointId, payload.wireModelId, payload.tokenCount, payload.costUsd);
+	// Dispatch bus payloads carry a total token count plus optional reasoning
+	// detail, so sessionTokens() leaves input/output at zero for dispatch runs.
+	// Chat-loop runs pass the full Usage breakdown through recordTokens().
+	cost.accumulate(payload.endpointId, payload.wireModelId, payload.tokenCount, payload.costUsd, {
+		reasoningTokens: payload.reasoningTokenCount ?? 0,
+		totalTokens: payload.tokenCount,
+	});
 }
 
 export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {

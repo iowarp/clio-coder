@@ -500,4 +500,56 @@ describe("dispatch concurrency gate", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+
+	it("folds provider reasoning token details into dispatch receipts", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const events = (async function* () {
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					usage: {
+						input: 100,
+						output: 40,
+						output_tokens_details: { reasoning_tokens: 12 },
+					},
+				},
+			};
+		})();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1007,
+				promise: exit.promise,
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "reasoning usage task" });
+			for await (const _ of handle.events) {
+				// drain so token accounting observes the worker message_end event
+			}
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			const envelope = bundle.contract.getRun(handle.runId);
+
+			strictEqual(receipt.tokenCount, 140);
+			strictEqual(receipt.reasoningTokenCount, 12);
+			strictEqual(envelope?.tokenCount, 140);
+			strictEqual(envelope?.reasoningTokenCount, 12);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 });

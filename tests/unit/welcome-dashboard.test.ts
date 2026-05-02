@@ -84,7 +84,7 @@ function deps(
 		modes: { current: () => "default" } as ModesContract,
 		providers: { list: () => statuses, knowledgeBase: null } as unknown as ProvidersContract,
 		observability: {
-			sessionTokens: () => ({ input: 200, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 250 }),
+			sessionTokens: () => ({ input: 200, output: 50, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 250 }),
 			metrics: () => ({
 				dispatchesCompleted: 0,
 				dispatchesFailed: 0,

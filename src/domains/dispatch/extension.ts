@@ -75,6 +75,43 @@ function promptHash(systemPrompt: string): string | null {
 	return systemPrompt.length > 0 ? sha256(systemPrompt) : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finitePositive(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function nestedFinitePositive(record: Record<string, unknown>, path: readonly string[]): number | undefined {
+	let cursor: unknown = record;
+	for (const key of path) {
+		if (!isRecord(cursor)) return undefined;
+		cursor = cursor[key];
+	}
+	return finitePositive(cursor);
+}
+
+function extractReasoningTokenCount(usage: unknown): number {
+	if (!isRecord(usage)) return 0;
+	const direct =
+		finitePositive(usage.reasoningTokens) ?? finitePositive(usage.reasoning_tokens) ?? finitePositive(usage.reasoning);
+	if (direct !== undefined) return direct;
+	const paths: ReadonlyArray<readonly string[]> = [
+		["outputDetails", "reasoningTokens"],
+		["output_details", "reasoning_tokens"],
+		["output_tokens_details", "reasoning_tokens"],
+		["completion_tokens_details", "reasoning_tokens"],
+		["completionTokensDetails", "reasoningTokens"],
+		["details", "reasoningTokens"],
+	];
+	for (const path of paths) {
+		const value = nestedFinitePositive(usage, path);
+		if (value !== undefined) return value;
+	}
+	return 0;
+}
+
 function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined): ScopeSpec {
 	if (mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
@@ -426,7 +463,7 @@ export function createDispatchBundle(
 			}
 		}
 
-		const tokenMeter = { inputTokens: 0, outputTokens: 0 };
+		const tokenMeter = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
 		const spec: WorkerSpec = {
 			systemPrompt,
 			task: req.task,
@@ -459,7 +496,7 @@ export function createDispatchBundle(
 					type?: string;
 					message?: {
 						role?: string;
-						usage?: { input?: number; output?: number; totalTokens?: number };
+						usage?: unknown;
 					};
 					payload?: {
 						tool?: string;
@@ -467,10 +504,11 @@ export function createDispatchBundle(
 						outcome?: "ok" | "error" | "blocked";
 					};
 				};
-				if (event.type === "message_end" && event.message?.role === "assistant" && event.message.usage) {
+				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 					const u = event.message.usage;
 					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
 					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
 				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
@@ -551,6 +589,7 @@ export function createDispatchBundle(
 					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
 					: 0;
 				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
+				const reasoningTokenCount = tokenMeter.reasoningTokens;
 				const receiptDraft: RunReceiptDraft = {
 					runId: envelope.id,
 					agentId: req.agentId,
@@ -563,6 +602,7 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptExitCode,
 					tokenCount,
+					reasoningTokenCount,
 					costUsd,
 					compiledPromptHash,
 					staticCompositionHash: null,
@@ -579,6 +619,7 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptExitCode,
 					tokenCount,
+					reasoningTokenCount,
 					costUsd,
 					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt.current) } : {}),
 				});
@@ -597,6 +638,7 @@ export function createDispatchBundle(
 						runtimeId: target.runtime.id,
 						runtimeKind,
 						tokenCount: receipt.tokenCount,
+						reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 						costUsd: receipt.costUsd,
 						durationMs,
 						exitCode: receiptExitCode,
@@ -610,6 +652,7 @@ export function createDispatchBundle(
 						runtimeId: target.runtime.id,
 						runtimeKind,
 						tokenCount: receipt.tokenCount,
+						reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 						costUsd: receipt.costUsd,
 						durationMs,
 						exitCode: receiptExitCode,

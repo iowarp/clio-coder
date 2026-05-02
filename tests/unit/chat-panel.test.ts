@@ -145,7 +145,7 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("Clio Coder: [working]"), `placeholder must not appear once output exists: ${text}`);
 	});
 
-	it("renders a dim thinking preview line by default and expands via toggleLastThinking", () => {
+	it("renders a dim folded thinking marker by default and expands via toggleLastThinking", () => {
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } as never });
 		panel.applyEvent({
@@ -168,9 +168,8 @@ describe("chat-panel active entry update", () => {
 		panel.applyEvent({ type: "agent_end", messages: [] });
 
 		let text = strip(panel.render(90).join("\n"));
-		ok(text.includes("thinking: Considering"), text);
-		// Full body must NOT appear when collapsed (only the truncated preview).
-		ok(!text.includes("thinking: Considering whether to read the file or grep first."), text);
+		ok(text.includes("Thinking..."), text);
+		ok(!text.includes("Considering whether to read the file or grep first."), text);
 
 		strictEqual(panel.toggleLastThinking(), true);
 		text = strip(panel.render(90).join("\n"));
@@ -178,7 +177,7 @@ describe("chat-panel active entry update", () => {
 
 		strictEqual(panel.toggleLastThinking(), true);
 		text = strip(panel.render(90).join("\n"));
-		ok(text.includes("thinking: Considering"), text);
+		ok(text.includes("Thinking..."), text);
 		ok(!text.includes("│ Considering whether"), text);
 	});
 
@@ -243,9 +242,10 @@ describe("chat-panel active entry update", () => {
 		});
 		panel.applyEvent({ type: "agent_end", messages: [] });
 		const text = strip(panel.render(90).join("\n"));
-		const thinkingIdx = text.indexOf("thinking: thought-marker-XYZ");
+		const thinkingIdx = text.indexOf("Thinking...");
 		const textIdx = text.indexOf("text-marker-ABC");
 		ok(thinkingIdx >= 0, text);
+		ok(!text.includes("thought-marker-XYZ"), text);
 		ok(textIdx >= 0, text);
 		ok(thinkingIdx < textIdx, `thinking must appear before text: thinkingIdx=${thinkingIdx} textIdx=${textIdx}: ${text}`);
 	});

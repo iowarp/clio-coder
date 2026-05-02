@@ -54,7 +54,7 @@ function serializeCanonical(value: unknown): string {
 }
 
 function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptDraft {
-	return {
+	const draft: RunReceiptDraft = {
 		runId: receipt.runId,
 		agentId: receipt.agentId,
 		task: receipt.task,
@@ -77,6 +77,10 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 		toolStats: receipt.toolStats,
 		sessionId: receipt.sessionId,
 	};
+	if (receipt.reasoningTokenCount !== undefined) {
+		draft.reasoningTokenCount = receipt.reasoningTokenCount;
+	}
+	return draft;
 }
 
 function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
@@ -95,6 +99,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		sessionId: envelope.sessionId,
 		cwd: envelope.cwd,
 		tokenCount: envelope.tokenCount,
+		reasoningTokenCount: envelope.reasoningTokenCount,
 		costUsd: envelope.costUsd,
 	};
 }
@@ -151,6 +156,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["endedAt", receipt.endedAt, envelope.endedAt],
 		["exitCode", receipt.exitCode, envelope.exitCode],
 		["tokenCount", receipt.tokenCount, envelope.tokenCount],
+		["reasoningTokenCount", receipt.reasoningTokenCount ?? 0, envelope.reasoningTokenCount ?? 0],
 		["costUsd", receipt.costUsd, envelope.costUsd],
 		["sessionId", receipt.sessionId, envelope.sessionId],
 	];

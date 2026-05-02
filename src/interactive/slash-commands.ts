@@ -114,7 +114,11 @@ export async function handleRun(
 			});
 		}
 		const receipt = await handle.finalPromise;
-		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}\n`);
+		const reasoning =
+			typeof receipt.reasoningTokenCount === "number" && receipt.reasoningTokenCount > 0
+				? ` reasoning=${receipt.reasoningTokenCount}`
+				: "";
+		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning}\n`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		io.stderr(`[run] failed: ${msg}\n`);

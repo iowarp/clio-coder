@@ -34,6 +34,7 @@ export interface RunEnvelope {
 	sessionId: string | null;
 	cwd: string;
 	tokenCount: number;
+	reasoningTokenCount?: number;
 	costUsd: number;
 }
 
@@ -63,6 +64,7 @@ export interface RunReceipt {
 	endedAt: string;
 	exitCode: number;
 	tokenCount: number;
+	reasoningTokenCount?: number;
 	costUsd: number;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;

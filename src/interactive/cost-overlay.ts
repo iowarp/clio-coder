@@ -3,7 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
 
-const DEFAULT_CONTENT_WIDTH = 70;
+const DEFAULT_CONTENT_WIDTH = 80;
 const TITLE_PREFIX = "─ Session cost";
 const HINT = "[Esc] close";
 const ANSI_RESET = "\u001b[0m";
@@ -15,6 +15,7 @@ export interface CostRow {
 	modelId: string;
 	runs: number;
 	tokens: number;
+	reasoningTokens: number;
 	usd: number;
 }
 
@@ -60,6 +61,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 		if (existing) {
 			existing.runs += 1;
 			existing.tokens += entry.tokens;
+			existing.reasoningTokens += entry.reasoningTokens;
 			existing.usd += entry.usd;
 			continue;
 		}
@@ -68,6 +70,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			modelId: entry.modelId,
 			runs: 1,
 			tokens: entry.tokens,
+			reasoningTokens: entry.reasoningTokens,
 			usd: entry.usd,
 		});
 	}
@@ -85,7 +88,8 @@ function formatHeader(): string {
 	const model = "model".padEnd(20);
 	const runs = "runs".padStart(4);
 	const tokens = "tokens".padStart(8);
-	return `  ${provider} ${model} ${runs} ${tokens}  USD`;
+	const reasoning = "reason".padStart(8);
+	return `  ${provider} ${model} ${runs} ${tokens} ${reasoning}  USD`;
 }
 
 function formatRow(row: CostRow): string {
@@ -93,7 +97,8 @@ function formatRow(row: CostRow): string {
 	const model = row.modelId.padEnd(20);
 	const runs = String(row.runs).padStart(4);
 	const tokens = formatTokens(row.tokens).padStart(8);
-	return `  ${provider} ${model} ${runs} ${tokens}  ${formatUsdCell(row.usd)}`;
+	const reasoning = formatTokens(row.reasoningTokens).padStart(8);
+	return `  ${provider} ${model} ${runs} ${tokens} ${reasoning}  ${formatUsdCell(row.usd)}`;
 }
 
 export interface FormatCostOverlayOptions {
@@ -108,8 +113,13 @@ export function formatCostOverlayLines(
 	options?: FormatCostOverlayOptions,
 ): string[] {
 	const contentWidth = Math.max(1, options?.contentWidth ?? DEFAULT_CONTENT_WIDTH);
+	const reasoningTokens = rows.reduce((sum, row) => sum + row.reasoningTokens, 0);
+	const totalLine =
+		reasoningTokens > 0
+			? `Total: ${formatUsd(totalUsd)} \u00b7 ${formatTokens(totalTokens)} tokens \u00b7 ${formatTokens(reasoningTokens)} reasoning`
+			: `Total: ${formatUsd(totalUsd)} \u00b7 ${formatTokens(totalTokens)} tokens`;
 	const lines: string[] = [topBorder(contentWidth, options?.sessionId ?? null)];
-	lines.push(padContent(`Total: ${formatUsd(totalUsd)} \u00b7 ${formatTokens(totalTokens)} tokens`, contentWidth));
+	lines.push(padContent(totalLine, contentWidth));
 	lines.push(dividerRow(contentWidth));
 	if (rows.length === 0) {
 		lines.push(padContent("no dispatch runs yet", contentWidth));
