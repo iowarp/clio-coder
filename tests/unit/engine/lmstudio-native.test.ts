@@ -81,10 +81,14 @@ describe("engine/lmstudio-native runStream", () => {
 		let toolCallStartCount = 0;
 		let toolCallEndCount = 0;
 		let errorMessage = "";
+		let errorUsage: { reasoningTokens?: number } | undefined;
 		for await (const event of events) {
 			if (event.type === "toolcall_start") toolCallStartCount += 1;
 			if (event.type === "toolcall_end") toolCallEndCount += 1;
-			if (event.type === "error") errorMessage = event.error.errorMessage ?? "";
+			if (event.type === "error") {
+				errorMessage = event.error.errorMessage ?? "";
+				errorUsage = event.error.usage as { reasoningTokens?: number };
+			}
 		}
 
 		strictEqual(toolCallStartCount, 1);
@@ -95,6 +99,96 @@ describe("engine/lmstudio-native runStream", () => {
 		strictEqual(capturedLoadConfig?.offloadKVCacheToGpu, true);
 		match(errorMessage, /LM Studio SDK returned empty tool-call arguments/);
 		match(errorMessage, /openai-compat runtime/);
+		// Reasoning tokens from the pre-error stream should still be reported on the
+		// failed assistant message so receipts and the TUI footer reflect the real
+		// chain-of-thought cost rather than zero.
+		strictEqual(errorUsage?.reasoningTokens, 7);
+	});
+
+	it("tracks reasoning tokens across reasoning content and start/end tags", async () => {
+		const model = {
+			id: "qwopus3.5-9b-v3",
+			name: "qwopus3.5-9b-v3",
+			api: "lmstudio-native",
+			provider: "lmstudio",
+			baseUrl: "ws://127.0.0.1:1234",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+		} satisfies Parameters<typeof runStream>[0];
+		const context = {
+			messages: [{ role: "user", content: "say hi", timestamp: 1 }],
+		} satisfies Parameters<typeof runStream>[1];
+		let doneUsage: { reasoningTokens?: number; output?: number; totalTokens?: number } | undefined;
+		const deps: NonNullable<Parameters<typeof runStream>[3]> = {
+			createClient: () => ({
+				files: {
+					prepareImageBase64: async () => {
+						throw new Error("unexpected image input");
+					},
+				},
+				llm: {
+					listLoaded: async () => [],
+					model: async () => ({
+						respond: (_history, opts) => {
+							opts.onPredictionFragment?.({
+								content: "<think>",
+								tokensCount: 1,
+								containsDrafted: false,
+								reasoningType: "reasoningStartTag",
+								isStructural: false,
+							});
+							opts.onPredictionFragment?.({
+								content: "weighing options",
+								tokensCount: 12,
+								containsDrafted: false,
+								reasoningType: "reasoning",
+								isStructural: false,
+							});
+							opts.onPredictionFragment?.({
+								content: "</think>",
+								tokensCount: 1,
+								containsDrafted: false,
+								reasoningType: "reasoningEndTag",
+								isStructural: false,
+							});
+							opts.onPredictionFragment?.({
+								content: "Hi.",
+								tokensCount: 2,
+								containsDrafted: false,
+								reasoningType: "none",
+								isStructural: false,
+							});
+							return {
+								result: async () => ({
+									stats: {
+										promptTokensCount: 10,
+										predictedTokensCount: 16,
+										totalTokensCount: 26,
+										stopReason: "eosFound",
+									},
+								}),
+							};
+						},
+					}),
+				},
+			}),
+			ensureResident: async () => {},
+			discoverLoadedContext: async () => undefined,
+		};
+
+		const events = runStream(model, context, undefined, deps);
+		for await (const event of events) {
+			if (event.type === "done") {
+				doneUsage = event.message.usage as { reasoningTokens?: number; output?: number; totalTokens?: number };
+			}
+		}
+
+		strictEqual(doneUsage?.reasoningTokens, 14);
+		strictEqual(doneUsage?.output, 16);
+		strictEqual(doneUsage?.totalTokens, 26);
 	});
 
 	it("clamps SDK maxTokens to the remaining context budget", async () => {
