@@ -145,14 +145,16 @@ function execBash(
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in the current working directory via /bin/bash -lc. Returns stdout and stderr. Optionally provide a timeout in seconds (or timeout_ms in milliseconds) and a cwd. Default timeout is 60 seconds.",
+		"Execute a bash command in the current working directory via /bin/bash -lc. Returns stdout and stderr. Optionally provide a timeout in seconds (or timeout_ms in milliseconds) and a cwd. Default timeout is 5 minutes (300 seconds), enough for npm install and full ci runs.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
 			Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
 		),
 		timeout: Type.Optional(Type.Number({ description: "Timeout in seconds. Alias of timeout_ms. Must be > 0." })),
-		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds. Defaults to 60000. Must be > 0." })),
+		timeout_ms: Type.Optional(
+			Type.Number({ description: "Timeout in milliseconds. Defaults to 300000 (5 min). Must be > 0." }),
+		),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
@@ -164,7 +166,7 @@ export const bashTool: ToolSpec = {
 		const timeoutMsArg = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : null;
 		const timeoutSecArg =
 			timeoutMsArg === null && typeof args.timeout === "number" && args.timeout > 0 ? args.timeout * 1000 : null;
-		const timeout = timeoutMsArg ?? timeoutSecArg ?? 60_000;
+		const timeout = timeoutMsArg ?? timeoutSecArg ?? 300_000;
 		try {
 			const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
 				args.command,
