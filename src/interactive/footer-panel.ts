@@ -7,6 +7,7 @@ import {
 	type ProvidersContract,
 	resolveModelCapabilities,
 } from "../domains/providers/index.js";
+import { extractLocalModelQuirks, type ThinkingMechanism } from "../domains/providers/types/local-model-quirks.js";
 import { Text } from "../engine/tui.js";
 import type { HarnessSnapshot } from "../harness/state.js";
 import { getCurrentBranch } from "../utils/git.js";
@@ -17,6 +18,7 @@ const ANSI_DIM = "\u001b[2m";
 const ANSI_RESET = "\u001b[0m";
 const SEP = " \u00b7 ";
 const GLYPH = "\u25c6";
+const GLYPH_OPEN = "\u25c7";
 const ARROW_UP = "\u2191";
 const ARROW_DOWN = "\u2193";
 
@@ -87,6 +89,7 @@ interface OrchestratorTarget {
 	runtimeId: string;
 	healthStatus: "healthy" | "degraded" | "unknown" | "down";
 	capabilities: CapabilityFlags | null;
+	thinkingMechanism: ThinkingMechanism | null;
 }
 
 function resolveOrchestratorTarget(
@@ -97,6 +100,8 @@ function resolveOrchestratorTarget(
 	const wireModelId = settings.orchestrator?.model?.trim();
 	if (!endpointId || !wireModelId) return null;
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
+	const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+	const quirks = extractLocalModelQuirks(kbHit?.entry.quirks);
 	return {
 		endpointId,
 		wireModelId,
@@ -107,7 +112,43 @@ function resolveOrchestratorTarget(
 					detectedReasoning: providers.getDetectedReasoning(endpointId, wireModelId),
 				})
 			: null,
+		thinkingMechanism: quirks?.thinking?.mechanism ?? null,
 	};
+}
+
+/**
+ * Build the thinking-segment suffix for the footer. Mechanism-aware:
+ *   - effort-levels and budget-tokens render the level glyph as today.
+ *   - on-off renders `◆ on` or `◆ off` (no level word).
+ *   - always-on renders `◆ forced`.
+ *   - none renders a dim `◇ off` so the operator sees the model has no
+ *     thinking surface.
+ *   - absent mechanism falls back to the legacy level glyph.
+ *
+ * Returns the empty string when the segment is suppressed (e.g. providers
+ * report only the `off` level for the active model).
+ */
+export function thinkingSuffixForFooter(
+	mechanism: ThinkingMechanism | null,
+	level: string,
+	availableLevelCount: number,
+): string {
+	if (mechanism === "none") {
+		return `${SEP}${ANSI_DIM}${GLYPH_OPEN} off${ANSI_RESET}`;
+	}
+	if (mechanism === "always-on") {
+		return `${SEP}${GLYPH} forced`;
+	}
+	if (mechanism === "on-off") {
+		const word = level === "off" ? "off" : "on";
+		const piece = `${SEP}${GLYPH} ${word}`;
+		return word === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
+	}
+	if (availableLevelCount > 1) {
+		const piece = `${SEP}${GLYPH} ${level}`;
+		return level === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
+	}
+	return "";
 }
 
 /**
@@ -179,11 +220,8 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 				runtimeId: target.runtimeId,
 				modelId: target.wireModelId,
 			});
-			if (available.length > 1) {
-				const level = settings?.orchestrator?.thinkingLevel ?? "off";
-				const piece = `${SEP}${GLYPH} ${level}`;
-				suffix = level === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
-			}
+			const level = settings?.orchestrator?.thinkingLevel ?? "off";
+			suffix = thinkingSuffixForFooter(target.thinkingMechanism, level, available.length);
 		}
 
 		const status = deps.getAgentStatus?.();
