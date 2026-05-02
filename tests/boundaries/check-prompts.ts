@@ -2,39 +2,20 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
 
-const allowedTemplateVars = new Set([
-	"provider",
-	"model",
-	"contextWindow",
-	"thinkingBudget",
-	"sessionNotes",
-	"contextFiles",
-	"memorySection",
-	"turnCount",
-	"clioVersion",
-	"piMonoVersion",
-]);
-
-const knownFrontmatterKeys = new Set(["id", "version", "budgetTokens", "description", "dynamic"]);
-const templateVarRegex = /^[A-Za-z][A-Za-z0-9]*$/;
+// `budgetTokens` is accepted but no longer enforced; legacy fragments still
+// carry it. Identity.clio is intentionally untouched per the revamp plan.
+const knownFrontmatterKeys = new Set(["id", "version", "description", "dynamic", "budgetTokens"]);
 const fragmentFrontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 interface FragmentFrontmatter {
 	id: string;
 	version: 1;
-	budgetTokens: number;
 	description: string;
 	dynamic?: boolean;
 }
 
-interface TemplateScanResult {
-	errors: string[];
-	vars: string[];
-}
-
 interface ParsedFragment {
 	body: string;
-	declaredTemplateVars: string[];
 	frontmatter: FragmentFrontmatter | null;
 	path: string;
 }
@@ -118,7 +99,6 @@ function validateFrontmatter(
 
 	const id = value.id;
 	const version = value.version;
-	const budgetTokens = value.budgetTokens;
 	const description = value.description;
 	const dynamic = value.dynamic;
 
@@ -131,11 +111,6 @@ function validateFrontmatter(
 
 	if (version !== 1) {
 		errors.push(`${relPath}: frontmatter.version must be 1`);
-		valid = false;
-	}
-
-	if (!Number.isInteger(budgetTokens) || typeof budgetTokens !== "number" || budgetTokens <= 0) {
-		errors.push(`${relPath}: frontmatter.budgetTokens must be a positive integer`);
 		valid = false;
 	}
 
@@ -154,89 +129,9 @@ function validateFrontmatter(
 	return {
 		id: id as string,
 		version: 1,
-		budgetTokens: budgetTokens as number,
 		description: description as string,
 		...(dynamic === undefined ? {} : { dynamic: dynamic as boolean }),
 	};
-}
-
-function scanTemplateVars(body: string): TemplateScanResult {
-	const errors: string[] = [];
-	const vars = new Set<string>();
-
-	let cursor = 0;
-	while (cursor < body.length) {
-		const openIndex = body.indexOf("{{", cursor);
-		if (openIndex === -1) break;
-
-		const closeIndex = body.indexOf("}}", openIndex + 2);
-		if (closeIndex === -1) {
-			errors.push(`unclosed template placeholder at offset ${openIndex}`);
-			break;
-		}
-
-		const candidate = body.slice(openIndex, closeIndex + 2);
-		const match = candidate.match(/^{{([A-Za-z][A-Za-z0-9]*)}}$/);
-		if (!match) {
-			errors.push(`invalid template placeholder "${candidate}"`);
-			cursor = openIndex + 2;
-			continue;
-		}
-
-		const variableName = match[1];
-		if (variableName && templateVarRegex.test(variableName)) {
-			vars.add(variableName);
-		}
-
-		cursor = closeIndex + 2;
-	}
-
-	return { errors, vars: [...vars].sort((left, right) => left.localeCompare(right)) };
-}
-
-function validateTemplateUsage(
-	projectRoot: string,
-	filePath: string,
-	body: string,
-	dynamic: boolean,
-	errors: string[],
-): string[] {
-	const relPath = formatRelative(projectRoot, filePath);
-	const scanned = scanTemplateVars(body);
-
-	for (const error of scanned.errors) {
-		errors.push(`${relPath}: ${error}`);
-	}
-
-	if (!dynamic) {
-		if (scanned.vars.length > 0) {
-			const joined = scanned.vars.map((name) => `{{${name}}}`).join(", ");
-			errors.push(`${relPath}: static fragment must not declare template vars (${joined})`);
-		}
-		return [];
-	}
-
-	for (const variableName of scanned.vars) {
-		if (!allowedTemplateVars.has(variableName)) {
-			errors.push(`${relPath}: unsupported template var "{{${variableName}}}"`);
-		}
-	}
-
-	return scanned.vars;
-}
-
-function validateBudget(
-	projectRoot: string,
-	filePath: string,
-	body: string,
-	budgetTokens: number,
-	errors: string[],
-): void {
-	const relPath = formatRelative(projectRoot, filePath);
-	const actualTokens = Math.ceil(body.length / 4);
-	if (actualTokens > budgetTokens * 1.1) {
-		errors.push(`${relPath}: budget exceeded (${actualTokens} > ${budgetTokens})`);
-	}
 }
 
 function parseFragment(projectRoot: string, filePath: string, errors: string[]): ParsedFragment {
@@ -246,7 +141,7 @@ function parseFragment(projectRoot: string, filePath: string, errors: string[]):
 
 	if (!split) {
 		errors.push(`${relPath}: missing or malformed YAML frontmatter`);
-		return { body: raw, declaredTemplateVars: [], frontmatter: null, path: filePath };
+		return { body: raw, frontmatter: null, path: filePath };
 	}
 
 	let parsedFrontmatter: unknown;
@@ -255,20 +150,12 @@ function parseFragment(projectRoot: string, filePath: string, errors: string[]):
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
 		errors.push(`${relPath}: invalid YAML frontmatter (${reason})`);
-		return { body: split.body, declaredTemplateVars: [], frontmatter: null, path: filePath };
+		return { body: split.body, frontmatter: null, path: filePath };
 	}
 
 	const frontmatter = validateFrontmatter(projectRoot, filePath, parsedFrontmatter, errors);
-	const declaredTemplateVars =
-		frontmatter === null
-			? []
-			: validateTemplateUsage(projectRoot, filePath, split.body, frontmatter.dynamic === true, errors);
 
-	if (frontmatter !== null) {
-		validateBudget(projectRoot, filePath, split.body, frontmatter.budgetTokens, errors);
-	}
-
-	return { body: split.body, declaredTemplateVars, frontmatter, path: filePath };
+	return { body: split.body, frontmatter, path: filePath };
 }
 
 /**

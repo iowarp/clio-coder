@@ -1,7 +1,6 @@
 ---
 id: safety.suggest
 version: 1
-budgetTokens: 150
 description: Suggest safety level
 ---
 

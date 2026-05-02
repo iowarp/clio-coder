@@ -13,7 +13,6 @@ export interface LoadedFragment {
 	relPath: string;
 	id: string;
 	version: number;
-	budgetTokens: number;
 	description: string;
 	dynamic: boolean;
 	body: string;
@@ -87,10 +86,6 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 	if (version !== 1) {
 		throw new Error(`fragment-loader: ${relPath}: frontmatter.version must be 1`);
 	}
-	const budgetTokens = fm.budgetTokens;
-	if (typeof budgetTokens !== "number" || !Number.isInteger(budgetTokens) || budgetTokens <= 0) {
-		throw new Error(`fragment-loader: ${relPath}: frontmatter.budgetTokens must be a positive integer`);
-	}
 	const description = fm.description;
 	if (typeof description !== "string" || description.trim() === "") {
 		throw new Error(`fragment-loader: ${relPath}: frontmatter.description must be a non-empty string`);
@@ -105,7 +100,6 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 		relPath,
 		id,
 		version,
-		budgetTokens,
 		description,
 		dynamic: dynamicRaw === true,
 		body,

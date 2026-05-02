@@ -1,7 +1,6 @@
 ---
 id: modes.default
 version: 1
-budgetTokens: 240
 description: Default mode behavior
 ---
 

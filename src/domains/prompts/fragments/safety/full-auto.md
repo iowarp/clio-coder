@@ -1,7 +1,6 @@
 ---
 id: safety.full-auto
 version: 1
-budgetTokens: 150
 description: Full-auto safety level
 ---
 

@@ -1,7 +1,6 @@
 ---
 id: modes.super
 version: 1
-budgetTokens: 240
 description: Super mode behavior
 ---
 

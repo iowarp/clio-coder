@@ -15,6 +15,7 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
 import { assessFinishContract } from "../domains/safety/finish-contract.js";
 import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
@@ -37,6 +38,7 @@ import {
 } from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
+import { applyThinkingMechanism } from "../engine/apis/thinking-mechanism.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
@@ -292,15 +294,17 @@ function noticeMessage(text: string): AgentMessage {
  * Built-in identity text used when `deps.prompts` is not wired (tests, degraded
  * boot). Production always overrides this via the prompts compiler; the
  * fallback exists so a chat-loop without a compiler still identifies as Clio.
+ *
+ * Kept short on purpose: small instruction-tuned models will copy the most
+ * emphatic verbatim phrasing out of the system prompt into their replies. A
+ * compact persona description lets the model speak naturally; the canonical
+ * identity block lives in src/domains/prompts/fragments/identity/clio.md.
  */
 function fallbackIdentityPrompt(): string {
 	return [
-		"You are Clio. You are Clio. You are Clio.",
-		"You are the coding agent in IOWarp's CLIO ecosystem of agentic science, part of the NSF-funded IOWarp project at iowarp.ai.",
-		"You specialize in HPC and scientific-software work for researchers and developers across research-software domains.",
-		'If asked who made you or what model you are, reply: "I am Clio, the coding agent in IOWarp\'s CLIO ecosystem of agentic science. I specialize in HPC and scientific-software work."',
-		"You are not Claude, GPT, Qwen, Gemini, Llama, or Mistral.",
-		"You are not from Anthropic, OpenAI, Alibaba, Google, Meta, or any other model vendor.",
+		"You are Clio, a coding agent in IOWarp's CLIO ecosystem of agentic science (NSF-funded, iowarp.ai).",
+		"You focus on HPC and scientific-software engineering.",
+		"Whichever weights run you, your name and persona are Clio. You are not Claude, GPT, Qwen, Gemini, Llama, Mistral, or any other vendor's assistant.",
 	].join(" ");
 }
 
@@ -1082,7 +1086,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return null;
 		}
 		const settings = deps.getSettings();
-		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
+		const modelState = agentRuntime.agent.state.model as
+			| { contextWindow?: number; reasoning?: boolean; clio?: { quirks?: LocalModelQuirks } }
+			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		// Read the thinking budget from the live agent state, which reflects
 		// `clampThinkingLevelForModel` after a hot-swap onto a non-reasoning
@@ -1090,11 +1096,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// `thinkingBudget: high` while the runtime actually sends "off",
 		// telling the model a budget it does not have.
 		const runtimeThinkingLevel = agentRuntime.agent.state.thinkingLevel as ThinkingLevel | undefined;
+		const effectiveLevel: ThinkingLevel = runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off";
+		const applied = applyThinkingMechanism(modelState?.clio?.quirks, effectiveLevel, {
+			reasoning: modelState?.reasoning === true,
+		});
+		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 		const dynamicInputs: DynamicInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
-			thinkingBudget: runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off",
+			thinkingBudget: effectiveLevel,
+			thinkingMechanism: applied.mechanism,
+			thinkingApplied: applied.noticeKind,
+			thinkingNotice: applied.notice,
+			...(guidance ? { thinkingGuidance: guidance } : {}),
 			turnCount: 0,
 		};
 		if (deps.getMemorySection) {
