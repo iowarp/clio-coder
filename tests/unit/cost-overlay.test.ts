@@ -101,14 +101,45 @@ describe("sumRunUsage", () => {
 describe("aggregateCostEntries", () => {
 	it("groups by provider::model and sums runs, tokens, and usd", () => {
 		const rows = aggregateCostEntries([
-			{ providerId: "a", modelId: "m1", tokens: 100, usd: 0.01, input: 60, output: 40, cacheRead: 0, cacheWrite: 0 },
-			{ providerId: "a", modelId: "m1", tokens: 200, usd: 0.02, input: 120, output: 80, cacheRead: 0, cacheWrite: 0 },
-			{ providerId: "b", modelId: "m2", tokens: 50, usd: 0, input: 25, output: 25, cacheRead: 0, cacheWrite: 0 },
+			{
+				providerId: "a",
+				modelId: "m1",
+				tokens: 100,
+				usd: 0.01,
+				input: 60,
+				output: 40,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoningTokens: 12,
+			},
+			{
+				providerId: "a",
+				modelId: "m1",
+				tokens: 200,
+				usd: 0.02,
+				input: 120,
+				output: 80,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoningTokens: 8,
+			},
+			{
+				providerId: "b",
+				modelId: "m2",
+				tokens: 50,
+				usd: 0,
+				input: 25,
+				output: 25,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoningTokens: 0,
+			},
 		]);
 		strictEqual(rows.length, 2);
 		const aRow = rows.find((r) => r.providerId === "a");
 		strictEqual(aRow?.runs, 2);
 		strictEqual(aRow?.tokens, 300);
+		strictEqual(aRow?.reasoningTokens, 20);
 		strictEqual(Math.round((aRow?.usd ?? 0) * 1000) / 1000, 0.03);
 	});
 });
@@ -124,6 +155,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 				output: 330,
 				cacheRead: 0,
 				cacheWrite: 0,
+				reasoningTokens: 12,
 				totalTokens: 1780,
 			});
 			bundle.contract.recordTokens("openai", "gpt-5.3", 600, 0.006, {
@@ -131,6 +163,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 				output: 100,
 				cacheRead: 0,
 				cacheWrite: 0,
+				reasoningTokens: 0,
 				totalTokens: 600,
 			});
 
@@ -140,6 +173,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 				output: 430,
 				cacheRead: 0,
 				cacheWrite: 0,
+				reasoningTokens: 12,
 				totalTokens: 2380,
 			});
 			strictEqual(Math.round(bundle.contract.sessionCost() * 1000) / 1000, 0.02);
@@ -147,6 +181,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 			const snapshot = buildCostSnapshot(bundle.contract, "sess-1");
 			strictEqual(snapshot.totalTokens, 2380);
 			strictEqual(snapshot.rows.length, 2);
+			strictEqual(snapshot.rows.find((row) => row.providerId === "anthropic")?.reasoningTokens, 12);
 			// Rows are sorted by provider then model; assert both are present
 			// with correct per-row math.
 			const anthropic = snapshot.rows.find((r) => r.providerId === "anthropic");
@@ -162,14 +197,22 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 			0.02,
 			2380,
 			[
-				{ providerId: "anthropic", modelId: "claude-opus-4-7", runs: 1, tokens: 1780, usd: 0.014 },
-				{ providerId: "openai", modelId: "gpt-5.3", runs: 1, tokens: 600, usd: 0.006 },
+				{
+					providerId: "anthropic",
+					modelId: "claude-opus-4-7",
+					runs: 1,
+					tokens: 1780,
+					reasoningTokens: 12,
+					usd: 0.014,
+				},
+				{ providerId: "openai", modelId: "gpt-5.3", runs: 1, tokens: 600, reasoningTokens: 0, usd: 0.006 },
 			],
 			{ sessionId: "sess-1" },
 		);
 		const joined = lines.join("\n");
 		strictEqual(joined.includes("$0.02"), true);
 		strictEqual(joined.includes("2,380 tokens"), true);
+		strictEqual(joined.includes("12 reasoning"), true);
 		strictEqual(joined.includes("claude-opus-4-7"), true);
 		strictEqual(joined.includes("gpt-5.3"), true);
 	});
@@ -178,7 +221,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 		const lines = formatCostOverlayLines(
 			0,
 			500,
-			[{ providerId: "ollama", modelId: "llama3.1", runs: 1, tokens: 500, usd: 0 }],
+			[{ providerId: "ollama", modelId: "llama3.1", runs: 1, tokens: 500, reasoningTokens: 0, usd: 0 }],
 			{ sessionId: null },
 		);
 		strictEqual(lines.join("\n").includes("(local)"), true);

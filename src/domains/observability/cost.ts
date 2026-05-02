@@ -5,10 +5,10 @@
  * the resolved `usd` per call. Unknown or unpriced calls accumulate zero so
  * they never blow up the tally.
  *
- * Per-entry token breakdown (input/output/cacheRead/cacheWrite) matches the
- * shape of pi-ai's `Usage`. The /cost overlay aggregates it via
- * `aggregateCostEntries`; the TUI footer consumes the session sum through
- * `ObservabilityContract.sessionTokens()`.
+ * Per-entry token breakdown (input/output/cacheRead/cacheWrite/reasoning)
+ * matches the shape of pi-ai's `Usage` plus provider-specific reasoning detail
+ * fields. The /cost overlay aggregates it via `aggregateCostEntries`; the TUI
+ * footer consumes the session sum through `ObservabilityContract.sessionTokens()`.
  */
 
 export interface UsageBreakdown {
@@ -16,6 +16,7 @@ export interface UsageBreakdown {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	reasoningTokens: number;
 	totalTokens: number;
 }
 
@@ -28,6 +29,7 @@ export interface CostEntry {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	reasoningTokens: number;
 }
 
 export interface CostTracker {
@@ -45,7 +47,7 @@ export interface CostTracker {
 }
 
 function emptyBreakdown(): UsageBreakdown {
-	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 };
 }
 
 export function createCostTracker(): CostTracker {
@@ -59,12 +61,24 @@ export function createCostTracker(): CostTracker {
 			const output = breakdown?.output ?? 0;
 			const cacheRead = breakdown?.cacheRead ?? 0;
 			const cacheWrite = breakdown?.cacheWrite ?? 0;
-			log.push({ providerId, modelId, tokens, usd: resolvedUsd, input, output, cacheRead, cacheWrite });
+			const reasoningTokens = breakdown?.reasoningTokens ?? 0;
+			log.push({
+				providerId,
+				modelId,
+				tokens,
+				usd: resolvedUsd,
+				input,
+				output,
+				cacheRead,
+				cacheWrite,
+				reasoningTokens,
+			});
 			total += resolvedUsd;
 			totals.input += input;
 			totals.output += output;
 			totals.cacheRead += cacheRead;
 			totals.cacheWrite += cacheWrite;
+			totals.reasoningTokens += reasoningTokens;
 			totals.totalTokens += tokens;
 			return resolvedUsd;
 		},
@@ -84,6 +98,7 @@ export function createCostTracker(): CostTracker {
 			totals.output = 0;
 			totals.cacheRead = 0;
 			totals.cacheWrite = 0;
+			totals.reasoningTokens = 0;
 			totals.totalTokens = 0;
 		},
 	};

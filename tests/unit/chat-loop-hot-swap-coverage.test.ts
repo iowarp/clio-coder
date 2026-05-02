@@ -187,7 +187,8 @@ function makeObservability(): { obs: ObservabilityContract; calls: CostEntry[] }
 		telemetry: () => ({}) as never,
 		metrics: () => ({}) as never,
 		sessionCost: () => 0,
-		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 }) as UsageBreakdown,
+		sessionTokens: () =>
+			({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }) as UsageBreakdown,
 		costEntries: () => calls,
 		recordTokens: (providerId, modelId, tokens, costUsd, breakdown) => {
 			calls.push({
@@ -199,6 +200,7 @@ function makeObservability(): { obs: ObservabilityContract; calls: CostEntry[] }
 				output: breakdown?.output ?? 0,
 				cacheRead: breakdown?.cacheRead ?? 0,
 				cacheWrite: breakdown?.cacheWrite ?? 0,
+				reasoningTokens: breakdown?.reasoningTokens ?? 0,
 			});
 		},
 	};
@@ -214,9 +216,17 @@ function fakeAgentEnd(modelId: string): AgentEvent {
 				content: [{ type: "text", text: "ok" }],
 				stopReason: "stop",
 				timestamp: 0,
-				usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150, cost: { total: 0.0042 } },
+				usage: {
+					input: 100,
+					output: 50,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 150,
+					outputDetails: { reasoningTokens: 9 },
+					cost: { total: 0.0042 },
+				},
 				model: modelId,
-			} as AgentMessage,
+			} as unknown as AgentMessage,
 		],
 	} as AgentEvent;
 }
@@ -277,6 +287,7 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 		strictEqual(calls[0]?.providerId, "ep1");
 		strictEqual(calls[0]?.modelId, "model-b", "must record under the swapped model id, not the build-time id");
 		strictEqual(calls[0]?.tokens, 150);
+		strictEqual(calls[0]?.reasoningTokens, 9);
 	});
 
 	it("compiles the prompt with the clamped thinking level after a hot-swap to a non-reasoning model", async () => {

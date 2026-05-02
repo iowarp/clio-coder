@@ -271,6 +271,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				sessionId: input.sessionId,
 				cwd: input.cwd,
 				tokenCount: 0,
+				reasoningTokenCount: 0,
 				costUsd: 0,
 			};
 			runs.unshift(envelope);

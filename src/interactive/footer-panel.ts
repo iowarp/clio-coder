@@ -61,16 +61,19 @@ export function formatFooterTokens(n: number): string {
 /**
  * Build the token-counter footer segment. Returns `null` when no usage has
  * landed yet so the footer stays uncluttered at session start. Cache-read
- * tokens are omitted here to keep the line scannable; the `/cost` overlay
- * exposes the full breakdown.
+ * tokens are omitted here to keep the line scannable; reasoning tokens are
+ * shown only when the provider exposes them. The `/cost` overlay exposes the
+ * full breakdown.
  */
 export function tokensSegment(usage: UsageBreakdown | null | undefined): string | null {
 	if (!usage) return null;
 	const input = Math.max(0, usage.input ?? 0);
 	const output = Math.max(0, usage.output ?? 0);
+	const reasoning = Math.max(0, usage.reasoningTokens ?? 0);
 	const total = Math.max(0, usage.totalTokens ?? input + output);
-	if (input + output + total === 0) return null;
-	return `${ARROW_UP}${formatFooterTokens(input)} ${ARROW_DOWN}${formatFooterTokens(output)}`;
+	if (input + output + reasoning + total === 0) return null;
+	const reasoningPart = reasoning > 0 ? ` r${formatFooterTokens(reasoning)}` : "";
+	return `${ARROW_UP}${formatFooterTokens(input)} ${ARROW_DOWN}${formatFooterTokens(output)}${reasoningPart}`;
 }
 
 export interface FooterPanel {
@@ -202,7 +205,7 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 			streamingFrame = 0;
 		}
 
-		// Token counters (input/output). Rendered right of the thinking-level
+		// Token counters (input/output/reasoning). Rendered right of the thinking-level
 		// segment and left of the streaming indicator so the running totals
 		// stay visible while a response is in flight. The segment disappears
 		// entirely when no usage has landed yet (first boot / fresh session).

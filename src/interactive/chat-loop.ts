@@ -875,6 +875,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							output: summary.output,
 							cacheRead: summary.cacheRead,
 							cacheWrite: summary.cacheWrite,
+							reasoningTokens: summary.reasoning,
 							totalTokens: summary.tokens,
 						},
 					);

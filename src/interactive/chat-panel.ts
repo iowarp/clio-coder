@@ -106,7 +106,7 @@ type TranscriptEntry =
 			/**
 			 * Raw thinking content from `thinking_delta` events plus any
 			 * `thinking` blocks captured on `message_end`. Rendered as a dim
-			 * one-line preview by default once the turn settles; expanded into
+			 * one-line marker by default once the turn settles; expanded into
 			 * a rail-prefixed body via `toggleLastThinking()` (Ctrl+T). Stays
 			 * suppressed while `pending === true` so streaming chain-of-thought
 			 * does not flicker into the visible stream before the turn
@@ -115,7 +115,7 @@ type TranscriptEntry =
 			thinking: string;
 			/**
 			 * Whether the thinking block renders as the full body (true) or
-			 * the one-line dim preview (false/undefined). Toggled by
+			 * the one-line dim marker (false/undefined). Toggled by
 			 * `toggleLastThinking()`. Default collapsed; new thinking does not
 			 * auto-expand during streaming.
 			 */
@@ -134,7 +134,7 @@ export interface ChatPanel extends Component {
 	setSummaryLine(line: string | null): void;
 	toggleLastToolExpanded(): boolean;
 	/**
-	 * Flip thinking-bearing assistant turns between the one-line dim preview
+	 * Flip thinking-bearing assistant turns between the one-line dim marker
 	 * and the full rail-prefixed body. The target visibility is derived from
 	 * the most recent thinking block, then applied to prior thinking history
 	 * so Ctrl+T behaves like a transcript-level thinking visibility toggle.
@@ -236,35 +236,25 @@ function prefixClioLabel(lines: string[], width: number): string[] {
 }
 
 /**
- * Total visible width budget for the collapsed `thinking: <preview>...` line.
- * Includes the `thinking: ` label so the truncation hugs ~60 columns total.
+ * Static marker used when thinking is folded. This matches pi-coding-agent's
+ * hidden-thinking presentation and avoids previewing reasoning content.
  */
-const THINKING_PREVIEW_WIDTH = 60;
-const THINKING_PREVIEW_LABEL = "thinking: ";
+const THINKING_HIDDEN_LABEL = "Thinking...";
 const THINKING_LINE_LIMIT = 12;
 
 /**
  * Render the assistant turn's thinking block. Collapsed (default) returns a
- * single dim line `thinking: <preview>...` with the preview clipped to
- * `THINKING_PREVIEW_WIDTH` visible columns. Expanded returns the full body
- * dimmed and prefixed with a dim `│ ` rail, capped at `THINKING_LINE_LIMIT`
- * lines with a tail `... N more lines hidden` overflow message. Mirrors the
- * tool toggle's lab-notebook minimalism: no colored glyphs, no boxes.
+ * single dim `Thinking...` marker. Expanded returns the full body dimmed and
+ * prefixed with a dim `│ ` rail, capped at `THINKING_LINE_LIMIT` lines with a
+ * tail `... N more lines hidden` overflow message. Mirrors the tool toggle's
+ * lab-notebook minimalism: no colored glyphs, no boxes.
  */
 function renderThinkingLines(thinking: string, expanded: boolean, width: number): string[] {
 	if (thinking.length === 0) return [];
 	const dimWrap = (s: string): string => `${ANSI_DIM}${s}${ANSI_RESET}`;
 	if (!expanded) {
-		const collapsed = thinking.replace(/\s+/g, " ").trim();
-		const contentBudget = Math.max(1, THINKING_PREVIEW_WIDTH - THINKING_PREVIEW_LABEL.length);
-		const preview = truncateToWidth(collapsed, contentBudget, "...", false);
-		// Clip the composed line to the actual terminal width so very narrow
-		// terminals (e.g. 33 cols) do not overflow pi-tui's render check. The
-		// inner preview budget hugs the ~60-col target on wide terminals; the
-		// outer truncate is a safety net for the narrow case.
-		const composed = `${THINKING_PREVIEW_LABEL}${preview}`;
 		const lineBudget = Math.max(1, width);
-		return [dimWrap(truncateToWidth(composed, lineBudget, "...", false))];
+		return [dimWrap(truncateToWidth(THINKING_HIDDEN_LABEL, lineBudget, "...", false))];
 	}
 	const splitLines = thinking.split("\n");
 	const visible: string[] =
@@ -331,7 +321,7 @@ function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: stri
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
 	}
 	const lines: string[] = [];
-	// Thinking renders BEFORE assistant text/tool segments so the dim preview
+	// Thinking renders BEFORE assistant text/tool segments so the folded marker
 	// or expanded rail sits above the response, matching the order the
 	// pi-coding-agent reference uses. Suppressed while `pending === true` so
 	// streaming `thinking_delta` events do not flicker into the visible

@@ -24,7 +24,7 @@ const AGENT_COL_WIDTH = 10;
 const ENDPOINT_COL_WIDTH = 12;
 const MODEL_COL_WIDTH = 16;
 const EXIT_COL_WIDTH = 5;
-const TOKENS_COL_WIDTH = 9;
+const TOKENS_COL_WIDTH = 12;
 const RECEIPT_SUFFIX_WIDTH = 22;
 
 const IDENTITY = (s: string): string => s;
@@ -52,8 +52,13 @@ function fitLeft(text: string, width: number): string {
 	return text.length >= width ? text.slice(0, width) : text.padEnd(width);
 }
 
-function formatReceiptTokens(tokens: number): string {
-	return `${Math.max(0, Math.round(tokens)).toLocaleString("en-US")}t`;
+function formatReceiptTokens(tokens: number, reasoningTokens?: number): string {
+	const base = `${Math.max(0, Math.round(tokens)).toLocaleString("en-US")}t`;
+	const reasoning =
+		typeof reasoningTokens === "number" && Number.isFinite(reasoningTokens) && reasoningTokens > 0
+			? `/r${Math.round(reasoningTokens).toLocaleString("en-US")}`
+			: "";
+	return `${base}${reasoning}`;
 }
 
 function formatReceiptUsd(usd: number): string {
@@ -75,7 +80,7 @@ export function formatReceiptRow(env: RunEnvelope): string {
 	const endpoint = fitLeft(env.endpointId || "-", ENDPOINT_COL_WIDTH);
 	const model = fitLeft(env.wireModelId || "-", MODEL_COL_WIDTH);
 	const exit = fitLeft(env.exitCode === null ? "e=?" : `e=${env.exitCode}`, EXIT_COL_WIDTH);
-	const tokens = formatReceiptTokens(env.tokenCount).padStart(TOKENS_COL_WIDTH);
+	const tokens = formatReceiptTokens(env.tokenCount, env.reasoningTokenCount).padStart(TOKENS_COL_WIDTH);
 	return `${id} ${agent} ${endpoint} ${model} ${exit} ${tokens} ${formatReceiptUsd(env.costUsd)}`;
 }
 
@@ -308,6 +313,9 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	const costUsd = r.costUsd;
 	if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
 		return { ok: false, reason: `costUsd out of range: ${String(costUsd)}` };
+	}
+	if ("reasoningTokenCount" in r && !isNonNegativeFiniteNumber(r.reasoningTokenCount)) {
+		return { ok: false, reason: `reasoningTokenCount out of range: ${String(r.reasoningTokenCount)}` };
 	}
 	if (!isIso8601(r.startedAt)) {
 		return { ok: false, reason: `startedAt not ISO-8601: ${String(r.startedAt)}` };

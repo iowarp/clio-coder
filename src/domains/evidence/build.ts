@@ -1134,6 +1134,7 @@ async function readReceipt(
 
 function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
 	return {
 		id: readString(value, source, "id"),
 		agentId: readString(value, source, "agentId"),
@@ -1152,6 +1153,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 		sessionId: readNullableString(value, source, "sessionId"),
 		cwd: readString(value, source, "cwd"),
 		tokenCount: readNumber(value, source, "tokenCount"),
+		...(reasoningTokenCount !== undefined ? { reasoningTokenCount } : {}),
 		costUsd: readNumber(value, source, "costUsd"),
 	};
 }
@@ -1160,6 +1162,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const integrity = value.integrity;
 	if (!isRecord(integrity)) throw new Error(`${source}.integrity: expected object`);
+	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
 	return {
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
@@ -1172,6 +1175,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		endedAt: readString(value, source, "endedAt"),
 		exitCode: readNumber(value, source, "exitCode"),
 		tokenCount: readNumber(value, source, "tokenCount"),
+		...(reasoningTokenCount !== undefined ? { reasoningTokenCount } : {}),
 		costUsd: readNumber(value, source, "costUsd"),
 		compiledPromptHash: readNullableString(value, source, "compiledPromptHash"),
 		staticCompositionHash: readNullableString(value, source, "staticCompositionHash"),
@@ -1245,6 +1249,13 @@ function readNullableString(record: Record<string, unknown>, source: string, fie
 }
 
 function readNumber(record: Record<string, unknown>, source: string, field: string): number {
+	const value = record[field];
+	if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${source}.${field}: expected number`);
+	return value;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, source: string, field: string): number | undefined {
+	if (!(field in record)) return undefined;
 	const value = record[field];
 	if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${source}.${field}: expected number`);
 	return value;

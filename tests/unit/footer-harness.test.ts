@@ -55,7 +55,10 @@ describe("tokensSegment", () => {
 	it("returns null when usage is missing or all-zero", () => {
 		strictEqual(tokensSegment(undefined), null);
 		strictEqual(tokensSegment(null), null);
-		strictEqual(tokensSegment({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 }), null);
+		strictEqual(
+			tokensSegment({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
+			null,
+		);
 	});
 	it("renders an ↑input ↓output counter for a populated breakdown", () => {
 		const segment = tokensSegment({
@@ -63,6 +66,7 @@ describe("tokensSegment", () => {
 			output: 567,
 			cacheRead: 200,
 			cacheWrite: 0,
+			reasoningTokens: 0,
 			totalTokens: 2001,
 		});
 		strictEqual(typeof segment, "string");
@@ -80,10 +84,22 @@ describe("tokensSegment", () => {
 			output: 0,
 			cacheRead: 0,
 			cacheWrite: 0,
+			reasoningTokens: 0,
 			totalTokens: 500,
 		});
 		strictEqual(typeof segment, "string");
 		strictEqual((segment as string).includes("↑0"), true);
 		strictEqual((segment as string).includes("↓0"), true);
+	});
+	it("renders reasoning tokens when providers expose them", () => {
+		const segment = tokensSegment({
+			input: 100,
+			output: 200,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoningTokens: 64,
+			totalTokens: 300,
+		});
+		strictEqual(segment, "↑100 ↓200 r64");
 	});
 });
