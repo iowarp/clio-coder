@@ -4,7 +4,6 @@ import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
-import { ensureSelfDevBranch, resolveSelfDevMode, selfDevActivationSource } from "../core/self-dev.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -50,7 +49,6 @@ import {
 } from "../domains/session/protected-artifacts.js";
 import { openSession } from "../engine/session.js";
 import type { Model } from "../engine/types.js";
-import { type HarnessHandle, startHarness } from "../harness/index.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { startInteractive } from "../interactive/index.js";
@@ -61,11 +59,13 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
+import { applySelfDevToolGuards } from "../selfdev/guards.js";
+import { type HarnessHandle, startHarness } from "../selfdev/harness/index.js";
 import { renderDevMemoryFragment } from "../selfdev/memory.js";
+import { ensureSelfDevBranch, resolveSelfDevMode, selfDevActivationSource } from "../selfdev/mode.js";
 import { createSelfDevFooterLine } from "../selfdev/ui/dev-footer.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
-import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
 
 export interface BootResult {
 	exitCode: number;

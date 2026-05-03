@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import type { ToolRegistry, ToolSpec } from "../tools/registry.js";
+import type { ToolRegistry, ToolSpec } from "../../tools/registry.js";
 import { compileTool } from "./hot-compile.js";
 
 export type ReloadResult = { kind: "ok"; name: string; elapsedMs: number } | { kind: "error"; error: string };

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { reloadToolFile } from "../../src/harness/tool-reloader.js";
+import { reloadToolFile } from "../../src/selfdev/harness/tool-reloader.js";
 import type { ToolRegistry, ToolSpec } from "../../src/tools/registry.js";
 
 function fakeRegistry(): ToolRegistry & { lastRegistered: ToolSpec | null } {

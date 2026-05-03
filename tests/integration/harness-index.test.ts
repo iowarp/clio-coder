@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ToolName } from "../../src/core/tool-names.js";
-import { startHarness } from "../../src/harness/index.js";
+import { startHarness } from "../../src/selfdev/harness/index.js";
 import type { ToolRegistry, ToolSpec } from "../../src/tools/registry.js";
 
 function fakeRegistry(): ToolRegistry & { specs: ToolSpec[] } {

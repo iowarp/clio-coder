@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { clioConfigDir } from "../core/xdg.js";
 import { getCachedDefaultRulePacks } from "../domains/safety/rule-pack-loader.js";
-import { clioConfigDir } from "./xdg.js";
 
 export const DEV_FILE_NAME = "CLIO-dev.md";
 
@@ -164,7 +164,7 @@ function selfDevRestartRequired(rel: string): boolean {
 		rel.startsWith("src/interactive/") ||
 		rel.startsWith("src/entry/") ||
 		rel.startsWith("src/cli/") ||
-		rel.startsWith("src/harness/") ||
+		rel.startsWith("src/selfdev/harness/") ||
 		rel.startsWith("src/")
 	);
 }

@@ -110,7 +110,7 @@ export function classifyChange(absPath: string, repoRoot: string): ClassifyResul
 	if (rel.startsWith("src/cli/")) {
 		return { class: "restart", reason: "argv already parsed" };
 	}
-	if (rel.startsWith("src/harness/")) {
+	if (rel.startsWith("src/selfdev/harness/")) {
 		return { class: "restart", reason: "changing hot-reload code while hot-reload runs is a footgun" };
 	}
 

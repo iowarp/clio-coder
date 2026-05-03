@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildRestartPlan } from "../../src/harness/restart.js";
+import { buildRestartPlan } from "../../src/selfdev/harness/restart.js";
 
 describe("buildRestartPlan", () => {
 	it("captures argv from index 1 onwards and injects CLIO_RESUME_SESSION_ID", () => {

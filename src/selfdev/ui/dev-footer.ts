@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { HarnessIntrospection } from "../../harness/state.js";
+import type { HarnessIntrospection } from "../harness/state.js";
 
 export interface SelfDevFooterDeps {
 	repoRoot: string;

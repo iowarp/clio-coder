@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { classifyChange } from "../../src/harness/classifier.js";
+import { classifyChange } from "../../src/selfdev/harness/classifier.js";
 
 const REPO = "/repo";
 
@@ -22,7 +22,7 @@ describe("classifyChange", () => {
 	it("restart: src/tools/truncate-utf8.ts", () => strictEqual(classify("src/tools/truncate-utf8.ts").class, "restart"));
 	it("restart: tool infrastructure and session-bound tool factories", () => {
 		strictEqual(classify("src/tools/policy.ts").class, "restart");
-		strictEqual(classify("src/tools/self-dev-guards.ts").class, "restart");
+		strictEqual(classify("src/selfdev/guards.ts").class, "restart");
 		strictEqual(classify("src/tools/workspace-context.ts").class, "restart");
 		strictEqual(classify("src/tools/codewiki/shared.ts").class, "restart");
 	});
@@ -38,8 +38,8 @@ describe("classifyChange", () => {
 	it("restart: src/cli/clio.ts", () => strictEqual(classify("src/cli/clio.ts").class, "restart"));
 	it("restart: src/interactive/overlays/model-selector.ts", () =>
 		strictEqual(classify("src/interactive/overlays/model-selector.ts").class, "restart"));
-	it("restart: src/harness/classifier.ts (self)", () =>
-		strictEqual(classify("src/harness/classifier.ts").class, "restart"));
+	it("restart: src/selfdev/harness/classifier.ts (self)", () =>
+		strictEqual(classify("src/selfdev/harness/classifier.ts").class, "restart"));
 	it("ignore: tests/unit/foo.test.ts", () => strictEqual(classify("tests/unit/foo.test.ts").class, "ignore"));
 	it("ignore: docs/README.md", () => strictEqual(classify("docs/README.md").class, "ignore"));
 	it("ignore: src/tools/README.md", () => strictEqual(classify("src/tools/README.md").class, "ignore"));
@@ -67,7 +67,7 @@ describe("classifyChange", () => {
 			"src/interactive/overlays/model.ts", // restart (interactive)
 			"src/entry/orchestrator.ts", // restart (entry)
 			"src/cli/clio.ts", // restart (cli)
-			"src/harness/classifier.ts", // restart (harness self)
+			"src/selfdev/harness/classifier.ts", // restart (harness self)
 			"src/unknown-subtree/foo.ts", // restart (unknown src)
 			"tests/unit/foo.test.ts", // ignore (tests)
 			"docs/README.md", // ignore (docs)
