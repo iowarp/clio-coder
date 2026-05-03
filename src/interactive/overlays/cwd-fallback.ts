@@ -19,6 +19,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
 
@@ -113,5 +114,5 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 	};
 	const box = new CwdFallbackOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: CWD_FALLBACK_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: CWD_FALLBACK_OVERLAY_WIDTH, title: "Session cwd" });
 }

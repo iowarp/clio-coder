@@ -6,6 +6,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const AUTH_SELECTOR_WIDTH = 84;
 const VISIBLE_ROWS = 10;
@@ -47,5 +48,5 @@ export function openAuthSelectorOverlay(tui: TUI, deps: OpenAuthSelectorDeps): O
 	};
 	const box = new AuthSelectorBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: AUTH_SELECTOR_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: AUTH_SELECTOR_WIDTH, title: "Connection" });
 }

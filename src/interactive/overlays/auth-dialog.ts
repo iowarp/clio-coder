@@ -1,4 +1,5 @@
 import { Box, Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
 
@@ -114,7 +115,7 @@ export interface AuthDialogHandle {
 
 export function openAuthDialog(tui: TUI, title: string, onCancel: () => void): AuthDialogHandle {
 	const box = new AuthDialogBox(title, onCancel);
-	const handle = tui.showOverlay(box, { anchor: "center", width: AUTH_DIALOG_WIDTH });
+	const handle = showClioOverlayFrame(tui, box, { anchor: "center", width: AUTH_DIALOG_WIDTH, title: "Auth" });
 	return {
 		handle,
 		controller: {

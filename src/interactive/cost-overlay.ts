@@ -2,11 +2,11 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
+import { brandedBottomBorder, brandedContentRow, brandedDividerRow, brandedTopBorder } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
 const TITLE_PREFIX = "─ Session usage";
 const HINT = "[Esc] close";
-const ANSI_RESET = "\u001b[0m";
 
 export const COST_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
@@ -20,11 +20,12 @@ export interface CostRow {
 	cacheRead: number;
 	cacheWrite: number;
 	reasoningTokens: number;
+	apiCalls: number;
 	usd: number;
 }
 
 function padContent(text: string, contentWidth: number): string {
-	return `│ ${truncateToWidth(text, contentWidth, "...", true).replaceAll(ANSI_RESET, "")} │`;
+	return brandedContentRow(text, contentWidth);
 }
 
 function topBorder(contentWidth: number, sessionId: string | null): string {
@@ -32,17 +33,17 @@ function topBorder(contentWidth: number, sessionId: string | null): string {
 	const label = sessionId && sessionId.length > 0 ? `${TITLE_PREFIX} (${sessionId}) ` : `${TITLE_PREFIX} `;
 	if (innerWidth <= label.length) {
 		const truncated = truncateToWidth(label, innerWidth, "...", true);
-		return `┌${truncated.padEnd(innerWidth, "─")}┐`;
+		return brandedTopBorder(truncated, innerWidth);
 	}
-	return `┌${label.padEnd(innerWidth, "─")}┐`;
+	return brandedTopBorder(label, innerWidth);
 }
 
 function bottomBorder(contentWidth: number): string {
-	return `└${"─".repeat(contentWidth + 2)}┘`;
+	return brandedBottomBorder(contentWidth + 2);
 }
 
 function dividerRow(contentWidth: number): string {
-	return padContent("─".repeat(contentWidth), contentWidth);
+	return brandedDividerRow(contentWidth);
 }
 
 function formatTokens(n: number): string {
@@ -70,6 +71,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.cacheRead += entry.cacheRead;
 			existing.cacheWrite += entry.cacheWrite;
 			existing.reasoningTokens += entry.reasoningTokens;
+			existing.apiCalls += entry.apiCalls ?? 1;
 			existing.usd += entry.usd;
 			continue;
 		}
@@ -83,6 +85,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			cacheRead: entry.cacheRead,
 			cacheWrite: entry.cacheWrite,
 			reasoningTokens: entry.reasoningTokens,
+			apiCalls: entry.apiCalls ?? 1,
 			usd: entry.usd,
 		});
 	}
@@ -95,36 +98,45 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 	return rows;
 }
 
-function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "runs" | "usd"> {
+function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "usd"> {
 	return rows.reduce(
 		(acc, row) => ({
+			runs: acc.runs + row.runs,
 			tokens: acc.tokens + row.tokens,
 			input: acc.input + row.input,
 			output: acc.output + row.output,
 			cacheRead: acc.cacheRead + row.cacheRead,
 			cacheWrite: acc.cacheWrite + row.cacheWrite,
 			reasoningTokens: acc.reasoningTokens + row.reasoningTokens,
+			apiCalls: acc.apiCalls + row.apiCalls,
 		}),
-		{ tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0 },
+		{ runs: 0, tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, apiCalls: 0 },
 	);
+}
+
+function formatCacheLine(cacheRead: number, cacheWrite: number, apiCalls: number): string {
+	const avg = apiCalls > 1 && cacheRead > 0 ? `  avg/request ${formatTokens(Math.round(cacheRead / apiCalls))}` : "";
+	return `cached prefix read ${formatTokens(cacheRead)}${avg}  write ${formatTokens(cacheWrite)}`;
 }
 
 function formatSummaryLines(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
 	return [
-		`total ${formatTokens(resolvedTotal)} tokens  cost ${formatUsdCell(totalUsd)}`,
-		`input ${formatTokens(totals.input)}  cache read ${formatTokens(totals.cacheRead)}  cache write ${formatTokens(totals.cacheWrite)}`,
-		`output ${formatTokens(totals.output)}  reasoning ${formatTokens(totals.reasoningTokens)}`,
+		`turns ${formatTokens(totals.runs)}  model requests ${formatTokens(totals.apiCalls)}  cost ${formatUsdCell(totalUsd)}`,
+		`fresh input ${formatTokens(totals.input)}  output ${formatTokens(totals.output)}  reasoning ${formatTokens(totals.reasoningTokens)}`,
+		formatCacheLine(totals.cacheRead, totals.cacheWrite, totals.apiCalls),
+		`processed total ${formatTokens(resolvedTotal)} tokens`,
 	];
 }
 
 function formatRowLines(row: CostRow): string[] {
 	return [
 		`${row.providerId} · ${row.modelId}`,
-		`  runs ${formatTokens(row.runs)}  total ${formatTokens(row.tokens)}  cost ${formatUsdCell(row.usd)}`,
-		`  input ${formatTokens(row.input)}  cache read ${formatTokens(row.cacheRead)}  cache write ${formatTokens(row.cacheWrite)}`,
-		`  output ${formatTokens(row.output)}  reasoning ${formatTokens(row.reasoningTokens)}`,
+		`  turns ${formatTokens(row.runs)}  model requests ${formatTokens(row.apiCalls)}  cost ${formatUsdCell(row.usd)}`,
+		`  fresh input ${formatTokens(row.input)}  output ${formatTokens(row.output)}  reasoning ${formatTokens(row.reasoningTokens)}`,
+		`  ${formatCacheLine(row.cacheRead, row.cacheWrite, row.apiCalls)}`,
+		`  processed total ${formatTokens(row.tokens)} tokens`,
 	];
 }
 

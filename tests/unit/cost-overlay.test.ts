@@ -49,6 +49,7 @@ describe("sumRunUsage", () => {
 		strictEqual(summary.input, 1450);
 		strictEqual(summary.output, 330);
 		strictEqual(summary.tokens, 1780);
+		strictEqual(summary.apiCalls, 3);
 		// Cost arithmetic on floats. Compare with tolerance in one digit.
 		strictEqual(Math.round(summary.costUsd * 1000) / 1000, 0.014);
 	});
@@ -62,6 +63,7 @@ describe("sumRunUsage", () => {
 		strictEqual(summary.hadUsage, false);
 		strictEqual(summary.tokens, 0);
 		strictEqual(summary.costUsd, 0);
+		strictEqual(summary.apiCalls, 0);
 	});
 
 	it("falls back to input+output+cache when totalTokens is missing", () => {
@@ -80,6 +82,7 @@ describe("sumRunUsage", () => {
 		strictEqual(summary.output, 50);
 		strictEqual(summary.cacheRead, 10);
 		strictEqual(summary.cacheWrite, 5);
+		strictEqual(summary.apiCalls, 1);
 	});
 
 	it("tracks reasoning tokens when a provider exposes them", () => {
@@ -95,6 +98,7 @@ describe("sumRunUsage", () => {
 		const summary = sumRunUsage(messages as never);
 		strictEqual(summary.hadReasoning, true);
 		strictEqual(summary.reasoning, 12);
+		strictEqual(summary.apiCalls, 1);
 	});
 });
 
@@ -144,6 +148,7 @@ describe("aggregateCostEntries", () => {
 		strictEqual(aRow?.cacheRead, 12);
 		strictEqual(aRow?.cacheWrite, 3);
 		strictEqual(aRow?.reasoningTokens, 20);
+		strictEqual(aRow?.apiCalls, 2);
 		strictEqual(Math.round((aRow?.usd ?? 0) * 1000) / 1000, 0.03);
 	});
 });
@@ -243,6 +248,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 					cacheRead: 0,
 					cacheWrite: 0,
 					reasoningTokens: 12,
+					apiCalls: 1,
 					usd: 0.014,
 				},
 				{
@@ -255,6 +261,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 					cacheRead: 0,
 					cacheWrite: 0,
 					reasoningTokens: 0,
+					apiCalls: 1,
 					usd: 0.006,
 				},
 			],
@@ -262,9 +269,9 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 		);
 		const joined = lines.join("\n");
 		strictEqual(joined.includes("$0.02"), true);
-		strictEqual(joined.includes("2,380 tokens"), true);
-		strictEqual(joined.includes("input 1,950"), true);
-		strictEqual(joined.includes("cache read 0"), true);
+		strictEqual(joined.includes("processed total 2,380 tokens"), true);
+		strictEqual(joined.includes("fresh input 1,950"), true);
+		strictEqual(joined.includes("cached prefix read 0"), true);
 		strictEqual(joined.includes("reasoning 12"), true);
 		strictEqual(joined.includes("claude-opus-4-7"), true);
 		strictEqual(joined.includes("gpt-5.3"), true);
@@ -285,6 +292,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 					cacheRead: 350,
 					cacheWrite: 0,
 					reasoningTokens: 7,
+					apiCalls: 2,
 					usd: 0,
 				},
 			],
@@ -292,7 +300,7 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 		);
 		const joined = lines.join("\n");
 		strictEqual(joined.includes("cost $0.00 local"), true);
-		strictEqual(joined.includes("cache read 350"), true);
+		strictEqual(joined.includes("cached prefix read 350"), true);
 		strictEqual(joined.includes("reasoning 7"), true);
 	});
 });

@@ -18,6 +18,7 @@ export interface UsageBreakdown {
 	cacheWrite: number;
 	reasoningTokens: number;
 	totalTokens: number;
+	apiCalls?: number;
 }
 
 export interface CostEntry {
@@ -30,6 +31,7 @@ export interface CostEntry {
 	cacheRead: number;
 	cacheWrite: number;
 	reasoningTokens: number;
+	apiCalls?: number;
 }
 
 export interface CostTracker {
@@ -62,6 +64,7 @@ export function createCostTracker(): CostTracker {
 			const cacheRead = breakdown?.cacheRead ?? 0;
 			const cacheWrite = breakdown?.cacheWrite ?? 0;
 			const reasoningTokens = breakdown?.reasoningTokens ?? 0;
+			const apiCalls = breakdown?.apiCalls;
 			log.push({
 				providerId,
 				modelId,
@@ -72,6 +75,7 @@ export function createCostTracker(): CostTracker {
 				cacheRead,
 				cacheWrite,
 				reasoningTokens,
+				...(apiCalls !== undefined ? { apiCalls } : {}),
 			});
 			total += resolvedUsd;
 			totals.input += input;

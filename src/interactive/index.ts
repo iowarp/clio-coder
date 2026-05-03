@@ -27,6 +27,7 @@ import {
 	type SelectItem,
 	Text,
 	TUI,
+	visibleWidth,
 } from "../engine/tui.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -695,11 +696,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	applyEditorModeTheme();
 
 	const superOverlayLines = renderSuperOverlayLines();
-	const superOverlayWidth = superOverlayLines.reduce((max, line) => Math.max(max, line.length), 0);
+	const superOverlayWidth = superOverlayLines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const superOverlay = new Text(superOverlayLines.join("\n"), 0, 0);
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
-	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, line.length), 0);
+	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
 	const io: RunIo = {
 		stdout: (s) => process.stdout.write(s),

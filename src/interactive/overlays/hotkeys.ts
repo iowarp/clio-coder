@@ -1,5 +1,6 @@
 import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
 import type { ClioKeybindingManager, PlatformKeybindingWarning } from "../keybinding-manager.js";
+import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "../overlay-frame.js";
 import { formatKeybindingDetailLines } from "./keybinding-detail.js";
 
 export const HOTKEYS_OVERLAY_WIDTH = 74;
@@ -88,26 +89,28 @@ export function formatHotkeysLines(
 	const keysCol = 24;
 	const actionCol = Math.max(10, contentWidth - keysCol - 5);
 	const lines: string[] = [];
-	lines.push(`┌${" Hotkeys ".padEnd(contentWidth + 2, "─")}┐`);
+	lines.push(brandedTopBorder(" Hotkeys ", contentWidth + 2));
 	for (const warning of options.warnings ?? []) {
 		const keys = warning.keys.map(formatKey).join(" / ");
-		lines.push(`│ ${pad(`! ${warning.id}: ${keys} needs CSI-u (${warning.terminal})`, contentWidth)} │`);
+		lines.push(
+			brandedContentRow(pad(`! ${warning.id}: ${keys} needs CSI-u (${warning.terminal})`, contentWidth), contentWidth),
+		);
 	}
 	if ((options.warnings ?? []).length > 0) {
-		lines.push(`│ ${pad("", contentWidth)} │`);
+		lines.push(brandedContentRow(pad("", contentWidth), contentWidth));
 	}
 	let lastScope: string | null = null;
 	entries.forEach((hk, index) => {
 		if (hk.scope !== lastScope) {
 			lastScope = hk.scope;
-			lines.push(`│ ${pad(`── ${hk.scope.toUpperCase()}`, contentWidth)} │`);
+			lines.push(brandedContentRow(pad(`── ${hk.scope.toUpperCase()}`, contentWidth), contentWidth));
 		}
 		const marker = index === options.selectedIndex ? ">" : " ";
 		const row = `${marker} ${pad(hk.keys, keysCol)}  ${pad(hk.action, actionCol)}`;
-		lines.push(`│ ${pad(row, contentWidth)} │`);
+		lines.push(brandedContentRow(pad(row, contentWidth), contentWidth));
 	});
-	lines.push(`│ ${pad("[Up/Down] select  [E] details  [Esc] close", contentWidth)} │`);
-	lines.push(`└${"─".repeat(contentWidth + 2)}┘`);
+	lines.push(brandedContentRow(pad("[Up/Down] select  [E] details  [Esc] close", contentWidth), contentWidth));
+	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }
 

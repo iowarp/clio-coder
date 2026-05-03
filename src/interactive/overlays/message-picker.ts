@@ -8,6 +8,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 12;
@@ -135,5 +136,5 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	};
 	const box = new MessagePickerOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: MESSAGE_PICKER_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: MESSAGE_PICKER_OVERLAY_WIDTH, title: "Fork" });
 }
