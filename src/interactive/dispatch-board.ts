@@ -1,6 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { RunKind, RunStatus } from "../domains/dispatch/types.js";
+import { brandedAsciiBottomBorder, brandedAsciiContentRow, brandedAsciiTopBorder } from "./overlay-frame.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -134,14 +135,14 @@ const SEPARATOR_LINE = buildSeparatorLine();
 const CONTENT_WIDTH = Math.max(HEADER_LINE.length, EMPTY_MESSAGE.length, HINT_MESSAGE.length);
 
 function frameLine(content: string): string {
-	return `| ${content.padEnd(CONTENT_WIDTH)} |`;
+	return brandedAsciiContentRow(content.padEnd(CONTENT_WIDTH), CONTENT_WIDTH);
 }
 
 function borderLine(title?: string): string {
 	const innerWidth = CONTENT_WIDTH + 2;
-	if (!title) return `+${"-".repeat(innerWidth)}+`;
+	if (!title) return brandedAsciiBottomBorder(innerWidth);
 	const label = ` ${title} `;
-	return `+${label}${"-".repeat(Math.max(0, innerWidth - label.length))}+`;
+	return brandedAsciiTopBorder(label, innerWidth);
 }
 
 function formatElapsedMs(value: number): string {

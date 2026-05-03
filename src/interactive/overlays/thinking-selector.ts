@@ -14,6 +14,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const THINKING_OVERLAY_WIDTH = 44;
 
@@ -75,7 +76,7 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 	};
 	const box = new ThinkingOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: THINKING_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: THINKING_OVERLAY_WIDTH, title: "Thinking" });
 }
 
 /** Current thinking level persisted under settings.orchestrator.thinkingLevel. */

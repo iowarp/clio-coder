@@ -10,6 +10,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -257,7 +258,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const box = new ModelOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: overlayWidth });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: overlayWidth, title: "Models" });
 }
 
 export const __modelSelectorTest = { modelLayoutForWidth, resolveOverlayWidth, truncateModelLabel };

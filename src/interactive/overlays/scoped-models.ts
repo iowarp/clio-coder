@@ -8,6 +8,7 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 import { modelsForEndpoint } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
@@ -119,7 +120,7 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 	};
 	const box = new ScopedOverlayBox(list, items, selected, deps);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: SCOPED_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: SCOPED_OVERLAY_WIDTH, title: "Scoped models" });
 }
 
 export function extractScopeFromSettings(settings: Readonly<ClioSettings>): string[] {

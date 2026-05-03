@@ -14,6 +14,7 @@ import {
 	type TUI,
 	truncateToWidth,
 } from "../engine/tui.js";
+import { showClioOverlayFrame } from "./overlay-frame.js";
 
 export const RECEIPTS_OVERLAY_WIDTH = 78;
 export const RECEIPTS_OVERLAY_MAX_VISIBLE = 10;
@@ -133,11 +134,14 @@ export function openReceiptsOverlay(
 		selectList.onSelect = (item: SelectItem): void => options.onSelect?.(item.value);
 	}
 	const box = new ReceiptsOverlayBox(selectList);
-	box.addChild(new Text(formatReceiptsHeader(envelopes.length), 0, 0));
 	box.addChild(selectList ?? new Text("no dispatch runs yet", 0, 0));
 	box.addChild(new Text("", 0, 0));
 	box.addChild(new Text(RECEIPTS_OVERLAY_HINT, 0, 0));
-	return tui.showOverlay(box, { anchor: "center", width: RECEIPTS_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: RECEIPTS_OVERLAY_WIDTH,
+		title: formatReceiptsHeader(envelopes.length).replace(/^─\s*/, "").replace(/\s*─$/, ""),
+	});
 }
 
 export type ReceiptVerifyResult = { ok: true } | { ok: false; reason: string };

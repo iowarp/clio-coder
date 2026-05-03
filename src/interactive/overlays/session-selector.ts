@@ -11,6 +11,7 @@ import {
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
@@ -213,5 +214,5 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),
 	);
-	return tui.showOverlay(box, { anchor: "center", width: SESSION_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: SESSION_OVERLAY_WIDTH, title: "Resume" });
 }

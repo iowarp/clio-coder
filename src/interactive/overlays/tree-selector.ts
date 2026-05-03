@@ -1,6 +1,7 @@
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { TreeSnapshot, TreeSnapshotNode } from "../../domains/session/tree/navigator.js";
 import { Box, type Component, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
+import { brandedBottomBorder, brandedContentRow, brandedDividerRow, brandedTopBorder } from "../overlay-frame.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -167,9 +168,9 @@ class TreeOverlayView implements Component {
 	render(width: number): string[] {
 		const contentWidth = Math.max(10, width - 4);
 		const lines: string[] = [];
-		lines.push(`┌${" /tree ".padEnd(contentWidth + 2, "─")}┐`);
+		lines.push(brandedTopBorder(" /tree ", contentWidth + 2));
 		if (this.rows.length === 0) {
-			lines.push(`│ ${"(no sessions yet)".padEnd(contentWidth)} │`);
+			lines.push(brandedContentRow("(no sessions yet)".padEnd(contentWidth), contentWidth));
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
@@ -178,19 +179,21 @@ class TreeOverlayView implements Component {
 				const body = formatTreeRow(row, { showTimestamps: this.showTimestamps, width: contentWidth - 2 });
 				const prefix = i === this.highlight ? "▸ " : "  ";
 				const full = `${prefix}${body}`;
-				lines.push(`│ ${full.padEnd(contentWidth)} │`);
+				lines.push(brandedContentRow(full.padEnd(contentWidth), contentWidth));
 			}
 			for (let i = end - this.scrollTop; i < VISIBLE_ROWS; i++) {
-				lines.push(`│ ${" ".repeat(contentWidth)} │`);
+				lines.push(brandedContentRow(" ".repeat(contentWidth), contentWidth));
 			}
 		}
-		lines.push(`├${"─".repeat(contentWidth + 2)}┤`);
+		lines.push(brandedDividerRow(contentWidth));
 		const footer = this.footerText();
-		lines.push(`│ ${truncateToWidth(footer, contentWidth, "", true).padEnd(contentWidth)} │`);
+		lines.push(brandedContentRow(truncateToWidth(footer, contentWidth, "", true).padEnd(contentWidth), contentWidth));
 		if (this.status) {
-			lines.push(`│ ${truncateToWidth(this.status, contentWidth, "", true).padEnd(contentWidth)} │`);
+			lines.push(
+				brandedContentRow(truncateToWidth(this.status, contentWidth, "", true).padEnd(contentWidth), contentWidth),
+			);
 		}
-		lines.push(`└${"─".repeat(contentWidth + 2)}┘`);
+		lines.push(brandedBottomBorder(contentWidth + 2));
 		return lines;
 	}
 

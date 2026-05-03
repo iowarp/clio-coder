@@ -330,6 +330,7 @@ interface RunUsageSummary {
 	cacheRead: number;
 	cacheWrite: number;
 	reasoning: number;
+	apiCalls: number;
 	hadReasoning: boolean;
 	hadUsage: boolean;
 }
@@ -353,6 +354,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		cacheRead: 0,
 		cacheWrite: 0,
 		reasoning: 0,
+		apiCalls: 0,
 		hadReasoning: false,
 		hadUsage: false,
 	};
@@ -375,6 +377,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
 		summary.hadUsage = true;
+		summary.apiCalls += 1;
 		const input = typeof usage.input === "number" ? usage.input : 0;
 		const output = typeof usage.output === "number" ? usage.output : 0;
 		const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
@@ -892,6 +895,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							cacheWrite: summary.cacheWrite,
 							reasoningTokens: summary.reasoning,
 							totalTokens: summary.tokens,
+							apiCalls: summary.apiCalls,
 						},
 					);
 				}

@@ -2,11 +2,11 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
 import { Box, type Component, Loader, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
 const TITLE = "─ Targets ";
 const HINT = "[r] probe selected  [R] probe all  [Esc] close";
-const ANSI_RESET = "\u001b[0m";
 
 export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 export const PROVIDERS_OVERLAY_DISCOVERED_PREVIEW = 4;
@@ -14,19 +14,19 @@ export const PROVIDERS_OVERLAY_DISCOVERED_PREVIEW = 4;
 const IDENTITY = (s: string): string => s;
 
 function padContent(text: string, contentWidth: number): string {
-	return `│ ${truncateToWidth(text, contentWidth, "...", true).replaceAll(ANSI_RESET, "")} │`;
+	return brandedContentRow(text, contentWidth);
 }
 
 function topBorder(contentWidth: number): string {
 	const innerWidth = contentWidth + 2;
 	if (innerWidth <= TITLE.length) {
-		return `┌${"─".repeat(innerWidth)}┐`;
+		return brandedTopBorder("─ ", innerWidth);
 	}
-	return `┌${TITLE.padEnd(innerWidth, "─")}┐`;
+	return brandedTopBorder(TITLE, innerWidth);
 }
 
 function bottomBorder(contentWidth: number): string {
-	return `└${"─".repeat(contentWidth + 2)}┘`;
+	return brandedBottomBorder(contentWidth + 2);
 }
 
 function healthTag(status: EndpointStatus): string {

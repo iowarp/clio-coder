@@ -1,4 +1,5 @@
 import { truncateToWidth } from "../../engine/tui.js";
+import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "../overlay-frame.js";
 
 export const KEYBINDING_DETAIL_OVERLAY_WIDTH = 74;
 
@@ -41,27 +42,27 @@ export function formatKeybindingDetailLines(
 	contentWidth: number = KEYBINDING_DETAIL_OVERLAY_WIDTH - 4,
 ): string[] {
 	const lines: string[] = [];
-	lines.push(`┌${" Keybinding ".padEnd(contentWidth + 2, "─")}┐`);
-	lines.push(`│ ${pad(`Action    ${entry.action}`, contentWidth)} │`);
-	lines.push(`│ ${pad(`Id        ${entry.id}`, contentWidth)} │`);
-	lines.push(`│ ${pad(`Keys      ${entry.keys}`, contentWidth)} │`);
-	lines.push(`│ ${pad(`Source    ${entry.source ?? "static"}`, contentWidth)} │`);
-	lines.push(`│ ${pad("", contentWidth)} │`);
+	lines.push(brandedTopBorder(" Keybinding ", contentWidth + 2));
+	lines.push(brandedContentRow(pad(`Action    ${entry.action}`, contentWidth), contentWidth));
+	lines.push(brandedContentRow(pad(`Id        ${entry.id}`, contentWidth), contentWidth));
+	lines.push(brandedContentRow(pad(`Keys      ${entry.keys}`, contentWidth), contentWidth));
+	lines.push(brandedContentRow(pad(`Source    ${entry.source ?? "static"}`, contentWidth), contentWidth));
+	lines.push(brandedContentRow(pad("", contentWidth), contentWidth));
 	for (const detail of row(
 		"Change",
 		"Edit settings.yaml > keybindings, then restart Clio or reopen the TUI.",
 		contentWidth,
 	)) {
-		lines.push(`│ ${detail} │`);
+		lines.push(brandedContentRow(detail, contentWidth));
 	}
 	if (entry.id.startsWith("clio.")) {
 		const example = `${entry.id}: "alt+<key>"`;
-		lines.push(`│ ${pad(`Example   ${example}`, contentWidth)} │`);
+		lines.push(brandedContentRow(pad(`Example   ${example}`, contentWidth), contentWidth));
 	}
 	for (const warning of entry.warnings ?? []) {
-		lines.push(`│ ${pad(`Warning   ${warning}`, contentWidth)} │`);
+		lines.push(brandedContentRow(pad(`Warning   ${warning}`, contentWidth), contentWidth));
 	}
-	lines.push(`│ ${pad("[Esc] close", contentWidth)} │`);
-	lines.push(`└${"─".repeat(contentWidth + 2)}┘`);
+	lines.push(brandedContentRow(pad("[Esc] close", contentWidth), contentWidth));
+	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }

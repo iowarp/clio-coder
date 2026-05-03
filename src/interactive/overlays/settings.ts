@@ -14,6 +14,7 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
 
 export const SETTINGS_OVERLAY_WIDTH = 84;
 const VISIBLE_ROWS = 12;
@@ -309,5 +310,5 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 	);
 	const box = new SettingsOverlayBox(list);
 	box.addChild(list);
-	return tui.showOverlay(box, { anchor: "center", width: SETTINGS_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: SETTINGS_OVERLAY_WIDTH, title: "Settings" });
 }
