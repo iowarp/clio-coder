@@ -2,10 +2,7 @@
 #
 # Clio-Coder pre-commit hook.
 #
-# Runs `npm run format` and the fast test suite (unit + integration +
-# boundaries). Aborts the commit if either fails, or if `format` rewrote any
-# tracked file. In that case the developer must `git add` the reformatted
-# files and re-run `git commit`.
+# Runs the same CI gate used by GitHub.
 #
 # Install via: `npm run hooks:install`
 #
@@ -17,18 +14,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-echo "[clio pre-commit] running npm run format"
-before_hash="$(git diff | git hash-object --stdin)"
-npm run --silent format
-after_hash="$(git diff | git hash-object --stdin)"
-
-if [ "$before_hash" != "$after_hash" ]; then
-  echo "[clio pre-commit] format rewrote tracked files; review and 'git add' them, then retry the commit." >&2
-  git --no-pager diff --name-only >&2
-  exit 1
-fi
-
-echo "[clio pre-commit] running npm run test"
-npm run --silent test
+echo "[clio pre-commit] running npm run ci"
+npm run --silent ci
 
 echo "[clio pre-commit] ok"

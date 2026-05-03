@@ -25,7 +25,7 @@ npm run test
 npm run build
 ```
 
-Full local gate:
+Local and GitHub gate:
 
 ```bash
 npm run ci

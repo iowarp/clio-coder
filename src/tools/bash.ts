@@ -8,15 +8,11 @@ const MAX_OUTPUT_BYTES = 1_000_000;
 const TRUNCATION_MARKER = "\n[output truncated]\n";
 const CLIO_CONTROL_ENV_KEYS = ["CLIO_DEV", "CLIO_SELF_DEV", "CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
-export interface BashToolOptions {
-	killGraceMs?: number;
-}
-
 function truncate(text: string): string {
 	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
 }
 
-export interface ExecOutcome {
+interface ExecOutcome {
 	error: NodeJS.ErrnoException | null;
 	stdout: string;
 	stderr: string;
@@ -33,12 +29,11 @@ function buildToolEnv(): NodeJS.ProcessEnv {
 	return env;
 }
 
-export function execBash(
+function execBash(
 	command: string,
 	cwd: string | undefined,
 	timeout: number,
 	signal?: AbortSignal,
-	options: BashToolOptions = {},
 ): Promise<ExecOutcome> {
 	return new Promise((resolve) => {
 		let aborted = false;
@@ -84,7 +79,7 @@ export function execBash(
 			sendSignal("SIGTERM");
 			killGraceTimer = setTimeout(() => {
 				sendSignal("SIGKILL");
-			}, options.killGraceMs ?? 5000);
+			}, 5000);
 		};
 
 		function onAbort(): void {

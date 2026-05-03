@@ -1,8 +1,20 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { bashTool, buildToolEnv, execBash } from "../../src/tools/bash.js";
+import { bashTool, buildToolEnv } from "../../src/tools/bash.js";
 
 const ORIGINAL_ENV = { ...process.env };
+
+async function waitForFile(path: string, timeoutMs = 1000): Promise<void> {
+	const deadline = performance.now() + timeoutMs;
+	while (performance.now() <= deadline) {
+		if (existsSync(path)) return;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error(`timed out waiting for ${path}`);
+}
 
 afterEach(() => {
 	for (const key of Object.keys(process.env)) {
@@ -83,34 +95,29 @@ describe("bash tool environment", () => {
 
 	it("escalates aborted commands that ignore sigterm", async () => {
 		const controller = new AbortController();
-		const killGraceMs = 50;
-		// The shell runs with `-l`, which on cold CI runners can spend a few
-		// hundred ms reading /etc/profile before reaching the user command. If
-		// SIGTERM arrives before the trap is installed, bash dies at the
-		// default disposition and the escalation path never runs. Wait long
-		// enough for the trap to take effect on the slowest runners we see.
-		// Use `performance.now()` for the elapsed measurement: WSL2 (and any
-		// hypervisor that re-syncs its guest clock) can jump `Date.now()`
-		// backwards by seconds at a time, which made this assertion appear to
-		// fail when the actual SIGKILL escalation fired on the correct
-		// monotonic schedule. libuv-backed `setTimeout` already uses the
-		// monotonic clock; the test just needs to read the same source.
-		const startedAt = performance.now();
-		const started = execBash(
-			'trap "" TERM; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
-			undefined,
-			16_000,
-			controller.signal,
-			{ killGraceMs },
-		);
-		setTimeout(() => controller.abort(), 1500);
-		const result = await started;
-		const elapsedMs = performance.now() - startedAt;
+		const scratch = mkdtempSync(join(tmpdir(), "clio-bash-abort-"));
+		const readyFile = join(scratch, "ready");
+		try {
+			const started = bashTool.run(
+				{
+					command: `READY=${JSON.stringify(readyFile)}; trap "" TERM; printf ready > "$READY"; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done`,
+					timeout_ms: 16_000,
+				},
+				{ signal: controller.signal },
+			);
+			await waitForFile(readyFile);
+			const startedAt = performance.now();
+			controller.abort();
+			const result = await started;
+			const elapsedMs = performance.now() - startedAt;
 
-		strictEqual(result.aborted, true);
-		strictEqual((result.error as { signal?: string } | null)?.signal, "SIGKILL");
-		ok(elapsedMs >= 1500 + killGraceMs - 20, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
-		ok(elapsedMs < 1500 + 2_000, `expected abort escalation within window, got ${elapsedMs}ms`);
+			strictEqual(result.kind, "error");
+			if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
+			ok(elapsedMs >= 4_500, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
+			ok(elapsedMs < 9_000, `expected abort escalation within window, got ${elapsedMs}ms`);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 
 	it("reports output cap exits explicitly", async () => {

@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fast:
+  ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -31,4 +31,4 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fd-find
       - run: npm ci --prefer-offline --no-audit --no-fund
-      - run: npm run ci:fast
+      - run: npm run ci
