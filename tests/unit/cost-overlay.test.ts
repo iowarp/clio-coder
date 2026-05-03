@@ -99,7 +99,7 @@ describe("sumRunUsage", () => {
 });
 
 describe("aggregateCostEntries", () => {
-	it("groups by provider::model and sums runs, tokens, and usd", () => {
+	it("groups by provider::model and sums runs, tokens, breakdown, and usd", () => {
 		const rows = aggregateCostEntries([
 			{
 				providerId: "a",
@@ -108,8 +108,8 @@ describe("aggregateCostEntries", () => {
 				usd: 0.01,
 				input: 60,
 				output: 40,
-				cacheRead: 0,
-				cacheWrite: 0,
+				cacheRead: 5,
+				cacheWrite: 1,
 				reasoningTokens: 12,
 			},
 			{
@@ -119,8 +119,8 @@ describe("aggregateCostEntries", () => {
 				usd: 0.02,
 				input: 120,
 				output: 80,
-				cacheRead: 0,
-				cacheWrite: 0,
+				cacheRead: 7,
+				cacheWrite: 2,
 				reasoningTokens: 8,
 			},
 			{
@@ -139,6 +139,10 @@ describe("aggregateCostEntries", () => {
 		const aRow = rows.find((r) => r.providerId === "a");
 		strictEqual(aRow?.runs, 2);
 		strictEqual(aRow?.tokens, 300);
+		strictEqual(aRow?.input, 180);
+		strictEqual(aRow?.output, 120);
+		strictEqual(aRow?.cacheRead, 12);
+		strictEqual(aRow?.cacheWrite, 3);
 		strictEqual(aRow?.reasoningTokens, 20);
 		strictEqual(Math.round((aRow?.usd ?? 0) * 1000) / 1000, 0.03);
 	});
@@ -234,28 +238,61 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 					modelId: "claude-opus-4-7",
 					runs: 1,
 					tokens: 1780,
+					input: 1450,
+					output: 330,
+					cacheRead: 0,
+					cacheWrite: 0,
 					reasoningTokens: 12,
 					usd: 0.014,
 				},
-				{ providerId: "openai", modelId: "gpt-5.3", runs: 1, tokens: 600, reasoningTokens: 0, usd: 0.006 },
+				{
+					providerId: "openai",
+					modelId: "gpt-5.3",
+					runs: 1,
+					tokens: 600,
+					input: 500,
+					output: 100,
+					cacheRead: 0,
+					cacheWrite: 0,
+					reasoningTokens: 0,
+					usd: 0.006,
+				},
 			],
 			{ sessionId: "sess-1" },
 		);
 		const joined = lines.join("\n");
 		strictEqual(joined.includes("$0.02"), true);
 		strictEqual(joined.includes("2,380 tokens"), true);
-		strictEqual(joined.includes("12 reasoning"), true);
+		strictEqual(joined.includes("input 1,950"), true);
+		strictEqual(joined.includes("cache read 0"), true);
+		strictEqual(joined.includes("reasoning 12"), true);
 		strictEqual(joined.includes("claude-opus-4-7"), true);
 		strictEqual(joined.includes("gpt-5.3"), true);
 	});
 
-	it("treats zero-USD entries as `(local)` so free local runs read clearly", () => {
+	it("shows zero-USD entries as local and keeps the cost visible for long model names", () => {
 		const lines = formatCostOverlayLines(
 			0,
 			500,
-			[{ providerId: "ollama", modelId: "llama3.1", runs: 1, tokens: 500, reasoningTokens: 0, usd: 0 }],
+			[
+				{
+					providerId: "mini",
+					modelId: "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+					runs: 1,
+					tokens: 500,
+					input: 120,
+					output: 30,
+					cacheRead: 350,
+					cacheWrite: 0,
+					reasoningTokens: 7,
+					usd: 0,
+				},
+			],
 			{ sessionId: null },
 		);
-		strictEqual(lines.join("\n").includes("(local)"), true);
+		const joined = lines.join("\n");
+		strictEqual(joined.includes("cost $0.00 local"), true);
+		strictEqual(joined.includes("cache read 350"), true);
+		strictEqual(joined.includes("reasoning 7"), true);
 	});
 });

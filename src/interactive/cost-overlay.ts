@@ -4,7 +4,7 @@ import type { CostEntry, ObservabilityContract } from "../domains/observability/
 import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
-const TITLE_PREFIX = "─ Session cost";
+const TITLE_PREFIX = "─ Session usage";
 const HINT = "[Esc] close";
 const ANSI_RESET = "\u001b[0m";
 
@@ -15,6 +15,10 @@ export interface CostRow {
 	modelId: string;
 	runs: number;
 	tokens: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
 	reasoningTokens: number;
 	usd: number;
 }
@@ -50,7 +54,7 @@ function formatUsd(n: number): string {
 }
 
 function formatUsdCell(usd: number): string {
-	return usd === 0 ? `${formatUsd(0)} (local)` : formatUsd(usd);
+	return usd === 0 ? `${formatUsd(0)} local` : formatUsd(usd);
 }
 
 export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow[] {
@@ -61,6 +65,10 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 		if (existing) {
 			existing.runs += 1;
 			existing.tokens += entry.tokens;
+			existing.input += entry.input;
+			existing.output += entry.output;
+			existing.cacheRead += entry.cacheRead;
+			existing.cacheWrite += entry.cacheWrite;
 			existing.reasoningTokens += entry.reasoningTokens;
 			existing.usd += entry.usd;
 			continue;
@@ -70,6 +78,10 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			modelId: entry.modelId,
 			runs: 1,
 			tokens: entry.tokens,
+			input: entry.input,
+			output: entry.output,
+			cacheRead: entry.cacheRead,
+			cacheWrite: entry.cacheWrite,
 			reasoningTokens: entry.reasoningTokens,
 			usd: entry.usd,
 		});
@@ -83,22 +95,37 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 	return rows;
 }
 
-function formatHeader(): string {
-	const provider = "provider".padEnd(16);
-	const model = "model".padEnd(20);
-	const runs = "runs".padStart(4);
-	const tokens = "tokens".padStart(8);
-	const reasoning = "reason".padStart(8);
-	return `  ${provider} ${model} ${runs} ${tokens} ${reasoning}  USD`;
+function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "runs" | "usd"> {
+	return rows.reduce(
+		(acc, row) => ({
+			tokens: acc.tokens + row.tokens,
+			input: acc.input + row.input,
+			output: acc.output + row.output,
+			cacheRead: acc.cacheRead + row.cacheRead,
+			cacheWrite: acc.cacheWrite + row.cacheWrite,
+			reasoningTokens: acc.reasoningTokens + row.reasoningTokens,
+		}),
+		{ tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0 },
+	);
 }
 
-function formatRow(row: CostRow): string {
-	const provider = row.providerId.padEnd(16);
-	const model = row.modelId.padEnd(20);
-	const runs = String(row.runs).padStart(4);
-	const tokens = formatTokens(row.tokens).padStart(8);
-	const reasoning = formatTokens(row.reasoningTokens).padStart(8);
-	return `  ${provider} ${model} ${runs} ${tokens} ${reasoning}  ${formatUsdCell(row.usd)}`;
+function formatSummaryLines(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
+	const totals = sumRows(rows);
+	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
+	return [
+		`total ${formatTokens(resolvedTotal)} tokens  cost ${formatUsdCell(totalUsd)}`,
+		`input ${formatTokens(totals.input)}  cache read ${formatTokens(totals.cacheRead)}  cache write ${formatTokens(totals.cacheWrite)}`,
+		`output ${formatTokens(totals.output)}  reasoning ${formatTokens(totals.reasoningTokens)}`,
+	];
+}
+
+function formatRowLines(row: CostRow): string[] {
+	return [
+		`${row.providerId} · ${row.modelId}`,
+		`  runs ${formatTokens(row.runs)}  total ${formatTokens(row.tokens)}  cost ${formatUsdCell(row.usd)}`,
+		`  input ${formatTokens(row.input)}  cache read ${formatTokens(row.cacheRead)}  cache write ${formatTokens(row.cacheWrite)}`,
+		`  output ${formatTokens(row.output)}  reasoning ${formatTokens(row.reasoningTokens)}`,
+	];
 }
 
 export interface FormatCostOverlayOptions {
@@ -113,20 +140,19 @@ export function formatCostOverlayLines(
 	options?: FormatCostOverlayOptions,
 ): string[] {
 	const contentWidth = Math.max(1, options?.contentWidth ?? DEFAULT_CONTENT_WIDTH);
-	const reasoningTokens = rows.reduce((sum, row) => sum + row.reasoningTokens, 0);
-	const totalLine =
-		reasoningTokens > 0
-			? `Total: ${formatUsd(totalUsd)} \u00b7 ${formatTokens(totalTokens)} tokens \u00b7 ${formatTokens(reasoningTokens)} reasoning`
-			: `Total: ${formatUsd(totalUsd)} \u00b7 ${formatTokens(totalTokens)} tokens`;
 	const lines: string[] = [topBorder(contentWidth, options?.sessionId ?? null)];
-	lines.push(padContent(totalLine, contentWidth));
+	for (const line of formatSummaryLines(totalUsd, totalTokens, rows)) {
+		lines.push(padContent(line, contentWidth));
+	}
 	lines.push(dividerRow(contentWidth));
 	if (rows.length === 0) {
-		lines.push(padContent("no dispatch runs yet", contentWidth));
+		lines.push(padContent("no token usage recorded for this session", contentWidth));
 	} else {
-		lines.push(padContent(formatHeader(), contentWidth));
-		for (const row of rows) {
-			lines.push(padContent(formatRow(row), contentWidth));
+		for (const [index, row] of rows.entries()) {
+			if (index > 0) lines.push(padContent("", contentWidth));
+			for (const line of formatRowLines(row)) {
+				lines.push(padContent(line, contentWidth));
+			}
 		}
 	}
 	lines.push(padContent("", contentWidth));
