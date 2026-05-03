@@ -158,6 +158,8 @@ export interface InteractiveDeps {
 	harness?: import("../harness/index.js").HarnessHandle;
 	/** True when the dashboard should show the self-development mode badge. */
 	selfDev: boolean;
+	/** Private self-development footer line. Present only in dev mode. */
+	getSelfDevFooterLine?: () => string | null;
 	onShutdown: () => Promise<void>;
 }
 
@@ -673,6 +675,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
+		...(deps.getSelfDevFooterLine ? { getSelfDevFooterLine: deps.getSelfDevFooterLine } : {}),
 		getStreaming: () => deps.chat.isStreaming(),
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
