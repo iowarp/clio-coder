@@ -5,7 +5,7 @@ import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
 import type { ModesContract } from "../modes/contract.js";
 import type { ModeName } from "../modes/index.js";
-import { compile } from "./compiler.js";
+import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 
@@ -16,12 +16,15 @@ export interface PromptsBundleOptions {
 	devRepoRoot?: string;
 }
 
+const SELF_DEV_STATIC_FRAGMENT_IDS = ["selfdev.identity", "selfdev.authority", "selfdev.iteration"] as const;
+
 export function createPromptsBundle(
 	context: DomainContext,
 	options: PromptsBundleOptions = {},
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
 	const suppressContextFiles = options.noContextFiles === true;
+	const includeSelfDev = typeof options.devRepoRoot === "string" && options.devRepoRoot.length > 0;
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -37,7 +40,7 @@ export function createPromptsBundle(
 
 	function reload(): void {
 		try {
-			table = loadFragments();
+			table = loadFragments({ includeSelfDev });
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[clio:prompts] reload failed: ${msg}\n`);
@@ -52,7 +55,7 @@ export function createPromptsBundle(
 	}
 
 	const contract: PromptsContract = {
-		compileForTurn(input: CompileForTurnInput) {
+		async compileForTurn(input: CompileForTurnInput) {
 			if (!table) throw new Error("prompts domain not started");
 			if (table.byId.size === 0) {
 				throw new Error("prompts: no fragments loaded, check startup logs");
@@ -75,6 +78,7 @@ export function createPromptsBundle(
 				mode: `modes.${currentMode}`,
 				safety: `safety.${safety}`,
 				dynamicInputs,
+				additionalFragments: selfDevFragments(table),
 			});
 		},
 		reload,
@@ -83,7 +87,7 @@ export function createPromptsBundle(
 	const extension: DomainExtension = {
 		async start() {
 			try {
-				table = loadFragments();
+				table = loadFragments({ includeSelfDev });
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				process.stderr.write(`[clio:prompts] initial load failed: ${msg}\n`);
@@ -100,4 +104,20 @@ export function createPromptsBundle(
 	};
 
 	return { extension, contract };
+}
+
+function selfDevFragments(table: FragmentTable): RenderedPromptFragment[] {
+	const rendered: RenderedPromptFragment[] = [];
+	for (const id of SELF_DEV_STATIC_FRAGMENT_IDS) {
+		const fragment = table.byId.get(id);
+		if (!fragment) continue;
+		rendered.push({
+			id: fragment.id,
+			relPath: fragment.relPath,
+			body: fragment.body,
+			contentHash: fragment.contentHash,
+			dynamic: fragment.dynamic,
+		});
+	}
+	return rendered;
 }

@@ -7,6 +7,7 @@ export interface CompileInputs {
 	mode: string;
 	safety: string;
 	dynamicInputs: DynamicInputs;
+	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
 }
 
 export interface DynamicInputs {
@@ -30,6 +31,14 @@ export interface DynamicInputs {
 export interface FragmentManifestEntry {
 	id: string;
 	relPath: string;
+	contentHash: string;
+	dynamic: boolean;
+}
+
+export interface RenderedPromptFragment {
+	id: string;
+	relPath: string;
+	body: string;
 	contentHash: string;
 	dynamic: boolean;
 }
@@ -159,6 +168,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	if (memory.length > 0) parts.push(memory);
 	const session = renderSessionBlock(inputs.dynamicInputs);
 	if (session.length > 0) parts.push(session);
+	for (const fragment of inputs.additionalFragments ?? []) {
+		const body = fragment.body.trim();
+		if (body.length > 0) parts.push(body);
+	}
 
 	const text = parts.join("\n\n");
 	const renderedPromptHash = sha256(text);
@@ -170,6 +183,14 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		contentHash: f.contentHash,
 		dynamic: f.dynamic,
 	}));
+	for (const fragment of inputs.additionalFragments ?? []) {
+		fragmentManifest.push({
+			id: fragment.id,
+			relPath: fragment.relPath,
+			contentHash: fragment.contentHash,
+			dynamic: fragment.dynamic,
+		});
+	}
 
 	return {
 		text,

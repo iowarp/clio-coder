@@ -11,6 +11,7 @@ import { sha256 } from "./hash.js";
 export interface LoadedFragment {
 	path: string;
 	relPath: string;
+	family: "base" | "selfdev";
 	id: string;
 	version: number;
 	description: string;
@@ -22,6 +23,11 @@ export interface LoadedFragment {
 export interface FragmentTable {
 	byId: ReadonlyMap<string, LoadedFragment>;
 	rootDir: string;
+}
+
+export interface LoadFragmentsOptions {
+	rootDir?: string;
+	includeSelfDev?: boolean;
 }
 
 const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
@@ -58,6 +64,7 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 	// across Windows and POSIX hosts.
 	const rawRel = path.relative(rootDir, filePath);
 	const relPath = rawRel.split(path.sep).join("/");
+	const family = relPath.startsWith("selfdev/") ? "selfdev" : "base";
 	const match = raw.match(frontmatterRegex);
 	if (!match) {
 		throw new Error(`fragment-loader: ${relPath}: missing or malformed YAML frontmatter`);
@@ -98,6 +105,7 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 	return {
 		path: filePath,
 		relPath,
+		family,
 		id,
 		version,
 		description,
@@ -115,12 +123,15 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
  * relPath-qualified error so that the prompts compiler never receives a
  * partially loaded table.
  */
-export function loadFragments(rootDir?: string): FragmentTable {
+export function loadFragments(options?: string | LoadFragmentsOptions): FragmentTable {
+	const rootDir = typeof options === "string" ? options : options?.rootDir;
+	const includeSelfDev = typeof options === "string" ? false : options?.includeSelfDev === true;
 	const resolvedRoot = rootDir ? path.resolve(rootDir) : defaultRootDir();
 	const files = walk(resolvedRoot);
 	const byId = new Map<string, LoadedFragment>();
 	for (const file of files) {
 		const fragment = parseFragment(file, resolvedRoot);
+		if (fragment.family === "selfdev" && !includeSelfDev) continue;
 		const existing = byId.get(fragment.id);
 		if (existing) {
 			throw new Error(

@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-	buildSelfDevPrompt,
 	ensureSelfDevBranch,
 	evaluateSelfDevBashCommand,
 	evaluateSelfDevWritePath,
@@ -335,16 +334,5 @@ describe("core/self-dev branch enforcement", () => {
 				process.env.CLIO_DEV_ALLOW_PROTECTED_BRANCH = previous;
 			}
 		}
-	});
-});
-
-describe("core/self-dev prompt", () => {
-	it("states the repository, branch, CI gate, and engine restart rule", () => {
-		const prompt = buildSelfDevPrompt(mode({ dirtySummary: "2 changed path(s): src/a.ts; tests/b.ts" }));
-		ok(prompt.includes("Clio Coder repository"));
-		ok(prompt.includes("feature/self-dev"));
-		ok(prompt.includes("npm run ci"));
-		ok(prompt.includes("src/engine/"));
-		ok(prompt.includes("restart"));
 	});
 });

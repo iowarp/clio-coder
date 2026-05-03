@@ -57,7 +57,7 @@ function createProviders(): { settings: typeof DEFAULT_SETTINGS; providers: Prov
 function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForTurnInput[] } {
 	const calls: CompileForTurnInput[] = [];
 	const prompts: PromptsContract = {
-		compileForTurn(input) {
+		async compileForTurn(input) {
 			calls.push(input);
 			const result: CompileResult = {
 				text: `system|memorySection=${input.dynamicInputs.memorySection ?? ""}`,

@@ -242,7 +242,7 @@ describe("prompts/compiler context files", () => {
 					name === "context" ? (contextContract as T) : undefined,
 			});
 			await bundle.extension.start?.();
-			const result = bundle.contract.compileForTurn({
+			const result = await bundle.contract.compileForTurn({
 				cwd: scratch,
 				dynamicInputs: {
 					provider: "stub",
@@ -285,7 +285,7 @@ describe("prompts/compiler context files", () => {
 				{ noContextFiles: true },
 			);
 			await bundle.extension.start?.();
-			const result = bundle.contract.compileForTurn({
+			const result = await bundle.contract.compileForTurn({
 				cwd: scratch,
 				dynamicInputs: {
 					provider: "stub",

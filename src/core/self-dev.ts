@@ -346,24 +346,3 @@ export async function ensureSelfDevBranch(
 	}
 	return { ...mode, branch: newBranch };
 }
-
-export function buildSelfDevPrompt(mode: SelfDevMode): string {
-	return [
-		"# Clio self-development mode",
-		"",
-		`You are running inside the Clio Coder repository at ${mode.repoRoot}.`,
-		`The process current working directory is ${mode.cwd}.`,
-		`The active git branch is ${mode.branch ?? "detached"}.`,
-		`The current worktree state at boot was ${mode.dirtySummary}.`,
-		"",
-		"Self-development rules:",
-		"1. You may read and edit Clio Coder source files under user supervision.",
-		"2. Preserve the engine boundary, worker isolation, and domain independence invariants.",
-		"3. Do not push, force, reset hard, clean with force, or bypass git safety rails.",
-		"4. Do not write test fixtures or boundary audit records.",
-		"5. Do not write src/engine/ unless the user explicitly opted in with CLIO_DEV_ALLOW_ENGINE_WRITES=1.",
-		"6. If a write touches restart-required source, tool infrastructure, or root config, tell the user the running Clio process needs a restart.",
-		"7. Run npm run ci successfully before proposing merge or handoff.",
-		"8. Treat OpenAI Codex OAuth as the preferred provider path for self-development when it is configured.",
-	].join("\n");
-}
