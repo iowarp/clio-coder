@@ -213,6 +213,59 @@ describe("providers domain endpoint lifecycle", () => {
 		strictEqual(bundle.contract.getDetectedReasoning("synthetic", "synthetic-model"), null);
 	});
 
+	it("preserves probe metadata only for config-only refreshes on the same endpoint identity", async () => {
+		const settings = syntheticSettings();
+		const registry = getRuntimeRegistry();
+		let liveProbeOk = true;
+		registry.register({
+			...syntheticRuntime(),
+			probe: async () =>
+				liveProbeOk
+					? {
+							ok: true,
+							models: ["synthetic-model"],
+							discoveredCapabilities: { contextWindow: 12345, reasoning: true },
+							capabilityModelId: "synthetic-model",
+						}
+					: { ok: false, error: "offline" },
+		});
+		process.env.CLIO_SYNTHETIC_KEY = "sk-test";
+		const bundle = createProvidersBundle(stubContext(settings));
+
+		let entry = await bundle.contract.probeEndpoint("synthetic");
+		ok(entry);
+		strictEqual(entry.probeCapabilities?.contextWindow, 12345);
+		strictEqual(entry.probeModelId, "synthetic-model");
+		strictEqual(entry.discoveredModels[0], "synthetic-model");
+
+		await bundle.contract.probeAll();
+		entry = bundle.contract.list()[0] ?? null;
+		ok(entry);
+		strictEqual(entry.probeCapabilities?.contextWindow, 12345);
+		strictEqual(entry.probeModelId, "synthetic-model");
+
+		const originalEndpoint = settings.endpoints[0];
+		ok(originalEndpoint);
+		settings.endpoints[0] = { ...originalEndpoint, defaultModel: "other-model" };
+		await bundle.contract.probeAll();
+		entry = bundle.contract.list()[0] ?? null;
+		ok(entry);
+		strictEqual(entry.probeCapabilities, null);
+		strictEqual(entry.probeModelId, null);
+		strictEqual(entry.discoveredModels.length, 0);
+
+		settings.endpoints[0] = { ...originalEndpoint, defaultModel: "synthetic-model" };
+		liveProbeOk = true;
+		await bundle.contract.probeEndpoint("synthetic");
+		liveProbeOk = false;
+		entry = await bundle.contract.probeEndpoint("synthetic");
+		ok(entry);
+		strictEqual(entry.available, false);
+		strictEqual(entry.probeCapabilities, null);
+		strictEqual(entry.probeModelId, null);
+		strictEqual(entry.discoveredModels.length, 0);
+	});
+
 	it("credentials.set/get/remove round-trips through the temp CLIO_CONFIG_DIR", () => {
 		const settings = syntheticSettings();
 		const registry = getRuntimeRegistry();

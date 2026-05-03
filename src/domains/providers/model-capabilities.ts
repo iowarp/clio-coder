@@ -63,8 +63,15 @@ export function resolveModelCapabilities(
 	}
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 	const probeModelId = normalizedModelId(status.probeModelId);
+	const defaultModelId = normalizedModelId(status.endpoint.defaultModel);
 	const probeCapabilities =
-		probeModelId !== null && modelId !== null && probeModelId === modelId ? (status.probeCapabilities ?? null) : null;
+		probeModelId !== null
+			? modelId !== null && probeModelId === modelId
+				? (status.probeCapabilities ?? null)
+				: null
+			: modelId !== null && defaultModelId !== null && modelId === defaultModelId
+				? (status.probeCapabilities ?? null)
+				: null;
 	return applyDetected(
 		mergeCapabilities(
 			baseCapabilities,

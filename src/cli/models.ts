@@ -3,7 +3,11 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { listKnownModelsForRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import {
+	listKnownModelsForRuntime,
+	ProvidersDomainModule,
+	resolveModelCapabilities,
+} from "../domains/providers/index.js";
 import { printError } from "./shared.js";
 
 interface ModelRow {
@@ -11,6 +15,9 @@ interface ModelRow {
 	runtimeId: string;
 	modelId: string;
 	caps: string;
+	contextWindow: number;
+	maxTokens: number;
+	reasoning: boolean;
 }
 
 const HELP = `clio models [search] [--target <id>] [--json] [--probe]
@@ -88,7 +95,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 	}
 	const entries = providers.list();
 	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
-	const rows = collectRows(filtered).filter((row) => matchesSearch(row, parsed.search));
+	const rows = collectRows(filtered, providers).filter((row) => matchesSearch(row, parsed.search));
 
 	if (parsed.json) {
 		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
@@ -99,23 +106,24 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 	return 0;
 }
 
-function collectRows(entries: ReadonlyArray<EndpointStatus>): ModelRow[] {
+function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: ProvidersContract): ModelRow[] {
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
-		const caps = capabilityBadges(status);
 		const discovered = status.discoveredModels.length > 0 ? status.discoveredModels : fallbackModels(status);
 		if (discovered.length === 0) {
+			const caps = resolveRowCapabilities(status, status.endpoint.defaultModel ?? null, providers);
 			rows.push({
 				targetId: status.endpoint.id,
 				runtimeId,
 				modelId: "(no models)",
-				caps,
+				...formatCapabilities(caps),
 			});
 			continue;
 		}
 		for (const modelId of discovered) {
-			rows.push({ targetId: status.endpoint.id, runtimeId, modelId, caps });
+			const caps = resolveRowCapabilities(status, modelId, providers);
+			rows.push({ targetId: status.endpoint.id, runtimeId, modelId, ...formatCapabilities(caps) });
 		}
 	}
 	return rows;
@@ -132,8 +140,24 @@ function fallbackModels(status: EndpointStatus): string[] {
 	return [];
 }
 
-function capabilityBadges(status: EndpointStatus): string {
-	const c = status.capabilities;
+function resolveRowCapabilities(status: EndpointStatus, modelId: string | null, providers: ProvidersContract) {
+	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, {
+		detectedReasoning: modelId ? providers.getDetectedReasoning(status.endpoint.id, modelId) : null,
+	});
+}
+
+function formatCapabilities(
+	c: ReturnType<typeof resolveRowCapabilities>,
+): Pick<ModelRow, "caps" | "contextWindow" | "maxTokens" | "reasoning"> {
+	return {
+		caps: capabilityBadges(c),
+		contextWindow: c.contextWindow,
+		maxTokens: c.maxTokens,
+		reasoning: c.reasoning,
+	};
+}
+
+function capabilityBadges(c: ReturnType<typeof resolveRowCapabilities>): string {
 	const badge = (on: boolean, letter: string): string => (on ? letter : "-");
 	return [
 		badge(c.chat, "C"),
@@ -146,13 +170,23 @@ function capabilityBadges(status: EndpointStatus): string {
 	].join("");
 }
 
+function compactTokenCount(value: number): string {
+	if (!Number.isFinite(value) || value <= 0) return "-";
+	if (value >= 1_000_000) {
+		const rounded = value / 1_000_000;
+		return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}m`;
+	}
+	if (value >= 1000) return `${Math.round(value / 1000)}k`;
+	return String(value);
+}
+
 function renderRows(rows: ReadonlyArray<ModelRow>): void {
 	if (rows.length === 0) {
 		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
 		return;
 	}
-	const widths: ReadonlyArray<number> = [16, 18, 42, 8];
-	const header = ["target", "runtime", "model", "caps"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
+	const widths: ReadonlyArray<number> = [16, 18, 42, 8, 8, 8];
+	const header = ["target", "runtime", "model", "caps", "ctx", "max"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
 	process.stdout.write(`${chalk.bold(header.trimEnd())}\n`);
 	for (const row of rows) {
 		const line = [
@@ -160,6 +194,8 @@ function renderRows(rows: ReadonlyArray<ModelRow>): void {
 			row.runtimeId.padEnd(widths[1] ?? 0),
 			row.modelId.padEnd(widths[2] ?? 0),
 			row.caps.padEnd(widths[3] ?? 0),
+			compactTokenCount(row.contextWindow).padEnd(widths[4] ?? 0),
+			compactTokenCount(row.maxTokens).padEnd(widths[5] ?? 0),
 		].join("");
 		process.stdout.write(`${line.trimEnd()}\n`);
 	}

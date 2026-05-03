@@ -330,6 +330,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			if (apiModels.ok) {
 				if (apiModels.models) result.models = apiModels.models;
 				if (apiModels.discoveredCapabilities) result.discoveredCapabilities = apiModels.discoveredCapabilities;
+				if (apiModels.capabilityModelId) result.capabilityModelId = apiModels.capabilityModelId;
 			}
 			return result;
 		} catch (err) {

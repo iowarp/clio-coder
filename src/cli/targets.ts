@@ -555,6 +555,7 @@ interface SerializedStatus {
 	health: EndpointStatus["health"];
 	capabilities: EndpointStatus["capabilities"];
 	probeCapabilities?: EndpointStatus["probeCapabilities"];
+	probeModelId?: EndpointStatus["probeModelId"];
 	probeNotes?: EndpointStatus["probeNotes"];
 	discoveredModels: EndpointStatus["discoveredModels"];
 	tier: ProviderOutputTier;
@@ -583,6 +584,9 @@ function serializeStatus(
 	};
 	if (status.probeCapabilities !== undefined) {
 		out.probeCapabilities = status.probeCapabilities;
+	}
+	if (status.probeModelId !== undefined) {
+		out.probeModelId = status.probeModelId;
 	}
 	if (status.probeNotes !== undefined) {
 		out.probeNotes = status.probeNotes;
