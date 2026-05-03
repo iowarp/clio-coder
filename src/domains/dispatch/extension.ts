@@ -13,11 +13,14 @@ import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import type { SelfDevMode } from "../../core/self-dev.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import type { ModesContract } from "../modes/contract.js";
+import type { PromptsContract } from "../prompts/index.js";
 import {
 	type CapabilityFlags,
 	type EndpointDescriptor,
@@ -59,11 +62,12 @@ interface ActiveRun {
 	finalPromise: Promise<RunReceipt>;
 }
 
-interface DispatchBundleOptions {
+export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
 	now?: () => number;
+	selfDevMode?: SelfDevMode;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -130,6 +134,13 @@ export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | nu
 	if (memory.length === 0) return base;
 	if (base.length === 0) return memory;
 	return `${memory}\n\n${base}`;
+}
+
+function prependSelfDevPreamble(systemPrompt: string, prompts: PromptsContract | undefined): string {
+	const preamble = prompts?.getSelfDevWorkerPreamble()?.trim() ?? "";
+	if (preamble.length === 0) return systemPrompt;
+	if (systemPrompt.length === 0) return preamble;
+	return `${preamble}\n\n${systemPrompt}`;
 }
 
 interface ResolvedTarget {
@@ -308,6 +319,7 @@ export function createDispatchBundle(
 	const modes: ModesContract = maybeModes;
 	const providers: ProvidersContract = maybeProviders;
 	const middleware: MiddlewareContract = maybeMiddleware;
+	const prompts = context.getContract<PromptsContract>("prompts");
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
@@ -444,12 +456,15 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = buildSystemPrompt(req, recipe);
+		const systemPrompt = prependSelfDevPreamble(buildSystemPrompt(req, recipe), prompts);
 		const compiledPromptHash = promptHash(systemPrompt);
 
 		const recipeTools = recipe?.tools;
-		const allowedTools =
+		const allowedToolsBase =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
+		const allowedTools = options?.selfDevMode
+			? [...new Set([...allowedToolsBase, ToolNames.ClioIntrospect, ToolNames.ClioRecall, ToolNames.ClioRemember])]
+			: allowedToolsBase;
 		const workerMode = recipe?.mode ?? currentMode;
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
 			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
@@ -490,6 +505,7 @@ export function createDispatchBundle(
 			mode: workerMode,
 			middlewareSnapshot: middleware.snapshot(),
 		};
+		if (options?.selfDevMode) spec.selfDev = options.selfDevMode;
 		if (target.modelCapabilities) spec.modelCapabilities = target.modelCapabilities;
 		if (apiKey) spec.apiKey = apiKey;
 		let worker: SpawnedWorker;

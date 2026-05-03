@@ -96,6 +96,11 @@ export function createPromptsBundle(
 				additionalFragments: await selfDevFragments(table, renderers),
 			});
 		},
+		getSelfDevWorkerPreamble() {
+			const fragment = table?.byId.get("selfdev.worker-preamble");
+			const body = fragment?.body.trim() ?? "";
+			return body.length > 0 ? body : null;
+		},
 		reload,
 	};
 

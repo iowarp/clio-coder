@@ -9,6 +9,7 @@
  * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
+import type { SelfDevMode } from "../core/self-dev.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModeName } from "../domains/modes/matrix.js";
@@ -49,6 +50,8 @@ export interface WorkerRunInput {
 	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
+	/** Private self-development context. Present only when the orchestrator runs in dev mode. */
+	selfDev?: SelfDevMode;
 	signal?: AbortSignal;
 }
 
@@ -176,7 +179,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const mode: ModeName = input.mode ?? "default";
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot);
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.selfDev);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });

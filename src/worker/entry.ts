@@ -8,6 +8,7 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
+import type { SelfDevMode } from "../core/self-dev.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { CapabilityFlags, EndpointDescriptor } from "../domains/providers/index.js";
@@ -31,6 +32,7 @@ interface WorkerSpec {
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
 	middlewareSnapshot?: MiddlewareSnapshot;
+	selfDev?: SelfDevMode;
 }
 
 async function main(): Promise<number> {
@@ -58,6 +60,7 @@ async function main(): Promise<number> {
 	if (spec.apiKey) input.apiKey = spec.apiKey;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
+	if (spec.selfDev) input.selfDev = spec.selfDev;
 	if (spec.allowedTools !== undefined) {
 		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
 	} else {
