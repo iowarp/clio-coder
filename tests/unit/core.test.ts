@@ -1,4 +1,4 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Semaphore, TokenBucket } from "../../src/core/concurrency.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../../src/core/tool-names.js";
