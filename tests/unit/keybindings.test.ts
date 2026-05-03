@@ -43,6 +43,7 @@ describe("domains/config/keybindings schema", () => {
 		ok("clio.thinking.expand" in CLIO_APP_KEYBINDINGS);
 		const def = CLIO_APP_KEYBINDINGS["clio.thinking.expand"];
 		strictEqual(def.defaultKeys, "ctrl+t");
+		strictEqual(def.description, "Toggle thinking blocks between hidden marker and full body");
 	});
 });
 

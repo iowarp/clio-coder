@@ -181,9 +181,22 @@ describe("chat-panel active entry update", () => {
 		ok(!text.includes("│ Considering whether"), text);
 	});
 
-	it("toggleLastThinking returns false when no thinking entry exists", () => {
+	it("toggleLastThinking toggles the sticky state even when no thinking entry exists", () => {
 		const panel = createChatPanel();
-		strictEqual(panel.toggleLastThinking(), false);
+		strictEqual(panel.toggleLastThinking(), true);
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "future detail" },
+					{ type: "text", text: "future answer" },
+				],
+			} as never,
+		});
+		panel.applyEvent({ type: "agent_end", messages: [] });
+		const text = strip(panel.render(90).join("\n"));
+		ok(text.includes("│ future detail"), text);
 	});
 
 	it("toggleLastThinking applies the thinking visibility mode to prior thinking history", () => {
@@ -274,13 +287,58 @@ describe("chat-panel active entry update", () => {
 			isError: false,
 		});
 		text = strip(panel.render(90).join("\n"));
-		ok(text.includes("▸ running `npm test` ✓"), text);
+		ok(text.includes("▸ ran `npm test` ✓"), text);
 		ok(!text.includes("│ ok"), text);
 
 		strictEqual(panel.toggleLastToolExpanded(), true);
 		text = strip(panel.render(90).join("\n"));
 		ok(text.includes("▸ bash(npm test) ✓"), text);
 		ok(text.includes("│ ok"), text);
+	});
+
+	it("shows measured duration for completed tools when a clock is supplied", () => {
+		let t = 10_000;
+		const panel = createChatPanel({ now: () => t });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-duration",
+			toolName: "read",
+			args: { path: "README.md" },
+		});
+		t = 11_250;
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-duration",
+			toolName: "read",
+			result: "body",
+			isError: false,
+		});
+		const text = strip(panel.render(90).join("\n"));
+		ok(text.includes("✓ · 1.3s"), text);
+	});
+
+	it("shows the expand hint only on the latest finished collapsed tool", () => {
+		const panel = createChatPanel({ getToolExpandKey: () => "ctrl+o" });
+		for (const id of ["first", "second"]) {
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: id,
+				toolName: "read",
+				args: { path: `${id}.ts` },
+			});
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: id,
+				toolName: "read",
+				result: "body",
+				isError: false,
+			});
+		}
+		const text = strip(panel.render(90).join("\n"));
+		strictEqual((text.match(/\(ctrl\+o\)/g) ?? []).length, 1);
+		ok(text.includes("▸ reading second.ts ✓"), text);
+		ok(text.includes("▸ reading second.ts ✓ (ctrl+o)"), text);
+		ok(!text.includes("▸ reading first.ts ✓ (ctrl+o)"), text);
 	});
 
 	it("streams tool_execution_update partials into the expanded tool block", () => {

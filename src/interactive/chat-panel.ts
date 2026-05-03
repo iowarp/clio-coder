@@ -84,6 +84,10 @@ type ToolSegment = {
 	isError: boolean;
 	/** When true, render the full structured block instead of the collapsed subline. */
 	expanded: boolean;
+	/** Wall-clock start time captured by the chat panel for live duration display. */
+	startedAtMs?: number;
+	/** Completed call duration in milliseconds when measured locally. */
+	durationMs?: number;
 	/**
 	 * Latest cumulative partial output from `tool_execution_update`. Cleared
 	 * back to `undefined` on `tool_execution_end` so the finished `result`
@@ -116,8 +120,8 @@ type TranscriptEntry =
 			/**
 			 * Whether the thinking block renders as the full body (true) or
 			 * the one-line dim marker (false/undefined). Toggled by
-			 * `toggleLastThinking()`. Default collapsed; new thinking does not
-			 * auto-expand during streaming.
+			 * `toggleLastThinking()`. New thinking inherits the panel-level
+			 * visibility mode until Ctrl+T toggles it again.
 			 */
 			expandedThinking?: boolean;
 			pending: boolean;
@@ -135,9 +139,9 @@ export interface ChatPanel extends Component {
 	toggleLastToolExpanded(): boolean;
 	/**
 	 * Flip thinking-bearing assistant turns between the one-line dim marker
-	 * and the full rail-prefixed body. The target visibility is derived from
-	 * the most recent thinking block, then applied to prior thinking history
-	 * so Ctrl+T behaves like a transcript-level thinking visibility toggle.
+	 * and the full rail-prefixed body. The target visibility is panel-level
+	 * sticky state, then applied to current thinking history so Ctrl+T behaves
+	 * like a transcript-level thinking visibility toggle.
 	 */
 	toggleLastThinking(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
@@ -148,12 +152,14 @@ export interface ChatPanelOptions {
 	/**
 	 * Resolves the user-visible key string for the `clio.tool.expand`
 	 * action. Returning a non-empty string surfaces a dim ` (<key>)` hint on
-	 * the first wrapped line of every finished, collapsed tool subline so the
-	 * Ctrl+O toggle is discoverable. Returning undefined or an empty string
-	 * suppresses the hint (e.g. action unbound, or display intentionally
-	 * minimal). Called per render so live keybinding changes flow through.
+	 * the first wrapped line of the latest finished collapsed tool subline so
+	 * the Ctrl+O toggle is discoverable without repeating on every historical
+	 * row. Returning undefined or an empty string suppresses the hint. Called
+	 * per render so live keybinding changes flow through.
 	 */
 	getToolExpandKey?: () => string | undefined;
+	/** Clock injection for deterministic duration tests. Defaults to Date.now. */
+	now?: () => number;
 }
 
 function extractAssistantText(message: unknown): string {
@@ -272,7 +278,13 @@ function renderThinkingLines(thinking: string, expanded: boolean, width: number)
 	return out;
 }
 
-function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: string | undefined): string[] {
+function renderToolSegmentLines(
+	seg: ToolSegment,
+	width: number,
+	expandKey: string | undefined,
+	latestHintToolId: string | null,
+): string[] {
+	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
 	if (!seg.expanded) {
 		return renderToolSubline(
 			seg.finished
@@ -282,10 +294,11 @@ function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: stri
 						args: seg.args,
 						result: seg.result,
 						isError: seg.isError,
+						durationMs: seg.durationMs,
 					}
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args },
 			width,
-			expandKey,
+			hintKey,
 		);
 	}
 	if (!seg.finished) {
@@ -305,12 +318,18 @@ function renderToolSegmentLines(seg: ToolSegment, width: number, expandKey: stri
 			args: seg.args,
 			result: seg.result,
 			isError: seg.isError,
+			durationMs: seg.durationMs,
 		},
 		width,
 	);
 }
 
-function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: string | undefined): string[] {
+function renderEntryLines(
+	entry: TranscriptEntry,
+	width: number,
+	expandKey: string | undefined,
+	latestHintToolId: string | null,
+): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
 	}
@@ -344,7 +363,7 @@ function renderEntryLines(entry: TranscriptEntry, width: number, expandKey: stri
 			}
 			continue;
 		}
-		lines.push(...renderToolSegmentLines(seg, width, expandKey));
+		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId));
 	}
 	const shouldRenderStatus =
 		entry.pending &&
@@ -371,6 +390,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
 	let cachedExpandKey: string | undefined;
+	let thinkingExpanded = false;
 
 	const markDirty = (): void => {
 		dirty = true;
@@ -382,6 +402,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		return key;
 	};
 
+	const now = (): number => options.now?.() ?? Date.now();
+
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") return last;
@@ -389,6 +411,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			role: "assistant",
 			segments: [],
 			thinking: "",
+			expandedThinking: thinkingExpanded,
 			pending: false,
 		};
 		transcript.push(entry);
@@ -426,15 +449,29 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entry.segments.push({ kind: "text", text, finalized: true });
 	};
 
+	const latestCollapsedFinishedToolId = (): string | null => {
+		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
+			const entry = transcript[entryIndex];
+			if (entry?.role !== "assistant") continue;
+			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+				const seg = entry.segments[segIndex];
+				if (seg?.kind !== "tool") continue;
+				if (seg.finished && !seg.expanded) return seg.id;
+			}
+		}
+		return null;
+	};
+
 	const render = (width: number): string[] => {
 		const expandKey = resolveExpandKey();
 		if (!dirty && cachedWidth === width && cachedExpandKey === expandKey) return cachedLines;
 		const out: string[] = [];
+		const latestHintToolId = latestCollapsedFinishedToolId();
 		for (let i = 0; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			out.push(...renderEntryLines(entry, width, expandKey));
+			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId));
 		}
 		cachedLines = out;
 		cachedWidth = width;
@@ -467,23 +504,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return false;
 		},
 		toggleLastThinking(): boolean {
-			let nextExpanded: boolean | null = null;
 			let found = false;
+			thinkingExpanded = !thinkingExpanded;
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
 				if (entry.thinking.length === 0) continue;
-				nextExpanded = entry.expandedThinking !== true;
+				found = true;
 				break;
 			}
-			if (nextExpanded === null) return false;
 			for (const entry of transcript) {
 				if (entry.role !== "assistant" || entry.thinking.length === 0) continue;
-				entry.expandedThinking = nextExpanded;
-				found = true;
+				entry.expandedThinking = thinkingExpanded;
 			}
 			if (found) markDirty();
-			return found;
+			return true;
 		},
 		reset(): void {
 			transcript.length = 0;
@@ -505,6 +540,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
 				assistant.thinking += event.delta;
+				assistant.expandedThinking = thinkingExpanded;
 				markDirty();
 				return;
 			}
@@ -525,6 +561,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					finished: false,
 					isError: false,
 					expanded,
+					startedAtMs: now(),
 				});
 				markDirty();
 				return;
@@ -561,6 +598,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.result = event.result;
 					tool.isError = event.isError;
 					tool.finished = true;
+					if (tool.startedAtMs !== undefined) {
+						const elapsed = Math.max(0, now() - tool.startedAtMs);
+						if (elapsed > 0) tool.durationMs = elapsed;
+					}
 					// Drop the streaming buffer once the final result has landed; the
 					// expanded render switches to `renderToolExecution` and stays
 					// stable instead of churning through partial-frame layout.
@@ -575,7 +616,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const terminalError = extractAssistantTerminalError(event.message);
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
 				const assistant = ensureAssistant();
-				if (thinking.length > 0) assistant.thinking = thinking;
+				if (thinking.length > 0) {
+					assistant.thinking = thinking;
+					assistant.expandedThinking = thinkingExpanded;
+				}
 				if (text.length > 0) canonicalizeMessageText(assistant, text);
 				if (terminalError.length > 0) canonicalizeMessageText(assistant, terminalError);
 				markDirty();

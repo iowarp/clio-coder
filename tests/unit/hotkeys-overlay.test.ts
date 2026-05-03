@@ -10,6 +10,7 @@ describe("interactive/overlays/hotkeys", () => {
 		const lines = formatHotkeysLines(buildHotkeyEntries(manager), 70, { selectedIndex: 0 });
 		const text = lines.join("\n");
 		ok(text.includes("> Shift+Tab"), text);
+		ok(text.includes("Toggle thinking blocks"), text);
 		ok(text.includes("[E] details"), text);
 		ok(text.includes("GLOBAL"), text);
 	});
