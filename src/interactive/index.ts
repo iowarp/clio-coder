@@ -23,13 +23,13 @@ import {
 	Editor,
 	isKeyRelease,
 	matchesKey,
+	type OverlayHandle,
 	ProcessTerminal,
 	type SelectItem,
 	Text,
 	TUI,
 	visibleWidth,
 } from "../engine/tui.js";
-import { openDevDiffOverlay } from "../selfdev/ui/dev-diff.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -163,6 +163,8 @@ export interface InteractiveDeps {
 	selfDevRepoRoot?: string;
 	/** Private self-development footer line. Present only in dev mode. */
 	getSelfDevFooterLine?: () => string | null;
+	/** Private self-development diff overlay opener. Present only in dev mode. */
+	openSelfDevDiffOverlay?: (tui: TUI, repoRoot: string) => OverlayHandle;
 	onShutdown: () => Promise<void>;
 }
 
@@ -1584,9 +1586,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const openDevDiffOverlayState = (): void => {
-		if (!deps.selfDev || !deps.selfDevRepoRoot || overlayState !== "closed") return;
+		if (!deps.selfDev || !deps.selfDevRepoRoot || !deps.openSelfDevDiffOverlay || overlayState !== "closed") return;
 		overlayState = "dev-diff";
-		overlayHandle = openDevDiffOverlay(tui, deps.selfDevRepoRoot);
+		overlayHandle = deps.openSelfDevDiffOverlay(tui, deps.selfDevRepoRoot);
 		tui.requestRender();
 	};
 

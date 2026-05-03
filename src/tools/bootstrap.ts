@@ -1,11 +1,6 @@
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
-import type { HarnessIntrospection } from "../selfdev/harness/state.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
-import { clioIntrospectTool } from "../selfdev/tools/introspect.js";
-import { clioRecallTool } from "../selfdev/tools/recall.js";
-import { clioRememberTool } from "../selfdev/tools/remember.js";
 import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
@@ -25,8 +20,6 @@ import { writeReviewTool } from "./write-review.js";
 
 export interface ToolBootstrapDeps {
 	session?: SessionContract;
-	selfDev?: SelfDevMode;
-	getHarnessIntrospection?: () => HarnessIntrospection;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
@@ -99,37 +92,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...withSourceInfo(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
-
-	if (deps.selfDev) {
-		registry.register({
-			...withSourceInfo(
-				clioIntrospectTool({
-					mode: deps.selfDev,
-					registry,
-					...(deps.getHarnessIntrospection ? { getHarnessIntrospection: deps.getHarnessIntrospection } : {}),
-				}),
-				{ path: "src/selfdev/tools/introspect.ts", scope: "selfdev" },
-			),
-			allowedModes: everyMode,
-			bypassModeMatrix: true,
-		});
-		registry.register({
-			...withSourceInfo(clioRecallTool({ repoRoot: deps.selfDev.repoRoot }), {
-				path: "src/selfdev/tools/recall.ts",
-				scope: "selfdev",
-			}),
-			allowedModes: everyMode,
-			bypassModeMatrix: true,
-		});
-		registry.register({
-			...withSourceInfo(clioRememberTool({ repoRoot: deps.selfDev.repoRoot }), {
-				path: "src/selfdev/tools/remember.ts",
-				scope: "selfdev",
-			}),
-			allowedModes: defaultAndSuper,
-			bypassModeMatrix: true,
-		});
-	}
 
 	const session = deps.session;
 	if (session) {

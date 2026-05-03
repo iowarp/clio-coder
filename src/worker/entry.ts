@@ -18,6 +18,9 @@ import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
 
 type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
+type SelfDevModule = typeof import("../selfdev/index.js");
+
+const SELFDEV_IMPORT_SPECIFIER = ["..", "selfdev", "index.js"].join("/");
 
 interface WorkerSpec {
 	systemPrompt: string;
@@ -33,6 +36,14 @@ interface WorkerSpec {
 	mode?: string;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	selfDev?: SelfDevMode;
+}
+
+async function loadSelfDevModule(): Promise<SelfDevModule | null> {
+	try {
+		return (await import(SELFDEV_IMPORT_SPECIFIER)) as SelfDevModule;
+	} catch {
+		return null;
+	}
 }
 
 async function main(): Promise<number> {
@@ -60,7 +71,17 @@ async function main(): Promise<number> {
 	if (spec.apiKey) input.apiKey = spec.apiKey;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
-	if (spec.selfDev) input.selfDev = spec.selfDev;
+	if (spec.selfDev) {
+		const selfdev = await loadSelfDevModule();
+		if (selfdev === null) {
+			process.stderr.write("[worker] selfdev module unavailable; private tools disabled\n");
+			stopHeartbeat();
+			return 2;
+		}
+		input.registerPrivateTools = (registry) => {
+			selfdev.registerSelfDevTools(registry, { mode: spec.selfDev as SelfDevMode });
+		};
+	}
 	if (spec.allowedTools !== undefined) {
 		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
 	} else {

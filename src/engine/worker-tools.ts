@@ -23,7 +23,6 @@ import { classify as classifyAction } from "../domains/safety/action-classifier.
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { formatRejection } from "../domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import { validateEngineToolArguments } from "./ai.js";
@@ -56,6 +55,8 @@ export interface ToolFinishEvent {
 	terminate?: boolean;
 	reason?: string;
 }
+
+export type WorkerToolRegistrar = (registry: ToolRegistry) => void;
 
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
@@ -223,14 +224,15 @@ function createWorkerSafety(): SafetyContract {
 export function createWorkerToolRegistry(
 	mode: ModeName,
 	middlewareSnapshot?: MiddlewareSnapshot,
-	selfDev?: SelfDevMode,
+	registerPrivateTools?: WorkerToolRegistrar,
 ): ToolRegistry {
 	const registry = createRegistry({
 		safety: createWorkerSafety(),
 		modes: createWorkerModes(mode),
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
-	registerAllTools(registry, selfDev ? { selfDev } : {});
+	registerAllTools(registry);
+	registerPrivateTools?.(registry);
 	return registry;
 }
 
