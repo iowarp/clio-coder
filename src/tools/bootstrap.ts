@@ -14,7 +14,7 @@ import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
-import type { ToolRegistry } from "./registry.js";
+import type { ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { webFetchTool } from "./web-fetch.js";
 import { workspaceContextTool } from "./workspace-context.js";
 import { writeTool } from "./write.js";
@@ -25,6 +25,10 @@ export interface ToolBootstrapDeps {
 	session?: SessionContract;
 	selfDev?: SelfDevMode;
 	getHarnessIntrospection?: () => HarnessIntrospection;
+}
+
+function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
+	return { ...spec, sourceInfo };
 }
 
 /**
@@ -41,27 +45,69 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const defaultAndSuper: ReadonlyArray<ModeName> = ["default", "super"];
 	const adviseOnly: ReadonlyArray<ModeName> = ["advise"];
 
-	registry.register({ ...readTool, allowedModes: everyMode });
-	registry.register({ ...writeTool, allowedModes: defaultAndSuper });
-	registry.register({ ...editTool, allowedModes: defaultAndSuper });
-	registry.register({ ...bashTool, allowedModes: defaultAndSuper });
-	registry.register({ ...grepTool, allowedModes: everyMode });
-	registry.register({ ...globTool, allowedModes: everyMode });
-	registry.register({ ...lsTool, allowedModes: everyMode });
-	registry.register({ ...webFetchTool, allowedModes: everyMode });
-	registry.register({ ...writePlanTool, allowedModes: adviseOnly });
-	registry.register({ ...writeReviewTool, allowedModes: adviseOnly });
-	registry.register({ ...findSymbolTool, allowedModes: everyMode });
-	registry.register({ ...entryPointsTool, allowedModes: everyMode });
-	registry.register({ ...whereIsTool, allowedModes: everyMode });
+	registry.register({
+		...withSourceInfo(readTool, { path: "src/tools/read.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(writeTool, { path: "src/tools/write.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(editTool, { path: "src/tools/edit.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(globTool, { path: "src/tools/glob.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
+		allowedModes: adviseOnly,
+	});
+	registry.register({
+		...withSourceInfo(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
+		allowedModes: adviseOnly,
+	});
+	registry.register({
+		...withSourceInfo(findSymbolTool, { path: "src/tools/codewiki/find-symbol.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(entryPointsTool, { path: "src/tools/codewiki/entry-points.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
 
 	if (deps.selfDev) {
 		registry.register({
-			...clioIntrospectTool({
-				mode: deps.selfDev,
-				registry,
-				...(deps.getHarnessIntrospection ? { getHarnessIntrospection: deps.getHarnessIntrospection } : {}),
-			}),
+			...withSourceInfo(
+				clioIntrospectTool({
+					mode: deps.selfDev,
+					registry,
+					...(deps.getHarnessIntrospection ? { getHarnessIntrospection: deps.getHarnessIntrospection } : {}),
+				}),
+				{ path: "src/selfdev/tools/introspect.ts", scope: "selfdev" },
+			),
 			allowedModes: everyMode,
 			bypassModeMatrix: true,
 		});
@@ -79,6 +125,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 					if (meta) meta.workspace = snap;
 				},
 			}),
+			sourceInfo: { path: "src/tools/workspace-context.ts", scope: "core" },
 			allowedModes: everyMode,
 		});
 	}
