@@ -61,6 +61,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.FindSymbol:
 		case ToolNames.EntryPoints:
 		case ToolNames.WhereIs:
+		case ToolNames.ClioIntrospect:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

@@ -4,9 +4,11 @@ import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([ToolNames.WorkspaceContext]);
+const SELF_DEV_TOOLS = new Set<ToolName>([ToolNames.ClioIntrospect]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
+	includeSelfDevTools?: boolean;
 }
 
 export function matrixModesForTool(tool: ToolName): ReadonlyArray<ModeName> {
@@ -59,10 +61,12 @@ export function validateBuiltinToolPolicy(
 	}
 
 	const includeSessionTools = options.includeSessionTools ?? false;
+	const includeSelfDevTools = options.includeSelfDevTools ?? false;
 	const required = new Set<ToolName>();
 	for (const mode of ALL_MODES) {
 		for (const tool of MODE_MATRIX[mode].tools) {
 			if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) continue;
+			if (!includeSelfDevTools && SELF_DEV_TOOLS.has(tool)) continue;
 			required.add(tool);
 		}
 	}

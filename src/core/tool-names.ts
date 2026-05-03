@@ -18,6 +18,7 @@ export const ToolNames = {
 	FindSymbol: "find_symbol",
 	EntryPoints: "entry_points",
 	WhereIs: "where_is",
+	ClioIntrospect: "clio_introspect",
 } as const;
 
 export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
