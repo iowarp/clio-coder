@@ -192,6 +192,38 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 		}
 	});
 
+	it("resetSession clears token totals, cost total, and cost entries", async () => {
+		const context = stubDomainContext();
+		const bundle = createObservabilityBundle(context);
+		await bundle.extension.start();
+		try {
+			bundle.contract.recordTokens("mini", "qwen", 1000, 0, {
+				input: 700,
+				output: 100,
+				cacheRead: 200,
+				cacheWrite: 0,
+				reasoningTokens: 12,
+				totalTokens: 1000,
+			});
+			strictEqual(bundle.contract.costEntries().length, 1);
+
+			bundle.contract.resetSession();
+
+			deepStrictEqual(bundle.contract.sessionTokens(), {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoningTokens: 0,
+				totalTokens: 0,
+			});
+			strictEqual(bundle.contract.sessionCost(), 0);
+			strictEqual(bundle.contract.costEntries().length, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("formats the overlay with a total header and per-row cells", () => {
 		const lines = formatCostOverlayLines(
 			0.02,

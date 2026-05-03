@@ -190,6 +190,9 @@ function makeObservability(): { obs: ObservabilityContract; calls: CostEntry[] }
 		sessionTokens: () =>
 			({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }) as UsageBreakdown,
 		costEntries: () => calls,
+		resetSession: () => {
+			calls.length = 0;
+		},
 		recordTokens: (providerId, modelId, tokens, costUsd, breakdown) => {
 			calls.push({
 				providerId,
