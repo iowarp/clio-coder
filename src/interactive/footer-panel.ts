@@ -9,7 +9,7 @@ import {
 } from "../domains/providers/index.js";
 import { extractLocalModelQuirks, type ThinkingMechanism } from "../domains/providers/types/local-model-quirks.js";
 import { Text } from "../engine/tui.js";
-import type { HarnessSnapshot } from "../harness/state.js";
+import type { HarnessSnapshot } from "../selfdev/harness/state.js";
 import { getCurrentBranch } from "../utils/git.js";
 import type { AgentStatus } from "./status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "./status/index.js";

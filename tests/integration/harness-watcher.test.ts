@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { watchRepo } from "../../src/harness/watcher.js";
+import { watchRepo } from "../../src/selfdev/harness/watcher.js";
 
 describe("watchRepo", () => {
 	let repo: string;

@@ -1,6 +1,6 @@
-import { evaluateSelfDevBashCommand, evaluateSelfDevWritePath, type SelfDevMode } from "../core/self-dev.js";
 import { ToolNames } from "../core/tool-names.js";
-import type { ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
+import type { ToolRegistry, ToolResult, ToolSpec } from "../tools/registry.js";
+import { evaluateSelfDevBashCommand, evaluateSelfDevWritePath, type SelfDevMode } from "./mode.js";
 
 function pathArg(args: Record<string, unknown>): string | null {
 	return typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;

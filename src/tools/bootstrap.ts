@@ -1,8 +1,8 @@
-import type { SelfDevMode } from "../core/self-dev.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
-import type { HarnessIntrospection } from "../harness/state.js";
+import type { HarnessIntrospection } from "../selfdev/harness/state.js";
+import type { SelfDevMode } from "../selfdev/mode.js";
 import { clioIntrospectTool } from "../selfdev/tools/introspect.js";
 import { clioRecallTool } from "../selfdev/tools/recall.js";
 import { clioRememberTool } from "../selfdev/tools/remember.js";

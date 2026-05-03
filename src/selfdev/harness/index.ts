@@ -1,6 +1,6 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import { BusChannels } from "../../core/bus-events.js";
+import type { SafeEventBus } from "../../core/event-bus.js";
+import type { ToolRegistry } from "../../tools/registry.js";
 import { classifyChange } from "./classifier.js";
 import { executeRestart } from "./restart.js";
 import { HarnessState } from "./state.js";

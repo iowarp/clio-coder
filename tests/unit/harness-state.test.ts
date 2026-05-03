@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { HarnessState } from "../../src/harness/state.js";
+import { HarnessState } from "../../src/selfdev/harness/state.js";
 
 describe("HarnessState", () => {
 	it("starts idle", () => {

@@ -29,6 +29,7 @@ import {
 	TUI,
 	visibleWidth,
 } from "../engine/tui.js";
+import { openDevDiffOverlay } from "../selfdev/ui/dev-diff.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -46,7 +47,6 @@ import { editorBorderColorForMode } from "./mode-theme.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
-import { openDevDiffOverlay } from "./overlays/dev-diff.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
@@ -156,7 +156,7 @@ export interface InteractiveDeps {
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
 	onCycleScopedModelBackward?: () => void;
 	/** Hot-reload harness handle. When present, the footer shows an indicator line and Ctrl+R triggers restart. */
-	harness?: import("../harness/index.js").HarnessHandle;
+	harness?: import("../selfdev/harness/index.js").HarnessHandle;
 	/** True when the dashboard should show the self-development mode badge. */
 	selfDev: boolean;
 	/** Repository root for private self-development UI affordances. */

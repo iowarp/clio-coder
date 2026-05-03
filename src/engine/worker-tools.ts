@@ -15,7 +15,6 @@
  */
 
 import type { TSchema } from "typebox";
-import type { SelfDevMode } from "../core/self-dev.js";
 import type { ToolName } from "../core/tool-names.js";
 import { createMiddlewareContractFromSnapshot, type MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModesContract } from "../domains/modes/contract.js";
@@ -24,6 +23,7 @@ import { classify as classifyAction } from "../domains/safety/action-classifier.
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { formatRejection } from "../domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
+import type { SelfDevMode } from "../selfdev/mode.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import { validateEngineToolArguments } from "./ai.js";

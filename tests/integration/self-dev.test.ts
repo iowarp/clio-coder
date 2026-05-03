@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	ensureSelfDevBranch,
 	evaluateSelfDevBashCommand,
@@ -10,8 +11,7 @@ import {
 	resolveSelfDevMode,
 	type SelfDevMode,
 	sanitizeSelfDevSlug,
-} from "../../src/core/self-dev.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
+} from "../../src/selfdev/mode.js";
 
 function mode(overrides: Partial<SelfDevMode> = {}): SelfDevMode {
 	return {
@@ -26,7 +26,7 @@ function mode(overrides: Partial<SelfDevMode> = {}): SelfDevMode {
 	};
 }
 
-describe("core/self-dev path policy", () => {
+describe("selfdev path policy", () => {
 	it("allows source writes on a non-main branch", () => {
 		const decision = evaluateSelfDevWritePath(mode(), "/repo/clio-coder/src/tools/read.ts");
 		strictEqual(decision.allowed, true);
@@ -40,7 +40,7 @@ describe("core/self-dev path policy", () => {
 			"/repo/clio-coder/src/interactive/index.ts",
 			"/repo/clio-coder/src/tools/policy.ts",
 			"/repo/clio-coder/src/tools/codewiki/shared.ts",
-			"/repo/clio-coder/src/harness/classifier.ts",
+			"/repo/clio-coder/src/selfdev/harness/classifier.ts",
 			"/repo/clio-coder/damage-control-rules.yaml",
 		];
 		for (const path of paths) {
@@ -87,7 +87,7 @@ describe("core/self-dev path policy", () => {
 	});
 });
 
-describe("core/self-dev bash policy", () => {
+describe("selfdev bash policy", () => {
 	it("blocks push, force, and destructive git commands", () => {
 		ok(evaluateSelfDevBashCommand("git push origin HEAD"));
 		ok(evaluateSelfDevBashCommand("git push --force-with-lease"));
@@ -104,7 +104,7 @@ describe("core/self-dev bash policy", () => {
 	});
 });
 
-describe("core/self-dev bash policy uses the dev rule pack", () => {
+describe("selfdev bash policy uses the dev rule pack", () => {
 	it("evaluateSelfDevBashCommand resolves block reasons from the dev pack, not a local list", () => {
 		// Asserts the wiring: the rule descriptions in damage-control-rules.yaml
 		// (packs[id=dev]) are the source of truth. If self-dev-guards held its
@@ -114,7 +114,7 @@ describe("core/self-dev bash policy uses the dev rule pack", () => {
 	});
 });
 
-describe("core/self-dev activation gate", () => {
+describe("selfdev activation gate", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 	let originalCwd: string;
@@ -181,7 +181,7 @@ describe("core/self-dev activation gate", () => {
 	});
 });
 
-describe("core/self-dev slug sanitization", () => {
+describe("selfdev slug sanitization", () => {
 	it("kebab-cases, trims, and caps at 40 chars", () => {
 		strictEqual(sanitizeSelfDevSlug("Add Cool Feature!"), "add-cool-feature");
 		strictEqual(sanitizeSelfDevSlug("  multiple   spaces  "), "multiple-spaces");
@@ -193,7 +193,7 @@ describe("core/self-dev slug sanitization", () => {
 	});
 });
 
-describe("core/self-dev branch enforcement", () => {
+describe("selfdev branch enforcement", () => {
 	let stderrBuffer: string;
 	let originalStderrWrite: typeof process.stderr.write;
 

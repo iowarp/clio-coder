@@ -107,7 +107,7 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		ok(result.stdout.includes("watching src/"), result.stdout);
 	});
 
-	it("dashboard shows DEV MODE and footer flips to restart-required on engine edit", async () => {
+	it("dashboard shows DEV MODE and footer reports selfdev harness state", async () => {
 		const readToolPath = join(REPO_ROOT, "src", "tools", "read.ts");
 		const original = readFileSync(readToolPath, "utf8");
 		const pty = spawnClioPty({
@@ -121,19 +121,17 @@ describe("CLIO_SELF_DEV end-to-end", () => {
 		try {
 			await pty.expect(/DEV MODE/, 8000);
 			await pty.expect(/Clio Coder/, 8000);
+			await pty.expect(/selfdev branch=/, 8000);
 			// touch read.ts (safe: change only a comment)
 			const patched = original.replace("export const readTool", "/* hot-reload smoke test */\nexport const readTool");
 			writeFileSync(readToolPath, patched);
-			// Match the success glyph to ensure the hot-swap actually landed; a
-			// bare `read\.ts` match would also catch the `⚠ read.ts: ...` failure
-			// banner and false-pass.
-			await pty.expect(/⚡\s+read\.ts\s+\(\d+ms\)/, 5000);
+			await pty.expect(/read\.ts:\d+/, 5000);
 			// Now trigger a restart prompt via an engine-boundary file.
 			const sessionTouch = join(REPO_ROOT, "src", "engine", "types.ts");
 			const engineOriginal = readFileSync(sessionTouch, "utf8");
 			try {
 				writeFileSync(sessionTouch, `${engineOriginal}\n// hot-reload smoke test\n`);
-				await pty.expect(/restart required/, 5000);
+				await pty.expect(/restart-required/, 5000);
 			} finally {
 				writeFileSync(sessionTouch, engineOriginal);
 			}

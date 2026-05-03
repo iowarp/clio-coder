@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { showClioOverlayFrame } from "../../interactive/overlay-frame.js";
 
 const MAX_DIFF_LINES = 200;
 const WIDTH = 118;

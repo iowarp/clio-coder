@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import type { HarnessIntrospection } from "../../harness/state.js";
+import type { HarnessIntrospection } from "../../selfdev/harness/state.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
 import type { ModesContract } from "../modes/contract.js";

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { compileTool } from "../../src/harness/hot-compile.js";
+import { compileTool } from "../../src/selfdev/harness/hot-compile.js";
 
 describe("compileTool", () => {
 	let tmp: string;

@@ -8,11 +8,11 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
-import type { SelfDevMode } from "../core/self-dev.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { CapabilityFlags, EndpointDescriptor } from "../domains/providers/index.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
+import type { SelfDevMode } from "../selfdev/mode.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
