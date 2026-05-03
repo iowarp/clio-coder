@@ -30,6 +30,7 @@ export interface FooterDeps {
 	getStreaming?: () => boolean;
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
+	getSelfDevFooterLine?: () => string | null;
 	/**
 	 * Running session-level token totals. Drives the input/output footer
 	 * segment. Invoked on every refresh so late-arriving `message_end` usage
@@ -198,6 +199,12 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 	let streamingFrame = 0;
 	let branchSlot: string | null = null;
 	const refresh = (): void => {
+		const selfDevLine = deps.getSelfDevFooterLine?.();
+		if (selfDevLine && selfDevLine.length > 0) {
+			view.setText(selfDevLine);
+			view.invalidate();
+			return;
+		}
 		const mode = deps.modes.current().toLowerCase();
 		const branchPart = branchSlot ? `${SEP}${branchSlot}` : "";
 		const settings = deps.getSettings?.();

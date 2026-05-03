@@ -62,6 +62,7 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { renderDevMemoryFragment } from "../selfdev/memory.js";
+import { createSelfDevFooterLine } from "../selfdev/ui/dev-footer.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
@@ -567,6 +568,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			harness?.stop();
 		});
 	}
+	const getSelfDevFooterLine = selfDev
+		? createSelfDevFooterLine({
+				repoRoot: selfDev.repoRoot,
+				getHarnessIntrospection: () =>
+					harness?.state.introspection() ?? {
+						last_restart_required_paths: [],
+						last_hot_succeeded: null,
+						last_hot_failed: null,
+						queue_depth: 0,
+					},
+			})
+		: null;
 
 	await startInteractive({
 		bus,
@@ -577,6 +590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		chat,
 		toolRegistry,
 		...(session ? { session } : {}),
+		...(getSelfDevFooterLine ? { getSelfDevFooterLine } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
 		...(config
