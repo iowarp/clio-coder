@@ -1,21 +1,21 @@
-name: ci
+name: e2e
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "17 8 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fast:
+  full:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -31,4 +31,4 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fd-find
       - run: npm ci --prefer-offline --no-audit --no-fund
-      - run: npm run ci:fast
+      - run: npm run ci:full
