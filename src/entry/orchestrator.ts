@@ -442,6 +442,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
 
+	let harness: HarnessHandle | null = null;
 	const toolRegistry = createRegistry({
 		safety,
 		modes,
@@ -449,7 +450,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 	});
-	registerAllTools(toolRegistry, { ...(session ? { session } : {}), ...(selfDev ? { selfDev } : {}) });
+	registerAllTools(toolRegistry, {
+		...(session ? { session } : {}),
+		...(selfDev
+			? {
+					selfDev,
+					getHarnessIntrospection: () =>
+						harness?.state.introspection() ?? {
+							last_restart_required_paths: [],
+							last_hot_succeeded: null,
+							last_hot_failed: null,
+							queue_depth: 0,
+						},
+				}
+			: {}),
+	});
 	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
@@ -521,7 +536,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 	});
 
-	let harness: HarnessHandle | null = null;
 	if (selfDev) {
 		const repoRoot = selfDev.repoRoot;
 		// Compile hot modules under the repo's node_modules so Node resolves
