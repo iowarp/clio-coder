@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import type { HarnessIntrospection } from "../../harness/state.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
 import type { ModesContract } from "../modes/contract.js";
@@ -8,15 +10,27 @@ import type { ModeName } from "../modes/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
+import { sha256 } from "./hash.js";
 
 export interface PromptsBundleOptions {
 	/** When true, the dynamic context.files fragment renders the empty string. */
 	noContextFiles?: boolean;
 	/** Retained for CLI option compatibility. Project context now comes only from CLIO.md. */
 	devRepoRoot?: string;
+	getHarnessIntrospection?: () => HarnessIntrospection;
+	renderSelfDevMemory?: () => Promise<string>;
 }
 
-const SELF_DEV_STATIC_FRAGMENT_IDS = ["selfdev.identity", "selfdev.authority", "selfdev.iteration"] as const;
+const SELF_DEV_FRAGMENT_IDS = [
+	"selfdev.identity",
+	"selfdev.authority",
+	"selfdev.iteration",
+	"selfdev.state",
+	"selfdev.memory",
+] as const;
+
+type SelfDevFragmentId = (typeof SELF_DEV_FRAGMENT_IDS)[number];
+type FragmentRenderer = () => Promise<string>;
 
 export function createPromptsBundle(
 	context: DomainContext,
@@ -25,6 +39,7 @@ export function createPromptsBundle(
 	let table: FragmentTable | null = null;
 	const suppressContextFiles = options.noContextFiles === true;
 	const includeSelfDev = typeof options.devRepoRoot === "string" && options.devRepoRoot.length > 0;
+	const renderers = includeSelfDev ? selfDevRenderers(options) : new Map<SelfDevFragmentId, FragmentRenderer>();
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -78,7 +93,7 @@ export function createPromptsBundle(
 				mode: `modes.${currentMode}`,
 				safety: `safety.${safety}`,
 				dynamicInputs,
-				additionalFragments: selfDevFragments(table),
+				additionalFragments: await selfDevFragments(table, renderers),
 			});
 		},
 		reload,
@@ -106,11 +121,95 @@ export function createPromptsBundle(
 	return { extension, contract };
 }
 
-function selfDevFragments(table: FragmentTable): RenderedPromptFragment[] {
+function readGit(repoRoot: string, args: ReadonlyArray<string>): string | null {
+	try {
+		return execFileSync("git", ["-C", repoRoot, ...args], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+function readGitLines(repoRoot: string, args: ReadonlyArray<string>): string[] {
+	const raw = readGit(repoRoot, args);
+	if (!raw) return [];
+	return raw.split(/\r?\n/).filter((line) => line.length > 0);
+}
+
+function defaultHarnessIntrospection(): HarnessIntrospection {
+	return {
+		last_restart_required_paths: [],
+		last_hot_succeeded: null,
+		last_hot_failed: null,
+		queue_depth: 0,
+	};
+}
+
+function harnessVerdict(state: HarnessIntrospection): string {
+	if (state.last_restart_required_paths.length > 0) return "restart-required";
+	if (state.queue_depth > 0) return `worker-pending:${state.queue_depth}`;
+	if (state.last_hot_failed) return "hot-failed";
+	if (state.last_hot_succeeded) return "hot-succeeded";
+	return "idle";
+}
+
+function createStateRenderer(options: PromptsBundleOptions): FragmentRenderer {
+	let cache: { at: number; body: string } | null = null;
+	return async () => {
+		const now = Date.now();
+		if (cache && now - cache.at < 1000) return cache.body;
+		const repoRoot = options.devRepoRoot ?? process.cwd();
+		const branch = readGit(repoRoot, ["branch", "--show-current"]) ?? "unknown";
+		const dirtyCount = readGitLines(repoRoot, ["status", "--short"]).length;
+		const harness = options.getHarnessIntrospection?.() ?? defaultHarnessIntrospection();
+		const lastHotReload = harness.last_hot_succeeded
+			? `${harness.last_hot_succeeded.path}:${harness.last_hot_succeeded.elapsedMs}`
+			: "none";
+		const lastRestart =
+			harness.last_restart_required_paths.length > 0
+				? (harness.last_restart_required_paths[harness.last_restart_required_paths.length - 1] ?? "none")
+				: "none";
+		const body = [
+			"## Live state",
+			`- branch: ${branch}`,
+			`- dirty: ${dirtyCount === 0 ? "clean" : `${dirtyCount} changed paths`}`,
+			`- harness: ${harnessVerdict(harness)}`,
+			`- last hot reload: ${lastHotReload}`,
+			`- last restart trigger: ${lastRestart}`,
+		].join("\n");
+		cache = { at: now, body };
+		return body;
+	};
+}
+
+function selfDevRenderers(options: PromptsBundleOptions): Map<SelfDevFragmentId, FragmentRenderer> {
+	const renderers = new Map<SelfDevFragmentId, FragmentRenderer>();
+	renderers.set("selfdev.state", createStateRenderer(options));
+	renderers.set("selfdev.memory", options.renderSelfDevMemory ?? (async () => ""));
+	return renderers;
+}
+
+async function selfDevFragments(
+	table: FragmentTable,
+	renderers: ReadonlyMap<SelfDevFragmentId, FragmentRenderer>,
+): Promise<RenderedPromptFragment[]> {
 	const rendered: RenderedPromptFragment[] = [];
-	for (const id of SELF_DEV_STATIC_FRAGMENT_IDS) {
+	for (const id of SELF_DEV_FRAGMENT_IDS) {
 		const fragment = table.byId.get(id);
 		if (!fragment) continue;
+		if (fragment.dynamic) {
+			const body = (await renderers.get(id)?.()) ?? "";
+			rendered.push({
+				id: fragment.id,
+				relPath: fragment.relPath,
+				body,
+				contentHash: sha256(body),
+				dynamic: true,
+			});
+			continue;
+		}
 		rendered.push({
 			id: fragment.id,
 			relPath: fragment.relPath,

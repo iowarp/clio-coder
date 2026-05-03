@@ -103,7 +103,7 @@ export function clioIntrospectTool(deps: IntrospectDeps): ToolSpec {
 	}
 
 	function viewFragments(): ToolResult {
-		const table = loadFragments();
+		const table = loadFragments({ includeSelfDev: true });
 		return jsonResult(
 			[...table.byId.values()].map((fragment) => ({
 				id: fragment.id,

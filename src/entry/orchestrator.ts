@@ -61,6 +61,7 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
+import { renderDevMemoryFragment } from "../selfdev/memory.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 import { applySelfDevToolGuards } from "../tools/self-dev-guards.js";
@@ -341,6 +342,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	ensureClioState();
 	timer.mark("install check");
 
+	let harness: HarnessHandle | null = null;
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ContextDomainModule,
@@ -349,7 +351,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ModesDomainModule,
 		createPromptsDomainModule({
 			noContextFiles: options.noContextFiles === true,
-			...(selfDev ? { devRepoRoot: selfDev.repoRoot } : {}),
+			...(selfDev
+				? {
+						devRepoRoot: selfDev.repoRoot,
+						getHarnessIntrospection: () =>
+							harness?.state.introspection() ?? {
+								last_restart_required_paths: [],
+								last_hot_succeeded: null,
+								last_hot_failed: null,
+								queue_depth: 0,
+							},
+						renderSelfDevMemory: () => renderDevMemoryFragment(selfDev.repoRoot),
+					}
+				: {}),
 		}),
 		AgentsDomainModule,
 		MiddlewareDomainModule,
@@ -437,7 +451,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
 
-	let harness: HarnessHandle | null = null;
 	const toolRegistry = createRegistry({
 		safety,
 		modes,
