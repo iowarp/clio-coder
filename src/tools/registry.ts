@@ -31,10 +31,17 @@ import {
  * undefined defers to the agent loop's global `toolExecution` setting.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
+export type ToolSourceScope = "core" | "domain" | "selfdev";
+
+export interface ToolSourceInfo {
+	path: string;
+	scope: ToolSourceScope;
+}
 
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
+	sourceInfo?: ToolSourceInfo;
 	/**
 	 * TypeBox schema advertised to the model so it knows which named
 	 * parameters the tool accepts. Must be a Type.Object(...). Runtime

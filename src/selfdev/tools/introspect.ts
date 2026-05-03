@@ -97,7 +97,7 @@ export function clioIntrospectTool(deps: IntrospectDeps): ToolSpec {
 			deps.registry.listAll().map((spec) => ({
 				name: spec.name,
 				allowed_modes: spec.allowedModes ? [...spec.allowedModes] : [],
-				source_path: null,
+				source_path: spec.sourceInfo?.path ?? null,
 			})),
 		);
 	}
