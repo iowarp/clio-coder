@@ -6,7 +6,6 @@ import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
-import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
 	type EndpointDescriptor,
@@ -152,8 +151,6 @@ export interface CreateChatLoopDeps {
 	autoCompact?: (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
-	/** Optional prompt supplement installed when Clio is editing its own repository. */
-	selfDevPrompt?: string;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
 	 * through `ToolRegistry.invoke(...)` so safety classification and mode
@@ -1095,7 +1092,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * stays on `state.systemPrompt` from the previous compile (or from
 	 * `ensureRuntime`).
 	 */
-	const compilePromptForTurn = (agentRuntime: AgentRuntime): CompileResult | null => {
+	const compilePromptForTurn = async (agentRuntime: AgentRuntime): Promise<CompileResult | null> => {
 		if (!deps.prompts) {
 			currentTurnHash = null;
 			return null;
@@ -1139,22 +1136,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		const safetyLevel = settings.safetyLevel ?? "auto-edit";
 		try {
-			const result = deps.prompts.compileForTurn({
+			const result = await deps.prompts.compileForTurn({
 				dynamicInputs,
 				overrideMode: deps.modes.current(),
 				safetyLevel,
 				cwd: process.cwd(),
 			});
-			if (!deps.selfDevPrompt) {
-				agentRuntime.agent.state.systemPrompt = result.text;
-				currentTurnHash = result.renderedPromptHash;
-				return result;
-			}
-			const text = `${result.text}\n\n${deps.selfDevPrompt}`;
-			const renderedPromptHash = sha256(text);
-			agentRuntime.agent.state.systemPrompt = text;
-			currentTurnHash = renderedPromptHash;
-			return { ...result, text, renderedPromptHash };
+			agentRuntime.agent.state.systemPrompt = result.text;
+			currentTurnHash = result.renderedPromptHash;
+			return result;
 		} catch (err) {
 			currentTurnHash = null;
 			emitNotice(
@@ -1257,7 +1247,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// safety level, provider, and model changes since the last turn
 			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
 			// side-effect so the user + assistant appends below stamp it.
-			compilePromptForTurn(agentRuntime);
+			await compilePromptForTurn(agentRuntime);
 
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
 			// the threshold so /compact integration tests and live drills can

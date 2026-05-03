@@ -315,7 +315,7 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 
 		const compileCalls: CompileForTurnInput[] = [];
 		const promptsStub: PromptsContract = {
-			compileForTurn: (input) => {
+			compileForTurn: async (input) => {
 				compileCalls.push(input);
 				return {
 					text: "compiled",

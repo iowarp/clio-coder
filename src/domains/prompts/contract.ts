@@ -10,7 +10,7 @@ export interface CompileForTurnInput {
 
 export interface PromptsContract {
 	/** Compile the current turn's prompt. Safe to call multiple times per turn. */
-	compileForTurn(input: CompileForTurnInput): CompileResult;
+	compileForTurn(input: CompileForTurnInput): Promise<CompileResult>;
 
 	/** Reload fragment table (triggered by config.hotReload). */
 	reload(): void;

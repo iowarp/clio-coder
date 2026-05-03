@@ -4,12 +4,7 @@ import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
-import {
-	buildSelfDevPrompt,
-	ensureSelfDevBranch,
-	resolveSelfDevMode,
-	selfDevActivationSource,
-} from "../core/self-dev.js";
+import { ensureSelfDevBranch, resolveSelfDevMode, selfDevActivationSource } from "../core/self-dev.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -506,7 +501,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
 		bus,
-		...(selfDev ? { selfDevPrompt: buildSelfDevPrompt(selfDev) } : {}),
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: () => {
