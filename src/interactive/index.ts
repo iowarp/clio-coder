@@ -46,6 +46,7 @@ import { editorBorderColorForMode } from "./mode-theme.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
+import { openDevDiffOverlay } from "./overlays/dev-diff.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
@@ -158,6 +159,8 @@ export interface InteractiveDeps {
 	harness?: import("../harness/index.js").HarnessHandle;
 	/** True when the dashboard should show the self-development mode badge. */
 	selfDev: boolean;
+	/** Repository root for private self-development UI affordances. */
+	selfDevRepoRoot?: string;
 	/** Private self-development footer line. Present only in dev mode. */
 	getSelfDevFooterLine?: () => string | null;
 	onShutdown: () => Promise<void>;
@@ -182,7 +185,8 @@ export type OverlayState =
 	| "tree"
 	| "message-picker"
 	| "cwd-fallback"
-	| "hotkeys";
+	| "hotkeys"
+	| "dev-diff";
 
 export interface KeyBindingDeps {
 	/**
@@ -264,6 +268,10 @@ export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface DevDiffOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -279,7 +287,8 @@ export interface OverlayKeyDeps
 		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
 		CwdFallbackOverlayKeyDeps,
-		HotkeysOverlayKeyDeps {
+		HotkeysOverlayKeyDeps,
+		DevDiffOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -550,6 +559,15 @@ export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps
 	return false;
 }
 
+/** Pure overlay key router for the self-development diff overlay. Esc closes; everything else is swallowed. */
+export function routeDevDiffOverlayKey(data: string, deps: DevDiffOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return true;
+}
+
 /** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
 export function routeOverlayKey(
 	data: string,
@@ -617,6 +635,9 @@ export function routeOverlayKey(
 	}
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
+	}
+	if (overlayState === "dev-diff") {
+		return routeDevDiffOverlayKey(data, deps);
 	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
 	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
@@ -1562,6 +1583,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const openDevDiffOverlayState = (): void => {
+		if (!deps.selfDev || !deps.selfDevRepoRoot || overlayState !== "closed") return;
+		overlayState = "dev-diff";
+		overlayHandle = openDevDiffOverlay(tui, deps.selfDevRepoRoot);
+		tui.requestRender();
+	};
+
 	const toggleDispatchBoardOverlay = (): void => {
 		if (overlayState === "dispatch-board") {
 			closeOverlay();
@@ -1722,6 +1750,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				void harness.restart();
 				return { consume: true };
 			}
+		}
+
+		if (deps.selfDev && overlayState === "closed" && matchesKey(data, "alt+d") && !isKeyRelease(data)) {
+			openDevDiffOverlayState();
+			return { consume: true };
 		}
 
 		const consumed = routeInteractiveKey(data, {

@@ -590,6 +590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		chat,
 		toolRegistry,
 		...(session ? { session } : {}),
+		...(selfDev ? { selfDevRepoRoot: selfDev.repoRoot } : {}),
 		...(getSelfDevFooterLine ? { getSelfDevFooterLine } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
