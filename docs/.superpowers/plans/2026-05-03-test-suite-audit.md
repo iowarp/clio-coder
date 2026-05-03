@@ -14,7 +14,7 @@ Baseline:
 | Rank | Test | Baseline wall | Citation | Action | Justification |
 |---:|---|---:|---|---|---|
 | 1 | `memory commands propose from evidence and manage approval state` | 8694.7ms | `tests/e2e/cli.test.ts:369` | KEEP | It is an end-to-end CLI workflow across evidence and memory state, so it belongs in full e2e only. |
-| 2 | `escalates aborted commands that ignore sigterm` | 6530.3ms | `tests/unit/bash-tool-env.test.ts:84` | TIGHTEN | It waits for the production 5s kill grace and can assert the same behavior through an injected shorter grace. |
+| 2 | `escalates aborted commands that ignore sigterm` | 6530.3ms | `tests/integration/bash-tool-env.test.ts:84` | TIGHTEN | It waits for the production 5s kill grace and can assert the same behavior through an injected shorter grace. |
 | 3 | `old lifecycle command names are rejected` | 6328.5ms | `tests/e2e/cli.test.ts:612` | KEEP | It is slow because it launches the built CLI eight times, but it protects retired public commands at the binary boundary. |
 | 4 | `eval run, report, help, and compare routing are wired` | 6289.6ms | `tests/e2e/cli.test.ts:422` | KEEP | It covers the public CLI path through eval artifacts and evidence, which unit tests do not exercise as a binary. |
 | 5 | `configures the interactive multi-worker profile pool` | 4388.9ms | `tests/integration/cli-configure-targets.test.ts:155` | MOVE | It writes real XDG config and belongs with integration tests. |
@@ -39,8 +39,8 @@ Baseline:
 | Finding | Citation | Action | Justification |
 |---|---|---|---|
 | `TokenBucket` refill slept for 200ms at baseline. | `tests/unit/core.test.ts:52` | TIGHTEN | Injecting a clock keeps the refill behavior exact without scheduler timing. |
-| Bash abort escalation slept for 1500ms and then waited for a 5s grace at baseline. | `tests/unit/bash-tool-env.test.ts:84` | TIGHTEN | A test-local bash tool with a shorter kill grace preserves the SIGTERM to SIGKILL behavior. |
-| Tool abort tests assert elapsed wall-clock thresholds. | `tests/unit/tool-signal.test.ts:58` | KEEP | These cover real abort propagation through bash and fetch, and their thresholds are broad enough for the behavior under test. |
+| Bash abort escalation slept for 1500ms and then waited for a 5s grace at baseline. | `tests/integration/bash-tool-env.test.ts:84` | TIGHTEN | A test-local bash path with a shorter kill grace preserves the SIGTERM to SIGKILL behavior. |
+| Tool abort tests assert elapsed wall-clock thresholds. | `tests/integration/tool-signal.test.ts:58` | MOVE | These cover real abort propagation through bash and fetch, so they belong in integration. |
 | Termination budget tests use small real timers. | `tests/unit/termination.test.ts:37` | KEEP | The behavior is specifically about budgeted timeout return, with generous thresholds. |
 | Chat renderer coalescing tests waited for render timers at baseline. | `tests/unit/chat-panel.test.ts:699` | TIGHTEN | The production helper already accepts timer injection, so tests can drive the timer synchronously. |
 | Dispatch concurrency polling uses `Date.now` and a 5ms delay loop. | `tests/integration/dispatch-concurrency.test.ts:50` | MOVE | The file uses scratch data dirs and worker fakes, so it belongs in integration instead of unit. |
@@ -127,6 +127,7 @@ Gate file mapping after execution:
 Moved from unit to integration:
 
 - `tests/unit/agents-builtins.test.ts` -> `tests/integration/agents-builtins.test.ts`
+- `tests/unit/bash-tool-env.test.ts` -> `tests/integration/bash-tool-env.test.ts`
 - `tests/unit/cli-auth.test.ts` -> `tests/integration/cli-auth.test.ts`
 - `tests/unit/cli-configure-targets.test.ts` -> `tests/integration/cli-configure-targets.test.ts`
 - `tests/unit/cli-reset-uninstall.test.ts` -> `tests/integration/cli-reset-uninstall.test.ts`
@@ -154,6 +155,7 @@ Moved from unit to integration:
 - `tests/unit/slash-autocomplete.test.ts` -> `tests/integration/slash-autocomplete.test.ts`
 - `tests/unit/tools-grep.test.ts` -> `tests/integration/tools-grep.test.ts`
 - `tests/unit/tools-registry-wiring.test.ts` -> `tests/integration/tools-registry-wiring.test.ts`
+- `tests/unit/tool-signal.test.ts` -> `tests/integration/tool-signal.test.ts`
 - `tests/unit/utils-git.test.ts` -> `tests/integration/utils-git.test.ts`
 - `tests/unit/workspace/git-probe.test.ts` -> `tests/integration/workspace/git-probe.test.ts`
 - `tests/unit/workspace/project-type.test.ts` -> `tests/integration/workspace/project-type.test.ts`

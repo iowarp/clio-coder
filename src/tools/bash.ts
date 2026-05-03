@@ -16,7 +16,7 @@ function truncate(text: string): string {
 	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
 }
 
-interface ExecOutcome {
+export interface ExecOutcome {
 	error: NodeJS.ErrnoException | null;
 	stdout: string;
 	stderr: string;
@@ -33,7 +33,7 @@ function buildToolEnv(): NodeJS.ProcessEnv {
 	return env;
 }
 
-function execBash(
+export function execBash(
 	command: string,
 	cwd: string | undefined,
 	timeout: number,
@@ -147,66 +147,61 @@ function execBash(
 	});
 }
 
-export function createBashTool(toolOptions: BashToolOptions = {}): ToolSpec {
-	return {
-		name: ToolNames.Bash,
-		description:
-			"Execute a bash command in the current working directory via /bin/bash -lc. Returns stdout and stderr. Optionally provide a timeout in seconds (or timeout_ms in milliseconds) and a cwd. Default timeout is 5 minutes (300 seconds), enough for npm install and full ci runs.",
-		parameters: Type.Object({
-			command: Type.String({ description: "Bash command to execute." }),
-			cwd: Type.Optional(
-				Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
-			),
-			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds. Alias of timeout_ms. Must be > 0." })),
-			timeout_ms: Type.Optional(
-				Type.Number({ description: "Timeout in milliseconds. Defaults to 300000 (5 min). Must be > 0." }),
-			),
-		}),
-		baseActionClass: "execute",
-		executionMode: "sequential",
-		async run(args, options): Promise<ToolResult> {
-			if (typeof args.command !== "string" || args.command.length === 0) {
-				return { kind: "error", message: "bash: missing command argument" };
+export const bashTool: ToolSpec = {
+	name: ToolNames.Bash,
+	description:
+		"Execute a bash command in the current working directory via /bin/bash -lc. Returns stdout and stderr. Optionally provide a timeout in seconds (or timeout_ms in milliseconds) and a cwd. Default timeout is 5 minutes (300 seconds), enough for npm install and full ci runs.",
+	parameters: Type.Object({
+		command: Type.String({ description: "Bash command to execute." }),
+		cwd: Type.Optional(
+			Type.String({ description: "Working directory for the command. Defaults to the orchestrator cwd." }),
+		),
+		timeout: Type.Optional(Type.Number({ description: "Timeout in seconds. Alias of timeout_ms. Must be > 0." })),
+		timeout_ms: Type.Optional(
+			Type.Number({ description: "Timeout in milliseconds. Defaults to 300000 (5 min). Must be > 0." }),
+		),
+	}),
+	baseActionClass: "execute",
+	executionMode: "sequential",
+	async run(args, options): Promise<ToolResult> {
+		if (typeof args.command !== "string" || args.command.length === 0) {
+			return { kind: "error", message: "bash: missing command argument" };
+		}
+		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
+		const timeoutMsArg = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : null;
+		const timeoutSecArg =
+			timeoutMsArg === null && typeof args.timeout === "number" && args.timeout > 0 ? args.timeout * 1000 : null;
+		const timeout = timeoutMsArg ?? timeoutSecArg ?? 300_000;
+		try {
+			const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
+				args.command,
+				cwd,
+				timeout,
+				options?.signal,
+			);
+			if (aborted) {
+				return { kind: "error", message: "bash: command aborted" };
 			}
-			const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
-			const timeoutMsArg = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : null;
-			const timeoutSecArg =
-				timeoutMsArg === null && typeof args.timeout === "number" && args.timeout > 0 ? args.timeout * 1000 : null;
-			const timeout = timeoutMsArg ?? timeoutSecArg ?? 300_000;
-			try {
-				const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
-					args.command,
-					cwd,
-					timeout,
-					options?.signal,
-					toolOptions,
-				);
-				if (aborted) {
-					return { kind: "error", message: "bash: command aborted" };
-				}
-				if (timedOut) {
-					return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
-				}
-				if (outputCapped) {
-					return { kind: "error", message: `bash: command output exceeded ${MAX_OUTPUT_BYTES * 2} bytes` };
-				}
-				if (error) {
-					const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
-					const tail = stderr.length > 0 ? stderr : stdout;
-					const message = `bash: command failed (exit ${code ?? "?"}): ${truncate(tail).trim() || error.message}`;
-					return { kind: "error", message };
-				}
-				const combined =
-					stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
-				return { kind: "ok", output: truncate(combined) };
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return { kind: "error", message: `bash: ${msg}` };
+			if (timedOut) {
+				return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
 			}
-		},
-	};
-}
-
-export const bashTool: ToolSpec = createBashTool();
+			if (outputCapped) {
+				return { kind: "error", message: `bash: command output exceeded ${MAX_OUTPUT_BYTES * 2} bytes` };
+			}
+			if (error) {
+				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
+				const tail = stderr.length > 0 ? stderr : stdout;
+				const message = `bash: command failed (exit ${code ?? "?"}): ${truncate(tail).trim() || error.message}`;
+				return { kind: "error", message };
+			}
+			const combined =
+				stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
+			return { kind: "ok", output: truncate(combined) };
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return { kind: "error", message: `bash: ${msg}` };
+		}
+	},
+};
 
 export { buildToolEnv, truncateUtf8 };
