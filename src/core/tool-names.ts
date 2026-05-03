@@ -19,6 +19,8 @@ export const ToolNames = {
 	EntryPoints: "entry_points",
 	WhereIs: "where_is",
 	ClioIntrospect: "clio_introspect",
+	ClioRecall: "clio_recall",
+	ClioRemember: "clio_remember",
 } as const;
 
 export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
