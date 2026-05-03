@@ -97,10 +97,10 @@ describe("core/concurrency/TokenBucket", () => {
 	});
 
 	it("refills at given rate", async () => {
-		const b = new TokenBucket(2, 1000);
+		const b = new TokenBucket(2, 10);
 		b.tryTake(2);
 		strictEqual(b.tryTake(1), false);
-		await new Promise((resolve) => setTimeout(resolve, 15));
+		await new Promise((resolve) => setTimeout(resolve, 200));
 		strictEqual(b.tryTake(1), true);
 	});
 });
