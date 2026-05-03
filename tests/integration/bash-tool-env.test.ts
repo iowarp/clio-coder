@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { bashTool, buildToolEnv, createBashTool } from "../../src/tools/bash.js";
+import { bashTool, buildToolEnv, execBash } from "../../src/tools/bash.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -84,7 +84,6 @@ describe("bash tool environment", () => {
 	it("escalates aborted commands that ignore sigterm", async () => {
 		const controller = new AbortController();
 		const killGraceMs = 50;
-		const testBashTool = createBashTool({ killGraceMs });
 		// The shell runs with `-l`, which on cold CI runners can spend a few
 		// hundred ms reading /etc/profile before reaching the user command. If
 		// SIGTERM arrives before the trap is installed, bash dies at the
@@ -97,19 +96,19 @@ describe("bash tool environment", () => {
 		// monotonic schedule. libuv-backed `setTimeout` already uses the
 		// monotonic clock; the test just needs to read the same source.
 		const startedAt = performance.now();
-		const started = testBashTool.run(
-			{
-				command: 'trap "" TERM; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
-				timeout_ms: 16_000,
-			},
-			{ signal: controller.signal },
+		const started = execBash(
+			'trap "" TERM; end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do sleep 1; done',
+			undefined,
+			16_000,
+			controller.signal,
+			{ killGraceMs },
 		);
 		setTimeout(() => controller.abort(), 1500);
 		const result = await started;
 		const elapsedMs = performance.now() - startedAt;
 
-		strictEqual(result.kind, "error");
-		if (result.kind === "error") strictEqual(result.message, "bash: command aborted");
+		strictEqual(result.aborted, true);
+		strictEqual((result.error as { signal?: string } | null)?.signal, "SIGKILL");
 		ok(elapsedMs >= 1500 + killGraceMs - 20, `expected abort escalation after the grace period, got ${elapsedMs}ms`);
 		ok(elapsedMs < 1500 + 2_000, `expected abort escalation within window, got ${elapsedMs}ms`);
 	});
