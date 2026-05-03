@@ -28,6 +28,25 @@ function seedTargets(configDir: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
+function seedLocalModelTarget(configDir: string): void {
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	const patched = yaml.replace(
+		/^targets:.*$/m,
+		[
+			"targets:",
+			"  - id: mini",
+			"    runtime: llamacpp",
+			"    url: http://mini.invalid:8080",
+			"    defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL",
+			"    wireModels:",
+			"      - Qwen3.6-35B-A3B-UD-Q4_K_XL",
+			"      - unknown-local-model",
+		].join("\n"),
+	);
+	writeFileSync(p, patched, "utf8");
+}
+
 describe("clio cli e2e", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
@@ -156,6 +175,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		const parsed = JSON.parse(result.stdout) as {
 			targets: Array<{
 				detectedReasoning: boolean | null;
+				probeModelId: string | null;
 				reasoningCandidateModelId: string | null;
 				target: { id: string; defaultModel?: string | null };
 			}>;
@@ -170,6 +190,7 @@ describe("clio cli e2e", { concurrency: false }, () => {
 				Object.hasOwn(row, "reasoningCandidateModelId"),
 				`target ${row.target.id} must include reasoningCandidateModelId`,
 			);
+			ok(Object.hasOwn(row, "probeModelId"), `target ${row.target.id} must include probeModelId`);
 			// Without --probe the reasoning cache stays cold; assert the
 			// negative-detection signal so a regression that swallows the
 			// cache miss surfaces here.
@@ -539,6 +560,34 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		const rows = JSON.parse(result.stdout) as Array<{ targetId: string; modelId: string }>;
 		strictEqual(rows.length, 1);
 		strictEqual(rows[0]?.modelId, "gpt-4o-mini");
+	});
+
+	it("models --json reports per-model local capabilities", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		seedLocalModelTarget(join(scratch.dir, "config"));
+		const result = await runCli(["models", "--target", "mini", "--json"], {
+			env: scratch.env,
+			timeoutMs: 20_000,
+		});
+		strictEqual(result.code, 0);
+		const rows = JSON.parse(result.stdout) as Array<{
+			modelId: string;
+			caps: string;
+			contextWindow: number;
+			maxTokens: number;
+			reasoning: boolean;
+		}>;
+		const qwen = rows.find((row) => row.modelId === "Qwen3.6-35B-A3B-UD-Q4_K_XL");
+		const unknown = rows.find((row) => row.modelId === "unknown-local-model");
+		ok(qwen);
+		ok(unknown);
+		strictEqual(qwen.reasoning, true);
+		strictEqual(qwen.contextWindow, 262144);
+		strictEqual(qwen.maxTokens, 65536);
+		strictEqual(unknown.reasoning, false);
+		strictEqual(unknown.contextWindow, 8192);
+		strictEqual(qwen.caps.includes("R"), true);
+		strictEqual(unknown.caps.includes("R"), false);
 	});
 
 	it("auth login --api-key is parsed by auth, not the global startup flag", async () => {

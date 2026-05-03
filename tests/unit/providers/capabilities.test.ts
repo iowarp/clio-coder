@@ -181,6 +181,26 @@ describe("providers/model-capabilities catalog alignment", () => {
 		strictEqual(caps.maxTokens, runtime.defaultCapabilities.maxTokens);
 	});
 
+	it("applies unkeyed probe-only capabilities only to the endpoint default model", () => {
+		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "llamacpp");
+		ok(runtime, "missing llamacpp runtime");
+		const status = {
+			endpoint: { id: "mini", runtime: "llamacpp", defaultModel: "loaded-model" },
+			runtime,
+			capabilities: base({ reasoning: false, contextWindow: 8192, maxTokens: 4096 }),
+			probeCapabilities: { reasoning: true, contextWindow: 262144, maxTokens: 32768 },
+			probeModelId: null,
+		};
+
+		const defaultCaps = resolveModelCapabilities(status, "loaded-model", null);
+		const otherCaps = resolveModelCapabilities(status, "other-model", null);
+
+		strictEqual(defaultCaps.reasoning, true);
+		strictEqual(defaultCaps.contextWindow, 262144);
+		strictEqual(otherCaps.reasoning, false);
+		strictEqual(otherCaps.contextWindow, runtime.defaultCapabilities.contextWindow);
+	});
+
 	it("treats detected reasoning=false as authoritative for the selected wire model", () => {
 		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "llamacpp");
 		ok(runtime, "missing llamacpp runtime");

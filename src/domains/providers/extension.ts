@@ -95,6 +95,15 @@ function uniqueModels(ids: ReadonlyArray<string>): string[] {
 	return out;
 }
 
+function sameProbeIdentity(previous: EndpointDescriptor, next: EndpointDescriptor): boolean {
+	return (
+		previous.id === next.id &&
+		previous.runtime === next.runtime &&
+		(previous.url ?? "") === (next.url ?? "") &&
+		(previous.defaultModel ?? "") === (next.defaultModel ?? "")
+	);
+}
+
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
@@ -165,10 +174,19 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		const availability = availabilityFor(desc, endpoint, authStatusFor);
 		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
-		const probeCapabilities = probe?.discoveredCapabilities ?? previous?.probeCapabilities ?? null;
-		const probeModelId = probe?.capabilityModelId ?? previous?.probeModelId ?? null;
-		const probeNotes = probe?.notes && probe.notes.length > 0 ? probe.notes : previous?.probeNotes;
-		const discoveredModels = uniqueModels(probe?.models ?? previous?.discoveredModels ?? desc.knownModels ?? []);
+		const preservePreviousProbe =
+			probe === null && previous !== undefined && sameProbeIdentity(previous.endpoint, endpoint);
+		const probeCapabilities =
+			probe?.discoveredCapabilities ?? (preservePreviousProbe ? previous.probeCapabilities : null) ?? null;
+		const probeModelId =
+			probe?.discoveredCapabilities !== undefined
+				? (probe.capabilityModelId ?? null)
+				: ((preservePreviousProbe ? previous.probeModelId : null) ?? null);
+		const probeNotes =
+			probe?.notes && probe.notes.length > 0 ? probe.notes : preservePreviousProbe ? previous.probeNotes : undefined;
+		const discoveredModels = uniqueModels(
+			probe?.models ?? (preservePreviousProbe ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
+		);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
 			probe === null
