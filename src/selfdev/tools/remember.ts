@@ -1,7 +1,7 @@
 import { Type } from "typebox";
-import { ToolNames } from "../../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "../../tools/registry.js";
 import { appendDevMemory } from "../memory.js";
+import { SelfDevToolNames } from "../tool-names.js";
 
 export interface ClioRememberDeps {
 	repoRoot: string;
@@ -18,7 +18,7 @@ function stringArray(value: unknown): string[] | undefined {
 
 export function clioRememberTool(deps: ClioRememberDeps): ToolSpec {
 	return {
-		name: ToolNames.ClioRemember,
+		name: SelfDevToolNames.ClioRemember,
 		description:
 			"Write one durable self-development memory note for this checkout. Store only facts useful for future Clio source work.",
 		parameters: Type.Object({

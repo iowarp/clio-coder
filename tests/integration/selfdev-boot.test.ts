@@ -9,6 +9,7 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { bootOrchestrator } from "../../src/entry/orchestrator.js";
 import { registerSelfDevTools, resolveSelfDevMode } from "../../src/selfdev/index.js";
+import { SelfDevToolNames } from "../../src/selfdev/tool-names.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import type { ToolRegistry, ToolSpec } from "../../src/tools/registry.js";
 
@@ -39,12 +40,12 @@ describe("selfdev boot wiring", () => {
 			const specs: ToolSpec[] = [];
 			const registry = { register: (spec: ToolSpec) => specs.push(spec), listAll: () => specs } as unknown as ToolRegistry;
 			registerAllTools(registry);
-			ok(!specs.some((tool) => tool.name === "clio_introspect"));
+			ok(!specs.some((tool) => tool.name === SelfDevToolNames.ClioIntrospect));
 			const mode = resolveSelfDevMode({ cliDev: true });
 			strictEqual(mode?.repoRoot, repo);
 			if (!mode) throw new Error("selfdev mode did not resolve");
 			registerSelfDevTools(registry, { mode });
-			ok(specs.some((tool) => tool.name === "clio_introspect"));
+			ok(specs.some((tool) => tool.name === SelfDevToolNames.ClioIntrospect));
 			const prompts = createPromptsBundle(
 				{ bus: createSafeEventBus(), getContract: () => undefined },
 				{ devRepoRoot: repo },

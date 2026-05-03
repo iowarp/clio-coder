@@ -90,7 +90,7 @@ export type ToolResult =
 			 */
 			terminate?: boolean;
 	  }
-	| { kind: "error"; message: string };
+	| { kind: "error"; message: string; details?: ToolResultDetails };
 
 export interface RegistryDeps {
 	safety: SafetyContract;
@@ -287,7 +287,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				verdict: { kind: "not_visible", reason: `tool ${spec.name} not allowed in mode ${currentMode}` },
 			};
 		}
-		const decision = deps.safety.evaluate(call, currentMode);
+		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, currentMode), spec);
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
 		}
@@ -383,6 +383,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			};
 		},
 	};
+}
+
+function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec): SafetyDecision {
+	if (decision.classification.actionClass !== "unknown" || spec.bypassModeMatrix !== true) return decision;
+	const classification = {
+		actionClass: spec.baseActionClass,
+		reasons: [`registered private tool: ${spec.name}`],
+	};
+	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
 }
 
 function emitProtectedArtifactEvent(deps: RegistryDeps, event: ProtectedArtifactRegistryEvent): void {

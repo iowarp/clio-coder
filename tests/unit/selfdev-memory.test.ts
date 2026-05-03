@@ -3,7 +3,14 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { appendDevMemory, devMemoryPath, recallDevMemory, renderDevMemoryFragment } from "../../src/selfdev/memory.js";
+import {
+	appendDevMemory,
+	devMemoryPath,
+	pruneDevMemory,
+	recallDevMemory,
+	renderDevMemoryFragment,
+} from "../../src/selfdev/memory.js";
+import { clioMemoryMaintainTool } from "../../src/selfdev/tools/memory-maintain.js";
 import { clioRecallTool } from "../../src/selfdev/tools/recall.js";
 import { clioRememberTool } from "../../src/selfdev/tools/remember.js";
 import type { ToolResult } from "../../src/tools/registry.js";
@@ -31,7 +38,14 @@ describe("selfdev memory tools", () => {
 		const remember = clioRememberTool({ repoRoot: repo });
 		const recall = clioRecallTool({ repoRoot: repo });
 		strictEqual(parse(await remember.run({ note: "prefer focused tests", tags: ["tests", "tests"] })).row_count, 1);
-		const rows = parse(await recall.run({ tags: ["tests"], limit: 5 })).entries as Array<{
+		const recalled = parse(await recall.run({ tags: ["tests"], limit: 5 }));
+		strictEqual(recalled.total_count, 1);
+		strictEqual(recalled.matched_count, 1);
+		strictEqual(recalled.returned_count, 1);
+		strictEqual(recalled.malformed_count, 0);
+		strictEqual(recalled.rotated_exists, false);
+		strictEqual(recalled.limit_applied, false);
+		const rows = recalled.entries as Array<{
 			note: string;
 			tags: string[];
 		}>;
@@ -46,6 +60,7 @@ describe("selfdev memory tools", () => {
 		writeFileSync(file, "x".repeat(64 * 1024), "utf8");
 		parse(await clioRememberTool({ repoRoot: repo }).run({ note: "after rotation" }));
 		ok(existsSync(`${file}.1`));
+		strictEqual(parse(await clioRecallTool({ repoRoot: repo }).run({ limit: 5 })).rotated_exists, true);
 	});
 
 	it("rejects an empty or whitespace-only note", async () => {
@@ -78,6 +93,12 @@ describe("selfdev memory tools", () => {
 		const entries = await recallDevMemory(repo, { limit: 50 });
 		strictEqual(entries.length, 1);
 		strictEqual(entries[0]?.note, "valid line");
+		const recalled = parse(await clioRecallTool({ repoRoot: repo }).run({ limit: 50 }));
+		strictEqual(recalled.total_count, 1);
+		strictEqual(recalled.matched_count, 1);
+		strictEqual(recalled.returned_count, 1);
+		strictEqual(recalled.malformed_count, 5);
+		strictEqual(recalled.rotated_exists, false);
 	});
 
 	it("filters by tag set with AND semantics", async () => {
@@ -133,6 +154,28 @@ describe("selfdev memory tools", () => {
 		);
 		// Most recent entries must be present.
 		ok(fragment.includes("-29"));
+		ok(fragment.includes("[dev-memory truncated:"), fragment);
+	});
+
+	it("prunes to newest valid entries and removes malformed lines only when applied", async () => {
+		const repo = tmpRepo();
+		for (let i = 0; i < 5; i++) await appendDevMemory(repo, { note: `note-${i}` });
+		appendFileSync(devMemoryPath(repo), "not-json\n", "utf8");
+		const preview = await pruneDevMemory(repo, { keep: 2 });
+		strictEqual(preview.dryRun, true);
+		strictEqual(preview.totalCount, 5);
+		strictEqual(preview.keptCount, 2);
+		strictEqual(preview.droppedCount, 3);
+		strictEqual(preview.malformedCount, 1);
+		ok(readFileSync(devMemoryPath(repo), "utf8").includes("not-json"));
+		const applied = parse(await clioMemoryMaintainTool({ repoRoot: repo }).run({ keep: 2, dry_run: false }));
+		strictEqual(applied.dry_run, false);
+		strictEqual(applied.kept_count, 2);
+		strictEqual(applied.dropped_count, 3);
+		strictEqual(applied.malformed_count, 1);
+		const after = await recallDevMemory(repo, { limit: 10 });
+		strictEqual(after.map((entry) => entry.note).join(","), "note-4,note-3");
+		ok(!readFileSync(devMemoryPath(repo), "utf8").includes("not-json"));
 	});
 
 	it("renders memory entries as JSON literals so newlines in notes do not break out of the fragment", async () => {
@@ -166,5 +209,14 @@ describe("selfdev memory tools", () => {
 		// The torn line stays in the file; future readers continue to skip it.
 		const raw = readFileSync(devMemoryPath(repo), "utf8");
 		ok(raw.includes('"note":"truncat'));
+	});
+
+	it("serializes same-process concurrent appends", async () => {
+		const repo = tmpRepo();
+		await Promise.all(Array.from({ length: 20 }, (_, i) => appendDevMemory(repo, { note: `parallel-${i}` })));
+		const entries = await recallDevMemory(repo, { limit: 50 });
+		strictEqual(entries.length, 20);
+		const unique = new Set(entries.map((entry) => entry.note));
+		strictEqual(unique.size, 20);
 	});
 });

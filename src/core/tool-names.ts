@@ -18,11 +18,21 @@ export const ToolNames = {
 	FindSymbol: "find_symbol",
 	EntryPoints: "entry_points",
 	WhereIs: "where_is",
-	ClioIntrospect: "clio_introspect",
-	ClioRecall: "clio_recall",
-	ClioRemember: "clio_remember",
 } as const;
 
-export type ToolName = (typeof ToolNames)[keyof typeof ToolNames];
+export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];
 
-export const ALL_TOOL_NAMES: ReadonlyArray<ToolName> = Object.values(ToolNames);
+declare const dynamicToolNameBrand: unique symbol;
+export type DynamicToolName = string & { readonly [dynamicToolNameBrand]: "dynamic-tool-name" };
+
+export type ToolName = BuiltinToolName | DynamicToolName;
+
+export function dynamicToolName<T extends string>(name: T): T & DynamicToolName {
+	return name as T & DynamicToolName;
+}
+
+export const ALL_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = Object.values(ToolNames);
+
+export function isBuiltinToolName(name: ToolName): name is BuiltinToolName {
+	return (ALL_TOOL_NAMES as ReadonlyArray<string>).includes(name);
+}

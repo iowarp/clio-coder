@@ -2,7 +2,9 @@ import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { ToolRegistry, ToolSourceInfo, ToolSpec } from "../tools/registry.js";
 import type { HarnessIntrospection } from "./harness/state.js";
 import type { SelfDevMode } from "./mode.js";
+import { SELFDEV_WORKER_TOOL_NAMES } from "./tool-names.js";
 import { clioIntrospectTool } from "./tools/introspect.js";
+import { clioMemoryMaintainTool } from "./tools/memory-maintain.js";
 import { clioRecallTool } from "./tools/recall.js";
 import { clioRememberTool } from "./tools/remember.js";
 
@@ -20,7 +22,9 @@ export {
 	appendDevMemory,
 	type DevMemoryEntry,
 	devMemoryPath,
+	pruneDevMemory,
 	recallDevMemory,
+	recallDevMemorySummary,
 	renderDevMemoryFragment,
 } from "./memory.js";
 export {
@@ -37,11 +41,17 @@ export {
 	type SelfDevPathDecision,
 	selfDevActivationSource,
 } from "./mode.js";
+export { SELFDEV_WORKER_TOOL_NAMES, SelfDevToolNames } from "./tool-names.js";
 export { clioIntrospectTool } from "./tools/introspect.js";
+export { clioMemoryMaintainTool } from "./tools/memory-maintain.js";
 export { clioRecallTool } from "./tools/recall.js";
 export { clioRememberTool } from "./tools/remember.js";
 export { openDevDiffOverlay, renderDevDiffOverlay } from "./ui/dev-diff.js";
 export { createSelfDevFooterLine } from "./ui/dev-footer.js";
+
+export function selfDevWorkerToolNames(): ReadonlyArray<import("../core/tool-names.js").ToolName> {
+	return SELFDEV_WORKER_TOOL_NAMES;
+}
 
 export interface SelfDevToolRegistrationDeps {
 	mode: SelfDevMode;
@@ -78,6 +88,14 @@ export function registerSelfDevTools(registry: ToolRegistry, deps: SelfDevToolRe
 	registry.register({
 		...withSourceInfo(clioRememberTool({ repoRoot: deps.mode.repoRoot }), {
 			path: "src/selfdev/tools/remember.ts",
+			scope: "selfdev",
+		}),
+		allowedModes: defaultAndSuper,
+		bypassModeMatrix: true,
+	});
+	registry.register({
+		...withSourceInfo(clioMemoryMaintainTool({ repoRoot: deps.mode.repoRoot }), {
+			path: "src/selfdev/tools/memory-maintain.ts",
 			scope: "selfdev",
 		}),
 		allowedModes: defaultAndSuper,
