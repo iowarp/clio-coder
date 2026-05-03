@@ -71,6 +71,11 @@ export interface InvokeWorkerToolOptions {
 }
 
 type WorkerAgentToolResult = AgentToolResult<{ kind: "ok" } | { kind: "error" }>;
+type WorkerToolOkDetails = { kind: "ok" } & Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 interface RunValidatedToolCallInput {
 	spec: ToolSpec;
@@ -108,9 +113,10 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		emitFinish(telemetry, spec.name, mode, startedAt, "error", { reason: verdict.result.message });
 		throw new Error(verdict.result.message);
 	}
-	const result: AgentToolResult<{ kind: "ok" }> = {
+	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
+	const result: AgentToolResult<WorkerToolOkDetails> = {
 		content: [{ type: "text", text: verdict.result.output }],
-		details: { kind: "ok" },
+		details: { ...toolDetails, kind: "ok" },
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
