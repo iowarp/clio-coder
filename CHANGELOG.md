@@ -5,14 +5,88 @@ Keep a Changelog.
 
 ## Unreleased
 
+No changes yet.
+
+## 0.1.5 - 2026-05-03
+
+Clio Coder's first public alpha release. This release is intended for
+developers and research-software teams who want to test a terminal-first
+coding agent on real repositories while keeping human review, explicit tool
+permissions, receipts, and audit trails in the loop. It is experimental:
+interfaces may change, rough edges remain, and source install is still the
+recommended path.
+
+### Product highlights
+
+- Interactive terminal UI for repository work, including a workspace
+  dashboard, slash commands, model switching, receipts, cost and usage
+  inspection, hotkeys, session navigation, and persistent chat state.
+- Target-first model configuration for local servers, cloud APIs, and
+  CLI-backed assistants. Targets can be probed, listed, selected, and routed
+  separately for chat and worker agents.
+- Built-in coding agents for scouting, planning, review, implementation,
+  debugging, regression scouting, benchmarking, memory curation, evolution
+  planning, and scientific validation.
+- Persistent sessions with resume, fork, compact, replay, `/new`, and
+  branch-aware navigation. `clio init` and `/init` create a checked-in
+  `CLIO.md` project guide and local fingerprint state.
+- Workspace orientation through the welcome dashboard and `workspace_context`
+  tool, plus codewiki indexing and lookup tools for entry points and symbols.
+- Safety modes for default, advise, and super workflows. Privileged actions
+  require explicit confirmation, protected artifacts are tracked, and
+  finish-contract advisories flag completion claims without recent validation
+  evidence.
+- Receipts and audit logs for run metadata, usage, tool activity, mode
+  changes, aborts, and session lifecycle events.
+- Evidence and eval workflows for building inspectable evidence corpora from
+  runs, sessions, receipts, audit rows, and eval results, then comparing
+  baseline and candidate runs.
+- Scoped memory records that must be approved and evidence-linked before they
+  are injected into prompts under a fixed budget.
+- TUI hardening for long tool output, thinking blocks, usage accounting,
+  model selection, popup framing, and terminal-width-sensitive rendering.
+
 ### Added
 
-- Added `clio init` and `/init` to bootstrap a checked-in `CLIO.md` plus local `.clio/state.json` fingerprint state.
-- Added CLIO.md parsing, serialization, project fingerprinting, and session lifecycle state refresh for project context.
+- Added `clio init` and `/init` to bootstrap `CLIO.md` plus local
+  `.clio/state.json` fingerprint state.
+- Added CLIO.md parsing, serialization, project fingerprinting, and session
+  lifecycle state refresh for project context.
+- Added codewiki indexing and lookup tools for repository entry points and
+  symbols.
+- Added clearer `/cost` accounting for fresh input, cached prefix reads,
+  output, reasoning, model requests, and processed totals.
+- Added a redesigned `/model` popup with summary counts, stable model
+  metadata columns, filtering, selected-row details, and terminal-width
+  guards.
+- Added CLIO-branded popup frames across the interactive overlays.
 
 ### Changed
 
-- Project context injection now loads `CLIO.md` only. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and `CODEX.md` are read during `/init` and folded into `CLIO.md`; they are no longer walked and merged on every turn.
+- Project context injection now loads `CLIO.md` only. `CLAUDE.md`,
+  `AGENTS.md`, `GEMINI.md`, and `CODEX.md` are read during `/init` and folded
+  into `CLIO.md`; they are no longer walked and merged on every turn.
+- Model capability resolution now follows the selected wire model instead of
+  assuming the endpoint default.
+- Session replay caps oversized retained content so resumed sessions do not
+  resend unbounded historical payloads.
+- Local usage accounting now exposes provider-reported cached prefix reads
+  without treating them as hidden conversation history.
+- Tool and thinking rendering now keeps long, streaming, and structured
+  output readable in the chat panel.
+
+### Alpha notes
+
+- The recommended install path is still from source using the GitHub release
+  tag. npm distribution is planned but not yet available under
+  `@iowarp/clio-coder`.
+- Clio Coder can execute tools in your repository. Review privileged actions,
+  use safety modes intentionally, and do not treat the assistant as an
+  unattended production operator.
+- Model behavior depends on the target you configure. Quality, tool calling,
+  reasoning, context length, and usage reporting vary by target.
+- The full release gate is `npm run ci`, covering typecheck, lint, unit,
+  integration, boundary, build, and end-to-end tests.
 
 ## 0.1.4 — 2026-04-30
 

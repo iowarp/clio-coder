@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
 	"keywords": [
 		"ai",

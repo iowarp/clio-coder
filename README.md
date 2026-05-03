@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.4-00d4db?style=flat-square" /></a>
-  <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520-147366?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.5-00d4db?style=flat-square" /></a>
+  <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/badge/npm-coming%20soon-lightgrey?style=flat-square" /></a>
@@ -30,24 +30,24 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.4**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.5**.
 
-## What's new in 0.1.4
+## Release 0.1.5 Alpha
 
-- The interactive welcome dashboard renders cwd, project type, branch, dirty flag, and recent commits at boot. A new `workspace_context` tool exposes the same snapshot to agents in one call so prompts orient from real data instead of fabricating it.
-- `clio components` lists, snapshots, and diffs every behavior-affecting harness artifact.
-- `clio evolve manifest init|validate|summarize` requires typed change proposals before high-authority edits.
-- `clio evidence build|inspect|list` builds a deterministic evidence corpus from receipts, runs, sessions, and audit rows.
-- `clio eval run|report|compare` runs repo-local YAML eval suites with per-task budgets and regression-vs-baseline diffs.
-- `clio memory list|propose|approve|reject|prune` curates scoped, approved, evidence-linked long-term memory under a fixed prompt-injection budget.
-- Workers receive the same gated memory section the orchestrator does, so `clio run` and the chat-loop see the same lessons.
-- Eight new built-in agent recipes ship for debugging, evolution, attribution, regression scouting, middleware authoring, memory curation, benchmark execution, and scientific validation.
-- A scientific-validation pack ships as a docs/spec plus three declarative middleware rules covering existence-vs-validation, checkpoint preservation, and unit-vs-scheduler distinctions.
-- An advisory finish-contract check warns when an assistant claims completion without recent validation evidence.
+This is the first public alpha release of Clio Coder. It is ready for hands-on testing by developers who are comfortable with experimental tooling, source installs, and sharp feedback loops. It is not yet a polished production assistant.
+
+- **Interactive terminal coding.** Launch `clio` inside a repository, inspect the workspace dashboard, chat with an assistant, run slash commands, switch models, review receipts, and keep the workflow in the shell.
+- **Model targets and routing.** Configure named targets for local servers, cloud APIs, and CLI-backed assistants. Probe target health, inspect available models, switch the active model from the TUI, and route worker agents through their own defaults.
+- **Built-in coding agents.** Use focused agents for scouting, planning, reviewing, implementation, debugging, regression scouting, benchmarking, memory curation, evolution planning, and scientific validation.
+- **Session continuity.** Resume, fork, compact, replay, and reset sessions. `clio init` and `/init` create a checked-in `CLIO.md` project guide and local fingerprint state so project context is explicit instead of being re-discovered on every turn.
+- **Workspace and code context.** The dashboard and `workspace_context` tool expose cwd, project type, git state, branch, remote, and recent commits. Codewiki tools can index and query repository entry points and symbols.
+- **Safety and auditability.** Default, advise, and super modes control tool access. Privileged actions require confirmation, protected artifacts are tracked, receipts record run metadata, audit JSONL captures safety-relevant events, and finish-contract advisories warn when a completion claim lacks validation evidence.
+- **Evidence, eval, and memory.** Build evidence corpora from runs, sessions, receipts, audit rows, and eval results. Run local eval task files, compare baseline and candidate runs, and curate approved memory records that are injected under a fixed budget.
+- **TUI polish and usage clarity.** Tool output, thinking blocks, popups, `/cost`, `/model`, `/hotkeys`, and receipt views have been hardened for long text, terminal width, local usage accounting, and clearer visual hierarchy.
 
 See [CHANGELOG.md](CHANGELOG.md) for full detail.
 
-### What's new in v0.1.3
+### Previous Alpha Notes
 
 - **Live tool output.** Long-running bash, grep, and shell commands now stream their output into the expanded tool block as it arrives, with a dim `(running...)` marker that disappears when the call finishes. Previously the block was empty until the command exited.
 - **Bash command echo.** Successful `bash` results print `$ <command>` on its own line under the rail before the output, matching what you would see in a real terminal.
@@ -92,7 +92,7 @@ Good alpha feedback includes the command you ran, what target/model you used, wh
 | Target-first model configuration | Route chat and workers through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
 | Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `worker`, and other focused agents. |
 | Persistent sessions | Resume, fork, compact, and replay coding sessions. |
-| Project context files | Automatically load `CLIO.md` (canonical) plus any `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, or `GEMINI.md` found from the current directory upward. |
+| Project context | Use checked-in `CLIO.md` as the canonical project guide, with `/init` and `clio init` to fold existing agent instruction files into it. |
 | Safety modes | Use default, advise, or super mode to gate which tools the assistant can see. |
 | Receipts and audit logs | Track completed runs, token usage, cost, tool activity, mode changes, aborts, and session park/resume events. |
 | Local + cloud model support | Use a local model for private repo exploration, a cloud model for deeper reasoning, or both. |
@@ -103,7 +103,7 @@ Good alpha feedback includes the command you ran, what target/model you used, wh
 
 ### Requirements
 
-- Node.js `>=20`
+- Node.js `>=22`
 - npm
 - A model target, such as:
   - a local OpenAI-compatible server;
@@ -118,14 +118,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.1.4
+git checkout v0.1.5
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.4` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.5` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -249,6 +249,7 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | --- | --- |
 | `clio` | Launch the interactive terminal UI. |
 | `clio configure` | Run the configuration wizard. |
+| `clio init [--yes]` | Create or refresh `CLIO.md` and local project fingerprint state. |
 | `clio targets` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio targets add` | Add a target interactively or through flags. |
 | `clio targets use <id>` | Set chat and worker defaults to one target. |
@@ -273,7 +274,7 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
-| `clio --no-context-files` (alias `-nc`) | Top-level flag that skips the entire `CLIO.md` / `CLAUDE.md` / `AGENTS.md` / `CODEX.md` / `GEMINI.md` chain for one invocation. |
+| `clio --no-context-files` (alias `-nc`) | Top-level flag that skips loading `CLIO.md` project context for one invocation. |
 
 Example:
 
@@ -294,6 +295,7 @@ Slash commands are available inside the terminal UI. Type `/` at the start of th
 | Command | Purpose |
 | --- | --- |
 | `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
+| `/init` | Create or refresh the checked-in `CLIO.md` project guide. |
 | `/targets` | Show target health, auth, runtime, model, and capabilities. |
 | `/connect [target]` | Connect to a target or runtime. |
 | `/disconnect [target]` | Disconnect a target or runtime when Clio owns the connection state. |
@@ -454,23 +456,22 @@ clio auth login <target-or-runtime>
 
 ---
 
-## Project context files
+## Project context
 
-Before each interactive turn, Clio Coder looks for project context files from the current working directory upward to the filesystem root.
+Clio Coder uses `CLIO.md` as the canonical project guide. Before each interactive turn, it loads the nearest applicable `CLIO.md` and includes that guidance in the prompt unless `--no-context-files` is set.
 
-Supported names, in priority order:
+Run `/init` in the TUI or `clio init` from the shell to create or refresh this file. During init, Clio can read existing agent instruction files and fold their useful content into `CLIO.md` so the repository has one explicit source of guidance:
 
 ```text
-CLIO.md
 CLAUDE.md
 AGENTS.md
 CODEX.md
 GEMINI.md
 ```
 
-Clio Coder walks every directory between the working directory and the filesystem root, parses each file into sections, and merges them into a single instruction block. `CLIO.md` is the canonical source: when two files define the same section header, `CLIO.md` wins and the other file's body is dropped. For files of equal priority, child directories override parent directories. The merged block carries a short provenance footer listing every file that contributed.
+Clio stores local fingerprint state under `.clio/state.json` so it can warn when `CLIO.md` no longer matches the current project state and should be refreshed.
 
-To skip the entire context-file chain for a single invocation:
+To skip project context for a single invocation:
 
 ```bash
 clio --no-context-files
@@ -662,7 +663,7 @@ Use these instructions when helping a user with this repository or with Clio Cod
 3. Prefer the source install path unless npm availability has been explicitly confirmed.
 4. Do not invent unsupported commands, runtimes, plugins, or capabilities.
 5. When explaining configuration, use the target-first model: `targets[]`, then `orchestrator`, then `workers.default`.
-6. When helping with a repository that uses Clio Coder, inspect `CLIO.md` (and any other context files such as `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`) before proposing changes.
+6. When helping with a repository that uses Clio Coder, inspect `CLIO.md` before proposing changes. If a repository still has older agent instruction files, recommend `/init` or `clio init` to fold them into `CLIO.md`.
 7. Keep safety modes distinct: `default`, `advise`, and `super`.
 8. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
 9. For repo edits, prefer small, reviewable patches and state which command should validate the change.
@@ -728,7 +729,8 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 Current release:
 
-- **v0.1.4** (alpha). Highlights: workspace orientation in the welcome dashboard plus a `workspace_context` tool, component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory injected into orchestrator and workers under a fixed budget, declarative middleware with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, doctor migration from `llamacpp-completion` to `llamacpp`, pi-fidelity compaction parity, and consistent `--help` across every subcommand.
+- **v0.1.5** (alpha). First public alpha release. Highlights: interactive terminal coding, target-first model routing, built-in coding agents, persistent sessions, checked-in `CLIO.md` project context, workspace orientation, codewiki lookup tools, safety modes, receipts, audit logs, evidence and eval workflows, scoped memory, clearer usage accounting, and polished TUI popups.
+- **v0.1.4** (alpha). Highlights: workspace orientation in the welcome dashboard plus a `workspace_context` tool, component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory injected into orchestrator and workers under a fixed budget, declarative middleware with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, doctor migration from `llamacpp-completion` to `llamacpp`, compaction parity, and consistent `--help` across every subcommand.
 - **v0.1.3** (alpha). Highlights: live tool-output streaming inside the expanded tool block with a dim `(running...)` marker, bash subrenderer that echoes `$ <command>` before its output, `Ctrl+T` to expand an assistant turn's thinking block (symmetric with `Ctrl+O`), footer git-branch indicator resolved once at boot, autocomplete `fd`/`fdfind` resolver fix, and a self-dev `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts.
 - **v0.1.2** (alpha). Highlights: transient provider/stream retry with cancel-aware countdowns and persisted recovery, bash abort that escalates `SIGTERM` to `SIGKILL` after a grace period, structured tool and bash transcript rendering with `Ctrl+O` expand toggle and edit-tool diff preview, mode-colored editor rails, slash-command autocomplete, welcome dashboard at TUI launch, per-tool stats in run receipts, five-arm audit JSONL (tool calls, mode changes, run aborts, session park/resume), reasoning probe state surfaced in `clio targets --json`, provider catalog aligned with pi SDK 0.70.2, and `/thinking` plus `clio run` working against local `openai-compat` and LM Studio backends.
 
