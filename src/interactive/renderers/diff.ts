@@ -11,7 +11,7 @@
  * lines ready to splice into the transcript.
  */
 import { structuredPatch } from "diff";
-import { wrapTextWithAnsi } from "../../engine/tui.js";
+import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 
 export interface DiffRenderInput {
 	oldText: string;
@@ -42,6 +42,35 @@ const NO_CHANGES_LINE = "  (no changes)";
 
 function wrap(line: string, width: number): string[] {
 	return wrapTextWithAnsi(line, width);
+}
+
+function wrapWithPrefix(prefix: string, content: string, width: number, style: (text: string) => string): string[] {
+	const prefixWidth = visibleWidth(prefix);
+	const contentWidth = Math.max(1, width - prefixWidth);
+	const continuation = " ".repeat(prefixWidth);
+	const wrapped = wrapTextWithAnsi(style(content), contentWidth);
+	if (wrapped.length === 0) return [style(prefix)];
+	const out: string[] = [];
+	for (let i = 0; i < wrapped.length; i += 1) {
+		out.push(`${style(i === 0 ? prefix : continuation)}${wrapped[i] ?? ""}`);
+	}
+	return out;
+}
+
+function renderNumberedDiffLine(
+	oldLine: number | null,
+	newLine: number | null,
+	marker: " " | "+" | "-",
+	content: string,
+	lineNumberWidth: number,
+	width: number,
+): string[] {
+	const oldCell = oldLine === null ? " ".repeat(lineNumberWidth) : String(oldLine).padStart(lineNumberWidth);
+	const newCell = newLine === null ? " ".repeat(lineNumberWidth) : String(newLine).padStart(lineNumberWidth);
+	const prefix = `${oldCell} ${newCell} ${marker}`;
+	if (marker === "-") return wrapWithPrefix(prefix, content, width, red);
+	if (marker === "+") return wrapWithPrefix(prefix, content, width, green);
+	return wrapWithPrefix(prefix, content, width, dim);
 }
 
 /**
@@ -78,17 +107,26 @@ export function renderUnifiedDiff(input: DiffRenderInput, width: number): string
 	for (const hunk of patch.hunks) {
 		const header = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
 		out.push(...wrap(cyan(header), safeWidth));
+		let oldLine = hunk.oldStart;
+		let newLine = hunk.newStart;
+		const maxOld = hunk.oldStart + Math.max(0, hunk.oldLines - 1);
+		const maxNew = hunk.newStart + Math.max(0, hunk.newLines - 1);
+		const lineNumberWidth = Math.max(1, String(Math.max(maxOld, maxNew)).length);
 		for (const raw of hunk.lines) {
 			const marker = raw.charAt(0);
-			let styled: string;
 			if (marker === "-") {
-				styled = red(raw);
+				out.push(...renderNumberedDiffLine(oldLine, null, "-", raw.slice(1), lineNumberWidth, safeWidth));
+				oldLine += 1;
 			} else if (marker === "+") {
-				styled = green(raw);
+				out.push(...renderNumberedDiffLine(null, newLine, "+", raw.slice(1), lineNumberWidth, safeWidth));
+				newLine += 1;
+			} else if (marker === " ") {
+				out.push(...renderNumberedDiffLine(oldLine, newLine, " ", raw.slice(1), lineNumberWidth, safeWidth));
+				oldLine += 1;
+				newLine += 1;
 			} else {
-				styled = raw;
+				out.push(...wrap(dim(raw), safeWidth));
 			}
-			out.push(...wrap(styled, safeWidth));
 		}
 	}
 

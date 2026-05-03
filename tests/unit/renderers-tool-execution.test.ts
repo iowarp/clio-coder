@@ -6,6 +6,7 @@ import {
 	renderToolResultOnly,
 	renderToolStreamingExecution,
 	renderToolSubline,
+	stripShellWrapperForDisplay,
 } from "../../src/interactive/renderers/tool-execution.js";
 
 // Strip ANSI sequences. Biome bans literal control chars in regex source,
@@ -131,7 +132,7 @@ describe("renderers/tool-execution", () => {
 			80,
 		);
 		ok(
-			plain.some((line) => line === `${HEADER_PREFIX}running \`false\` ${STATUS_ERROR}`),
+			plain.some((line) => line === `${HEADER_PREFIX}ran \`false\` ${STATUS_ERROR} (exit 1)`),
 			JSON.stringify(plain),
 		);
 	});
@@ -181,7 +182,7 @@ describe("renderers/tool-execution", () => {
 		);
 		const plain = lines.map(stripAnsi);
 		ok(
-			plain.some((l) => l.startsWith(`${HEADER_PREFIX}bash(false)`) && l.endsWith(STATUS_ERROR)),
+			plain.some((l) => l.startsWith(`${HEADER_PREFIX}bash(false)`) && l.includes(`${STATUS_ERROR} (exit 1)`)),
 			JSON.stringify(plain),
 		);
 	});
@@ -356,18 +357,18 @@ describe("renderers/tool-execution", () => {
 		ok(plain.includes(`${RAIL}first chunk second chunk`), JSON.stringify(plain));
 	});
 
-	it("caps long results at 12 visible lines with a hidden-count marker on the rail", () => {
-		const result = Array.from({ length: 30 }, (_, i) => `line${i + 1}`).join("\n");
+	it("middle-truncates long results by visible rows with a hidden-count marker on the rail", () => {
+		const result = Array.from({ length: 130 }, (_, i) => `line${i + 1}`).join("\n");
 		const lines = renderToolExecution(
 			{ toolCallId: "t1", toolName: "read", args: { path: "a.ts" }, result, isError: false },
 			80,
 		);
 		const plain = lines.map(stripAnsi);
 		ok(plain.includes(`${RAIL}line1`), JSON.stringify(plain));
-		ok(plain.includes(`${RAIL}line12`), JSON.stringify(plain));
-		ok(!plain.some((l) => l.includes("line13")), `expected line13 to be hidden, got: ${JSON.stringify(plain)}`);
+		ok(plain.includes(`${RAIL}line130`), JSON.stringify(plain));
+		ok(!plain.some((l) => l.includes("line61")), `expected middle lines to be hidden, got: ${JSON.stringify(plain)}`);
 		ok(
-			plain.some((l) => l.includes("18 more lines hidden")),
+			plain.some((l) => l.includes("11 lines hidden")),
 			`expected hidden-count marker, got: ${JSON.stringify(plain)}`,
 		);
 	});
@@ -487,6 +488,38 @@ describe("renderers/tool-execution", () => {
 		ok(!plain.includes("(ctrl+o)"), `default key must not leak when a rebind is supplied: ${plain}`);
 	});
 
+	it("renders duration metadata on collapsed and expanded finished tools", () => {
+		const subline = renderToolSubline(
+			{
+				toolCallId: "duration",
+				toolName: "read",
+				args: { path: "a.ts" },
+				result: "ok",
+				isError: false,
+				durationMs: 1250,
+			},
+			80,
+		)
+			.map(stripAnsi)
+			.join("\n");
+		ok(subline.includes(`${STATUS_OK} · 1.3s`), subline);
+
+		const expanded = renderToolExecution(
+			{
+				toolCallId: "duration",
+				toolName: "read",
+				args: { path: "a.ts" },
+				result: "ok",
+				isError: false,
+				durationMs: 1250,
+			},
+			80,
+		)
+			.map(stripAnsi)
+			.join("\n");
+		ok(expanded.includes(`${STATUS_OK} · 1.3s`), expanded);
+	});
+
 	it("renders an expanded in-flight tool block with partial output and a running marker", () => {
 		const lines = renderToolStreamingExecution(
 			{ toolCallId: "t1", toolName: "bash", args: { command: "npm test" } },
@@ -533,7 +566,7 @@ describe("renderers/tool-execution", () => {
 		ok(text.includes(STATUS_OK), text);
 	});
 
-	it("falls back to the standard result block for bash errors", () => {
+	it("renders bash errors with the command line and error rail", () => {
 		const lines = renderToolExecution(
 			{
 				toolCallId: "b2",
@@ -545,8 +578,27 @@ describe("renderers/tool-execution", () => {
 			80,
 		);
 		const text = lines.map(stripAnsi).join("\n");
-		ok(!text.includes(`${RAIL}$ false`), text);
+		ok(text.includes(`${RAIL}$ false`), text);
 		ok(text.includes(STATUS_ERROR), text);
+		ok(text.includes("(exit 1)"), text);
+	});
+
+	it("strips bash -lc shell wrappers for display", () => {
+		strictEqual(stripShellWrapperForDisplay(`/bin/bash -lc 'npm test'`), "npm test");
+		const lines = renderToolExecution(
+			{
+				toolCallId: "b4",
+				toolName: "bash",
+				args: { command: `/bin/bash -lc 'npm test'` },
+				result: "ok",
+				isError: false,
+			},
+			80,
+		);
+		const text = lines.map(stripAnsi).join("\n");
+		ok(text.includes(`${HEADER_PREFIX}bash(npm test)`), text);
+		ok(text.includes(`${RAIL}$ npm test`), text);
+		ok(!text.includes("bash -lc"), text);
 	});
 
 	it("falls through to the standard block when bash args lack a string command", () => {

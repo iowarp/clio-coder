@@ -100,7 +100,7 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio.thinking.expand": {
 		defaultKeys: "ctrl+t",
-		description: "Toggle the most recent assistant turn's thinking block between collapsed preview and full body",
+		description: "Toggle thinking blocks between hidden marker and full body",
 	},
 } as const satisfies KeybindingDefinitions;
 

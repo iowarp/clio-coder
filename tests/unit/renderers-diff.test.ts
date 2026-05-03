@@ -20,8 +20,9 @@ describe("renderers/diff", () => {
 		ok(plain.includes("--- a/file"));
 		ok(plain.includes("+++ b/file"));
 		ok(plain.includes("@@"));
-		ok(plain.includes("-beta"));
-		ok(plain.includes("+GAMMA"));
+		ok(plain.includes("1 1  alpha"));
+		ok(plain.includes("2   -beta"));
+		ok(plain.includes("  2 +GAMMA"));
 	});
 
 	it("uses the supplied filename when provided", () => {

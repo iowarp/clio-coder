@@ -24,11 +24,13 @@ const ANSI_BOLD = "\u001b[1m";
 const ANSI_DIM = "\u001b[2m";
 const ANSI_RED = "\u001b[31m";
 const ANSI_GREEN = "\u001b[32m";
+const ANSI_YELLOW = "\u001b[33m";
 const ANSI_CYAN = "\u001b[36m";
 
 const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
 const red = (text: string): string => `${ANSI_RED}${text}${ANSI_RESET}`;
 const green = (text: string): string => `${ANSI_GREEN}${text}${ANSI_RESET}`;
+const yellow = (text: string): string => `${ANSI_YELLOW}${text}${ANSI_RESET}`;
 const cyan = (text: string): string => `${ANSI_CYAN}${text}${ANSI_RESET}`;
 const cyanBold = (text: string): string => `${ANSI_BOLD}${ANSI_CYAN}${text}${ANSI_RESET}`;
 
@@ -40,7 +42,9 @@ const BODY_INDENT_VISIBLE_WIDTH = 2;
 const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
 const RESULT_PREVIEW_LIMIT = 4000;
-const RESULT_LINE_LIMIT = 12;
+const FULL_RESULT_PREVIEW_LIMIT = 60_000;
+const FULL_RESULT_ROW_LIMIT = 120;
+const STREAMING_RESULT_ROW_LIMIT = 20;
 const ARGS_BODY_LINE_LIMIT = 24;
 const STATUS_OK_GLYPH = "✓";
 const STATUS_ERROR_GLYPH = "✗";
@@ -63,6 +67,7 @@ export interface ToolExecutionFinished {
 	args?: unknown;
 	result: unknown;
 	isError: boolean;
+	durationMs?: number | undefined;
 }
 
 // Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
@@ -95,6 +100,48 @@ function jsonStringifySafe(value: unknown): string {
 	} catch {
 		return String(value);
 	}
+}
+
+function unquoteShellScript(value: string): string {
+	const trimmed = value.trim();
+	if (trimmed.length < 2) return trimmed;
+	const quote = trimmed.charAt(0);
+	if ((quote !== "'" && quote !== '"') || trimmed.charAt(trimmed.length - 1) !== quote) return trimmed;
+	const inner = trimmed.slice(1, -1);
+	if (quote === "'") return inner.replace(/'\\''/g, "'");
+	return inner.replace(/\\"/g, '"').replace(/\\`/g, "`").replace(/\\\$/g, "$").replace(/\\\\/g, "\\");
+}
+
+export function stripShellWrapperForDisplay(command: string): string {
+	const trimmed = command.trim();
+	const match = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|zsh|sh))\s+-lc\s+([\s\S]+)$/u.exec(trimmed);
+	if (!match?.[1]) return command;
+	return unquoteShellScript(match[1]);
+}
+
+function displayArg(toolName: string, value: string): string {
+	return toolName === "bash" ? stripShellWrapperForDisplay(value) : value;
+}
+
+function formatDurationMs(durationMs: number | undefined): string | null {
+	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return null;
+	if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+	const seconds = durationMs / 1000;
+	if (seconds < 10) return `${seconds.toFixed(1)}s`;
+	if (seconds < 60) return `${Math.round(seconds)}s`;
+	const minutes = Math.floor(seconds / 60);
+	const rest = Math.round(seconds % 60);
+	return `${minutes}m${rest.toString().padStart(2, "0")}s`;
+}
+
+function bashExitCodeFromResult(result: unknown): string | null {
+	const unwrapped = unwrapResultEnvelope(result);
+	const text = typeof unwrapped === "string" ? unwrapped : jsonStringifySafe(unwrapped);
+	const match =
+		/\bcommand failed \(exit (?<paren>[^)]+)\)/iu.exec(text) ??
+		/\bcommand exited with code (?<code>[0-9?]+)/iu.exec(text) ??
+		/\bexit (?<short>[0-9?]+)\b/iu.exec(text);
+	return match?.groups?.paren ?? match?.groups?.code ?? match?.groups?.short ?? null;
 }
 
 /**
@@ -136,7 +183,7 @@ function capturedPrimaryArg(toolName: string, args: unknown): string | null {
 function summarizeArgs(toolName: string, args: unknown): string {
 	if (isEmptyArgs(args)) return "";
 	const primary = capturedPrimaryArg(toolName, args);
-	if (primary !== null) return truncate(primary, ARG_PREVIEW_LIMIT);
+	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
 }
 
@@ -148,15 +195,24 @@ function summarizeArgs(toolName: string, args: unknown): string {
  */
 type HeaderStatus = "ok" | "error" | undefined;
 
-function statusGlyph(status: HeaderStatus): string {
-	if (status === undefined) return "";
-	return status === "ok" ? ` ${green(STATUS_OK_GLYPH)}` : ` ${red(STATUS_ERROR_GLYPH)}`;
+interface StatusMeta {
+	durationMs?: number | undefined;
+	exitCode?: string | null;
 }
 
-function headerLine(toolName: string, args: unknown, status: HeaderStatus): string {
+function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
+	if (status === undefined) return "";
+	const duration = formatDurationMs(meta.durationMs);
+	const durationSuffix = duration ? dim(` · ${duration}`) : "";
+	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
+	const exitSuffix = meta.exitCode ? dim(` (exit ${meta.exitCode})`) : "";
+	return ` ${red(STATUS_ERROR_GLYPH)}${exitSuffix}${durationSuffix}`;
+}
+
+function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
 	const summary = summarizeArgs(toolName, args);
 	const head = `${dim(HEADER_PREFIX_PLAIN)}${cyanBold(toolName)}${dim("(")}${cyan(summary)}${dim(")")}`;
-	return `${head}${statusGlyph(status)}`;
+	return `${head}${statusGlyph(status, meta)}`;
 }
 
 function sublineLead(token: string, rest: string): string {
@@ -181,7 +237,7 @@ function buildFieldSublineBody(
 ): string | null {
 	const value = readStringField(args, key);
 	if (value === null) return null;
-	const preview = truncate(value, ARG_PREVIEW_LIMIT);
+	const preview = truncate(key === "command" ? stripShellWrapperForDisplay(value) : value, ARG_PREVIEW_LIMIT);
 	if (options.wrapInBackticks) return `${lead}\`${preview}\``;
 	return `${lead}${preview}`;
 }
@@ -202,15 +258,21 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
  * verb-led subline body without the leading glyph and without the trailing
  * status glyph. Unknown tools fall back to the existing `<name>(<arg>)` form.
  */
-function buildSublineBody(toolName: string, args: unknown): string {
+function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus): string {
+	if (toolName === "bash") {
+		const lead = status === undefined ? "running " : "ran ";
+		return (
+			buildFieldSublineBody(args, "command", lead, { wrapInBackticks: true }) ?? buildUnknownToolBody(toolName, args)
+		);
+	}
 	const body = SUBLINE_BODY_BUILDERS[toolName]?.(args);
 	if (body !== null && body !== undefined) return body;
 	return buildUnknownToolBody(toolName, args);
 }
 
-function sublineLine(toolName: string, args: unknown, status: HeaderStatus): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args));
-	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status)}`;
+function sublineLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
+	const body = styleSublineBody(buildSublineBody(toolName, args, status));
+	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status, meta)}`;
 }
 
 function wrap(line: string, width: number): string[] {
@@ -300,18 +362,44 @@ function isEmptyResult(result: unknown): boolean {
 	return false;
 }
 
-/**
- * Cap the body of a result block at `RESULT_LINE_LIMIT` lines. When more
- * lines would be shown, replaces the overflow with a single
- * `... <N> more lines hidden` marker so long file reads, grep dumps, and
- * stack traces stay scannable instead of pushing the conversation off-screen.
- */
-function capResultLines(lines: ReadonlyArray<string>): string[] {
-	if (lines.length <= RESULT_LINE_LIMIT) return [...lines];
-	const visible = lines.slice(0, RESULT_LINE_LIMIT);
-	const hidden = lines.length - RESULT_LINE_LIMIT;
-	visible.push(`... ${hidden} more lines hidden`);
-	return visible;
+function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string {
+	if (typeof result === "string") return truncate(result, limit);
+	return truncate(jsonStringifySafe(result), limit);
+}
+
+function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isError: boolean): string[] {
+	if (rows.length <= rowLimit) return [...rows];
+	if (rowLimit <= 1) return [`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`... ${rows.length} lines hidden`)}`];
+	const available = rowLimit - 1;
+	const head = Math.floor(available / 2);
+	const tail = available - head;
+	const hidden = Math.max(0, rows.length - head - tail);
+	return [
+		...rows.slice(0, head),
+		`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`... ${hidden} lines hidden`)}`,
+		...rows.slice(-tail),
+	];
+}
+
+function renderOutputRows(text: string, width: number, isError: boolean, rowLimit: number): string[] {
+	const rows: string[] = [];
+	for (const raw of text.split("\n")) {
+		rows.push(...indentAndWrap(raw, width, isError));
+	}
+	return truncateRowsMiddle(rows, rowLimit, isError);
+}
+
+function highlightBashCommand(command: string): string {
+	const tokens = command.match(/'[^']*'|"[^"]*"|\|\||&&|[|;()<>]|[^\s|;&()<>]+|\s+/gu) ?? [command];
+	return tokens
+		.map((token) => {
+			if (/^\s+$/u.test(token)) return token;
+			if (/^'[^']*'$|^"[^"]*"$/u.test(token)) return green(token);
+			if (/^(?:\|\||&&|[|;()<>])$/u.test(token)) return dim(token);
+			if (/^-{1,2}[\w-]+/u.test(token)) return yellow(token);
+			return token;
+		})
+		.join("");
 }
 
 interface EditDiffArgs {
@@ -368,24 +456,19 @@ function asBashArgs(args: unknown): BashArgs | null {
  * Bash subrenderer: emits `$ <cmd>` (full command) on its own line under the
  * rail, then the unwrapped output via the same chain as `renderResultBlock`.
  * Mirrors pi-coding-agent's bash component shape so users see exactly what
- * was executed before the output. Errors stay on the standard result path so
- * the red rail remains the dominant signal for bash failures.
+ * was executed before the output. Failures use the same command and output
+ * body while the caller selects the red rail and error status.
  */
-function renderBashResultBlock(args: BashArgs, result: unknown, width: number): string[] {
+function renderBashResultBlock(args: BashArgs, result: unknown, width: number, isError: boolean): string[] {
 	const out: string[] = [];
-	const commandLine = `${cyanBold("$")} ${args.command}`;
-	out.push(...indentAndWrap(commandLine, width, false));
+	const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
+	out.push(...indentAndWrap(commandLine, width, isError));
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		out.push(...indentAndWrap(dim("(no output)"), width, false));
+		out.push(...indentAndWrap(dim("(no output)"), width, isError));
 		return out;
 	}
-	const preview = previewResult(unwrapped);
-	const lines = capResultLines(preview.split("\n"));
-	for (const raw of lines) {
-		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
-		out.push(...indentAndWrap(styled, width, false));
-	}
+	out.push(...renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT));
 	return out;
 }
 
@@ -394,14 +477,7 @@ function renderResultBlock(result: unknown, isError: boolean, width: number): st
 	if (isEmptyResult(unwrapped)) {
 		return indentAndWrap(dim("(no output)"), width, isError);
 	}
-	const preview = previewResult(unwrapped);
-	const lines = capResultLines(preview.split("\n"));
-	const out: string[] = [];
-	for (const raw of lines) {
-		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
-		out.push(...indentAndWrap(styled, width, isError));
-	}
-	return out;
+	return renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT);
 }
 
 /**
@@ -443,7 +519,14 @@ export function renderToolSubline(
 	expandKey?: string,
 ): string[] {
 	const status = sublineStatus(call);
-	const wrapped = wrap(sublineLine(call.toolName, call.args, status), width);
+	const meta: StatusMeta =
+		"result" in call
+			? {
+					durationMs: call.durationMs,
+					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
+				}
+			: {};
+	const wrapped = wrap(sublineLine(call.toolName, call.args, status, meta), width);
 	if (status === undefined) return wrapped;
 	if (expandKey === undefined || expandKey.length === 0) return wrapped;
 	if (wrapped.length === 0) return wrapped;
@@ -462,8 +545,12 @@ export function renderToolSubline(
  */
 export function renderToolExecution(finished: ToolExecutionFinished, width: number): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const statusMeta: StatusMeta = {
+		durationMs: finished.durationMs,
+		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+	};
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, finished.args, status), width));
+	out.push(...wrap(headerLine(finished.toolName, finished.args, status, statusMeta), width));
 
 	// Edit-tool dispatch: when the tool succeeded and `args` carries the
 	// expected `{ old_string, new_string }` strings, swap the args body and
@@ -478,14 +565,14 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 		}
 	}
 
-	// Bash-tool dispatch: when the tool succeeded and `args.command` is a
-	// string, prefix the result body with `$ <cmd>` on its own line so the
-	// user sees the full executed command above its output. Errors stay on
-	// the standard path so the red rail remains the dominant failure signal.
-	if (finished.toolName === "bash" && finished.isError === false) {
+	// Bash-tool dispatch: when `args.command` is a string, prefix the result
+	// body with `$ <cmd>` on its own line so the user sees the display command
+	// above its output. Failures use the red rail and expose the parsed exit
+	// code in the header when the result includes one.
+	if (finished.toolName === "bash") {
 		const bashArgs = asBashArgs(finished.args);
 		if (bashArgs !== null) {
-			out.push(...renderBashResultBlock(bashArgs, finished.result, width));
+			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError));
 			return out;
 		}
 	}
@@ -509,8 +596,12 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
  */
 export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args">, width: number): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const statusMeta: StatusMeta = {
+		durationMs: finished.durationMs,
+		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+	};
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, undefined, status), width));
+	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));
 	out.push(...renderResultBlock(finished.result, finished.isError, width));
 	return out;
 }
@@ -536,11 +627,7 @@ export function renderToolStreamingExecution(call: ToolExecutionStart, width: nu
 	if (partialOutput.length === 0) {
 		out.push(...indentAndWrap(dim("(no output yet)"), width, false));
 	} else {
-		const lines = capResultLines(partialOutput.split("\n"));
-		for (const raw of lines) {
-			const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
-			out.push(...indentAndWrap(styled, width, false));
-		}
+		out.push(...renderOutputRows(partialOutput, width, false, STREAMING_RESULT_ROW_LIMIT));
 	}
 	out.push(...indentAndWrap(dim("(running...)"), width, false));
 	return out;
