@@ -11,7 +11,7 @@ small, explicit, and easy to verify from git history.
 
 Requirements:
 
-- Node.js `>=20`
+- Node.js `>=22`
 - npm
 - Linux or macOS for full parity. Windows is best effort until release.
 
