@@ -24,7 +24,6 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
@@ -32,7 +31,12 @@ import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
-import { createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
+import {
+	createWorkerToolRegistry,
+	resolveAgentTools,
+	type ToolTelemetry,
+	type WorkerToolRegistrar,
+} from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -50,8 +54,8 @@ export interface WorkerRunInput {
 	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
-	/** Private self-development context. Present only when the orchestrator runs in dev mode. */
-	selfDev?: SelfDevMode;
+	/** Private tool registrar. Present only when the worker entry loaded a private extension. */
+	registerPrivateTools?: WorkerToolRegistrar;
 	signal?: AbortSignal;
 }
 
@@ -179,7 +183,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const mode: ModeName = input.mode ?? "default";
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.selfDev);
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.registerPrivateTools);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });

@@ -1,10 +1,13 @@
 import { defineConfig } from "tsup";
 
+const includeSelfdev = process.env.CLIO_BUILD_PRIVATE === "1";
+const baseEntries = {
+	"cli/index": "src/cli/index.ts",
+	"worker/entry": "src/worker/entry.ts",
+};
+
 export default defineConfig({
-	entry: {
-		"cli/index": "src/cli/index.ts",
-		"worker/entry": "src/worker/entry.ts",
-	},
+	entry: includeSelfdev ? { ...baseEntries, "selfdev/index": "src/selfdev/index.ts" } : baseEntries,
 	format: ["esm"],
 	target: "node20",
 	platform: "node",

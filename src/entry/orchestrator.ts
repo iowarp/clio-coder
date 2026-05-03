@@ -59,13 +59,36 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
-import { applySelfDevToolGuards } from "../selfdev/guards.js";
-import { type HarnessHandle, startHarness } from "../selfdev/harness/index.js";
-import { renderDevMemoryFragment } from "../selfdev/memory.js";
-import { ensureSelfDevBranch, resolveSelfDevMode, selfDevActivationSource } from "../selfdev/mode.js";
-import { createSelfDevFooterLine } from "../selfdev/ui/dev-footer.js";
+import type { HarnessHandle, HarnessIntrospection, SelfDevMode } from "../selfdev/index.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
+
+type SelfDevModule = typeof import("../selfdev/index.js");
+
+const SELFDEV_IMPORT_SPECIFIER = ["..", "selfdev", "index.js"].join("/");
+const SELFDEV_NOT_BUNDLED_MESSAGE =
+	"clio --dev: not bundled in public releases; build from source with CLIO_BUILD_PRIVATE=1\n";
+
+async function loadSelfDevModule(): Promise<SelfDevModule | null> {
+	try {
+		return (await import(SELFDEV_IMPORT_SPECIFIER)) as SelfDevModule;
+	} catch {
+		return null;
+	}
+}
+
+function userRequestedSelfDev(cliDev: boolean): boolean {
+	return cliDev || process.env.CLIO_DEV === "1" || process.env.CLIO_SELF_DEV === "1";
+}
+
+function emptyHarnessIntrospection(): HarnessIntrospection {
+	return {
+		last_restart_required_paths: [],
+		last_hot_succeeded: null,
+		last_hot_failed: null,
+		queue_depth: 0,
+	};
+}
 
 export interface BootResult {
 	exitCode: number;
@@ -320,15 +343,20 @@ function cycleScoped(
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const cliDev = options.dev === true;
-	const userSignalledDev = selfDevActivationSource({ cliDev }) !== null;
-	let selfDev = resolveSelfDevMode({ cliDev });
+	const userSignalledDev = userRequestedSelfDev(cliDev);
+	const selfdev = userSignalledDev ? await loadSelfDevModule() : null;
+	if (userSignalledDev && selfdev === null) {
+		process.stderr.write(SELFDEV_NOT_BUNDLED_MESSAGE);
+		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
+	}
+	let selfDev: SelfDevMode | null = selfdev?.resolveSelfDevMode({ cliDev }) ?? null;
 	if (selfDev === null && userSignalledDev) {
 		// resolveSelfDevMode already wrote a clear stderr message; surface the
 		// gate failure as exit 1 instead of silently continuing in default mode.
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
-	if (selfDev) {
-		selfDev = await ensureSelfDevBranch(selfDev);
+	if (selfDev && selfdev) {
+		selfDev = await selfdev.ensureSelfDevBranch(selfDev);
 		if (selfDev === null) {
 			// Branch step refused or failed; ensureSelfDevBranch already wrote the
 			// reason. The user explicitly signalled dev mode, so exit 1.
@@ -355,14 +383,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(selfDev
 				? {
 						devRepoRoot: selfDev.repoRoot,
-						getHarnessIntrospection: () =>
-							harness?.state.introspection() ?? {
-								last_restart_required_paths: [],
-								last_hot_succeeded: null,
-								last_hot_failed: null,
-								queue_depth: 0,
-							},
-						renderSelfDevMemory: () => renderDevMemoryFragment(selfDev.repoRoot),
+						getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
+						renderSelfDevMemory: async () => selfdev?.renderDevMemoryFragment(selfDev.repoRoot) ?? "",
 					}
 				: {}),
 		}),
@@ -463,20 +485,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
-		...(selfDev
-			? {
-					selfDev,
-					getHarnessIntrospection: () =>
-						harness?.state.introspection() ?? {
-							last_restart_required_paths: [],
-							last_hot_succeeded: null,
-							last_hot_failed: null,
-							queue_depth: 0,
-						},
-				}
-			: {}),
 	});
-	if (selfDev) applySelfDevToolGuards(toolRegistry, selfDev);
+	if (selfDev && selfdev) {
+		selfdev.registerSelfDevTools(toolRegistry, {
+			mode: selfDev,
+			getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
+		});
+		selfdev.applySelfDevToolGuards(toolRegistry, selfDev);
+	}
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
 	for (const spec of toolRegistry.listAll()) {
@@ -546,14 +562,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 	});
 
-	if (selfDev) {
+	if (selfDev && selfdev) {
 		const repoRoot = selfDev.repoRoot;
 		// Compile hot modules under the repo's node_modules so Node resolves
 		// bare imports (e.g. typebox) via the repo's installed deps. An XDG
 		// cache path would be outside any node_modules tree and break
 		// bare-specifier resolution.
 		const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
-		harness = startHarness({
+		harness = selfdev.startHarness({
 			repoRoot,
 			cacheRoot: hotCacheRoot,
 			toolRegistry,
@@ -569,16 +585,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 	}
 	const getSelfDevFooterLine = selfDev
-		? createSelfDevFooterLine({
+		? (selfdev?.createSelfDevFooterLine({
 				repoRoot: selfDev.repoRoot,
-				getHarnessIntrospection: () =>
-					harness?.state.introspection() ?? {
-						last_restart_required_paths: [],
-						last_hot_succeeded: null,
-						last_hot_failed: null,
-						queue_depth: 0,
-					},
-			})
+				getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
+			}) ?? null)
 		: null;
 
 	await startInteractive({
@@ -592,6 +602,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(selfDev ? { selfDevRepoRoot: selfDev.repoRoot } : {}),
 		...(getSelfDevFooterLine ? { getSelfDevFooterLine } : {}),
+		...(selfDev && selfdev ? { openSelfDevDiffOverlay: selfdev.openDevDiffOverlay } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
 		...(config
