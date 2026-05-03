@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface DevMemoryEntry {
@@ -59,6 +59,31 @@ async function rotateIfNeeded(filePath: string, incomingBytes: number): Promise<
 	}
 }
 
+/**
+ * Append a leading newline if the existing file is non-empty and does not
+ * already end in one. Self-heals after a torn write or a crash that left a
+ * partial JSON line; without this, the next `appendFile` would concatenate
+ * the new entry with the prior fragment and corrupt both lines.
+ */
+async function ensureNewlineTerminated(filePath: string): Promise<void> {
+	let size = 0;
+	try {
+		size = (await stat(filePath)).size;
+	} catch {
+		return;
+	}
+	if (size === 0) return;
+	const handle = await open(filePath, "r+");
+	try {
+		const buf = Buffer.alloc(1);
+		await handle.read(buf, 0, 1, size - 1);
+		if (buf[0] === 0x0a) return;
+	} finally {
+		await handle.close();
+	}
+	await appendFile(filePath, "\n", "utf8");
+}
+
 async function readEntries(repoRoot: string): Promise<DevMemoryEntry[]> {
 	const filePath = devMemoryPath(repoRoot);
 	let raw = "";
@@ -88,6 +113,7 @@ export async function appendDevMemory(repoRoot: string, input: AppendDevMemoryIn
 	};
 	const line = `${JSON.stringify(entry)}\n`;
 	await rotateIfNeeded(filePath, Buffer.byteLength(line, "utf8"));
+	await ensureNewlineTerminated(filePath);
 	await appendFile(filePath, line, "utf8");
 	const rowCount = (await readEntries(repoRoot)).length;
 	return { rowCount };
