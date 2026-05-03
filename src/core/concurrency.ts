@@ -43,10 +43,11 @@ export class TokenBucket {
 	constructor(
 		private readonly capacity: number,
 		private readonly refillPerSec: number,
+		private readonly now: () => number = Date.now,
 	) {
 		if (capacity < 1) throw new Error("TokenBucket capacity must be >= 1");
 		this.tokens = capacity;
-		this.lastRefillMs = Date.now();
+		this.lastRefillMs = this.now();
 	}
 
 	tryTake(n = 1): boolean {
@@ -57,7 +58,7 @@ export class TokenBucket {
 	}
 
 	private refill(): void {
-		const now = Date.now();
+		const now = this.now();
 		const elapsedSec = (now - this.lastRefillMs) / 1000;
 		if (elapsedSec <= 0) return;
 		this.tokens = Math.min(this.capacity, this.tokens + elapsedSec * this.refillPerSec);
