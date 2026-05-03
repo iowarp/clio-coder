@@ -233,12 +233,17 @@ When debugging:
 |---|---|
 | safety domain | `tests/unit/safety.test.ts` |
 | dispatch (validation/admission/backoff) | `tests/unit/dispatch.test.ts` |
-| dispatch ledger (fs) | `tests/integration/ledger.test.ts` |
-| providers catalog/matcher/resolver | `tests/unit/providers.test.ts` |
+| dispatch ledger and worker wiring (fs) | `tests/integration/ledger.test.ts`, `tests/integration/dispatch-concurrency.test.ts` |
+| providers catalog/matcher/resolver | `tests/unit/providers/*.test.ts` |
+| providers registry and knowledge base (fs) | `tests/integration/providers/registry.test.ts`, `tests/integration/providers/knowledge-base.test.ts` |
 | providers credentials (fs) | `tests/integration/credentials.test.ts` |
 | agents frontmatter + fleet parser | `tests/unit/agents.test.ts` |
-| prompts hash + canonicalJson | `tests/unit/prompts.test.ts` |
-| core xdg/tool-names/concurrency | `tests/unit/core.test.ts` |
+| built-in agent files (fs) | `tests/integration/agents-builtins.test.ts` |
+| prompts hash + canonicalJson | `tests/integration/prompts.test.ts` |
+| core tool-names/concurrency | `tests/unit/core.test.ts` |
+| core xdg (fs) | `tests/integration/core-xdg.test.ts` |
+| CLI command internals (fs/XDG) | `tests/integration/cli-*.test.ts` |
+| session, memory, evidence artifacts (fs) | `tests/integration/session.test.ts`, `tests/integration/memory.test.ts`, `tests/integration/evidence-builder.test.ts` |
 | import boundary rules | `tests/boundaries/boundaries.test.ts` |
 | prompt fragment manifests | `tests/boundaries/prompts.test.ts` |
 | non-interactive CLI smoke | `tests/e2e/cli.test.ts` |
