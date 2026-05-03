@@ -11,8 +11,10 @@ export interface ObservabilityContract {
 	sessionCost(): number;
 	/** Running session token totals broken down by kind, including reasoning when exposed. */
 	sessionTokens(): UsageBreakdown;
-	/** Per-dispatch cost log. */
+	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
+	/** Reset the running session token and cost totals. */
+	resetSession(): void;
 	/**
 	 * Record a token count. Used by dispatch glue, diags, and the chat loop's
 	 * `agent_end` handler. `breakdown` is optional for call sites (dispatch

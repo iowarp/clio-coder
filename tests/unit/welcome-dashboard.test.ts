@@ -95,6 +95,7 @@ function deps(
 			telemetry: () => ({ counters: {}, histograms: {} }),
 			sessionCost: () => 0,
 			costEntries: () => [],
+			resetSession: () => {},
 			recordTokens: () => {},
 		} as ObservabilityContract,
 		getContextUsage: () =>

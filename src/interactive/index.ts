@@ -1498,6 +1498,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		deps.onNewSession();
+		deps.observability.resetSession();
 		chatPanel.reset();
 		// Same pre-switch cleanup as /resume and /fork: without this, the
 		// chat-loop closure keeps the prior session's lastTurnId and the
