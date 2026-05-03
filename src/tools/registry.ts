@@ -73,10 +73,13 @@ export interface ToolSpec {
 	run(args: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<ToolResult>;
 }
 
+export type ToolResultDetails = Record<string, unknown>;
+
 export type ToolResult =
 	| {
 			kind: "ok";
 			output: string;
+			details?: ToolResultDetails;
 			/**
 			 * Early-termination hint propagated to pi-agent-core's
 			 * `AgentToolResult.terminate`. When every finalized tool result in
@@ -532,6 +535,7 @@ function applyToolResultEffects(result: ToolResult, effects: ReadonlyArray<Middl
 	const suffix = `\n\n${annotations.join("\n")}`;
 	if (result.kind === "ok") {
 		const annotated: ToolResult = { kind: "ok", output: `${result.output}${suffix}` };
+		if (result.details !== undefined) annotated.details = result.details;
 		if (result.terminate === true) annotated.terminate = true;
 		return annotated;
 	}

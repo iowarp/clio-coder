@@ -6,10 +6,22 @@ function pathArg(args: Record<string, unknown>): string | null {
 	return typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
 }
 
-function appendRestartNotice(result: ToolResult, relativePath: string): ToolResult {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function appendRestartNotice(result: ToolResult, relativePath: string, reason: string): ToolResult {
 	if (result.kind !== "ok") return result;
 	const notice = `self-dev: ${relativePath} requires restarting Clio before trusting the running process`;
-	return { ...result, output: result.output.length > 0 ? `${result.output}\n${notice}` : notice };
+	const details = isRecord(result.details) ? result.details : {};
+	return {
+		...result,
+		output: result.output.length > 0 ? `${result.output}\n${notice}` : notice,
+		details: {
+			...details,
+			restart: { required: true, reason, path: relativePath },
+		},
+	};
 }
 
 function wrapPathMutator(spec: ToolSpec, mode: SelfDevMode): ToolSpec {
@@ -21,7 +33,9 @@ function wrapPathMutator(spec: ToolSpec, mode: SelfDevMode): ToolSpec {
 			const decision = evaluateSelfDevWritePath(mode, target);
 			if (!decision.allowed) return { kind: "error", message: decision.reason };
 			const result = await spec.run(args, options);
-			return decision.restartRequired ? appendRestartNotice(result, decision.relativePath) : result;
+			return decision.restartRequired
+				? appendRestartNotice(result, decision.relativePath, "self-dev source change requires restart")
+				: result;
 		},
 	};
 }
