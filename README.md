@@ -679,11 +679,12 @@ Most users do not need this section. It is for contributors.
 
 | Script | Purpose |
 | --- | --- |
-| `npm run ci` | Full repo gate: typecheck, lint, tests, build, and e2e tests. |
+| `npm run ci` | Local and GitHub gate: typecheck, lint, tests, build, and e2e. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run format` | Biome formatting pass. |
 | `npm run lint` | Biome checks. |
 | `npm run test` | Unit, integration, and boundary tests. |
+| `npm run check:boundaries` | Boundary invariants only. |
 | `npm run test:e2e` | Build first, then run end-to-end tests. |
 | `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
