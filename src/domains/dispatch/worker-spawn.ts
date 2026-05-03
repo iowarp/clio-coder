@@ -14,6 +14,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { SelfDevMode } from "../../core/self-dev.js";
 import type { MiddlewareSnapshot } from "../middleware/index.js";
 import type { CapabilityFlags, EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
 
@@ -30,6 +31,7 @@ export interface WorkerSpec {
 	allowedTools?: ReadonlyArray<string>;
 	mode?: string;
 	middlewareSnapshot?: MiddlewareSnapshot;
+	selfDev?: SelfDevMode;
 }
 
 export interface SpawnedWorker {

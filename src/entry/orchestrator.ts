@@ -14,7 +14,7 @@ import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { type ContextContract, ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
@@ -370,7 +370,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		DispatchDomainModule,
+		createDispatchDomainModule({
+			...(selfDev ? { selfDevMode: selfDev } : {}),
+		}),
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);

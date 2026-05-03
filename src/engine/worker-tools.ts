@@ -15,6 +15,7 @@
  */
 
 import type { TSchema } from "typebox";
+import type { SelfDevMode } from "../core/self-dev.js";
 import type { ToolName } from "../core/tool-names.js";
 import { createMiddlewareContractFromSnapshot, type MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModesContract } from "../domains/modes/contract.js";
@@ -213,13 +214,17 @@ function createWorkerSafety(): SafetyContract {
 	};
 }
 
-export function createWorkerToolRegistry(mode: ModeName, middlewareSnapshot?: MiddlewareSnapshot): ToolRegistry {
+export function createWorkerToolRegistry(
+	mode: ModeName,
+	middlewareSnapshot?: MiddlewareSnapshot,
+	selfDev?: SelfDevMode,
+): ToolRegistry {
 	const registry = createRegistry({
 		safety: createWorkerSafety(),
 		modes: createWorkerModes(mode),
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
-	registerAllTools(registry);
+	registerAllTools(registry, selfDev ? { selfDev } : {});
 	return registry;
 }
 
