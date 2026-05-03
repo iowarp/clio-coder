@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import { SelectList, visibleWidth } from "../../src/engine/tui.js";
+import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	__modelSelectorTest,
 	buildModelItems,
@@ -150,6 +150,9 @@ describe("interactive/model-selector", () => {
 		ok(result.items[1]?.label.includes("★") ?? false);
 		ok(result.items[0]?.description?.includes("OpenAI Codex") ?? false);
 		ok(result.items[0]?.description?.includes("endpoint=openai") ?? false);
+		strictEqual(result.rows[0]?.active, true);
+		strictEqual(result.rows[1]?.scoped, true);
+		strictEqual(result.summary.totalModels, 3);
 	});
 
 	it("resolves per-row knowledge-base capabilities for wire models instead of the endpoint default model", () => {
@@ -267,30 +270,97 @@ describe("interactive/model-selector", () => {
 		ok(result.items[1]?.description?.includes("8kctx") ?? false);
 	});
 
-	it("keeps a usable description column for long model ids on narrow overlays", () => {
+	it("keeps key model metadata visible on narrow framed overlays", () => {
 		const longModel = "Qwen3.6-35B-A3B-UD-Q4_K_XL-extra-long-local-build";
-		const list = new SelectList(
-			[
+		const width = __modelSelectorTest.resolveOverlayWidth(80) - 4;
+		const lines = __modelSelectorTest.renderModelOverlayLines({
+			rows: [
 				{
 					value: `mini/${longModel}`,
-					label: `●  ${longModel}`,
-					description: "262kctx  TR  LM Studio (native SDK)  endpoint=mini  auth=stored-api-key",
+					endpoint: "mini",
+					model: longModel,
+					runtimeName: "LM Studio native API",
+					runtimeShortName: "LM Studio",
+					runtimeId: "lmstudio-native",
+					apiFamily: "openai-responses",
+					bucket: "local",
+					source: "configured",
+					authText: "stored-api-key:lmstudio-native",
+					available: true,
+					reason: "ready",
+					healthGlyph: "●",
+					healthText: "healthy 10ms",
+					caps: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true, contextWindow: 262144 },
+					badges: "TR",
+					context: "262k",
+					maxTokens: "8k",
+					active: true,
+					scoped: false,
+					selectable: true,
 				},
 			],
-			1,
-			{
-				selectedPrefix: (s) => s,
-				selectedText: (s) => s,
-				description: (s) => s,
-				scrollInfo: (s) => s,
-				noMatch: (s) => s,
+			summary: {
+				totalModels: 1,
+				targets: 1,
+				localModels: 1,
+				cloudModels: 0,
+				cliModels: 0,
+				activeRef: `mini/${longModel}`,
 			},
-			__modelSelectorTest.modelLayoutForWidth(72),
+			selectedIndex: 0,
+			query: "",
+			width,
+		});
+		const row = lines.find((line) => line.includes("TR"));
+		ok(row, lines.join("\n"));
+		ok(row.includes("262k"), row);
+		ok(row.includes("mini"), row);
+		ok(row.includes("LM Studio"), row);
+		for (const line of lines) ok(visibleWidth(line) <= width, line);
+
+		const filtered = __modelSelectorTest.renderModelOverlayLines({
+			rows: [
+				{
+					value: `mini/${longModel}`,
+					endpoint: "mini",
+					model: longModel,
+					runtimeName: "LM Studio native API",
+					runtimeShortName: "LM Studio",
+					runtimeId: "lmstudio-native",
+					apiFamily: "openai-responses",
+					bucket: "local",
+					source: "configured",
+					authText: "stored-api-key:lmstudio-native",
+					available: true,
+					reason: "ready",
+					healthGlyph: "●",
+					healthText: "healthy 10ms",
+					caps: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true, contextWindow: 262144 },
+					badges: "TR",
+					context: "262k",
+					maxTokens: "8k",
+					active: true,
+					scoped: false,
+					selectable: true,
+				},
+			],
+			summary: {
+				totalModels: 1,
+				targets: 1,
+				localModels: 1,
+				cloudModels: 0,
+				cliModels: 0,
+				activeRef: `mini/${longModel}`,
+			},
+			selectedIndex: 0,
+			query: "studio 262k",
+			width,
+		});
+		ok(filtered[0]?.includes('filter "studio 262k"'), filtered.join("\n"));
+		ok(
+			filtered.some((line) => line.includes("LM Studio")),
+			filtered.join("\n"),
 		);
-		const [line] = list.render(72);
-		ok(line, "SelectList rendered a row");
-		ok(line.includes("262kctx"), line);
-		ok(visibleWidth(line) <= 72, line);
 	});
 
 	it("does not choose an overlay wider than a narrow terminal budget", () => {
