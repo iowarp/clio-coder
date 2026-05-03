@@ -17,7 +17,7 @@ Baseline:
 | 2 | `escalates aborted commands that ignore sigterm` | 6530.3ms | `tests/unit/bash-tool-env.test.ts:84` | TIGHTEN | It waits for the production 5s kill grace and can assert the same behavior through an injected shorter grace. |
 | 3 | `old lifecycle command names are rejected` | 6328.5ms | `tests/e2e/cli.test.ts:612` | KEEP | It is slow because it launches the built CLI eight times, but it protects retired public commands at the binary boundary. |
 | 4 | `eval run, report, help, and compare routing are wired` | 6289.6ms | `tests/e2e/cli.test.ts:422` | KEEP | It covers the public CLI path through eval artifacts and evidence, which unit tests do not exercise as a binary. |
-| 5 | `configures the interactive multi-worker profile pool` | 4388.9ms | `tests/unit/cli-configure-targets.test.ts:155` | MOVE | It writes real XDG config and belongs with integration tests. |
+| 5 | `configures the interactive multi-worker profile pool` | 4388.9ms | `tests/integration/cli-configure-targets.test.ts:155` | MOVE | It writes real XDG config and belongs with integration tests. |
 | 6 | `/scoped-models dispatches cleanly and Esc restores the editor` | 3011.0ms | `tests/e2e/interactive.test.ts:283` | KEEP | It verifies a real pty overlay lifecycle with stable loose matching. |
 | 7 | `/resume opens the session picker (possibly empty), Esc closes` | 2785.4ms | `tests/e2e/interactive.test.ts:325` | KEEP | It protects the real pty route for session picker startup. |
 | 8 | `/thinking shows the full level set for a reasoning-capable target` | 2758.2ms | `tests/e2e/interactive.test.ts:457` | KEEP | It checks capability data reaching the real TUI route. |
@@ -38,12 +38,12 @@ Baseline:
 
 | Finding | Citation | Action | Justification |
 |---|---|---|---|
-| `TokenBucket` refill sleeps for 200ms. | `tests/unit/core.test.ts:99` | TIGHTEN | Injecting a clock keeps the refill behavior exact without scheduler timing. |
-| Bash abort escalation sleeps for 1500ms and then waits for a 5s grace. | `tests/unit/bash-tool-env.test.ts:84` | TIGHTEN | A test-local bash tool with a shorter kill grace preserves the SIGTERM to SIGKILL behavior. |
+| `TokenBucket` refill slept for 200ms at baseline. | `tests/unit/core.test.ts:52` | TIGHTEN | Injecting a clock keeps the refill behavior exact without scheduler timing. |
+| Bash abort escalation slept for 1500ms and then waited for a 5s grace at baseline. | `tests/unit/bash-tool-env.test.ts:84` | TIGHTEN | A test-local bash tool with a shorter kill grace preserves the SIGTERM to SIGKILL behavior. |
 | Tool abort tests assert elapsed wall-clock thresholds. | `tests/unit/tool-signal.test.ts:58` | KEEP | These cover real abort propagation through bash and fetch, and their thresholds are broad enough for the behavior under test. |
 | Termination budget tests use small real timers. | `tests/unit/termination.test.ts:37` | KEEP | The behavior is specifically about budgeted timeout return, with generous thresholds. |
-| Chat renderer coalescing tests wait for render timers. | `tests/unit/chat-panel.test.ts:699` | TIGHTEN | The production helper already accepts timer injection, so tests can drive the timer synchronously. |
-| Dispatch concurrency polling uses `Date.now` and a 5ms delay loop. | `tests/unit/dispatch-concurrency.test.ts:50` | MOVE | The file uses scratch data dirs and worker fakes, so it belongs in integration instead of unit. |
+| Chat renderer coalescing tests waited for render timers at baseline. | `tests/unit/chat-panel.test.ts:699` | TIGHTEN | The production helper already accepts timer injection, so tests can drive the timer synchronously. |
+| Dispatch concurrency polling uses `Date.now` and a 5ms delay loop. | `tests/integration/dispatch-concurrency.test.ts:50` | MOVE | The file uses scratch data dirs and worker fakes, so it belongs in integration instead of unit. |
 | Session listing forces mtime separation with a 5ms sleep. | `tests/integration/session-listing.test.ts:109` | KEEP | The test checks filesystem mtime ordering and is already in integration. |
 | Interactive pty tests use short sleeps after Esc and selection keys. | `tests/e2e/interactive.test.ts:105` | KEEP | They are wrapped in try/finally and paired with loose stable-text pty matching. |
 
@@ -51,7 +51,7 @@ Baseline:
 
 | Finding | Citation | Action | Justification |
 |---|---|---|---|
-| No test imports or mocks `@mariozechner/pi-tui` directly. The closest live dependency is file completion through the real slash autocomplete contract. | `tests/unit/slash-autocomplete.test.ts:54` | KEEP | This does not assert on synthetic TUI frames. |
+| No test imports or mocks `@mariozechner/pi-tui` directly. The closest live dependency is file completion through the real slash autocomplete contract. | `tests/integration/slash-autocomplete.test.ts:54` | KEEP | This does not assert on synthetic TUI frames. |
 | Chat panel tests render through the project renderer and assert structural output rather than mocked pi-tui frames. | `tests/unit/chat-panel.test.ts:523` | KEEP | They exercise Clio rendering boundaries without simulating the full TUI. |
 | Keybinding tests mention pi-tui defaults but do not mock frame output. | `tests/unit/keybindings.test.ts:29` | KEEP | They validate configuration data rather than terminal frames. |
 
@@ -60,19 +60,19 @@ Baseline:
 | Behavior | Citations | Action | Justification |
 |---|---|---|---|
 | Model capability wiring appears in unit, integration, and e2e. | `tests/unit/model-selector.test.ts:158`, `tests/integration/providers/endpoint-lifecycle.test.ts:194`, `tests/e2e/interactive.test.ts:139` | KEEP | Each layer checks a different boundary: row construction, provider cache reset, and live picker display. |
-| Evidence and memory behavior appears in unit and e2e. | `tests/unit/evidence-builder.test.ts:21`, `tests/unit/memory.test.ts:125`, `tests/e2e/cli.test.ts:340`, `tests/e2e/cli.test.ts:369` | KEEP | Unit tests own transformations while e2e owns public command routing. |
-| Context file suppression is covered by unit and e2e. | `tests/unit/prompts.test.ts:265`, `tests/e2e/cli.test.ts:98` | KEEP | Unit covers prompt assembly and e2e covers the top-level flag reaching orchestrator boot. |
-| Configure and targets are covered by direct command tests and binary e2e. | `tests/unit/cli-configure-targets.test.ts:36`, `tests/e2e/cli.test.ts:173` | MOVE | The direct command tests are integration-shaped XDG tests and should not count against unit. |
+| Evidence and memory behavior appears in integration and e2e. | `tests/integration/evidence-builder.test.ts:21`, `tests/integration/memory.test.ts:125`, `tests/e2e/cli.test.ts:340`, `tests/e2e/cli.test.ts:369` | KEEP | Integration tests own artifact transformations while e2e owns public command routing. |
+| Context file suppression is covered by integration and e2e. | `tests/integration/prompts.test.ts:265`, `tests/e2e/cli.test.ts:98` | KEEP | Integration covers prompt assembly with filesystem inputs and e2e covers the top-level flag reaching orchestrator boot. |
+| Configure and targets are covered by direct command tests and binary e2e. | `tests/integration/cli-configure-targets.test.ts:36`, `tests/e2e/cli.test.ts:173` | MOVE | The direct command tests are integration-shaped XDG tests and should not count against unit. |
 
 ## Integration-Shaped Tests Under Unit
 
 | Finding | Citation | Action | Justification |
 |---|---|---|---|
-| CLI auth/configure/reset command tests write scratch XDG state and shims. | `tests/unit/cli-auth.test.ts:74`, `tests/unit/cli-configure-targets.test.ts:40`, `tests/unit/cli-reset-uninstall.test.ts:18` | MOVE | They are filesystem-backed command integration tests. |
-| Dispatch auth/concurrency tests allocate real data dirs and exercise domain wiring. | `tests/unit/dispatch-auth.test.ts:28`, `tests/unit/dispatch-concurrency.test.ts:229` | MOVE | They are domain integration tests, not pure unit tests. |
-| Evidence, eval, memory, receipt, session, and self-dev tests write real artifacts. | `tests/unit/evidence-builder.test.ts:26`, `tests/unit/eval-runner.test.ts:19`, `tests/unit/memory.test.ts:28`, `tests/unit/receipt-verify.test.ts:80`, `tests/unit/session.test.ts:393`, `tests/unit/self-dev.test.ts:126` | MOVE | Their assertions depend on filesystem state. |
-| Workspace and git tests spawn `git` or inspect real project directories. | `tests/unit/utils-git.test.ts:20`, `tests/unit/workspace/git-probe.test.ts:10`, `tests/unit/workspace/snapshot.test.ts:25` | MOVE | Real subprocesses and filesystem probes belong in integration. |
-| Context, component, provider registry, prompts, grep, autocomplete, and tool registry tests create temp files. | `tests/unit/components-scan.test.ts:11`, `tests/unit/context/codewiki/indexer.test.ts:9`, `tests/unit/providers/registry.test.ts:68`, `tests/unit/prompts.test.ts:108`, `tests/unit/tools-grep.test.ts:10`, `tests/unit/slash-autocomplete.test.ts:55`, `tests/unit/tools-registry-wiring.test.ts:605` | MOVE | They are integration-shaped even when they are fast. |
+| CLI auth/configure/reset command tests write scratch XDG state and shims. | `tests/integration/cli-auth.test.ts:74`, `tests/integration/cli-configure-targets.test.ts:40`, `tests/integration/cli-reset-uninstall.test.ts:18` | MOVE | They are filesystem-backed command integration tests. |
+| Dispatch auth/concurrency tests allocate real data dirs and exercise domain wiring. | `tests/integration/dispatch-auth.test.ts:28`, `tests/integration/dispatch-concurrency.test.ts:229` | MOVE | They are domain integration tests, not pure unit tests. |
+| Evidence, eval, memory, receipt, session, and self-dev tests write real artifacts. | `tests/integration/evidence-builder.test.ts:26`, `tests/integration/eval-runner.test.ts:19`, `tests/integration/memory.test.ts:28`, `tests/integration/receipt-verify.test.ts:80`, `tests/integration/session.test.ts:393`, `tests/integration/self-dev.test.ts:126` | MOVE | Their assertions depend on filesystem state. |
+| Workspace and git tests spawn `git` or inspect real project directories. | `tests/integration/utils-git.test.ts:20`, `tests/integration/workspace/git-probe.test.ts:10`, `tests/integration/workspace/snapshot.test.ts:25` | MOVE | Real subprocesses and filesystem probes belong in integration. |
+| Context, component, provider registry, prompts, grep, autocomplete, and tool registry tests create temp files. | `tests/integration/components-scan.test.ts:11`, `tests/integration/context/codewiki/indexer.test.ts:9`, `tests/integration/providers/registry.test.ts:68`, `tests/integration/prompts.test.ts:108`, `tests/integration/tools-grep.test.ts:10`, `tests/integration/slash-autocomplete.test.ts:55`, `tests/integration/tools-registry-wiring.test.ts:605` | MOVE | They are integration-shaped even when they are fast. |
 | `core.test.ts` mixes pure concurrency tests with XDG filesystem tests. | `tests/unit/core.test.ts:24`, `tests/unit/core.test.ts:90` | TIGHTEN | Split XDG checks to integration and keep pure concurrency in unit. |
 
 ## CI Workflow Signal
@@ -124,47 +124,45 @@ Gate file mapping after execution:
 - Pre-push integration: every file under `tests/integration/**/*.test.ts`, including the moved filesystem, XDG, git, and command tests from `tests/unit`.
 - Full e2e: every file under `tests/e2e/**/*.test.ts`.
 
-Planned moves from unit to integration:
+Moved from unit to integration:
 
-- `tests/unit/agents-builtins.test.ts`
-- `tests/unit/cli-auth.test.ts`
-- `tests/unit/cli-configure-targets.test.ts`
-- `tests/unit/cli-reset-uninstall.test.ts`
-- `tests/unit/components-scan.test.ts`
-- `tests/unit/context/codewiki/indexer.test.ts`
-- `tests/unit/context/codewiki/tools.test.ts`
-- `tests/unit/context/fingerprint.test.ts`
-- `tests/unit/context/sibling-files.test.ts`
-- `tests/unit/context/state.test.ts`
-- `tests/unit/cwd-fallback.test.ts`
-- `tests/unit/dispatch-auth.test.ts`
-- `tests/unit/dispatch-concurrency.test.ts`
-- `tests/unit/eval-evidence.test.ts`
-- `tests/unit/eval-runner.test.ts`
-- `tests/unit/evidence-builder.test.ts`
-- `tests/unit/memory.test.ts`
-- `tests/unit/prompts.test.ts`
-- `tests/unit/providers/knowledge-base.test.ts`
-- `tests/unit/providers/registry.test.ts`
-- `tests/unit/receipt-verify.test.ts`
-- `tests/unit/safety-rule-packs.test.ts`
-- `tests/unit/self-dev.test.ts`
-- `tests/unit/session-compaction-entry.test.ts`
-- `tests/unit/session.test.ts`
-- `tests/unit/slash-autocomplete.test.ts`
-- `tests/unit/tools-grep.test.ts`
-- `tests/unit/tools-registry-wiring.test.ts`
-- `tests/unit/utils-git.test.ts`
-- `tests/unit/workspace/git-probe.test.ts`
-- `tests/unit/workspace/project-type.test.ts`
-- `tests/unit/workspace/snapshot.test.ts`
+- `tests/unit/agents-builtins.test.ts` -> `tests/integration/agents-builtins.test.ts`
+- `tests/unit/cli-auth.test.ts` -> `tests/integration/cli-auth.test.ts`
+- `tests/unit/cli-configure-targets.test.ts` -> `tests/integration/cli-configure-targets.test.ts`
+- `tests/unit/cli-reset-uninstall.test.ts` -> `tests/integration/cli-reset-uninstall.test.ts`
+- `tests/unit/components-scan.test.ts` -> `tests/integration/components-scan.test.ts`
+- `tests/unit/context/codewiki/indexer.test.ts` -> `tests/integration/context/codewiki/indexer.test.ts`
+- `tests/unit/context/codewiki/tools.test.ts` -> `tests/integration/context/codewiki/tools.test.ts`
+- `tests/unit/context/fingerprint.test.ts` -> `tests/integration/context/fingerprint.test.ts`
+- `tests/unit/context/sibling-files.test.ts` -> `tests/integration/context/sibling-files.test.ts`
+- `tests/unit/context/state.test.ts` -> `tests/integration/context/state.test.ts`
+- `tests/unit/cwd-fallback.test.ts` -> `tests/integration/cwd-fallback.test.ts`
+- `tests/unit/dispatch-auth.test.ts` -> `tests/integration/dispatch-auth.test.ts`
+- `tests/unit/dispatch-concurrency.test.ts` -> `tests/integration/dispatch-concurrency.test.ts`
+- `tests/unit/eval-evidence.test.ts` -> `tests/integration/eval-evidence.test.ts`
+- `tests/unit/eval-runner.test.ts` -> `tests/integration/eval-runner.test.ts`
+- `tests/unit/evidence-builder.test.ts` -> `tests/integration/evidence-builder.test.ts`
+- `tests/unit/memory.test.ts` -> `tests/integration/memory.test.ts`
+- `tests/unit/prompts.test.ts` -> `tests/integration/prompts.test.ts`
+- `tests/unit/providers/knowledge-base.test.ts` -> `tests/integration/providers/knowledge-base.test.ts`
+- `tests/unit/providers/registry.test.ts` -> `tests/integration/providers/registry.test.ts`
+- `tests/unit/receipt-verify.test.ts` -> `tests/integration/receipt-verify.test.ts`
+- `tests/unit/safety-rule-packs.test.ts` -> `tests/integration/safety-rule-packs.test.ts`
+- `tests/unit/self-dev.test.ts` -> `tests/integration/self-dev.test.ts`
+- `tests/unit/session-compaction-entry.test.ts` -> `tests/integration/session-compaction-entry.test.ts`
+- `tests/unit/session.test.ts` -> `tests/integration/session.test.ts`
+- `tests/unit/slash-autocomplete.test.ts` -> `tests/integration/slash-autocomplete.test.ts`
+- `tests/unit/tools-grep.test.ts` -> `tests/integration/tools-grep.test.ts`
+- `tests/unit/tools-registry-wiring.test.ts` -> `tests/integration/tools-registry-wiring.test.ts`
+- `tests/unit/utils-git.test.ts` -> `tests/integration/utils-git.test.ts`
+- `tests/unit/workspace/git-probe.test.ts` -> `tests/integration/workspace/git-probe.test.ts`
+- `tests/unit/workspace/project-type.test.ts` -> `tests/integration/workspace/project-type.test.ts`
+- `tests/unit/workspace/snapshot.test.ts` -> `tests/integration/workspace/snapshot.test.ts`
 
 ## Validation Measurements
 
-To be filled after execution:
-
 | Gate | Before | After |
 |---|---:|---:|
-| `npm run ci:precommit` | not split | TBD |
-| `npm run ci:fast` | not split | TBD |
-| `npm run ci:full` | old `npm run ci`: 60.64s e2e plus 9.37s test phase | TBD |
+| `npm run ci:precommit` | not split; old `npm run test` was 9.37s without typecheck or lint | 16.87s |
+| `npm run ci:fast` | not split; old default `npm run ci` included e2e | 23.74s |
+| `npm run ci:full` | old `npm run test` 9.37s plus `npm run test:e2e` 60.64s, not measured as one script | 82.06s |
