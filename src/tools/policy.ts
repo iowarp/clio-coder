@@ -1,4 +1,4 @@
-import { ALL_TOOL_NAMES, type ToolName, ToolNames } from "../core/tool-names.js";
+import { isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import { ALL_MODES, MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
@@ -29,7 +29,7 @@ export function validateBuiltinToolPolicy(
 	const registered = new Map<ToolName, ToolSpec>();
 
 	for (const spec of specs) {
-		if (!ALL_TOOL_NAMES.includes(spec.name)) {
+		if (!isBuiltinToolName(spec.name)) {
 			errors.push(`registered tool ${spec.name} is not in ToolNames`);
 			continue;
 		}

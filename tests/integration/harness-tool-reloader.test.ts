@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -76,6 +76,30 @@ describe("reloadToolFile", () => {
 		const run = await registry.lastRegistered?.run({});
 		strictEqual(run?.kind, "ok");
 		if (run?.kind === "ok") strictEqual(run.output, "v2");
+	});
+
+	it("chaos: edited hot tool source changes registered behavior and is restored", async () => {
+		const source = join(tmp, "fake.ts");
+		const v1 =
+			'export const fakeTool = { name: "fake", description: "d", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "chaos-v1" }; } };\n';
+		const v2 =
+			'export const fakeTool = { name: "fake", description: "d", parameters: { type: "object", properties: {}, additionalProperties: false }, baseActionClass: "read", async run() { return { kind: "ok", output: "chaos-v2" }; } };\n';
+		writeFileSync(source, v1);
+		const registry = fakeRegistry();
+		try {
+			await reloadToolFile(source, cache, registry, new Map());
+			let run = await registry.lastRegistered?.run({});
+			strictEqual(run?.kind, "ok");
+			if (run?.kind === "ok") strictEqual(run.output, "chaos-v1");
+			writeFileSync(source, v2);
+			await reloadToolFile(source, cache, registry, new Map());
+			run = await registry.lastRegistered?.run({});
+			strictEqual(run?.kind, "ok");
+			if (run?.kind === "ok") strictEqual(run.output, "chaos-v2");
+		} finally {
+			writeFileSync(source, v1);
+		}
+		strictEqual(readFileSync(source, "utf8"), v1);
 	});
 
 	it("returns an error when compile fails", async () => {

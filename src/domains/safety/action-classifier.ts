@@ -61,14 +61,11 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.FindSymbol:
 		case ToolNames.EntryPoints:
 		case ToolNames.WhereIs:
-		case ToolNames.ClioIntrospect:
-		case ToolNames.ClioRecall:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:
 		case ToolNames.WritePlan:
 		case ToolNames.WriteReview:
-		case ToolNames.ClioRemember:
 			return "write";
 		case ToolNames.Bash:
 			return "execute";

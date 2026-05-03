@@ -10,7 +10,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
+import { createDispatchBundle, DispatchStaleProcessError } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
@@ -23,6 +23,7 @@ import type { EndpointDescriptor } from "../../src/domains/providers/types/endpo
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 import type { SelfDevMode } from "../../src/selfdev/mode.js";
+import { SELFDEV_WORKER_TOOL_NAMES } from "../../src/selfdev/tool-names.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -179,13 +180,16 @@ function selfDevMode(repoRoot: string): SelfDevMode {
 }
 
 const tempDirs: string[] = [];
+const ORIGINAL_STALE_OVERRIDE = process.env.CLIO_DEV_ALLOW_STALE_WRITES;
 afterEach(() => {
 	resetXdgCache();
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	if (ORIGINAL_STALE_OVERRIDE === undefined) Reflect.deleteProperty(process.env, "CLIO_DEV_ALLOW_STALE_WRITES");
+	else process.env.CLIO_DEV_ALLOW_STALE_WRITES = ORIGINAL_STALE_OVERRIDE;
 });
 
 describe("dispatch selfdev passthrough", () => {
-	it("prepends the worker preamble and grants the three private tools when selfDevMode is active", async () => {
+	it("prepends the worker preamble and grants private tools when selfDevMode is active", async () => {
 		const repo = mkdtempSync(join(tmpdir(), "clio-dispatch-selfdev-"));
 		tempDirs.push(repo);
 		const context = stubContext();
@@ -193,6 +197,7 @@ describe("dispatch selfdev passthrough", () => {
 		const captured: { spec?: WorkerSpec } = {};
 		const bundle = createDispatchBundle(context, {
 			selfDevMode: selfDevMode(repo),
+			selfDevToolNames: SELFDEV_WORKER_TOOL_NAMES,
 			spawnWorker: (spec: WorkerSpec): SpawnedWorker => {
 				captured.spec = spec;
 				return {
@@ -214,7 +219,7 @@ describe("dispatch selfdev passthrough", () => {
 			const spec = captured.spec;
 			ok(spec.systemPrompt.startsWith(FAKE_PREAMBLE), "systemPrompt begins with the selfdev preamble");
 			const allowed = new Set(spec.allowedTools ?? []);
-			for (const required of [ToolNames.ClioIntrospect, ToolNames.ClioRecall, ToolNames.ClioRemember]) {
+			for (const required of SELFDEV_WORKER_TOOL_NAMES) {
 				ok(allowed.has(required), `worker allowedTools missing ${required}`);
 			}
 			// Inherited base tools must still be present.
@@ -240,6 +245,7 @@ describe("dispatch selfdev passthrough", () => {
 		const captured: { spec?: WorkerSpec } = {};
 		const bundle = createDispatchBundle(context, {
 			selfDevMode: selfDevMode(repo),
+			selfDevToolNames: SELFDEV_WORKER_TOOL_NAMES,
 			spawnWorker: (spec: WorkerSpec): SpawnedWorker => {
 				captured.spec = spec;
 				return {
@@ -275,6 +281,65 @@ describe("dispatch selfdev passthrough", () => {
 		}
 	});
 
+	it("blocks worker dispatch while restart-required is active in selfdev mode", async () => {
+		const repo = mkdtempSync(join(tmpdir(), "clio-dispatch-selfdev-"));
+		tempDirs.push(repo);
+		const bundle = createDispatchBundle(stubContext(), {
+			selfDevMode: selfDevMode(repo),
+			selfDevToolNames: SELFDEV_WORKER_TOOL_NAMES,
+			getSelfDevHarnessSnapshot: () => ({ kind: "restart-required", files: ["src/core/config.ts"] }),
+			spawnWorker: (): SpawnedWorker => {
+				throw new Error("spawn should not run");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await bundle.contract.dispatch({ agentId: "scout", task: "blocked stale dispatch" });
+			throw new Error("expected stale dispatch block");
+		} catch (err) {
+			ok(err instanceof DispatchStaleProcessError, String(err));
+			strictEqual(err.details.stale_process.restart_required, true);
+			strictEqual(err.details.stale_process.blocked_action, "worker_dispatch");
+			strictEqual(err.details.stale_process.restart_required_paths[0], "src/core/config.ts");
+			ok(err.message.includes("stale process guard"));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("allows worker dispatch with the explicit stale-write override", async () => {
+		const repo = mkdtempSync(join(tmpdir(), "clio-dispatch-selfdev-"));
+		tempDirs.push(repo);
+		process.env.CLIO_DEV_ALLOW_STALE_WRITES = "1";
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const captured: { spawned: boolean } = { spawned: false };
+		const bundle = createDispatchBundle(stubContext(), {
+			selfDevMode: selfDevMode(repo),
+			selfDevToolNames: SELFDEV_WORKER_TOOL_NAMES,
+			getSelfDevHarnessSnapshot: () => ({ kind: "restart-required", files: ["src/core/config.ts"] }),
+			spawnWorker: (): SpawnedWorker => {
+				captured.spawned = true;
+				return {
+					pid: 4245,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "scout", task: "allowed stale override" });
+			ok(captured.spawned);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("emits no preamble and no private tools when selfDevMode is absent", async () => {
 		const context = stubContext({ withPreamble: false });
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -298,9 +363,9 @@ describe("dispatch selfdev passthrough", () => {
 			ok(!captured.spec.systemPrompt.includes(FAKE_PREAMBLE));
 			ok(!captured.spec.selfDev);
 			const allowed = new Set(captured.spec.allowedTools ?? []);
-			ok(!allowed.has(ToolNames.ClioIntrospect));
-			ok(!allowed.has(ToolNames.ClioRecall));
-			ok(!allowed.has(ToolNames.ClioRemember));
+			for (const privateName of SELFDEV_WORKER_TOOL_NAMES) {
+				ok(!allowed.has(privateName));
+			}
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
 		} finally {

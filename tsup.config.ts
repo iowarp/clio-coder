@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 const includeSelfdev = process.env.CLIO_BUILD_PRIVATE === "1";
@@ -19,4 +20,9 @@ export default defineConfig({
 	outDir: "dist",
 	banner: ({ format }) => (format === "esm" ? { js: "#!/usr/bin/env node" } : {}),
 	external: ["@mariozechner/pi-agent-core", "@mariozechner/pi-ai", "@mariozechner/pi-tui", "typescript"],
+	onSuccess: includeSelfdev
+		? undefined
+		: () => {
+				rmSync("dist/selfdev", { recursive: true, force: true });
+			},
 });

@@ -1,7 +1,7 @@
 import { Type } from "typebox";
-import { ToolNames } from "../../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "../../tools/registry.js";
-import { recallDevMemory } from "../memory.js";
+import { recallDevMemorySummary } from "../memory.js";
+import { SelfDevToolNames } from "../tool-names.js";
 
 export interface ClioRecallDeps {
 	repoRoot: string;
@@ -18,7 +18,7 @@ function stringArray(value: unknown): string[] | undefined {
 
 export function clioRecallTool(deps: ClioRecallDeps): ToolSpec {
 	return {
-		name: ToolNames.ClioRecall,
+		name: SelfDevToolNames.ClioRecall,
 		description:
 			"Read newest self-development memory entries for this checkout. Filter by tags when that helps focus the result.",
 		parameters: Type.Object({
@@ -35,8 +35,19 @@ export function clioRecallTool(deps: ClioRecallDeps): ToolSpec {
 			const options: { tags?: ReadonlyArray<string>; limit?: number } = {};
 			if (tags) options.tags = tags;
 			if (limit !== undefined) options.limit = limit;
-			const entries = await recallDevMemory(deps.repoRoot, options);
-			return { kind: "ok", output: JSON.stringify({ entries }) };
+			const result = await recallDevMemorySummary(deps.repoRoot, options);
+			return {
+				kind: "ok",
+				output: JSON.stringify({
+					entries: result.entries,
+					total_count: result.totalCount,
+					matched_count: result.matchedCount,
+					returned_count: result.returnedCount,
+					malformed_count: result.malformedCount,
+					rotated_exists: result.rotatedExists,
+					limit_applied: result.limitApplied,
+				}),
+			};
 		},
 	};
 }

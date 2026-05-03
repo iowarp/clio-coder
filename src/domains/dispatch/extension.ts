@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
-import { ToolNames } from "../../core/tool-names.js";
+import type { ToolName } from "../../core/tool-names.js";
 import type { SelfDevMode } from "../../selfdev/mode.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
@@ -68,9 +68,33 @@ export interface DispatchBundleOptions {
 	heartbeatIntervalMs?: number;
 	now?: () => number;
 	selfDevMode?: SelfDevMode;
+	selfDevToolNames?: ReadonlyArray<ToolName>;
+	getSelfDevHarnessSnapshot?: () => { kind: string; files?: ReadonlyArray<string> } | null;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
+const STALE_WRITES_OVERRIDE_ENV = "CLIO_DEV_ALLOW_STALE_WRITES";
+
+export interface DispatchStaleProcessDetails {
+	stale_process: {
+		restart_required: true;
+		restart_required_paths: string[];
+		blocked_action: "worker_dispatch";
+		override_env: typeof STALE_WRITES_OVERRIDE_ENV;
+	};
+}
+
+export class DispatchStaleProcessError extends Error {
+	readonly details: DispatchStaleProcessDetails;
+
+	constructor(details: DispatchStaleProcessDetails) {
+		super(
+			`dispatch: stale process guard: restart-required is active; restart Clio before dispatching workers (${details.stale_process.restart_required_paths.join(", ")})`,
+		);
+		this.name = "DispatchStaleProcessError";
+		this.details = details;
+	}
+}
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -78,6 +102,23 @@ function sha256(input: string): string {
 
 function promptHash(systemPrompt: string): string | null {
 	return systemPrompt.length > 0 ? sha256(systemPrompt) : null;
+}
+
+function staleDispatchDetails(options: DispatchBundleOptions | undefined): DispatchStaleProcessDetails | null {
+	if (!options?.selfDevMode) return null;
+	if (process.env[STALE_WRITES_OVERRIDE_ENV] === "1") return null;
+	const snapshot = options.getSelfDevHarnessSnapshot?.();
+	if (snapshot?.kind !== "restart-required") return null;
+	const paths = [...(snapshot.files ?? [])];
+	if (paths.length === 0) return null;
+	return {
+		stale_process: {
+			restart_required: true,
+			restart_required_paths: paths,
+			blocked_action: "worker_dispatch",
+			override_env: STALE_WRITES_OVERRIDE_ENV,
+		},
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -408,6 +449,10 @@ export function createDispatchBundle(
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
+		const staleDetails = staleDispatchDetails(options);
+		if (staleDetails) {
+			throw new DispatchStaleProcessError(staleDetails);
+		}
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
@@ -463,7 +508,7 @@ export function createDispatchBundle(
 		const allowedToolsBase =
 			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
 		const allowedTools = options?.selfDevMode
-			? [...new Set([...allowedToolsBase, ToolNames.ClioIntrospect, ToolNames.ClioRecall, ToolNames.ClioRemember])]
+			? [...new Set([...allowedToolsBase, ...(options.selfDevToolNames ?? [])])]
 			: allowedToolsBase;
 		const workerMode = recipe?.mode ?? currentMode;
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)

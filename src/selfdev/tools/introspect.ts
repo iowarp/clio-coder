@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { ToolNames } from "../../core/tool-names.js";
 import { createComponentSnapshot } from "../../domains/components/index.js";
 import { loadFragments } from "../../domains/prompts/fragment-loader.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../../tools/registry.js";
 import type { HarnessIntrospection } from "../harness/state.js";
 import type { SelfDevMode } from "../mode.js";
+import { SelfDevToolNames } from "../tool-names.js";
 
 interface IntrospectDeps {
 	mode: SelfDevMode;
@@ -131,7 +131,7 @@ export function clioIntrospectTool(deps: IntrospectDeps): ToolSpec {
 	}
 
 	return {
-		name: ToolNames.ClioIntrospect,
+		name: SelfDevToolNames.ClioIntrospect,
 		description: `Read-only self-development introspection for Clio's own repository.
 
 schema:

@@ -395,6 +395,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		SchedulingDomainModule,
 		createDispatchDomainModule({
 			...(selfDev ? { selfDevMode: selfDev } : {}),
+			...(selfDev && selfdev ? { selfDevToolNames: selfdev.selfDevWorkerToolNames() } : {}),
+			...(selfDev ? { getSelfDevHarnessSnapshot: () => harness?.state.snapshot() ?? null } : {}),
 		}),
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
@@ -491,7 +493,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mode: selfDev,
 			getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
 		});
-		selfdev.applySelfDevToolGuards(toolRegistry, selfDev);
+		selfdev.applySelfDevToolGuards(toolRegistry, selfDev, {
+			getHarnessSnapshot: () => harness?.state.snapshot() ?? null,
+		});
 	}
 
 	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
