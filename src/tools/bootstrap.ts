@@ -1,6 +1,8 @@
+import type { SelfDevMode } from "../core/self-dev.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import { clioIntrospectTool } from "../selfdev/tools/introspect.js";
 import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
@@ -20,6 +22,7 @@ import { writeReviewTool } from "./write-review.js";
 
 export interface ToolBootstrapDeps {
 	session?: SessionContract;
+	selfDev?: SelfDevMode;
 }
 
 /**
@@ -50,6 +53,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({ ...entryPointsTool, allowedModes: everyMode });
 	registry.register({ ...whereIsTool, allowedModes: everyMode });
 
+	if (deps.selfDev) {
+		registry.register({ ...clioIntrospectTool({ mode: deps.selfDev }), allowedModes: everyMode });
+	}
+
 	const session = deps.session;
 	if (session) {
 		registry.register({
@@ -66,5 +73,8 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		});
 	}
 
-	assertBuiltinToolPolicy(registry.listAll(), { includeSessionTools: Boolean(session) });
+	assertBuiltinToolPolicy(registry.listAll(), {
+		includeSessionTools: Boolean(session),
+		includeSelfDevTools: Boolean(deps.selfDev),
+	});
 }
