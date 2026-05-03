@@ -4,6 +4,8 @@ import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import type { HarnessIntrospection } from "../harness/state.js";
 import { clioIntrospectTool } from "../selfdev/tools/introspect.js";
+import { clioRecallTool } from "../selfdev/tools/recall.js";
+import { clioRememberTool } from "../selfdev/tools/remember.js";
 import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
@@ -109,6 +111,22 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				{ path: "src/selfdev/tools/introspect.ts", scope: "selfdev" },
 			),
 			allowedModes: everyMode,
+			bypassModeMatrix: true,
+		});
+		registry.register({
+			...withSourceInfo(clioRecallTool({ repoRoot: deps.selfDev.repoRoot }), {
+				path: "src/selfdev/tools/recall.ts",
+				scope: "selfdev",
+			}),
+			allowedModes: everyMode,
+			bypassModeMatrix: true,
+		});
+		registry.register({
+			...withSourceInfo(clioRememberTool({ repoRoot: deps.selfDev.repoRoot }), {
+				path: "src/selfdev/tools/remember.ts",
+				scope: "selfdev",
+			}),
+			allowedModes: defaultAndSuper,
 			bypassModeMatrix: true,
 		});
 	}
