@@ -271,6 +271,7 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio eval run\|report\|compare` | Run local eval task files and compare results. |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio --print "<task>"` (alias `-p`) | Run one non-interactive chat turn and print only the assistant text. |
 | `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
@@ -730,6 +731,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 Current release:
 
+- **v0.1.6** (alpha). Focused parity cut that adds top-level `clio --print` / `clio -p` text mode, stdin plus argv prompt composition, and stdout-clean non-interactive execution through Clio's native endpoint-first orchestrator.
 - **v0.1.5** (alpha). First public alpha release. Highlights: interactive terminal coding, target-first model routing, built-in coding agents, persistent sessions, checked-in `CLIO.md` project context, workspace orientation, codewiki lookup tools, safety modes, receipts, audit logs, evidence and eval workflows, scoped memory, clearer usage accounting, and polished TUI popups.
 - **v0.1.4** (alpha). Highlights: workspace orientation in the welcome dashboard plus a `workspace_context` tool, component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory injected into orchestrator and workers under a fixed budget, declarative middleware with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, doctor migration from `llamacpp-completion` to `llamacpp`, compaction parity, and consistent `--help` across every subcommand.
 - **v0.1.3** (alpha). Highlights: live tool-output streaming inside the expanded tool block with a dim `(running...)` marker, bash subrenderer that echoes `$ <command>` before its output, `Ctrl+T` to expand an assistant turn's thinking block (symmetric with `Ctrl+O`), footer git-branch indicator resolved once at boot, autocomplete `fd`/`fdfind` resolver fix, and a self-dev `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` opt-out for trusted contexts.

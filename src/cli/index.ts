@@ -1,4 +1,5 @@
 import { runAgentsCommand } from "./agents.js";
+import { parsePrintCliArgs } from "./args.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
@@ -8,8 +9,10 @@ import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
 import { runEvolveCommand } from "./evolve.js";
 import { runInitCommand } from "./init.js";
+import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
+import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
 import { extractApiKeyFlag, extractNoContextFilesFlag, parseFlags, printError } from "./shared.js";
@@ -25,6 +28,7 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 Usage:
   clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
+  clio --print, -p <task>   run one non-interactive chat turn
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
   clio --no-context-files, -nc  skip CLIO.md project-context injection
@@ -55,6 +59,44 @@ Usage:
 async function main(argv: string[]): Promise<number> {
 	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
 	const { noContextFiles, rest } = extractNoContextFilesFlag(afterApiKey);
+	const printArgs = parsePrintCliArgs(rest);
+	if (printArgs.print) {
+		takeOverStdout();
+		try {
+			if (printArgs.help) {
+				process.stdout.write(HELP);
+				await flushRawStdout();
+				return 0;
+			}
+			for (const diagnostic of printArgs.diagnostics) {
+				printError(diagnostic.message);
+			}
+			if (printArgs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
+			if (printArgs.mode !== "text") {
+				printError(`--mode ${printArgs.mode} is not implemented yet; use --print for text mode`);
+				return 2;
+			}
+			const stdinContent = await readPipedStdin();
+			const initial = buildInitialMessage({
+				messages: printArgs.messages.length > 0 ? [printArgs.messages.join(" ")] : [],
+				...(stdinContent !== undefined ? { stdinContent } : {}),
+			});
+			if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
+				printError("print mode requires a prompt on argv or stdin");
+				process.stdout.write('usage: clio --print "task"\n');
+				return 2;
+			}
+			const result = await runClioCommand({
+				...(apiKey === undefined ? {} : { apiKey }),
+				...(noContextFiles ? { noContextFiles: true } : {}),
+				print: { prompt: initial.initialMessage },
+			});
+			await flushRawStdout();
+			return result;
+		} finally {
+			restoreStdout();
+		}
+	}
 	const { flags, positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));

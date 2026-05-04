@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import chalk from "chalk";
+import { runPrintMode } from "../cli/modes/index.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
@@ -102,6 +103,8 @@ export interface BootOptions {
 	dev?: boolean;
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
+	/** Run one non-interactive orchestrator turn and print the final text response. */
+	print?: { prompt: string };
 }
 
 function buildBanner(): string {
@@ -416,11 +419,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
 
-	const interactive = process.env.CLIO_INTERACTIVE === "1";
+	const interactive = !options.print && process.env.CLIO_INTERACTIVE === "1";
 	const selfDevLine = selfDev
 		? `${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`
 		: undefined;
-	if (!interactive) {
+	if (!interactive && !options.print) {
 		process.stdout.write(buildBanner());
 		if (selfDevLine) process.stdout.write(`  ${chalk.magenta(selfDevLine)}\n`);
 		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
@@ -445,7 +448,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	if (!interactive) {
+	if (!interactive && !options.print) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
@@ -460,7 +463,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const contextDomain = result.getContract<ContextContract>("context");
 	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
-			"Clio Coder: interactive mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
+			"Clio Coder: chat mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
@@ -565,6 +568,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		toolRegistry,
 	});
+
+	if (options.print) {
+		const code = await runPrintMode(chat, { prompt: options.print.prompt });
+		await termination.shutdown(code);
+		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+	}
 
 	if (selfDev && selfdev) {
 		const repoRoot = selfDev.repoRoot;
