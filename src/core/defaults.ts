@@ -151,7 +151,7 @@ targets: []
 #   clio configure --runtime claude-code-sdk --id claude-sdk-opus --model claude-opus-4-7 --worker-profile claude-opus
 #   clio configure --runtime copilot-cli --id copilot-sonnet --model claude-sonnet-4.6 --worker-profile copilot-sonnet
 #   clio configure --runtime gemini-cli --id gemini-flash --model gemini-3-flash-preview --worker-profile gemini-flash
-#   clio targets add --runtime openai-compat --id mini --url http://mini:8080 --model Qwen3.6-35B-A3B-UD-Q4_K_XL --context-window 262144 --max-tokens 65536 --reasoning true
+#   clio targets add --runtime llamacpp --id mini --url http://mini:8080 --model AgenticQwen-30B-A3B-i1-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
 #   clio targets add --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
 #
 # Example targets:
@@ -165,9 +165,9 @@ targets: []
 #       - gpt-5.4
 #       - gpt-5.4-mini
 #   - id: mini
-#     runtime: openai-compat
+#     runtime: llamacpp
 #     url: http://mini:8080
-#     defaultModel: Qwen3.6-35B-A3B-UD-Q4_K_XL
+#     defaultModel: AgenticQwen-30B-A3B-i1-Q4_K_M
 #     capabilities:
 #       contextWindow: 262144
 #       maxTokens: 65536

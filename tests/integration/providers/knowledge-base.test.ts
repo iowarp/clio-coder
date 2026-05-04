@@ -134,6 +134,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 				.map((entry) => entry.family)
 				.sort(),
 			[
+				"agenticqwen-30b-a3b-i1",
 				"gemma-4-31b-it-nvfp4-turbo",
 				"gemma4-26b-a4b",
 				"gemopus-4-31b-it",
@@ -151,6 +152,13 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 		strictEqual(qwen.entry.capabilities.contextWindow, 262144);
 		strictEqual(qwen.entry.capabilities.maxTokens, 65536);
 		strictEqual(qwen.entry.capabilities.thinkingFormat, "qwen-chat-template");
+
+		const agentic = kb.lookup("AgenticQwen-30B-A3B-i1-Q4_K_M");
+		ok(agentic, "expected AgenticQwen GGUF id to match the production KB");
+		strictEqual(agentic.entry.capabilities.contextWindow, 262144);
+		strictEqual(agentic.entry.capabilities.maxTokens, 65536);
+		strictEqual(agentic.entry.capabilities.reasoning, true);
+		strictEqual(agentic.entry.capabilities.thinkingFormat, "qwen-chat-template");
 
 		const gemma = kb.lookup("gemma-4-26B-A4B-it-Q4_K_M");
 		ok(gemma, "expected Gemma 4 MoE to match the production KB");
