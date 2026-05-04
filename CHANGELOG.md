@@ -7,6 +7,37 @@ Keep a Changelog.
 
 No changes yet.
 
+## 0.1.6 - 2026-05-04
+
+Clio Coder 0.1.6 is a focused pi-coding-agent parity cut. It starts the
+missing Phase 16 automation surface with a real text print mode while keeping
+the implementation native to Clio's endpoint-first runtime, prompt compiler,
+session, safety, receipt, and audit architecture.
+
+### Added
+
+- Added top-level `clio --print` / `clio -p` for one non-interactive
+  orchestrator turn. The command runs through the same configured Clio
+  orchestrator target and prompt compiler as the TUI, then prints only the
+  assistant text to stdout.
+- Added stdin plus argv prompt composition for print mode, matching the
+  practical pi-coding-agent `-p` workflow for shell pipelines.
+- Added a stdout guard for print-mode plumbing so startup chatter, usage, and
+  diagnostics are routed to stderr while stdout remains script-friendly.
+
+### Changed
+
+- Reserved `--mode json` and `--mode rpc` behind explicit errors instead of
+  silently treating them as ordinary subcommands. JSONL and RPC execution
+  remain the next Phase 16 slices.
+
+### Tests
+
+- Added unit coverage for print-mode argument parsing, initial-message
+  composition, and stdout guarding.
+- Added end-to-end CLI coverage with a local OpenAI-compatible SSE fixture for
+  `--print`, stdin merge, empty prompt errors, and reserved JSON mode.
+
 ## 0.1.5 - 2026-05-03
 
 Clio Coder's first public alpha release. This release is intended for

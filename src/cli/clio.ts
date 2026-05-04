@@ -27,7 +27,7 @@ export async function runClioCommand(options: BootOptions = {}): Promise<number>
 	// CI runners, and non-interactive scripts) should fall through to the
 	// bannered non-interactive boot so those scripts do not hang on the TUI.
 	// Explicit CLIO_INTERACTIVE=1 still forces interactive mode.
-	if (process.env.CLIO_INTERACTIVE === undefined && process.stdin.isTTY) {
+	if (!options.print && process.env.CLIO_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_INTERACTIVE = "1";
 	}
 	if (process.env.CLIO_INTERACTIVE === "1") {
