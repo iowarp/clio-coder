@@ -28,3 +28,11 @@ export {
 	type PromptTemplateRoot,
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
+export {
+	expandSkillInvocationInput,
+	loadSkills,
+	type Skill,
+	type SkillExpansion,
+	type SkillList,
+	type SkillRoot,
+} from "./skills/loader.js";

@@ -4,7 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
-import type { PromptTemplate, ResourceList } from "../domains/resources/index.js";
+import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -17,6 +17,7 @@ export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
 	| { kind: "init" }
+	| { kind: "skills" }
 	| { kind: "prompts" }
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
@@ -197,6 +198,7 @@ export interface SlashCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: () => void;
+	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	openProviders: () => void;
 	openConnect: (target?: string) => void;
@@ -289,6 +291,28 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.runInit();
+		},
+	},
+	{
+		name: "skills",
+		description: "List skills",
+		kinds: ["skills"],
+		match(trimmed) {
+			return trimmed === "/skills" ? { kind: "skills" } : null;
+		},
+		handle(_command, ctx) {
+			const list = ctx.listSkills();
+			if (list.items.length === 0) {
+				ctx.io.stdout("\nskills: none\n");
+				return;
+			}
+			const rows = list.items.map((skill) => {
+				const usage = `/skill:${skill.name}`;
+				return `  ${usage.padEnd(28)} ${skill.description}`;
+			});
+			const diagnostics =
+				list.diagnostics.length > 0 ? `\n${list.diagnostics.length} skill diagnostic(s) while loading resources.\n` : "\n";
+			ctx.io.stdout(`\nskills:\n${rows.join("\n")}\n${diagnostics}`);
 		},
 	},
 	{

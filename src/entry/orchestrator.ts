@@ -573,9 +573,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 
 	if (options.print) {
-		const promptExpansion = resources?.expandPromptTemplate(options.print.prompt, process.cwd());
+		const skillExpansion = resources?.expandSkillInvocation(options.print.prompt, process.cwd());
+		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.print.prompt;
+		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
 		const code = await runPrintMode(chat, {
-			prompt: promptExpansion?.expanded ? promptExpansion.text : options.print.prompt,
+			prompt: promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
 		});
 		await termination.shutdown(code);
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };

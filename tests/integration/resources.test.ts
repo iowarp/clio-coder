@@ -100,6 +100,43 @@ describe("resources domain", () => {
 		}
 	});
 
+	it("loads skills from user and project resource roots and expands explicit invocations", async () => {
+		const repo = join(scratch, "repo");
+		const configDir = process.env.CLIO_CONFIG_DIR;
+		ok(configDir, "CLIO_CONFIG_DIR should be set by the test harness");
+		mkdirSync(join(configDir, "skills", "review"), { recursive: true });
+		mkdirSync(join(repo, ".clio", "skills", "review"), { recursive: true });
+		writeFileSync(
+			join(configDir, "skills", "review", "SKILL.md"),
+			"---\nname: review\ndescription: User review\n---\nUse user review.\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(repo, ".clio", "skills", "review", "SKILL.md"),
+			"---\nname: review\ndescription: Project review\n---\nUse project review.\n",
+			"utf8",
+		);
+
+		const loaded = await loadDomains([ConfigDomainModule, ResourcesDomainModule]);
+		try {
+			const resources = loaded.getContract<ResourcesContract>("resources");
+			ok(resources, "resources contract should be available");
+			const skills = resources.skills(repo);
+			strictEqual(skills.items.length, 1);
+			strictEqual(skills.items[0]?.description, "Project review");
+			strictEqual(skills.items[0]?.sourceInfo.scope, "project");
+			strictEqual(skills.diagnostics.filter((diag) => diag.type === "collision").length, 1);
+
+			const expanded = resources.expandSkillInvocation("/skill:review src/app.ts", repo);
+			strictEqual(expanded.expanded, true);
+			ok(expanded.text.includes('<skill name="review"'), expanded.text);
+			ok(expanded.text.includes("Use project review."), expanded.text);
+			ok(expanded.text.endsWith("\n\nsrc/app.ts"), expanded.text);
+		} finally {
+			await loaded.stop();
+		}
+	});
+
 	it("keeps CLIO.md-first prompt compilation while the resources domain is loaded", async () => {
 		const repo = join(scratch, "repo");
 		mkdirSync(repo, { recursive: true });

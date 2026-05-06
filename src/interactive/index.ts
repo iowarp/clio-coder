@@ -179,8 +179,10 @@ export function expandInteractiveSubmitText(
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
 ): string {
-	const expansion = resources?.expandPromptTemplate(text, cwd);
-	return expansion?.expanded ? expansion.text : text;
+	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
+	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
+	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
+	return promptExpansion?.expanded ? promptExpansion.text : skillText;
 }
 
 export type OverlayState =
@@ -829,6 +831,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			void shutdown();
 		},
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
+		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
 		openProviders: () => openProvidersOverlayState(),
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),

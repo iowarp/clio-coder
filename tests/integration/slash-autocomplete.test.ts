@@ -72,6 +72,7 @@ describe("interactive/slash-autocomplete", () => {
 		deepStrictEqual(parseSlashCommand("/models"), { kind: "unknown", text: "/models" });
 		deepStrictEqual(parseSlashCommand("/quit"), { kind: "quit" });
 		deepStrictEqual(parseSlashCommand("/exit"), { kind: "unknown", text: "/exit" });
+		deepStrictEqual(parseSlashCommand("/skills"), { kind: "skills" });
 		deepStrictEqual(parseSlashCommand("/prompts"), { kind: "prompts" });
 		deepStrictEqual(parseSlashCommand("/receipts"), { kind: "receipts" });
 		deepStrictEqual(parseSlashCommand("/receipts verify run-123"), {
