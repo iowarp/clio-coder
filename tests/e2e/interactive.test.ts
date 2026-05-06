@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, spawnClioPty } from "../harness/pty.js";
 import { runCli } from "../harness/spawn.js";
 
+const PNG_1X1 = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+	"base64",
+);
+
 function writeSettings(configDir: string, yaml: string): void {
 	writeFileSync(join(configDir, "settings.yaml"), yaml, "utf8");
 }
@@ -117,6 +122,23 @@ function lastUserMessageText(body: Record<string, unknown>): string {
 	return "";
 }
 
+function hasLastUserImage(body: Record<string, unknown>, expectedMimeType: string): boolean {
+	const messages = body.messages;
+	if (!Array.isArray(messages)) return false;
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const entry = messages[i];
+		if (!entry || typeof entry !== "object" || !("role" in entry) || entry.role !== "user") continue;
+		if (!("content" in entry) || !Array.isArray(entry.content)) return false;
+		return entry.content.some((block: unknown) => {
+			if (!block || typeof block !== "object" || !("type" in block) || block.type !== "image_url") return false;
+			const imageUrl = "image_url" in block ? block.image_url : undefined;
+			if (!imageUrl || typeof imageUrl !== "object" || !("url" in imageUrl)) return false;
+			return typeof imageUrl.url === "string" && imageUrl.url.startsWith(`data:${expectedMimeType};base64,`);
+		});
+	}
+	return false;
+}
+
 function writeOpenAICompatFixture(configDir: string, url: string): void {
 	writeSettings(
 		configDir,
@@ -128,6 +150,8 @@ function writeOpenAICompatFixture(configDir: string, url: string): void {
 				"    defaultModel: mock-model",
 				"    auth:",
 				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
+				"    capabilities:",
+				"      vision: true",
 				"    wireModels:",
 				"      - mock-model",
 			].join("\n"),
@@ -286,6 +310,33 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
 			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "first prompt").length, 1);
 			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "queued prompt").length, 1);
+		} finally {
+			p.kill();
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("interactive @image file references attach images to chat submissions", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		const fixture = await startFollowUpFixture();
+		writeOpenAICompatFixture(configDir, fixture.url);
+		writeFileSync(join(scratch.dir, "pixel.png"), PNG_1X1);
+		const p = spawnClioPty({ cwd: scratch.dir, env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("Describe @pixel.png\r");
+			await p.expect(/probe-ok/, 15_000);
+			const expectedMarker = `<file name="${join(scratch.dir, "pixel.png")}"></file>`;
+			ok(
+				fixture.requests.some(
+					(body) => lastUserMessageText(body).includes(expectedMarker) && hasLastUserImage(body, "image/png"),
+				),
+				`missing interactive image request in ${JSON.stringify(fixture.requests)}`,
+			);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
 		} finally {
 			p.kill();
 			await closeServer(fixture.server);

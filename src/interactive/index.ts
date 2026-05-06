@@ -33,6 +33,7 @@ import {
 	TUI,
 	visibleWidth,
 } from "../engine/tui.js";
+import type { ImageContent } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -183,16 +184,30 @@ export const ENTER = "\r";
 export const ESC = "\x1b";
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
+export interface InteractiveSubmitExpansion {
+	text: string;
+	images: ImageContent[];
+}
+
+export function expandInteractiveSubmit(
+	text: string,
+	resources: ResourcesContract | undefined,
+	cwd = process.cwd(),
+): InteractiveSubmitExpansion {
+	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
+	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
+	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
+	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
+	return { text: fileExpansion.text, images: fileExpansion.images };
+}
+
 export function expandInteractiveSubmitText(
 	text: string,
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
 ): string {
-	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
-	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
-	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
-	return expandInlineFileReferences(promptText, { cwd, missing: "leave" }).text;
+	return expandInteractiveSubmit(text, resources, cwd).text;
 }
 
 export type OverlayState =
@@ -1000,12 +1015,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
-			const submitted = expandInteractiveSubmitText(text, deps.resources);
-			chatPanel.appendUser(submitted);
+			const submitted = expandInteractiveSubmit(text, deps.resources);
+			chatPanel.appendUser(submitted.text);
 			tui.requestRender();
 			void (async () => {
 				try {
-					await deps.chat.submit(submitted);
+					await deps.chat.submit(submitted.text, submitted.images.length > 0 ? { images: submitted.images } : undefined);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[interactive] chat failed: ${msg}\n`);
@@ -1031,8 +1046,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			return;
 		}
-		const submitted = expandInteractiveSubmitText(text, deps.resources);
-		if (!deps.chat.queueFollowUp(submitted)) {
+		const submitted = expandInteractiveSubmit(text, deps.resources);
+		if (submitted.images.length > 0) {
+			io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
+			return;
+		}
+		if (!deps.chat.queueFollowUp(submitted.text)) {
 			io.stderr("[follow-up] no active response to queue against\n");
 			return;
 		}
