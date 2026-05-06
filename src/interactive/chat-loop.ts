@@ -40,7 +40,7 @@ import { createEngineAgent } from "../engine/agent.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { applyThinkingMechanism } from "../engine/apis/thinking-mechanism.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
-import type { AgentEvent, AgentMessage, Model, MutableAgentState } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
@@ -88,8 +88,12 @@ export interface QueuedMessagesSnapshot {
 
 export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | QueueUpdateEvent | AgentStatusEvent;
 
+export interface ChatSubmitOptions {
+	images?: ReadonlyArray<ImageContent>;
+}
+
 export interface ChatLoop {
-	submit(text: string): Promise<void>;
+	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	queueFollowUp(text: string): boolean;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
@@ -1029,6 +1033,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		agentRuntime: AgentRuntime,
 		text: string,
 		overflow: NonNullable<ReturnType<typeof toContextOverflowError>>,
+		images?: ReadonlyArray<ImageContent>,
 	): Promise<void> => {
 		let compacted = false;
 		try {
@@ -1046,7 +1051,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return;
 		}
 		try {
-			await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text));
+			await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text, images ? [...images] : undefined));
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
 				emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
@@ -1324,7 +1329,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queuedMessages(): QueuedMessagesSnapshot {
 			return { followUp: [...queuedFollowUps] };
 		},
-		async submit(text: string): Promise<void> {
+		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
 			if (streaming) {
 				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
 				return;
@@ -1341,6 +1346,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(notConfiguredNotice());
 				return;
 			}
+			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 
 			// Recompile the prompt before every turn so mode (/mode, Alt+M),
 			// safety level, provider, and model changes since the last turn
@@ -1371,7 +1377,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const userTurn = deps.session.append({
 					kind: "user",
 					parentId: lastTurnId,
-					payload: { text },
+					payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
 					...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 				});
 				lastTurnId = userTurn.id;
@@ -1387,7 +1393,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			streaming = true;
 			try {
-				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text));
+				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text, images));
 				// pi-agent-core 0.70.x does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
@@ -1396,7 +1402,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// a resolve, not only the catch arm.
 				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
 				if (overflowPostResolve) {
-					await runCompactAndRetry(agentRuntime, text, overflowPostResolve);
+					await runCompactAndRetry(agentRuntime, text, overflowPostResolve, images);
 				} else {
 					const failure = detectTerminalFailureFromState(agentRuntime.agent);
 					if (failure) {
@@ -1429,7 +1435,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitNotice(err instanceof Error ? err.message : String(err));
 					return;
 				}
-				await runCompactAndRetry(agentRuntime, text, overflow);
+				await runCompactAndRetry(agentRuntime, text, overflow, images);
 			} finally {
 				streaming = false;
 			}

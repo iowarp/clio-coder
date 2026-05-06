@@ -1,9 +1,10 @@
-import type { AgentMessage } from "../../engine/types.js";
+import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 
 export interface PrintModeOptions {
 	prompt: string;
+	images?: ReadonlyArray<ImageContent>;
 }
 
 interface PrintResult {
@@ -50,7 +51,10 @@ export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): P
 	});
 
 	try {
-		await chat.submit(options.prompt);
+		await chat.submit(
+			options.prompt,
+			options.images && options.images.length > 0 ? { images: options.images } : undefined,
+		);
 	} finally {
 		unsubscribe();
 	}

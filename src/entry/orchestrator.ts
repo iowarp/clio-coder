@@ -51,7 +51,7 @@ import {
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
 import { openSession } from "../engine/session.js";
-import type { Model } from "../engine/types.js";
+import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { startInteractive } from "../interactive/index.js";
@@ -106,7 +106,7 @@ export interface BootOptions {
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
 	/** Run one non-interactive orchestrator turn and print the final text response. */
-	print?: { prompt: string };
+	print?: { prompt: string; images?: ReadonlyArray<ImageContent> };
 }
 
 function buildBanner(): string {
@@ -581,10 +581,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
 		const fileExpansion = expandInlineFileReferences(promptExpansion?.expanded ? promptExpansion.text : skillPrompt, {
 			cwd: process.cwd(),
+			includeImages: true,
 			missing: "leave",
 		});
+		const images = [...(options.print.images ?? []), ...fileExpansion.images];
 		const code = await runPrintMode(chat, {
 			prompt: fileExpansion.text,
+			...(images.length > 0 ? { images } : {}),
 		});
 		await termination.shutdown(code);
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };

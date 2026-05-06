@@ -29,4 +29,16 @@ describe("cli/initial-message", () => {
 		strictEqual(result.initialMessage, "stdin\nfile\nExplain it");
 		deepStrictEqual(result.remainingMessages, ["Second message"]);
 	});
+
+	it("carries file images separately from the text prompt", () => {
+		const image = { type: "image" as const, mimeType: "image/png", data: "abc" };
+		const result = buildInitialMessage({
+			messages: ["Describe it"],
+			fileText: '<file name="pixel.png"></file>\n',
+			fileImages: [image],
+		});
+
+		strictEqual(result.initialMessage, '<file name="pixel.png"></file>\nDescribe it');
+		deepStrictEqual(result.initialImages, [image]);
+	});
 });
