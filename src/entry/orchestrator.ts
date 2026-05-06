@@ -35,7 +35,7 @@ import {
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
-import { ResourcesDomainModule } from "../domains/resources/index.js";
+import { type ResourcesContract, ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -462,6 +462,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
+	const resources = result.getContract<ResourcesContract>("resources");
 	const contextDomain = result.getContract<ContextContract>("context");
 	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
@@ -572,7 +573,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 
 	if (options.print) {
-		const code = await runPrintMode(chat, { prompt: options.print.prompt });
+		const promptExpansion = resources?.expandPromptTemplate(options.print.prompt, process.cwd());
+		const code = await runPrintMode(chat, {
+			prompt: promptExpansion?.expanded ? promptExpansion.text : options.print.prompt,
+		});
 		await termination.shutdown(code);
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -613,6 +617,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		observability,
 		chat,
+		...(resources ? { resources } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(selfDev ? { selfDevRepoRoot: selfDev.repoRoot } : {}),

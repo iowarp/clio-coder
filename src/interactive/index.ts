@@ -14,6 +14,7 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import type { ResourcesContract } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
@@ -96,6 +97,7 @@ export interface InteractiveDeps {
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
+	resources?: ResourcesContract;
 	/**
 	 * Shared tool registry. When wired, the super overlay opens automatically
 	 * whenever a tool call is parked waiting for super admission, and the
@@ -171,6 +173,16 @@ export interface InteractiveDeps {
 export const CTRL_C_DOUBLE_TAP_MS = 500;
 export const ENTER = "\r";
 export const ESC = "\x1b";
+
+export function expandInteractiveSubmitText(
+	text: string,
+	resources: ResourcesContract | undefined,
+	cwd = process.cwd(),
+): string {
+	const expansion = resources?.expandPromptTemplate(text, cwd);
+	return expansion?.expanded ? expansion.text : text;
+}
+
 export type OverlayState =
 	| "closed"
 	| "super-confirm"
@@ -816,6 +828,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		shutdown: () => {
 			void shutdown();
 		},
+		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		openProviders: () => openProvidersOverlayState(),
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),
@@ -862,11 +875,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
-			chatPanel.appendUser(text);
+			const submitted = expandInteractiveSubmitText(text, deps.resources);
+			chatPanel.appendUser(submitted);
 			tui.requestRender();
 			void (async () => {
 				try {
-					await deps.chat.submit(text);
+					await deps.chat.submit(submitted);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[interactive] chat failed: ${msg}\n`);

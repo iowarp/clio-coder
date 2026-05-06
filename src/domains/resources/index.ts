@@ -16,6 +16,15 @@ export {
 	type ProjectContextFile,
 	renderProjectContextFiles,
 } from "./context-files/loader.js";
-export type { ResourcesContract } from "./contract.js";
+export type { ResourceList, ResourcesContract } from "./contract.js";
 export { createResourcesLoader } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";
+export {
+	expandPromptTemplateInput,
+	loadPromptTemplates,
+	type PromptTemplate,
+	type PromptTemplateExpansion,
+	type PromptTemplateList,
+	type PromptTemplateRoot,
+} from "./prompts/loader.js";
+export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
