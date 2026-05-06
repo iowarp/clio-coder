@@ -9,6 +9,7 @@ export interface PrintCliArgs {
 	print: boolean;
 	help: boolean;
 	mode: CliOutputMode;
+	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
 }
@@ -22,6 +23,7 @@ export function parsePrintCliArgs(argv: ReadonlyArray<string>): PrintCliArgs {
 		print: false,
 		help: false,
 		mode: "text",
+		fileArgs: [],
 		messages: [],
 		diagnostics: [],
 	};
@@ -55,7 +57,10 @@ export function parsePrintCliArgs(argv: ReadonlyArray<string>): PrintCliArgs {
 			parsed.diagnostics.push({ type: "error", message: `unknown print-mode option: ${arg}` });
 			continue;
 		}
-		if (arg !== undefined) parsed.messages.push(arg);
+		if (arg !== undefined) {
+			if (arg.startsWith("@") && arg.length > 1) parsed.fileArgs.push(arg.slice(1));
+			else parsed.messages.push(arg);
+		}
 	}
 
 	return parsed;

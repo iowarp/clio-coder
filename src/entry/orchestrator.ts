@@ -5,6 +5,7 @@ import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { expandInlineFileReferences } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -576,8 +577,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const skillExpansion = resources?.expandSkillInvocation(options.print.prompt, process.cwd());
 		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.print.prompt;
 		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
+		const fileExpansion = expandInlineFileReferences(promptExpansion?.expanded ? promptExpansion.text : skillPrompt, {
+			cwd: process.cwd(),
+			missing: "leave",
+		});
 		const code = await runPrintMode(chat, {
-			prompt: promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
+			prompt: fileExpansion.text,
 		});
 		await termination.shutdown(code);
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
