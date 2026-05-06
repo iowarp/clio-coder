@@ -84,6 +84,21 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("!!command runs local bash and marks the output excluded from context", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("!!printf 'bash-output'\r");
+			await p.expect(/excluded from context/, 10_000);
+			await p.expect(/bash-output/, 10_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("Ctrl-D shuts down the tui", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {

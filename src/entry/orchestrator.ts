@@ -537,6 +537,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSettings(current);
 	};
 
+	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
+		const meta = session?.current();
+		if (!meta) return [];
+		return readSessionEntriesForCompact(meta.id);
+	};
+
 	const chat = createChatLoop({
 		getSettings: () => config?.get() ?? readSettings(),
 		modes,
@@ -556,11 +562,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		...(session
 			? {
-					readSessionEntries: (): ReadonlyArray<SessionEntry> => {
-						const meta = session.current();
-						if (!meta) return [];
-						return readSessionEntriesForCompact(meta.id);
-					},
+					readSessionEntries: readCurrentSessionEntries,
 					autoCompact: async (instructions?: string, trigger?: CompactionTrigger): Promise<CompactResult | null> => {
 						try {
 							return await runCompactionFlow(session, config?.get() ?? readSettings(), providers, instructions, trigger);
@@ -627,6 +629,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(resources ? { resources } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
+		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		...(selfDev ? { selfDevRepoRoot: selfDev.repoRoot } : {}),
 		...(getSelfDevFooterLine ? { getSelfDevFooterLine } : {}),
 		...(selfDev && selfdev ? { openSelfDevDiffOverlay: selfdev.openDevDiffOverlay } : {}),

@@ -24,6 +24,8 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "Esc", action: "Cancel stream or close overlay", scope: "global" },
 	{ keys: "/help", action: "List commands", scope: "editor" },
 	{ keys: "Tab", action: "Complete selected slash-command suggestion", scope: "editor" },
+	{ keys: "!cmd", action: "Run local bash and include output as context", scope: "editor" },
+	{ keys: "!!cmd", action: "Run local bash without adding output to context", scope: "editor" },
 	{ keys: "/hotkeys", action: "Show this reference", scope: "editor" },
 	{ keys: "/thinking", action: "Open thinking selector", scope: "editor" },
 	{ keys: "/model [pattern[:thinking]]", action: "Open or set model", scope: "editor" },
