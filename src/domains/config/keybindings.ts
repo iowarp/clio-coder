@@ -31,6 +31,8 @@ export interface ClioAppKeybindings {
 	"clio.tool.expand": true;
 	"clio.thinking.expand": true;
 	"clio.editor.external": true;
+	"clio.message.followUp": true;
+	"clio.message.dequeue": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -106,6 +108,14 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.editor.external": {
 		defaultKeys: "ctrl+g",
 		description: "Open the current input in an external editor",
+	},
+	"clio.message.followUp": {
+		defaultKeys: "alt+enter",
+		description: "Queue the current input as a follow-up message",
+	},
+	"clio.message.dequeue": {
+		defaultKeys: "alt+up",
+		description: "Restore queued follow-up messages to the editor",
 	},
 } as const satisfies KeybindingDefinitions;
 

@@ -35,8 +35,8 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 13 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 13);
+	it("app id list is exactly 15 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 15);
 	});
 
 	it("registers clio.thinking.expand with default ctrl+t", () => {
@@ -92,6 +92,16 @@ describe("interactive/keybinding-manager defaults", () => {
 
 	it("matches Ctrl+G against clio.editor.external", () => {
 		strictEqual(manager.matches("\x07", "clio.editor.external"), true);
+	});
+
+	it("matches Alt+Enter against clio.message.followUp", () => {
+		strictEqual(manager.matches("\x1b\r", "clio.message.followUp"), true);
+		strictEqual(manager.matches("\x1b[13;3u", "clio.message.followUp"), true);
+	});
+
+	it("matches Alt+Up against clio.message.dequeue", () => {
+		strictEqual(manager.matches("\x1bp", "clio.message.dequeue"), true);
+		strictEqual(manager.matches("\x1b[1;3A", "clio.message.dequeue"), true);
 	});
 
 	it("rejects unrelated keystrokes for a specific binding", () => {

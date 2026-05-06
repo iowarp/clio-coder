@@ -261,6 +261,9 @@ describe("status/controller", () => {
 		const controller = createStatusController({
 			chat: {
 				submit: async () => undefined,
+				queueFollowUp: () => false,
+				clearQueuedFollowUps: () => [],
+				queuedMessages: () => ({ followUp: [] }),
 				cancel: () => undefined,
 				onEvent: (listener) => {
 					chatListeners.add(listener as (event: never) => void);

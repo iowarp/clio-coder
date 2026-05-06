@@ -1,5 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, spawnClioPty } from "../harness/pty.js";
@@ -53,6 +55,153 @@ function writeEndpointFixture(configDir: string): void {
 			orchestrator: ["  target: anthropic-prod", "  model: claude-sonnet-4-6", "  thinkingLevel: off"].join("\n"),
 		}),
 	);
+}
+
+async function closeServer(server: Server | null): Promise<void> {
+	if (!server) return;
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+async function readRequestBody(req: IncomingMessage): Promise<string> {
+	return new Promise((resolve) => {
+		let body = "";
+		req.setEncoding("utf8");
+		req.on("data", (chunk) => {
+			body += chunk;
+		});
+		req.on("end", () => resolve(body));
+	});
+}
+
+function defer<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+function messageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((entry) => {
+			if (entry && typeof entry === "object" && "text" in entry && typeof entry.text === "string") return entry.text;
+			return "";
+		})
+		.join("");
+}
+
+function lastUserMessageText(body: Record<string, unknown>): string {
+	const messages = body.messages;
+	if (!Array.isArray(messages)) return "";
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const entry = messages[i];
+		if (!entry || typeof entry !== "object" || !("role" in entry) || entry.role !== "user") continue;
+		return messageText("content" in entry ? entry.content : undefined);
+	}
+	return "";
+}
+
+function writeOpenAICompatFixture(configDir: string, url: string): void {
+	writeSettings(
+		configDir,
+		baseSettingsYaml({
+			targets: [
+				"  - id: mock-chat",
+				"    runtime: openai-compat",
+				`    url: ${url}`,
+				"    defaultModel: mock-model",
+				"    auth:",
+				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
+				"    wireModels:",
+				"      - mock-model",
+			].join("\n"),
+			orchestrator: ["  target: mock-chat", "  model: mock-model", "  thinkingLevel: off"].join("\n"),
+		}),
+	);
+}
+
+async function startFollowUpFixture(): Promise<{
+	server: Server;
+	url: string;
+	requests: Array<Record<string, unknown>>;
+	firstRequestStarted: Promise<void>;
+	secondRequestStarted: Promise<void>;
+}> {
+	const requests: Array<Record<string, unknown>> = [];
+	const firstRequestStarted = defer();
+	const secondRequestStarted = defer();
+	const writeChunk = (res: ServerResponse, content: string, finish = false): void => {
+		res.write(
+			`data: ${JSON.stringify({
+				id: "chatcmpl-clio-interactive",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "mock-model",
+				choices: finish ? [{ index: 0, delta: {}, finish_reason: "stop" }] : [{ index: 0, delta: { content } }],
+				...(finish ? { usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 } } : {}),
+			})}\n\n`,
+		);
+	};
+	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+		if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+			res.writeHead(404);
+			res.end("not found");
+			return;
+		}
+		const raw = await readRequestBody(req);
+		const body = JSON.parse(raw) as Record<string, unknown>;
+		requests.push(body);
+		const lastUser = lastUserMessageText(body);
+		res.writeHead(200, {
+			"content-type": "text/event-stream",
+			"cache-control": "no-cache",
+			connection: "keep-alive",
+		});
+		if (lastUser === "first prompt") {
+			firstRequestStarted.resolve();
+			writeChunk(res, "first-stream-open ");
+			await new Promise((resolve) => setTimeout(resolve, 3_000));
+			writeChunk(res, "first-stream-done ");
+			writeChunk(res, "", true);
+			res.end("data: [DONE]\n\n");
+			return;
+		}
+		if (lastUser !== "queued prompt") {
+			writeChunk(res, "probe-ok");
+			writeChunk(res, "", true);
+			res.end("data: [DONE]\n\n");
+			return;
+		}
+		secondRequestStarted.resolve();
+		writeChunk(res, "queued-response-complete");
+		writeChunk(res, "", true);
+		res.end("data: [DONE]\n\n");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const addr = server.address() as AddressInfo;
+	return {
+		server,
+		url: `http://127.0.0.1:${addr.port}`,
+		requests,
+		firstRequestStarted: firstRequestStarted.promise,
+		secondRequestStarted: secondRequestStarted.promise,
+	};
 }
 
 describe("clio interactive tui e2e", { concurrency: false }, () => {
@@ -115,6 +264,31 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
 		} finally {
 			p.kill();
+		}
+	});
+
+	it("Alt+Enter queues a follow-up while the model is streaming", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		const fixture = await startFollowUpFixture();
+		writeOpenAICompatFixture(configDir, fixture.url);
+		const p = spawnClioPty({ env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("first prompt\r");
+			await withTimeout(fixture.firstRequestStarted, 15_000, "first request");
+			p.send("queued prompt");
+			p.send("\x1b[13;3u");
+			await p.expect(/follow-up queued/, 10_000);
+			await withTimeout(fixture.secondRequestStarted, 15_000, "second request");
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "first prompt").length, 1);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "queued prompt").length, 1);
+		} finally {
+			p.kill();
+			await closeServer(fixture.server);
 		}
 	});
 

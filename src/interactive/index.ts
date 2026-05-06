@@ -46,6 +46,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
+import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooter } from "./footer-panel.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
@@ -709,6 +710,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
 	});
+	const followUpQueuePanel = createFollowUpQueuePanel({
+		getDequeueKey: () => {
+			const keys = keybindings.getKeys("clio.message.dequeue");
+			const first = keys[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+	});
 	const statusController = createStatusController({
 		chat: deps.chat,
 		providers: deps.providers,
@@ -760,7 +768,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		chatPanel,
 		requestRender: () => tui.requestRender(),
 	});
-	const unsubscribeChat = deps.chat.onEvent((event) => chatRenderer.applyEvent(event));
+	const unsubscribeChat = deps.chat.onEvent((event) => {
+		if (event.type === "queue_update") {
+			followUpQueuePanel.setMessages(event.followUp);
+			tui.requestRender();
+			return;
+		}
+		chatRenderer.applyEvent(event);
+	});
 	let statusInlineFrame = 0;
 	const formatSummaryLine = (summary: TurnSummary): string => {
 		const stopGlyph =
@@ -1002,12 +1017,45 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		render: () => tui.requestRender(),
 	};
 
-	editor.onSubmit = (text: string): void => {
+	const submitEditorText = (text: string): void => {
 		if (runEditorBash(text)) return;
 		dispatchSlashCommand(parseSlashCommand(text), slashCtx);
 	};
 
-	const root = buildLayout({ banner, chat: chatPanel, editor, footer: footer.view });
+	const queueFollowUpFromEditor = (): void => {
+		const text = editor.getText().trim();
+		if (text.length === 0) return;
+		if (!deps.chat.isStreaming()) {
+			editor.setText("");
+			submitEditorText(text);
+			tui.requestRender();
+			return;
+		}
+		const submitted = expandInteractiveSubmitText(text, deps.resources);
+		if (!deps.chat.queueFollowUp(submitted)) {
+			io.stderr("[follow-up] no active response to queue against\n");
+			return;
+		}
+		editor.addToHistory(text);
+		editor.setText("");
+		tui.requestRender();
+	};
+
+	const restoreQueuedFollowUpsToEditor = (): void => {
+		const restored = deps.chat.clearQueuedFollowUps();
+		if (restored.length === 0) {
+			io.stderr("[follow-up] no queued messages to restore\n");
+			return;
+		}
+		const currentText = editor.getText();
+		const queuedText = restored.join("\n\n");
+		editor.setText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
+		tui.requestRender();
+	};
+
+	editor.onSubmit = submitEditorText;
+
+	const root = buildLayout({ banner, chat: chatPanel, pending: followUpQueuePanel, editor, footer: footer.view });
 	tui.addChild(root);
 	tui.setFocus(editor);
 	tui.start();
@@ -1872,6 +1920,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 		if (overlayState === "closed" && keybindings.matches(data, "clio.editor.external") && !isKeyRelease(data)) {
 			openExternalEditorForInput();
+			return { consume: true };
+		}
+
+		if (overlayState === "closed" && keybindings.matches(data, "clio.message.followUp") && !isKeyRelease(data)) {
+			queueFollowUpFromEditor();
+			return { consume: true };
+		}
+
+		if (overlayState === "closed" && keybindings.matches(data, "clio.message.dequeue") && !isKeyRelease(data)) {
+			restoreQueuedFollowUpsToEditor();
 			return { consume: true };
 		}
 
