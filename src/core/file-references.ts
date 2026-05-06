@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ImageContent } from "../engine/types.js";
+import { formatDimensionNote, resizeImage } from "../utils/image-resize.js";
 import { expandConfigPath } from "./resolve-config-value.js";
 
 export interface FileReferenceDiagnostic {
@@ -19,6 +20,7 @@ export interface FileReferenceOptions {
 	cwd?: string;
 	missing?: "error" | "leave";
 	includeImages?: boolean;
+	autoResizeImages?: boolean;
 }
 
 const FILE_REF = /(^|\s)@(\S+)/g;
@@ -40,8 +42,8 @@ function renderTextFile(filePath: string, content: string): string {
 	return `<file name="${filePath}">\n${content}\n</file>\n`;
 }
 
-function renderImageFile(filePath: string): string {
-	return `<file name="${filePath}"></file>\n`;
+function renderImageFile(filePath: string, content = ""): string {
+	return `<file name="${filePath}">${content}</file>\n`;
 }
 
 function result(
@@ -106,12 +108,84 @@ function readFileReference(fileArg: string, options: FileReferenceOptions): File
 	}
 }
 
+async function readFileReferenceAsync(fileArg: string, options: FileReferenceOptions): Promise<FileReferenceResult> {
+	const filePath = expandConfigPath(fileArg, options.cwd === undefined ? undefined : { cwd: options.cwd });
+	if (!existsSync(filePath)) {
+		if (options.missing === "leave") return result(`@${fileArg}`);
+		return result("", [{ type: "error", message: `file not found: ${filePath}`, path: filePath }]);
+	}
+	let stat: ReturnType<typeof statSync>;
+	try {
+		stat = statSync(filePath);
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		return result("", [{ type: "error", message: `file could not be stat'ed: ${reason}`, path: filePath }]);
+	}
+	if (!stat.isFile()) {
+		return result("", [{ type: "error", message: `not a file: ${filePath}`, path: filePath }]);
+	}
+	if (stat.size === 0) return result("");
+	try {
+		const bytes = readFileSync(filePath);
+		const imageMimeType = detectSupportedImageMimeType(bytes);
+		if (imageMimeType) {
+			if (options.includeImages !== true) return result(`@${fileArg}`);
+
+			const originalImage: ImageContent = {
+				type: "image",
+				mimeType: imageMimeType,
+				data: bytes.toString("base64"),
+			};
+			if (options.autoResizeImages === false) {
+				return result(renderImageFile(filePath), [], [originalImage]);
+			}
+
+			const resized = await resizeImage(originalImage);
+			if (!resized) {
+				return result(
+					renderImageFile(filePath, "[Image omitted: could not be resized below the inline image size limit.]"),
+				);
+			}
+
+			return result(
+				renderImageFile(filePath, formatDimensionNote(resized)),
+				[],
+				[{ type: "image", mimeType: resized.mimeType, data: resized.data }],
+			);
+		}
+		return result(renderTextFile(filePath, bytes.toString("utf8")));
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
+	}
+}
+
 export function readFileArgs(fileArgs: ReadonlyArray<string>, options: FileReferenceOptions = {}): FileReferenceResult {
 	const diagnostics: FileReferenceDiagnostic[] = [];
 	const images: ImageContent[] = [];
 	let text = "";
 	for (const fileArg of fileArgs) {
 		const ref = readFileReference(fileArg, { ...options, missing: options.missing ?? "error", includeImages: true });
+		text += ref.text;
+		images.push(...ref.images);
+		diagnostics.push(...ref.diagnostics);
+	}
+	return { text, images, diagnostics };
+}
+
+export async function readFileArgsAsync(
+	fileArgs: ReadonlyArray<string>,
+	options: FileReferenceOptions = {},
+): Promise<FileReferenceResult> {
+	const diagnostics: FileReferenceDiagnostic[] = [];
+	const images: ImageContent[] = [];
+	let text = "";
+	for (const fileArg of fileArgs) {
+		const ref = await readFileReferenceAsync(fileArg, {
+			...options,
+			missing: options.missing ?? "error",
+			includeImages: true,
+		});
 		text += ref.text;
 		images.push(...ref.images);
 		diagnostics.push(...ref.diagnostics);
@@ -156,5 +230,59 @@ export function expandInlineFileReferences(input: string, options: FileReference
 		images.push(...stripped.images);
 		return `${prefix}${stripped.text}${suffix}`;
 	});
+	return { text, images, diagnostics };
+}
+
+export async function expandInlineFileReferencesAsync(
+	input: string,
+	options: FileReferenceOptions = {},
+): Promise<FileReferenceResult> {
+	const diagnostics: FileReferenceDiagnostic[] = [];
+	const images: ImageContent[] = [];
+	let text = "";
+	let lastIndex = 0;
+	for (const match of input.matchAll(FILE_REF)) {
+		const index = match.index ?? 0;
+		const full = match[0] ?? "";
+		const prefix = match[1] ?? "";
+		const token = match[2] ?? "";
+		text += input.slice(lastIndex, index);
+
+		const direct = await readFileReferenceAsync(token, {
+			...options,
+			missing: "leave",
+			includeImages: options.includeImages === true,
+		});
+		if (direct.text !== `@${token}`) {
+			diagnostics.push(...direct.diagnostics);
+			images.push(...direct.images);
+			text += `${prefix}${direct.text}`;
+			lastIndex = index + full.length;
+			continue;
+		}
+
+		const { fileArg, suffix } = splitTrailingPunctuation(token);
+		if (fileArg === token) {
+			text += full;
+			lastIndex = index + full.length;
+			continue;
+		}
+
+		const stripped = await readFileReferenceAsync(fileArg, {
+			...options,
+			missing: "leave",
+			includeImages: options.includeImages === true,
+		});
+		if (stripped.text === `@${fileArg}`) {
+			text += full;
+			lastIndex = index + full.length;
+			continue;
+		}
+		diagnostics.push(...stripped.diagnostics);
+		images.push(...stripped.images);
+		text += `${prefix}${stripped.text}${suffix}`;
+		lastIndex = index + full.length;
+	}
+	text += input.slice(lastIndex);
 	return { text, images, diagnostics };
 }

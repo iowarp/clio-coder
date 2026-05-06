@@ -3,7 +3,7 @@ import { runBashCommand } from "../core/bash-exec.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { expandInlineFileReferences } from "../core/file-references.js";
+import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
@@ -199,6 +199,23 @@ export function expandInteractiveSubmit(
 	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
 	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
+	return { text: fileExpansion.text, images: fileExpansion.images };
+}
+
+export async function expandInteractiveSubmitAsync(
+	text: string,
+	resources: ResourcesContract | undefined,
+	cwd = process.cwd(),
+): Promise<InteractiveSubmitExpansion> {
+	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
+	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
+	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
+	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
+		cwd,
+		includeImages: true,
+		missing: "leave",
+	});
 	return { text: fileExpansion.text, images: fileExpansion.images };
 }
 
@@ -1015,11 +1032,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
-			const submitted = expandInteractiveSubmit(text, deps.resources);
-			chatPanel.appendUser(submitted.text);
-			tui.requestRender();
 			void (async () => {
 				try {
+					const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
+					chatPanel.appendUser(submitted.text);
+					tui.requestRender();
 					await deps.chat.submit(submitted.text, submitted.images.length > 0 ? { images: submitted.images } : undefined);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -1046,18 +1063,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			return;
 		}
-		const submitted = expandInteractiveSubmit(text, deps.resources);
-		if (submitted.images.length > 0) {
-			io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
-			return;
-		}
-		if (!deps.chat.queueFollowUp(submitted.text)) {
-			io.stderr("[follow-up] no active response to queue against\n");
-			return;
-		}
-		editor.addToHistory(text);
-		editor.setText("");
-		tui.requestRender();
+		void (async () => {
+			const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
+			if (submitted.images.length > 0) {
+				io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
+				return;
+			}
+			if (!deps.chat.queueFollowUp(submitted.text)) {
+				io.stderr("[follow-up] no active response to queue against\n");
+				return;
+			}
+			editor.addToHistory(text);
+			editor.setText("");
+			tui.requestRender();
+		})().catch((err) => {
+			const msg = err instanceof Error ? err.message : String(err);
+			io.stderr(`[follow-up] ${msg}\n`);
+		});
 	};
 
 	const restoreQueuedFollowUpsToEditor = (): void => {
