@@ -45,6 +45,7 @@ import {
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
+import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { buildFooter } from "./footer-panel.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
@@ -902,6 +903,29 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			}
 		})();
 		return true;
+	};
+
+	const openExternalEditorForInput = (): void => {
+		const command = resolveExternalEditor();
+		if (!command) {
+			io.stderr("[editor] no external editor configured; set VISUAL or EDITOR\n");
+			return;
+		}
+		const currentText = editor.getText();
+		let result: ReturnType<typeof editTextExternally>;
+		try {
+			tui.stop();
+			result = editTextExternally(currentText, command);
+		} finally {
+			tui.start();
+			tui.requestRender(true);
+		}
+		if (result.ok) {
+			editor.setText(result.text ?? "");
+		} else if (result.error) {
+			io.stderr(`[editor] ${result.error}\n`);
+		}
+		tui.requestRender(true);
 	};
 
 	const slashCtx: SlashCommandContext = {
@@ -1843,6 +1867,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 		if (overlayState === "closed" && keybindings.matches(data, "clio.tool.expand") && !isKeyRelease(data)) {
 			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
+			return { consume: true };
+		}
+
+		if (overlayState === "closed" && keybindings.matches(data, "clio.editor.external") && !isKeyRelease(data)) {
+			openExternalEditorForInput();
 			return { consume: true };
 		}
 
