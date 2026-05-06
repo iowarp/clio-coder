@@ -24,6 +24,7 @@ export interface FileReferenceOptions {
 }
 
 const FILE_REF = /(^|\s)@(\S+)/g;
+const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
 
 export function splitFileArgs(args: ReadonlyArray<string>): { fileArgs: string[]; messages: string[] } {
 	const fileArgs: string[] = [];
@@ -142,6 +143,9 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 
 			const resized = await resizeImage(originalImage);
 			if (!resized) {
+				if (Buffer.byteLength(originalImage.data, "utf-8") < DEFAULT_IMAGE_MAX_BASE64_BYTES) {
+					return result(renderImageFile(filePath), [], [originalImage]);
+				}
 				return result(
 					renderImageFile(filePath, "[Image omitted: could not be resized below the inline image size limit.]"),
 				);
