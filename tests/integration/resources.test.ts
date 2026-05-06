@@ -58,6 +58,48 @@ describe("resources domain", () => {
 		}
 	});
 
+	it("loads prompt templates from user and project resource roots with project override", async () => {
+		const repo = join(scratch, "repo");
+		const configDir = process.env.CLIO_CONFIG_DIR;
+		ok(configDir, "CLIO_CONFIG_DIR should be set by the test harness");
+		mkdirSync(join(configDir, "prompts"), { recursive: true });
+		mkdirSync(join(repo, ".clio", "prompts"), { recursive: true });
+		writeFileSync(
+			join(configDir, "prompts", "review.md"),
+			"---\ndescription: User review\nargument-hint: <file>\n---\nuser review $1\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(configDir, "prompts", "explain.md"),
+			"---\ndescription: Explain code\nargument-hint: <symbol>\n---\nExplain $1.\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(repo, ".clio", "prompts", "review.md"),
+			"---\ndescription: Project review\nargument-hint: <file> [focus]\n---\nProject review $1 with $" + "{@:2}.\n",
+			"utf8",
+		);
+
+		const loaded = await loadDomains([ConfigDomainModule, ResourcesDomainModule]);
+		try {
+			const resources = loaded.getContract<ResourcesContract>("resources");
+			ok(resources, "resources contract should be available");
+			const prompts = resources.prompts(repo);
+			strictEqual(prompts.items.map((prompt) => prompt.name).join(","), "explain,review");
+			const review = prompts.items.find((prompt) => prompt.name === "review");
+			strictEqual(review?.description, "Project review");
+			strictEqual(review?.argumentHint, "<file> [focus]");
+			strictEqual(review?.sourceInfo.scope, "project");
+			strictEqual(prompts.diagnostics.filter((diag) => diag.type === "collision").length, 1);
+
+			const expanded = resources.expandPromptTemplate('/review "src/app.ts" performance security', repo);
+			strictEqual(expanded.expanded, true);
+			strictEqual(expanded.text, "Project review src/app.ts with performance security.");
+		} finally {
+			await loaded.stop();
+		}
+	});
+
 	it("keeps CLIO.md-first prompt compilation while the resources domain is loaded", async () => {
 		const repo = join(scratch, "repo");
 		mkdirSync(repo, { recursive: true });

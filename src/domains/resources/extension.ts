@@ -16,11 +16,14 @@ export function createResourcesBundle(_context: DomainContext): DomainBundle<Res
 		renderContextFiles(files, cwd) {
 			return loader.renderContextFiles(files, cwd);
 		},
-		skills() {
-			return loader.skills();
+		skills(cwd) {
+			return loader.skills(cwd);
 		},
-		prompts() {
-			return loader.prompts();
+		prompts(cwd) {
+			return loader.prompts(cwd);
+		},
+		expandPromptTemplate(text, cwd) {
+			return loader.expandPromptTemplate(text, cwd);
 		},
 		themes() {
 			return loader.themes();

@@ -4,6 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
+import type { PromptTemplate, ResourceList } from "../domains/resources/index.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -16,6 +17,7 @@ export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
 	| { kind: "init" }
+	| { kind: "prompts" }
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
@@ -195,6 +197,7 @@ export interface SlashCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: () => void;
+	listPrompts: () => ResourceList<PromptTemplate>;
 	openProviders: () => void;
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
@@ -286,6 +289,30 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.runInit();
+		},
+	},
+	{
+		name: "prompts",
+		description: "List prompt templates",
+		kinds: ["prompts"],
+		match(trimmed) {
+			return trimmed === "/prompts" ? { kind: "prompts" } : null;
+		},
+		handle(_command, ctx) {
+			const list = ctx.listPrompts();
+			if (list.items.length === 0) {
+				ctx.io.stdout("\nprompt templates: none\n");
+				return;
+			}
+			const rows = list.items.map((template) => {
+				const usage = `/${template.name}${template.argumentHint ? ` ${template.argumentHint}` : ""}`;
+				return `  ${usage.padEnd(28)} ${template.description}`;
+			});
+			const diagnostics =
+				list.diagnostics.length > 0
+					? `\n${list.diagnostics.length} prompt-template diagnostic(s) while loading resources.\n`
+					: "\n";
+			ctx.io.stdout(`\nprompt templates:\n${rows.join("\n")}\n${diagnostics}`);
 		},
 	},
 	{

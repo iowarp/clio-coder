@@ -6,6 +6,12 @@ import {
 	type ProjectContextFile,
 	renderProjectContextFiles,
 } from "./context-files/loader.js";
+import {
+	expandPromptTemplateInput,
+	loadPromptTemplates,
+	type PromptTemplate,
+	type PromptTemplateExpansion,
+} from "./prompts/loader.js";
 
 export interface ResourceList<T> {
 	items: T[];
@@ -20,8 +26,9 @@ export interface ResourceLoaderOptions {
 export interface ResourcesLoader {
 	contextFiles(cwd?: string, options?: Omit<LoadProjectContextFilesInput, "cwd">): ProjectContextFile[];
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd?: string): string;
-	skills(): ResourceList<never>;
-	prompts(): ResourceList<never>;
+	skills(cwd?: string): ResourceList<never>;
+	prompts(cwd?: string): ResourceList<PromptTemplate>;
+	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
 	themes(): ResourceList<never>;
 	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
@@ -38,11 +45,14 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		renderContextFiles(files, cwd = defaultCwd) {
 			return renderProjectContextFiles(files, cwd);
 		},
-		skills() {
+		skills(_cwd = defaultCwd) {
 			return { items: [], diagnostics: [] };
 		},
-		prompts() {
-			return { items: [], diagnostics: [] };
+		prompts(cwd = defaultCwd) {
+			return loadPromptTemplates({ cwd });
+		},
+		expandPromptTemplate(text, cwd = defaultCwd) {
+			return expandPromptTemplateInput(text, loadPromptTemplates({ cwd }));
 		},
 		themes() {
 			return { items: [], diagnostics: [] };
