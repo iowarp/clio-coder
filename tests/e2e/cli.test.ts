@@ -155,6 +155,14 @@ function messageText(content: unknown): string {
 		.join("");
 }
 
+function parseJsonLines(stdout: string): Array<Record<string, unknown>> {
+	return stdout
+		.trim()
+		.split("\n")
+		.filter((line) => line.trim().length > 0)
+		.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 function findUserPrompt(requests: ReadonlyArray<Record<string, unknown>>, expected: string): boolean {
 	for (const body of requests) {
 		const messages = body.messages;
@@ -343,11 +351,55 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stderr, /usage: clio --print/);
 	});
 
-	it("--mode json is reserved and does not pollute stdout", async () => {
-		const result = await runCli(["--mode", "json", "hello"], { env: scratch.env });
+	it("--mode json streams the one-shot turn as JSONL", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("json ok");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["--mode", "json", "say ok"], {
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			const records = parseJsonLines(result.stdout);
+			const header = records[0];
+			ok(header, "expected JSONL session header");
+			strictEqual(header.type, "session");
+			strictEqual(typeof header.id, "string");
+			const events = records.slice(1);
+			ok(
+				events.some((event) => event.type === "agent_start"),
+				"expected agent_start event",
+			);
+			ok(
+				events.some((event) => event.type === "text_delta" && event.delta === "json ok"),
+				"expected text_delta event",
+			);
+			ok(
+				events.some(
+					(event) =>
+						event.type === "message_end" &&
+						event.message &&
+						typeof event.message === "object" &&
+						messageText("content" in event.message ? event.message.content : undefined) === "json ok",
+				),
+				"expected final assistant message_end event",
+			);
+			ok(
+				events.some((event) => event.type === "agent_end"),
+				"expected agent_end event",
+			);
+			ok(findUserPrompt(fixture.requests, "say ok"), `missing JSON mode prompt in ${JSON.stringify(fixture.requests)}`);
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("--mode rpc is reserved and does not pollute stdout", async () => {
+		const result = await runCli(["--mode", "rpc", "hello"], { env: scratch.env });
 		strictEqual(result.code, 2);
 		strictEqual(result.stdout, "");
-		match(result.stderr, /--mode json is not implemented yet/);
+		match(result.stderr, /--mode rpc is not implemented yet/);
 	});
 
 	it("configure --help exits 0 and prints target usage", async () => {
