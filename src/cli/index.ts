@@ -1,3 +1,4 @@
+import { readFileArgs } from "../core/file-references.js";
 import { runAgentsCommand } from "./agents.js";
 import { parsePrintCliArgs } from "./args.js";
 import { runAuthCommand } from "./auth.js";
@@ -28,7 +29,7 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 Usage:
   clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
-  clio --print, -p <task>   run one non-interactive chat turn
+  clio --print, -p [@files...] <task>  run one non-interactive chat turn
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
   clio --no-context-files, -nc  skip CLIO.md project-context injection
@@ -77,13 +78,19 @@ async function main(argv: string[]): Promise<number> {
 				return 2;
 			}
 			const stdinContent = await readPipedStdin();
+			const fileRefs = readFileArgs(printArgs.fileArgs, { cwd: process.cwd(), missing: "error" });
+			for (const diagnostic of fileRefs.diagnostics) {
+				printError(diagnostic.message);
+			}
+			if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
 			const initial = buildInitialMessage({
 				messages: printArgs.messages.length > 0 ? [printArgs.messages.join(" ")] : [],
 				...(stdinContent !== undefined ? { stdinContent } : {}),
+				...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
 			});
 			if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
 				printError("print mode requires a prompt on argv or stdin");
-				process.stdout.write('usage: clio --print "task"\n');
+				process.stdout.write('usage: clio --print [@files...] "task"\n');
 				return 2;
 			}
 			const result = await runClioCommand({

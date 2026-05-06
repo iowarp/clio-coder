@@ -253,6 +253,26 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("--print expands @file arguments into file blocks before the prompt", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		writeFileSync(join(scratch.dir, "notes.md"), "file body\n", "utf8");
+		const fixture = await startOpenAICompatFixture("file ok");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["--print", "@notes.md", "Summarize"], {
+				cwd: scratch.dir,
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			strictEqual(result.stdout, "file ok\n");
+			const expected = `<file name="${join(scratch.dir, "notes.md")}">\nfile body\n\n</file>\nSummarize`;
+			ok(findUserPrompt(fixture.requests, expected), `missing @file prompt in ${JSON.stringify(fixture.requests)}`);
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
 	it("--print without a prompt exits 2 with usage on stderr only", async () => {
 		const result = await runCli(["--print"], { env: scratch.env });
 		strictEqual(result.code, 2);

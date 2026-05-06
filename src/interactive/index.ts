@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { expandInlineFileReferences } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
@@ -182,7 +183,8 @@ export function expandInteractiveSubmitText(
 	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
 	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
 	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
-	return promptExpansion?.expanded ? promptExpansion.text : skillText;
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
+	return expandInlineFileReferences(promptText, { cwd, missing: "leave" }).text;
 }
 
 export type OverlayState =
