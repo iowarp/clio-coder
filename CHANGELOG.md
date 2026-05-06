@@ -5,7 +5,18 @@ Keep a Changelog.
 
 ## Unreleased
 
-No changes yet.
+### Added
+
+- Added the Clio extension package model with filesystem install state, user/project scopes, enable/disable/remove behavior, discovery diagnostics, and package resource roots for skills and prompt templates.
+- Added `clio extensions ...` CLI commands plus `/extensions` in the TUI for installed extension visibility.
+- Added Clio share archives (`kind: "clio-share-archive"`, `formatVersion: 1`) for project context, prompts, skills, settings fragments, and extension bundles.
+- Added `clio share export|import|inspect` plus `clio export` / `clio import` aliases and `/share export|import` TUI flows with dry-run conflict reporting.
+- Redesigned the welcome dashboard around a CLIO coding-engine view with project familiarity, confidence, active capabilities, user preferences, extension counts, and level/progression status.
+
+### Tests
+
+- Added focused extension tests for install state, project/user precedence, malformed packages, and extension-backed resource loading.
+- Added share archive tests for round trips, version mismatch warnings, dry-run conflicts, forced imports, and corrupted archive handling.
 
 ## 0.1.6 - 2026-05-04
 

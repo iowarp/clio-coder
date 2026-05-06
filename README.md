@@ -271,6 +271,10 @@ Never paste API keys, private prompts, or proprietary source code into a public 
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio eval run\|report\|compare` | Run local eval task files and compare results. |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and their resource roots. |
+| `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles into a Clio share archive. |
+| `clio share import <path> [--dry-run] [--force]` | Import a Clio share archive with conflict reporting. |
+| `clio export --out <path>` / `clio import <path>` | Short aliases for `clio share export` and `clio share import`. |
 | `clio --print [@files...] "<task>"` (alias `-p`) | Run one non-interactive chat turn, optionally including text file references, and print only the assistant text. |
 | `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
@@ -312,6 +316,9 @@ Slash commands are available inside the terminal UI. Type `/` at the start of th
 | `/cost` | Show token and USD totals for completed runs in the session. |
 | `/receipts` | Browse saved run receipts. |
 | `/receipts verify <runId>` | Verify a receipt against the persisted run ledger. |
+| `/extensions` | List installed extension packages and active/shadowed/disabled state. |
+| `/share export <path>` | Export the current project resources to a Clio share archive. |
+| `/share import [--dry-run] [--force] <path>` | Preview or apply a Clio share archive import. |
 | `/help` | Show the slash-command reference. |
 | `/hotkeys` | Show resolved keyboard bindings. |
 | `/quit` | Exit the TUI cleanly. |
@@ -495,6 +502,44 @@ Example `CLIO.md`:
 ```
 
 This is the best place to encode repository-specific rules, test commands, style constraints, forbidden paths, review requirements, and release procedures.
+
+---
+
+## Extensions and sharing
+
+Clio extension packages are filesystem bundles with a `clio-extension.yaml` manifest. User extensions install under the Clio config directory, project extensions install under `.clio/extensions`, and project packages shadow user packages with the same `id`. Extension resources are loaded as low-priority package roots, so user and project prompts or skills still override package defaults.
+
+Minimal extension manifest:
+
+```yaml
+manifestVersion: 1
+id: lab-pack
+name: Lab Pack
+version: 1.0.0
+description: Prompts and skills for this lab
+resources:
+  prompts: prompts
+  skills: skills
+```
+
+Install and inspect packages:
+
+```bash
+clio extensions discover ./lab-pack
+clio extensions install ./lab-pack --project
+clio extensions list --all
+clio extensions disable lab-pack --project
+```
+
+Share archives are single JSON files with `kind: "clio-share-archive"`, `formatVersion: 1`, a stable `manifest.files[]` index, and per-file SHA-256 checks. They can carry project context files, project/user prompt templates, skills, non-secret settings fragments, and extension bundle files.
+
+```bash
+clio share export --out project.clio-share.json --project
+clio share import project.clio-share.json --dry-run
+clio share import project.clio-share.json --force
+```
+
+Dry-run imports report destination conflicts without writing files. Forced imports overwrite conflicting files and merge supported settings-fragment keys.
 
 ---
 

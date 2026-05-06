@@ -2,9 +2,11 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
+import type { ShareImportPlan } from "../domains/share/index.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -19,6 +21,8 @@ export type SlashCommand =
 	| { kind: "init" }
 	| { kind: "skills" }
 	| { kind: "prompts" }
+	| { kind: "extensions" }
+	| { kind: "share"; args: string }
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
 	| { kind: "providers" }
@@ -200,6 +204,9 @@ export interface SlashCommandContext {
 	runInit: () => void;
 	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
+	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
+	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openProviders: () => void;
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
@@ -337,6 +344,86 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					? `\n${list.diagnostics.length} prompt-template diagnostic(s) while loading resources.\n`
 					: "\n";
 			ctx.io.stdout(`\nprompt templates:\n${rows.join("\n")}\n${diagnostics}`);
+		},
+	},
+	{
+		name: "extensions",
+		description: "List installed extensions",
+		kinds: ["extensions"],
+		match(trimmed) {
+			return trimmed === "/extensions" ? { kind: "extensions" } : null;
+		},
+		handle(_command, ctx) {
+			const items = ctx.listExtensions?.() ?? [];
+			if (items.length === 0) {
+				ctx.io.stdout("\nextensions: none\n");
+				return;
+			}
+			const rows = items.map((extension) => {
+				const state = !extension.enabled
+					? "disabled"
+					: extension.effective
+						? "active"
+						: `shadowed:${extension.overriddenBy ?? "higher"}`;
+				return `  ${extension.id.padEnd(22)} ${extension.scope.padEnd(7)} ${state.padEnd(15)} ${extension.version.padEnd(10)} ${extension.description}`;
+			});
+			ctx.io.stdout(`\nextensions:\n${rows.join("\n")}\n`);
+		},
+	},
+	{
+		name: "share",
+		description: "Export or import Clio archives",
+		argumentHint: "export <path> | import [--dry-run] [--force] <path>",
+		kinds: ["share"],
+		match(trimmed) {
+			if (trimmed === "/share") return { kind: "share", args: "" };
+			if (trimmed.startsWith("/share ")) return { kind: "share", args: trimmed.slice("/share ".length).trim() };
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "share") return;
+			const parts = command.args.split(/\s+/).filter(Boolean);
+			const sub = parts.shift();
+			if (sub === "export") {
+				const out = parts[0];
+				if (!out || parts.length !== 1) {
+					ctx.io.stdout("\nusage: /share export <path>\n");
+					return;
+				}
+				if (!ctx.exportShareArchive) {
+					ctx.io.stderr("[/share] share export is not wired\n");
+					return;
+				}
+				const result = ctx.exportShareArchive(out);
+				ctx.io.stdout(`[/share] exported ${result.fileCount} item(s) to ${result.path}\n`);
+				return;
+			}
+			if (sub === "import") {
+				const dryRun = parts.includes("--dry-run");
+				const force = parts.includes("--force");
+				const archivePath = parts.find((part) => !part.startsWith("--"));
+				if (!archivePath) {
+					ctx.io.stdout("\nusage: /share import [--dry-run] [--force] <path>\n");
+					return;
+				}
+				if (!ctx.importShareArchive) {
+					ctx.io.stderr("[/share] share import is not wired\n");
+					return;
+				}
+				const plan = ctx.importShareArchive(archivePath, { dryRun, force });
+				for (const diag of plan.diagnostics) {
+					const detail = diag.path ? `${diag.message}: ${diag.path}` : diag.message;
+					ctx.io.stderr(`[/share] ${diag.type}: ${detail}\n`);
+				}
+				const write = plan.actions.filter((action) => action.action === "write").length;
+				const overwrite = plan.actions.filter((action) => action.action === "overwrite").length;
+				const skip = plan.actions.filter((action) => action.action === "skip").length;
+				ctx.io.stdout(
+					`[/share] ${dryRun ? "dry-run" : "import"} write=${write} overwrite=${overwrite} skip=${skip} settings=${plan.actions.filter((action) => action.action === "settings").length}\n`,
+				);
+				return;
+			}
+			ctx.io.stdout("\nusage: /share export <path> | /share import [--dry-run] [--force] <path>\n");
 		},
 	},
 	{
