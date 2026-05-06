@@ -43,7 +43,7 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateAgentContextTokens } from "../domains/session/context-accounting.js";
-import type { SessionContract } from "../domains/session/contract.js";
+import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import {
@@ -106,7 +106,7 @@ export interface BootOptions {
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
 	/** Run one non-interactive orchestrator turn and print the final text response. */
-	print?: { prompt: string; images?: ReadonlyArray<ImageContent> };
+	print?: { prompt: string; images?: ReadonlyArray<ImageContent>; mode?: "text" | "json" };
 }
 
 function buildBanner(): string {
@@ -115,6 +115,20 @@ function buildBanner(): string {
   ${chalk.cyan("Clio Coder")}
   ${chalk.dim(`v${clio} · IOWarp CLIO · HPC and scientific software · ready`)}
 `;
+}
+
+function printJsonSessionHeader(meta: SessionMeta | null): Record<string, unknown> | null {
+	if (!meta) return null;
+	return {
+		type: "session",
+		version: meta.sessionFormatVersion ?? 1,
+		id: meta.id,
+		timestamp: meta.createdAt,
+		cwd: meta.cwd,
+		endpoint: meta.endpoint,
+		model: meta.model,
+		clioVersion: meta.clioVersion,
+	};
 }
 
 interface CompactionResolution {
@@ -588,6 +602,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const code = await runPrintMode(chat, {
 			prompt: fileExpansion.text,
 			...(images.length > 0 ? { images } : {}),
+			mode: options.print.mode ?? "text",
+			getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 		});
 		await termination.shutdown(code);
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };

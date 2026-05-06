@@ -1,10 +1,13 @@
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
+import { serializeJsonLine } from "./jsonl.js";
 
 export interface PrintModeOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
+	mode?: "text" | "json";
+	getSessionHeader?: () => unknown | null;
 }
 
 interface PrintResult {
@@ -45,8 +48,20 @@ function isDiagnosticAssistantText(text: string): boolean {
 }
 
 export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): Promise<number> {
+	const mode = options.mode ?? "text";
 	let result: PrintResult = { text: "", error: null };
+	let jsonHeaderWritten = false;
+	const writeJsonHeader = (): void => {
+		if (jsonHeaderWritten) return;
+		jsonHeaderWritten = true;
+		const header = options.getSessionHeader?.();
+		if (header !== undefined && header !== null) writeRawStdout(serializeJsonLine(header));
+	};
 	const unsubscribe = chat.onEvent((event) => {
+		if (mode === "json") {
+			writeJsonHeader();
+			writeRawStdout(serializeJsonLine(event));
+		}
 		result = resultFromEvent(event, result);
 	});
 
@@ -72,7 +87,7 @@ export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): P
 		return 1;
 	}
 
-	writeRawStdout(`${result.text}\n`);
+	if (mode === "text") writeRawStdout(`${result.text}\n`);
 	await flushRawStdout();
 	return 0;
 }

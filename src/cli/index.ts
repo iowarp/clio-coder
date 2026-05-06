@@ -30,6 +30,7 @@ Usage:
   clio                      start interactive repository chat
   clio --dev                start self-development mode for this checkout
   clio --print, -p [@files...] <task>  run one non-interactive chat turn
+  clio --mode json [@files...] <task>  stream one non-interactive turn as JSONL
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
   clio --no-context-files, -nc  skip CLIO.md project-context injection
@@ -73,7 +74,7 @@ async function main(argv: string[]): Promise<number> {
 				printError(diagnostic.message);
 			}
 			if (printArgs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
-			if (printArgs.mode !== "text") {
+			if (printArgs.mode === "rpc") {
 				printError(`--mode ${printArgs.mode} is not implemented yet; use --print for text mode`);
 				return 2;
 			}
@@ -99,6 +100,7 @@ async function main(argv: string[]): Promise<number> {
 				...(noContextFiles ? { noContextFiles: true } : {}),
 				print: {
 					prompt: initial.initialMessage,
+					mode: printArgs.mode,
 					...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
 				},
 			});

@@ -26,6 +26,14 @@ describe("cli/args print parser", () => {
 		deepStrictEqual(parsed.messages, ["hello"]);
 	});
 
+	it("treats --mode json as print mode", () => {
+		const parsed = parsePrintCliArgs(["--mode", "json", "@image.png", "hello"]);
+		strictEqual(parsed.print, true);
+		strictEqual(parsed.mode, "json");
+		deepStrictEqual(parsed.fileArgs, ["image.png"]);
+		deepStrictEqual(parsed.messages, ["hello"]);
+	});
+
 	it("reports invalid mode values", () => {
 		const parsed = parsePrintCliArgs(["--mode", "xml", "hello"]);
 		strictEqual(parsed.print, true);
