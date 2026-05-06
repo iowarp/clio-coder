@@ -43,7 +43,7 @@ This is the first public alpha release of Clio Coder. It is ready for hands-on t
 - **Workspace and code context.** The dashboard and `workspace_context` tool expose cwd, project type, git state, branch, remote, and recent commits. Codewiki tools can index and query repository entry points and symbols.
 - **Safety and auditability.** Default, advise, and super modes control tool access. Privileged actions require confirmation, protected artifacts are tracked, receipts record run metadata, audit JSONL captures safety-relevant events, and finish-contract advisories warn when a completion claim lacks validation evidence.
 - **Evidence, eval, and memory.** Build evidence corpora from runs, sessions, receipts, audit rows, and eval results. Run local eval task files, compare baseline and candidate runs, and curate approved memory records that are injected under a fixed budget.
-- **TUI polish and usage clarity.** Tool output, thinking blocks, popups, `/cost`, `/model`, `/hotkeys`, and receipt views have been hardened for long text, terminal width, local usage accounting, and clearer visual hierarchy.
+- **TUI polish and usage clarity.** Tool output, thinking blocks, popups, `/cost`, `/model`, `/hotkeys`, `!cmd` / `!!cmd` local bash, and receipt views have been hardened for long text, terminal width, local usage accounting, and clearer visual hierarchy.
 
 See [CHANGELOG.md](CHANGELOG.md) for full detail.
 

@@ -1,145 +1,13 @@
-import { spawn } from "node:child_process";
 import { Type } from "typebox";
+import { BASH_MAX_OUTPUT_BYTES, buildToolEnv, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
-const MAX_OUTPUT_BYTES = 1_000_000;
 const TRUNCATION_MARKER = "\n[output truncated]\n";
-const CLIO_CONTROL_ENV_KEYS = ["CLIO_DEV", "CLIO_SELF_DEV", "CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
 function truncate(text: string): string {
-	return truncateUtf8(text, MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
-}
-
-interface ExecOutcome {
-	error: NodeJS.ErrnoException | null;
-	stdout: string;
-	stderr: string;
-	aborted: boolean;
-	timedOut: boolean;
-	outputCapped: boolean;
-}
-
-function buildToolEnv(): NodeJS.ProcessEnv {
-	const env = { ...process.env };
-	for (const key of CLIO_CONTROL_ENV_KEYS) {
-		Reflect.deleteProperty(env, key);
-	}
-	return env;
-}
-
-function execBash(
-	command: string,
-	cwd: string | undefined,
-	timeout: number,
-	signal?: AbortSignal,
-): Promise<ExecOutcome> {
-	return new Promise((resolve) => {
-		let aborted = false;
-		let timedOut = false;
-		let settled = false;
-		let timeoutId: ReturnType<typeof setTimeout> | null = null;
-		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
-		let killSent = false;
-		let stdout = "";
-		let stderr = "";
-		let outputBytes = 0;
-		let outputCapped = false;
-
-		const child = spawn("/bin/bash", ["-lc", command], {
-			cwd,
-			env: buildToolEnv(),
-			detached: process.platform !== "win32",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-
-		const clearKillGraceTimer = (): void => {
-			if (!killGraceTimer) return;
-			clearTimeout(killGraceTimer);
-			killGraceTimer = null;
-		};
-
-		const sendSignal = (signalName: NodeJS.Signals): void => {
-			const pid = child.pid;
-			if (pid && process.platform !== "win32") {
-				try {
-					process.kill(-pid, signalName);
-					return;
-				} catch {
-					// Fall through to killing the shell process directly.
-				}
-			}
-			child.kill(signalName);
-		};
-
-		const killChild = (): void => {
-			if (killSent) return;
-			killSent = true;
-			sendSignal("SIGTERM");
-			killGraceTimer = setTimeout(() => {
-				sendSignal("SIGKILL");
-			}, 5000);
-		};
-
-		function onAbort(): void {
-			aborted = true;
-			killChild();
-		}
-
-		if (timeout > 0) {
-			timeoutId = setTimeout(() => {
-				timedOut = true;
-				killChild();
-			}, timeout);
-		}
-
-		if (signal?.aborted) {
-			onAbort();
-		} else {
-			signal?.addEventListener("abort", onAbort, { once: true });
-		}
-
-		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
-			outputBytes += chunk.byteLength;
-			if (outputBytes > MAX_OUTPUT_BYTES * 2) {
-				outputCapped = true;
-				killChild();
-				return;
-			}
-			if (outputCapped) return;
-			if (target === "stdout") stdout += chunk.toString("utf8");
-			else stderr += chunk.toString("utf8");
-		};
-
-		child.stdout?.on("data", (chunk: Buffer) => appendChunk("stdout", chunk));
-		child.stderr?.on("data", (chunk: Buffer) => appendChunk("stderr", chunk));
-		child.on("error", (error) => {
-			if (settled) return;
-			settled = true;
-			if (timeoutId) clearTimeout(timeoutId);
-			clearKillGraceTimer();
-			signal?.removeEventListener("abort", onAbort);
-			resolve({ error: error as NodeJS.ErrnoException, stdout, stderr, aborted, timedOut, outputCapped });
-		});
-		child.on("close", (code, signalName) => {
-			if (settled) return;
-			settled = true;
-			if (timeoutId) clearTimeout(timeoutId);
-			clearKillGraceTimer();
-			signal?.removeEventListener("abort", onAbort);
-			const error =
-				code === 0 && signalName === null
-					? null
-					: ({
-							name: "Error",
-							message: signalName ? `command terminated by ${signalName}` : `command exited with code ${code ?? "?"}`,
-							code: code ?? undefined,
-							signal: signalName ?? undefined,
-						} as NodeJS.ErrnoException);
-			resolve({ error, stdout, stderr, aborted, timedOut, outputCapped });
-		});
-	});
+	return truncateUtf8(text, BASH_MAX_OUTPUT_BYTES, TRUNCATION_MARKER);
 }
 
 export const bashTool: ToolSpec = {
@@ -168,12 +36,12 @@ export const bashTool: ToolSpec = {
 			timeoutMsArg === null && typeof args.timeout === "number" && args.timeout > 0 ? args.timeout * 1000 : null;
 		const timeout = timeoutMsArg ?? timeoutSecArg ?? 300_000;
 		try {
-			const { error, stdout, stderr, aborted, timedOut, outputCapped } = await execBash(
-				args.command,
-				cwd,
-				timeout,
-				options?.signal,
-			);
+			const result = await runBashCommand(args.command, {
+				...(cwd === undefined ? {} : { cwd }),
+				timeoutMs: timeout,
+				...(options?.signal === undefined ? {} : { signal: options.signal }),
+			});
+			const { error, aborted, timedOut, outputCapped } = result;
 			if (aborted) {
 				return { kind: "error", message: "bash: command aborted" };
 			}
@@ -181,17 +49,15 @@ export const bashTool: ToolSpec = {
 				return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
 			}
 			if (outputCapped) {
-				return { kind: "error", message: `bash: command output exceeded ${MAX_OUTPUT_BYTES * 2} bytes` };
+				return { kind: "error", message: `bash: command output exceeded ${BASH_MAX_OUTPUT_BYTES * 2} bytes` };
 			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
-				const tail = stderr.length > 0 ? stderr : stdout;
+				const tail = result.stderr.length > 0 ? result.stderr : result.stdout;
 				const message = `bash: command failed (exit ${code ?? "?"}): ${truncate(tail).trim() || error.message}`;
 				return { kind: "error", message };
 			}
-			const combined =
-				stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
-			return { kind: "ok", output: truncate(combined) };
+			return { kind: "ok", output: truncate(combineBashOutput(result)) };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `bash: ${msg}` };

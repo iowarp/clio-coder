@@ -412,7 +412,7 @@ function appendReplayLine(chatPanel: ChatPanel, text: string): void {
 
 const BASH_REPLAY_MAX_LINES = 12;
 
-function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
+export function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
 	const lines: string[] = [];
 	lines.push(...wrapTextWithAnsi(`bash: $ ${entry.command}`, width));
 	const output = truncateReplayText(entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, ""));

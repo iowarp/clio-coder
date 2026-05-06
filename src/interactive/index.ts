@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { runBashCommand } from "../core/bash-exec.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -16,8 +17,8 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
-import type { SessionContract } from "../domains/session/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
+import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { openSession } from "../engine/session.js";
 import {
@@ -39,9 +40,11 @@ import {
 	buildReplayAgentMessagesFromTurns,
 	createCoalescingChatRenderer,
 	rehydrateChatPanelFromTurns,
+	renderBashExecutionEntry,
 } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
+import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { buildFooter } from "./footer-panel.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
@@ -108,6 +111,8 @@ export interface InteractiveDeps {
 	 */
 	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
+	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
+	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** XDG data dir (clioDataDir()). `/receipts verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
 	/**
@@ -174,6 +179,7 @@ export interface InteractiveDeps {
 export const CTRL_C_DOUBLE_TAP_MS = 500;
 export const ENTER = "\r";
 export const ESC = "\x1b";
+const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
 export function expandInteractiveSubmitText(
 	text: string,
@@ -823,6 +829,81 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	});
 
+	let activeEditorBash: AbortController | null = null;
+
+	const ensureSessionForLocalEntry = (): void => {
+		if (!deps.session || deps.session.current()) return;
+		const settings = deps.getSettings?.();
+		const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
+		if (settings?.orchestrator.endpoint) input.endpoint = settings.orchestrator.endpoint;
+		if (settings?.orchestrator.model) input.model = settings.orchestrator.model;
+		deps.session.create(input);
+	};
+
+	const refreshChatContextFromSession = (leafTurnId: string | null): void => {
+		if (!deps.readSessionEntries) return;
+		const turns = deps.readSessionEntries();
+		deps.chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(turns));
+		footer.refresh();
+	};
+
+	const runEditorBash = (text: string): boolean => {
+		const parsed = parseEditorBashCommand(text);
+		if (!parsed) return false;
+		if (deps.chat.isStreaming()) {
+			io.stderr("[bash] response in progress. Press Esc to cancel the active run before running a local command.\n");
+			return true;
+		}
+		if (activeEditorBash) {
+			io.stderr("[bash] command already running. Press Esc to cancel it first.\n");
+			return true;
+		}
+		const abort = new AbortController();
+		activeEditorBash = abort;
+		let parentTurnId: string | null = null;
+		try {
+			ensureSessionForLocalEntry();
+			parentTurnId = deps.session?.tree().leafId ?? null;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			io.stderr(`[bash] session setup failed: ${msg}\n`);
+			activeEditorBash = null;
+			return true;
+		}
+
+		io.stdout(`bash: $ ${parsed.command}\n`);
+		void (async () => {
+			try {
+				const result = await runBashCommand(parsed.command, {
+					cwd: process.cwd(),
+					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
+					signal: abort.signal,
+				});
+				const input = bashExecutionEntryInput({
+					command: parsed.command,
+					result,
+					parentTurnId,
+					excludeFromContext: parsed.excludeFromContext,
+					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
+				});
+				const entry = deps.session?.current()
+					? deps.session.appendEntry(input)
+					: ({ ...input, turnId: "local-bash-preview", timestamp: new Date().toISOString() } as SessionEntry);
+				if (entry.kind === "bashExecution") {
+					chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
+				}
+				refreshChatContextFromSession(parentTurnId);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				io.stderr(`[bash] ${msg}\n`);
+			} finally {
+				if (activeEditorBash === abort) activeEditorBash = null;
+				tui.requestRender();
+			}
+		})();
+		return true;
+	};
+
 	const slashCtx: SlashCommandContext = {
 		io,
 		dispatch: deps.dispatch,
@@ -898,6 +979,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	editor.onSubmit = (text: string): void => {
+		if (runEditorBash(text)) return;
 		dispatchSlashCommand(parseSlashCommand(text), slashCtx);
 	};
 
@@ -1750,6 +1832,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// short-circuited above the overlay router and stole the keystroke
 		// from any open modal, forcing the user to press Esc twice to dismiss
 		// modals that opened mid-stream.
+		if (data === ESC && activeEditorBash) {
+			activeEditorBash.abort();
+			return { consume: true };
+		}
 		if (data === ESC && deps.chat.isStreaming()) {
 			cancelActiveRun();
 			return { consume: true };
