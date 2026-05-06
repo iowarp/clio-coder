@@ -77,10 +77,22 @@ export interface RetryStatusEvent {
 	status: RetryStatusPayload;
 }
 
-export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | AgentStatusEvent;
+export interface QueueUpdateEvent {
+	type: "queue_update";
+	followUp: string[];
+}
+
+export interface QueuedMessagesSnapshot {
+	followUp: ReadonlyArray<string>;
+}
+
+export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | QueueUpdateEvent | AgentStatusEvent;
 
 export interface ChatLoop {
 	submit(text: string): Promise<void>;
+	queueFollowUp(text: string): boolean;
+	clearQueuedFollowUps(): string[];
+	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(): void;
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
@@ -206,6 +218,19 @@ function extractText(message: AgentMessage | undefined): string {
 		return "";
 	}
 	const content = "content" in message && Array.isArray(message.content) ? message.content : [];
+	return content
+		.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")
+		.map((item) => item.text)
+		.join("");
+}
+
+function extractUserText(message: AgentMessage | undefined): string {
+	if (!message || typeof message !== "object" || message === null || !("role" in message) || message.role !== "user") {
+		return "";
+	}
+	const content = "content" in message ? message.content : "";
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
 	return content
 		.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")
 		.map((item) => item.text)
@@ -448,10 +473,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
 	let currentTurnHash: string | null = null;
+	const queuedFollowUps: string[] = [];
+	const persistedUserEchoes: string[] = [];
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
 			listener(event);
+		}
+	};
+
+	const emitQueueUpdate = (): void => {
+		emit({ type: "queue_update", followUp: [...queuedFollowUps] });
+	};
+
+	const removeQueuedFollowUp = (text: string): void => {
+		const idx = queuedFollowUps.indexOf(text);
+		if (idx < 0) return;
+		queuedFollowUps.splice(idx, 1);
+		emitQueueUpdate();
+	};
+
+	const markPersistedUserEcho = async (text: string, prompt: () => Promise<void>): Promise<void> => {
+		persistedUserEchoes.push(text);
+		try {
+			await prompt();
+		} finally {
+			const idx = persistedUserEchoes.indexOf(text);
+			if (idx >= 0) persistedUserEchoes.splice(idx, 1);
 		}
 	};
 
@@ -468,6 +516,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = turn.id;
+	};
+
+	const appendQueuedUserTurn = (message: AgentMessage): void => {
+		if (!message || message.role !== "user") return;
+		const text = extractUserText(message).trim();
+		if (text.length === 0) return;
+		const persistedEchoIdx = persistedUserEchoes.indexOf(text);
+		if (persistedEchoIdx >= 0) {
+			persistedUserEchoes.splice(persistedEchoIdx, 1);
+			return;
+		}
+		removeQueuedFollowUp(text);
+		if (!deps.session) return;
+		if (!deps.session.current()) {
+			const settings = deps.getSettings();
+			const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
+			if (settings.orchestrator.endpoint) input.endpoint = settings.orchestrator.endpoint;
+			if (settings.orchestrator.model) input.model = settings.orchestrator.model;
+			deps.session.create(input);
+		}
+		const userTurn = deps.session.append({
+			kind: "user",
+			parentId: lastTurnId,
+			payload: { text },
+			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
+		});
+		lastTurnId = userTurn.id;
 	};
 
 	const appendToolCallTurn = (event: Extract<AgentEvent, { type: "tool_execution_start" }>): void => {
@@ -869,6 +944,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 			if (event.type === "message_end") {
+				appendQueuedUserTurn(event.message);
 				appendAssistantTurn(event.message);
 			}
 			if (event.type === "tool_execution_start") {
@@ -970,7 +1046,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return;
 		}
 		try {
-			await agentRuntime.agent.prompt(text);
+			await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text));
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
 				emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
@@ -1225,6 +1301,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	return {
+		queueFollowUp(text: string): boolean {
+			const trimmed = text.trim();
+			if (trimmed.length === 0 || !streaming || !runtime) return false;
+			const message = {
+				role: "user",
+				content: trimmed,
+				timestamp: Date.now(),
+			} as AgentMessage;
+			queuedFollowUps.push(trimmed);
+			runtime.agent.followUp(message);
+			emitQueueUpdate();
+			return true;
+		},
+		clearQueuedFollowUps(): string[] {
+			const restored = [...queuedFollowUps];
+			queuedFollowUps.length = 0;
+			(runtime?.agent as { clearFollowUpQueue?: () => void } | undefined)?.clearFollowUpQueue?.();
+			emitQueueUpdate();
+			return restored;
+		},
+		queuedMessages(): QueuedMessagesSnapshot {
+			return { followUp: [...queuedFollowUps] };
+		},
 		async submit(text: string): Promise<void> {
 			if (streaming) {
 				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
@@ -1288,7 +1387,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			streaming = true;
 			try {
-				await agentRuntime.agent.prompt(text);
+				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text));
 				// pi-agent-core 0.70.x does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
@@ -1377,7 +1476,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			runtime?.agent.abort();
+			(runtime?.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
 			retryCountdown?.cancel();
+			queuedFollowUps.length = 0;
+			persistedUserEchoes.length = 0;
+			emitQueueUpdate();
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];
