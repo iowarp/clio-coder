@@ -35,8 +35,8 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 12 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 12);
+	it("app id list is exactly 13 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 13);
 	});
 
 	it("registers clio.thinking.expand with default ctrl+t", () => {
@@ -88,6 +88,10 @@ describe("interactive/keybinding-manager defaults", () => {
 
 	it("matches Ctrl+T against clio.thinking.expand", () => {
 		strictEqual(manager.matches("\x14", "clio.thinking.expand"), true);
+	});
+
+	it("matches Ctrl+G against clio.editor.external", () => {
+		strictEqual(manager.matches("\x07", "clio.editor.external"), true);
 	});
 
 	it("rejects unrelated keystrokes for a specific binding", () => {

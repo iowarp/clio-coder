@@ -30,6 +30,7 @@ export interface ClioAppKeybindings {
 	"clio.harness.restart": true;
 	"clio.tool.expand": true;
 	"clio.thinking.expand": true;
+	"clio.editor.external": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -101,6 +102,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.thinking.expand": {
 		defaultKeys: "ctrl+t",
 		description: "Toggle thinking blocks between hidden marker and full body",
+	},
+	"clio.editor.external": {
+		defaultKeys: "ctrl+g",
+		description: "Open the current input in an external editor",
 	},
 } as const satisfies KeybindingDefinitions;
 

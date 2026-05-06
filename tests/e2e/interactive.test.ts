@@ -99,6 +99,25 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("Ctrl-G edits the current input through VISUAL", async () => {
+		const script = "require('fs').writeFileSync(process.argv[1], 'external-edited')";
+		const visual = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+		const p = spawnClioPty({ env: { ...scratch.env, VISUAL: visual } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("draft");
+			p.send("\x07");
+			await p.expect(/external-edited/, 10_000);
+			p.send("\x03");
+			await new Promise((r) => setTimeout(r, 100));
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("Ctrl-D shuts down the tui", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
