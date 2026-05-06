@@ -1,4 +1,4 @@
-import { readFileArgs } from "../core/file-references.js";
+import { readFileArgsAsync } from "../core/file-references.js";
 import { runAgentsCommand } from "./agents.js";
 import { parsePrintCliArgs } from "./args.js";
 import { runAuthCommand } from "./auth.js";
@@ -79,7 +79,7 @@ async function main(argv: string[]): Promise<number> {
 				return 2;
 			}
 			const stdinContent = await readPipedStdin();
-			const fileRefs = readFileArgs(printArgs.fileArgs, { cwd: process.cwd(), missing: "error" });
+			const fileRefs = await readFileArgsAsync(printArgs.fileArgs, { cwd: process.cwd(), missing: "error" });
 			for (const diagnostic of fileRefs.diagnostics) {
 				printError(diagnostic.message);
 			}
