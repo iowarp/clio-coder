@@ -1,11 +1,15 @@
+import type { ImageContent } from "../engine/types.js";
+
 export interface InitialMessageInput {
 	messages: ReadonlyArray<string>;
 	stdinContent?: string;
 	fileText?: string;
+	fileImages?: ImageContent[];
 }
 
 export interface InitialMessageResult {
 	initialMessage?: string;
+	initialImages?: ImageContent[];
 	remainingMessages: string[];
 }
 
@@ -34,5 +38,6 @@ export function buildInitialMessage(input: InitialMessageInput): InitialMessageR
 
 	const result: InitialMessageResult = { remainingMessages: rest };
 	if (parts.length > 0) result.initialMessage = parts.join("");
+	if (input.fileImages && input.fileImages.length > 0) result.initialImages = [...input.fileImages];
 	return result;
 }

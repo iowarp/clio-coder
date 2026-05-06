@@ -12,6 +12,10 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 	version: string;
 };
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
+const PNG_1X1 = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+	"base64",
+);
 
 function seedTargets(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
@@ -129,6 +133,8 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 				"    defaultModel: mock-model",
 				"    auth:",
 				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
+				"    capabilities:",
+				"      vision: true",
 				"    wireModels:",
 				"      - mock-model",
 			].join("\n"),
@@ -156,6 +162,39 @@ function findUserPrompt(requests: ReadonlyArray<Record<string, unknown>>, expect
 		for (const entry of messages) {
 			if (!entry || typeof entry !== "object" || !("role" in entry) || entry.role !== "user") continue;
 			if (messageText("content" in entry ? entry.content : undefined) === expected) return true;
+		}
+	}
+	return false;
+}
+
+function findUserPromptWithImage(
+	requests: ReadonlyArray<Record<string, unknown>>,
+	expectedText: string,
+	expectedMimeType: string,
+): boolean {
+	for (const body of requests) {
+		const messages = body.messages;
+		if (!Array.isArray(messages)) continue;
+		for (const entry of messages) {
+			if (!entry || typeof entry !== "object" || !("role" in entry) || entry.role !== "user") continue;
+			if (!("content" in entry) || !Array.isArray(entry.content)) continue;
+			const content = entry.content as unknown[];
+			const hasText = content.some(
+				(block: unknown) =>
+					block &&
+					typeof block === "object" &&
+					"type" in block &&
+					block.type === "text" &&
+					"text" in block &&
+					block.text === expectedText,
+			);
+			const hasImage = content.some((block: unknown) => {
+				if (!block || typeof block !== "object" || !("type" in block) || block.type !== "image_url") return false;
+				const imageUrl = "image_url" in block ? block.image_url : undefined;
+				if (!imageUrl || typeof imageUrl !== "object" || !("url" in imageUrl)) return false;
+				return typeof imageUrl.url === "string" && imageUrl.url.startsWith(`data:${expectedMimeType};base64,`);
+			});
+			if (hasText && hasImage) return true;
 		}
 	}
 	return false;
@@ -268,6 +307,29 @@ describe("clio cli e2e", { concurrency: false }, () => {
 			strictEqual(result.stdout, "file ok\n");
 			const expected = `<file name="${join(scratch.dir, "notes.md")}">\nfile body\n\n</file>\nSummarize`;
 			ok(findUserPrompt(fixture.requests, expected), `missing @file prompt in ${JSON.stringify(fixture.requests)}`);
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("--print attaches image @file arguments to the user message", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		writeFileSync(join(scratch.dir, "pixel.png"), PNG_1X1);
+		const fixture = await startOpenAICompatFixture("image ok");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["--print", "@pixel.png", "Describe"], {
+				cwd: scratch.dir,
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			strictEqual(result.stdout, "image ok\n");
+			const expectedText = `<file name="${join(scratch.dir, "pixel.png")}"></file>\nDescribe`;
+			ok(
+				findUserPromptWithImage(fixture.requests, expectedText, "image/png"),
+				`missing image prompt in ${JSON.stringify(fixture.requests)}`,
+			);
 		} finally {
 			await closeServer(fixture.server);
 		}

@@ -87,6 +87,7 @@ async function main(argv: string[]): Promise<number> {
 				messages: printArgs.messages.length > 0 ? [printArgs.messages.join(" ")] : [],
 				...(stdinContent !== undefined ? { stdinContent } : {}),
 				...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
+				...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 			});
 			if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
 				printError("print mode requires a prompt on argv or stdin");
@@ -96,7 +97,10 @@ async function main(argv: string[]): Promise<number> {
 			const result = await runClioCommand({
 				...(apiKey === undefined ? {} : { apiKey }),
 				...(noContextFiles ? { noContextFiles: true } : {}),
-				print: { prompt: initial.initialMessage },
+				print: {
+					prompt: initial.initialMessage,
+					...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
+				},
 			});
 			await flushRawStdout();
 			return result;
