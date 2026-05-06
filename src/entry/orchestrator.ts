@@ -35,6 +35,7 @@ import {
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
+import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -377,6 +378,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let harness: HarnessHandle | null = null;
 	const result = await loadDomains([
 		ConfigDomainModule,
+		ResourcesDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,

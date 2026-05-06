@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
-import { loadProjectContextFiles } from "../prompts/context-files.js";
+import { loadProjectContextFiles } from "../resources/context-files/loader.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { type ClioMdFingerprintFooter, parseClioMd, serializeClioMd } from "./clio-md.js";
 import { buildCodewiki, writeCodewiki } from "./codewiki/indexer.js";
