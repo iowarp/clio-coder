@@ -15,6 +15,7 @@ import { ModesDomainModule } from "../domains/modes/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
@@ -138,6 +139,7 @@ export async function runClioRun(
 	ensureClioState();
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ResourcesDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
