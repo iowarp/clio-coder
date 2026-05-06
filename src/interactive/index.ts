@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
@@ -6,6 +7,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -20,6 +22,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import type { ShareContract } from "../domains/share/index.js";
 import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
@@ -105,6 +108,8 @@ export interface InteractiveDeps {
 	observability: ObservabilityContract;
 	chat: ChatLoop;
 	resources?: ResourcesContract;
+	extensions?: ExtensionsContract;
+	share?: ShareContract;
 	/**
 	 * Shared tool registry. When wired, the super overlay opens automatically
 	 * whenever a tool call is parked waiting for super admission, and the
@@ -728,6 +733,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
 		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
+		getExtensionStats: () => {
+			const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
+			return {
+				active: items.filter((entry) => entry.enabled && entry.effective).length,
+				installed: items.length,
+			};
+		},
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		selfDev: deps.selfDev,
 	});
@@ -986,6 +998,29 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
+		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
+		exportShareArchive: (outPath) => {
+			if (!deps.share) throw new Error("share domain is not loaded");
+			const path = resolve(outPath);
+			const archive = deps.share.writeArchive(path, { scope: "project" });
+			return { fileCount: archive.files.length, path };
+		},
+		importShareArchive: (archivePath, options) => {
+			if (!deps.share) {
+				return {
+					archive: null,
+					actions: [],
+					diagnostics: [{ type: "error", message: "share domain is not loaded" }],
+				};
+			}
+			const importOptions = {
+				...(options.dryRun ? { dryRun: true } : {}),
+				...(options.force ? { force: true } : {}),
+			};
+			return options.dryRun
+				? deps.share.planImport(resolve(archivePath), importOptions)
+				: deps.share.importArchive(resolve(archivePath), importOptions);
+		},
 		openProviders: () => openProvidersOverlayState(),
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),

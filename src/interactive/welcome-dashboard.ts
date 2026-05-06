@@ -15,13 +15,9 @@ const CYAN = "\u001b[38;5;80m";
 const MAGENTA = "\u001b[38;5;207m";
 const AMBER = "\u001b[38;5;221m";
 const RED = "\u001b[38;5;203m";
+const BLUE = "\u001b[38;5;75m";
 
-const LOGO = [
-	" CCCC  L      III   OOO ",
-	"C      L       I   O   O",
-	"C      L       I   O   O",
-	" CCCC  LLLLL  III   OOO ",
-];
+const LOGO = ["CLIO::CODER", "PERCEIVE  REASON", "ACT       REMEMBER", "PROJECT ENGINE"];
 
 export interface WelcomeDashboardDeps {
 	modes: ModesContract;
@@ -30,6 +26,7 @@ export interface WelcomeDashboardDeps {
 	getContextUsage?: () => ContextUsageSnapshot;
 	getSettings?: () => Readonly<ClioSettings>;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
+	getExtensionStats?: () => { active: number; installed: number };
 	selfDev: boolean;
 }
 
@@ -47,8 +44,18 @@ export interface WelcomeDashboardStats {
 	contextPercent: number | null;
 	avgLatencyMs: number | null;
 	mode: string;
+	safetyLevel: string;
+	theme: string;
+	thinkingLevel: string;
 	selfDev: boolean;
 	workspace: WorkspaceSnapshot | null;
+	currentAvailable: boolean;
+	activeCapabilities: string[];
+	projectFamiliarity: number;
+	confidence: number;
+	level: string;
+	activeExtensions: number;
+	installedExtensions: number;
 }
 
 function color(text: string, fn: string): string {
@@ -130,6 +137,59 @@ function findCurrentStatus(
 	return statuses.find((status) => status.endpoint.id === endpointId) ?? null;
 }
 
+function capabilityLabels(status: EndpointStatus | null): string[] {
+	const caps = status?.capabilities;
+	if (!caps) return [];
+	const out: string[] = [];
+	if (caps.tools) out.push("tools");
+	if (caps.reasoning) out.push("reasoning");
+	if (caps.vision) out.push("vision");
+	if (caps.fim) out.push("fim");
+	if (caps.embeddings) out.push("embed");
+	if (typeof caps.contextWindow === "number" && caps.contextWindow > 0)
+		out.push(`${Math.round(caps.contextWindow / 1000)}k ctx`);
+	return out.slice(0, 5);
+}
+
+function scoreProjectFamiliarity(input: {
+	workspace: WorkspaceSnapshot | null;
+	contextPercent: number | null;
+	currentAvailable: boolean;
+	activeExtensions: number;
+}): number {
+	let score = 0;
+	if (input.workspace) score += 15;
+	if (input.workspace?.projectType && input.workspace.projectType !== "unknown") score += 15;
+	if (input.workspace?.isGit) score += 20;
+	if ((input.workspace?.recentCommits.length ?? 0) > 0) score += 15;
+	if (input.contextPercent !== null && input.contextPercent > 0) score += 20;
+	if (input.currentAvailable) score += 10;
+	if (input.activeExtensions > 0) score += 5;
+	return Math.min(100, score);
+}
+
+function scoreConfidence(input: {
+	activeTargets: number;
+	totalTargets: number;
+	currentAvailable: boolean;
+	contextPercent: number | null;
+	capabilities: ReadonlyArray<string>;
+}): number {
+	let score = input.currentAvailable ? 40 : 10;
+	if (input.totalTargets > 0) score += Math.min(25, Math.round((input.activeTargets / input.totalTargets) * 25));
+	if (input.capabilities.length > 0) score += Math.min(20, input.capabilities.length * 5);
+	if (input.contextPercent === null || input.contextPercent < 85) score += 15;
+	return Math.min(100, score);
+}
+
+function levelLabel(score: number): string {
+	if (score >= 85) return "L5 campaign-ready";
+	if (score >= 65) return "L4 operating";
+	if (score >= 45) return "L3 oriented";
+	if (score >= 25) return "L2 warming";
+	return "L1 bootstrap";
+}
+
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
@@ -153,6 +213,22 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		.filter((value): value is number => typeof value === "number");
 	const avgLatencyMs = latencies.length > 0 ? latencies.reduce((sum, value) => sum + value, 0) / latencies.length : null;
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
+	const extensionStats = deps.getExtensionStats?.() ?? { active: 0, installed: 0 };
+	const currentAvailable = current ? activeStatus(current) : false;
+	const activeCapabilities = capabilityLabels(current);
+	const projectFamiliarity = scoreProjectFamiliarity({
+		workspace,
+		contextPercent,
+		currentAvailable,
+		activeExtensions: extensionStats.active,
+	});
+	const confidence = scoreConfidence({
+		activeTargets: statuses.filter(activeStatus).length,
+		totalTargets: statuses.length,
+		currentAvailable,
+		contextPercent,
+		capabilities: activeCapabilities,
+	});
 	return {
 		activeTargets: statuses.filter(activeStatus).length,
 		totalTargets: statuses.length,
@@ -168,8 +244,18 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		contextPercent,
 		avgLatencyMs,
 		mode: deps.modes.current().toLowerCase(),
+		safetyLevel: settings?.safetyLevel ?? "auto-edit",
+		theme: settings?.theme ?? "default",
+		thinkingLevel: settings?.orchestrator?.thinkingLevel ?? "off",
 		selfDev: deps.selfDev,
 		workspace,
+		currentAvailable,
+		activeCapabilities,
+		projectFamiliarity,
+		confidence,
+		level: levelLabel(projectFamiliarity),
+		activeExtensions: extensionStats.active,
+		installedExtensions: extensionStats.installed,
 	};
 }
 
@@ -181,7 +267,7 @@ function modeStatus(stats: Pick<WelcomeDashboardStats, "mode" | "selfDev">): str
 function compactLine(stats: WelcomeDashboardStats, width: number): string[] {
 	const status = color("Clio Coder", CYAN);
 	const right = `${modeStatus(stats)}${color(
-		` · ${stats.targetLabel}/${stats.modelLabel} · ${stats.activeTargets}/${stats.totalTargets} targets`,
+		` · ${stats.level} · confidence ${stats.confidence}% · ${stats.activeTargets}/${stats.totalTargets} targets`,
 		DIM,
 	)}`;
 	return [truncateToWidth(joinAnsi(status, right, Math.max(20, width)), width, "", true)];
@@ -216,6 +302,15 @@ function formatLatency(ms: number | null): string {
 	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+function percentLabel(value: number): string {
+	return `${Math.round(value)}%`;
+}
+
+function capabilityLine(labels: ReadonlyArray<string>): string {
+	if (labels.length === 0) return "Capabilities: awaiting target probe";
+	return `Capabilities: ${labels.join(" | ")}`;
+}
+
 function gitStatusLabel(ws: WorkspaceSnapshot): string {
 	if (ws.dirty === null) return "unknown";
 	return ws.dirty ? "dirty" : "clean";
@@ -240,31 +335,48 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const inner = Math.min(118, Math.max(84, width));
 	const content = inner - 4;
 	const pct = stats.contextPercent === null ? "idle" : `${Math.round(stats.contextPercent)}%`;
-	const title = "Clio Coder";
+	const title = "Clio Coder Engine";
 	const top = `╭─ ${color(title, BOLD)} ${"─".repeat(Math.max(0, content - title.length - 1))}╮`;
 	const out: string[] = [top];
-	out.push(`│ ${padAnsi(joinAnsi("interactive workspace", modeStatus(stats), content), content)} │`);
+	out.push(`│ ${padAnsi(joinAnsi("scientific coding engine", modeStatus(stats), content), content)} │`);
 	out.push(`│ ${padAnsi("", content)} │`);
-	const logoWidth = 25;
+	const logoWidth = 22;
 	const panelWidth = content - logoWidth - 3;
 	const current = [
-		`${color("Target", BOLD)} ${color(stats.targetLabel, CYAN)}`,
-		`${color("Model ", BOLD)} ${color(stats.modelLabel, GREEN)}`,
-		`Models: ${stats.totalModels} total  ${color(`${stats.localModels} local`, GREEN)}  ${color(`${stats.cloudModels} cloud`, CYAN)}  ${color(`${stats.cliModels} cli`, MAGENTA)}`,
+		`${color("Target", BOLD)} ${color(stats.targetLabel, CYAN)}  ${stats.currentAvailable ? color("online", GREEN) : color("not ready", AMBER)}`,
+		`${color("Model ", BOLD)} ${color(stats.modelLabel, GREEN)}  ${color(`thinking ${stats.thinkingLevel}`, DIM)}`,
+		`${color("Level ", BOLD)} ${color(stats.level, BLUE)}  familiarity ${percentLabel(stats.projectFamiliarity)}  confidence ${percentLabel(stats.confidence)}`,
+		`${capabilityLine(stats.activeCapabilities)}`,
 	];
 	for (let i = 0; i < LOGO.length; i++) {
-		out.push(`│ ${padAnsi(color(LOGO[i] ?? "", GREEN), logoWidth)}   ${padAnsi(current[i] ?? "", panelWidth)} │`);
+		const logoColor = i === 0 ? CYAN : i === 1 ? BLUE : i === 2 ? GREEN : MAGENTA;
+		out.push(`│ ${padAnsi(color(LOGO[i] ?? "", logoColor), logoWidth)}   ${padAnsi(current[i] ?? "", panelWidth)} │`);
 	}
 	out.push(`│ ${padAnsi("", content)} │`);
 	for (const line of twoColumn(
 		[
 			`Targets: ${stats.activeTargets} active / ${stats.totalTargets} total`,
 			`Runtimes: ${stats.runtimes}`,
-			`Worker profiles: ${stats.workerProfiles}`,
+			`Models: ${stats.totalModels} total (${stats.localModels} local, ${stats.cloudModels} cloud, ${stats.cliModels} cli)`,
 		],
 		[
 			`Context usage: ${pct}`,
 			`${bar(stats.contextPercent, 18)}  avg latency ${formatLatency(stats.avgLatencyMs)}`,
+			`Preferences: ${stats.safetyLevel} · theme ${stats.theme} · workers ${stats.workerProfiles}`,
+		],
+		content,
+	)) {
+		out.push(`│ ${padAnsi(line, content)} │`);
+	}
+	for (const line of twoColumn(
+		[
+			`Project familiarity: ${percentLabel(stats.projectFamiliarity)}`,
+			`${bar(stats.projectFamiliarity, 18)}  ${stats.level}`,
+			"Perception | Reasoning | Action | Memory",
+		],
+		[
+			`Active capabilities: ${stats.activeCapabilities.length || 0}`,
+			`Extensions: ${stats.activeExtensions} active / ${stats.installedExtensions} installed`,
 			"Shift+Tab modes · Ctrl+L model · /hotkeys",
 		],
 		content,

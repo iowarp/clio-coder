@@ -2,6 +2,7 @@ import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "no
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioConfigDir } from "../../../core/xdg.js";
+import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import {
 	type ResourceCandidate,
 	type ResourceDiagnostic,
@@ -58,6 +59,11 @@ interface ParsedPromptFrontmatter {
 
 function defaultPromptTemplateRoots(cwd: string): PromptTemplateRoot[] {
 	return [
+		...enabledExtensionResourceRoots("prompts", cwd).map((root) => ({
+			path: root.path,
+			scope: "package" as const,
+			source: root.source,
+		})),
 		{ path: path.join(clioConfigDir(), "prompts"), scope: "user", source: "config" },
 		{ path: path.join(cwd, ".clio", "prompts"), scope: "project", source: "project" },
 	];

@@ -9,6 +9,7 @@ import { runDoctorCommand } from "./doctor.js";
 import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
 import { runEvolveCommand } from "./evolve.js";
+import { runExtensionsCommand } from "./extensions.js";
 import { runInitCommand } from "./init.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { runMemoryCommand } from "./memory.js";
@@ -16,6 +17,7 @@ import { runModelsCommand } from "./models.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
+import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
 import { extractApiKeyFlag, extractNoContextFilesFlag, parseFlags, printError } from "./shared.js";
 import { runTargetsCommand } from "./targets.js";
 import { runUninstallCommand } from "./uninstall.js";
@@ -53,6 +55,8 @@ Usage:
   clio eval                 run, report, or compare local eval task files
   clio memory               list, propose, approve, reject, or prune memory
   clio evolve manifest      create, validate, or summarize change manifests
+  clio extensions           install, list, enable, disable, or remove extension packages
+  clio share export|import  export or import Clio project/resource archives
   clio init [--yes]         bootstrap or refresh CLIO.md for this project
   clio run <task>           dispatch a one-shot worker
   clio --help, -h           this message
@@ -150,6 +154,15 @@ async function main(argv: string[]): Promise<number> {
 			return runMemoryCommand(subArgs);
 		case "evolve":
 			return runEvolveCommand(subArgs);
+		case "extensions":
+		case "ext":
+			return runExtensionsCommand(subArgs);
+		case "share":
+			return runShareCommand(subArgs);
+		case "export":
+			return runExportCommand(subArgs);
+		case "import":
+			return runImportCommand(subArgs);
 		case "init":
 			return runInitCommand(subArgs);
 		case "run":

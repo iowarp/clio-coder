@@ -16,6 +16,7 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { type ContextContract, ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
@@ -50,6 +51,7 @@ import {
 	protectedArtifactEntryFromArtifact,
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
+import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -393,7 +395,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let harness: HarnessHandle | null = null;
 	const result = await loadDomains([
 		ConfigDomainModule,
+		ExtensionsDomainModule,
 		ResourcesDomainModule,
+		ShareDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
@@ -478,6 +482,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const resources = result.getContract<ResourcesContract>("resources");
+	const extensions = result.getContract<ExtensionsContract>("extensions");
+	const share = result.getContract<ShareContract>("share");
 	const contextDomain = result.getContract<ContextContract>("context");
 	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
@@ -649,6 +655,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		observability,
 		chat,
 		...(resources ? { resources } : {}),
+		...(extensions ? { extensions } : {}),
+		...(share ? { share } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
