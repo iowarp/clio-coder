@@ -11,6 +11,7 @@
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { CapabilityFlags, EndpointDescriptor } from "../domains/providers/index.js";
+import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import type { SelfDevMode } from "../selfdev/mode.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -99,6 +100,10 @@ async function main(): Promise<number> {
 		stopHeartbeat();
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);
+		// Best-effort dispose of any LMStudioClient instances cached by the
+		// engine so we close their WebSocket sessions cleanly before the worker
+		// process exits.
+		await disposeLmStudioClients();
 	}
 }
 
