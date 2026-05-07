@@ -4,6 +4,8 @@ import { compileGlobRegex } from "../glob.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
 import { loadCodewikiForTool, renderEntries } from "./shared.js";
 
+const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
+
 function regexFromPattern(pattern: string): RegExp | null {
 	if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
 		const last = pattern.lastIndexOf("/");
@@ -13,6 +15,13 @@ function regexFromPattern(pattern: string): RegExp | null {
 			return new RegExp(body, flags);
 		} catch {
 			return null;
+		}
+	}
+	if (REGEX_SYNTAX_HINTS.test(pattern)) {
+		try {
+			return new RegExp(pattern);
+		} catch {
+			// fall through to glob or substring
 		}
 	}
 	if (/[*?[\]]/.test(pattern)) {
@@ -27,9 +36,10 @@ function regexFromPattern(pattern: string): RegExp | null {
 
 export const whereIsTool: ToolSpec = {
 	name: ToolNames.WhereIs,
-	description: "Find codewiki entries whose paths match a glob, regex, or substring.",
+	description:
+		"Find codewiki entries whose paths match a glob, regex, or substring. Codewiki indexes TypeScript only, so paths end in .ts or .tsx. Patterns: glob (e.g. src/interactive/*.ts), bare regex (e.g. .*tui.* or ^src/cli/), regex literal (/cli/i), or substring (e.g. tui). Empty entries means zero matches, so broaden the pattern, switch syntax, or use the glob tool.",
 	parameters: Type.Object({
-		pattern: Type.String({ description: "Path glob, regex like /cli/, or plain substring." }),
+		pattern: Type.String({ description: "Pattern: glob, bare regex like .*tui.*, /regex/flags, or substring." }),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
