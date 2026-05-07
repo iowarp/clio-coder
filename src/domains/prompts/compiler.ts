@@ -22,6 +22,7 @@ export interface DynamicInputs {
 	familyGuidance?: string | null;
 	sessionNotes?: string;
 	contextFiles?: string;
+	projectType?: string | null;
 	memorySection?: string;
 	turnCount?: number;
 	clioVersion?: string;
@@ -111,10 +112,21 @@ function renderRuntimeBlock(inputs: DynamicInputs): string {
 	return lines.join("\n");
 }
 
-function renderProjectBlock(contextFiles: string | undefined): string {
-	const trimmed = contextFiles?.trim() ?? "";
-	if (trimmed.length === 0) return "";
-	return `# Project\n\n${trimmed}`;
+function renderProjectBlock(contextFiles: string | undefined, projectType: string | null | undefined): string {
+	const trimmedFiles = contextFiles?.trim() ?? "";
+	const trimmedType = typeof projectType === "string" ? projectType.trim() : "";
+	const hasType = trimmedType.length > 0 && trimmedType !== "unknown";
+	if (trimmedFiles.length === 0 && !hasType) return "";
+	const lines: string[] = ["# Project"];
+	if (hasType) {
+		lines.push("");
+		lines.push(`Language: ${trimmedType}`);
+	}
+	if (trimmedFiles.length > 0) {
+		lines.push("");
+		lines.push(trimmedFiles);
+	}
+	return lines.join("\n");
 }
 
 function renderMemoryBlock(memorySection: string | undefined): string {
@@ -162,7 +174,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		renderSafetySection(safety, safetyLevel),
 		renderRuntimeBlock(inputs.dynamicInputs),
 	];
-	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles);
+	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
 	if (project.length > 0) parts.push(project);
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
 	if (memory.length > 0) parts.push(memory);

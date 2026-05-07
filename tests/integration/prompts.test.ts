@@ -305,6 +305,48 @@ describe("prompts/compiler context files", () => {
 	});
 });
 
+describe("prompts/compiler project type", () => {
+	it("renders Language: <projectType> in the # Project block when projectType is set", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { projectType: "typescript" },
+		});
+
+		ok(result.text.includes("# Project"), result.text);
+		ok(result.text.includes("Language: typescript"), result.text);
+	});
+
+	it("omits the # Project block when projectType is unknown and no context files are supplied", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { projectType: "unknown" },
+		});
+
+		strictEqual(result.text.includes("# Project"), false);
+		strictEqual(result.text.includes("Language:"), false);
+	});
+
+	it("renders Language alongside contextFiles when both are supplied", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				projectType: "python",
+				contextFiles: "<project-context>\nrepo rules\n</project-context>",
+			},
+		});
+
+		ok(result.text.includes("Language: python"), result.text);
+		ok(result.text.includes("repo rules"), result.text);
+		ok(result.text.indexOf("Language: python") < result.text.indexOf("repo rules"), result.text);
+	});
+});
+
 describe("prompts/compiler memory section", () => {
 	it("omits the memory block when no memory section is supplied", () => {
 		const result = compile(loadFragments(), {

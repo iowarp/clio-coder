@@ -66,6 +66,13 @@ export const editTool: ToolSpec = {
 			return { kind: "ok", output: `edited ${pathArg}: ${replacements} replacement(s)` };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
+			const code = (err as NodeJS.ErrnoException | undefined)?.code;
+			if (code === "ENOENT") {
+				return {
+					kind: "error",
+					message: `edit: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: where_is or glob to locate the file, or ls on the parent directory.`,
+				};
+			}
 			return { kind: "error", message: `edit: ${msg}` };
 		}
 	},
