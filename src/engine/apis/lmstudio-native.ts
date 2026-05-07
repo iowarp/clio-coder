@@ -195,8 +195,62 @@ export interface RunStreamHints {
 	thinkingLevel?: ThinkingLevel;
 }
 
+// Worker-process-scoped cache of LMStudioClient instances keyed on
+// `${baseUrl}|${clientPasskey ?? ""}`. Creating a fresh client per turn
+// allocates a new WebSocket session against the LM Studio server, and abandoning
+// it without [Symbol.asyncDispose] leaks server-side channel state. The server
+// then logs `Received channelSend for unknown channel` warnings on the next
+// abort because the previous turn's controller fires after the SDK has already
+// torn the channel down. Reusing one client across turns avoids that race and
+// keeps the WebSocket warm for high-latency remote targets like the dynamo
+// node. The cache lives in the worker subprocess and dies with it; it is not
+// shared across worker processes.
+const lmStudioClientCache = new Map<string, LMStudioClient>();
+
+function lmStudioCacheKey(baseUrl: string, clientPasskey: string | undefined): string {
+	return `${baseUrl}|${clientPasskey ?? ""}`;
+}
+
+export function resetLmStudioClientCache(): void {
+	lmStudioClientCache.clear();
+}
+
+export async function disposeLmStudioClients(): Promise<void> {
+	const clients = Array.from(lmStudioClientCache.values());
+	lmStudioClientCache.clear();
+	await Promise.all(
+		clients.map(async (client) => {
+			try {
+				await client[Symbol.asyncDispose]();
+			} catch {
+				// Disposal is best-effort: the worker is already shutting down,
+				// and a noisy close should not block process exit.
+			}
+		}),
+	);
+}
+
+function getOrCreateLmStudioClient(
+	opts: ConstructorParameters<typeof LMStudioClient>[0],
+	create: (o: ConstructorParameters<typeof LMStudioClient>[0]) => LmStudioRunClient,
+): LmStudioRunClient {
+	const baseUrl = opts?.baseUrl ?? "";
+	const passkey = opts?.clientPasskey;
+	const key = lmStudioCacheKey(baseUrl, passkey);
+	const cached = lmStudioClientCache.get(key);
+	if (cached) return cached as unknown as LmStudioRunClient;
+	const created = create(opts);
+	// `created` is the structural LmStudioRunClient view of an LMStudioClient.
+	// In production `defaultRunDeps.createClient` returns `new LMStudioClient(...)`,
+	// which satisfies the cache value type. Tests inject fakes through the
+	// `deps.createClient` parameter and bypass this cache entirely (see
+	// `runStream`'s caller-provided-deps branch below).
+	lmStudioClientCache.set(key, created as unknown as LMStudioClient);
+	return created;
+}
+
 const defaultRunDeps: LmStudioRunDeps = {
-	createClient: (opts) => new LMStudioClient(opts),
+	createClient: (opts) => getOrCreateLmStudioClient(opts, (o) => new LMStudioClient(o)),
 	ensureResident: ensureResidentModel,
 	discoverLoadedContext: discoverLoadedContextLength,
 };
@@ -566,11 +620,26 @@ export function runStream(
 	const controller = new AbortController();
 	const signal = options?.signal;
 	let aborted = signal?.aborted === true;
-	const onAbort = () => {
-		aborted = true;
+	// `predictionDone` flips to true the moment `prediction.result()` resolves
+	// successfully, before any post-result work. Once it is set we must not call
+	// `controller.abort()` again: the SDK has already closed its channel cleanly,
+	// and a late abort raises "Received channelSend for unknown channel" on the
+	// LM Studio server. `controllerAborted` collapses repeated abort signals so
+	// `controller.abort()` fires at most once.
+	let predictionDone = false;
+	let controllerAborted = false;
+	const abortControllerOnce = () => {
+		if (controllerAborted) return;
+		controllerAborted = true;
 		controller.abort();
 	};
+	const onAbort = () => {
+		aborted = true;
+		if (predictionDone) return;
+		abortControllerOnce();
+	};
 	if (signal && !signal.aborted) signal.addEventListener("abort", onAbort, { once: true });
+	else if (aborted) abortControllerOnce();
 	(async () => {
 		try {
 			if (aborted) throw new Error("Request was aborted");
@@ -902,6 +971,11 @@ export function runStream(
 			if (aborted) throw new Error("Request was aborted");
 			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
+			// The SDK has now closed its prediction channel cleanly. Block any
+			// future `onAbort` from racing a second `controller.abort()` against
+			// that closed channel; the post-result `if (aborted) throw` below
+			// still surfaces a late user-driven abort to the caller.
+			predictionDone = true;
 			flushGemmaPending();
 			closeActiveText();
 			closeActiveThinking();
