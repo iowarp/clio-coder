@@ -32,6 +32,8 @@ import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import {
+	createWorkerLoopGuard,
+	createWorkerSafety,
 	createWorkerToolRegistry,
 	resolveAgentTools,
 	type ToolTelemetry,
@@ -183,7 +185,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const mode: ModeName = input.mode ?? "default";
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.registerPrivateTools);
+	// Build the per-run safety contract once so the registry's admission path
+	// and the agent-loop guard share the same loop-detector state. Without this,
+	// the registry would create its own state and the beforeToolCall hook would
+	// be unable to observe repetition that already triggered admission.
+	const safety = createWorkerSafety();
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.registerPrivateTools, safety);
+	const loopGuard = createWorkerLoopGuard({ safety });
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });
@@ -216,6 +224,19 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		onPayload: async (payload, currentModel) =>
 			patchReasoningSummaryPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
 		getApiKey: async () => input.apiKey,
+		// Worker-side safety net. Pi-agent-core invokes this hook with
+		// validated args before each tool call. When the guard reports a block
+		// the loop emits an error tool result containing `reason`, feeding the
+		// model a description of the failure so it can pivot. Hard-blocking on
+		// the iteration cap protects against degenerate sessions that flood the
+		// audit log with hallucinated paths.
+		beforeToolCall: async (context) => {
+			const decision = loopGuard.check(context.toolCall.name, context.args);
+			if (decision.block) {
+				return decision.reason !== undefined ? { block: true, reason: decision.reason } : { block: true };
+			}
+			return undefined;
+		},
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;
 

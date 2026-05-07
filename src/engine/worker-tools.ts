@@ -21,6 +21,12 @@ import type { ModesContract } from "../domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import {
+	createLoopState,
+	type LoopDetectorState,
+	type LoopVerdict,
+	observe as observeLoopState,
+} from "../domains/safety/loop-detector.js";
 import { formatRejection } from "../domains/safety/rejection-feedback.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -197,7 +203,14 @@ function createWorkerModes(mode: ModeName): ModesContract {
 	};
 }
 
-function createWorkerSafety(): SafetyContract {
+/**
+ * Build a worker-local SafetyContract that owns its own loop-detector state.
+ * The state is per-worker-run (one subprocess per run) so two concurrent
+ * workers do not share counts. The detector matches the orchestrator's
+ * behaviour but skips audit-record bookkeeping which the worker does not own.
+ */
+export function createWorkerSafety(): SafetyContract {
+	let loopState: LoopDetectorState = createLoopState();
 	return {
 		classify: (call) => classifyAction(call),
 		evaluate(call, mode) {
@@ -214,10 +227,177 @@ function createWorkerSafety(): SafetyContract {
 			const decision: SafetyDecision = { kind: "allow", classification };
 			return decision;
 		},
-		observeLoop: (key) => ({ looping: false, key, count: 1 }),
+		observeLoop(key, now) {
+			const [next, verdict] = observeLoopState(loopState, key, now ?? Date.now());
+			loopState = next;
+			return verdict;
+		},
 		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
 		isSubset,
 		audit: { recordCount: () => 0 },
+	};
+}
+
+/**
+ * Stable canonical JSON serializer used to fingerprint tool arguments for the
+ * loop detector. Sorts object keys, drops `undefined`, encodes sparse array
+ * holes as `null`, serializes Date values through their JSON representation,
+ * and rejects non-finite numbers, circular references, and bigint/symbol/function
+ * values. Matches the prompts/hash.ts contract closely enough for hashing,
+ * inlined here so worker code does not import a sibling domain.
+ */
+export function canonicalJson(value: unknown): string {
+	if (value === undefined) {
+		throw new Error("canonicalJson: undefined is not representable at root");
+	}
+	return canonicalSerialize(value, new WeakSet<object>());
+}
+
+function canonicalSerialize(value: unknown, seen: WeakSet<object>): string {
+	if (value === null) return "null";
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new Error(`canonicalJson: non-finite number ${String(value)} is not representable`);
+		}
+		return JSON.stringify(value);
+	}
+	if (typeof value === "string" || typeof value === "boolean") {
+		return JSON.stringify(value);
+	}
+	if (typeof value === "bigint") {
+		throw new Error("canonicalJson: bigint is not representable");
+	}
+	if (typeof value === "symbol" || typeof value === "function") {
+		throw new Error(`canonicalJson: ${typeof value} is not representable`);
+	}
+	if (Array.isArray(value)) {
+		if (seen.has(value)) throw new Error("canonicalJson: circular reference is not representable");
+		seen.add(value);
+		try {
+			const parts: string[] = [];
+			for (let i = 0; i < value.length; i++) {
+				if (!(i in value) || value[i] === undefined) {
+					parts.push("null");
+					continue;
+				}
+				parts.push(canonicalSerialize(value[i], seen));
+			}
+			return `[${parts.join(",")}]`;
+		} finally {
+			seen.delete(value);
+		}
+	}
+	if (typeof value === "object") {
+		if (value instanceof Date) {
+			const jsonValue = value.toJSON();
+			return jsonValue === null ? "null" : JSON.stringify(jsonValue);
+		}
+		if (seen.has(value)) throw new Error("canonicalJson: circular reference is not representable");
+		seen.add(value);
+		const obj = value as Record<string, unknown>;
+		try {
+			const keys = Object.keys(obj).sort();
+			const parts: string[] = [];
+			for (const key of keys) {
+				const child = obj[key];
+				if (child === undefined) continue;
+				parts.push(`${JSON.stringify(key)}:${canonicalSerialize(child, seen)}`);
+			}
+			return `{${parts.join(",")}}`;
+		} finally {
+			seen.delete(value);
+		}
+	}
+	throw new Error(`canonicalJson: unsupported value of type ${typeof value}`);
+}
+
+/** Compute a stable fingerprint from a tool name plus its arguments. */
+export function hashToolCall(tool: string, args: unknown): string {
+	let argPart: string;
+	try {
+		argPart = canonicalJson(args ?? {});
+	} catch {
+		// Fall back to a tool-only fingerprint when args contain non-serializable
+		// values (e.g. functions). The detector still triggers when the tool name
+		// alone repeats, which matches the user-visible failure mode.
+		argPart = "<unrepresentable>";
+	}
+	return `${tool}${argPart}`;
+}
+
+/** Default per-turn tool-call cap when the env var is unset or invalid. */
+export const DEFAULT_MAX_TOOL_CALLS = 50;
+/** Environment variable that overrides the per-turn tool-call cap. */
+export const MAX_TOOL_CALLS_ENV = "CLIO_MAX_TOOL_CALLS";
+/**
+ * Sliding window length used by the loop detector. Mirrors the default in
+ * src/domains/safety/loop-detector.ts; surfaced here so the block reason can
+ * include the window without round-tripping through the verdict.
+ */
+const LOOP_DETECTOR_WINDOW_MS = createLoopState().windowMs;
+
+function readToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env[MAX_TOOL_CALLS_ENV];
+	if (raw === undefined || raw === "") return DEFAULT_MAX_TOOL_CALLS;
+	const normalized = raw.trim();
+	if (!/^[1-9]\d*$/.test(normalized)) return DEFAULT_MAX_TOOL_CALLS;
+	const parsed = Number(normalized);
+	if (!Number.isSafeInteger(parsed)) return DEFAULT_MAX_TOOL_CALLS;
+	return parsed;
+}
+
+export interface WorkerLoopGuardDecision {
+	block: boolean;
+	reason?: string;
+}
+
+export interface WorkerLoopGuard {
+	/**
+	 * Inspect a pending tool call. When the loop detector flags repetition or
+	 * the per-turn iteration cap is reached, returns `{ block: true, reason }`
+	 * so the agent loop can feed the reason back to the model as a tool error.
+	 */
+	check(tool: string, args: unknown, now?: number): WorkerLoopGuardDecision;
+	/** Read-only counters for tests and telemetry. */
+	readonly count: () => number;
+	readonly cap: number;
+}
+
+export interface CreateWorkerLoopGuardOptions {
+	safety: SafetyContract;
+	cap?: number;
+	env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Per-worker-run loop guard. Combines the safety contract's loop detector
+ * (sliding-window repetition) with a hard tool-call cap so a degenerate model
+ * cannot burn through the run by spamming distinct calls.
+ */
+export function createWorkerLoopGuard(opts: CreateWorkerLoopGuardOptions): WorkerLoopGuard {
+	const cap = opts.cap ?? readToolCallCap(opts.env);
+	let count = 0;
+	return {
+		check(tool, args, now): WorkerLoopGuardDecision {
+			count += 1;
+			if (count > cap) {
+				return {
+					block: true,
+					reason: `tool-call cap reached (${cap}); abort turn`,
+				};
+			}
+			const key = hashToolCall(tool, args);
+			const verdict: LoopVerdict = opts.safety.observeLoop(key, now ?? Date.now());
+			if (verdict.looping) {
+				return {
+					block: true,
+					reason: `loop detected: tool '${tool}' repeated ${verdict.count} times in ${LOOP_DETECTOR_WINDOW_MS}ms; try a different approach`,
+				};
+			}
+			return { block: false };
+		},
+		count: () => count,
+		cap,
 	};
 }
 
@@ -225,9 +405,10 @@ export function createWorkerToolRegistry(
 	mode: ModeName,
 	middlewareSnapshot?: MiddlewareSnapshot,
 	registerPrivateTools?: WorkerToolRegistrar,
+	safety: SafetyContract = createWorkerSafety(),
 ): ToolRegistry {
 	const registry = createRegistry({
-		safety: createWorkerSafety(),
+		safety,
 		modes: createWorkerModes(mode),
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
