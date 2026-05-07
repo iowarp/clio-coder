@@ -19,6 +19,7 @@ import {
 
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type AppliedThinking, applyThinkingMechanism } from "./thinking-mechanism.js";
 
@@ -349,6 +350,84 @@ function withReasoningTokenEstimate(
 	return annotated;
 }
 
+/**
+ * Strip tokenizer special-token sentinels (e.g. `<|endoftext|>`,
+ * `<|im_end|>`) from the streamed assistant text. Local inference servers
+ * sometimes leak these when the chat template is misconfigured. Sanitizing
+ * them at the engine adapter layer prevents the literal sentinel text from
+ * reaching the agent loop, turn history, or the TUI renderer. Thinking and
+ * tool-call events pass through unchanged.
+ */
+function stripSentinelsFromStream(
+	source: ReturnType<typeof streamOpenAICompletions>,
+): ReturnType<typeof streamOpenAICompletions> {
+	const sanitized = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			const strippers = new Map<number, ReturnType<typeof createSentinelStripper>>();
+			const safeText = new Map<number, string>();
+			const ensureStripper = (idx: number): ReturnType<typeof createSentinelStripper> => {
+				const existing = strippers.get(idx);
+				if (existing) return existing;
+				const created = createSentinelStripper();
+				strippers.set(idx, created);
+				safeText.set(idx, "");
+				return created;
+			};
+			const rewritePartialText = (event: AssistantMessageEvent, idx: number, value: string): void => {
+				if (!("partial" in event)) return;
+				const block = event.partial.content[idx];
+				if (block && block.type === "text") block.text = value;
+			};
+			for await (const event of source) {
+				if (event.type === "text_delta") {
+					const stripper = ensureStripper(event.contentIndex);
+					const safeChunk = stripper.push(event.delta);
+					const accumulated = (safeText.get(event.contentIndex) ?? "") + safeChunk;
+					safeText.set(event.contentIndex, accumulated);
+					rewritePartialText(event, event.contentIndex, accumulated);
+					if (safeChunk.length === 0) continue;
+					sanitized.push({ ...event, delta: safeChunk });
+					continue;
+				}
+				if (event.type === "text_end") {
+					const stripper = ensureStripper(event.contentIndex);
+					const tail = stripper.flush();
+					let accumulated = safeText.get(event.contentIndex) ?? "";
+					if (tail.length > 0) {
+						accumulated += tail;
+						safeText.set(event.contentIndex, accumulated);
+						rewritePartialText(event, event.contentIndex, accumulated);
+						sanitized.push({
+							type: "text_delta",
+							contentIndex: event.contentIndex,
+							delta: tail,
+							partial: event.partial,
+						});
+					} else {
+						rewritePartialText(event, event.contentIndex, accumulated);
+					}
+					sanitized.push({ ...event, content: accumulated });
+					strippers.delete(event.contentIndex);
+					continue;
+				}
+				if (event.type === "done" || event.type === "error") {
+					const message = event.type === "done" ? event.message : event.error;
+					for (const block of message.content) {
+						if (block.type === "text") block.text = stripTokenizerSentinels(block.text);
+					}
+				}
+				sanitized.push(event as AssistantMessageEvent);
+			}
+			sanitized.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(message);
+		}
+	})();
+	return sanitized;
+}
+
 function guardMalformedToolCalls(
 	source: ReturnType<typeof streamOpenAICompletions>,
 	model: Model<"openai-completions">,
@@ -421,7 +500,9 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		const withSamplers = withSamplingOverrides(model, options, applied);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
-				streamOpenAICompletions(model, replayContext, withRemainingContextBudget(model, replayContext, withSamplers)),
+				stripSentinelsFromStream(
+					streamOpenAICompletions(model, replayContext, withRemainingContextBudget(model, replayContext, withSamplers)),
+				),
 			),
 			model,
 			replayContext,
@@ -433,7 +514,13 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		const withSamplers = withSamplingOverrides(model, options, applied);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
-				streamSimpleOpenAICompletions(model, replayContext, withRemainingContextBudget(model, replayContext, withSamplers)),
+				stripSentinelsFromStream(
+					streamSimpleOpenAICompletions(
+						model,
+						replayContext,
+						withRemainingContextBudget(model, replayContext, withSamplers),
+					),
+				),
 			),
 			model,
 			replayContext,

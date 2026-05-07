@@ -28,6 +28,7 @@ import {
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
+import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type AppliedThinking, applyThinkingMechanism } from "./thinking-mechanism.js";
 
@@ -314,17 +315,7 @@ function runStream(
 			let reasoningChars = 0;
 			let hadToolCall = false;
 			let doneReason: string | undefined;
-			const closeActiveText = () => {
-				if (!active) return;
-				stream.push({
-					type: "text_end",
-					contentIndex: activeIdx,
-					content: active.text,
-					partial: output,
-				});
-				active = null;
-				activeIdx = -1;
-			};
+			const sentinelStripper = createSentinelStripper();
 			const closeActiveThinking = () => {
 				if (!activeThinking) return;
 				stream.push({
@@ -336,7 +327,8 @@ function runStream(
 				activeThinking = null;
 				activeThinkingIdx = -1;
 			};
-			const emitText = (content: string) => {
+			const pushSafeText = (safe: string) => {
+				if (!safe) return;
 				closeActiveThinking();
 				if (!active) {
 					active = { type: "text", text: "" };
@@ -344,13 +336,33 @@ function runStream(
 					activeIdx = output.content.length - 1;
 					stream.push({ type: "text_start", contentIndex: activeIdx, partial: output });
 				}
-				active.text += content;
+				active.text += safe;
 				stream.push({
 					type: "text_delta",
 					contentIndex: activeIdx,
-					delta: content,
+					delta: safe,
 					partial: output,
 				});
+			};
+			const emitText = (content: string) => {
+				if (!content) return;
+				const safe = sentinelStripper.push(content);
+				pushSafeText(safe);
+			};
+			const closeActiveText = () => {
+				// Drain any sentinel-prefix bytes the streaming stripper held
+				// back across the last delta before closing the text block.
+				const tail = sentinelStripper.flush();
+				if (tail) pushSafeText(tail);
+				if (!active) return;
+				stream.push({
+					type: "text_end",
+					contentIndex: activeIdx,
+					content: active.text,
+					partial: output,
+				});
+				active = null;
+				activeIdx = -1;
 			};
 			const emitThinking = (content: string) => {
 				closeActiveText();
