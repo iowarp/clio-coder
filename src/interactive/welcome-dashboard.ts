@@ -377,7 +377,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		[
 			`Active capabilities: ${stats.activeCapabilities.length || 0}`,
 			`Extensions: ${stats.activeExtensions} active / ${stats.installedExtensions} installed`,
-			"Shift+Tab modes · Ctrl+L model · /hotkeys",
+			"Alt+M modes · Ctrl+L model · /hotkeys",
 		],
 		content,
 	)) {

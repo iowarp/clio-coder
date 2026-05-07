@@ -297,4 +297,73 @@ describe("status/controller", () => {
 			controller.dispose();
 		}
 	});
+
+	it("keeps one-shot super requests in tool_blocked until granted or cancelled", () => {
+		let clock = 0;
+		const bus = createSafeEventBus();
+		const chatListeners = new Set<(event: never) => void>();
+		const providers = {
+			list: () => [],
+		} as unknown as ProvidersContract;
+		const controller = createStatusController({
+			chat: {
+				submit: async () => undefined,
+				queueFollowUp: () => false,
+				clearQueuedFollowUps: () => [],
+				queuedMessages: () => ({ followUp: [] }),
+				cancel: () => undefined,
+				onEvent: (listener) => {
+					chatListeners.add(listener as (event: never) => void);
+					return () => chatListeners.delete(listener as (event: never) => void);
+				},
+				getSessionId: () => "session-1",
+				isStreaming: () => false,
+				contextUsage: () => ({ tokens: null, contextWindow: 0, percent: null }),
+				compact: async () => undefined,
+				resetForSession: () => undefined,
+			},
+			providers,
+			bus,
+			now: () => clock,
+			setInterval: () => 0,
+			clearInterval: () => undefined,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+		});
+		try {
+			for (const listener of chatListeners) listener({ type: "agent_start" } as never);
+			clock = 10;
+			bus.emit(BusChannels.SuperRequired, { requestedBy: "tool", at: clock });
+			strictEqual(controller.current().phase, "tool_blocked");
+			bus.emit(BusChannels.ModeChanged, {
+				from: "default",
+				to: "default",
+				reason: "one_shot_request",
+				requestedBy: "tool",
+				requiresConfirmation: true,
+				at: clock,
+			});
+			strictEqual(controller.current().phase, "tool_blocked");
+			bus.emit(BusChannels.ModeChanged, {
+				from: "default",
+				to: "default",
+				reason: "one_shot_granted",
+				requestedBy: "tool",
+				at: clock,
+			});
+			strictEqual(controller.current().phase, "preparing");
+
+			bus.emit(BusChannels.SuperRequired, { requestedBy: "tool", at: clock });
+			bus.emit(BusChannels.ModeChanged, {
+				from: "default",
+				to: "default",
+				reason: "one_shot_cancelled",
+				requestedBy: "tool",
+				at: clock,
+			});
+			strictEqual(controller.current().phase, "preparing");
+		} finally {
+			controller.dispose();
+		}
+	});
 });
