@@ -36,6 +36,7 @@ import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
+import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { applyThinkingMechanism } from "./thinking-mechanism.js";
 
@@ -694,18 +695,7 @@ export function runStream(
 			let reasoningTokensAccum = 0;
 			const activeTextRef: { block: TextContent | null; idx: number } = { block: null, idx: -1 };
 			const activeThinkingRef: { block: ThinkingContent | null; idx: number } = { block: null, idx: -1 };
-			const closeActiveText = () => {
-				const current = activeTextRef.block;
-				if (!current) return;
-				stream.push({
-					type: "text_end",
-					contentIndex: activeTextRef.idx,
-					content: current.text,
-					partial: output,
-				});
-				activeTextRef.block = null;
-				activeTextRef.idx = -1;
-			};
+			const sentinelStripper = createSentinelStripper();
 			const closeActiveThinking = () => {
 				const current = activeThinkingRef.block;
 				if (!current) return;
@@ -718,8 +708,8 @@ export function runStream(
 				activeThinkingRef.block = null;
 				activeThinkingRef.idx = -1;
 			};
-			const emitText = (chunk: string) => {
-				if (!chunk) return;
+			const pushSafeText = (safe: string) => {
+				if (!safe) return;
 				closeActiveThinking();
 				let current = activeTextRef.block;
 				if (!current) {
@@ -729,13 +719,40 @@ export function runStream(
 					activeTextRef.idx = output.content.length - 1;
 					stream.push({ type: "text_start", contentIndex: activeTextRef.idx, partial: output });
 				}
-				current.text += chunk;
+				current.text += safe;
 				stream.push({
 					type: "text_delta",
 					contentIndex: activeTextRef.idx,
-					delta: chunk,
+					delta: safe,
 					partial: output,
 				});
+			};
+			const flushTextSentinelBuffer = () => {
+				const tail = sentinelStripper.flush();
+				if (tail) pushSafeText(tail);
+			};
+			const emitText = (chunk: string) => {
+				if (!chunk) return;
+				const safe = sentinelStripper.push(chunk);
+				pushSafeText(safe);
+			};
+			const closeActiveText = () => {
+				// Drain any sentinel-prefix bytes the streaming stripper held
+				// back across the last delta. The buffered tail can never grow
+				// past `MAX_SENTINEL_LEN - 1` characters and only contains
+				// matter that turned out not to be a sentinel; emitting it now
+				// keeps the visible block whole without leaking sentinels.
+				flushTextSentinelBuffer();
+				const current = activeTextRef.block;
+				if (!current) return;
+				stream.push({
+					type: "text_end",
+					contentIndex: activeTextRef.idx,
+					content: current.text,
+					partial: output,
+				});
+				activeTextRef.block = null;
+				activeTextRef.idx = -1;
 			};
 			const emitThinking = (chunk: string, tokensHint?: number) => {
 				if (!chunk) return;
