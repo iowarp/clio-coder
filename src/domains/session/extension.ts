@@ -17,6 +17,7 @@ import {
 import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
+import { buildTurnPreview } from "./tree/preview.js";
 import { probeWorkspace } from "./workspace/index.js";
 
 type ParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
@@ -68,7 +69,21 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// session so checkpoint/fork pointers are fresh; otherwise fall back
 		// to the on-disk read.
 		const meta: SessionMeta = state?.meta.id === sessionId ? state.meta : (openSession(sessionId).meta() as SessionMeta);
-		return buildTreeSnapshot({ meta, nodes: bundle.nodes, labels: bundle.labels });
+		// Build a turnId → preview map so /tree rows show distinguishing
+		// payload slices. Reading turns is cheap (single jsonl scan) and
+		// happens only when the overlay opens.
+		const previews = new Map<string, string>();
+		try {
+			for (const turn of openSession(sessionId).turns()) {
+				const text = buildTurnPreview({ kind: turn.kind, payload: turn.payload });
+				if (text.length > 0) previews.set(turn.id, text);
+			}
+		} catch {
+			// Best-effort: if the on-disk transcript cannot be read, fall back
+			// to a previewless snapshot. The overlay handles missing previews
+			// gracefully via its kind-label fallback.
+		}
+		return buildTreeSnapshot({ meta, nodes: bundle.nodes, labels: bundle.labels, previews });
 	}
 
 	const contract: SessionContract = {
