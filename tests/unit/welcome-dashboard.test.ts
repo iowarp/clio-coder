@@ -130,6 +130,8 @@ describe("interactive/welcome-dashboard", () => {
 		ok(!text.includes("v0.1.2 · supervised repository work · ready"), text);
 		ok(!text.includes("CLIO_SELF_DEV"), text);
 		ok(text.includes("Context usage: 25%"), text);
+		ok(text.includes("Alt+M modes"), text);
+		ok(!text.includes("Shift+Tab modes"), text);
 		for (const line of lines) {
 			ok(visibleWidth(line) <= 112, `line too wide: ${visibleWidth(line)} ${line}`);
 		}
