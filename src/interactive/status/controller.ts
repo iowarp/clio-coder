@@ -165,7 +165,11 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			deps.bus.on(BusChannels.SuperRequired, () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
 			deps.bus.on(BusChannels.ModeChanged, (payload) => {
 				const p = payloadObject(payload);
-				if (p.to === "super" && p.from !== "super") apply({ type: "overlay_pop", overlay: "tool_blocked" }, true);
+				const reason = typeof p.reason === "string" ? p.reason : null;
+				const oneShotResolved = reason === "one_shot_granted" || reason === "one_shot_cancelled";
+				if (oneShotResolved || (p.to === "super" && p.from !== "super" && reason !== "one_shot_request")) {
+					apply({ type: "overlay_pop", overlay: "tool_blocked" }, true);
+				}
 			}),
 			deps.bus.on(BusChannels.CompactionBegin, () => apply({ type: "overlay_push", overlay: "compacting" }, true)),
 			deps.bus.on(BusChannels.CompactionEnd, () => apply({ type: "overlay_pop", overlay: "compacting" }, true)),
