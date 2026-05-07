@@ -40,7 +40,7 @@ interface DeleteContext {
 }
 
 function shortTurnId(id: string): string {
-	return id.length > 8 ? id.slice(0, 8) : id;
+	return id.length > 6 ? id.slice(0, 6) : id;
 }
 
 /**
@@ -64,25 +64,27 @@ function clampPreview(text: string, max: number): string {
 	return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine;
 }
 
-function previewForNode(node: TreeSnapshotNode): string {
-	// TreeSnapshotNode only carries kind + ids + label; the entry payload lives
-	// in current.jsonl and is not part of the snapshot. Render kind-specific
-	// short strings so the operator still sees what the row represents.
+/**
+ * Fallback when the snapshot omits a payload preview (e.g. unit tests, or a
+ * session whose current.jsonl cannot be read). Returns a kind-tagged token so
+ * the row still renders a non-empty cell.
+ */
+function fallbackPreview(node: TreeSnapshotNode): string {
 	switch (node.kind) {
 		case "user":
-			return "[user]";
+			return "(no text)";
 		case "assistant":
-			return "[assistant]";
+			return "(no text)";
 		case "tool_call":
-			return "[tool_call]";
+			return "(unknown tool)";
 		case "tool_result":
-			return "[tool_result]";
+			return "(no result)";
 		case "system":
-			return "[system]";
+			return "(system)";
 		case "checkpoint":
-			return "[checkpoint]";
+			return "(checkpoint)";
 		default:
-			return `[${node.kind}]`;
+			return `(${node.kind})`;
 	}
 }
 
@@ -102,11 +104,16 @@ export function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	return rows;
 }
 
+/** Width budget for the inline preview cell. Sized so the surrounding indent,
+ * role marker, and short turn id still fit on an 88-column overlay. */
+const ROW_PREVIEW_BUDGET = 55;
+
 export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
 	const indent = "  ".repeat(row.depth);
 	const glyph = isLeaf(row.node) ? "●" : "○";
 	const turnId = shortTurnId(row.node.id);
-	const preview = clampPreview(previewForNode(row.node), 40);
+	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
+	const preview = clampPreview(rawPreview, ROW_PREVIEW_BUDGET);
 	const labelSuffix = row.node.label ? ` · label:"${row.node.label}"` : "";
 	const main = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  ${preview}${labelSuffix}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);

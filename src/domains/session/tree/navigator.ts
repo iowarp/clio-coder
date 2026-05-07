@@ -15,6 +15,13 @@ export interface TreeSnapshotNode {
 	at: string;
 	kind: SessionTreeNode["kind"];
 	label?: string;
+	/**
+	 * Single-line, ANSI/sentinel-stripped synopsis of the underlying turn
+	 * payload. Populated when the snapshot builder is given a previews map
+	 * keyed by turnId; absent for snapshots built without payload access
+	 * (e.g. unit tests that exercise tree shape only).
+	 */
+	preview?: string;
 	/** Child ids in oldest-first order. */
 	children: string[];
 }
@@ -86,6 +93,13 @@ export function buildTreeSnapshot(input: {
 	nodes: ReadonlyArray<SessionTreeNode>;
 	labels: ReadonlyMap<string, ResolvedLabel>;
 	leafId?: string | null;
+	/**
+	 * Optional turnId → preview map. When supplied, each TreeSnapshotNode
+	 * carries the matching preview so /tree overlay rows can render a
+	 * distinguishing synopsis. Domain callers populate this from the engine
+	 * reader's turns; unit tests that only care about tree shape may omit it.
+	 */
+	previews?: ReadonlyMap<string, string>;
 }): TreeSnapshot {
 	const nodesById: Record<string, TreeSnapshotNode> = {};
 	for (const node of input.nodes) {
@@ -100,6 +114,8 @@ export function buildTreeSnapshot(input: {
 		// Empty-string label is a tombstone produced by resolveLabelMap; treat
 		// it as "no label" so tombstone entries do not surface as blank chips.
 		if (resolved && resolved.label !== "") entry.label = resolved.label;
+		const preview = input.previews?.get(node.id);
+		if (preview !== undefined && preview.length > 0) entry.preview = preview;
 		nodesById[node.id] = entry;
 	}
 
