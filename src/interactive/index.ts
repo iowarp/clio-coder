@@ -81,7 +81,7 @@ import {
 	spinnerFrame,
 	type TurnSummary,
 } from "./status/index.js";
-import { renderSuperOverlayLines } from "./super-overlay.js";
+import { renderSuperOverlayLinesForOrigin } from "./super-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -796,9 +796,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	applyEditorModeTheme();
 
-	const superOverlayLines = renderSuperOverlayLines();
-	const superOverlayWidth = superOverlayLines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-	const superOverlay = new Text(superOverlayLines.join("\n"), 0, 0);
+	// The super-confirm overlay is rebuilt per open because its body and width
+	// depend on the origin (keybind vs tool). The `renderSuperOverlayLinesForOrigin`
+	// helper produces both variants from `super-overlay.ts`.
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
@@ -1162,6 +1162,18 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
+	// Tracks how the super-confirm overlay was opened so the confirm handler
+	// can choose the correct lifecycle. `keybind` (Alt+S) flips the persistent
+	// mode to super; `tool` (parked admission) issues a one-shot grant that
+	// resumes the parked queue without changing `modes.current()`. The flag is
+	// set on every `openSuperOverlay(...)` call and cleared in `closeOverlay`.
+	type SuperConfirmOrigin = "keybind" | "tool";
+	let superConfirmOrigin: SuperConfirmOrigin | null = null;
+	// Set true between `confirmSuper` and `closeOverlay` so the close path can
+	// tell a one-shot confirm apart from an Esc/Ctrl-C dismissal. Without this
+	// the close path would have to inspect `modes.current()`, which by design
+	// stays at the prior value for one-shot grants.
+	let superConfirmJustFired = false;
 	process.removeAllListeners("SIGINT");
 
 	const renderDispatchBoard = (): void => {
@@ -1197,24 +1209,27 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = null;
 		// Centralize the parked-call lifecycle here so every super-overlay
 		// dismissal (Enter, Esc, Ctrl+C, shutdown) drives the registry to a
-		// terminal verdict. `modes.confirmSuper` flips the mode before the
-		// confirm handler calls closeOverlay, so a post-close mode of "super"
-		// means the user confirmed; anything else means they cancelled.
+		// terminal verdict. The path splits on origin:
+		//   - keybind: confirm flips the persistent mode (legacy semantics);
+		//     close inspects `modes.current()` to tell confirm from cancel.
+		//   - tool: confirm issues a one-shot grant via the registry without
+		//     touching `modes.current()`, so close uses
+		//     `superConfirmJustFired` rather than the mode flag.
 		if (leaving === "super-confirm") {
-			const cancelled = deps.modes.current() !== "super";
+			const origin = superConfirmOrigin;
+			const confirmed = origin === "tool" ? superConfirmJustFired : deps.modes.current() === "super";
+			const cancelled = !confirmed;
 			if (cancelled) {
-				// Emit before mutating the registry so the audit row lands even
-				// when toolRegistry is not wired (lighter integration tests, future
-				// non-tool callers). The from/to fields stay equal because the
-				// pending request never produced a real mode transition; safety's
-				// audit subscriber persists this row as kind: "mode_change" with
-				// reason: "request_cancelled" so /audit consumers can correlate
-				// dismissed Alt+S overlays with the prior request rows.
+				// Emit a clear cancellation audit row. For keybind this matches
+				// the legacy "request_cancelled" reason; for tool we use a
+				// distinct reason so /audit consumers can tell a one-shot
+				// rejection apart from a persistent-request rejection.
 				const current = deps.modes.current();
 				deps.bus.emit(BusChannels.ModeChanged, {
 					from: current,
 					to: current,
-					reason: "request_cancelled",
+					reason: origin === "tool" ? "one_shot_cancelled" : "request_cancelled",
+					...(origin ? { requestedBy: origin } : {}),
 					at: Date.now(),
 				});
 			}
@@ -1223,18 +1238,37 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					deps.toolRegistry.cancelParkedCalls(
 						"User cancelled this tool call from the super-mode confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
 					);
+				} else if (origin === "tool") {
+					const current = deps.modes.current();
+					deps.bus.emit(BusChannels.ModeChanged, {
+						from: current,
+						to: current,
+						reason: "one_shot_granted",
+						requestedBy: "tool",
+						at: Date.now(),
+					});
+					// One-shot grant. Resume the parked queue under
+					// super-equivalent admission for this single pass; the
+					// persistent mode is unchanged. Subsequent invocations
+					// re-enter the live mode gate normally.
+					void deps.toolRegistry.resumeParkedCalls({ mode: "super", requestedBy: "tool:one_shot" });
 				} else {
+					// Persistent escalation already flipped the mode; resume
+					// the parked queue under the live (now super) mode.
 					void deps.toolRegistry.resumeParkedCalls();
 				}
 			}
-			// Hard-stop the entire agent turn on a super cancel so the model
-			// cannot reach the same target through a different tool (e.g.
-			// write -> bash redirection). Without this the SDK auto-continues
-			// after the blocked tool result and the agent treats the
-			// cancellation as "use a different approach".
-			if (cancelled && deps.chat.isStreaming()) {
+			// Keybind cancellation keeps the legacy stream-cancel behavior.
+			// Tool-origin cancellation resolves the parked call as a blocked
+			// tool result so pi-agent-core can surface the denial to the model
+			// instead of losing it behind an immediate abort.
+			if (cancelled && origin !== "tool" && deps.chat.isStreaming()) {
 				cancelActiveRun();
 			}
+			// Reset the per-open trackers so a stale origin/confirm flag
+			// cannot leak into the next overlay.
+			superConfirmOrigin = null;
+			superConfirmJustFired = false;
 		}
 		// If a parked call arrived while an unrelated overlay was open, the
 		// onSuperRequired listener's attempt to open the super overlay was a
@@ -1504,11 +1538,40 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const openSuperOverlay = (requestedBy: string = "keybind"): void => {
 		if (overlayState !== "closed") return;
-		deps.modes.requestSuper(requestedBy);
+		// Distinguish keybind (Alt+S) opens from tool-driven (parked admission)
+		// opens. Only keybind opens are persistent mode requests; tool opens
+		// resolve to a one-shot grant in the confirm handler and never call
+		// `requestSuper`/`confirmSuper`, which would otherwise flip the global
+		// mode behind the user's back. The mapping here is from the second
+		// argument to `requestedBy` strings used elsewhere (`tool`, `keybind`).
+		const origin: SuperConfirmOrigin = requestedBy === "tool" ? "tool" : "keybind";
+		superConfirmOrigin = origin;
+		superConfirmJustFired = false;
+		if (origin === "keybind") {
+			// Persistent escalation path. The pending guard inside modes ensures
+			// confirmSuper only flips to super when this request preceded it.
+			deps.modes.requestSuper(requestedBy);
+		} else {
+			// One-shot path. Surface the request on the bus for audit/metrics
+			// without arming the persistent mode flip or reporting a live mode
+			// transition to downstream consumers.
+			const current = deps.modes.current();
+			deps.bus.emit(BusChannels.ModeChanged, {
+				from: current,
+				to: current,
+				reason: "one_shot_request",
+				requestedBy,
+				requiresConfirmation: true,
+				at: Date.now(),
+			});
+		}
+		const overlayLines = renderSuperOverlayLinesForOrigin(origin);
+		const overlay = new Text(overlayLines.join("\n"), 0, 0);
+		const width = overlayLines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 		overlayState = "super-confirm";
-		overlayHandle = tui.showOverlay(superOverlay, {
+		overlayHandle = tui.showOverlay(overlay, {
 			anchor: "center",
-			width: superOverlayWidth,
+			width,
 		});
 		tui.requestRender();
 	};
@@ -1958,7 +2021,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					closeOverlay();
 				},
 				confirmSuper: (conf) => {
-					deps.modes.confirmSuper(conf);
+					// Origin-aware confirm. Tool-driven opens issue a one-shot
+					// grant inside `closeOverlay` and never call
+					// `modes.confirmSuper`, so the persistent mode stays put.
+					// Keybind opens (Alt+S) keep the legacy persistent flip.
+					if (superConfirmOrigin === "tool") {
+						superConfirmJustFired = true;
+					} else {
+						deps.modes.confirmSuper(conf);
+					}
 					closeOverlay();
 					footer.refresh();
 					tui.requestRender();

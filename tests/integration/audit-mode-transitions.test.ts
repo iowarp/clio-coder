@@ -167,6 +167,70 @@ describe("audit jsonl: mode transitions land in the audit file", () => {
 		}
 	});
 
+	it("one-shot super requests audit as non-persistent mode_change rows", async () => {
+		const bus = createSafeEventBus();
+		const safety = createSafetyBundle(makeContextOn(bus));
+		const modes = createModesBundle(makeContextOn(bus));
+		await safety.extension.start();
+		await modes.extension.start();
+		try {
+			const current = modes.contract.current();
+			bus.emit("mode.changed", {
+				from: current,
+				to: current,
+				reason: "one_shot_request",
+				requestedBy: "tool",
+				requiresConfirmation: true,
+				at: Date.now(),
+			});
+			bus.emit("mode.changed", {
+				from: current,
+				to: current,
+				reason: "one_shot_granted",
+				requestedBy: "tool",
+				at: Date.now(),
+			});
+			await safety.extension.stop?.();
+			await modes.extension.stop?.();
+
+			const rows = readAuditRows();
+			const requestRow = rows.find(
+				(
+					r,
+				): r is {
+					kind: string;
+					from: string | null;
+					to: string;
+					reason: string | null;
+					requestedBy?: string;
+					requiresConfirmation?: boolean;
+				} =>
+					typeof r === "object" &&
+					r !== null &&
+					(r as { kind?: unknown }).kind === "mode_change" &&
+					(r as { reason?: unknown }).reason === "one_shot_request",
+			);
+			ok(requestRow, `expected a one_shot_request mode_change row, got ${JSON.stringify(rows)}`);
+			strictEqual(requestRow.from, current);
+			strictEqual(requestRow.to, current);
+			strictEqual(requestRow.requestedBy, "tool");
+			strictEqual(requestRow.requiresConfirmation, true);
+			const grantedRow = rows.find(
+				(r): r is { kind: string; from: string | null; to: string; reason: string | null } =>
+					typeof r === "object" &&
+					r !== null &&
+					(r as { kind?: unknown }).kind === "mode_change" &&
+					(r as { reason?: unknown }).reason === "one_shot_granted",
+			);
+			ok(grantedRow, `expected a one_shot_granted mode_change row, got ${JSON.stringify(rows)}`);
+			strictEqual(grantedRow.from, current);
+			strictEqual(grantedRow.to, current);
+		} finally {
+			await safety.extension.stop?.();
+			await modes.extension.stop?.();
+		}
+	});
+
 	it("requestSuper writes an audit row tagged requiresConfirmation=true so Alt+S overlays leave a trail", async () => {
 		const bus = createSafeEventBus();
 		const safety = createSafetyBundle(makeContextOn(bus));

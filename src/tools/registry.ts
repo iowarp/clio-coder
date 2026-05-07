@@ -120,6 +120,20 @@ export interface ProtectedArtifactRegistryEvent {
 	correlationId?: string;
 }
 
+/**
+ * One-shot elevation grant. The interactive layer issues this when the user
+ * confirms a single parked tool call without escalating the persistent mode.
+ * The registry consumes the grant on the next `resumeParkedCalls` pass so
+ * exactly one parked call receives elevated admission; subsequent calls go
+ * back through the normal mode gate.
+ */
+export interface OneShotGrant {
+	/** Mode used for the single admission pass. Equivalent of "as if current mode were this". */
+	mode: ModeName;
+	/** Free-form origin tag carried into audit (`tool`, `keybind:single`, ...). */
+	requestedBy: string;
+}
+
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
 	/** Tools visible to the current mode. Models only see these. */
@@ -154,11 +168,15 @@ export interface ToolRegistry {
 	 */
 	hasParkedCalls(): boolean;
 	/**
-	 * Re-run admission for every parked call against the current mode. Calls
-	 * admitted on retry execute and their original promise resolves with the
-	 * result. Calls still blocked only by the mode gate stay parked.
+	 * Re-run admission for every parked call. When `grant` is provided the
+	 * admission gate uses the grant mode for its action-allow check instead
+	 * of the live mode, so the user can confirm a single tool call without
+	 * flipping the persistent mode (one-shot escalation). Calls admitted on
+	 * retry execute and their original promise resolves with the result.
+	 * Calls still blocked only by the mode gate (with no grant or with a
+	 * grant that does not cover their action class) stay parked.
 	 */
-	resumeParkedCalls(): Promise<void>;
+	resumeParkedCalls(grant?: OneShotGrant): Promise<void>;
 	/**
 	 * Resolve every parked call with a `blocked` verdict carrying `reason`.
 	 * Used when the super overlay is cancelled so the agent loop sees a
@@ -268,7 +286,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
 		| { kind: "park"; decision: SafetyDecision };
 
-	const admit = (call: ClassifierCall): AdmitOutcome => {
+	const admit = (call: ClassifierCall, grant?: OneShotGrant): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
 		if (!spec) {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
@@ -292,7 +310,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
 		}
 		const actionClass = decision.classification.actionClass;
-		if (!deps.modes.isActionAllowed(actionClass)) {
+		// Action gate: a one-shot grant lets a parked call execute as if the
+		// current mode were `grant.mode`, without flipping the persistent mode.
+		// Tool-name visibility (above) still uses the live mode so a one-shot
+		// grant can never expose a tool that the live mode hides.
+		const grantAllows = grant !== undefined && MODE_MATRIX[grant.mode].allowedActions.has(actionClass);
+		if (!deps.modes.isActionAllowed(actionClass) && !grantAllows) {
 			if (deps.modes.elevatedModeFor(actionClass) !== null) {
 				return { kind: "park", decision };
 			}
@@ -353,11 +376,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
-		async resumeParkedCalls() {
+		async resumeParkedCalls(grant?: OneShotGrant) {
 			if (parked.length === 0) return;
-			const pending = parked.splice(0, parked.length);
+			const pending = grant === undefined ? parked.splice(0, parked.length) : parked.splice(0, 1);
 			for (const entry of pending) {
-				const outcome = admit(entry.call);
+				// A one-shot grant covers only the oldest parked call. Calls that
+				// parked while the overlay was already open remain queued and need
+				// their own confirmation, so a late or concurrent privileged call
+				// cannot ride along on a grant the user approved for another call.
+				const outcome = admit(entry.call, grant);
 				if (outcome.kind === "park") {
 					parked.push(entry);
 					continue;
