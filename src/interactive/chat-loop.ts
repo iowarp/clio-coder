@@ -1194,6 +1194,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			reasoning: modelState?.reasoning === true,
 		});
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
+		const workspaceProjectType = deps.session?.current()?.workspace?.projectType;
 		const dynamicInputs: DynamicInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
@@ -1203,6 +1204,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			thinkingApplied: applied.noticeKind,
 			thinkingNotice: applied.notice,
 			...(guidance ? { thinkingGuidance: guidance } : {}),
+			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
 			turnCount: 0,
 		};
 		if (deps.getMemorySection) {

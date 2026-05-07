@@ -73,6 +73,13 @@ export const readTool: ToolSpec = {
 			return { kind: "ok", output };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
+			const code = (err as NodeJS.ErrnoException | undefined)?.code;
+			if (code === "ENOENT") {
+				return {
+					kind: "error",
+					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: where_is or glob to locate the file, or ls on the parent directory.`,
+				};
+			}
 			return { kind: "error", message: `read: ${msg}` };
 		}
 	},
