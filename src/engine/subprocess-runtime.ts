@@ -348,7 +348,8 @@ function parseGeminiEvent(event: Record<string, unknown>, acc: ParserAccumulator
 	if (event.type === "result") {
 		const result = extractTextDeep(event.result ?? event.response ?? event);
 		if (result.length > 0) acc.text = result;
-		setMergedUsage(acc, normalizeUsage(event.usage, undefined));
+		// Gemini's stream-json emits per-call counts under `stats`; older builds used `usage`.
+		setMergedUsage(acc, normalizeUsage(event.stats ?? event.usage, undefined));
 	}
 	if (event.type === "error") {
 		const message = extractFirstString(event, ["message", "error"]);
