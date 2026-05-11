@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.5-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.7-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,18 +30,20 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.5**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.7**.
 
-## Release 0.1.5 Alpha
+## Release 0.1.7 Alpha
 
-This is the first public alpha release of Clio Coder. It is ready for hands-on testing by developers who are comfortable with experimental tooling, source installs, and sharp feedback loops. It is not yet a polished production assistant.
+This release turns safety, receipts, and reproducibility into first-class release surfaces. Clio Coder now treats blacklist-only Bash defense as the floor, adds L4-style default-deny command evaluation, introduces purpose-built execution tools, and records more evidence about what ran, what was blocked, and why a run can be trusted.
 
 - **Interactive terminal coding.** Launch `clio` inside a repository, inspect the workspace dashboard, chat with an assistant, run slash commands, switch models, review receipts, and keep the workflow in the shell.
 - **Model targets and routing.** Configure named targets for local servers, cloud APIs, and CLI-backed assistants. Probe target health, inspect available models, switch the active model from the TUI, and route worker agents through their own defaults.
 - **Built-in coding agents.** Use focused agents for scouting, planning, reviewing, implementation, debugging, regression scouting, benchmarking, memory curation, evolution planning, and scientific validation.
 - **Session continuity.** Resume, fork, compact, replay, and reset sessions. `clio init` and `/init` create a checked-in `CLIO.md` project guide and local fingerprint state so project context is explicit instead of being re-discovered on every turn.
 - **Workspace and code context.** The dashboard and `workspace_context` tool expose cwd, project type, git state, branch, remote, and recent commits. Codewiki tools can index and query repository entry points and symbols.
-- **Safety and auditability.** Default, advise, and super modes control tool access. Privileged actions require confirmation, protected artifacts are tracked, receipts record run metadata, audit JSONL captures safety-relevant events, and finish-contract advisories warn when a completion claim lacks validation evidence.
+- **Safety and auditability.** Default, advise, and super modes control tool access. A shared safety policy engine is used by the orchestrator and native workers, privileged actions require confirmation, protected artifacts are tracked, receipts record run metadata, audit JSONL captures safety decisions, and finish-contract advisories warn when a completion claim lacks validation evidence.
+- **Restricted execution.** Common shell-shaped work now has typed tools: `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, and `package_script`. Arbitrary Bash remains gated by the shared policy engine and super elevation.
+- **Project policy and receipts.** `.clio/safety.yaml` can define audited command policy for future project-local allowlists. Receipts include safety summaries, blocked attempts, runtime limitations, policy fingerprints, cwd, git commit/branch, dirty-state hash, and integrity metadata.
 - **Evidence, eval, and memory.** Build evidence corpora from runs, sessions, receipts, audit rows, and eval results. Run local eval task files, compare baseline and candidate runs, and curate approved memory records that are injected under a fixed budget.
 - **TUI polish and usage clarity.** Tool output, thinking blocks, popups, `/cost`, `/model`, `/hotkeys`, `Ctrl+G` external editing, `Alt+Enter` follow-up queuing, `!cmd` / `!!cmd` local bash, and receipt views have been hardened for long text, terminal width, local usage accounting, and clearer visual hierarchy.
 
@@ -118,14 +120,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.1.5
+git checkout v0.1.7
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.5` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.7` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -549,23 +551,41 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 
 | Mode | Behavior |
 | --- | --- |
-| `default` | Read, write, edit, bash, search, and dispatch tools are visible. |
-| `advise` | Read-oriented mode. Filesystem mutation is disabled. |
-| `super` | Allows privileged writes outside the working directory. Requires explicit confirmation. |
+| `default` | Normal repository work with read/write/edit, search, typed git/test/build tools, and default-deny Bash. Bash only admits curated/project-policy command shapes; arbitrary Bash is blocked until the operator chooses super mode or adds reviewed project policy. |
+| `advise` | Read-oriented mode for analysis, planning, and review. Dispatch admission is readonly, and stronger worker recipes are denied unless the operator elevates. |
+| `super` | Explicit elevation for privileged local work. Base hard blocks still apply, and external CLI/SDK runtimes are not mapped to full-access bypass unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is set. |
+
+Settings also expose `safetyLevel` (`suggest`, `auto-edit`, `full-auto`). Safety levels affect prompt posture and UX defaults; enforcement is the mode matrix plus the shared safety policy engine, not prompt text alone.
 
 Key safety behavior:
 
 - `Alt+S` opens the super-mode confirmation overlay.
-- Dangerous Bash patterns are blocked by hardcoded damage-control rules.
+- The orchestrator and native workers use the same safety policy evaluator.
+- The base damage-control pack is always active; self-development runs add the dev pack, and super mode can add the super pack.
+- Dangerous Bash patterns are blocked by damage-control rules before execution.
 - Known blocked patterns include commands like `rm -rf /`, force-pushing `main`, and raw `dd` writes to block devices.
+- Default mode has an L4-style Bash allowlist and denies shell operators such as pipes, redirects, `&&`, `;`, command substitution, and heredoc-like multi-line execution unless an explicit project policy command owns the risk.
+- Typed execution tools prefer fixed argv vectors over `/bin/bash -lc` and return structured exit, timeout, output-cap, cwd, and duration details.
 - Bash subprocess abort escalates from `SIGTERM` to `SIGKILL` after a grace period.
-- Tool and bash activity is rendered into the transcript with status, elapsed time, and command previews.
+- Tool and bash activity is rendered into the transcript with status, elapsed time, command previews, and structured safety decisions.
 
 The damage-control rules live in:
 
 ```text
 damage-control-rules.yaml
 ```
+
+The full safety model is documented in [docs/specs/safety-model.md](docs/specs/safety-model.md).
+
+Project-local policy is reserved at:
+
+```text
+.clio/safety.yaml
+```
+
+Schema version 1 supports `commands` or `tasks` entries with `id`, `command`, optional relative `cwd`, `timeoutMs`, `maxOutputBytes`, `actionClass`, `shellOperators`, `env`, `requireConfirmation`, `rationale`, `owner`, and `comment`. Validation is strict. If a policy file is present but invalid, command execution fails closed instead of silently widening permissions. The active run snapshots the policy, so an agent cannot edit the allowlist and use the new permissions in the same run.
+
+External CLI and SDK workers are delegated sandboxes. Clio records their launch permissions and final output, but cannot fully observe internal tool calls made by those external agents. Receipts call out this limitation for subprocess and SDK runtimes.
 
 ---
 
@@ -623,9 +643,13 @@ A receipt records:
 
 - run id;
 - model and target;
+- cwd, git commit, branch, dirty-state count, and dirty-state hash;
 - token counts;
 - estimated USD cost;
 - tool statistics;
+- safety decision counts and blocked attempts;
+- worker mode, dispatch scope, requested action classes, and external runtime limitations;
+- damage-control rule-pack hash and project safety policy fingerprint;
 - integrity metadata;
 - a SHA-256 hash over receipt fields plus the matching run ledger entry.
 
@@ -643,7 +667,7 @@ Clio Coder also writes structured audit rows under:
 <dataDir>/audit/YYYY-MM-DD.jsonl
 ```
 
-Audit entries cover classified tool calls, mode transitions, run aborts, and session park/resume events.
+Audit entries cover classified tool calls, mode transitions, run aborts, and session park/resume events. Tool rows include action class, decision, rule id, reason code, policy source, command, cwd, mode, and redacted arguments where available.
 
 ---
 
@@ -776,6 +800,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 Current release:
 
+- **v0.1.7** (alpha). Safety architecture release: shared policy evaluation for orchestrator and native workers, base/dev/super rule-pack composition, L4 default-deny Bash, typed git/test/build/package tools, dispatch-scope correctness, external runtime permission hardening, richer audit rows, and reproducibility receipts with safety and git fingerprints.
 - **v0.1.6** (alpha). Focused parity cut that adds top-level `clio --print` / `clio -p` text mode, stdin plus argv prompt composition, text `@file` prompt inclusion, and stdout-clean non-interactive execution through Clio's native endpoint-first orchestrator.
 - **v0.1.5** (alpha). First public alpha release. Highlights: interactive terminal coding, target-first model routing, built-in coding agents, persistent sessions, checked-in `CLIO.md` project context, workspace orientation, codewiki lookup tools, safety modes, receipts, audit logs, evidence and eval workflows, scoped memory, clearer usage accounting, and polished TUI popups.
 - **v0.1.4** (alpha). Highlights: workspace orientation in the welcome dashboard plus a `workspace_context` tool, component snapshots and diffs, typed evolve manifests, deterministic evidence corpora, local eval run/report/compare, scoped long-term memory injected into orchestrator and workers under a fixed budget, declarative middleware with tool-surface enforcement, protected-artifact safety, finish-contract advisories, eight new specialist agents, doctor migration from `llamacpp-completion` to `llamacpp`, compaction parity, and consistent `--help` across every subcommand.

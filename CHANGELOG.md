@@ -18,6 +18,60 @@ Keep a Changelog.
 - Added focused extension tests for install state, project/user precedence, malformed packages, and extension-backed resource loading.
 - Added share archive tests for round trips, version mismatch warnings, dry-run conflicts, forced imports, and corrupted archive handling.
 
+## 0.1.7 - 2026-05-11
+
+Clio Coder 0.1.7 is a safety architecture release. It moves Clio beyond
+blacklist-only Bash defense by sharing one policy evaluator across the
+orchestrator and native workers, adding default-deny Bash admission, exposing
+typed execution tools, tightening dispatch scope, and making receipts/audit
+rows stronger evidence for reproducible runs.
+
+### Added
+
+- Added a shared safety policy engine for orchestrator and native workers.
+  It composes `damage-control-rules.yaml` base/dev/super packs, snapshots
+  project policy, and returns structured allow/elevate/block decisions with
+  rule id, reason code, policy source, command, cwd, mode, and action class.
+- Added strict `.clio/safety.yaml` parsing for project command policy. Invalid
+  policy fails closed for command execution, and the active run keeps the
+  validated snapshot so a model cannot edit the allowlist and use it in the
+  same run.
+- Added typed execution tools: `git_status`, `git_diff`, `git_log`,
+  `run_tests`, `run_lint`, `run_build`, and `package_script`. These use fixed
+  argv vectors, bounded cwd, timeouts, output caps, and structured result
+  details.
+- Added receipt safety summaries with decision counts, blocked attempts,
+  worker mode, dispatch scope, requested action classes, runtime limitations,
+  cwd, git branch/commit, dirty-state hash, rule-pack hash, and project policy
+  fingerprint.
+
+### Changed
+
+- Native worker safety now enforces the same base hard blocks as the
+  orchestrator, including remote install pipe-to-shell patterns, block-device
+  writes, filesystem creation, fork bombs, and destructive git patterns.
+- Default-mode Bash is now L4-style default-deny for ordinary execution. Common
+  curated commands remain available; arbitrary Bash requires project policy or
+  super elevation, and base hard blocks remain hard blocks in every mode.
+- Dispatch admission now honors `MODE_MATRIX[mode].dispatchScope` and derives
+  requested action classes from the actual worker recipe/tool surface instead
+  of assuming every worker only reads.
+- Claude Code CLI/SDK and other external runtimes are treated as delegated
+  sandboxes. Clio no longer maps super mode directly to external full-access
+  bypass unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is set.
+- Built-in default worker recipes prefer typed execution tools over Bash.
+- Audit JSONL tool-call rows now carry policy provenance fields such as rule
+  id, reason code, policy source, command, cwd, and policy hash where
+  available.
+
+### Tests
+
+- Added unit coverage for project safety policy validation, active-run policy
+  snapshots, default-deny Bash behavior, worker safety parity, dispatch action
+  derivation, typed safe execution, and external runtime permission hardening.
+- Extended receipt tests to assert blocked-attempt safety summaries and
+  reproducibility metadata.
+
 ## 0.1.6 - 2026-05-04
 
 Clio Coder 0.1.6 is a focused pi-coding-agent parity cut. It starts the
