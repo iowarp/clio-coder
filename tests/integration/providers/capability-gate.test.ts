@@ -165,6 +165,8 @@ function setupHarness(
 		events: (async function* () {})(),
 		abort: () => {},
 		heartbeatAt: { current: Date.now() },
+		onApprovalRequest: () => {},
+		sendApprovalResponse: () => {},
 	};
 	const bundle = createDispatchBundle(context, {
 		spawnWorker: (spec) => {

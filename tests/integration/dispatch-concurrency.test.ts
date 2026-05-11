@@ -46,6 +46,13 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprovalResponse"> {
+	return {
+		onApprovalRequest: () => {},
+		sendApprovalResponse: () => {},
+	};
+}
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 	const deadline = Date.now() + 1000;
 	while (Date.now() <= deadline) {
@@ -243,6 +250,7 @@ describe("dispatch concurrency gate", () => {
 				events: emptyEvents(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
 			},
 			{
 				pid: 1002,
@@ -250,6 +258,7 @@ describe("dispatch concurrency gate", () => {
 				events: emptyEvents(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
 			},
 		];
 		const bundle = createDispatchBundle(context, {
@@ -303,6 +312,7 @@ describe("dispatch concurrency gate", () => {
 				events: emptyEvents(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
 			}),
 		});
 		await bundle.extension.start();
@@ -362,6 +372,7 @@ describe("dispatch concurrency gate", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
@@ -415,6 +426,7 @@ describe("dispatch concurrency gate", () => {
 					aborts += 1;
 				},
 				heartbeatAt,
+				...approvalNoops(),
 			}),
 			heartbeatSpec: { windowMs: 5, graceMs: 5 },
 			heartbeatIntervalMs: 1,
@@ -492,6 +504,7 @@ describe("dispatch concurrency gate", () => {
 				events,
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
 			}),
 		});
 		await bundle.extension.start();
@@ -561,6 +574,7 @@ describe("dispatch concurrency gate", () => {
 				events,
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
 			}),
 		});
 		await bundle.extension.start();
