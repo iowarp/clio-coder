@@ -33,14 +33,6 @@
 		}
 	},
 	"files": {
-		"includes": [
-			"**",
-			"!**/.claude",
-			"!**/.clio",
-			"!**/dist",
-			"!**/node_modules",
-			"!**/*.log",
-			"!**/docs/.superpowers/**"
-		]
+		"includes": ["**", "!**/.claude", "!**/.clio", "!**/dist", "!**/node_modules", "!**/*.log", "!**/docs/.superpowers"]
 	}
 }
