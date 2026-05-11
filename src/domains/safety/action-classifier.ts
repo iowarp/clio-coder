@@ -57,6 +57,9 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Glob:
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:
+		case ToolNames.GitStatus:
+		case ToolNames.GitDiff:
+		case ToolNames.GitLog:
 		case ToolNames.WorkspaceContext:
 		case ToolNames.FindSymbol:
 		case ToolNames.EntryPoints:
@@ -68,6 +71,10 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.WriteReview:
 			return "write";
 		case ToolNames.Bash:
+		case ToolNames.RunTests:
+		case ToolNames.RunLint:
+		case ToolNames.RunBuild:
+		case ToolNames.PackageScript:
 			return "execute";
 		default:
 			return null;
