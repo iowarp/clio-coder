@@ -279,6 +279,26 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	];
 }
 
+export interface DispatchAutoApproveDerivation {
+	supervised: boolean;
+	autoApprove: "allow" | "deny" | undefined;
+	runtimeLimitations: string[];
+}
+
+export function deriveAutoApproveForDispatch(
+	req: Pick<DispatchRequest, "supervised" | "autoApprove">,
+	existingLimitations: ReadonlyArray<string> = [],
+): DispatchAutoApproveDerivation {
+	const supervised = req.supervised === true;
+	let autoApprove = req.autoApprove;
+	const nextLimitations = [...existingLimitations];
+	if (!supervised && autoApprove === undefined) {
+		autoApprove = "deny";
+		nextLimitations.push("headless ask auto-denied; pass --auto-approve to override");
+	}
+	return { supervised, autoApprove, runtimeLimitations: nextLimitations };
+}
+
 function pickCapabilityMatchedWorker(
 	required: ReadonlyArray<string> | undefined,
 	runtimeId: string | undefined,
@@ -573,6 +593,7 @@ export function createDispatchBundle(
 		// requiring the user to invent a credential.
 		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
+		const approval = deriveAutoApproveForDispatch(req, runtimeLimitations(runtimeKind, target.runtime.id));
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
@@ -603,7 +624,9 @@ export function createDispatchBundle(
 			allowedTools,
 			mode: workerMode,
 			middlewareSnapshot: middleware.snapshot(),
+			supervised: approval.supervised,
 		};
+		if (approval.autoApprove !== undefined) spec.autoApprove = approval.autoApprove;
 		if (options?.selfDevMode) spec.selfDev = options.selfDevMode;
 		if (target.modelCapabilities) spec.modelCapabilities = target.modelCapabilities;
 		if (apiKey) spec.apiKey = apiKey;
@@ -770,7 +793,7 @@ export function createDispatchBundle(
 						dispatchScope: MODE_MATRIX[currentMode].dispatchScope,
 						workerMode,
 						requestedActions,
-						runtimeLimitations: runtimeLimitations(runtimeKind, target.runtime.id),
+						runtimeLimitations: approval.runtimeLimitations,
 					},
 					reproducibility: collectReproducibilityMetadata(cwd, safetyMetadata),
 					sessionId: null,
