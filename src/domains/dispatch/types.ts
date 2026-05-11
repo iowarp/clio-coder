@@ -52,6 +52,49 @@ export interface ToolCallStat {
 	totalDurationMs: number;
 }
 
+export interface SafetyBlockedAttempt {
+	tool: string;
+	mode?: string;
+	actionClass?: string;
+	ruleId?: string;
+	reasonCode?: string;
+	policySource?: string;
+	reason?: string;
+}
+
+export interface RunReceiptSafetySummary {
+	decisions: {
+		allowed: number;
+		blocked: number;
+		elevated: number;
+	};
+	blockedAttempts: SafetyBlockedAttempt[];
+	dispatchScope: "any" | "readonly" | "none";
+	workerMode: string;
+	requestedActions: ReadonlyArray<string>;
+	runtimeLimitations: ReadonlyArray<string>;
+}
+
+export interface RunReceiptReproducibility {
+	cwd: string;
+	git: {
+		branch: string | null;
+		commit: string | null;
+		dirty: boolean | null;
+		dirtyEntries: number | null;
+		statusHash: string | null;
+	};
+	safetyPolicy: {
+		version: number;
+		rulePackHash: string | null;
+		rulePackVersion: number | null;
+		projectPolicyPath: string | null;
+		projectPolicyHash: string | null;
+		projectPolicyValid: boolean | null;
+		selfDev: boolean | null;
+	};
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -74,6 +117,8 @@ export interface RunReceipt {
 	nodeVersion: string;
 	toolCalls: number;
 	toolStats: ToolCallStat[];
+	safety?: RunReceiptSafetySummary;
+	reproducibility?: RunReceiptReproducibility;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

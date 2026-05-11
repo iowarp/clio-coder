@@ -15,11 +15,13 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { SelfDevMode } from "../../selfdev/mode.js";
+import { SelfDevToolNames } from "../../selfdev/tool-names.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import type { ModesContract } from "../modes/contract.js";
+import { MODE_MATRIX, type ModeName } from "../modes/matrix.js";
 import type { PromptsContract } from "../prompts/index.js";
 import {
 	type CapabilityFlags,
@@ -30,15 +32,25 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
+import type { ActionClass } from "../safety/action-classifier.js";
 import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { type Ledger, openLedger } from "./state.js";
 import { countToolCalls, recordToolFinish, snapshotToolStats } from "./tool-stats.js";
-import type { RunEnvelope, RunKind, RunReceipt, RunReceiptDraft, RunStatus, ToolCallStat } from "./types.js";
+import type {
+	RunEnvelope,
+	RunKind,
+	RunReceipt,
+	RunReceiptDraft,
+	RunStatus,
+	SafetyBlockedAttempt,
+	ToolCallStat,
+} from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
@@ -158,15 +170,40 @@ function extractReasoningTokenCount(usage: unknown): number {
 	return 0;
 }
 
-function pickOrchestratorScope(safety: SafetyContract, mode: string | undefined): ScopeSpec {
+export function pickOrchestratorScope(safety: SafetyContract, mode: ModeName): ScopeSpec | null {
+	const dispatchScope = MODE_MATRIX[mode].dispatchScope;
+	if (dispatchScope === "none") return null;
+	if (dispatchScope === "readonly") return safety.scopes.readonly;
 	if (mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
 }
 
-function pickWorkerScope(safety: SafetyContract, recipe: AgentRecipe | null): ScopeSpec {
-	if (recipe?.mode === "advise") return safety.scopes.readonly;
-	if (recipe?.mode === "super") return safety.scopes.super;
+function pickWorkerScope(safety: SafetyContract, mode: ModeName): ScopeSpec {
+	if (mode === "advise") return safety.scopes.readonly;
+	if (mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
+}
+
+export function deriveRequestedActions(
+	tools: ReadonlyArray<ToolName>,
+	safety: SafetyContract,
+	selfDevToolNames: ReadonlyArray<ToolName> = [],
+): ReadonlyArray<ActionClass> {
+	const selfDev = new Set<string>(selfDevToolNames);
+	const actions = new Set<ActionClass>();
+	for (const tool of tools) {
+		const selfDevAction = selfDevActionClass(tool, selfDev);
+		const action = selfDevAction ?? safety.classify({ tool }).actionClass;
+		actions.add(action);
+	}
+	return [...actions].sort();
+}
+
+function selfDevActionClass(tool: string, selfDevTools: ReadonlySet<string>): ActionClass | null {
+	if (!selfDevTools.has(tool)) return null;
+	if (tool === SelfDevToolNames.ClioIntrospect || tool === SelfDevToolNames.ClioRecall) return "read";
+	if (tool === SelfDevToolNames.ClioRemember || tool === SelfDevToolNames.ClioMemoryMaintain) return "write";
+	return "unknown";
 }
 
 export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
@@ -233,6 +270,13 @@ function supportsRequiredCapabilities(
 		if (value === undefined || value === false || value === 0 || value === "") return false;
 	}
 	return true;
+}
+
+function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
+	if (runtimeKind === "http") return [];
+	return [
+		`${runtimeId} is a delegated ${runtimeKind} runtime; Clio records launch policy and final output but cannot fully observe internal tool calls made inside the external agent.`,
+	];
 }
 
 function pickCapabilityMatchedWorker(
@@ -465,14 +509,29 @@ export function createDispatchBundle(
 
 		const recipe = agents.get(req.agentId);
 		const currentMode = modes.current();
+		const workerMode = recipe?.mode ?? currentMode;
+		const recipeTools = recipe?.tools;
+		const allowedToolsBase =
+			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
+		const allowedTools = options?.selfDevMode
+			? [...new Set([...allowedToolsBase, ...(options.selfDevToolNames ?? [])])]
+			: allowedToolsBase;
+		const requestedActions = deriveRequestedActions(
+			allowedTools as ReadonlyArray<ToolName>,
+			safety,
+			options?.selfDevToolNames,
+		);
 		const orchScope = pickOrchestratorScope(safety, currentMode);
-		const workerScope = pickWorkerScope(safety, recipe);
+		if (orchScope === null) {
+			throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow dispatch`);
+		}
+		const workerScope = pickWorkerScope(safety, workerMode);
 
 		const verdict = admit(
 			{
 				requestedScope: workerScope,
 				orchestratorScope: orchScope,
-				requestedActions: ["read"],
+				requestedActions,
 				agentId: req.agentId,
 			},
 			safety.isSubset,
@@ -504,13 +563,6 @@ export function createDispatchBundle(
 		const systemPrompt = prependSelfDevPreamble(buildSystemPrompt(req, recipe), prompts);
 		const compiledPromptHash = promptHash(systemPrompt);
 
-		const recipeTools = recipe?.tools;
-		const allowedToolsBase =
-			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
-		const allowedTools = options?.selfDevMode
-			? [...new Set([...allowedToolsBase, ...(options.selfDevToolNames ?? [])])]
-			: allowedToolsBase;
-		const workerMode = recipe?.mode ?? currentMode;
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
 			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
 			: null;
@@ -539,6 +591,8 @@ export function createDispatchBundle(
 		}
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
+		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const spec: WorkerSpec = {
 			systemPrompt,
 			task: req.task,
@@ -577,8 +631,15 @@ export function createDispatchBundle(
 					};
 					payload?: {
 						tool?: string;
+						mode?: string;
 						durationMs?: number;
 						outcome?: "ok" | "error" | "blocked";
+						decision?: "allowed" | "blocked" | "elevated";
+						actionClass?: string;
+						ruleId?: string;
+						reasonCode?: string;
+						policySource?: string;
+						reason?: string;
 					};
 				};
 				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
@@ -589,6 +650,19 @@ export function createDispatchBundle(
 				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
+					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+					else if (event.payload.decision === "elevated") safetyDecisionCounts.elevated += 1;
+					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+						if (event.payload.mode !== undefined) attempt.mode = event.payload.mode;
+						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+						if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+						if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+						blockedAttempts.push(attempt);
+					}
 				}
 				yield raw;
 			}
@@ -667,6 +741,7 @@ export function createDispatchBundle(
 					: 0;
 				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
 				const reasoningTokenCount = tokenMeter.reasoningTokens;
+				const safetyMetadata = safety.policy?.metadata(currentMode) ?? null;
 				const receiptDraft: RunReceiptDraft = {
 					runId: envelope.id,
 					agentId: req.agentId,
@@ -689,6 +764,15 @@ export function createDispatchBundle(
 					nodeVersion: process.version,
 					toolCalls: countToolCalls(toolStats),
 					toolStats: snapshotToolStats(toolStats),
+					safety: {
+						decisions: safetyDecisionCounts,
+						blockedAttempts,
+						dispatchScope: MODE_MATRIX[currentMode].dispatchScope,
+						workerMode,
+						requestedActions,
+						runtimeLimitations: runtimeLimitations(runtimeKind, target.runtime.id),
+					},
+					reproducibility: collectReproducibilityMetadata(cwd, safetyMetadata),
 					sessionId: null,
 				};
 				ledgerRef.update(envelope.id, {

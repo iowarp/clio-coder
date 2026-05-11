@@ -457,15 +457,32 @@ describe("dispatch concurrency gate", () => {
 		const context = stubContext(scheduling);
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		const events = (async function* () {
-			yield { type: "clio_tool_finish", payload: { tool: "read", mode: "default", durationMs: 12, outcome: "ok" } };
-			yield { type: "clio_tool_finish", payload: { tool: "read", mode: "default", durationMs: 8, outcome: "ok" } };
 			yield {
 				type: "clio_tool_finish",
-				payload: { tool: "bash", mode: "default", durationMs: 50, outcome: "error", reason: "boom" },
+				payload: { tool: "read", mode: "default", durationMs: 12, outcome: "ok", decision: "allowed" },
 			};
 			yield {
 				type: "clio_tool_finish",
-				payload: { tool: "bash", mode: "default", durationMs: 0, outcome: "blocked", reason: "denied" },
+				payload: { tool: "read", mode: "default", durationMs: 8, outcome: "ok", decision: "allowed" },
+			};
+			yield {
+				type: "clio_tool_finish",
+				payload: { tool: "bash", mode: "default", durationMs: 50, outcome: "error", reason: "boom", decision: "allowed" },
+			};
+			yield {
+				type: "clio_tool_finish",
+				payload: {
+					tool: "bash",
+					mode: "default",
+					durationMs: 0,
+					outcome: "blocked",
+					reason: "denied",
+					decision: "blocked",
+					ruleId: "bash-default-deny",
+					reasonCode: "bash-default-deny",
+					policySource: "builtin-command-allowlist",
+					actionClass: "execute",
+				},
 			};
 		})();
 		const bundle = createDispatchBundle(context, {
@@ -496,6 +513,20 @@ describe("dispatch concurrency gate", () => {
 				{ tool: "bash", count: 2, ok: 0, errors: 1, blocked: 1, totalDurationMs: 50 },
 				{ tool: "read", count: 2, ok: 2, errors: 0, blocked: 0, totalDurationMs: 20 },
 			]);
+			deepStrictEqual(receipt.safety?.decisions, { allowed: 3, blocked: 1, elevated: 0 });
+			deepStrictEqual(receipt.safety?.blockedAttempts, [
+				{
+					tool: "bash",
+					mode: "default",
+					actionClass: "execute",
+					ruleId: "bash-default-deny",
+					reasonCode: "bash-default-deny",
+					policySource: "builtin-command-allowlist",
+					reason: "denied",
+				},
+			]);
+			strictEqual(receipt.reproducibility?.cwd, process.cwd());
+			strictEqual(receipt.reproducibility?.safetyPolicy.rulePackHash, null);
 		} finally {
 			await bundle.extension.stop?.();
 		}
