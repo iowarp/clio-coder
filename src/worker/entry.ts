@@ -73,6 +73,7 @@ async function main(): Promise<number> {
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
 	if (spec.selfDev) {
+		input.selfDev = spec.selfDev;
 		const selfdev = await loadSelfDevModule();
 		if (selfdev === null) {
 			process.stderr.write("[worker] selfdev module unavailable; private tools disabled\n");

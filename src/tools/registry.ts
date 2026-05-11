@@ -299,15 +299,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			};
 		}
 		const currentMode = deps.modes.current();
+		const safetyMode = grant?.mode ?? currentMode;
 		if (spec.allowedModes && !spec.allowedModes.includes(currentMode)) {
 			return {
 				kind: "terminal",
 				verdict: { kind: "not_visible", reason: `tool ${spec.name} not allowed in mode ${currentMode}` },
 			};
 		}
-		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, currentMode), spec);
+		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, safetyMode), spec);
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		}
+		if (decision.kind === "ask") {
+			return { kind: "park", decision };
 		}
 		const actionClass = decision.classification.actionClass;
 		// Action gate: a one-shot grant lets a parked call execute as if the
