@@ -9,6 +9,7 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../../src/domains/providers/types/runtime-descriptor.js";
+import { mapClioModeToClaudePermission } from "../../../src/engine/claude-code-sdk-runtime.js";
 import {
 	parseSubprocessOutput,
 	planSubprocessInvocation,
@@ -16,6 +17,8 @@ import {
 	startSubprocessWorkerRun,
 } from "../../../src/engine/subprocess-runtime.js";
 import type { AgentEvent, AgentMessage } from "../../../src/engine/types.js";
+
+const FULL_ACCESS_ENV = "CLIO_ALLOW_EXTERNAL_FULL_ACCESS";
 
 const ORIGINAL_PATH = process.env.PATH;
 
@@ -163,30 +166,187 @@ describe("subprocess-runtime startSubprocessWorkerRun", () => {
 		}
 	});
 
-	it("maps permissions conservatively in command plans", () => {
-		const advise = planSubprocessInvocation({
-			systemPrompt: "",
-			task: "task",
-			endpoint,
-			runtime: runtime("claude-code-cli"),
-			wireModelId: "claude-sonnet-4-6",
-			mode: "advise",
-		});
-		deepStrictEqual(
-			[advise.permissionStrategy, advise.args[advise.args.indexOf("--permission-mode") + 1]],
-			["read-only", "plan"],
-		);
+	describe("permission-strategy matrix (mode x CLIO_ALLOW_EXTERNAL_FULL_ACCESS)", () => {
+		const originalFullAccess = process.env[FULL_ACCESS_ENV];
 
-		const superCopilot = planSubprocessInvocation({
-			systemPrompt: "",
-			task: "task",
-			endpoint: { ...endpoint, runtime: "copilot-cli" },
-			runtime: runtime("copilot-cli"),
-			wireModelId: "gpt-5.4",
-			mode: "super",
+		afterEach(() => {
+			if (originalFullAccess === undefined) Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+			else process.env[FULL_ACCESS_ENV] = originalFullAccess;
 		});
-		strictEqual(superCopilot.permissionStrategy, "supervised");
-		ok(!superCopilot.args.includes("--allow-all-tools"));
+
+		interface CliCase {
+			id: string;
+			model: string;
+			// Flag tokens that must be absent unless full-access is granted.
+			dangerousFlags: ReadonlyArray<string>;
+			// Specific argv sequences expected in each cell. `null` means "absent".
+			cells: {
+				default: ReadonlyArray<string> | null;
+				advise: ReadonlyArray<string> | null;
+				superSupervised: ReadonlyArray<string> | null;
+				superFullAccess: ReadonlyArray<string>;
+			};
+		}
+
+		const cliCases: ReadonlyArray<CliCase> = [
+			{
+				id: "claude-code-cli",
+				model: "claude-sonnet-4-6",
+				dangerousFlags: ["bypassPermissions"],
+				cells: {
+					default: ["--permission-mode", "default"],
+					advise: ["--permission-mode", "plan"],
+					superSupervised: ["--permission-mode", "default"],
+					superFullAccess: ["--permission-mode", "bypassPermissions"],
+				},
+			},
+			{
+				id: "codex-cli",
+				model: "gpt-5.4",
+				dangerousFlags: ["danger-full-access", "--ask-for-approval"],
+				cells: {
+					default: null,
+					advise: ["--sandbox", "read-only"],
+					superSupervised: null,
+					superFullAccess: ["--sandbox", "danger-full-access", "--ask-for-approval", "never"],
+				},
+			},
+			{
+				id: "gemini-cli",
+				model: "gemini-2.5-pro",
+				dangerousFlags: ["yolo"],
+				cells: {
+					default: ["--approval-mode", "default"],
+					advise: ["--approval-mode", "plan"],
+					superSupervised: ["--approval-mode", "default"],
+					superFullAccess: ["--approval-mode", "yolo"],
+				},
+			},
+			{
+				id: "copilot-cli",
+				model: "gpt-5.4",
+				dangerousFlags: ["--allow-all-tools"],
+				cells: {
+					default: null,
+					advise: ["--mode", "plan"],
+					superSupervised: null,
+					superFullAccess: ["--allow-all-tools"],
+				},
+			},
+			{
+				id: "opencode-cli",
+				model: "anthropic/claude-sonnet-4-6",
+				dangerousFlags: ["--dangerously-skip-permissions"],
+				cells: {
+					default: null,
+					advise: null,
+					superSupervised: null,
+					superFullAccess: ["--dangerously-skip-permissions"],
+				},
+			},
+		];
+
+		function planFor(id: string, model: string, mode: "default" | "advise" | "super") {
+			return planSubprocessInvocation({
+				systemPrompt: "",
+				task: "task",
+				endpoint: { ...endpoint, runtime: id },
+				runtime: runtime(id),
+				wireModelId: model,
+				mode,
+			});
+		}
+
+		function assertContainsSequence(haystack: ReadonlyArray<string>, needle: ReadonlyArray<string>, label: string) {
+			outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+				for (let j = 0; j < needle.length; j++) {
+					if (haystack[i + j] !== needle[j]) continue outer;
+				}
+				return;
+			}
+			throw new Error(`${label}: expected argv to contain sequence [${needle.join(" ")}], got [${haystack.join(" ")}]`);
+		}
+
+		function assertAbsent(haystack: ReadonlyArray<string>, tokens: ReadonlyArray<string>, label: string) {
+			for (const token of tokens) {
+				ok(!haystack.includes(token), `${label}: expected token '${token}' to be absent, got [${haystack.join(" ")}]`);
+			}
+		}
+
+		for (const c of cliCases) {
+			it(`${c.id}: default mode -> supervised, no dangerous flags`, () => {
+				Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+				const plan = planFor(c.id, c.model, "default");
+				strictEqual(plan.permissionStrategy, "supervised", c.id);
+				assertAbsent(plan.args, c.dangerousFlags, `${c.id}/default`);
+				if (c.cells.default) assertContainsSequence(plan.args, c.cells.default, `${c.id}/default`);
+			});
+
+			it(`${c.id}: advise mode -> read-only with safe flags, no dangerous flags`, () => {
+				Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+				const plan = planFor(c.id, c.model, "advise");
+				strictEqual(plan.permissionStrategy, "read-only", c.id);
+				assertAbsent(plan.args, c.dangerousFlags, `${c.id}/advise`);
+				if (c.cells.advise) assertContainsSequence(plan.args, c.cells.advise, `${c.id}/advise`);
+			});
+
+			it(`${c.id}: super mode without env -> supervised, no dangerous flags`, () => {
+				Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+				const plan = planFor(c.id, c.model, "super");
+				strictEqual(plan.permissionStrategy, "supervised", c.id);
+				assertAbsent(plan.args, c.dangerousFlags, `${c.id}/super-no-env`);
+				if (c.cells.superSupervised) assertContainsSequence(plan.args, c.cells.superSupervised, `${c.id}/super-no-env`);
+			});
+
+			it(`${c.id}: super mode with env=0 stays supervised`, () => {
+				process.env[FULL_ACCESS_ENV] = "0";
+				const plan = planFor(c.id, c.model, "super");
+				strictEqual(plan.permissionStrategy, "supervised", c.id);
+				assertAbsent(plan.args, c.dangerousFlags, `${c.id}/super-env-0`);
+			});
+
+			it(`${c.id}: super mode with env=1 -> full-access with dangerous flags`, () => {
+				process.env[FULL_ACCESS_ENV] = "1";
+				const plan = planFor(c.id, c.model, "super");
+				strictEqual(plan.permissionStrategy, "full-access", c.id);
+				assertContainsSequence(plan.args, c.cells.superFullAccess, `${c.id}/super-env-1`);
+			});
+		}
+
+		it("claude-code-sdk: maps modes correctly and gates bypassPermissions on env=1", () => {
+			Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+			const def = mapClioModeToClaudePermission("default", undefined);
+			strictEqual(def.permissionMode, "default");
+			strictEqual(def.allowDangerouslySkipPermissions, false);
+
+			const advise = mapClioModeToClaudePermission("advise", undefined);
+			strictEqual(advise.permissionMode, "plan");
+			strictEqual(advise.allowDangerouslySkipPermissions, false);
+
+			const superNoEnv = mapClioModeToClaudePermission("super", undefined);
+			strictEqual(superNoEnv.permissionMode, "default");
+			strictEqual(superNoEnv.allowDangerouslySkipPermissions, false);
+
+			process.env[FULL_ACCESS_ENV] = "1";
+			const superEnv = mapClioModeToClaudePermission("super", undefined);
+			strictEqual(superEnv.permissionMode, "bypassPermissions");
+			strictEqual(superEnv.allowDangerouslySkipPermissions, true);
+
+			process.env[FULL_ACCESS_ENV] = "0";
+			const superEnvZero = mapClioModeToClaudePermission("super", undefined);
+			strictEqual(superEnvZero.permissionMode, "default");
+			strictEqual(superEnvZero.allowDangerouslySkipPermissions, false);
+		});
+
+		// Sanity: deepStrictEqual sanity for the existing pair (kept from prior coverage).
+		it("legacy: claude-code-cli advise pin still matches", () => {
+			Reflect.deleteProperty(process.env, FULL_ACCESS_ENV);
+			const plan = planFor("claude-code-cli", "claude-sonnet-4-6", "advise");
+			deepStrictEqual(
+				[plan.permissionStrategy, plan.args[plan.args.indexOf("--permission-mode") + 1]],
+				["read-only", "plan"],
+			);
+		});
 	});
 
 	it("parses structured CLI outputs into assistant text and usage", () => {
@@ -234,5 +394,31 @@ describe("subprocess-runtime startSubprocessWorkerRun", () => {
 			0,
 		);
 		strictEqual(gemini.text, "hi there");
+	});
+
+	it("reads gemini per-call token counts from `stats` (modern CLI shape)", () => {
+		const plan = planSubprocessInvocation({
+			systemPrompt: "",
+			task: "task",
+			endpoint: { ...endpoint, runtime: "gemini-cli" },
+			runtime: runtime("gemini-cli"),
+			wireModelId: "gemini-3-flash-preview",
+		});
+		const parsed = parseSubprocessOutput(
+			plan,
+			[
+				JSON.stringify({ type: "message", message: { role: "assistant", content: "OK" } }),
+				JSON.stringify({
+					type: "result",
+					status: "success",
+					stats: { total_tokens: 10345, input_tokens: 9948, output_tokens: 28, cached: 0 },
+				}),
+			].join("\n"),
+			"",
+			0,
+		);
+		strictEqual(parsed.usage?.input, 9948);
+		strictEqual(parsed.usage?.output, 28);
+		strictEqual(parsed.usage?.totalTokens, 10345);
 	});
 });
