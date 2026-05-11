@@ -107,6 +107,7 @@ export async function handleRun(
 			...(options.requiredCapabilities && options.requiredCapabilities.length > 0
 				? { requiredCapabilities: options.requiredCapabilities }
 				: {}),
+			supervised: true,
 		};
 		const handle = await dispatch.dispatch(request);
 		io.stdout(`\n[run] runId=${handle.runId}\n`);
