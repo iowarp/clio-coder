@@ -154,7 +154,68 @@ const CLIO_TOOL_TO_CLAUDE = new Map<ToolName, string>([
 ]);
 
 export function createClaudeCodeSdkRuntime(options: ClaudeCodeSdkRuntimeOptions = {}): SessionfulRuntime {
-	return new ClaudeCodeSdkRuntime(options.createQuery ?? ((input) => query(input)), options);
+	return new ClaudeCodeSdkRuntime(
+		options.createQuery ?? createFauxAskQueryFromEnv() ?? ((input) => query(input)),
+		options,
+	);
+}
+
+function createFauxAskQueryFromEnv(): CreateClaudeQuery | null {
+	if (process.env.CLIO_CLAUDE_SDK_FAUX_ASK !== "1") return null;
+	return ({ prompt, options }) => {
+		async function* iterate(): AsyncGenerator<SDKMessage, void> {
+			for await (const _message of prompt) {
+				const toolName = process.env.CLIO_CLAUDE_SDK_FAUX_TOOL ?? "MysteryTool";
+				const toolUseID = process.env.CLIO_CLAUDE_SDK_FAUX_TOOL_USE_ID ?? "tool-approval-e2e";
+				const args = readFauxAskArgs();
+				const result = await options.canUseTool?.(toolName, args, {
+					toolUseID,
+					signal: new AbortController().signal,
+				} as never);
+				yield fauxSdkResultMessage(result?.behavior === "allow" ? "approval allowed" : "approval denied");
+				return;
+			}
+		}
+		const generator = iterate();
+		return Object.assign(generator, {
+			async interrupt() {},
+			async setPermissionMode(_mode: string) {},
+			async setModel(_model?: string) {},
+			async setMaxThinkingTokens(_maxThinkingTokens: number | null) {},
+			close() {},
+		}) as ClaudeQuery;
+	};
+}
+
+function readFauxAskArgs(): Record<string, unknown> {
+	const raw = process.env.CLIO_CLAUDE_SDK_FAUX_ARGS;
+	if (!raw) return { path: "package.json" };
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+	} catch {
+		return { path: raw };
+	}
+	return { path: String(raw) };
+}
+
+function fauxSdkResultMessage(text: string): SDKMessage {
+	return {
+		type: "result",
+		subtype: "success",
+		duration_ms: 1,
+		duration_api_ms: 1,
+		is_error: false,
+		num_turns: 1,
+		result: text,
+		stop_reason: "stop",
+		total_cost_usd: 0,
+		usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+		modelUsage: {},
+		permission_denials: [],
+		uuid: "faux-sdk-result",
+		session_id: "faux-sdk-session",
+	} as never;
 }
 
 export function mapClioModeToClaudePermission(

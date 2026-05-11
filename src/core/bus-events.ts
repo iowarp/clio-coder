@@ -26,6 +26,8 @@ export const BusChannels = {
 	DispatchProgress: "dispatch.progress",
 	DispatchCompleted: "dispatch.completed",
 	DispatchFailed: "dispatch.failed",
+	ToolApprovalRequest: "tool.approval.request",
+	ToolApprovalResponse: "tool.approval.response",
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
 	AgentStatusChanged: "agent.status.changed",
