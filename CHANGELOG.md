@@ -5,18 +5,105 @@ Keep a Changelog.
 
 ## Unreleased
 
+## 0.1.8 - 2026-05-11
+
+Clio Coder 0.1.8 wires the `claude-code-sdk` runtime into Clio's safety
+policy engine, adds bidirectional approval IPC over the worker subprocess's
+stdin, exposes a TUI overlay for `ask` decisions, and hardens
+`clio configure` against unknown models and oversized context windows. It
+also corrects the gemini-cli token parser and surfaces SDK safety
+decisions in the receipt.
+
 ### Added
 
-- Added the Clio extension package model with filesystem install state, user/project scopes, enable/disable/remove behavior, discovery diagnostics, and package resource roots for skills and prompt templates.
-- Added `clio extensions ...` CLI commands plus `/extensions` in the TUI for installed extension visibility.
-- Added Clio share archives (`kind: "clio-share-archive"`, `formatVersion: 1`) for project context, prompts, skills, settings fragments, and extension bundles.
-- Added `clio share export|import|inspect` plus `clio export` / `clio import` aliases and `/share export|import` TUI flows with dry-run conflict reporting.
-- Redesigned the welcome dashboard around a CLIO coding-engine view with project familiarity, confidence, active capabilities, user preferences, extension counts, and level/progression status.
+- Added the Clio extension package model with filesystem install state,
+  user/project scopes, enable/disable/remove behavior, discovery
+  diagnostics, and package resource roots for skills and prompt templates.
+- Added `clio extensions ...` CLI commands plus `/extensions` in the TUI
+  for installed extension visibility.
+- Added Clio share archives (`kind: "clio-share-archive"`,
+  `formatVersion: 1`) for project context, prompts, skills, settings
+  fragments, and extension bundles.
+- Added `clio share export|import|inspect` plus `clio export` /
+  `clio import` aliases and `/share export|import` TUI flows with dry-run
+  conflict reporting.
+- Redesigned the welcome dashboard around a CLIO coding-engine view with
+  project familiarity, confidence, active capabilities, user preferences,
+  extension counts, and level/progression status.
+- Added `validateModelChoice` in `clio configure` so unknown models are
+  rejected with exit 2 and a listing of the known catalog. A new `--force`
+  flag escapes the check with a `warning:` line for advanced users who
+  know the runtime accepts the model anyway.
+- Added context-window override validation. `clio configure
+  --context-window N` is rejected with exit 2 when `N` exceeds the
+  catalog's known maximum for the resolved model. `--force` warns and
+  proceeds.
+- Added a safety policy bridge for the `claude-code-sdk` runtime
+  (`src/engine/sdk-policy-bridge.ts`). The bridge maps Claude Code tool
+  names to Clio tool names, evaluates them against Clio's `SafetyContract`,
+  and returns `allow|block|ask` decisions consistent with the native
+  worker.
+- Added a bidirectional approval IPC channel over the worker subprocess's
+  stdin. The worker entry now demultiplexes its stdin line-by-line
+  (`src/worker/stdin-demux.ts`), allowing the orchestrator to deliver
+  `clio_tool_approval_response` NDJSON messages after the initial spec.
+- Added `SpawnedWorker.onApprovalRequest` / `sendApprovalResponse`,
+  `clio_tool_approval_request` and `clio_tool_approval_response` event
+  types, and dispatch derivation of effective `autoApprove` from a new
+  `supervised` flag on `DispatchRequest`/`JobSpec`/`WorkerSpec`.
+- Added `clio run --auto-approve <allow|deny>` and a dispatch policy that
+  appends `"headless ask auto-denied; pass --auto-approve to override"`
+  to `safety.runtimeLimitations` when an unsupervised run does not opt in.
+- Added a TUI tool-approval overlay
+  (`src/interactive/overlays/tool-approval-overlay.ts`) that prints the
+  Claude tool name, arguments, classification, and policy hint; `[A]`,
+  `[D]`, and `Esc` resolve allow / deny / deny.
+- Added receipt accounting for SDK safety decisions. `buildCanUseTool`
+  now emits `clio_tool_finish` events for every allow, block, elevated
+  (ask resolved to allow), and ask-resolved-to-deny path so the receipt's
+  `safety.decisions` counters and `safety.blockedAttempts` reflect what
+  Clio gated even when the underlying tool runs inside Claude Code.
+
+### Fixed
+
+- `subprocess-runtime` now reads gemini-cli per-call tokens from
+  `event.stats` (falling back to `event.usage` for older builds) so
+  gemini receipts no longer report `tokenCount: 0` on successful turns.
+
+### Changed
+
+- `clio configure` reuses the new `--force` flag across model validation
+  and context-window validation. Without `--force`, both checks fail
+  closed and no settings are written.
+- The `claude-code-sdk` runtime constructor accepts an optional
+  `SafetyContract`, an `autoApprove` mode, and an `awaitApproval`
+  callback. When supervised, the runtime emits a
+  `clio_tool_approval_request` and awaits the orchestrator's reply over
+  the worker stdin channel.
 
 ### Tests
 
-- Added focused extension tests for install state, project/user precedence, malformed packages, and extension-backed resource loading.
-- Added share archive tests for round trips, version mismatch warnings, dry-run conflicts, forced imports, and corrupted archive handling.
+- Added focused extension tests for install state, project/user
+  precedence, malformed packages, and extension-backed resource loading.
+- Added share archive tests for round trips, version mismatch warnings,
+  dry-run conflicts, forced imports, and corrupted archive handling.
+- Added `validateModelChoice` unit tests and CLI integration cases for
+  unknown / known / forced-unknown configure flows.
+- Added context-window validation integration tests for known / over-cap
+  / over-cap-with-force combinations.
+- Added SDK policy bridge tests for the Claude-to-Clio tool mapping and
+  for `allow|block|ask` evaluation across modes.
+- Added worker stdin demultiplexer tests covering happy path, stdin EOF,
+  timeout, and chunked-line delivery.
+- Added a dispatch approval handshake integration test that drives a
+  stub worker over `spawnNativeWorker` and asserts the response reaches
+  the worker over stdin.
+- Added e2e coverage for the tool-approval TUI overlay, the
+  `--auto-approve` flag, and the `(runtime x mode x env)` permission
+  matrix for the five subprocess CLI runtimes.
+- Added unit tests pinning the new `clio_tool_finish` emit shape for
+  each SDK decision path (policy allow, policy block, autoApprove allow,
+  autoApprove deny, supervised IPC allow, supervised IPC deny).
 
 ## 0.1.7 - 2026-05-11
 
