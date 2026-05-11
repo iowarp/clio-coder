@@ -21,6 +21,7 @@ import type { EndpointDescriptor } from "../domains/providers/types/endpoint-des
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { printError, printOk } from "./shared.js";
+import { validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio configure
 
@@ -44,6 +45,7 @@ Non-interactive flags:
   --worker-profile-model <id>      model to use for --worker-profile
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
+  --force                          allow a model outside the runtime catalog
   --gateway                        mark the target as a gateway
   --lifecycle <user-managed|clio-managed>
                                   resident model lifecycle policy
@@ -88,6 +90,7 @@ interface ParsedArgs {
 	workerProfileModel?: string;
 	apiKeyEnv?: string;
 	apiKey?: string;
+	force: boolean;
 	gateway: boolean;
 	lifecycle?: EndpointDescriptor["lifecycle"];
 	setOrchestrator: boolean;
@@ -103,6 +106,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		help: false,
 		list: false,
 		all: false,
+		force: false,
 		gateway: false,
 		setOrchestrator: false,
 		setWorkerDefault: false,
@@ -162,6 +166,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--api-key":
 				out.apiKey = need();
+				break;
+			case "--force":
+				out.force = true;
 				break;
 			case "--gateway":
 				out.gateway = true;
@@ -292,6 +299,26 @@ function buildProbeContext(): ProbeContext {
 		credentialsPresent: credentialsPresent(),
 		httpTimeoutMs: 5000,
 	};
+}
+
+function runtimeKnownModelsFor(runtimeId: string): ReadonlyArray<string> {
+	return listKnownModelsForRuntime(runtimeId);
+}
+
+function validateResolvedModel(runtimeId: string, modelId: string | undefined, force: boolean): boolean {
+	if (!modelId) return true;
+	const validation = validateModelChoice({
+		runtimeId,
+		modelId,
+		knownModels: runtimeKnownModelsFor(runtimeId),
+		force,
+	});
+	if (!validation.ok) {
+		process.stderr.write(`error: ${validation.reason}\n`);
+		return false;
+	}
+	if (validation.warning) process.stderr.write(`warning: ${validation.warning}\n`);
+	return true;
 }
 
 async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: EndpointDescriptor): Promise<ProbeResult | null> {
@@ -553,11 +580,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
+	const model = args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0];
+	if (!validateResolvedModel(runtime.id, model, args.force)) return 2;
 	const descriptor = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
-		...((args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0])
-			? { model: args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0] }
-			: {}),
+		...(model ? { model } : {}),
 		...(wireModels.length > 0 ? { wireModels } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
@@ -921,12 +948,20 @@ async function runInteractive(
 		for (const [index, wireModel] of wireModels.entries()) {
 			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
-		const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);
-		if (pickedModel === null) return 0;
-		if (pickedModel.length > 0) model = pickedModel;
-	} else if (!model) {
-		const manual = await ask(rl, "Default model id (blank to leave empty)", "");
-		if (manual && manual.length > 0) model = manual;
+		for (;;) {
+			const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);
+			if (pickedModel === null) return 0;
+			if (pickedModel.length > 0) model = pickedModel;
+			if (validateResolvedModel(runtime.id, model, defaults.force)) break;
+		}
+	} else {
+		for (;;) {
+			if (model && validateResolvedModel(runtime.id, model, defaults.force)) break;
+			const manual = await ask(rl, "Default model id (blank to leave empty)", model ?? "");
+			if (manual === null) return 0;
+			model = manual.length > 0 ? manual : undefined;
+			if (!model) break;
+		}
 	}
 
 	const gatewayDefault = defaults.gateway || existing?.gateway === true;

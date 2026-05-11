@@ -286,7 +286,7 @@ describe("cli configure and targets", () => {
 			"--id",
 			"claude-worker",
 			"--model",
-			"sonnet",
+			"claude-sonnet-4-6",
 			"--set-worker-default",
 		]);
 		strictEqual(code, 0);
@@ -296,7 +296,10 @@ describe("cli configure and targets", () => {
 		ok(target, "expected claude-worker target");
 		strictEqual(target.runtime, "claude-code-cli");
 		strictEqual(target.auth, undefined);
-		deepStrictEqual([settings.workers.default.endpoint, settings.workers.default.model], ["claude-worker", "sonnet"]);
+		deepStrictEqual(
+			[settings.workers.default.endpoint, settings.workers.default.model],
+			["claude-worker", "claude-sonnet-4-6"],
+		);
 	});
 
 	it("configure --list shows SDK and CLI runtimes with native CLI auth", async () => {
@@ -310,6 +313,30 @@ describe("cli configure and targets", () => {
 				ok(line.includes(" cli "), `expected native cli auth label in line: ${line}`);
 			}
 		}
+	});
+
+	it("rejects an unknown model with exit 2 and lists known models in stderr", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand(["--id", "codex-bad", "--runtime", "codex-cli", "--model", "gpt-5.1-codex-mini"]),
+		);
+		strictEqual(out.result, 2);
+		ok(out.stderr.includes("not in codex-cli catalog"), `stderr=${out.stderr}`);
+		ok(out.stderr.includes("gpt-5.4"), `stderr=${out.stderr}`);
+	});
+
+	it("accepts an unknown model with --force and emits a warning", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand(["--id", "codex-forced", "--runtime", "codex-cli", "--model", "exotic-future-model", "--force"]),
+		);
+		strictEqual(out.result, 0);
+		ok(out.stderr.includes("warning") || out.stdout.includes("warning"), "expected warning surfaced");
+	});
+
+	it("accepts a known model silently", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand(["--id", "codex-ok", "--runtime", "codex-cli", "--model", "gpt-5.4-mini"]),
+		);
+		strictEqual(out.result, 0);
 	});
 
 	it("persists a Claude SDK target without Clio-managed credentials", async () => {
