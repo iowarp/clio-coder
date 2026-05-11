@@ -9,35 +9,18 @@
  */
 
 import type { ToolName } from "../core/tool-names.js";
-import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
-import type { CapabilityFlags, EndpointDescriptor } from "../domains/providers/index.js";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import type { SelfDevMode } from "../selfdev/mode.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
+import { createWorkerStdinDemux } from "./stdin-demux.js";
 
 type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
 type SelfDevModule = typeof import("../selfdev/index.js");
 
 const SELFDEV_IMPORT_SPECIFIER = ["..", "selfdev", "index.js"].join("/");
-
-interface WorkerSpec {
-	systemPrompt: string;
-	task: string;
-	endpoint: EndpointDescriptor;
-	runtimeId: string;
-	wireModelId: string;
-	modelCapabilities?: Partial<CapabilityFlags>;
-	sessionId?: string;
-	apiKey?: string;
-	thinkingLevel?: WorkerRunInput["thinkingLevel"];
-	allowedTools?: ReadonlyArray<string>;
-	mode?: string;
-	middlewareSnapshot?: MiddlewareSnapshot;
-	selfDev?: SelfDevMode;
-}
 
 async function loadSelfDevModule(): Promise<SelfDevModule | null> {
 	try {
@@ -48,7 +31,14 @@ async function loadSelfDevModule(): Promise<SelfDevModule | null> {
 }
 
 async function main(): Promise<number> {
-	const spec = await readSpecFromStdin();
+	const demux = createWorkerStdinDemux();
+	process.stdin.setEncoding("utf8");
+	process.stdin.on("data", (chunk: string) => demux.feed(chunk));
+	process.stdin.on("end", () => demux.eof());
+	process.stdin.on("error", () => demux.eof());
+	process.stdin.resume();
+
+	const spec = await demux.readSpec();
 	const stopHeartbeat = startWorkerHeartbeat();
 	const mode = (spec.mode ?? "default") as WorkerMode;
 
@@ -106,25 +96,6 @@ async function main(): Promise<number> {
 		// process exits.
 		await disposeLmStudioClients();
 	}
-}
-
-async function readSpecFromStdin(): Promise<WorkerSpec> {
-	return new Promise((resolve, reject) => {
-		let data = "";
-		process.stdin.setEncoding("utf8");
-		process.stdin.resume();
-		process.stdin.on("data", (chunk) => {
-			data += chunk;
-		});
-		process.stdin.on("end", () => {
-			try {
-				resolve(JSON.parse(data) as WorkerSpec);
-			} catch (err) {
-				reject(err);
-			}
-		});
-		process.stdin.on("error", reject);
-	});
 }
 
 main().then(
