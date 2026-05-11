@@ -42,6 +42,13 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprovalResponse"> {
+	return {
+		onApprovalRequest: () => {},
+		sendApprovalResponse: () => {},
+	};
+}
+
 const FAKE_PREAMBLE = "You are running under Clio self-development.\nThe repository is Clio's own source.";
 
 function stubContext(opts: { withPreamble?: boolean } = {}): DomainContext {
@@ -206,6 +213,7 @@ describe("dispatch selfdev passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
@@ -254,6 +262,7 @@ describe("dispatch selfdev passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
@@ -325,6 +334,7 @@ describe("dispatch selfdev passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
@@ -353,6 +363,7 @@ describe("dispatch selfdev passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});

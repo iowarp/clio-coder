@@ -176,6 +176,8 @@ describe("dispatch auth resolution", () => {
 					events: (async function* () {})(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					onApprovalRequest: () => {},
+					sendApprovalResponse: () => {},
 				};
 			},
 		});

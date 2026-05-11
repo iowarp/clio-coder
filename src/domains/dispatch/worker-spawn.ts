@@ -14,6 +14,11 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import {
+	isToolApprovalRequest,
+	type ToolApprovalRequestPayload,
+	type ToolApprovalResponsePayload,
+} from "../../engine/worker-events.js";
 import type { SelfDevMode } from "../../selfdev/mode.js";
 import type { MiddlewareSnapshot } from "../middleware/index.js";
 import type { CapabilityFlags, EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
@@ -40,6 +45,8 @@ export interface SpawnedWorker {
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
 	heartbeatAt: { current: number };
+	onApprovalRequest(handler: (req: ToolApprovalRequestPayload) => Promise<ToolApprovalResponsePayload>): void;
+	sendApprovalResponse(response: ToolApprovalResponsePayload): void;
 }
 
 export interface SpawnOptions {
@@ -74,6 +81,40 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	const pending: unknown[] = [];
 	const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
 	let finished = false;
+	let approvalHandler: ((req: ToolApprovalRequestPayload) => Promise<ToolApprovalResponsePayload>) | null = null;
+
+	function sendApprovalResponse(response: ToolApprovalResponsePayload): void {
+		try {
+			child.stdin?.write(`${JSON.stringify({ type: "clio_tool_approval_response", payload: response })}\n`);
+		} catch {
+			// Worker may have exited between request handling and response write.
+		}
+	}
+
+	function intercept(value: unknown): boolean {
+		if (!isToolApprovalRequest(value)) return false;
+		heartbeatAt.current = Date.now();
+		const payload = value.payload;
+		const handler = approvalHandler;
+		if (!handler) {
+			sendApprovalResponse({
+				requestId: payload.requestId,
+				decision: "deny",
+				reason: "no approval handler registered",
+			});
+			return true;
+		}
+		void handler(payload)
+			.then(sendApprovalResponse)
+			.catch((err) => {
+				sendApprovalResponse({
+					requestId: payload.requestId,
+					decision: "deny",
+					reason: err instanceof Error ? err.message : String(err),
+				});
+			});
+		return true;
+	}
 
 	function push(value: unknown): void {
 		heartbeatAt.current = Date.now();
@@ -112,7 +153,6 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 
 	if (pid !== null && child.stdin) {
 		child.stdin.write(`${JSON.stringify(spec)}\n`);
-		child.stdin.end();
 	}
 
 	if (child.stdout) {
@@ -121,7 +161,8 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 			const trimmed = line.trim();
 			if (trimmed.length === 0) return;
 			try {
-				push(JSON.parse(trimmed));
+				const value = JSON.parse(trimmed) as unknown;
+				if (!intercept(value)) push(value);
 			} catch {
 				// malformed line; stderr carries diagnostics
 			}
@@ -152,6 +193,11 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 
 	const promise = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
 		child.on("close", (code, signal) => {
+			try {
+				child.stdin?.end();
+			} catch {
+				// stdin may already be closed.
+			}
 			end();
 			if (sawSpawnError) {
 				resolve({ exitCode: null, signal: null });
@@ -167,6 +213,11 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 
 	const abort = (): void => {
 		if (!isAlive()) return;
+		try {
+			child.stdin?.end();
+		} catch {
+			// process may already be closing
+		}
 		try {
 			child.kill("SIGTERM");
 		} catch {
@@ -190,5 +241,9 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		events,
 		abort,
 		heartbeatAt,
+		onApprovalRequest(handler): void {
+			approvalHandler = handler;
+		},
+		sendApprovalResponse,
 	};
 }

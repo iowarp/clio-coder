@@ -38,6 +38,13 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprovalResponse"> {
+	return {
+		onApprovalRequest: () => {},
+		sendApprovalResponse: () => {},
+	};
+}
+
 function stubContext(): DomainContext & { bus: ReturnType<typeof createSafeEventBus> } {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const endpoint: EndpointDescriptor = {
@@ -216,6 +223,7 @@ describe("dispatch memory passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
@@ -259,6 +267,7 @@ describe("dispatch memory passthrough", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
 				};
 			},
 		});
