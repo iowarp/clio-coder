@@ -26,8 +26,8 @@ import type {
 	SessionRuntimeTurnResult,
 } from "./session-runtime.js";
 import type { AgentEvent, AgentMessage } from "./types.js";
-import type { ClioToolApprovalRequest, ToolApprovalResponsePayload } from "./worker-events.js";
-import { createWorkerSafety } from "./worker-tools.js";
+import type { ClioToolApprovalRequest, ClioToolFinishEvent, ToolApprovalResponsePayload } from "./worker-events.js";
+import { createWorkerSafety, type ToolFinishEvent } from "./worker-tools.js";
 
 type CreateClaudeQuery = (input: { prompt: AsyncIterable<SDKUserMessage>; options: ClaudeQueryOptions }) => ClaudeQuery;
 
@@ -80,7 +80,7 @@ export interface BuildCanUseToolInput {
 	mode: ModeName;
 	autoApprove?: "allow" | "deny" | undefined;
 	awaitApproval: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
-	emit: (event: AgentEvent | ClioToolApprovalRequest) => void;
+	emit: (event: AgentEvent | ClioToolApprovalRequest | ClioToolFinishEvent) => void;
 }
 
 export function buildCanUseTool(input: BuildCanUseToolInput): CanUseTool {
@@ -101,18 +101,54 @@ export function buildCanUseTool(input: BuildCanUseToolInput): CanUseTool {
 		}
 
 		const toolArgs = isRecord(args) ? args : {};
+		const startedAt = Date.now();
 		const decision = evaluateClaudeToolCall(toolName, toolArgs, mode, safety);
-		if (decision.decision === "allow") return { behavior: "allow" };
-		if (decision.decision === "block") return { behavior: "deny", message: decision.reason };
+		const clioToolName = mapClaudeToolName(toolName);
+		const finishTool = clioToolName ?? `claude:${toolName}`;
 
-		if (autoApprove === "allow") return { behavior: "allow" };
-		if (autoApprove === "deny") return { behavior: "deny", message: decision.reason };
+		const emitFinish = (
+			decisionKind: "allowed" | "blocked" | "elevated",
+			outcome: "ok" | "blocked",
+			reason: string | undefined,
+		): void => {
+			const payload: ToolFinishEvent = {
+				tool: finishTool,
+				mode,
+				durationMs: Math.max(0, Date.now() - startedAt),
+				outcome,
+				decision: decisionKind,
+				actionClass: decision.classification.actionClass,
+			};
+			if (reason !== undefined) payload.reason = reason;
+			if (decision.policy?.ruleId !== undefined) payload.ruleId = decision.policy.ruleId;
+			if (decision.policy?.reasonCode !== undefined) payload.reasonCode = decision.policy.reasonCode;
+			if (decision.policy?.policySource !== undefined) payload.policySource = decision.policy.policySource;
+			emit({ type: "clio_tool_finish", payload });
+		};
+
+		if (decision.decision === "allow") {
+			emitFinish("allowed", "ok", undefined);
+			return { behavior: "allow" };
+		}
+		if (decision.decision === "block") {
+			emitFinish("blocked", "blocked", decision.reason);
+			return { behavior: "deny", message: decision.reason };
+		}
+
+		if (autoApprove === "allow") {
+			emitFinish("elevated", "ok", "auto-approved by --auto-approve allow");
+			return { behavior: "allow" };
+		}
+		if (autoApprove === "deny") {
+			emitFinish("blocked", "blocked", `auto-denied by --auto-approve deny: ${decision.reason}`);
+			return { behavior: "deny", message: decision.reason };
+		}
 
 		const requestId = options.toolUseID ?? randomUUID();
 		const payload = {
 			requestId,
 			claudeToolName: toolName,
-			clioToolName: mapClaudeToolName(toolName),
+			clioToolName,
 			args: toolArgs,
 			classification: {
 				actionClass: decision.classification.actionClass,
@@ -125,11 +161,17 @@ export function buildCanUseTool(input: BuildCanUseToolInput): CanUseTool {
 
 		try {
 			const response = await awaitApproval(requestId);
-			return response.decision === "allow"
-				? { behavior: "allow" }
-				: { behavior: "deny", message: response.reason ?? "user denied" };
+			if (response.decision === "allow") {
+				emitFinish("elevated", "ok", response.reason ?? "approved via supervised IPC");
+				return { behavior: "allow" };
+			}
+			const denyReason = response.reason ?? "user denied";
+			emitFinish("blocked", "blocked", denyReason);
+			return { behavior: "deny", message: denyReason };
 		} catch (err) {
-			return { behavior: "deny", message: err instanceof Error ? err.message : "approval channel error" };
+			const errMessage = err instanceof Error ? err.message : "approval channel error";
+			emitFinish("blocked", "blocked", errMessage);
+			return { behavior: "deny", message: errMessage };
 		}
 	};
 }
