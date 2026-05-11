@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.7-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.8-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,20 +30,21 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.7**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.8**.
 
-## What's new in v0.1.7
+## What's new in v0.1.8
 
-A safety architecture release. The headline is that arbitrary Bash is no longer the path of least resistance for the model.
+A supervised-control and configure-hardening release. The headline is that the `claude-code-sdk` runtime now goes through Clio's safety policy with a real overlay for `ask` decisions, and `clio configure` rejects nonsense before it reaches the runtime.
 
-- **Shared safety policy engine.** Orchestrator and native workers run the same evaluator over the same `damage-control-rules.yaml` packs and `.clio/safety.yaml` project policy. Workers no longer have a weaker view of what is dangerous.
-- **L4-style default-deny Bash.** Default mode admits a curated allowlist (`ls`, `pwd`, `git status/diff/log`, `npm test/lint/build/typecheck/ci`, `pytest`, `cargo test`, `go test`, `make test`). Anything else needs an audited project policy entry or `Alt+S` super elevation. Shell operators (`|`, `&&`, `;`, `>`, `<`, `` ` ``, `$(...)`) are denied by default.
-- **Typed execution tools.** `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script` use fixed argv vectors, bounded cwd, timeouts, and output caps. No shell parsing.
-- **Project policy hardening.** `.clio/safety.yaml` is strictly validated, snapshotted for the active run, and rejects absolute or `..`-escaping cwds. Entries without `cwd` are bound to the policy root. Default-mode bash with a caller cwd outside the workspace is rejected as `bash-cwd-escape`.
-- **Stronger receipts.** Every receipt records safety decision counts, blocked attempts with rule provenance, rule-pack hash, project policy fingerprint, git commit/branch and dirty-state hash, plus a SHA-256 integrity digest over receipt and ledger fields.
-- **External runtime opt-in.** Super mode does not map external CLI/SDK runtimes (Claude Code, Codex, Copilot, Gemini, OpenCode) to bypass/full-access unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is set.
+- **Configure validation.** `clio configure --runtime <r> --model <m>` rejects models that are not in the runtime catalog (exit 2, with a known-models listing). `--context-window N` is rejected when it exceeds the catalog max. Both gates share a `--force` flag that warns instead of failing for advanced users.
+- **SDK canUseTool wired to Clio safety.** The `claude-code-sdk` runtime now calls Clio's `SafetyContract` for every Claude Code tool request. Allow / block / ask decisions match what native Clio workers would do for the same tool.
+- **Bidirectional approval IPC.** Workers and the orchestrator now talk both directions over the worker subprocess's stdin. `clio_tool_approval_request` and `clio_tool_approval_response` NDJSON messages carry safety asks to the TUI and decisions back to the worker.
+- **Tool-approval overlay.** Supervised SDK runs open a TUI overlay showing the Claude tool, arguments, classification, and policy hint. `[A]` allows once, `[D]` and `Esc` deny.
+- **`--auto-approve` flag.** `clio run --auto-approve <allow|deny>` skips the IPC handshake for headless runs. Unsupervised runs without the flag auto-deny ask decisions and record `"headless ask auto-denied; pass --auto-approve to override"` in the receipt.
+- **Receipt accounting for SDK gates.** SDK runs now record allow / elevated / blocked counts and populate `safety.blockedAttempts` so the receipt reflects what Clio actually gated.
+- **gemini-cli token fix.** Receipts for gemini runs now show real `tokenCount` values; the parser reads the per-call `stats` field gemini's `stream-json` emits.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full entry and [docs/specs/safety-model.md](docs/specs/safety-model.md) for the spec.
+See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
 ## Use it if
 
@@ -92,14 +93,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.1.7
+git checkout v0.1.8
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.7` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.8` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -485,7 +486,7 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 ### Enforcement layers
 
 1. **Damage-control rules.** Base hard blocks for things like `rm -rf /`, `git push --force`, `dd` writes to block devices, fork bombs, and pipe-to-shell installers. Applied identically in the orchestrator and native workers. See `damage-control-rules.yaml`.
-2. **Default-deny Bash.** Default mode denies arbitrary Bash. The allowlist covers common engineering commands (see the v0.1.7 highlights above). Anything else needs an audited project policy entry or super elevation. Shell operators are denied unless a project policy entry explicitly opts in.
+2. **Default-deny Bash.** Default mode denies arbitrary Bash. The allowlist covers common engineering commands (see [docs/specs/safety-model.md](docs/specs/safety-model.md) for the full list). Anything else needs an audited project policy entry or super elevation. Shell operators are denied unless a project policy entry explicitly opts in.
 3. **Typed execution tools.** `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script` use fixed argv vectors with bounded cwd, timeouts, and output caps. No `/bin/bash -lc`.
 4. **Project policy.** `.clio/safety.yaml` (schema v1) defines reviewed commands with `id`, `command`, optional relative `cwd`, `timeoutMs`, `maxOutputBytes`, `actionClass`, `shellOperators`, `env`, `requireConfirmation`, `rationale`, `owner`, `comment`. Strict validation: unknown keys, wrong types, absolute cwd, and `..`-escaping cwd reject the entire policy. Entries without `cwd` are bound to the policy root. Active runs use the snapshot the engine loaded at start, so an agent cannot edit and benefit from the new allowlist in the same run.
 5. **Dispatch admission.** Worker scope must be a subset of orchestrator scope, and the worker's requested action classes must fit inside its scope. Unknown tools classify as `unknown` and fail closed.
@@ -689,7 +690,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 ## Roadmap
 
-Current release: **v0.1.7** alpha (safety architecture). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
+Current release: **v0.1.8** alpha (supervised SDK control plus configure validation). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
 
 Near-term:
 
