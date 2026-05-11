@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
+import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
  * NDJSON audit writer. One line per recorded event, fsynced after each
@@ -32,9 +33,15 @@ export interface ToolCallAuditRecord {
 	correlationId: string;
 	tool: string;
 	actionClass: string;
-	decision: "allowed" | "blocked" | "classified";
+	decision: "allowed" | "blocked" | "elevated" | "classified";
 	mode?: string;
 	reasons: ReadonlyArray<string>;
+	ruleId?: string;
+	reasonCode?: string;
+	policySource?: string;
+	policyHash?: string;
+	command?: string;
+	cwd?: string;
 	args?: unknown;
 }
 
@@ -158,9 +165,10 @@ function redactArgs(value: unknown, depth = 0): unknown {
 export function buildAuditRecord(input: {
 	tool: string;
 	classification: { actionClass: string; reasons: ReadonlyArray<string> };
-	decision: "allowed" | "blocked" | "classified";
+	decision: "allowed" | "blocked" | "elevated" | "classified";
 	mode?: string;
 	args?: unknown;
+	policy?: SafetyPolicyDecision;
 	now?: Date;
 }): ToolCallAuditRecord {
 	const now = input.now ?? new Date();
@@ -171,9 +179,15 @@ export function buildAuditRecord(input: {
 		tool: input.tool,
 		actionClass: input.classification.actionClass,
 		decision: input.decision,
-		reasons: input.classification.reasons,
+		reasons: input.policy?.reasons ?? input.classification.reasons,
 	};
 	if (input.mode !== undefined) record.mode = input.mode;
+	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;
+	if (input.policy?.reasonCode !== undefined) record.reasonCode = input.policy.reasonCode;
+	if (input.policy?.policySource !== undefined) record.policySource = input.policy.policySource;
+	if (input.policy?.policyHash !== undefined) record.policyHash = input.policy.policyHash;
+	if (input.policy?.command !== undefined) record.command = redactString(input.policy.command);
+	if (input.policy?.cwd !== undefined) record.cwd = input.policy.cwd;
 	if (input.args !== undefined) record.args = redactArgs(input.args);
 	return record;
 }

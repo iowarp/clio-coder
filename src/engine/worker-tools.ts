@@ -27,7 +27,7 @@ import {
 	type LoopVerdict,
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
-import { formatRejection } from "../domains/safety/rejection-feedback.js";
+import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
@@ -60,6 +60,11 @@ export interface ToolFinishEvent {
 	outcome: ToolOutcome;
 	terminate?: boolean;
 	reason?: string;
+	actionClass?: string;
+	decision?: "allowed" | "blocked" | "elevated";
+	ruleId?: string;
+	reasonCode?: string;
+	policySource?: string;
 }
 
 export type WorkerToolRegistrar = (registry: ToolRegistry) => void;
@@ -113,11 +118,17 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
-		emitFinish(telemetry, spec.name, mode, startedAt, "blocked", { reason: verdict.reason });
+		emitFinish(telemetry, spec.name, mode, startedAt, "blocked", {
+			reason: verdict.reason,
+			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
+		});
 		throw new Error(verdict.reason);
 	}
 	if (verdict.result.kind === "error") {
-		emitFinish(telemetry, spec.name, mode, startedAt, "error", { reason: verdict.result.message });
+		emitFinish(telemetry, spec.name, mode, startedAt, "error", {
+			reason: verdict.result.message,
+			decision: verdict.decision,
+		});
 		throw new Error(verdict.result.message);
 	}
 	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
@@ -127,9 +138,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok", { terminate: true });
+		emitFinish(telemetry, spec.name, mode, startedAt, "ok", { terminate: true, decision: verdict.decision });
 	} else {
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok");
+		emitFinish(telemetry, spec.name, mode, startedAt, "ok", { decision: verdict.decision });
 	}
 	return result;
 }
@@ -140,7 +151,7 @@ function emitFinish(
 	mode: ModeName,
 	startedAt: number,
 	outcome: ToolOutcome,
-	extra?: { reason?: string; terminate?: boolean },
+	extra?: { reason?: string; terminate?: boolean; decision?: SafetyDecision },
 ): void {
 	if (!telemetry?.onFinish) return;
 	const event: ToolFinishEvent = {
@@ -151,6 +162,13 @@ function emitFinish(
 	};
 	if (extra?.reason !== undefined) event.reason = extra.reason;
 	if (extra?.terminate === true) event.terminate = true;
+	if (extra?.decision !== undefined) {
+		event.actionClass = extra.decision.classification.actionClass;
+		event.decision = extra.decision.kind === "allow" ? "allowed" : extra.decision.kind === "ask" ? "elevated" : "blocked";
+		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
+		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
+		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
+	}
 	telemetry.onFinish(event);
 }
 
@@ -209,23 +227,36 @@ function createWorkerModes(mode: ModeName): ModesContract {
  * workers do not share counts. The detector matches the orchestrator's
  * behaviour but skips audit-record bookkeeping which the worker does not own.
  */
-export function createWorkerSafety(): SafetyContract {
+export function createWorkerSafety(options: { cwd?: string; selfDev?: boolean } = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
+	const policyEngine = createSafetyPolicyEngine(options);
 	return {
 		classify: (call) => classifyAction(call),
 		evaluate(call, mode) {
-			const classification = classifyAction(call);
-			if (classification.actionClass === "git_destructive") {
-				const rejection = formatRejection({
-					tool: call.tool,
-					actionClass: classification.actionClass,
-					reasons: classification.reasons,
-					...(mode ? { mode } : {}),
-				});
-				return { kind: "block", classification, rejection };
+			const policy = policyEngine.evaluate(call, mode);
+			const classification = policy.classification;
+			if (policy.kind === "block") {
+				const decision: SafetyDecision = {
+					kind: "block",
+					classification,
+					rejection: policy.rejection ?? fallbackRejection(policy),
+					policy,
+				};
+				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
+				return decision;
 			}
-			const decision: SafetyDecision = { kind: "allow", classification };
-			return decision;
+			if (policy.kind === "ask") {
+				const decision: SafetyDecision = {
+					kind: "ask",
+					classification,
+					rejection: policy.rejection ?? fallbackRejection(policy),
+					policy,
+				};
+				if (policy.elevationMode !== undefined) decision.elevationMode = policy.elevationMode;
+				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
+				return decision;
+			}
+			return { kind: "allow", classification, policy };
 		},
 		observeLoop(key, now) {
 			const [next, verdict] = observeLoopState(loopState, key, now ?? Date.now());
@@ -234,7 +265,16 @@ export function createWorkerSafety(): SafetyContract {
 		},
 		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
 		isSubset,
+		policy: { metadata: (mode) => policyEngine.metadata(mode) },
 		audit: { recordCount: () => 0 },
+	};
+}
+
+function fallbackRejection(policy: { tool: string; actionClass: string; reasons: ReadonlyArray<string> }) {
+	return {
+		short: `${policy.tool} blocked: ${policy.actionClass}`,
+		detail: policy.reasons.join("\n"),
+		hints: [],
 	};
 }
 
