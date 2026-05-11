@@ -181,7 +181,17 @@ function parseCommandPolicy(
 
 	if (id && !ID_RE.test(id)) errors.push(`${label}.id must match ${ID_RE}`);
 	if (command && command.trim().length === 0) errors.push(`${label}.command must not be empty`);
-	if (cwd !== undefined && path.isAbsolute(cwd)) errors.push(`${label}.cwd must be relative to the policy root`);
+	if (cwd !== undefined) {
+		if (path.isAbsolute(cwd)) {
+			errors.push(`${label}.cwd must be relative to the policy root`);
+		} else {
+			const normalized = path.normalize(cwd);
+			const segments = normalized.split(path.sep).filter((segment) => segment.length > 0);
+			if (segments.some((segment) => segment === "..")) {
+				errors.push(`${label}.cwd must not escape the policy root with '..'`);
+			}
+		}
+	}
 
 	if (errors.length > 0 || id === undefined || command === undefined || actionClass === undefined || env === undefined) {
 		return { errors };

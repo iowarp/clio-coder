@@ -145,7 +145,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
-				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, mode, projectPolicy);
+				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, cwd, mode, projectPolicy);
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -183,7 +183,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 
 function evaluateDefaultDenyBash(
 	command: string,
-	cwd: string,
+	callCwd: string,
+	workspaceRoot: string,
 	mode: string | undefined,
 	policy: LoadedProjectSafetyPolicy,
 ): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"> {
@@ -199,7 +200,7 @@ function evaluateDefaultDenyBash(
 			policySource: "builtin-command-allowlist",
 		};
 	}
-	const projectMatch = matchingProjectCommand(policy, command, cwd);
+	const projectMatch = matchingProjectCommand(policy, command, callCwd);
 	if (projectMatch) {
 		const base: Omit<
 			SafetyPolicyDecision,
@@ -221,6 +222,17 @@ function evaluateDefaultDenyBash(
 			};
 		}
 		return { ...base, kind: "allow" };
+	}
+	if (!isUnderOrSame(callCwd, workspaceRoot)) {
+		return {
+			kind: "block",
+			ruleId: "bash-cwd-escape",
+			reasonCode: "bash-cwd-escape",
+			reasons: [
+				`bash cwd '${callCwd}' escapes workspace root '${workspaceRoot}'; use a typed tool or a project policy entry with explicit cwd`,
+			],
+			policySource: "builtin-command-allowlist",
+		};
 	}
 	if (hasShellOperators(command)) {
 		return {
@@ -331,10 +343,8 @@ function matchingProjectCommand(
 	for (const entry of policy.commands) {
 		if (entry.command !== command) continue;
 		if (entry.shellOperators === "deny" && hasShellOperators(command)) continue;
-		if (entry.cwd !== undefined) {
-			const allowedCwd = path.resolve(policyRoot, entry.cwd);
-			if (!isUnderOrSame(cwd, allowedCwd)) continue;
-		}
+		const allowedCwd = entry.cwd !== undefined ? path.resolve(policyRoot, entry.cwd) : policyRoot;
+		if (!isUnderOrSame(cwd, allowedCwd)) continue;
 		return entry;
 	}
 	return null;
