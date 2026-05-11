@@ -1,9 +1,12 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { admit } from "../../src/domains/dispatch/admission.js";
 import { createBackoff, nextDelay, reset } from "../../src/domains/dispatch/backoff.js";
+import { deriveRequestedActions, pickOrchestratorScope } from "../../src/domains/dispatch/extension.js";
 import { classifyHeartbeat } from "../../src/domains/dispatch/heartbeat.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
+import { classify } from "../../src/domains/safety/action-classifier.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("dispatch/validation", () => {
@@ -92,6 +95,50 @@ describe("dispatch/admission", () => {
 			isSubset,
 		);
 		strictEqual(verdict.admitted, false);
+	});
+
+	it("derives requested actions from the worker tool surface", () => {
+		const safety = {
+			classify: (call: { tool: string }) => classify(call),
+		} as never;
+		deepStrictEqual(deriveRequestedActions([ToolNames.Read, ToolNames.Write, ToolNames.Bash], safety), [
+			"execute",
+			"read",
+			"write",
+		]);
+		deepStrictEqual(deriveRequestedActions([ToolNames.Read, "mystery" as never], safety), ["read", "unknown"]);
+	});
+
+	it("honors mode dispatchScope when picking the orchestrator scope", () => {
+		const safety = {
+			scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: DEFAULT_SCOPE },
+		} as never;
+		strictEqual(pickOrchestratorScope(safety, "advise"), READONLY_SCOPE);
+		strictEqual(pickOrchestratorScope(safety, "default"), DEFAULT_SCOPE);
+	});
+
+	it("advise dispatch scope denies default worker recipes that expose write or bash", () => {
+		const writeVerdict = admit(
+			{
+				requestedScope: DEFAULT_SCOPE,
+				orchestratorScope: READONLY_SCOPE,
+				requestedActions: ["read", "write"],
+				agentId: "worker",
+			},
+			isSubset,
+		);
+		strictEqual(writeVerdict.admitted, false);
+
+		const bashVerdict = admit(
+			{
+				requestedScope: DEFAULT_SCOPE,
+				orchestratorScope: READONLY_SCOPE,
+				requestedActions: ["execute", "read"],
+				agentId: "worker",
+			},
+			isSubset,
+		);
+		strictEqual(bashVerdict.admitted, false);
 	});
 });
 
