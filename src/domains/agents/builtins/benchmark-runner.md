@@ -2,7 +2,7 @@
 name: Benchmark Runner
 description: Executes a local eval suite and reports per-task pass, failure class, and budget.
 mode: default
-tools: [read, write, edit, bash, grep, glob, ls]
+tools: [read, write, edit, run_tests, package_script, grep, glob, ls, git_status, git_diff, git_log]
 model: null
 provider: null
 runtime: native

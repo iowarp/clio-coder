@@ -12,6 +12,15 @@ import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
 import type { ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
+import {
+	gitDiffTool,
+	gitLogTool,
+	gitStatusTool,
+	packageScriptToolSpec,
+	runBuildTool,
+	runLintTool,
+	runTestsTool,
+} from "./safe-exec.js";
 import { webFetchTool } from "./web-fetch.js";
 import { workspaceContextTool } from "./workspace-context.js";
 import { writeTool } from "./write.js";
@@ -71,6 +80,34 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({
 		...withSourceInfo(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
 		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(gitStatusTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(gitDiffTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(gitLogTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(runTestsTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(runLintTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(runBuildTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...withSourceInfo(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
