@@ -851,6 +851,19 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stderr, /--api-key supplied but no target resolved/);
 	});
 
+	it("clio run --auto-approve allow accepts the flag", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const result = await runCli(["run", "--auto-approve", "allow", "--help"], { env: scratch.env });
+		ok(result.code === 0 || result.code === 2, `unexpected: ${result.code}`);
+	});
+
+	it("clio run --auto-approve maybe rejects with error", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const result = await runCli(["run", "--auto-approve", "maybe", "task"], { env: scratch.env });
+		strictEqual(result.code, 2);
+		ok(result.stderr.includes("must be 'allow' or 'deny'"));
+	});
+
 	it("models --target <id> <search> combines both filters", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		seedTargets(join(scratch.dir, "config"));

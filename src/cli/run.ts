@@ -20,7 +20,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
 const USAGE =
-	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] [--json] "<task>"\n';
+	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
@@ -34,6 +34,7 @@ Flags:
   --thinking <level>        thinking level: off|minimal|low|medium|high|xhigh
   --agent <recipe-id>       agent recipe (defaults to scout)
   --require <capability>    capability the target must advertise (repeatable)
+  --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
   --json                    stream events and the final receipt as JSON
 `;
 
@@ -49,6 +50,8 @@ interface ParsedArgs {
 	required: string[];
 	task: string;
 	json: boolean;
+	autoApprove?: "allow" | "deny";
+	supervised?: boolean;
 }
 
 function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
@@ -94,6 +97,16 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			const v = need();
 			if (v === null) return null;
 			out.required.push(v);
+		} else if (a === "--auto-approve") {
+			const v = need();
+			if (v === null) return null;
+			const normalized = v.toLowerCase();
+			if (normalized !== "allow" && normalized !== "deny") {
+				throw new Error("--auto-approve must be 'allow' or 'deny'");
+			}
+			out.autoApprove = normalized;
+		} else if (a === "--supervised") {
+			out.supervised = true;
 		} else if (a === "--json") {
 			out.json = true;
 		} else if (a?.startsWith("-")) {
@@ -114,7 +127,14 @@ export async function runClioRun(
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const parsed = parseArgs(args);
+	let parsed: ParsedArgs | null;
+	try {
+		parsed = parseArgs(args);
+	} catch (err) {
+		process.stderr.write(`clio run: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(USAGE);
+		return 2;
+	}
 	if (parsed === null) {
 		process.stderr.write(USAGE);
 		return 2;
@@ -201,6 +221,8 @@ export async function runClioRun(
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
+	dispatchReq.supervised = parsed.supervised === true;
+	if (parsed.autoApprove) dispatchReq.autoApprove = parsed.autoApprove;
 
 	let memorySection = "";
 	try {
