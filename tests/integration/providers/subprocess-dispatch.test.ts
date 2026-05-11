@@ -185,8 +185,8 @@ describe("subprocess-runtime startSubprocessWorkerRun", () => {
 			wireModelId: "gpt-5.4",
 			mode: "super",
 		});
-		strictEqual(superCopilot.permissionStrategy, "full-access");
-		ok(superCopilot.args.includes("--allow-all-tools"));
+		strictEqual(superCopilot.permissionStrategy, "supervised");
+		ok(!superCopilot.args.includes("--allow-all-tools"));
 	});
 
 	it("parses structured CLI outputs into assistant text and usage", () => {
