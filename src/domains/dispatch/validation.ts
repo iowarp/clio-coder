@@ -18,6 +18,8 @@ export interface JobSpec {
 	requiredCapabilities?: ReadonlyArray<string>;
 	cwd?: string;
 	memorySection?: string;
+	supervised?: boolean;
+	autoApprove?: "allow" | "deny";
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -33,6 +35,8 @@ const KNOWN_KEYS = new Set([
 	"requiredCapabilities",
 	"cwd",
 	"memorySection",
+	"supervised",
+	"autoApprove",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
@@ -111,6 +115,18 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("supervised" in spec && spec.supervised !== undefined) {
+		if (typeof spec.supervised !== "boolean") {
+			errors.push("supervised must be a boolean");
+		}
+	}
+
+	if ("autoApprove" in spec && spec.autoApprove !== undefined) {
+		if (spec.autoApprove !== "allow" && spec.autoApprove !== "deny") {
+			errors.push("autoApprove must be one of: allow|deny");
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -129,5 +145,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	}
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
+	if (typeof spec.supervised === "boolean") out.supervised = spec.supervised;
+	if (spec.autoApprove === "allow" || spec.autoApprove === "deny") out.autoApprove = spec.autoApprove;
 	return { ok: true, spec: out };
 }
