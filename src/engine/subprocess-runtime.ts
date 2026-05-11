@@ -486,7 +486,7 @@ function permissionStrategyForMode(mode: ModeName | undefined): SubprocessRuntim
 		case "advise":
 			return "read-only";
 		case "super":
-			return "full-access";
+			return process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS === "1" ? "full-access" : "supervised";
 		default:
 			return "supervised";
 	}

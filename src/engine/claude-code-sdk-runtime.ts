@@ -104,6 +104,13 @@ export function mapClioModeToClaudePermission(
 				allowedTools: [...READ_ONLY_CLAUDE_TOOLS],
 			};
 		case "super":
+			if (process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS !== "1") {
+				return {
+					permissionMode: "default",
+					allowDangerouslySkipPermissions: false,
+					tools: mappedTools.length > 0 ? mappedTools : { type: "preset", preset: "claude_code" },
+				};
+			}
 			return {
 				permissionMode: "bypassPermissions",
 				allowDangerouslySkipPermissions: true,

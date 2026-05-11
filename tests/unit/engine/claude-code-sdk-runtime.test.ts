@@ -95,8 +95,8 @@ describe("Claude Code SDK runtime", () => {
 		ok(!(advise.tools as string[]).includes("Bash"));
 
 		const full = mapClioModeToClaudePermission("super", undefined);
-		strictEqual(full.permissionMode, "bypassPermissions");
-		strictEqual(full.allowDangerouslySkipPermissions, true);
+		strictEqual(full.permissionMode, "default");
+		strictEqual(full.allowDangerouslySkipPermissions, false);
 	});
 
 	it("runs one SDK turn with streaming deltas and final usage", async () => {
