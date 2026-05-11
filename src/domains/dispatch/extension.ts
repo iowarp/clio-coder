@@ -54,6 +54,10 @@ import type {
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
+type WorkerApprovalHandler = Parameters<SpawnedWorker["onApprovalRequest"]>[0];
+type WorkerApprovalRequest = Parameters<WorkerApprovalHandler>[0];
+type WorkerApprovalResponse = Awaited<ReturnType<WorkerApprovalHandler>>;
+
 interface ActiveRun {
 	runId: string;
 	abort: () => void;
@@ -86,6 +90,7 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const STALE_WRITES_OVERRIDE_ENV = "CLIO_DEV_ALLOW_STALE_WRITES";
+const DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS = 60000;
 
 export interface DispatchStaleProcessDetails {
 	stale_process: {
@@ -297,6 +302,54 @@ export function deriveAutoApproveForDispatch(
 		nextLimitations.push("headless ask auto-denied; pass --auto-approve to override");
 	}
 	return { supervised, autoApprove, runtimeLimitations: nextLimitations };
+}
+
+function approvalResponseTimeoutMs(): number {
+	const raw = process.env.CLIO_SDK_APPROVAL_TIMEOUT_MS;
+	if (raw === undefined || raw.trim().length === 0) return DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS;
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS;
+}
+
+function isApprovalResponsePayload(value: unknown): value is WorkerApprovalResponse {
+	if (!value || typeof value !== "object") return false;
+	const payload = value as Partial<WorkerApprovalResponse>;
+	return typeof payload.requestId === "string" && (payload.decision === "allow" || payload.decision === "deny");
+}
+
+function waitForToolApprovalResponse(
+	context: DomainContext,
+	request: WorkerApprovalRequest,
+): Promise<WorkerApprovalResponse> {
+	return new Promise((resolve) => {
+		let settled = false;
+		let timeout: ReturnType<typeof setTimeout> | null = null;
+		let unsubscribe = (): void => {};
+		const finish = (response: WorkerApprovalResponse): void => {
+			if (settled) return;
+			settled = true;
+			if (timeout) clearTimeout(timeout);
+			unsubscribe();
+			resolve(response);
+		};
+		unsubscribe = context.bus.on(BusChannels.ToolApprovalResponse, (payload) => {
+			if (!isApprovalResponsePayload(payload)) return;
+			if (payload.requestId !== request.requestId) return;
+			finish(payload);
+		});
+		const timeoutMs = approvalResponseTimeoutMs();
+		if (timeoutMs > 0) {
+			timeout = setTimeout(() => {
+				finish({
+					requestId: request.requestId,
+					decision: "deny",
+					reason: `approval response timed out after ${timeoutMs}ms`,
+				});
+			}, timeoutMs);
+			timeout.unref?.();
+		}
+		context.bus.emit(BusChannels.ToolApprovalRequest, { request });
+	});
 }
 
 function pickCapabilityMatchedWorker(
@@ -637,6 +690,7 @@ export function createDispatchBundle(
 			releaseWorkerSlot();
 			throw error;
 		}
+		worker.onApprovalRequest((request) => waitForToolApprovalResponse(context, request));
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const heartbeatAt = worker.heartbeatAt;
