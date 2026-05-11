@@ -3,6 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
+import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
 import {
 	buildProviderSupportEntry,
@@ -305,6 +306,17 @@ function runtimeKnownModelsFor(runtimeId: string): ReadonlyArray<string> {
 	return listKnownModelsForRuntime(runtimeId);
 }
 
+function catalogContextWindowFor(runtime: RuntimeDescriptor, modelId: string): number | null {
+	const catalogModel = getCatalogModelForRuntime(runtime.id, modelId);
+	if (typeof catalogModel?.contextWindow === "number" && catalogModel.contextWindow > 0) {
+		return catalogModel.contextWindow;
+	}
+	if (runtimeKnownModelsFor(runtime.id).includes(modelId) && runtime.defaultCapabilities.contextWindow > 0) {
+		return runtime.defaultCapabilities.contextWindow;
+	}
+	return null;
+}
+
 function validateResolvedModel(runtimeId: string, modelId: string | undefined, force: boolean): boolean {
 	if (!modelId) return true;
 	const validation = validateModelChoice({
@@ -318,6 +330,24 @@ function validateResolvedModel(runtimeId: string, modelId: string | undefined, f
 		return false;
 	}
 	if (validation.warning) process.stderr.write(`warning: ${validation.warning}\n`);
+	return true;
+}
+
+function validateContextWindowOverride(
+	runtime: RuntimeDescriptor,
+	modelId: string | undefined,
+	contextWindow: number | undefined,
+	force: boolean,
+): boolean {
+	if (contextWindow === undefined || !modelId) return true;
+	const catalogMax = catalogContextWindowFor(runtime, modelId);
+	if (catalogMax === null || contextWindow <= catalogMax) return true;
+	const message = `--context-window ${contextWindow} exceeds catalog max ${catalogMax} for model '${modelId}'`;
+	if (!force) {
+		process.stderr.write(`error: ${message}. Use --force to override.\n`);
+		return false;
+	}
+	process.stderr.write(`warning: ${message}\n`);
 	return true;
 }
 
@@ -582,6 +612,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
 	const model = args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0];
 	if (!validateResolvedModel(runtime.id, model, args.force)) return 2;
+	if (!validateContextWindowOverride(runtime, model, args.contextWindow, args.force)) return 2;
 	const descriptor = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
 		...(model ? { model } : {}),
@@ -963,6 +994,7 @@ async function runInteractive(
 			if (!model) break;
 		}
 	}
+	if (!validateContextWindowOverride(runtime, model, defaults.contextWindow, defaults.force)) return 2;
 
 	const gatewayDefault = defaults.gateway || existing?.gateway === true;
 	const gatewayAnswer = gatewayDefault ? true : await askYesNo(rl, "Mark as gateway?", false);
