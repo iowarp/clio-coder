@@ -339,6 +339,57 @@ describe("cli configure and targets", () => {
 		strictEqual(out.result, 0);
 	});
 
+	it("rejects --context-window above the catalog max with exit 2", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand([
+				"--id",
+				"claude-big",
+				"--runtime",
+				"claude-code-cli",
+				"--model",
+				"claude-haiku-4-5",
+				"--context-window",
+				"999999999",
+			]),
+		);
+		strictEqual(out.result, 2);
+		ok(out.stderr.includes("exceeds catalog max"), `stderr=${out.stderr}`);
+	});
+
+	it("accepts --context-window above catalog max with --force and warns", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand([
+				"--id",
+				"claude-big-forced",
+				"--runtime",
+				"claude-code-cli",
+				"--model",
+				"claude-haiku-4-5",
+				"--context-window",
+				"999999999",
+				"--force",
+			]),
+		);
+		strictEqual(out.result, 0);
+		ok(out.stderr.includes("warning") || out.stdout.includes("warning"));
+	});
+
+	it("accepts --context-window within the catalog max silently", async () => {
+		const out = await captureOutput(() =>
+			runConfigureCommand([
+				"--id",
+				"claude-ok",
+				"--runtime",
+				"claude-code-cli",
+				"--model",
+				"claude-haiku-4-5",
+				"--context-window",
+				"100000",
+			]),
+		);
+		strictEqual(out.result, 0);
+	});
+
 	it("persists a Claude SDK target without Clio-managed credentials", async () => {
 		const code = await runConfigureCommand([
 			"--runtime",
