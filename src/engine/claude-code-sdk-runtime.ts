@@ -14,6 +14,8 @@ import type { AssistantMessage, AssistantMessageEvent, ToolCall, Usage } from "@
 
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
+import type { SafetyContract } from "../domains/safety/contract.js";
+import { evaluateClaudeToolCall, mapClaudeToolName } from "./sdk-policy-bridge.js";
 import type {
 	SessionfulRuntime,
 	SessionRuntimeHook,
@@ -24,6 +26,8 @@ import type {
 	SessionRuntimeTurnResult,
 } from "./session-runtime.js";
 import type { AgentEvent, AgentMessage } from "./types.js";
+import type { ClioToolApprovalRequest, ToolApprovalResponsePayload } from "./worker-events.js";
+import { createWorkerSafety } from "./worker-tools.js";
 
 type CreateClaudeQuery = (input: { prompt: AsyncIterable<SDKUserMessage>; options: ClaudeQueryOptions }) => ClaudeQuery;
 
@@ -52,6 +56,7 @@ interface ClaudeCodeSdkSessionContext {
 	emit: (event: AgentEvent) => void;
 	abortController: AbortController;
 	currentModel: string;
+	mode: ModeName;
 	basePermissionMode: PermissionMode;
 	currentPermissionMode: PermissionMode;
 	pendingApprovals: Map<string, unknown>;
@@ -65,6 +70,68 @@ interface ClaudeCodeSdkSessionContext {
 
 export interface ClaudeCodeSdkRuntimeOptions {
 	createQuery?: CreateClaudeQuery;
+	safety?: SafetyContract;
+	autoApprove?: "allow" | "deny";
+	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
+}
+
+export interface BuildCanUseToolInput {
+	safety: SafetyContract;
+	mode: ModeName;
+	autoApprove?: "allow" | "deny" | undefined;
+	awaitApproval: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
+	emit: (event: AgentEvent | ClioToolApprovalRequest) => void;
+}
+
+export function buildCanUseTool(input: BuildCanUseToolInput): CanUseTool {
+	const { safety, mode, autoApprove, awaitApproval, emit } = input;
+	return async (toolName, args, options): Promise<PermissionResult> => {
+		if (toolName === "ExitPlanMode") {
+			return {
+				behavior: "deny",
+				message: "Plan captured by Clio; refusing automatic plan exit.",
+				interrupt: true,
+			};
+		}
+		if (toolName === "AskUserQuestion") {
+			return {
+				behavior: "deny",
+				message: "Clio cannot answer Claude Code AskUserQuestion prompts in non-interactive workers.",
+			};
+		}
+
+		const toolArgs = isRecord(args) ? args : {};
+		const decision = evaluateClaudeToolCall(toolName, toolArgs, mode, safety);
+		if (decision.decision === "allow") return { behavior: "allow" };
+		if (decision.decision === "block") return { behavior: "deny", message: decision.reason };
+
+		if (autoApprove === "allow") return { behavior: "allow" };
+		if (autoApprove === "deny") return { behavior: "deny", message: decision.reason };
+
+		const requestId = options.toolUseID ?? randomUUID();
+		const payload = {
+			requestId,
+			claudeToolName: toolName,
+			clioToolName: mapClaudeToolName(toolName),
+			args: toolArgs,
+			classification: {
+				actionClass: decision.classification.actionClass,
+				reasons: decision.classification.reasons,
+			},
+			...(decision.rejection ? { rejection: decision.rejection } : {}),
+			mode,
+		} satisfies ClioToolApprovalRequest["payload"];
+		emit({ type: "clio_tool_approval_request", payload });
+
+		try {
+			const response = await awaitApproval(requestId);
+			return response.decision === "allow"
+				? { behavior: "allow" }
+				: { behavior: "deny", message: response.reason ?? "user denied" };
+		} catch (err) {
+			return { behavior: "deny", message: err instanceof Error ? err.message : "approval channel error" };
+		}
+	};
 }
 
 export interface ClaudePermissionMapping {
@@ -87,7 +154,7 @@ const CLIO_TOOL_TO_CLAUDE = new Map<ToolName, string>([
 ]);
 
 export function createClaudeCodeSdkRuntime(options: ClaudeCodeSdkRuntimeOptions = {}): SessionfulRuntime {
-	return new ClaudeCodeSdkRuntime(options.createQuery ?? ((input) => query(input)));
+	return new ClaudeCodeSdkRuntime(options.createQuery ?? ((input) => query(input)), options);
 }
 
 export function mapClioModeToClaudePermission(
@@ -129,8 +196,22 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 	private readonly sessions = new Map<string, ClaudeCodeSdkSessionContext>();
 	private readonly sessionStartHooks: SessionRuntimeHook[] = [];
 	private readonly sessionEndHooks: SessionRuntimeHook[] = [];
+	private readonly safety: SafetyContract;
+	private readonly autoApprove: "allow" | "deny" | undefined;
+	private readonly awaitApproval: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
 
-	constructor(private readonly createQuery: CreateClaudeQuery) {}
+	constructor(
+		private readonly createQuery: CreateClaudeQuery,
+		options: ClaudeCodeSdkRuntimeOptions = {},
+	) {
+		this.safety = options.safety ?? createWorkerSafety({ cwd: process.cwd() });
+		this.autoApprove = options.autoApprove;
+		this.awaitApproval =
+			options.awaitApproval ??
+			(async () => {
+				throw new Error("approval channel unavailable");
+			});
+	}
 
 	onSessionStart(hook: SessionRuntimeHook): () => void {
 		this.sessionStartHooks.push(hook);
@@ -182,6 +263,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 			emit,
 			abortController,
 			currentModel: input.wireModelId,
+			mode: input.mode ?? "default",
 			basePermissionMode: permission.permissionMode,
 			currentPermissionMode: permission.permissionMode,
 			pendingApprovals: new Map(),
@@ -220,6 +302,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 				context.currentPermissionMode = permission.permissionMode;
 				context.session = { ...context.session, permissionMode: permission.permissionMode };
 			}
+			context.mode = input.mode;
 		}
 		const turn = makeActiveTurn();
 		context.activeTurn = turn;
@@ -283,30 +366,16 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 	private canUseTool(threadId: string): CanUseTool {
 		return async (toolName, input, options): Promise<PermissionResult> => {
 			const context = this.sessions.get(threadId);
-			const requestId = options.toolUseID ?? randomUUID();
-			if (context) context.pendingApprovals.set(requestId, { toolName, input, options });
-			if (toolName === "AskUserQuestion") {
-				if (context) context.pendingUserQuestions.set(requestId, input);
-				return {
-					behavior: "deny",
-					message: "Clio cannot answer Claude Code AskUserQuestion prompts in this non-interactive worker yet.",
-				};
-			}
-			if (toolName === "ExitPlanMode") {
-				if (context) context.capturedPlans.push(extractPlanText(input));
-				return {
-					behavior: "deny",
-					message: "Plan captured by Clio; refusing automatic plan exit in the worker adapter.",
-					interrupt: true,
-				};
-			}
-			if (READ_ONLY_CLAUDE_TOOLS.includes(toolName as (typeof READ_ONLY_CLAUDE_TOOLS)[number])) {
-				return { behavior: "allow" };
-			}
-			return {
-				behavior: "deny",
-				message: `Clio denied native Claude Code permission request for ${toolName}; interactive approvals are not wired yet.`,
-			};
+			const canUseTool = buildCanUseTool({
+				safety: this.safety,
+				mode: context?.mode ?? "default",
+				autoApprove: this.autoApprove,
+				awaitApproval: this.awaitApproval,
+				emit: (event) => {
+					context?.emit(event as AgentEvent);
+				},
+			});
+			return canUseTool(toolName, input, options);
 		};
 	}
 
@@ -504,12 +573,23 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 	}
 }
 
+export interface ClaudeCodeSdkWorkerRunInput extends SessionRuntimeStartInput {
+	task: string;
+	safety?: SafetyContract;
+	autoApprove?: "allow" | "deny";
+	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
+}
+
 export function startClaudeCodeSdkWorkerRun(
-	input: SessionRuntimeStartInput & { task: string },
-	emit: (event: AgentEvent) => void,
+	input: ClaudeCodeSdkWorkerRunInput,
+	emit: (event: AgentEvent | ClioToolApprovalRequest) => void,
 	options: ClaudeCodeSdkRuntimeOptions = {},
 ): { promise: Promise<SessionRuntimeTurnResult>; abort(): void } {
-	const runtime = createClaudeCodeSdkRuntime(options);
+	const runtimeOptions: ClaudeCodeSdkRuntimeOptions = { ...options };
+	if (input.safety !== undefined) runtimeOptions.safety = input.safety;
+	if (input.autoApprove !== undefined) runtimeOptions.autoApprove = input.autoApprove;
+	if (input.awaitApproval !== undefined) runtimeOptions.awaitApproval = input.awaitApproval;
+	const runtime = createClaudeCodeSdkRuntime(runtimeOptions);
 	let threadId: string | undefined;
 	let turnId: string | undefined;
 	const promise = (async () => {
@@ -725,14 +805,6 @@ function extractToolCalls(content: unknown): ToolCall[] {
 		out.push({ type: "toolCall", id, name, arguments: args });
 	}
 	return out;
-}
-
-function extractPlanText(input: Record<string, unknown>): string {
-	for (const key of ["plan", "content", "text", "message"]) {
-		const value = input[key];
-		if (typeof value === "string" && value.length > 0) return value;
-	}
-	return JSON.stringify(input);
 }
 
 function numeric(value: unknown): number | undefined {

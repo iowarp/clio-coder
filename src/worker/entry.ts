@@ -62,6 +62,8 @@ async function main(): Promise<number> {
 	if (spec.apiKey) input.apiKey = spec.apiKey;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
+	if (spec.autoApprove !== undefined) input.autoApprove = spec.autoApprove;
+	input.awaitApproval = demux.awaitApproval;
 	if (spec.selfDev) {
 		input.selfDev = spec.selfDev;
 		const selfdev = await loadSelfDevModule();

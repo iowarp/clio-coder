@@ -31,7 +31,7 @@ import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
-import type { ClioWorkerEvent } from "./worker-events.js";
+import type { ClioWorkerEvent, ToolApprovalResponsePayload } from "./worker-events.js";
 import {
 	createWorkerLoopGuard,
 	createWorkerSafety,
@@ -61,6 +61,8 @@ export interface WorkerRunInput {
 	registerPrivateTools?: WorkerToolRegistrar;
 	/** Self-development metadata, when this worker has private self-dev tools. */
 	selfDev?: SelfDevMode;
+	autoApprove?: "allow" | "deny";
+	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
 	signal?: AbortSignal;
 }
 
@@ -176,6 +178,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
 		if (input.allowedTools !== undefined) sdkInput.allowedTools = input.allowedTools;
 		if (input.signal !== undefined) sdkInput.signal = input.signal;
+		const sdkSafety = createWorkerSafety({ cwd: process.cwd(), selfDev: input.selfDev !== undefined });
+		sdkInput.safety = sdkSafety;
+		if (input.autoApprove !== undefined) sdkInput.autoApprove = input.autoApprove;
+		if (input.awaitApproval !== undefined) sdkInput.awaitApproval = input.awaitApproval;
 		return startClaudeCodeSdkWorkerRun(sdkInput, emit);
 	}
 
