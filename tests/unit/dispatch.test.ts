@@ -55,6 +55,30 @@ describe("dispatch/validation", () => {
 		ok(v.ok);
 		strictEqual(v.spec.workerRuntime, "copilot-cli");
 	});
+
+	it("accepts supervised booleans and rejects other values", () => {
+		for (const supervised of [true, false]) {
+			const v = validateJobSpec({ agentId: "a", task: "t", supervised });
+			ok(v.ok);
+			strictEqual(v.spec.supervised, supervised);
+		}
+
+		const invalid = validateJobSpec({ agentId: "a", task: "t", supervised: "x" });
+		strictEqual(invalid.ok, false);
+		if (!invalid.ok) ok(invalid.errors.some((e) => e.includes("supervised")));
+	});
+
+	it("accepts allow or deny autoApprove values and rejects others", () => {
+		for (const autoApprove of ["allow", "deny"] as const) {
+			const v = validateJobSpec({ agentId: "a", task: "t", autoApprove });
+			ok(v.ok);
+			strictEqual(v.spec.autoApprove, autoApprove);
+		}
+
+		const invalid = validateJobSpec({ agentId: "a", task: "t", autoApprove: "maybe" });
+		strictEqual(invalid.ok, false);
+		if (!invalid.ok) ok(invalid.errors.some((e) => e.includes("autoApprove")));
+	});
 });
 
 describe("dispatch/admission", () => {

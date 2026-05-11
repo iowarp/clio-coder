@@ -37,6 +37,8 @@ export interface WorkerSpec {
 	mode?: string;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	selfDev?: SelfDevMode;
+	supervised?: boolean;
+	autoApprove?: "allow" | "deny";
 }
 
 export interface SpawnedWorker {
