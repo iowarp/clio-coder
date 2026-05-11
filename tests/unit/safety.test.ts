@@ -149,6 +149,90 @@ describe("safety/policy-engine", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+
+	it("rejects project policy entries with absolute or escaping cwd", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-project-policy-cwd-"));
+		try {
+			mkdirSync(join(dir, ".clio"));
+			writeFileSync(
+				join(dir, ".clio", "safety.yaml"),
+				[
+					"version: 1",
+					"commands:",
+					"  - id: absolute-cwd",
+					"    command: ls",
+					"    cwd: /etc",
+					"    actionClass: execute",
+					"    shellOperators: deny",
+					"  - id: escape-cwd",
+					"    command: ls",
+					"    cwd: ../..",
+					"    actionClass: execute",
+					"    shellOperators: deny",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: dir, selfDev: false });
+			const meta = engine.metadata();
+			strictEqual(meta.projectPolicyValid, false);
+			strictEqual(
+				meta.projectPolicyErrors.some((entry) => entry.includes("must be relative to the policy root")),
+				true,
+			);
+			strictEqual(
+				meta.projectPolicyErrors.some((entry) => entry.includes("must not escape the policy root")),
+				true,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("binds project policy entries without explicit cwd to the policy root", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-project-policy-default-cwd-"));
+		try {
+			mkdirSync(join(dir, ".clio"));
+			writeFileSync(
+				join(dir, ".clio", "safety.yaml"),
+				[
+					"version: 1",
+					"commands:",
+					"  - id: open",
+					"    command: ls",
+					"    actionClass: execute",
+					"    shellOperators: deny",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: dir, selfDev: false });
+			const inside = engine.evaluate({ tool: "bash", args: { command: "ls", cwd: dir } }, "default");
+			strictEqual(inside.kind, "allow");
+			strictEqual(inside.policySource, "project-policy");
+			const outside = engine.evaluate({ tool: "bash", args: { command: "ls", cwd: "/etc" } }, "default");
+			strictEqual(outside.kind, "block");
+			strictEqual(outside.ruleId, "bash-cwd-escape");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("blocks default-mode bash when the caller cwd escapes the workspace root", () => {
+		const engine = createSafetyPolicyEngine({ cwd: process.cwd(), selfDev: false });
+		const decision = engine.evaluate({ tool: "bash", args: { command: "ls", cwd: "/etc" } }, "default");
+		strictEqual(decision.kind, "block");
+		strictEqual(decision.ruleId, "bash-cwd-escape");
+	});
+
+	it("classifies bash redirect targets against the call's cwd argument", () => {
+		const homeRedirect = classify({ tool: "bash", args: { command: "echo hi > foo.txt", cwd: "/etc" } });
+		strictEqual(homeRedirect.actionClass, "system_modify");
+		strictEqual(
+			homeRedirect.reasons.some((reason) => reason.startsWith("write-path-system-root: /etc")),
+			true,
+		);
+	});
 });
 
 describe("worker safety parity", () => {

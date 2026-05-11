@@ -35,7 +35,12 @@ rows stronger evidence for reproducible runs.
 - Added strict `.clio/safety.yaml` parsing for project command policy. Invalid
   policy fails closed for command execution, and the active run keeps the
   validated snapshot so a model cannot edit the allowlist and use it in the
-  same run.
+  same run. Project policy `cwd` must be relative to the policy root and may
+  not escape it via `..`; entries that omit `cwd` are bound to the policy root.
+  Default-mode bash with a caller `cwd` outside the workspace is rejected as
+  `bash-cwd-escape`. Bash redirect targets are classified against the call's
+  `cwd` argument so a relative redirect cannot launder a write outside the
+  workspace.
 - Added typed execution tools: `git_status`, `git_diff`, `git_log`,
   `run_tests`, `run_lint`, `run_build`, and `package_script`. These use fixed
   argv vectors, bounded cwd, timeouts, output caps, and structured result

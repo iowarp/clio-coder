@@ -68,11 +68,16 @@ commands:
     comment: Keep exact and reviewed.
 ```
 
-Validation is strict: unknown keys, wrong types, absolute `cwd`, duplicate ids,
-or unsupported action classes make the policy invalid. Invalid policy blocks
-command execution instead of widening permissions. The policy is snapshotted
-for the active run so a model cannot edit the policy and immediately benefit
-from the new allowlist.
+Validation is strict: unknown keys, wrong types, duplicate ids, or unsupported
+action classes make the policy invalid. The `cwd` field must be relative to the
+policy root and must not escape it via `..`; absolute or escaping cwds reject
+the entire policy. Entries that omit `cwd` are bound to the policy root, so a
+reviewed command only matches when the caller's effective cwd stays under the
+project. Invalid policy blocks command execution instead of widening
+permissions. The policy is snapshotted for the active run so a model cannot
+edit the policy and immediately benefit from the new allowlist. Default-mode
+bash that does not match a project policy entry must also run with a cwd under
+the workspace root; otherwise the call is rejected as `bash-cwd-escape`.
 
 ## External CLI and SDK Runtimes
 

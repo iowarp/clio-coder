@@ -106,13 +106,13 @@ function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string): Na
 	return null;
 }
 
-function resolveCandidate(p: string): string {
+function resolveCandidate(p: string, baseCwd?: string): string {
 	// ~ expansion is not performed here; any ~-prefixed path is treated as an
 	// absolute user-home reference. We keep it as-is so the caller-visible
 	// string drives the escape check, and classify conservatively as modify.
 	if (p.startsWith("~")) return p;
 	if (path.isAbsolute(p)) return path.resolve(p);
-	return path.resolve(process.cwd(), p);
+	return path.resolve(baseCwd ?? process.cwd(), p);
 }
 
 function isInsideCwd(abs: string): boolean {
@@ -121,11 +121,11 @@ function isInsideCwd(abs: string): boolean {
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-function writePathClass(pathArg: string): { cls: "system_modify" | "write"; reason?: string } {
+function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modify" | "write"; reason?: string } {
 	if (pathArg.startsWith("~")) {
 		return { cls: "system_modify", reason: `write-path-home-escape: ${pathArg}` };
 	}
-	const abs = resolveCandidate(pathArg);
+	const abs = resolveCandidate(pathArg, baseCwd);
 	for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
 		if (abs === prefix || abs.startsWith(`${prefix}/`)) {
 			return { cls: "system_modify", reason: `write-path-system-root: ${prefix}` };
@@ -165,12 +165,16 @@ export function classify(call: ClassifierCall): Classification {
 		// shell write-target the command exposes (redirects, tee, cp/mv
 		// destinations). Without this the model can dodge the write tool's
 		// super-mode gate by emitting `echo X > /tmp/foo.txt` after the user
-		// cancels the original write call.
+		// cancels the original write call. Relative write targets are
+		// resolved against the bash call's explicit cwd argument when
+		// supplied so a model cannot launder a write outside the workspace
+		// by combining a relative redirect with a cwd outside the workspace.
 		const command = typeof call.args?.command === "string" ? call.args.command : null;
+		const argCwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : undefined;
 		if (command !== null) {
 			const targetReasons: string[] = [];
 			for (const target of extractCommandWriteTargets(command)) {
-				const decision = writePathClass(target);
+				const decision = writePathClass(target, argCwd);
 				if (decision.cls === "system_modify") {
 					targetReasons.push(decision.reason ?? `bash-write-target: ${target}`);
 				}
