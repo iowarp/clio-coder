@@ -25,4 +25,16 @@ describe("tools/grep", () => {
 		ok(!result.output.includes(".fallow/cache.bin"), result.output);
 		ok(!result.output.includes("blob.bin"), result.output);
 	});
+
+	it("uses shared read-path normalization for the search root", async () => {
+		const root = mkdtempSync(path.join(tmpdir(), "clio-grep-"));
+		mkdirSync(path.join(root, "src"));
+		writeFileSync(path.join(root, "src", "index.ts"), "export const normalizedSearchRoot = true;\n", "utf8");
+
+		const result = await grepTool.run({ pattern: "normalizedSearchRoot", path: `@${root}` });
+
+		ok(result.kind === "ok", JSON.stringify(result));
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("src/index.ts"), result.output);
+	});
 });
