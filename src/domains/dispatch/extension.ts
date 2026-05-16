@@ -47,6 +47,7 @@ import type {
 	RunKind,
 	RunReceipt,
 	RunReceiptDraft,
+	RunReceiptUpstreamResponse,
 	RunStatus,
 	SafetyBlockedAttempt,
 	ToolCallStat,
@@ -173,6 +174,10 @@ function extractReasoningTokenCount(usage: unknown): number {
 		if (value !== undefined) return value;
 	}
 	return 0;
+}
+
+function readStringOrNull(value: unknown): string | null {
+	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 export function pickOrchestratorScope(safety: SafetyContract, mode: ModeName): ScopeSpec | null {
@@ -698,6 +703,7 @@ export function createDispatchBundle(
 		const workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
 
 		const toolStats = new Map<string, ToolCallStat>();
+		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
 				const event = raw as {
@@ -705,6 +711,9 @@ export function createDispatchBundle(
 					message?: {
 						role?: string;
 						usage?: unknown;
+						model?: unknown;
+						responseModel?: unknown;
+						responseId?: unknown;
 					};
 					payload?: {
 						tool?: string;
@@ -724,6 +733,12 @@ export function createDispatchBundle(
 					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
 					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
 					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+					const model = readStringOrNull(event.message.model);
+					const responseModel = readStringOrNull(event.message.responseModel);
+					const responseId = readStringOrNull(event.message.responseId);
+					if (model !== null || responseModel !== null || responseId !== null) {
+						upstreamResponses.push({ model, responseModel, responseId });
+					}
 				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
@@ -832,6 +847,7 @@ export function createDispatchBundle(
 					exitCode: receiptExitCode,
 					tokenCount,
 					reasoningTokenCount,
+					...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 					costUsd,
 					compiledPromptHash,
 					staticCompositionHash: null,

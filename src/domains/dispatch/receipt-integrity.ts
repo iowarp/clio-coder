@@ -80,6 +80,9 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 	if (receipt.reasoningTokenCount !== undefined) {
 		draft.reasoningTokenCount = receipt.reasoningTokenCount;
 	}
+	if (receipt.upstreamResponses !== undefined) {
+		draft.upstreamResponses = receipt.upstreamResponses;
+	}
 	if (receipt.safety !== undefined) {
 		draft.safety = receipt.safety;
 	}

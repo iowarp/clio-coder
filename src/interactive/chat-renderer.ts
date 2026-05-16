@@ -192,7 +192,7 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 		const failure = messageFailure(entry);
 		message.stopReason = failure?.stopReason ?? (typeof obj?.stopReason === "string" ? obj.stopReason : "stop");
 		if (failure) message.errorMessage = failure.errorMessage;
-		for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId"]) {
+		for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId", "diagnostics"]) {
 			if (obj?.[key] !== undefined) message[key] = obj[key];
 		}
 	}

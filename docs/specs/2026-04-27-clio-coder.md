@@ -563,6 +563,12 @@ Settings live in `<configDir>/settings.yaml` and are validated by
   table.
 - `state`, `compaction`, `retry`: persisted run-state knobs.
 
+Clio does not load Pi's `models.json` directly. Custom targets are
+declared in YAML `settings.yaml`, and custom runtimes load as JavaScript
+descriptor files or npm packages through `runtimePlugins`; Pi 0.73's
+JSONC `models.json` parsing is therefore not part of Clio's config
+surface.
+
 Platform defaults:
 
 | Platform | Default config path |
