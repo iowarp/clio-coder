@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -146,6 +146,30 @@ describe("extensions domain", () => {
 		strictEqual(candidates.length, 1);
 		strictEqual(candidates[0]?.valid, false);
 		ok(candidates[0]?.diagnostics.some((diag) => diag.type === "error"));
+	});
+
+	it("keeps the previous install when a forced replacement copy fails", (t) => {
+		if (typeof process.getuid === "function" && process.getuid() === 0) {
+			t.skip("root can read chmod 000 files, so copy failure is not deterministic");
+			return;
+		}
+		const original = join(scratch, "original-source");
+		const replacement = join(scratch, "replacement-source");
+		writeExtension(original, "lab-pack", "Original package");
+		writeExtension(replacement, "lab-pack", "Replacement package");
+		const unreadable = join(replacement, "skills", "review", "blocked.txt");
+		writeFileSync(unreadable, "blocked", "utf8");
+		chmodSync(unreadable, 0);
+
+		const installed = installExtension(original);
+		strictEqual(installed.diagnostics.length, 0);
+
+		const failed = installExtension(replacement, { force: true });
+		chmodSync(unreadable, 0o600);
+
+		ok(failed.diagnostics.some((diag) => diag.type === "error" && diag.message.includes("install failed")));
+		const current = listInstalledExtensions().find((entry) => entry.id === "lab-pack");
+		strictEqual(current?.description, "Original package");
 	});
 
 	it("keeps a disabled effective project extension ahead of a user extension", () => {
