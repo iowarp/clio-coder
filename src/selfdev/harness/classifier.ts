@@ -1,4 +1,5 @@
 import { isAbsolute, relative, sep } from "node:path";
+import { SELF_DEV_HOT_TOOL_FILES, SELF_DEV_RESTART_ROOT_FILES } from "../reload-policy.js";
 
 export type ChangeClass = "hot" | "restart" | "worker-next-dispatch" | "ignore";
 
@@ -7,32 +8,7 @@ export interface ClassifyResult {
 	reason: string;
 }
 
-export const ROOT_CONFIG_FILES = new Set([
-	"package.json",
-	"package-lock.json",
-	"tsconfig.json",
-	"tsconfig.tests.json",
-	"tsup.config.ts",
-	"biome.json",
-	".gitignore",
-	"damage-control-rules.yaml",
-]);
-
-const HOT_TOOL_FILES = new Set([
-	"src/tools/bash.ts",
-	"src/tools/edit.ts",
-	"src/tools/glob.ts",
-	"src/tools/grep.ts",
-	"src/tools/ls.ts",
-	"src/tools/read.ts",
-	"src/tools/web-fetch.ts",
-	"src/tools/write-plan.ts",
-	"src/tools/write-review.ts",
-	"src/tools/write.ts",
-	"src/tools/codewiki/entry-points.ts",
-	"src/tools/codewiki/find-symbol.ts",
-	"src/tools/codewiki/where-is.ts",
-]);
+export const ROOT_CONFIG_FILES = SELF_DEV_RESTART_ROOT_FILES;
 const IGNORE_EXTENSIONS = new Set([".md", ".mdx"]);
 
 function toPosix(p: string): string {
@@ -82,7 +58,7 @@ export function classifyChange(absPath: string, repoRoot: string): ClassifyResul
 		if (!basename.endsWith(".ts")) {
 			return { class: "ignore", reason: `non-ts tool file ${basename}` };
 		}
-		if (HOT_TOOL_FILES.has(rel)) {
+		if (SELF_DEV_HOT_TOOL_FILES.has(rel)) {
 			return { class: "hot", reason: `tool spec ${basename} is self-contained and re-registerable` };
 		}
 		return { class: "restart", reason: `${basename} is tool infrastructure or an unregistered tool module` };
