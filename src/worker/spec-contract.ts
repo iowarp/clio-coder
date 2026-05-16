@@ -1,3 +1,4 @@
+import type { SelfDevMode } from "../core/dev-harness-contract.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
@@ -9,7 +10,6 @@ import type {
 	RuntimeKind,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
 
 export const WORKER_SPEC_VERSION = 1;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 1;
