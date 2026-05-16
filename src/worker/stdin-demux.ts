@@ -1,5 +1,5 @@
-import type { WorkerSpec } from "../domains/dispatch/worker-spawn.js";
 import { isToolApprovalResponse, type ToolApprovalResponsePayload } from "../engine/worker-events.js";
+import { parseWorkerSpec, type WorkerSpec } from "./spec-contract.js";
 
 interface PendingApproval {
 	resolve: (response: ToolApprovalResponsePayload) => void;
@@ -49,7 +49,7 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		if (!specReceived) {
 			specReceived = true;
 			try {
-				resolveSpec(JSON.parse(line) as WorkerSpec);
+				resolveSpec(parseWorkerSpec(JSON.parse(line)));
 			} catch (err) {
 				rejectSpec(err instanceof Error ? err : new Error(String(err)));
 			}

@@ -15,6 +15,7 @@ import type { SelfDevMode } from "../selfdev/mode.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
+import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
 
 type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
@@ -45,6 +46,13 @@ async function main(): Promise<number> {
 	const runtime = await resolveWorkerRuntime(spec.runtimeId);
 	if (!runtime) {
 		process.stderr.write(`[worker] runtime '${spec.runtimeId}' not registered\n`);
+		stopHeartbeat();
+		return 2;
+	}
+	try {
+		validateRehydratedWorkerRuntime(spec, runtime);
+	} catch (err) {
+		process.stderr.write(`[worker] ${err instanceof Error ? err.message : String(err)}\n`);
 		stopHeartbeat();
 		return 2;
 	}

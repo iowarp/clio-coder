@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { spawnNativeWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 
 describe("dispatch approval handshake", () => {
 	let scratch: string;
@@ -38,7 +39,21 @@ rl.on("line", (line) => {
 
 	it("delivers an approval response to the worker after receiving its request", async () => {
 		const worker = spawnNativeWorker(
-			{ systemPrompt: "", task: "t", endpoint: { id: "e", runtime: "x" } as never, runtimeId: "x", wireModelId: "m" },
+			{
+				specVersion: WORKER_SPEC_VERSION,
+				systemPrompt: "",
+				task: "t",
+				endpoint: { id: "e", runtime: "x" } as never,
+				runtime: {
+					version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+					id: "x",
+					kind: "http",
+					apiFamily: "openai-responses",
+					auth: "none",
+				},
+				runtimeId: "x",
+				wireModelId: "m",
+			},
 			{ workerEntryPath: stubEntry },
 		);
 

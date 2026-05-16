@@ -19,27 +19,9 @@ import {
 	type ToolApprovalRequestPayload,
 	type ToolApprovalResponsePayload,
 } from "../../engine/worker-events.js";
-import type { SelfDevMode } from "../../selfdev/mode.js";
-import type { MiddlewareSnapshot } from "../middleware/index.js";
-import type { CapabilityFlags, EndpointDescriptor, ThinkingLevel } from "../providers/index.js";
+import type { WorkerSpec } from "../../worker/spec-contract.js";
 
-export interface WorkerSpec {
-	systemPrompt: string;
-	task: string;
-	endpoint: EndpointDescriptor;
-	runtimeId: string;
-	wireModelId: string;
-	modelCapabilities?: Partial<CapabilityFlags>;
-	sessionId?: string;
-	apiKey?: string;
-	thinkingLevel?: ThinkingLevel;
-	allowedTools?: ReadonlyArray<string>;
-	mode?: string;
-	middlewareSnapshot?: MiddlewareSnapshot;
-	selfDev?: SelfDevMode;
-	supervised?: boolean;
-	autoApprove?: "allow" | "deny";
-}
+export type { WorkerSpec } from "../../worker/spec-contract.js";
 
 export interface SpawnedWorker {
 	pid: number | null;
