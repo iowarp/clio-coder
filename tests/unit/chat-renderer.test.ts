@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { ClioTurnRecord } from "../../src/engine/session.js";
@@ -279,7 +279,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(serialized.length < huge.length, `replay remained too large: ${serialized.length}`);
 	});
 
-	it("preserves routed responseModel metadata in model replay", () => {
+	it("preserves routed response metadata and diagnostics in model replay", () => {
 		const entries: SessionEntry[] = [
 			{
 				kind: "message",
@@ -292,6 +292,13 @@ describe("rehydrateChatPanelFromTurns", () => {
 					model: "openrouter/auto",
 					responseModel: "anthropic/claude-sonnet-4.6",
 					responseId: "resp-1",
+					diagnostics: [
+						{
+							type: "openai-codex-websocket-fallback",
+							timestamp: 1,
+							details: { transport: "sse" },
+						},
+					],
 				},
 			},
 		];
@@ -299,6 +306,13 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const messages = buildReplayAgentMessagesFromTurns(entries) as unknown as Array<Record<string, unknown>>;
 		strictEqual(messages[0]?.responseModel, "anthropic/claude-sonnet-4.6");
 		strictEqual(messages[0]?.responseId, "resp-1");
+		deepStrictEqual(messages[0]?.diagnostics, [
+			{
+				type: "openai-codex-websocket-fallback",
+				timestamp: 1,
+				details: { transport: "sse" },
+			},
+		]);
 	});
 
 	it("caps oversized retained rich content when rehydrating the visible chat panel", () => {

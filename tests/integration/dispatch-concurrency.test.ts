@@ -564,6 +564,9 @@ describe("dispatch concurrency gate", () => {
 						output: 40,
 						output_tokens_details: { reasoning_tokens: 12 },
 					},
+					model: "openrouter/auto",
+					responseModel: "anthropic/claude-sonnet-4.6",
+					responseId: "resp-1",
 				},
 			};
 		})();
@@ -591,6 +594,13 @@ describe("dispatch concurrency gate", () => {
 
 			strictEqual(receipt.tokenCount, 140);
 			strictEqual(receipt.reasoningTokenCount, 12);
+			deepStrictEqual(receipt.upstreamResponses, [
+				{
+					model: "openrouter/auto",
+					responseModel: "anthropic/claude-sonnet-4.6",
+					responseId: "resp-1",
+				},
+			]);
 			strictEqual(envelope?.tokenCount, 140);
 			strictEqual(envelope?.reasoningTokenCount, 12);
 		} finally {

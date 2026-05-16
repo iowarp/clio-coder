@@ -95,6 +95,12 @@ export interface RunReceiptReproducibility {
 	};
 }
 
+export interface RunReceiptUpstreamResponse {
+	model: string | null;
+	responseModel: string | null;
+	responseId: string | null;
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -108,6 +114,7 @@ export interface RunReceipt {
 	exitCode: number;
 	tokenCount: number;
 	reasoningTokenCount?: number;
+	upstreamResponses?: RunReceiptUpstreamResponse[];
 	costUsd: number;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
