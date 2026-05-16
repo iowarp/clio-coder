@@ -180,6 +180,34 @@ export function extractCommandWriteTargets(command: string): string[] {
 	return targets.filter(isInterestingWriteTarget);
 }
 
+/**
+ * Returns paths that common shell commands would remove from their current
+ * location. This intentionally covers only deterministic, path-bearing
+ * patterns; broader command admission remains owned by the policy engine.
+ */
+export function extractCommandDeleteTargets(command: string): string[] {
+	const tokens = tokenizeShellLike(command);
+	const targets: string[] = [];
+	for (const segment of splitSegments(tokens)) {
+		const commandIndex = commandTokenIndex(segment);
+		if (commandIndex === null) continue;
+		const executable = basenameToken(segment[commandIndex]);
+		if (executable === "rm") {
+			targets.push(...pathArgs(segment, commandIndex));
+			continue;
+		}
+		if (executable === "mv") {
+			const args = pathArgs(segment, commandIndex);
+			if (args.length >= 2) targets.push(...args.slice(0, -1));
+			continue;
+		}
+		if (executable === "find" && segment.includes("-delete")) {
+			targets.push(...findRoots(segment.slice(commandIndex + 1)));
+		}
+	}
+	return targets.filter(isInterestingWriteTarget);
+}
+
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
 
 function collectRedirectTargets(segment: ReadonlyArray<string>, out: string[]): void {
@@ -288,12 +316,7 @@ function classifyFindDelete(
 	artifacts: ReadonlyArray<NormalizedArtifact>,
 ): DestructiveCommandClassification {
 	if (!args.includes("-delete")) return { kind: "benign", matches: [] };
-	const roots: string[] = [];
-	for (const token of args) {
-		if (token === "-delete" || token.startsWith("-") || token === "(" || token === "!" || token === "not") break;
-		if (token === "--") continue;
-		roots.push(token);
-	}
+	const roots = findRoots(args);
 	const matches = matchesForPaths(
 		roots.length === 0 ? ["."] : roots,
 		artifacts,
@@ -308,6 +331,16 @@ function classifyFindDelete(
 		};
 	}
 	return { kind: "benign", matches: [] };
+}
+
+function findRoots(args: ReadonlyArray<string>): string[] {
+	const roots: string[] = [];
+	for (const token of args) {
+		if (token === "-delete" || token.startsWith("-") || token === "(" || token === "!" || token === "not") break;
+		if (token === "--") continue;
+		roots.push(token);
+	}
+	return roots.length === 0 ? ["."] : roots;
 }
 
 function classifyPathOperation(

@@ -5,10 +5,18 @@ import type { ModeName } from "../modes/matrix.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
 import {
+	type CompiledPathPolicy,
+	compilePathPolicy,
+	evaluatePathPolicy,
+	type PathPolicyDecision,
+	type PathPolicyOperation,
+} from "./path-policy.js";
+import {
 	type LoadedProjectSafetyPolicy,
 	loadProjectSafetyPolicy,
 	type ProjectCommandPolicy,
 } from "./project-policy.js";
+import { extractCommandDeleteTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { applicablePacks, getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 
@@ -96,6 +104,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const selfDev = options.selfDev ?? process.env.CLIO_SELF_DEV === "1";
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
+	const projectPolicyRoot = projectPolicy.path === null ? cwd : path.dirname(path.dirname(projectPolicy.path));
+	const pathPolicy = compilePathPolicy(projectPolicy.pathPolicy, projectPolicyRoot);
 
 	function rulesFor(mode: string | undefined): SourcedRule[] {
 		const safetyMode = mode ?? "default";
@@ -163,6 +173,24 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return blockDecision(base, blockInput);
 			}
 
+			if (projectPolicy.valid) {
+				const pathBlock = evaluateProjectPathPolicy(pathPolicy, call, callCwd);
+				if (pathBlock !== null) {
+					const blockInput: Omit<
+						SafetyPolicyDecision,
+						"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+					> = {
+						ruleId: pathBlock.reasonCode,
+						reasonCode: pathBlock.reasonCode,
+						reasons: [pathBlock.reason],
+						policySource: "project-policy",
+					};
+					if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+					return blockDecision(base, blockInput);
+				}
+			}
+
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
 				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, cwd, mode, projectPolicy);
 				if (bash.kind === "block") return blockDecision(base, bash);
@@ -192,12 +220,58 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				projectPolicyPath: projectPolicy.path,
 				projectPolicyHash: projectPolicy.hash,
 				projectPolicyValid: projectPolicy.valid,
-				projectPolicyErrors: projectPolicy.errors,
+				projectPolicyErrors: [...projectPolicy.errors, ...pathPolicy.diagnostics],
 				selfDev,
 				cwd,
 			};
 		},
 	};
+}
+
+function evaluateProjectPathPolicy(
+	policy: CompiledPathPolicy,
+	call: ClassifierCall,
+	callCwd: string,
+): Extract<PathPolicyDecision, { kind: "block" }> | null {
+	if (policy.entries.length === 0) return null;
+	for (const target of pathPolicyTargets(call)) {
+		const decision = evaluatePathPolicy(policy, target.operation, target.path, callCwd);
+		if (decision.kind === "block") return decision;
+	}
+	return null;
+}
+
+function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyOperation; path: string }> {
+	const args = call.args;
+	switch (call.tool) {
+		case ToolNames.Read:
+		case ToolNames.Ls:
+		case ToolNames.Grep:
+		case ToolNames.Find:
+		case ToolNames.Glob: {
+			const target = pathArg(args) ?? ".";
+			return [{ operation: "read", path: target }];
+		}
+		case ToolNames.Write:
+		case ToolNames.Edit: {
+			const target = pathArg(args);
+			return target === null ? [] : [{ operation: "write", path: target }];
+		}
+		case ToolNames.WritePlan:
+			return [{ operation: "write", path: pathArg(args) ?? "PLAN.md" }];
+		case ToolNames.WriteReview:
+			return [{ operation: "write", path: pathArg(args) ?? "REVIEW.md" }];
+		case ToolNames.Bash: {
+			const command = commandArg(args);
+			if (command === null) return [];
+			return [
+				...extractCommandWriteTargets(command).map((target) => ({ operation: "write" as const, path: target })),
+				...extractCommandDeleteTargets(command).map((target) => ({ operation: "delete" as const, path: target })),
+			];
+		}
+		default:
+			return [];
+	}
 }
 
 function evaluateDefaultDenyBash(
@@ -381,6 +455,12 @@ function isUnderOrSame(child: string, parent: string): boolean {
 
 function commandArg(args: Record<string, unknown> | undefined): string | null {
 	return typeof args?.command === "string" ? args.command : null;
+}
+
+function pathArg(args: Record<string, unknown> | undefined): string | null {
+	if (!args) return null;
+	const candidate = args.path ?? args.file_path ?? args.filePath;
+	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
 function cwdArg(args: Record<string, unknown> | undefined, fallback: string): string {

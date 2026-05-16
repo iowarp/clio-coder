@@ -284,6 +284,70 @@ describe("safety/policy-engine", () => {
 		}
 	});
 
+	it("enforces project path policies through the policy engine", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-project-path-policy-"));
+		try {
+			mkdirSync(join(dir, ".clio"));
+			writeFileSync(
+				join(dir, ".clio", "safety.yaml"),
+				[
+					"version: 1",
+					"zeroAccessPaths:",
+					"  - secrets",
+					"readOnlyPaths:",
+					"  - vendor",
+					"noDeletePaths:",
+					"  - src",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: dir, selfDev: false });
+
+			const secretRead = engine.evaluate({ tool: "read", args: { path: "secrets/key.txt" } }, "default");
+			strictEqual(secretRead.kind, "block");
+			strictEqual(secretRead.reasonCode, "path-policy:zeroAccessPaths");
+
+			const vendorWrite = engine.evaluate({ tool: "write", args: { path: "vendor/generated.ts" } }, "default");
+			strictEqual(vendorWrite.kind, "block");
+			strictEqual(vendorWrite.reasonCode, "path-policy:readOnlyPaths");
+
+			const vendorRead = engine.evaluate({ tool: "read", args: { path: "vendor/generated.ts" } }, "default");
+			strictEqual(vendorRead.kind, "allow");
+
+			const sourceDelete = engine.evaluate({ tool: "bash", args: { command: "rm src/app.ts", cwd: dir } }, "super");
+			strictEqual(sourceDelete.kind, "block");
+			strictEqual(sourceDelete.reasonCode, "path-policy:noDeletePaths");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects project path policy entries that escape the policy root", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-project-path-policy-invalid-"));
+		try {
+			mkdirSync(join(dir, ".clio"));
+			writeFileSync(
+				join(dir, ".clio", "safety.yaml"),
+				["version: 1", "readOnlyPaths:", "  - ../outside", "noDeletePaths:", "  - /etc", ""].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: dir, selfDev: false });
+			const meta = engine.metadata();
+			strictEqual(meta.projectPolicyValid, false);
+			strictEqual(
+				meta.projectPolicyErrors.some((entry) => entry.includes("readOnlyPaths[0] must not escape")),
+				true,
+			);
+			strictEqual(
+				meta.projectPolicyErrors.some((entry) => entry.includes("noDeletePaths[0] must be relative")),
+				true,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("blocks default-mode bash when the caller cwd escapes the workspace root", () => {
 		const engine = createSafetyPolicyEngine({ cwd: process.cwd(), selfDev: false });
 		const decision = engine.evaluate({ tool: "bash", args: { command: "ls", cwd: "/etc" } }, "default");
