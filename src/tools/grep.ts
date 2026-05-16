@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveRgBinary } from "./executables.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, formatSize, GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
@@ -212,7 +212,7 @@ export const grepTool: ToolSpec = {
 		if (!pattern) return { kind: "error", message: "grep: missing pattern argument" };
 		const context = parseContext(args.context);
 		if (context === null) return { kind: "error", message: "grep: context must be a non-negative number" };
-		const searchPath = resolveToCwd(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
+		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
 		const stat = statIsDirectory(searchPath);
 		if (!stat.ok) return { kind: "error", message: `grep: ${stat.message}` };
 		const rgPath = resolveRgBinary();
