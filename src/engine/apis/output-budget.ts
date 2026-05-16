@@ -72,7 +72,9 @@ export function remainingContextMaxTokens(
 	const loadedContextWindow =
 		limits?.contextWindow !== undefined && limits.contextWindow > 0 ? limits.contextWindow : Number.POSITIVE_INFINITY;
 	const contextWindow = Math.min(configuredContextWindow, loadedContextWindow);
-	const budget = Math.max(safety, contextWindow - inputTokens - safety);
+	const budget = Number.isFinite(contextWindow)
+		? Math.max(1, contextWindow - inputTokens - safety)
+		: Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	const requested = options?.maxTokens ?? modelLimit;
 	const resolved = Math.min(requested, modelLimit, budget);

@@ -29,4 +29,26 @@ describe("engine/apis/output-budget remainingContextMaxTokens", () => {
 
 		strictEqual(maxTokens, 1024);
 	});
+
+	it("does not reserve a safety-sized output when the known context window is too small", () => {
+		const maxTokens = remainingContextMaxTokens({ contextWindow: 512, maxTokens: 0 }, emptyContext, {
+			maxTokens: 9999,
+		});
+
+		strictEqual(maxTokens, 1);
+	});
+
+	it("does not request overflow output when input already consumes the known context window", () => {
+		const maxTokens = remainingContextMaxTokens(
+			{ contextWindow: 2048, maxTokens: 0 },
+			{
+				systemPrompt: "x".repeat(8192),
+				messages: [],
+				tools: [],
+			} as unknown as Context,
+			{ maxTokens: 9999 },
+		);
+
+		strictEqual(maxTokens, 1);
+	});
 });

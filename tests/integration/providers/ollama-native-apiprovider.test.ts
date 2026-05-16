@@ -194,7 +194,7 @@ describe("engine/apis ollamaNativeApiProvider.stream", () => {
 		if (typeof maxTokens !== "number") {
 			throw new TypeError(`expected numeric num_predict, got ${typeof maxTokens}`);
 		}
-		strictEqual(maxTokens, 1024);
+		strictEqual(maxTokens, 1023);
 		ok(estimateInputTokensFromContext(context) + maxTokens <= model.contextWindow);
 	});
 
