@@ -121,4 +121,27 @@ describe("boundaries", () => {
 			result.violations.join("\n"),
 		);
 	});
+
+	it("rejects stable runtime static imports from selfdev", () => {
+		const root = fixtureProject({
+			"src/entry/orchestrator.ts": 'import type { SelfDevMode } from "../selfdev/mode.js";',
+			"src/selfdev/mode.ts": "export type SelfDevMode = {};",
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule5")),
+			result.violations.join("\n"),
+		);
+	});
+
+	it("allows deliberate lazy selfdev loading", () => {
+		const root = fixtureProject({
+			"src/entry/orchestrator.ts": 'const mod = await import("../selfdev/index.js");',
+			"src/selfdev/index.ts": "export const register = {};",
+		});
+
+		strictEqual(runBoundaryCheck(root).violations.length, 0);
+	});
 });
