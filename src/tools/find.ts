@@ -33,8 +33,9 @@ function toPosixPath(value: string): string {
 
 function renderFindOutput(paths: string[], limit: number): ToolResult {
 	if (paths.length === 0) return { kind: "ok", output: "No files found matching pattern" };
-	const resultLimitReached = paths.length >= limit;
-	const truncation = truncateHead(paths.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
+	const resultLimitReached = paths.length > limit;
+	const visiblePaths = paths.slice(0, limit);
+	const truncation = truncateHead(visiblePaths.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
 	let output = truncation.content;
 	const details: Record<string, unknown> = {};
 	const notices: string[] = [];
@@ -50,14 +51,14 @@ function renderFindOutput(paths: string[], limit: number): ToolResult {
 	return { kind: "ok", output, ...(Object.keys(details).length > 0 ? { details } : {}) };
 }
 
-function fallbackFind(pattern: string, searchPath: string, limit: number): string[] {
+function fallbackFind(pattern: string, searchPath: string, collectLimit: number): string[] {
 	const matcher = compileGlobRegex(pattern.includes("/") ? pattern : `**/${pattern}`);
 	const out: string[] = [];
 	function walk(dir: string): void {
-		if (out.length >= limit) return;
+		if (out.length >= collectLimit) return;
 		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 		for (const entry of entries) {
-			if (out.length >= limit) return;
+			if (out.length >= collectLimit) return;
 			const absPath = join(dir, entry.name);
 			let stat: import("node:fs").Stats;
 			try {
@@ -89,7 +90,7 @@ async function fdFind(
 	signal?: AbortSignal,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
 	return new Promise((resolve) => {
-		const args = ["--glob", "--color=never", "--hidden", "--no-require-git", "--max-results", String(limit)];
+		const args = ["--glob", "--color=never", "--hidden", "--no-require-git", "--max-results", String(limit + 1)];
 		let effectivePattern = pattern;
 		if (pattern.includes("/")) {
 			args.push("--full-path");
