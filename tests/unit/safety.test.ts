@@ -101,6 +101,21 @@ describe("safety/policy-engine", () => {
 		strictEqual(superDecision.kind, "allow");
 	});
 
+	it("asks for confirmation on damage-control ask rules and admits them after super elevation", () => {
+		const engine = createSafetyPolicyEngine({ cwd: process.cwd(), selfDev: false });
+
+		const asked = engine.evaluate({ tool: "bash", args: { command: "git stash drop stash@{0}" } }, "default");
+		strictEqual(asked.kind, "ask");
+		strictEqual(asked.ruleId, "git-stash-drop");
+		strictEqual(asked.elevationMode, "super");
+		strictEqual(asked.match?.ask, true);
+
+		const elevated = engine.evaluate({ tool: "bash", args: { command: "git stash drop stash@{0}" } }, "super");
+		strictEqual(elevated.kind, "allow");
+		strictEqual(elevated.ruleId, "git-stash-drop");
+		strictEqual(elevated.match?.ask, true);
+	});
+
 	it("loads project safety policy once and fails closed when invalid", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-project-policy-"));
 		try {

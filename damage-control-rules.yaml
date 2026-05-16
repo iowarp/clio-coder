@@ -117,6 +117,42 @@ packs:
         pattern: "\\bDROP\\s+DATABASE\\b"
         class: system_modify
         block: true
+      - id: git-checkout-discard-all
+        description: "git checkout -- . discards all uncommitted changes"
+        pattern: "\\bgit\\s+checkout\\s+--\\s*\\.\\s*$"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-restore-discard-all
+        description: "git restore . discards all uncommitted changes"
+        pattern: "\\bgit\\s+restore\\s+\\.\\s*$"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-stash-drop
+        description: "git stash drop permanently deletes a stash"
+        pattern: "\\bgit\\s+stash\\s+drop\\b"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-branch-force-delete
+        description: "git branch -D force deletes a branch"
+        pattern: "\\bgit\\s+branch\\b[^;&|]*\\s-[A-Za-z]*D\\b"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-push-delete-remote-branch
+        description: "git push --delete deletes a remote branch"
+        pattern: "\\bgit\\s+push\\s+\\S+\\s+--delete\\b"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-push-colon-delete-remote-branch
+        description: "git push remote :branch deletes a remote branch"
+        pattern: "\\bgit\\s+push\\s+\\S+\\s+:\\S+"
+        class: git_destructive
+        block: false
+        ask: true
   - id: dev
     rules:
       - id: selfdev-git-push

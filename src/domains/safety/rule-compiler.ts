@@ -6,6 +6,7 @@ interface RawRule {
 	pattern?: unknown;
 	class?: unknown;
 	block?: unknown;
+	ask?: unknown;
 }
 
 function asString(value: unknown, ruleId: string, field: string): string {
@@ -26,6 +27,9 @@ export function compileDamageControlRule(raw: RawRule, index: number): DamageCon
 	if (typeof raw.block !== "boolean") {
 		throw new Error(`damage-control rule '${id}': expected boolean for block`);
 	}
+	if (raw.ask !== undefined && typeof raw.ask !== "boolean") {
+		throw new Error(`damage-control rule '${id}': expected boolean for ask`);
+	}
 	let pattern: RegExp;
 	try {
 		pattern = new RegExp(patternString, "i");
@@ -33,7 +37,14 @@ export function compileDamageControlRule(raw: RawRule, index: number): DamageCon
 		const msg = err instanceof Error ? err.message : String(err);
 		throw new Error(`damage-control rule '${id}': invalid pattern: ${msg}`);
 	}
-	return { id, description, pattern, class: klass, block: raw.block };
+	return {
+		id,
+		description,
+		pattern,
+		class: klass,
+		block: raw.block,
+		...(raw.ask !== undefined ? { ask: raw.ask } : {}),
+	};
 }
 
 export function compileDamageControlRules(rawRules: unknown, ctx: string): DamageControlRule[] {

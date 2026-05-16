@@ -21,6 +21,7 @@ export interface DamageControlRule {
 	pattern: RegExp;
 	class: string;
 	block: boolean;
+	ask?: boolean;
 }
 
 export interface DamageControlRuleset {
@@ -33,6 +34,7 @@ export interface DamageControlMatch {
 	reason: string;
 	actionClass: string;
 	block: boolean;
+	ask?: boolean;
 }
 
 interface RawPack {
@@ -79,12 +81,14 @@ export function match(commandString: string, ruleset: DamageControlRuleset): Dam
 	if (commandString.length === 0) return null;
 	for (const rule of ruleset.rules) {
 		if (rule.pattern.test(commandString)) {
-			return {
+			const match: DamageControlMatch = {
 				ruleId: rule.id,
 				reason: `matched ${rule.id}: ${rule.description}`,
 				actionClass: rule.class,
 				block: rule.block,
 			};
+			if (rule.ask !== undefined) match.ask = rule.ask;
+			return match;
 		}
 	}
 	return null;
