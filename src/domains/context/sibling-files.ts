@@ -8,6 +8,11 @@ export interface SiblingContextFile {
 	content: string;
 }
 
+export interface LoadSiblingContextFilesOptions {
+	homeDir?: string;
+	includeGlobal?: boolean;
+}
+
 const LOCAL_FILES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md"] as const;
 const LOCAL_NESTED_FILES = [join(".claude", "CLAUDE.md")] as const;
 
@@ -31,7 +36,10 @@ function markdownFilesInDir(dir: string): string[] {
 	}
 }
 
-export function loadSiblingContextFiles(cwd: string): SiblingContextFile[] {
+export function loadSiblingContextFiles(
+	cwd: string,
+	options: LoadSiblingContextFilesOptions = {},
+): SiblingContextFile[] {
 	const files: SiblingContextFile[] = [];
 	for (const name of LOCAL_FILES) {
 		const found = readFileIfPresent("project", join(cwd, name));
@@ -46,7 +54,9 @@ export function loadSiblingContextFiles(cwd: string): SiblingContextFile[] {
 		if (found) files.push(found);
 	}
 
-	const home = homedir();
+	if (options.includeGlobal === false) return files;
+
+	const home = options.homeDir ?? homedir();
 	const globalCandidates = [join(home, ".claude", "CLAUDE.md"), join(home, ".gemini", "GEMINI.md")];
 	for (const filePath of globalCandidates) {
 		const found = readFileIfPresent("global", filePath);

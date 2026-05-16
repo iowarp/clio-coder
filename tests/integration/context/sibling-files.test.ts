@@ -12,7 +12,7 @@ describe("context/sibling-files", () => {
 			writeFileSync(join(dir, "CLAUDE.md"), "claude", "utf8");
 			mkdirSync(join(dir, ".cursor", "rules"), { recursive: true });
 			writeFileSync(join(dir, ".cursor", "rules", "rules.md"), "cursor", "utf8");
-			const files = loadSiblingContextFiles(dir);
+			const files = loadSiblingContextFiles(dir, { includeGlobal: false });
 			strictEqual(
 				files.some((file) => file.path.endsWith("CLAUDE.md")),
 				true,
@@ -20,6 +20,41 @@ describe("context/sibling-files", () => {
 			ok(files.some((file) => file.content === "cursor"));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("loads global sibling files from an explicit home directory", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-sibling-"));
+		const home = mkdtempSync(join(tmpdir(), "clio-sibling-home-"));
+		try {
+			mkdirSync(join(home, ".claude"), { recursive: true });
+			mkdirSync(join(home, ".config", "agents"), { recursive: true });
+			writeFileSync(join(home, ".claude", "CLAUDE.md"), "global claude", "utf8");
+			writeFileSync(join(home, ".config", "agents", "rules.md"), "global agents", "utf8");
+
+			const files = loadSiblingContextFiles(dir, { homeDir: home });
+
+			ok(files.some((file) => file.source === "global" && file.content === "global claude"));
+			ok(files.some((file) => file.source === "global" && file.content === "global agents"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	it("can suppress global sibling files for isolated callers", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-sibling-"));
+		const home = mkdtempSync(join(tmpdir(), "clio-sibling-home-"));
+		try {
+			mkdirSync(join(home, ".claude"), { recursive: true });
+			writeFileSync(join(home, ".claude", "CLAUDE.md"), "global claude", "utf8");
+
+			const files = loadSiblingContextFiles(dir, { homeDir: home, includeGlobal: false });
+
+			strictEqual(files.length, 0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
 		}
 	});
 });
