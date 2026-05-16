@@ -148,6 +148,17 @@ describe("ported basic coding tools", () => {
 		if (result.kind === "ok") strictEqual(result.output, "(empty directory)");
 	});
 
+	it("ls uses shared read-path normalization for the search root", async () => {
+		const root = scratchDir();
+		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");
+
+		const result = await lsTool.run({ path: `@${root}` });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(result.output, "note.md");
+	});
+
 	it("bash preserves command output when the command exits nonzero", async () => {
 		const result = await bashTool.run({ command: "printf before; printf 'err' >&2; exit 7" });
 
