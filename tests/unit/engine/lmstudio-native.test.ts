@@ -252,7 +252,7 @@ describe("engine/lmstudio-native runStream", () => {
 		}
 
 		ok(sawDone);
-		strictEqual(capturedMaxTokens, 1024);
+		strictEqual(capturedMaxTokens, 1023);
 	});
 
 	it("uses discovered loaded context when it is smaller than catalog context", async () => {
@@ -309,7 +309,7 @@ describe("engine/lmstudio-native runStream", () => {
 		}
 
 		ok(sawDone);
-		strictEqual(capturedMaxTokens, 1024);
+		strictEqual(capturedMaxTokens, 1023);
 	});
 
 	it("does not pass load config for already-loaded user-managed models", async () => {
