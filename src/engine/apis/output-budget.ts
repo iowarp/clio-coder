@@ -14,6 +14,7 @@ import type {
 
 const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
 const IMAGE_ESTIMATE_BYTES = 4800;
+const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 function byteLength(value: string): number {
 	return Buffer.byteLength(value, "utf8");
@@ -74,5 +75,6 @@ export function remainingContextMaxTokens(
 	const budget = Math.max(safety, contextWindow - inputTokens - safety);
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	const requested = options?.maxTokens ?? modelLimit;
-	return Math.min(requested, modelLimit, budget);
+	const resolved = Math.min(requested, modelLimit, budget);
+	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
 }
