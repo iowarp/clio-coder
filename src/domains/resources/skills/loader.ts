@@ -1,8 +1,5 @@
-import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
-import { clioConfigDir } from "../../../core/xdg.js";
-import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import {
 	type ResourceCandidate,
 	type ResourceDiagnostic,
@@ -10,6 +7,13 @@ import {
 	type ResourceSourceInfo,
 	resolveResourceCollisions,
 } from "../collision.js";
+import {
+	defaultScopedResourceRoots,
+	readRootEntries,
+	sourceInfoForRoot,
+	splitYamlFrontmatter,
+	stringField,
+} from "../common-loader.js";
 
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
@@ -55,58 +59,23 @@ export type SkillExpansion =
 			diagnostics: ResourceDiagnostic[];
 	  };
 
-interface ParsedSkillFrontmatter {
-	frontmatter: Record<string, unknown>;
-	body: string;
-}
-
 function defaultSkillRoots(cwd: string): SkillRoot[] {
-	return [
-		...enabledExtensionResourceRoots("skills", cwd).map((root) => ({
-			path: root.path,
-			scope: "package" as const,
-			source: root.source,
-		})),
-		{ path: path.join(clioConfigDir(), "skills"), scope: "user", source: "config" },
-		{ path: path.join(cwd, ".clio", "skills"), scope: "project", source: "project" },
-	];
+	return defaultScopedResourceRoots("skills", cwd);
 }
 
-function splitSkillFrontmatter(raw: string): ParsedSkillFrontmatter {
-	const opening = raw.match(/^---\r?\n/);
-	if (!opening) {
+function splitSkillFrontmatter(raw: string): { frontmatter: Record<string, unknown>; body: string } {
+	const split = splitYamlFrontmatter(raw);
+	if (!split.ok && split.reason === "missing") {
 		throw new Error("skill file is missing YAML frontmatter");
 	}
-
-	const closeRegex = /\r?\n---(?:\r?\n|$)/g;
-	closeRegex.lastIndex = opening[0].length;
-	const closing = closeRegex.exec(raw);
-	if (!closing) {
+	if (!split.ok && split.reason === "missing closing delimiter") {
 		throw new Error("skill file is missing a closing YAML frontmatter delimiter");
 	}
-
-	const frontmatterText = raw.slice(opening[0].length, closing.index);
-	let parsed: unknown;
-	try {
-		parsed = parseYaml(frontmatterText);
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		throw new Error(`skill frontmatter is invalid YAML: ${reason}`);
-	}
-
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+	if (!split.ok && split.reason === "must be a YAML object") {
 		throw new Error("skill frontmatter must be a YAML object");
 	}
-
-	return {
-		frontmatter: parsed as Record<string, unknown>,
-		body: raw.slice(closing.index + closing[0].length),
-	};
-}
-
-function stringField(frontmatter: Record<string, unknown>, key: string): string | null {
-	const value = frontmatter[key];
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+	if (!split.ok) throw new Error(`skill frontmatter is ${split.reason}`);
+	return split;
 }
 
 function booleanField(frontmatter: Record<string, unknown>, key: string): boolean {
@@ -153,7 +122,7 @@ function loadSkillFile(
 		};
 	}
 
-	let parsed: ParsedSkillFrontmatter;
+	let parsed: { frontmatter: Record<string, unknown>; body: string };
 	try {
 		parsed = splitSkillFrontmatter(raw);
 	} catch (err) {
@@ -170,11 +139,7 @@ function loadSkillFile(
 	if (!description) return { candidate: null, diagnostics };
 
 	const baseDir = path.dirname(filePath);
-	const sourceInfo: ResourceSourceInfo = {
-		path: filePath,
-		scope: root.scope,
-		...(root.source ? { source: root.source } : {}),
-	};
+	const sourceInfo: ResourceSourceInfo = sourceInfoForRoot(root, filePath);
 	const skill: Skill = {
 		name,
 		description,
@@ -231,17 +196,8 @@ function collectSkills(
 }
 
 function loadSkillRoot(root: SkillRoot, diagnostics: ResourceDiagnostic[]): ResourceCandidate<Skill>[] {
-	if (!existsSync(root.path)) return [];
-	try {
-		if (!statSync(root.path).isDirectory()) {
-			diagnostics.push({ type: "warning", message: "skill root is not a directory", path: root.path });
-			return [];
-		}
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		diagnostics.push({ type: "warning", message: `skill root could not be stat'ed: ${reason}`, path: root.path });
-		return [];
-	}
+	const entries = readRootEntries(root, "skill", diagnostics);
+	if (entries.length === 0) return [];
 	return collectSkills(root, root.path, diagnostics, true);
 }
 
