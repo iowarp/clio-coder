@@ -4,6 +4,7 @@ import { runPrintMode } from "../cli/modes/index.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
+import type { DevHarnessIntrospection } from "../core/dev-harness-contract.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
@@ -64,7 +65,7 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
-import type { HarnessHandle, HarnessIntrospection, SelfDevMode } from "../selfdev/index.js";
+import type { HarnessHandle, SelfDevMode } from "../selfdev/index.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 
@@ -86,7 +87,7 @@ function userRequestedSelfDev(cliDev: boolean): boolean {
 	return cliDev || process.env.CLIO_DEV === "1" || process.env.CLIO_SELF_DEV === "1";
 }
 
-function emptyHarnessIntrospection(): HarnessIntrospection {
+function emptyHarnessIntrospection(): DevHarnessIntrospection {
 	return {
 		last_restart_required_paths: [],
 		last_hot_succeeded: null,

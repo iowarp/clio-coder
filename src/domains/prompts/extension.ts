@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
+import type { DevHarnessIntrospection } from "../../core/dev-harness-contract.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import type { HarnessIntrospection } from "../../selfdev/harness/state.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
 import type { ModesContract } from "../modes/contract.js";
@@ -17,7 +17,7 @@ export interface PromptsBundleOptions {
 	noContextFiles?: boolean;
 	/** Retained for CLI option compatibility. Project context now comes only from CLIO.md. */
 	devRepoRoot?: string;
-	getHarnessIntrospection?: () => HarnessIntrospection;
+	getHarnessIntrospection?: () => DevHarnessIntrospection;
 	renderSelfDevMemory?: () => Promise<string>;
 }
 
@@ -143,7 +143,7 @@ function readGitLines(repoRoot: string, args: ReadonlyArray<string>): string[] {
 	return raw.split(/\r?\n/).filter((line) => line.length > 0);
 }
 
-function defaultHarnessIntrospection(): HarnessIntrospection {
+function defaultHarnessIntrospection(): DevHarnessIntrospection {
 	return {
 		last_restart_required_paths: [],
 		last_hot_succeeded: null,
@@ -152,7 +152,7 @@ function defaultHarnessIntrospection(): HarnessIntrospection {
 	};
 }
 
-function harnessVerdict(state: HarnessIntrospection): string {
+function harnessVerdict(state: DevHarnessIntrospection): string {
 	if (state.last_restart_required_paths.length > 0) return "restart-required";
 	if (state.queue_depth > 0) return `worker-pending:${state.queue_depth}`;
 	if (state.last_hot_failed) return "hot-failed";

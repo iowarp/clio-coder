@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import type { HarnessIntrospection } from "../harness/state.js";
+import type { DevHarnessIntrospection } from "../../core/dev-harness-contract.js";
 
 export interface SelfDevFooterDeps {
 	repoRoot: string;
-	getHarnessIntrospection: () => HarnessIntrospection;
+	getHarnessIntrospection: () => DevHarnessIntrospection;
 	now?: () => number;
 }
 
@@ -26,7 +26,7 @@ function statusCount(repoRoot: string): number {
 	return raw.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
 }
 
-function harnessVerdict(state: HarnessIntrospection): string {
+function harnessVerdict(state: DevHarnessIntrospection): string {
 	if (state.last_restart_required_paths.length > 0) return "restart-required";
 	if (state.queue_depth > 0) return `worker-pending:${state.queue_depth}`;
 	if (state.last_hot_failed) return "hot-failed";
@@ -34,7 +34,7 @@ function harnessVerdict(state: HarnessIntrospection): string {
 	return "idle";
 }
 
-function lastHot(state: HarnessIntrospection): string {
+function lastHot(state: DevHarnessIntrospection): string {
 	if (!state.last_hot_succeeded) return "none";
 	return `${state.last_hot_succeeded.path}:${state.last_hot_succeeded.elapsedMs}`;
 }

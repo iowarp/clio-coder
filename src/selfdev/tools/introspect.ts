@@ -2,17 +2,17 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
+import type { DevHarnessIntrospection } from "../../core/dev-harness-contract.js";
 import { createComponentSnapshot } from "../../domains/components/index.js";
 import { loadFragments } from "../../domains/prompts/fragment-loader.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../../tools/registry.js";
-import type { HarnessIntrospection } from "../harness/state.js";
 import type { SelfDevMode } from "../mode.js";
 import { SelfDevToolNames } from "../tool-names.js";
 
 interface IntrospectDeps {
 	mode: SelfDevMode;
 	registry: ToolRegistry;
-	getHarnessIntrospection?: () => HarnessIntrospection;
+	getHarnessIntrospection?: () => DevHarnessIntrospection;
 }
 
 interface PackageJson {
@@ -58,7 +58,7 @@ function dirtySummary(repoRoot: string): string {
 	return lines.length === 0 ? "clean" : `${lines.length} changed path(s)`;
 }
 
-function defaultHarnessIntrospection(): HarnessIntrospection {
+function defaultHarnessIntrospection(): DevHarnessIntrospection {
 	return {
 		last_restart_required_paths: [],
 		last_hot_succeeded: null,

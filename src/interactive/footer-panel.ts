@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../core/config.js";
+import type { DevHarnessSnapshot } from "../core/dev-harness-contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { UsageBreakdown } from "../domains/observability/index.js";
 import {
@@ -9,7 +10,6 @@ import {
 } from "../domains/providers/index.js";
 import { extractLocalModelQuirks, type ThinkingMechanism } from "../domains/providers/types/local-model-quirks.js";
 import { Text } from "../engine/tui.js";
-import type { HarnessSnapshot } from "../selfdev/harness/state.js";
 import { getCurrentBranch } from "../utils/git.js";
 import type { AgentStatus } from "./status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "./status/index.js";
@@ -26,7 +26,7 @@ export interface FooterDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
-	getHarnessState?: () => HarnessSnapshot;
+	getHarnessState?: () => DevHarnessSnapshot;
 	getStreaming?: () => boolean;
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
@@ -180,7 +180,7 @@ const HARNESS_GLYPHS = {
 
 const STREAMING_FRAMES = ["|", "/", "-", "\\"] as const;
 
-export function formatHarnessIndicator(state: HarnessSnapshot): string | null {
+export function formatHarnessIndicator(state: DevHarnessSnapshot): string | null {
 	if (state.kind === "idle") return null;
 	if (state.kind === "hot-ready") return `${HARNESS_GLYPHS.hot} ${state.message}`;
 	if (state.kind === "hot-failed") return `${HARNESS_GLYPHS.warn} ${state.message}`;

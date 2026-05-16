@@ -1,30 +1,17 @@
 import { basename } from "node:path";
+import type {
+	DevHarnessHotFailedSummary,
+	DevHarnessHotSucceededSummary,
+	DevHarnessIntrospection,
+	DevHarnessSnapshot,
+} from "../../core/dev-harness-contract.js";
 
-export type HarnessSnapshot =
-	| { kind: "idle" }
-	| { kind: "hot-ready"; message: string; until: number }
-	| { kind: "hot-failed"; message: string; until: number }
-	| { kind: "restart-required"; files: string[] }
-	| { kind: "worker-pending"; count: number };
-
-export interface HarnessHotSucceededSummary {
-	path: string;
-	elapsedMs: number;
-	at: number;
-}
-
-export interface HarnessHotFailedSummary {
-	path: string;
-	error: string;
-	at: number;
-}
-
-export interface HarnessIntrospection {
-	last_restart_required_paths: string[];
-	last_hot_succeeded: HarnessHotSucceededSummary | null;
-	last_hot_failed: HarnessHotFailedSummary | null;
-	queue_depth: number;
-}
+export type {
+	DevHarnessHotFailedSummary as HarnessHotFailedSummary,
+	DevHarnessHotSucceededSummary as HarnessHotSucceededSummary,
+	DevHarnessIntrospection as HarnessIntrospection,
+	DevHarnessSnapshot as HarnessSnapshot,
+};
 
 const HOT_READY_TTL_MS = 3000;
 const HOT_FAILED_TTL_MS = 3000;
@@ -43,14 +30,14 @@ export class HarnessState {
 	private transient: { kind: "hot-ready" | "hot-failed"; message: string; until: number } | null = null;
 	private readonly restartFiles: string[] = [];
 	private readonly workerFiles: Set<string> = new Set();
-	private lastHotSucceeded: HarnessHotSucceededSummary | null = null;
-	private lastHotFailed: HarnessHotFailedSummary | null = null;
+	private lastHotSucceeded: DevHarnessHotSucceededSummary | null = null;
+	private lastHotFailed: DevHarnessHotFailedSummary | null = null;
 
 	constructor(deps: HarnessStateDeps) {
 		this.now = deps.now;
 	}
 
-	snapshot(): HarnessSnapshot {
+	snapshot(): DevHarnessSnapshot {
 		if (this.restartFiles.length > 0) {
 			return { kind: "restart-required", files: [...this.restartFiles] };
 		}
@@ -66,7 +53,7 @@ export class HarnessState {
 		return { kind: "idle" };
 	}
 
-	introspection(): HarnessIntrospection {
+	introspection(): DevHarnessIntrospection {
 		return {
 			last_restart_required_paths: [...this.restartFiles],
 			last_hot_succeeded: this.lastHotSucceeded ? { ...this.lastHotSucceeded } : null,

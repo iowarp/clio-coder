@@ -1,6 +1,6 @@
+import type { DevHarnessIntrospection } from "../core/dev-harness-contract.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { ToolRegistry, ToolSourceInfo, ToolSpec } from "../tools/registry.js";
-import type { HarnessIntrospection } from "./harness/state.js";
 import type { SelfDevMode } from "./mode.js";
 import { SELFDEV_WORKER_TOOL_NAMES } from "./tool-names.js";
 import { clioIntrospectTool } from "./tools/introspect.js";
@@ -8,16 +8,15 @@ import { clioMemoryMaintainTool } from "./tools/memory-maintain.js";
 import { clioRecallTool } from "./tools/recall.js";
 import { clioRememberTool } from "./tools/remember.js";
 
+export type {
+	DevHarnessHotFailedSummary as HarnessHotFailedSummary,
+	DevHarnessHotSucceededSummary as HarnessHotSucceededSummary,
+	DevHarnessIntrospection as HarnessIntrospection,
+	DevHarnessSnapshot as HarnessSnapshot,
+} from "../core/dev-harness-contract.js";
 export { applySelfDevToolGuards } from "./guards.js";
 export { type HarnessDeps, type HarnessHandle, startHarness } from "./harness/index.js";
-export {
-	type HarnessHotFailedSummary,
-	type HarnessHotSucceededSummary,
-	type HarnessIntrospection,
-	type HarnessSnapshot,
-	HarnessState,
-	type HarnessStateDeps,
-} from "./harness/state.js";
+export { HarnessState, type HarnessStateDeps } from "./harness/state.js";
 export {
 	appendDevMemory,
 	type DevMemoryEntry,
@@ -55,7 +54,7 @@ export function selfDevWorkerToolNames(): ReadonlyArray<import("../core/tool-nam
 
 export interface SelfDevToolRegistrationDeps {
 	mode: SelfDevMode;
-	getHarnessIntrospection?: () => HarnessIntrospection;
+	getHarnessIntrospection?: () => DevHarnessIntrospection;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
