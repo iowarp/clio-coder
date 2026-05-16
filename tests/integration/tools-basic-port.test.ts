@@ -6,6 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
+import { globTool } from "../../src/tools/glob.js";
 import { lsTool } from "../../src/tools/ls.js";
 import { writeTool } from "../../src/tools/write.js";
 
@@ -67,6 +68,30 @@ describe("ported basic coding tools", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.split("\n").includes("src/index.ts"), result.output);
+	});
+
+	it("glob uses shared read-path normalization for the search root", async () => {
+		const root = scratchDir();
+		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");
+
+		const result = await globTool.run({ pattern: "*.md", path: `@${root}` });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(result.output, join(root, "note.md"));
+	});
+
+	it("glob reports when its result limit is reached", async () => {
+		const root = scratchDir();
+		writeFileSync(join(root, "a.txt"), "a\n", "utf8");
+		writeFileSync(join(root, "b.txt"), "b\n", "utf8");
+
+		const result = await globTool.run({ pattern: "*.txt", path: root, limit: 1 });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("1 results limit reached"), result.output);
+		strictEqual(result.details?.resultLimitReached, 1);
 	});
 
 	it("ls lists directory names with suffixes and honors the entry limit", async () => {

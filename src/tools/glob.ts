@@ -2,7 +2,9 @@ import { lstatSync, readdirSync, type Stats } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
 
 const MAX_RESULTS = 500;
 
@@ -97,6 +99,7 @@ export const globTool: ToolSpec = {
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
 		path: Type.Optional(Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." })),
+		limit: Type.Optional(Type.Number({ description: `Maximum number of results. Defaults to ${MAX_RESULTS}.` })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
@@ -107,7 +110,8 @@ export const globTool: ToolSpec = {
 		}
 
 		const rootArg = typeof args.path === "string" ? args.path : process.cwd();
-		const root = path.resolve(rootArg);
+		const root = resolveReadPath(rootArg);
+		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : MAX_RESULTS;
 
 		let rootStat: Stats;
 		try {
@@ -152,12 +156,23 @@ export const globTool: ToolSpec = {
 			return a.absPath.localeCompare(b.absPath);
 		});
 
-		return {
-			kind: "ok",
-			output: matches
-				.slice(0, MAX_RESULTS)
-				.map((entry) => entry.absPath)
-				.join("\n"),
-		};
+		const resultLimitReached = matches.length > limit;
+		const rawOutput = matches
+			.slice(0, limit)
+			.map((entry) => entry.absPath)
+			.join("\n");
+		const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+		const details: Record<string, unknown> = {};
+		const notices: string[] = [];
+		if (resultLimitReached) {
+			notices.push(`${limit} results limit reached. Use limit=${limit * 2} for more, or refine pattern`);
+			details.resultLimitReached = limit;
+		}
+		if (truncation.truncated) {
+			notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+			details.truncation = truncation;
+		}
+		const output = notices.length > 0 ? `${truncation.content}\n\n[${notices.join(". ")}]` : truncation.content;
+		return { kind: "ok", output, ...(Object.keys(details).length > 0 ? { details } : {}) };
 	},
 };
