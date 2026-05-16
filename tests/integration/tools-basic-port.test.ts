@@ -90,6 +90,17 @@ describe("ported basic coding tools", () => {
 		strictEqual(exceededLimit.details?.resultLimitReached, 1);
 	});
 
+	it("find uses shared read-path normalization for the search root", async () => {
+		const root = scratchDir();
+		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");
+
+		const result = await findTool.run({ pattern: "*.md", path: `@${root}` });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(result.output, "note.md");
+	});
+
 	it("glob uses shared read-path normalization for the search root", async () => {
 		const root = scratchDir();
 		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");

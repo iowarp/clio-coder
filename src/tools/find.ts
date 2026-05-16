@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveFdBinary } from "./executables.js";
 import { compileGlobRegex, normalizeGlobInput } from "./glob.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
 
@@ -160,7 +160,7 @@ export const findTool: ToolSpec = {
 	async run(args, options): Promise<ToolResult> {
 		const pattern = typeof args.pattern === "string" && args.pattern.length > 0 ? args.pattern : null;
 		if (!pattern) return { kind: "error", message: "find: missing pattern argument" };
-		const searchPath = resolveToCwd(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
+		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
 		if (!existsSync(searchPath)) return { kind: "error", message: `find: path not found: ${searchPath}` };
 		if (!statSync(searchPath).isDirectory()) return { kind: "error", message: `find: not a directory: ${searchPath}` };
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : DEFAULT_LIMIT;
