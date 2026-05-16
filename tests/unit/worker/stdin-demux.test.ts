@@ -1,16 +1,35 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../../src/worker/stdin-demux.js";
+
+function specJson(overrides: Record<string, unknown> = {}): string {
+	return JSON.stringify({
+		specVersion: WORKER_SPEC_VERSION,
+		systemPrompt: "",
+		task: "y",
+		endpoint: { id: "local", runtime: "openai" },
+		runtime: {
+			version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+			id: "openai",
+			kind: "http",
+			apiFamily: "openai-responses",
+			auth: "api-key",
+		},
+		runtimeId: "openai",
+		wireModelId: "gpt-test",
+		...overrides,
+	});
+}
 
 describe("worker/stdin-demux", () => {
 	it("delivers the first line as the spec and routes responses to pending approvals", async () => {
 		const demux = createWorkerStdinDemux();
 		const specPromise = demux.readSpec();
 
-		demux.feed('{"agentId":"x","task":"y"}\n');
+		demux.feed(`${specJson()}\n`);
 		const spec = await specPromise;
-		const parsedSpec = spec as unknown as { agentId?: string; task?: string };
-		ok(parsedSpec.agentId === "x" && parsedSpec.task === "y", `spec=${JSON.stringify(spec)}`);
+		ok(spec.specVersion === WORKER_SPEC_VERSION && spec.task === "y", `spec=${JSON.stringify(spec)}`);
 
 		const responsePromise = demux.awaitApproval("req-1", 1000);
 		demux.feed('{"type":"clio_tool_approval_response","payload":{"requestId":"req-1","decision":"allow"}}\n');
@@ -20,7 +39,7 @@ describe("worker/stdin-demux", () => {
 
 	it("rejects awaitApproval when stdin EOFs before a response", async () => {
 		const demux = createWorkerStdinDemux();
-		demux.feed("{}\n");
+		demux.feed(`${specJson()}\n`);
 		await demux.readSpec();
 
 		const pending = demux.awaitApproval("req-1", 5000);
@@ -35,7 +54,7 @@ describe("worker/stdin-demux", () => {
 
 	it("rejects awaitApproval on timeout", async () => {
 		const demux = createWorkerStdinDemux();
-		demux.feed("{}\n");
+		demux.feed(`${specJson()}\n`);
 		await demux.readSpec();
 
 		try {
@@ -49,10 +68,11 @@ describe("worker/stdin-demux", () => {
 	it("handles partial lines and multiple lines in one chunk", async () => {
 		const demux = createWorkerStdinDemux();
 		const specPromise = demux.readSpec();
-		demux.feed('{"agen');
-		demux.feed('tId":"a","task":"b"}\n');
+		const text = specJson({ task: "b" });
+		demux.feed(text.slice(0, 8));
+		demux.feed(`${text.slice(8)}\n`);
 		const spec = await specPromise;
-		strictEqual((spec as unknown as { agentId?: string }).agentId, "a");
+		strictEqual(spec.task, "b");
 
 		const r1 = demux.awaitApproval("r1");
 		const r2 = demux.awaitApproval("r2");
@@ -61,5 +81,25 @@ describe("worker/stdin-demux", () => {
 		);
 		strictEqual((await r1).decision, "allow");
 		strictEqual((await r2).decision, "deny");
+	});
+
+	it("rejects an unknown worker spec version before approval routing starts", async () => {
+		const demux = createWorkerStdinDemux();
+		const specPromise = demux.readSpec();
+
+		demux.feed(`${specJson({ specVersion: 999 })}\n`);
+
+		await rejects(specPromise, /WorkerSpec version 999 is unsupported/);
+	});
+
+	it("rejects an unknown serialized runtime descriptor version", async () => {
+		const demux = createWorkerStdinDemux();
+		const specPromise = demux.readSpec();
+
+		demux.feed(
+			`${specJson({ runtime: { version: 999, id: "openai", kind: "http", apiFamily: "openai-responses", auth: "api-key" } })}\n`,
+		);
+
+		await rejects(specPromise, /WorkerSpec.runtime version 999 is unsupported/);
 	});
 });
