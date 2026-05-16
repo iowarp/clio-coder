@@ -5,7 +5,7 @@ import { join, resolve, sep } from "node:path";
 const commandResultCache = new Map<string, string | undefined>();
 
 export interface ConfigValueWarning {
-	code: "dynamic-command-in-generic-resolution";
+	code: "dynamic-command-in-generic-resolution" | "dynamic-command-in-static-resolution";
 	message: string;
 	command: string;
 }
@@ -49,7 +49,15 @@ function executeCommandUncached(commandConfig: string): string | undefined {
 function warnLegacyCommand(config: string, options?: ResolveConfigValueOptions): void {
 	options?.onWarning?.({
 		code: "dynamic-command-in-generic-resolution",
-		message: "bang-prefixed config command resolved through generic config value resolver",
+		message: "bang-prefixed config command is no longer executed through generic config value resolution",
+		command: config.slice(1),
+	});
+}
+
+function warnStaticCommand(config: string, options?: ResolveConfigValueOptions): void {
+	options?.onWarning?.({
+		code: "dynamic-command-in-static-resolution",
+		message: "bang-prefixed config command left literal by static config value resolver",
 		command: config.slice(1),
 	});
 }
@@ -78,6 +86,7 @@ export function expandConfigPath(value: string, options?: ResolveConfigValueOpti
 }
 
 export function resolveStaticConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
+	if (config.startsWith("!")) warnStaticCommand(config, options);
 	const sourceEnv = env(options);
 	const envValue = sourceEnv[config];
 	if (envValue !== undefined && envValue.length > 0) return envValue;
@@ -101,7 +110,6 @@ export function resolveDynamicConfigValueUncached(
 export function resolveConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	if (config.startsWith("!")) {
 		warnLegacyCommand(config, options);
-		return executeCommand(config);
 	}
 	return resolveStaticConfigValue(config, options);
 }
@@ -109,7 +117,6 @@ export function resolveConfigValue(config: string, options?: ResolveConfigValueO
 export function resolveConfigValueUncached(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	if (config.startsWith("!")) {
 		warnLegacyCommand(config, options);
-		return executeCommandUncached(config);
 	}
 	return resolveStaticConfigValue(config, options);
 }

@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
 
+import { clearConfigValueCache } from "../../../src/core/resolve-config-value.js";
 import { type AuthStorageData, createMemoryAuthStorage } from "../../../src/domains/providers/auth/index.js";
 import {
 	type OAuthCredentials,
@@ -58,6 +59,20 @@ describe("providers/auth in-memory storage", () => {
 		const resolved = await auth.resolveApiKey("openai");
 		strictEqual(resolved.apiKey, "sk-memory");
 		strictEqual(auth.status("openai").source, "stored-api-key");
+	});
+
+	it("resolves command-backed stored api keys only through provider auth", async () => {
+		clearConfigValueCache();
+		const auth = createMemoryAuthStorage();
+		auth.setApiKey("openai", '!node -e "process.stdout.write(String(1234))"');
+
+		const stored = auth.get("openai");
+		strictEqual(stored?.type, "api_key");
+		if (stored?.type === "api_key") strictEqual(stored.key.startsWith("!node -e"), true);
+
+		const resolved = await auth.resolveApiKey("openai");
+		strictEqual(resolved.apiKey, "1234");
+		strictEqual(resolved.source, "stored-api-key");
 	});
 
 	it("labels pi-ai provider environment keys by variable name", async () => {
