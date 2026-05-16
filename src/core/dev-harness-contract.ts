@@ -55,3 +55,14 @@ export interface DevHarnessIntrospection {
 	last_hot_failed: DevHarnessHotFailedSummary | null;
 	queue_depth: number;
 }
+
+export interface DevHarnessStateContract {
+	snapshot(): DevHarnessSnapshot;
+	introspection(): DevHarnessIntrospection;
+}
+
+export interface DevHarnessHandle {
+	state: DevHarnessStateContract;
+	restart(): Promise<void>;
+	stop(): void;
+}

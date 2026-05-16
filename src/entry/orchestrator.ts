@@ -4,7 +4,7 @@ import { runPrintMode } from "../cli/modes/index.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
-import type { DevHarnessIntrospection } from "../core/dev-harness-contract.js";
+import type { DevHarnessHandle, DevHarnessIntrospection, SelfDevMode } from "../core/dev-harness-contract.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
@@ -65,7 +65,6 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
-import type { HarnessHandle, SelfDevMode } from "../selfdev/index.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 
@@ -393,7 +392,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	ensureClioState();
 	timer.mark("install check");
 
-	let harness: HarnessHandle | null = null;
+	let harness: DevHarnessHandle | null = null;
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ExtensionsDomainModule,

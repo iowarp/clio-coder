@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import type { DevHarnessHandle } from "../core/dev-harness-contract.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -179,7 +180,7 @@ export interface InteractiveDeps {
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
 	onCycleScopedModelBackward?: () => void;
 	/** Hot-reload harness handle. When present, the footer shows an indicator line and Ctrl+R triggers restart. */
-	harness?: import("../selfdev/harness/index.js").HarnessHandle;
+	harness?: DevHarnessHandle;
 	/** True when the dashboard should show the self-development mode badge. */
 	selfDev: boolean;
 	/** Repository root for private self-development UI affordances. */

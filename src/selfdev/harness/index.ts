@@ -1,4 +1,5 @@
 import { BusChannels } from "../../core/bus-events.js";
+import type { DevHarnessHandle } from "../../core/dev-harness-contract.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { classifyChange } from "./classifier.js";
@@ -17,11 +18,7 @@ export interface HarnessDeps {
 	shutdown?: (code?: number) => Promise<void>;
 }
 
-export interface HarnessHandle {
-	state: HarnessState;
-	restart(): Promise<void>;
-	stop(): void;
-}
+export type HarnessHandle = DevHarnessHandle;
 
 /**
  * Compose watcher, classifier, reloader, and restart state for the current
