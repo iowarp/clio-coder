@@ -1,8 +1,5 @@
-import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
-import { clioConfigDir } from "../../../core/xdg.js";
-import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import {
 	type ResourceCandidate,
 	type ResourceDiagnostic,
@@ -10,6 +7,13 @@ import {
 	type ResourceSourceInfo,
 	resolveResourceCollisions,
 } from "../collision.js";
+import {
+	defaultScopedResourceRoots,
+	readRootEntries,
+	sourceInfoForRoot,
+	splitYamlFrontmatter,
+	stringField,
+} from "../common-loader.js";
 import { parseCommandArgs, substituteArgs } from "./substitute.js";
 
 export interface PromptTemplate {
@@ -52,70 +56,26 @@ export type PromptTemplateExpansion =
 			diagnostics: ResourceDiagnostic[];
 	  };
 
-interface ParsedPromptFrontmatter {
-	frontmatter: Record<string, unknown>;
-	body: string;
-}
-
 function defaultPromptTemplateRoots(cwd: string): PromptTemplateRoot[] {
-	return [
-		...enabledExtensionResourceRoots("prompts", cwd).map((root) => ({
-			path: root.path,
-			scope: "package" as const,
-			source: root.source,
-		})),
-		{ path: path.join(clioConfigDir(), "prompts"), scope: "user", source: "config" },
-		{ path: path.join(cwd, ".clio", "prompts"), scope: "project", source: "project" },
-	];
+	return defaultScopedResourceRoots("prompts", cwd);
 }
 
 function splitOptionalFrontmatter(
 	raw: string,
 	filePath: string,
 	diagnostics: ResourceDiagnostic[],
-): ParsedPromptFrontmatter {
-	const opening = raw.match(/^---\r?\n/);
-	if (!opening) return { frontmatter: {}, body: raw };
-
-	const closeRegex = /\r?\n---(?:\r?\n|$)/g;
-	closeRegex.lastIndex = opening[0].length;
-	const closing = closeRegex.exec(raw);
-	if (!closing) {
-		diagnostics.push({
-			type: "warning",
-			message: "prompt template frontmatter is missing a closing delimiter; treating the file as plain markdown",
-			path: filePath,
-		});
-		return { frontmatter: {}, body: raw };
-	}
-
-	const frontmatterText = raw.slice(opening[0].length, closing.index);
-	let parsed: unknown;
-	try {
-		parsed = parseYaml(frontmatterText);
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		diagnostics.push({
-			type: "warning",
-			message: `prompt template frontmatter is invalid YAML: ${reason}`,
-			path: filePath,
-		});
-		return { frontmatter: {}, body: raw.slice(closing.index + closing[0].length) };
-	}
-
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-		diagnostics.push({
-			type: "warning",
-			message: "prompt template frontmatter must be a YAML object",
-			path: filePath,
-		});
-		return { frontmatter: {}, body: raw.slice(closing.index + closing[0].length) };
-	}
-
-	return {
-		frontmatter: parsed as Record<string, unknown>,
-		body: raw.slice(closing.index + closing[0].length),
-	};
+): { frontmatter: Record<string, unknown>; body: string } {
+	const split = splitYamlFrontmatter(raw);
+	if (split.ok) return split;
+	if (split.reason === "missing") return { frontmatter: {}, body: raw };
+	const message =
+		split.reason === "missing closing delimiter"
+			? "prompt template frontmatter is missing a closing delimiter; treating the file as plain markdown"
+			: split.reason === "must be a YAML object"
+				? "prompt template frontmatter must be a YAML object"
+				: `prompt template frontmatter is ${split.reason}`;
+	diagnostics.push({ type: "warning", message, path: filePath });
+	return { frontmatter: {}, body: split.body };
 }
 
 function fallbackDescription(body: string): string {
@@ -126,11 +86,6 @@ function fallbackDescription(body: string): string {
 	if (!line) return "Prompt template";
 	const normalized = line.replace(/^#{1,6}\s+/, "");
 	return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
-}
-
-function stringField(frontmatter: Record<string, unknown>, key: string): string | null {
-	const value = frontmatter[key];
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function loadPromptFile(
@@ -154,11 +109,7 @@ function loadPromptFile(
 	const { frontmatter, body } = splitOptionalFrontmatter(raw, filePath, diagnostics);
 	const description = stringField(frontmatter, "description") ?? fallbackDescription(body);
 	const argumentHint = stringField(frontmatter, "argument-hint") ?? stringField(frontmatter, "argumentHint");
-	const sourceInfo: ResourceSourceInfo = {
-		path: filePath,
-		scope: root.scope,
-		...(root.source ? { source: root.source } : {}),
-	};
+	const sourceInfo: ResourceSourceInfo = sourceInfoForRoot(root, filePath);
 	const template: PromptTemplate = {
 		name,
 		description,
@@ -174,35 +125,8 @@ function loadPromptRoot(
 	root: PromptTemplateRoot,
 	diagnostics: ResourceDiagnostic[],
 ): ResourceCandidate<PromptTemplate>[] {
-	if (!existsSync(root.path)) return [];
-	let stat: ReturnType<typeof statSync>;
-	try {
-		stat = statSync(root.path);
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		diagnostics.push({
-			type: "warning",
-			message: `prompt template root could not be stat'ed: ${reason}`,
-			path: root.path,
-		});
-		return [];
-	}
-	if (!stat.isDirectory()) {
-		diagnostics.push({ type: "warning", message: "prompt template root is not a directory", path: root.path });
-		return [];
-	}
-
-	let entries: Dirent<string>[];
-	try {
-		entries = readdirSync(root.path, { withFileTypes: true });
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		diagnostics.push({ type: "warning", message: `prompt template root could not be read: ${reason}`, path: root.path });
-		return [];
-	}
-
 	const candidates: ResourceCandidate<PromptTemplate>[] = [];
-	for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+	for (const entry of readRootEntries(root, "prompt template", diagnostics)) {
 		if (!entry.isFile()) continue;
 		const candidate = loadPromptFile(path.join(root.path, entry.name), root, diagnostics);
 		if (candidate) candidates.push(candidate);
