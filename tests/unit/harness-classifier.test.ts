@@ -12,6 +12,7 @@ function classify(rel: string) {
 describe("classifyChange", () => {
 	it("hot: src/tools/read.ts", () => strictEqual(classify("src/tools/read.ts").class, "hot"));
 	it("hot: src/tools/edit.ts", () => strictEqual(classify("src/tools/edit.ts").class, "hot"));
+	it("hot: src/tools/find.ts", () => strictEqual(classify("src/tools/find.ts").class, "hot"));
 	it("hot: nested codewiki tool specs", () => {
 		strictEqual(classify("src/tools/codewiki/find-symbol.ts").class, "hot");
 		strictEqual(classify("src/tools/codewiki/entry-points.ts").class, "hot");
