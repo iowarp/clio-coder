@@ -46,7 +46,9 @@ export const bashTool: ToolSpec = {
 				return { kind: "error", message: "bash: command aborted" };
 			}
 			if (timedOut) {
-				return { kind: "error", message: `bash: command timed out after ${timeout}ms` };
+				const output = truncate(combineBashOutput(result)).trim();
+				const status = `bash: command timed out after ${timeout}ms`;
+				return { kind: "error", message: output.length > 0 ? `${output}\n\n${status}` : status };
 			}
 			if (outputCapped) {
 				return { kind: "error", message: `bash: command output exceeded ${BASH_MAX_OUTPUT_BYTES * 2} bytes` };
