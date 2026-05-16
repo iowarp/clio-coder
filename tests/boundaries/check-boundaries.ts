@@ -53,6 +53,7 @@ function extractReferenceDirectives(source: string): { kind: "path" | "types"; s
 interface ExtractedSpecifier {
 	specifier: string;
 	typeOnly: boolean;
+	dynamic: boolean;
 }
 
 function isTypeOnlyImportOrExportClause(clause: string): boolean {
@@ -69,13 +70,13 @@ function extractSpecifiers(source: string): ExtractedSpecifier[] {
 		const specifier = match[3];
 		if (!specifier) continue;
 		const typeOnly = isTypeOnlyImportOrExportClause(clause);
-		specifiers.push({ specifier, typeOnly });
+		specifiers.push({ specifier, typeOnly, dynamic: false });
 	}
 
 	const dynRegex = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 	for (const match of stripped.matchAll(dynRegex)) {
 		const specifier = match[1];
-		if (specifier) specifiers.push({ specifier, typeOnly: false });
+		if (specifier) specifiers.push({ specifier, typeOnly: false, dynamic: true });
 	}
 
 	return specifiers;
@@ -142,6 +143,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const workerRoot = path.join(srcRoot, "worker");
 	const domainsRoot = path.join(srcRoot, "domains");
 	const providersDomainRoot = path.join(domainsRoot, "providers");
+	const selfdevRoot = path.join(srcRoot, "selfdev");
 	const harnessRoot = path.join(srcRoot, "harness");
 	const toolsRoot = path.join(srcRoot, "tools");
 	const toolRegistryFile = path.join(toolsRoot, "registry.ts");
@@ -158,7 +160,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const fromDomain = domainOf(filePath, domainsRoot);
 		const inHarness = isWithin(filePath, harnessRoot);
 
-		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
+		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference", dynamic = false) => {
 			if (specifier.startsWith("@earendil-works/pi-")) {
 				if (!inEngine && !typeOnly) {
 					violations.push(
@@ -170,6 +172,13 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 			if (!(specifier.startsWith(".") || specifier.startsWith("/"))) return;
 			const resolved = resolveRelativeImport(filePath, specifier);
+
+			if (!isWithin(filePath, selfdevRoot) && isWithin(resolved, selfdevRoot) && !dynamic) {
+				violations.push(
+					`rule5: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/selfdev; stable runtime paths must use src/core/dev-harness-contract.ts and lazy private loading`,
+				);
+				return;
+			}
 
 			if (inWorker && isWithin(resolved, domainsRoot)) {
 				if (!typeOnly && !isAllowedWorkerProviderValueImport(resolved, providersDomainRoot)) {
@@ -224,8 +233,8 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			}
 		};
 
-		for (const { specifier, typeOnly } of specifiers) {
-			evaluate(specifier, typeOnly, "import");
+		for (const { specifier, typeOnly, dynamic } of specifiers) {
+			evaluate(specifier, typeOnly, "import", dynamic);
 		}
 
 		for (const ref of references) {
