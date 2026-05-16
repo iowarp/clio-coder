@@ -1,6 +1,6 @@
+import type { DevHarnessSnapshot } from "../core/dev-harness-contract.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../tools/registry.js";
-import type { HarnessSnapshot } from "./harness/state.js";
 import { evaluateSelfDevBashCommand, evaluateSelfDevWritePath, type SelfDevMode } from "./mode.js";
 
 const STALE_WRITES_OVERRIDE_ENV = "CLIO_DEV_ALLOW_STALE_WRITES";
@@ -28,10 +28,10 @@ function appendRestartNotice(result: ToolResult, relativePath: string, reason: s
 }
 
 export interface SelfDevToolGuardOptions {
-	getHarnessSnapshot?: () => HarnessSnapshot | null;
+	getHarnessSnapshot?: () => DevHarnessSnapshot | null;
 }
 
-function restartFiles(snapshot: HarnessSnapshot | null | undefined): string[] {
+function restartFiles(snapshot: DevHarnessSnapshot | null | undefined): string[] {
 	return snapshot?.kind === "restart-required" ? [...snapshot.files] : [];
 }
 

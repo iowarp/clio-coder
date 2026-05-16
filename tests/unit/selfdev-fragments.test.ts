@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import type { DevHarnessIntrospection } from "../../src/core/dev-harness-contract.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import type { HarnessIntrospection } from "../../src/selfdev/harness/state.js";
 
 const dirs: string[] = [];
 
@@ -74,7 +74,7 @@ describe("selfdev prompt fragments", () => {
 	});
 
 	it("recomputes the dynamic state contentHash when harness state changes after the cache window", async () => {
-		let snapshot: HarnessIntrospection = {
+		let snapshot: DevHarnessIntrospection = {
 			last_restart_required_paths: [],
 			last_hot_succeeded: { path: "src/tools/read.ts", elapsedMs: 7, at: 1 },
 			last_hot_failed: null,
