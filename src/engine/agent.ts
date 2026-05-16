@@ -1,12 +1,12 @@
 /**
- * Thin wrapper over @mariozechner/pi-agent-core 0.70.x's Agent class.
+ * Thin wrapper over @earendil-works/pi-agent-core 0.74.0's Agent class.
  *
  * pi-agent-core's Agent owns its own state (exposed via `agent.state`). There is no
  * separate state factory. AgentOptions drives the construction; the state is derived
  * from options.initialState on instantiation.
  */
 
-import { Agent, type AgentOptions, type AgentState } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentOptions, type AgentState } from "@earendil-works/pi-agent-core";
 
 export interface EngineAgentHandle {
 	agent: Agent;

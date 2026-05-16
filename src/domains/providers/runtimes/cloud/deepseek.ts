@@ -1,4 +1,4 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { listCatalogModelsForRuntime, synthesizeCatalogBackedModel } from "../../catalog.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";

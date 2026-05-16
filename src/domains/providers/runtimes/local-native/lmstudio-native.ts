@@ -1,5 +1,5 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { LMStudioClient } from "@lmstudio/sdk";
-import type { Api, Model } from "@mariozechner/pi-ai";
 
 import { mergeCapabilities } from "../../capabilities.js";
 import { probeJson } from "../../probe/http.js";

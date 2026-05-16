@@ -15,7 +15,7 @@ import {
 	type ThinkingContent,
 	type Tool,
 	type Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";

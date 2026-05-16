@@ -209,7 +209,7 @@ function inferInvariants(files: ReadonlyArray<SiblingContextFile>): string[] {
 	const context = allContextText(files);
 	const invariants: string[] = [];
 	if (/Engine boundary/i.test(context)) {
-		pushUnique(invariants, "Engine boundary. Only `src/engine/**` may value-import `@mariozechner/pi-*`.");
+		pushUnique(invariants, "Engine boundary. Only `src/engine/**` may value-import `@earendil-works/pi-*`.");
 	}
 	if (/Worker isolation/i.test(context)) {
 		pushUnique(

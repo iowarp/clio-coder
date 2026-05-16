@@ -20,9 +20,9 @@ export default defineConfig({
 	outDir: "dist",
 	banner: ({ format }) => (format === "esm" ? { js: "#!/usr/bin/env node" } : {}),
 	external: [
-		"@mariozechner/pi-agent-core",
-		"@mariozechner/pi-ai",
-		"@mariozechner/pi-tui",
+		"@earendil-works/pi-agent-core",
+		"@earendil-works/pi-ai",
+		"@earendil-works/pi-tui",
 		"@silvia-odwyer/photon-node",
 		"typescript",
 	],

@@ -37,6 +37,7 @@ import {
 	type RetrySettings,
 } from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { clampEngineThinkingLevel, cleanupEngineSessionResources } from "../engine/ai.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { applyThinkingMechanism } from "../engine/apis/thinking-mechanism.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
@@ -119,6 +120,8 @@ export interface ChatLoop {
 	 * from the selected session entries; omit it for a fresh session.
 	 */
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
+	/** Abort the live agent and release SDK session-scoped resources before shutdown. */
+	dispose(): void;
 }
 
 export interface CreateChatLoopDeps {
@@ -438,7 +441,7 @@ function assistantSessionPayload(
 	const raw = message as unknown as Record<string, unknown>;
 	if (Array.isArray(raw.content)) payload.content = raw.content;
 	if (thinking.length > 0) payload.thinking = thinking;
-	for (const key of ["usage", "api", "provider", "model", "responseId"]) {
+	for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId"]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
 	if (failure) {
@@ -790,14 +793,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * Mirror of pi-coding-agent's setThinkingLevel clamp: when the resolved
-	 * model lacks reasoning capability, force "off" so providers do not see a
-	 * thinking budget they cannot honor. The orchestrator's requested level is
-	 * preserved on settings; this only governs what reaches pi-agent-core.
+	 * Mirror pi-coding-agent's model-level thinking clamp. The orchestrator's
+	 * requested level is preserved in settings; this only governs what reaches
+	 * pi-agent-core for the active model.
 	 */
 	const clampThinkingLevelForModel = (model: Model<never>, requested: ThinkingLevel): ThinkingLevel => {
-		const reasons = (model as unknown as { reasoning?: unknown }).reasoning === true;
-		return reasons ? requested : "off";
+		return clampEngineThinkingLevel(model, requested) as ThinkingLevel;
+	};
+
+	const cleanupSdkSessionResources = (sessionId: string | undefined): void => {
+		try {
+			cleanupEngineSessionResources(sessionId);
+		} catch (err) {
+			emitNotice(`[Clio Coder] SDK session cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	};
 
 	/**
@@ -887,7 +896,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const hadPriorRuntime = runtime !== null;
 		const priorMessages = runtime ? [...runtime.agent.state.messages] : [...replayedContextMessages];
 		// Drop any in-flight stream on the prior agent before discarding it.
-		runtime?.agent.abort();
+		if (runtime) {
+			runtime.agent.abort();
+			cleanupSdkSessionResources(runtime.agent.sessionId);
+		}
 		const handle = createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -995,7 +1007,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Inspect the agent's state after `agent.prompt` resolves. pi-agent-core
-	 * 0.70.x's `handleRunFailure` records the upstream error on the assistant
+	 * 0.74.0's `handleRunFailure` records the upstream error on the assistant
 	 * message (stopReason="error", errorMessage="<text>") and on
 	 * `state.errorMessage`, then resolves the prompt() Promise normally.
 	 * Returns a ContextOverflowError when either surface matches the heuristic
@@ -1396,7 +1408,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			try {
 				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text, images));
-				// pi-agent-core 0.70.x does NOT throw on provider failures:
+				// pi-agent-core 0.74.0 does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
 				// state.errorMessage, emits agent_end, and resolves normally.
@@ -1483,8 +1495,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return contextUsageSnapshot(tokens > 0 ? tokens : null, contextWindow);
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
-			runtime?.agent.abort();
-			(runtime?.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
+			if (runtime) {
+				runtime.agent.abort();
+				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
+				cleanupSdkSessionResources(runtime.agent.sessionId);
+			}
 			retryCountdown?.cancel();
 			queuedFollowUps.length = 0;
 			persistedUserEchoes.length = 0;
@@ -1503,6 +1518,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					deps.toolRegistry.replaceProtectedArtifacts({ artifacts: [] });
 				}
 			}
+		},
+		dispose(): void {
+			if (runtime) {
+				runtime.agent.abort();
+				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
+				cleanupSdkSessionResources(runtime.agent.sessionId);
+			}
+			retryCountdown?.cancel();
+			queuedFollowUps.length = 0;
+			emitQueueUpdate();
 		},
 		async compact(instructions?: string): Promise<void> {
 			// Session check runs BEFORE orchestrator-configuration so a fresh

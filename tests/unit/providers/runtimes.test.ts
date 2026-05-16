@@ -150,7 +150,7 @@ describe("providers/runtimes built-in descriptors", () => {
 		strictEqual(model.reasoning, true);
 		strictEqual(model.contextWindow, 1000000);
 		strictEqual(model.maxTokens, 384000);
-		strictEqual(model.cost.input, 1.74);
+		strictEqual(model.cost.input, 0.435);
 		strictEqual((model.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat, "deepseek");
 
 		const support = buildProviderSupportEntry(desc);

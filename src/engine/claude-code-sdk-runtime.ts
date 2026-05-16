@@ -10,7 +10,7 @@ import {
 	type SDKMessage,
 	type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AssistantMessage, AssistantMessageEvent, ToolCall, Usage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, ToolCall, Usage } from "@earendil-works/pi-ai";
 
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";

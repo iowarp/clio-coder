@@ -21,6 +21,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
+import { promptOAuthSelection } from "./oauth-select.js";
 import { printError, printOk } from "./shared.js";
 import { validateModelChoice } from "./validate-model.js";
 
@@ -490,6 +491,7 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 				const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
 				return prompt.allowEmpty ? answer : answer.trim();
 			},
+			onSelect: (prompt) => promptOAuthSelection(rl, prompt),
 			onManualCodeInput: manualCodeInput.onManualCodeInput,
 			onProgress: (message) => {
 				process.stderr.write(`${message}\n`);

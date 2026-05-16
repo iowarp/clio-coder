@@ -23,6 +23,7 @@ import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
@@ -898,7 +899,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.70.x
+	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.74.0
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
@@ -1393,6 +1394,37 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		};
 
+		const selectOAuthOption = async (
+			dialog: ReturnType<typeof openAuthDialog>,
+			prompt: OAuthSelectPrompt,
+			prefix: ReadonlyArray<string>,
+		): Promise<string | undefined> => {
+			const defaultId = prompt.options[0]?.id;
+			if (!defaultId) return undefined;
+			const ids = new Set(prompt.options.map((option) => option.id));
+			const baseLines = [
+				...prefix,
+				prompt.message,
+				...prompt.options.map((option, index) => {
+					const marker = option.id === defaultId ? "*" : " ";
+					return `${marker} ${String(index + 1).padStart(2)}. ${option.label} (${option.id})`;
+				}),
+			];
+			let errorLine: string | null = null;
+			for (;;) {
+				dialog.controller.setLines(errorLine ? [...baseLines, errorLine] : baseLines);
+				const answer = (await dialog.controller.prompt(`Selection (number or id, q to cancel) [${defaultId}]`)).trim();
+				if (answer.length === 0) return defaultId;
+				if (answer === "q" || answer === "quit" || answer === "cancel") return undefined;
+				const numeric = Number(answer);
+				if (Number.isInteger(numeric) && numeric >= 1 && numeric <= prompt.options.length) {
+					return prompt.options[numeric - 1]?.id;
+				}
+				if (ids.has(answer)) return answer;
+				errorLine = `Unknown selection: ${answer}`;
+			}
+		};
+
 		overlayState = "auth";
 		const requiresManagedAuth = targetRequiresAuth(resolved.endpoint, resolved.runtime);
 		const authStatus = deps.providers.auth.statusForTarget(resolved.endpoint, resolved.runtime);
@@ -1464,6 +1496,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						maybeOpenExternalUrl(url);
 					},
 					onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
+					onSelect: (prompt) =>
+						selectOAuthOption(dialog, prompt, [`Target: ${endpointId}`, `Runtime: ${resolved.runtime.id}`]),
 					onManualCodeInput: async () =>
 						await new Promise<string>((resolve, reject) => {
 							manualCodeTimer = setTimeout(() => {
@@ -2012,6 +2046,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeSuperRequired();
 		unsubscribeToolApprovalRequests();
 		agentProgress.stop();
+		deps.chat.dispose();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
 		try {
 			tui.stop();

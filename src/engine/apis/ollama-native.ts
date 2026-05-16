@@ -14,8 +14,8 @@ import type {
 	Tool,
 	ToolCall,
 	Usage,
-} from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
 	type ChatRequest,
 	type ChatResponse,

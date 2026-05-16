@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import type { Context, Model } from "@mariozechner/pi-ai";
+import type { Context, Model } from "@earendil-works/pi-ai";
 
 import { ollamaNativeApiProvider } from "../../../src/engine/apis/ollama-native.js";
 import { estimateInputTokensFromContext } from "../../../src/engine/apis/output-budget.js";

@@ -1,4 +1,4 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { probeHttp } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";

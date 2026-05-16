@@ -1,4 +1,4 @@
-import { catalogSupportsXhighForRuntime } from "../catalog.js";
+import { catalogThinkingLevelsForRuntime } from "../catalog.js";
 
 export type ToolCallFormat = "openai" | "anthropic" | "hermes" | "llama3-json" | "mistral" | "qwen" | "xml";
 
@@ -46,8 +46,8 @@ export const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high",
 export type ThinkingLevel = (typeof VALID_THINKING_LEVELS)[number];
 
 const THINKING_LEVELS_WITHOUT_XHIGH: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
-const THINKING_LEVELS_OPENAI_5_1_MINI: ReadonlyArray<ThinkingLevel> = ["off", "medium", "high"];
-const THINKING_LEVELS_OPENAI_5_2_PLUS: ReadonlyArray<ThinkingLevel> = ["off", "low", "medium", "high", "xhigh"];
+const THINKING_LEVELS_OPENAI_5_1_MINI: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
+const THINKING_LEVELS_OPENAI_5_2_PLUS: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
 
 function normalizeModelId(modelId: string | undefined): string | undefined {
 	if (!modelId) return undefined;
@@ -76,22 +76,11 @@ export function availableThinkingLevels(
 	options?: { runtimeId?: string; modelId?: string },
 ): ReadonlyArray<ThinkingLevel> {
 	if (!caps.reasoning) return ["off"];
-	const catalogSupportsXhigh =
+	const catalogLevels =
 		options?.runtimeId && options.modelId
-			? catalogSupportsXhighForRuntime(options.runtimeId, options.modelId)
+			? catalogThinkingLevelsForRuntime(options.runtimeId, options.modelId)
 			: undefined;
-	if (catalogSupportsXhigh === false) {
-		if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
-			return availableOpenAICodexThinkingLevels(options?.modelId);
-		}
-		return THINKING_LEVELS_WITHOUT_XHIGH;
-	}
-	if (catalogSupportsXhigh === true) {
-		if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
-			return THINKING_LEVELS_OPENAI_5_2_PLUS;
-		}
-		return VALID_THINKING_LEVELS;
-	}
+	if (catalogLevels) return catalogLevels;
 	if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
 		return availableOpenAICodexThinkingLevels(options?.modelId);
 	}

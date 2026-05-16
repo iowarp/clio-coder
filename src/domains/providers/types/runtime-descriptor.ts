@@ -1,4 +1,4 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { CapabilityFlags } from "./capability-flags.js";
 import type { EndpointDescriptor } from "./endpoint-descriptor.js";

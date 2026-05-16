@@ -1,6 +1,6 @@
 /**
- * Re-exports of pi SDK 0.70.x types consumed by Clio. Frozen against
- * docs/.superpowers/boundaries/pi-sdk-boundary-0.70.x.md.
+ * Re-exports of pi SDK 0.74.0 types consumed by Clio. Frozen against
+ * docs/.superpowers/boundaries/pi-sdk-boundary-0.74.0.md.
  *
  * Importing pi-* types from anywhere else in the codebase violates the engine boundary.
  * Add new re-exports here when domains need additional pi types, and update the audit
@@ -15,10 +15,10 @@ export type {
 	AgentTool,
 	AgentToolResult,
 	StreamFn,
-} from "@mariozechner/pi-agent-core";
-export { Agent } from "@mariozechner/pi-agent-core";
+} from "@earendil-works/pi-agent-core";
+export { Agent } from "@earendil-works/pi-agent-core";
 
-import type { AgentState as PiAgentState } from "@mariozechner/pi-agent-core";
+import type { AgentState as PiAgentState } from "@earendil-works/pi-agent-core";
 
 /**
  * Writable view onto pi-agent-core's AgentState. The public typings mark
@@ -40,7 +40,7 @@ export type {
 	KnownProvider,
 	Model,
 	Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 export type {
 	EditorOptions,
 	EditorTheme,
@@ -49,5 +49,5 @@ export type {
 	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
-} from "@mariozechner/pi-tui";
-export { TUI } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
+export { TUI } from "@earendil-works/pi-tui";

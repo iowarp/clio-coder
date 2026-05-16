@@ -1,20 +1,4 @@
 import { randomUUID } from "node:crypto";
-
-import {
-	type ChatHistoryData,
-	type ChatMessageData,
-	type ChatMessagePartFileData,
-	type ChatMessagePartTextData,
-	type ChatMessagePartToolCallRequestData,
-	type ChatMessagePartToolCallResultData,
-	type FileHandle,
-	type FunctionToolCallRequest,
-	type LLMLoadModelConfig,
-	type LLMPredictionStopReason,
-	type LLMRespondOpts,
-	type LLMTool,
-	LMStudioClient,
-} from "@lmstudio/sdk";
 import type {
 	Api,
 	ApiProvider,
@@ -31,8 +15,23 @@ import type {
 	Tool,
 	ToolCall,
 	Usage,
-} from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import {
+	type ChatHistoryData,
+	type ChatMessageData,
+	type ChatMessagePartFileData,
+	type ChatMessagePartTextData,
+	type ChatMessagePartToolCallRequestData,
+	type ChatMessagePartToolCallResultData,
+	type FileHandle,
+	type FunctionToolCallRequest,
+	type LLMLoadModelConfig,
+	type LLMPredictionStopReason,
+	type LLMRespondOpts,
+	type LLMTool,
+	LMStudioClient,
+} from "@lmstudio/sdk";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";

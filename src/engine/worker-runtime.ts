@@ -25,7 +25,7 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import type { SelfDevMode } from "../selfdev/mode.js";
-import { registerFauxFromEnv } from "./ai.js";
+import { clampEngineThinkingLevel, registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
@@ -128,8 +128,7 @@ function applyModelCapabilities(model: Model<never>, caps: Partial<CapabilityFla
 
 function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLevel | undefined): ThinkingLevel {
 	const level = requested ?? "off";
-	const reasons = (model as { reasoning?: unknown }).reasoning === true;
-	return reasons ? level : "off";
+	return clampEngineThinkingLevel(model, level) as ThinkingLevel;
 }
 
 /**

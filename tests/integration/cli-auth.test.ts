@@ -23,9 +23,16 @@ const TEST_PROVIDER_ID = "clio-cli-oauth";
 const TEST_PROVIDER: OAuthProviderInterface = {
 	id: TEST_PROVIDER_ID,
 	name: "Clio CLI OAuth",
-	async login(_callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+	async login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+		const selected = await callbacks.onSelect?.({
+			message: "Choose login method",
+			options: [
+				{ id: "browser", label: "Browser login" },
+				{ id: "device", label: "Device code" },
+			],
+		});
 		return {
-			access: "cli-access",
+			access: selected ?? "cli-access",
 			refresh: "cli-refresh",
 			expires: Date.now() + 60_000,
 		};
@@ -101,6 +108,8 @@ describe("cli auth commands", () => {
 		strictEqual(login.result, 0);
 		const stored = openAuthStorage().get(TEST_PROVIDER_ID);
 		ok(stored && stored.type === "oauth");
+		strictEqual(stored.access, "browser");
+		ok(login.stdout.includes("Choose login method"), login.stdout);
 
 		const status = await captureOutput(() => runAuthCommand(["status", TEST_PROVIDER_ID]));
 		strictEqual(status.result, 0);
