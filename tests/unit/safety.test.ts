@@ -23,6 +23,7 @@ describe("safety/action-classifier", () => {
 	it("read tools classify as read", () => {
 		strictEqual(classify({ tool: "read", args: { path: "/x" } }).actionClass, "read");
 		strictEqual(classify({ tool: "grep", args: {} }).actionClass, "read");
+		strictEqual(classify({ tool: "find", args: {} }).actionClass, "read");
 		strictEqual(classify({ tool: "glob", args: {} }).actionClass, "read");
 	});
 

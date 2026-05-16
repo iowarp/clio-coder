@@ -95,6 +95,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"bash",
 		"edit",
 		"entry_points",
+		"find",
 		"find_symbol",
 		"git_diff",
 		"git_log",
@@ -113,6 +114,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 	],
 	advise: [
 		"entry_points",
+		"find",
 		"find_symbol",
 		"git_diff",
 		"git_log",
@@ -130,6 +132,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"bash",
 		"edit",
 		"entry_points",
+		"find",
 		"find_symbol",
 		"git_diff",
 		"git_log",

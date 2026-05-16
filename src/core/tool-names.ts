@@ -9,6 +9,7 @@ export const ToolNames = {
 	Edit: "edit",
 	Bash: "bash",
 	Grep: "grep",
+	Find: "find",
 	Glob: "glob",
 	Ls: "ls",
 	WebFetch: "web_fetch",

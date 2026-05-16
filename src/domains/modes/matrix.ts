@@ -27,6 +27,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Edit,
 			ToolNames.Bash,
 			ToolNames.Grep,
+			ToolNames.Find,
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,
@@ -49,6 +50,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 		tools: new Set<ToolName>([
 			ToolNames.Read,
 			ToolNames.Grep,
+			ToolNames.Find,
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,
@@ -76,6 +78,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.Edit,
 			ToolNames.Bash,
 			ToolNames.Grep,
+			ToolNames.Find,
 			ToolNames.Glob,
 			ToolNames.Ls,
 			ToolNames.WebFetch,

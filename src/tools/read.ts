@@ -1,10 +1,9 @@
 import { readFileSync, statSync } from "node:fs";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
-
-const DEFAULT_MAX_LINES = 2000;
-const DEFAULT_MAX_BYTES = 100 * 1024;
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
@@ -22,62 +21,59 @@ export const readTool: ToolSpec = {
 		const pathArg =
 			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
+		const filePath = resolveReadPath(pathArg);
 		const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 1;
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : null;
 		try {
-			const stat = statSync(pathArg);
-			if (!stat.isFile()) return { kind: "error", message: `read: not a file: ${pathArg}` };
+			const stat = statSync(filePath);
+			if (!stat.isFile()) return { kind: "error", message: `read: not a file: ${filePath}` };
 			if (stat.size > 20_000_000) {
 				return { kind: "error", message: `read: file too large (${stat.size}B > 20MB); use bash with sed/head` };
 			}
-			const content = readFileSync(pathArg, "utf8");
+			const content = readFileSync(filePath, "utf8");
 			const allLines = content.split("\n");
 			const totalLines = allLines.length;
 			const startIndex = Math.min(offset - 1, totalLines);
 			if (offset > 1 && startIndex >= totalLines) {
 				return { kind: "error", message: `read: offset ${offset} is beyond end of file (${totalLines} lines total)` };
 			}
-			const sliceEnd = limit !== null ? Math.min(startIndex + limit, totalLines) : totalLines;
-			const selected = allLines.slice(startIndex, sliceEnd).join("\n");
-			let output = selected;
-			let truncated = false;
-			let truncatedBy: "lines" | "bytes" | null = null;
-			let outputLines = sliceEnd - startIndex;
-			if (limit === null && outputLines > DEFAULT_MAX_LINES) {
-				outputLines = DEFAULT_MAX_LINES;
-				output = allLines.slice(startIndex, startIndex + DEFAULT_MAX_LINES).join("\n");
-				truncated = true;
-				truncatedBy = "lines";
-			}
-			if (Buffer.byteLength(output, "utf8") > DEFAULT_MAX_BYTES) {
-				const buf = Buffer.from(output, "utf8");
-				const trimmed = buf.subarray(0, DEFAULT_MAX_BYTES).toString("utf8");
-				const trimmedLines = trimmed.split("\n");
-				if (trimmedLines.length > 1) trimmedLines.pop();
-				output = trimmedLines.join("\n");
-				outputLines = trimmedLines.length;
-				truncated = true;
-				truncatedBy = truncatedBy ?? "bytes";
-			}
-			if (truncated) {
-				const startDisplay = startIndex + 1;
-				const endDisplay = startIndex + outputLines;
+			const selected =
+				limit !== null
+					? allLines.slice(startIndex, Math.min(startIndex + limit, totalLines)).join("\n")
+					: allLines.slice(startIndex).join("\n");
+			const truncation = truncateHead(selected);
+			let output: string;
+			if (truncation.firstLineExceedsLimit) {
+				const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
+				output = `[Line ${startIndex + 1} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startIndex + 1}p' ${pathArg} | head -c ${DEFAULT_MAX_BYTES}]`;
+			} else if (truncation.truncated) {
+				const endDisplay = startIndex + truncation.outputLines;
 				const nextOffset = endDisplay + 1;
-				const reason = truncatedBy === "bytes" ? `${DEFAULT_MAX_BYTES / 1024}KB limit` : `${DEFAULT_MAX_LINES}-line limit`;
-				output += `\n\n[Showing lines ${startDisplay}-${endDisplay} of ${totalLines} (${reason}). Use offset=${nextOffset} to continue.]`;
-			} else if (limit !== null && startIndex + outputLines < totalLines) {
-				const nextOffset = startIndex + outputLines + 1;
-				const remaining = totalLines - (startIndex + outputLines);
-				output += `\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+				output = truncation.content;
+				const suffix =
+					truncation.truncatedBy === "lines"
+						? `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`
+						: `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
+				output += `\n\n${suffix}`;
+			} else if (limit !== null && startIndex + truncation.outputLines < totalLines) {
+				const nextOffset = startIndex + truncation.outputLines + 1;
+				const remaining = totalLines - (startIndex + truncation.outputLines);
+				output = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+			} else {
+				output = truncation.content;
 			}
-			return { kind: "ok", output };
+			return {
+				kind: "ok",
+				output,
+				...(truncation.truncated ? { details: { truncation } } : {}),
+			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			const code = (err as NodeJS.ErrnoException | undefined)?.code;
 			if (code === "ENOENT") {
 				return {
 					kind: "error",
-					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: where_is or glob to locate the file, or ls on the parent directory.`,
+					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: where_is, find, glob, or ls to locate it.`,
 				};
 			}
 			return { kind: "error", message: `read: ${msg}` };
