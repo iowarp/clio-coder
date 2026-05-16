@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
+import { lsTool } from "../../src/tools/ls.js";
 import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
@@ -65,5 +67,37 @@ describe("ported basic coding tools", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.split("\n").includes("src/index.ts"), result.output);
+	});
+
+	it("ls lists directory names with suffixes and honors the entry limit", async () => {
+		const root = scratchDir();
+		mkdirSync(join(root, "Aardvark"), { recursive: true });
+		writeFileSync(join(root, "Alpha.txt"), "a\n", "utf8");
+		writeFileSync(join(root, "beta.txt"), "b\n", "utf8");
+
+		const result = await lsTool.run({ path: root, limit: 2 });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(result.output, "Aardvark/\nAlpha.txt\n\n[2 entries limit reached. Use limit=4 for more]");
+		strictEqual(result.details?.entryLimitReached, 2);
+	});
+
+	it("ls reports empty directories explicitly", async () => {
+		const root = scratchDir();
+
+		const result = await lsTool.run({ path: root });
+
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") strictEqual(result.output, "(empty directory)");
+	});
+
+	it("bash preserves command output when the command exits nonzero", async () => {
+		const result = await bashTool.run({ command: "printf before; printf 'err' >&2; exit 7" });
+
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.includes("before\nerr"), result.message);
+		ok(result.message.includes("bash: command failed (exit 7)"), result.message);
 	});
 });

@@ -53,11 +53,13 @@ export const bashTool: ToolSpec = {
 			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
-				const tail = result.stderr.length > 0 ? result.stderr : result.stdout;
-				const message = `bash: command failed (exit ${code ?? "?"}): ${truncate(tail).trim() || error.message}`;
+				const output = truncate(combineBashOutput(result)).trim();
+				const status = `bash: command failed (exit ${code ?? "?"})`;
+				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
 				return { kind: "error", message };
 			}
-			return { kind: "ok", output: truncate(combineBashOutput(result)) };
+			const output = truncate(combineBashOutput(result));
+			return { kind: "ok", output: output.length > 0 ? output : "(no output)" };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `bash: ${msg}` };
