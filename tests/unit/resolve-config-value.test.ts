@@ -9,7 +9,9 @@ import {
 	resolveConfigValue,
 	resolveConfigValueOrThrow,
 	resolveConfigValueUncached,
+	resolveDynamicConfigValue,
 	resolveHeaders,
+	resolveStaticConfigValue,
 } from "../../src/core/resolve-config-value.js";
 
 describe("core/resolve-config-value", () => {
@@ -53,6 +55,30 @@ describe("core/resolve-config-value", () => {
 		const second = resolveConfigValue(command);
 		ok(first && first.length > 0);
 		strictEqual(second, first);
+	});
+
+	it("keeps command execution behind an explicit dynamic resolver", () => {
+		clearConfigValueCache();
+		const command = '!node -e "process.stdout.write(String(42))"';
+
+		strictEqual(resolveStaticConfigValue(command), command);
+		strictEqual(resolveDynamicConfigValue(command), "42");
+	});
+
+	it("warns when the legacy generic resolver executes a command", () => {
+		clearConfigValueCache();
+		const warnings: string[] = [];
+		const command = '!node -e "process.stdout.write(String(7))"';
+
+		const value = resolveConfigValue(command, {
+			onWarning(warning) {
+				warnings.push(`${warning.code}:${warning.command}`);
+			},
+		});
+
+		strictEqual(value, "7");
+		strictEqual(warnings.length, 1);
+		ok(warnings[0]?.startsWith("dynamic-command-in-generic-resolution:node -e"));
 	});
 
 	it("can bypass the command cache for callers that need fresh values", () => {

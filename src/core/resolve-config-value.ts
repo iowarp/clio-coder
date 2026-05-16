@@ -4,9 +4,16 @@ import { join, resolve, sep } from "node:path";
 
 const commandResultCache = new Map<string, string | undefined>();
 
+export interface ConfigValueWarning {
+	code: "dynamic-command-in-generic-resolution";
+	message: string;
+	command: string;
+}
+
 export interface ResolveConfigValueOptions {
 	env?: NodeJS.ProcessEnv;
 	cwd?: string;
+	onWarning?: (warning: ConfigValueWarning) => void;
 }
 
 function env(options?: ResolveConfigValueOptions): NodeJS.ProcessEnv {
@@ -39,6 +46,14 @@ function executeCommandUncached(commandConfig: string): string | undefined {
 	return shellCommand(commandConfig.slice(1));
 }
 
+function warnLegacyCommand(config: string, options?: ResolveConfigValueOptions): void {
+	options?.onWarning?.({
+		code: "dynamic-command-in-generic-resolution",
+		message: "bang-prefixed config command resolved through generic config value resolver",
+		command: config.slice(1),
+	});
+}
+
 export function expandConfigValue(value: string, options?: ResolveConfigValueOptions): string {
 	const sourceEnv = env(options);
 	return value.replace(/\$(\w+)|\$\{([^}]+)\}/g, (match, bare: string | undefined, braced: string | undefined) => {
@@ -62,8 +77,7 @@ export function expandConfigPath(value: string, options?: ResolveConfigValueOpti
 	return resolve(cwd, expanded);
 }
 
-export function resolveConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
-	if (config.startsWith("!")) return executeCommand(config);
+export function resolveStaticConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	const sourceEnv = env(options);
 	const envValue = sourceEnv[config];
 	if (envValue !== undefined && envValue.length > 0) return envValue;
@@ -71,13 +85,33 @@ export function resolveConfigValue(config: string, options?: ResolveConfigValueO
 	return expanded.length > 0 ? expanded : undefined;
 }
 
-export function resolveConfigValueUncached(config: string, options?: ResolveConfigValueOptions): string | undefined {
+export function resolveDynamicConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
+	if (config.startsWith("!")) return executeCommand(config);
+	return resolveStaticConfigValue(config, options);
+}
+
+export function resolveDynamicConfigValueUncached(
+	config: string,
+	options?: ResolveConfigValueOptions,
+): string | undefined {
 	if (config.startsWith("!")) return executeCommandUncached(config);
-	const sourceEnv = env(options);
-	const envValue = sourceEnv[config];
-	if (envValue !== undefined && envValue.length > 0) return envValue;
-	const expanded = expandConfigValue(config, options);
-	return expanded.length > 0 ? expanded : undefined;
+	return resolveStaticConfigValue(config, options);
+}
+
+export function resolveConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
+	if (config.startsWith("!")) {
+		warnLegacyCommand(config, options);
+		return executeCommand(config);
+	}
+	return resolveStaticConfigValue(config, options);
+}
+
+export function resolveConfigValueUncached(config: string, options?: ResolveConfigValueOptions): string | undefined {
+	if (config.startsWith("!")) {
+		warnLegacyCommand(config, options);
+		return executeCommandUncached(config);
+	}
+	return resolveStaticConfigValue(config, options);
 }
 
 export function resolveConfigValueOrThrow(
@@ -86,6 +120,17 @@ export function resolveConfigValueOrThrow(
 	options?: ResolveConfigValueOptions,
 ): string {
 	const value = resolveConfigValueUncached(config, options);
+	if (value !== undefined) return value;
+	if (config.startsWith("!")) throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);
+	throw new Error(`Failed to resolve ${description}`);
+}
+
+export function resolveDynamicConfigValueOrThrow(
+	config: string,
+	description: string,
+	options?: ResolveConfigValueOptions,
+): string {
+	const value = resolveDynamicConfigValueUncached(config, options);
 	if (value !== undefined) return value;
 	if (config.startsWith("!")) throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);
 	throw new Error(`Failed to resolve ${description}`);
