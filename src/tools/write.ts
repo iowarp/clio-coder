@@ -10,12 +10,15 @@ export const writeTool: ToolSpec = {
 	name: ToolNames.Write,
 	description:
 		"Write a UTF-8 text file. Creates parent directories and overwrites existing files. Use edit for surgical changes to existing files.",
-	parameters: Type.Object({
-		path: Type.Optional(Type.String({ description: "Path of the file to create (relative or absolute)." })),
-		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
-		content: Type.String({ description: "Full UTF-8 file contents." }),
-		overwrite: Type.Optional(Type.Boolean({ description: "Deprecated compatibility flag; write overwrites files." })),
-	}),
+	parameters: Type.Object(
+		{
+			path: Type.Optional(Type.String({ description: "Path of the file to create (relative or absolute)." })),
+			file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
+			content: Type.String({ description: "Full UTF-8 file contents." }),
+			overwrite: Type.Optional(Type.Boolean({ description: "Deprecated compatibility flag; write overwrites files." })),
+		},
+		{ anyOf: [{ required: ["path"] }, { required: ["file_path"] }] },
+	),
 	baseActionClass: "write",
 	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
