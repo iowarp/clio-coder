@@ -129,4 +129,16 @@ describe("bash tool environment", () => {
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") strictEqual(result.message, "bash: command output exceeded 2000000 bytes");
 	});
+
+	it("preserves partial output when a command times out", async () => {
+		const result = await bashTool.run({
+			command: "printf before; printf err >&2; sleep 5",
+			timeout_ms: 50,
+		});
+
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.includes("before\nerr"), result.message);
+		ok(result.message.includes("bash: command timed out after 50ms"), result.message);
+	});
 });
