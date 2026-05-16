@@ -54,6 +54,7 @@ function baseClassify(tool: string): ActionClass | null {
 	switch (tool) {
 		case ToolNames.Read:
 		case ToolNames.Grep:
+		case ToolNames.Find:
 		case ToolNames.Glob:
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:

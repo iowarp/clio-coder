@@ -562,6 +562,7 @@ describe("engine/worker-tools registry wiring", () => {
 		const byName = new Map(defaults.map((tool) => [tool.name, tool]));
 		strictEqual(byName.get("read")?.executionMode, "parallel");
 		strictEqual(byName.get("grep")?.executionMode, "parallel");
+		strictEqual(byName.get("find")?.executionMode, "parallel");
 		strictEqual(byName.get("glob")?.executionMode, "parallel");
 		strictEqual(byName.get("ls")?.executionMode, "parallel");
 		strictEqual(byName.get("web_fetch")?.executionMode, "parallel");

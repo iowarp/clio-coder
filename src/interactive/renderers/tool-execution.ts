@@ -158,6 +158,7 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 	ls: "path",
 	bash: "command",
 	grep: "pattern",
+	find: "pattern",
 	glob: "pattern",
 	web_fetch: "url",
 };
@@ -249,6 +250,7 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	ls: (args) => buildFieldSublineBody(args, "path", "listing "),
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
+	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
 	glob: (args) => buildFieldSublineBody(args, "pattern", "matching ", { wrapInBackticks: true }),
 	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
 };

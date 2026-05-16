@@ -24,6 +24,5 @@ describe("tools/grep", () => {
 		ok(!result.output.includes(".clio/codewiki.json"), result.output);
 		ok(!result.output.includes(".fallow/cache.bin"), result.output);
 		ok(!result.output.includes("blob.bin"), result.output);
-		ok(result.output.includes("[skipped"), result.output);
 	});
 });

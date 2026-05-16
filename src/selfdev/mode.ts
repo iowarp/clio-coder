@@ -42,6 +42,7 @@ const SELF_DEV_RESTART_ROOT_FILES = new Set([
 const SELF_DEV_HOT_TOOL_FILES = new Set([
 	"src/tools/bash.ts",
 	"src/tools/edit.ts",
+	"src/tools/find.ts",
 	"src/tools/glob.ts",
 	"src/tools/grep.ts",
 	"src/tools/ls.ts",

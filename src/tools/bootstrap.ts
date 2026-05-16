@@ -6,6 +6,7 @@ import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
 import { whereIsTool } from "./codewiki/where-is.js";
 import { editTool } from "./edit.js";
+import { findTool } from "./find.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
@@ -67,6 +68,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	registry.register({
 		...withSourceInfo(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(findTool, { path: "src/tools/find.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
