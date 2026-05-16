@@ -115,7 +115,26 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const hit = scan ? matchSourcedRule(scan, rulesFor(mode)) : null;
 
 			const base = baseDecision(call, classification, callCwd, mode, command);
-			if (classification.actionClass === "git_destructive" || hit?.match.block === true) {
+			if (hit?.match.ask === true && mode !== "super") {
+				return askDecision(base, {
+					ruleId: hit.match.ruleId,
+					reasonCode: `damage-control:${hit.match.ruleId}`,
+					reasons: [...classification.reasons, hit.match.reason, "damage-control rule requires confirmation"],
+					policySource: hit.source,
+					elevationMode: "super",
+					match: hit.match,
+				});
+			}
+			if (hit?.match.ask === true && mode === "super") {
+				return allowDecision(base, {
+					ruleId: hit.match.ruleId,
+					reasonCode: `damage-control:${hit.match.ruleId}`,
+					reasons: [...classification.reasons, hit.match.reason, "damage-control rule confirmed by super mode"],
+					policySource: hit.source,
+					match: hit.match,
+				});
+			}
+			if ((classification.actionClass === "git_destructive" && hit?.match.ask !== true) || hit?.match.block === true) {
 				const blockInput: Omit<
 					SafetyPolicyDecision,
 					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
@@ -327,6 +346,7 @@ function matchSourcedRule(commandString: string, rules: ReadonlyArray<SourcedRul
 				actionClass: entry.rule.class,
 				block: entry.rule.block,
 			};
+			if (entry.rule.ask !== undefined) match.ask = entry.rule.ask;
 			return { match, source: entry.source };
 		}
 	}
@@ -400,6 +420,7 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 		pattern: rule.pattern.source,
 		class: rule.class,
 		block: rule.block,
+		...(rule.ask !== undefined ? { ask: rule.ask } : {}),
 	}));
 }
 

@@ -53,6 +53,24 @@ describe("safety/rule-pack-loader v2", () => {
 		}
 	});
 
+	it("base pack includes reference ask rules for recoverable destructive git commands", () => {
+		const packs = loadDefaultRulePacks();
+		const base = { version: packs.base.version, rules: packs.base.rules };
+		for (const command of [
+			"git checkout -- .",
+			"git restore .",
+			"git stash drop stash@{0}",
+			"git branch -D old-topic",
+			"git push origin --delete old-topic",
+			"git push origin :old-topic",
+		]) {
+			const hit = match(command, base);
+			ok(hit, command);
+			strictEqual(hit.ask, true, command);
+			strictEqual(hit.block, false, command);
+		}
+	});
+
 	it("dev pack matches the self-development git/gh blocks", () => {
 		const packs = loadDefaultRulePacks();
 		const dev = { version: packs.dev.version, rules: packs.dev.rules };
