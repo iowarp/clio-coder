@@ -104,6 +104,22 @@ describe("tool abort signal handling", () => {
 		ok(elapsedMs < 1500, `expected timeout to fire within 1500ms, got ${elapsedMs}ms`);
 	});
 
+	it("web_fetch returns after max_bytes without waiting for the full response", async () => {
+		const streaming = await startStreamingServer();
+		try {
+			const startedAt = Date.now();
+			const result = await webFetchTool.run({ url: streaming.url("/stream"), max_bytes: 3, timeout_ms: 10_000 });
+			const elapsedMs = Date.now() - startedAt;
+
+			strictEqual(result.kind, "ok");
+			if (result.kind !== "ok") return;
+			strictEqual(result.output, "abc\n[output truncated]");
+			ok(elapsedMs < 1000, `expected max_bytes cap to return within 1000ms, got ${elapsedMs}ms`);
+		} finally {
+			await closeServer(streaming.server);
+		}
+	});
+
 	it("web_fetch: aborting after a successful fetch is a no-op", async () => {
 		const fast = await startFastServer("fast-ok");
 		try {
@@ -143,6 +159,28 @@ function startFastServer(body: string): Promise<FastServer> {
 			const addr = server.address() as AddressInfo | null;
 			if (!addr || typeof addr === "string") {
 				reject(new Error("failed to bind fast test server"));
+				return;
+			}
+			const port = addr.port;
+			resolve({
+				server,
+				url: (path = "/") => `http://127.0.0.1:${port}${path}`,
+			});
+		});
+	});
+}
+
+function startStreamingServer(): Promise<FastServer> {
+	return new Promise((resolve, reject) => {
+		const server = createServer((_req, res) => {
+			res.writeHead(200, { "content-type": "text/plain" });
+			res.write("abcdef");
+		});
+		server.on("error", reject);
+		server.listen(0, "127.0.0.1", () => {
+			const addr = server.address() as AddressInfo | null;
+			if (!addr || typeof addr === "string") {
+				reject(new Error("failed to bind streaming test server"));
 				return;
 			}
 			const port = addr.port;
