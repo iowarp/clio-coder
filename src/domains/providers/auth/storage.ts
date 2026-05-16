@@ -4,7 +4,7 @@ import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
 import type { EndpointDescriptor } from "../types/endpoint-descriptor.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
 
-import { resolveEnvironmentApiKey, resolveStoredApiKey } from "./api-key.js";
+import { normalizeStoredApiKeyRef, resolveEnvironmentApiKey, resolveStoredApiKey } from "./api-key.js";
 import {
 	getOAuthApiKey,
 	getOAuthProvider,
@@ -260,7 +260,7 @@ export class AuthStorage {
 	}
 
 	setApiKey(providerId: string, key: string): void {
-		const resolved = resolveStoredApiKey(key);
+		const resolved = normalizeStoredApiKeyRef(key);
 		if (!resolved) throw new Error(`auth.setApiKey: empty key for provider=${providerId}`);
 		this.set(providerId, { type: "api_key", key: resolved, updatedAt: nowIso() });
 	}
@@ -294,7 +294,7 @@ export class AuthStorage {
 		if (endpointId.length === 0) {
 			throw new Error("auth.setRuntimeOverride: empty endpointId");
 		}
-		const resolved = resolveStoredApiKey(apiKey);
+		const resolved = normalizeStoredApiKeyRef(apiKey);
 		if (!resolved) throw new Error(`auth.setRuntimeOverride: empty key for endpoint=${endpointId}`);
 		this.runtimeOverrides.set(endpointId, resolved);
 	}
@@ -437,7 +437,7 @@ export class AuthStorage {
 
 		const stored = this.data[providerId];
 		if (stored?.type === "api_key") {
-			const apiKey = resolveStoredApiKey(stored.key);
+			const apiKey = resolveStoredApiKey(stored.key, providerId);
 			return {
 				providerId,
 				available: true,

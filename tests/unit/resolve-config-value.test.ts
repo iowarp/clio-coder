@@ -1,4 +1,4 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -59,12 +59,12 @@ describe("core/resolve-config-value", () => {
 		strictEqual(resolved?.["x-command"], "11");
 	});
 
-	it("executes bang-prefixed shell commands and caches the result", () => {
+	it("keeps bang-prefixed commands literal in the generic resolver", () => {
 		clearConfigValueCache();
 		const command = '!node -e "process.stdout.write(String(Date.now()))"';
 		const first = resolveConfigValue(command);
 		const second = resolveConfigValue(command);
-		ok(first && first.length > 0);
+		strictEqual(first, command);
 		strictEqual(second, first);
 	});
 
@@ -76,7 +76,7 @@ describe("core/resolve-config-value", () => {
 		strictEqual(resolveDynamicConfigValue(command), "42");
 	});
 
-	it("warns when the legacy generic resolver executes a command", () => {
+	it("warns when the legacy generic resolver sees a command-backed value", () => {
 		clearConfigValueCache();
 		const warnings: string[] = [];
 		const command = '!node -e "process.stdout.write(String(7))"';
@@ -87,20 +87,21 @@ describe("core/resolve-config-value", () => {
 			},
 		});
 
-		strictEqual(value, "7");
-		strictEqual(warnings.length, 1);
+		strictEqual(value, command);
+		strictEqual(warnings.length, 2);
 		ok(warnings[0]?.startsWith("dynamic-command-in-generic-resolution:node -e"));
+		ok(warnings[1]?.startsWith("dynamic-command-in-static-resolution:node -e"));
 	});
 
-	it("can bypass the command cache for callers that need fresh values", () => {
+	it("does not execute commands through uncached generic resolution", () => {
 		const command = '!node -e "process.stdout.write(String(process.hrtime.bigint()))"';
 		const first = resolveConfigValueUncached(command);
 		const second = resolveConfigValueUncached(command);
-		ok(first && second);
-		ok(first !== second || first.length > 0);
+		strictEqual(first, command);
+		strictEqual(second, command);
 	});
 
-	it("throws a descriptive error when a command cannot resolve", () => {
-		throws(() => resolveConfigValueOrThrow('!node -e "process.exit(7)"', "api key"), /api key/);
+	it("leaves command-like values literal for generic throwing resolution", () => {
+		strictEqual(resolveConfigValueOrThrow('!node -e "process.exit(7)"', "api key"), '!node -e "process.exit(7)"');
 	});
 });

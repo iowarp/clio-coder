@@ -1,3 +1,8 @@
+import {
+	type ResolveConfigValueOptions,
+	resolveDynamicConfigValue,
+	resolveDynamicConfigValueUncached,
+} from "../../../core/resolve-config-value.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/oauth.js";
 
 export interface EnvironmentApiKeyResolution {
@@ -5,9 +10,33 @@ export interface EnvironmentApiKeyResolution {
 	source: string | null;
 }
 
-export function resolveStoredApiKey(key: string): string | undefined {
+export function resolveStoredApiKey(key: string, providerId = "stored-api-key"): string | undefined {
+	const trimmed = key.trim();
+	if (trimmed.length === 0) return undefined;
+	return resolveProviderDynamicSecret(trimmed, { providerId, field: "apiKey" });
+}
+
+export function normalizeStoredApiKeyRef(key: string): string | undefined {
 	const trimmed = key.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function resolveProviderDynamicSecret(
+	value: string,
+	context: { providerId: string; endpointId?: string; field?: string },
+	options?: ResolveConfigValueOptions,
+): string | undefined {
+	void context;
+	return resolveDynamicConfigValue(value, options);
+}
+
+export function resolveProviderDynamicSecretUncached(
+	value: string,
+	context: { providerId: string; endpointId?: string; field?: string },
+	options?: ResolveConfigValueOptions,
+): string | undefined {
+	void context;
+	return resolveDynamicConfigValueUncached(value, options);
 }
 
 export function resolveEnvironmentApiKey(providerId: string, explicitEnvVar?: string): EnvironmentApiKeyResolution {
