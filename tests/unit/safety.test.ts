@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE } from "../../src/domains/safety/finish-contract.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
+import { compilePathPolicy, evaluatePathPolicy, isSameOrDescendant } from "../../src/domains/safety/path-policy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import {
 	classifyDestructiveCommand,
@@ -83,6 +84,55 @@ describe("safety/scope", () => {
 
 	it("worker with dispatch when orchestrator has none fails", () => {
 		strictEqual(isSubset(DEFAULT_SCOPE, READONLY_SCOPE), false);
+	});
+});
+
+describe("safety/path-policy", () => {
+	it("matches exact paths and descendants without sibling-prefix leaks", () => {
+		strictEqual(isSameOrDescendant("/repo/build", "/repo/build"), true);
+		strictEqual(isSameOrDescendant("/repo/build/log.txt", "/repo/build"), true);
+		strictEqual(isSameOrDescendant("/repo/build-output/log.txt", "/repo/build"), false);
+		strictEqual(isSameOrDescendant("/repo", "/repo/build"), false);
+	});
+
+	it("blocks zero-access paths for read, write, and delete", () => {
+		const policy = compilePathPolicy({ zeroAccessPaths: ["secrets"] }, "/repo");
+
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/secrets/key").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "write", "/repo/secrets/key").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "delete", "/repo/secrets/key").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/src/key").kind, "allow");
+	});
+
+	it("lets read-only paths be read but not written or deleted", () => {
+		const policy = compilePathPolicy({ readOnlyPaths: ["vendor"] }, "/repo");
+
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/vendor/lib.ts").kind, "allow");
+		strictEqual(evaluatePathPolicy(policy, "write", "/repo/vendor/lib.ts").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "delete", "/repo/vendor/lib.ts").kind, "block");
+	});
+
+	it("blocks deletes for no-delete paths while allowing writes", () => {
+		const policy = compilePathPolicy({ noDeletePaths: ["src"] }, "/repo");
+
+		strictEqual(evaluatePathPolicy(policy, "write", "/repo/src/app.ts").kind, "allow");
+		const blocked = evaluatePathPolicy(policy, "delete", "/repo/src/app.ts");
+		strictEqual(blocked.kind, "block");
+		if (blocked.kind === "block") strictEqual(blocked.reasonCode, "path-policy:noDeletePaths");
+	});
+
+	it("resolves relative target paths against the call cwd", () => {
+		const policy = compilePathPolicy({ readOnlyPaths: ["src/generated"] }, "/repo");
+
+		strictEqual(evaluatePathPolicy(policy, "write", "generated/types.ts", "/repo/src").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "write", "generated-other/types.ts", "/repo/src").kind, "allow");
+	});
+
+	it("records diagnostics for empty policy paths", () => {
+		const policy = compilePathPolicy({ zeroAccessPaths: ["  "] }, "/repo");
+
+		deepStrictEqual(policy.diagnostics, ["zeroAccessPaths: path must not be empty"]);
+		strictEqual(policy.entries.length, 0);
 	});
 });
 

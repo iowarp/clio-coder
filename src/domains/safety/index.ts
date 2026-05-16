@@ -16,3 +16,14 @@ export {
 	hasExplicitLimitation,
 } from "./finish-contract.js";
 export { SafetyManifest } from "./manifest.js";
+export {
+	type CompiledPathPolicy,
+	compilePathPolicy,
+	evaluatePathPolicy,
+	isSameOrDescendant,
+	type PathPolicyDecision,
+	type PathPolicyEntry,
+	type PathPolicyInput,
+	type PathPolicyKind,
+	type PathPolicyOperation,
+} from "./path-policy.js";
