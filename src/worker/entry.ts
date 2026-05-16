@@ -8,10 +8,10 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
+import type { SelfDevMode } from "../core/dev-harness-contract.js";
 import type { ToolName } from "../core/tool-names.js";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";

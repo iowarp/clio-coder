@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import type { SelfDevActivationSource, SelfDevMode, SelfDevPathDecision } from "../core/dev-harness-contract.js";
 import { clioConfigDir } from "../core/xdg.js";
 import { getCachedDefaultRulePacks } from "../domains/safety/rule-pack-loader.js";
 import { selfDevRestartRequired } from "./reload-policy.js";
@@ -13,21 +14,7 @@ export function devSupplementCandidates(repoRoot: string): string[] {
 	return [join(repoRoot, DEV_FILE_NAME), join(clioConfigDir(), DEV_FILE_NAME)];
 }
 
-export type SelfDevActivationSource = "--dev" | "CLIO_DEV=1" | "CLIO_SELF_DEV=1";
-
-export interface SelfDevMode {
-	enabled: true;
-	source: SelfDevActivationSource;
-	repoRoot: string;
-	cwd: string;
-	branch: string | null;
-	dirtySummary: string;
-	engineWritesAllowed: boolean;
-}
-
-export type SelfDevPathDecision =
-	| { allowed: true; absolutePath: string; relativePath: string; restartRequired: boolean }
-	| { allowed: false; absolutePath: string; relativePath: string; reason: string };
+export type { SelfDevActivationSource, SelfDevMode, SelfDevPathDecision } from "../core/dev-harness-contract.js";
 
 export function resolveRepoRoot(start: string = dirname(fileURLToPath(import.meta.url))): string | null {
 	let cursor = resolve(start);

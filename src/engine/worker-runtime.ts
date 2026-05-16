@@ -9,6 +9,7 @@
  * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
+import type { SelfDevMode } from "../core/dev-harness-contract.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModeName } from "../domains/modes/matrix.js";
@@ -24,7 +25,6 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import type { SelfDevMode } from "../selfdev/mode.js";
 import { clampEngineThinkingLevel, registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";

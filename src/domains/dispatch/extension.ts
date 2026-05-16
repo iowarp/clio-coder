@@ -11,11 +11,10 @@
 
 import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
+import { type SelfDevMode, SelfDevToolNames } from "../../core/dev-harness-contract.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { ToolName } from "../../core/tool-names.js";
-import type { SelfDevMode } from "../../selfdev/mode.js";
-import { SelfDevToolNames } from "../../selfdev/tool-names.js";
 import { serializeWorkerRuntimeDescriptor, WORKER_SPEC_VERSION } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
