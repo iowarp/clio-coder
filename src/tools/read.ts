@@ -11,7 +11,8 @@ export const readTool: ToolSpec = {
 		DEFAULT_MAX_BYTES / 1024
 	}KB (whichever hits first). Use offset/limit for large files; when the result is truncated, continue with the suggested offset until complete.`,
 	parameters: Type.Object({
-		path: Type.String({ description: "Path to the file to read (relative or absolute)." }),
+		path: Type.Optional(Type.String({ description: "Path to the file to read (relative or absolute)." })),
+		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
 		offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)." })),
 		limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read." })),
 	}),
