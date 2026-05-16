@@ -23,6 +23,54 @@ function truncate(text: string, maxBytes: number): string {
 	return truncateUtf8(text, maxBytes, TRUNCATION_MARKER);
 }
 
+function decodeUtf8Prefix(bytes: Buffer, maxBytes: number): string {
+	let cut = Math.min(maxBytes, bytes.byteLength);
+	while (cut > 0) {
+		const nextByte = bytes[cut];
+		if (nextByte === undefined || (nextByte & 0xc0) !== 0x80) break;
+		cut -= 1;
+	}
+	return bytes.subarray(0, cut).toString("utf8");
+}
+
+async function readResponseText(response: Response, maxBytes: number): Promise<string> {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	const chunks: Buffer[] = [];
+	let totalBytes = 0;
+	let truncated = false;
+
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+
+			const chunk = Buffer.from(value);
+			const remaining = maxBytes + 4 - totalBytes;
+			if (remaining > 0) {
+				const kept = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
+				chunks.push(kept);
+				totalBytes += kept.byteLength;
+			}
+
+			if (totalBytes > maxBytes || chunk.byteLength > remaining) {
+				truncated = true;
+				await reader.cancel();
+				break;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	const bytes = Buffer.concat(chunks, totalBytes);
+	if (truncated || bytes.byteLength > maxBytes) {
+		return `${decodeUtf8Prefix(bytes, maxBytes)}${TRUNCATION_MARKER}`;
+	}
+	return bytes.toString("utf8");
+}
+
 export const webFetchTool: ToolSpec = {
 	name: ToolNames.WebFetch,
 	description:
@@ -105,7 +153,7 @@ export const webFetchTool: ToolSpec = {
 					message: `web_fetch: HTTP ${response.status}: ${response.statusText}`,
 				};
 			}
-			const text = await response.text();
+			const text = await readResponseText(response, maxBytes);
 			return { kind: "ok", output: truncate(text, maxBytes) };
 		} catch (err) {
 			if (err instanceof Error && err.name === "AbortError") {
