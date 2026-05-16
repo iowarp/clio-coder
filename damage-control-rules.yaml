@@ -57,6 +57,66 @@ packs:
         pattern: "\\btee\\s+(?:-[A-Za-z]+\\s+)*\"?/(?:etc|usr|bin|sbin|var(?!/tmp))(?:/|\\s|\"|$)"
         class: system_modify
         block: true
+      - id: git-stash-clear
+        description: "git stash clear deletes all stashes"
+        pattern: "\\bgit\\s+stash\\s+clear\\b"
+        class: git_destructive
+        block: true
+      - id: git-reflog-expire
+        description: "git reflog expire destroys recovery history"
+        pattern: "\\bgit\\s+reflog\\s+expire\\b"
+        class: git_destructive
+        block: true
+      - id: git-gc-prune-now
+        description: "git gc --prune=now can lose dangling commits"
+        pattern: "\\bgit\\s+gc\\b[^;&|]*--prune=now\\b"
+        class: git_destructive
+        block: true
+      - id: git-filter-branch
+        description: "git filter-branch rewrites repository history"
+        pattern: "\\bgit\\s+filter-branch\\b"
+        class: git_destructive
+        block: true
+      - id: aws-s3-rm-recursive
+        description: "aws s3 rm --recursive deletes many objects"
+        pattern: "\\baws\\s+s3\\s+rm\\b[^;&|]*--recursive\\b"
+        class: system_modify
+        block: true
+      - id: aws-terminate-instances
+        description: "aws ec2 terminate-instances destroys compute instances"
+        pattern: "\\baws\\s+ec2\\s+terminate-instances\\b"
+        class: system_modify
+        block: true
+      - id: gcloud-projects-delete
+        description: "gcloud projects delete destroys a cloud project"
+        pattern: "\\bgcloud\\s+projects\\s+delete\\b"
+        class: system_modify
+        block: true
+      - id: firebase-projects-delete
+        description: "firebase projects:delete destroys a Firebase project"
+        pattern: "\\bfirebase\\s+projects:delete\\b"
+        class: system_modify
+        block: true
+      - id: vercel-remove
+        description: "vercel remove/rm deletes deployments or projects"
+        pattern: "\\bvercel\\s+(?:remove|rm|projects\\s+rm)\\b"
+        class: system_modify
+        block: true
+      - id: sql-delete-without-where
+        description: "SQL DELETE without WHERE can delete every row"
+        pattern: "\\bDELETE\\s+FROM\\s+\\w+\\s*;"
+        class: system_modify
+        block: true
+      - id: sql-truncate-table
+        description: "TRUNCATE TABLE deletes all rows"
+        pattern: "\\bTRUNCATE\\s+TABLE\\b"
+        class: system_modify
+        block: true
+      - id: sql-drop-database
+        description: "DROP DATABASE destroys a database"
+        pattern: "\\bDROP\\s+DATABASE\\b"
+        class: system_modify
+        block: true
   - id: dev
     rules:
       - id: selfdev-git-push
