@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { DamageControlRule, DamageControlRuleset } from "./damage-control.js";
+import { compileDamageControlRule } from "./rule-compiler.js";
 
 export type PackId = "base" | "dev" | "super";
 
@@ -24,14 +25,6 @@ export interface RulePacks {
 	base: DamageControlRuleset;
 	dev: DamageControlRuleset;
 	super: DamageControlRuleset;
-}
-
-interface RawRule {
-	id?: unknown;
-	description?: unknown;
-	pattern?: unknown;
-	class?: unknown;
-	block?: unknown;
 }
 
 interface RawPack {
@@ -45,40 +38,12 @@ interface RawDocument {
 	rules?: unknown;
 }
 
-function asString(value: unknown, ruleId: string, field: string): string {
-	if (typeof value !== "string" || value.length === 0) {
-		throw new Error(`damage-control rule '${ruleId}': expected string for ${field}`);
-	}
-	return value;
-}
-
-function compileRule(raw: RawRule, index: number): DamageControlRule {
-	if (typeof raw.id !== "string" || raw.id.length === 0) {
-		throw new Error(`damage-control rule at index ${index}: missing or non-string 'id'`);
-	}
-	const id = raw.id;
-	const description = asString(raw.description, id, "description");
-	const patternString = asString(raw.pattern, id, "pattern");
-	const klass = asString(raw.class, id, "class");
-	if (typeof raw.block !== "boolean") {
-		throw new Error(`damage-control rule '${id}': expected boolean for block`);
-	}
-	let pattern: RegExp;
-	try {
-		pattern = new RegExp(patternString, "i");
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(`damage-control rule '${id}': invalid pattern: ${msg}`);
-	}
-	return { id, description, pattern, class: klass, block: raw.block };
-}
-
 function compilePackRules(rawRules: unknown, packId: string): DamageControlRule[] {
 	if (rawRules === undefined || rawRules === null) return [];
 	if (!Array.isArray(rawRules)) {
 		throw new Error(`damage-control pack '${packId}': expected array at 'rules'`);
 	}
-	return rawRules.map((r, i) => compileRule(r as RawRule, i));
+	return rawRules.map((rule, index) => compileDamageControlRule(rule as Record<string, unknown>, index));
 }
 
 function emptyRuleset(version: number): DamageControlRuleset {

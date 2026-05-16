@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { compileDamageControlRules } from "./rule-compiler.js";
 
 /**
  * Rule-driven hard-block interceptor. Rules are seeded from
@@ -34,14 +35,6 @@ export interface DamageControlMatch {
 	block: boolean;
 }
 
-interface RawRule {
-	id?: unknown;
-	description?: unknown;
-	pattern?: unknown;
-	class?: unknown;
-	block?: unknown;
-}
-
 interface RawPack {
 	id?: unknown;
 	rules?: unknown;
@@ -53,42 +46,6 @@ interface RawRuleset {
 	packs?: unknown;
 }
 
-function asString(value: unknown, ruleId: string, field: string): string {
-	if (typeof value !== "string" || value.length === 0) {
-		throw new Error(`damage-control rule '${ruleId}': expected string for ${field}`);
-	}
-	return value;
-}
-
-function compileRule(raw: RawRule, index: number): DamageControlRule {
-	if (typeof raw.id !== "string" || raw.id.length === 0) {
-		throw new Error(`damage-control rule at index ${index}: missing or non-string 'id'`);
-	}
-	const id = raw.id;
-	const description = asString(raw.description, id, "description");
-	const patternString = asString(raw.pattern, id, "pattern");
-	const klass = asString(raw.class, id, "class");
-	if (typeof raw.block !== "boolean") {
-		throw new Error(`damage-control rule '${id}': expected boolean for block`);
-	}
-	let pattern: RegExp;
-	try {
-		pattern = new RegExp(patternString, "i");
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(`damage-control rule '${id}': invalid pattern: ${msg}`);
-	}
-	return { id, description, pattern, class: klass, block: raw.block };
-}
-
-function compileRules(rawRules: unknown, ctx: string): DamageControlRule[] {
-	if (rawRules === undefined || rawRules === null) return [];
-	if (!Array.isArray(rawRules)) {
-		throw new Error(`damage-control ${ctx}: expected array at 'rules'`);
-	}
-	return rawRules.map((r, i) => compileRule(r as RawRule, i));
-}
-
 export function loadRuleset(path: string): DamageControlRuleset {
 	const raw = readFileSync(path, "utf8");
 	const parsed = parseYaml(raw) as RawRuleset | null;
@@ -98,7 +55,7 @@ export function loadRuleset(path: string): DamageControlRuleset {
 	const version = typeof parsed.version === "number" ? parsed.version : 0;
 
 	if (version === 1) {
-		return { version, rules: compileRules(parsed.rules, `rules at ${path}`) };
+		return { version, rules: compileDamageControlRules(parsed.rules, `rules at ${path}`) };
 	}
 
 	if (version === 2) {
@@ -106,7 +63,7 @@ export function loadRuleset(path: string): DamageControlRuleset {
 			throw new Error(`damage-control rules at ${path}: expected array at 'packs'`);
 		}
 		const baseRaw = (parsed.packs as RawPack[]).find((p) => p.id === "base");
-		const baseRules = baseRaw ? compileRules(baseRaw.rules, `pack 'base' at ${path}`) : [];
+		const baseRules = baseRaw ? compileDamageControlRules(baseRaw.rules, `pack 'base' at ${path}`) : [];
 		return { version, rules: baseRules };
 	}
 
