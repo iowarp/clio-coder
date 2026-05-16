@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -24,13 +24,16 @@ import {
 	type ToolFinishEvent,
 	type ToolStartEvent,
 } from "../../src/engine/worker-tools.js";
+import { editTool } from "../../src/tools/edit.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
+import { readTool } from "../../src/tools/read.js";
 import {
 	createRegistry,
 	type ProtectedArtifactRegistryEvent,
 	type ToolRegistry,
 	type ToolSpec,
 } from "../../src/tools/registry.js";
+import { writeTool } from "../../src/tools/write.js";
 
 function makeModes(
 	initial: ModeName,
@@ -170,6 +173,53 @@ describe("engine/worker-tools registry wiring", () => {
 		await rejects(invokeWorkerTool(registry, "write", { path: "notes.txt" }), /Validation failed for tool "write"/);
 		strictEqual(runCalls, 1);
 		strictEqual(decisions.length, 1);
+	});
+
+	it("validates legacy file_path aliases for built-in file tools", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-tool-file-path-"));
+		try {
+			const readDecisions: ClassifierCall[] = [];
+			const readRegistry = createRegistry({
+				safety: makeSafety({ actionClass: "read", reasons: ["test"] }, readDecisions),
+				modes: makeModes("default", (action) => action === "read", ["read"]),
+			});
+			readRegistry.register(readTool);
+			const readPath = join(root, "read.txt");
+			writeFileSync(readPath, "hello\n", "utf8");
+
+			const readResult = await invokeWorkerTool(readRegistry, ToolNames.Read, { file_path: readPath });
+
+			strictEqual(readResult.content[0]?.type, "text");
+			if (readResult.content[0]?.type === "text") strictEqual(readResult.content[0].text, "hello\n");
+
+			const writeDecisions: ClassifierCall[] = [];
+			const writeRegistry = createRegistry({
+				safety: makeSafety({ actionClass: "write", reasons: ["test"] }, writeDecisions),
+				modes: makeModes("default", (action) => action === "write", ["write", "edit"]),
+			});
+			writeRegistry.register(writeTool);
+			writeRegistry.register(editTool);
+			const writePath = join(root, "write.txt");
+
+			const writeResult = await invokeWorkerTool(writeRegistry, ToolNames.Write, {
+				file_path: writePath,
+				content: "old\n",
+			});
+
+			strictEqual(writeResult.content[0]?.type, "text");
+			strictEqual(readFileSync(writePath, "utf8"), "old\n");
+
+			const editResult = await invokeWorkerTool(writeRegistry, ToolNames.Edit, {
+				file_path: writePath,
+				old_string: "old",
+				new_string: "new",
+			});
+
+			strictEqual(editResult.content[0]?.type, "text");
+			strictEqual(readFileSync(writePath, "utf8"), "new\n");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("emits onStart and onFinish telemetry for ok, blocked, and error outcomes", async () => {
