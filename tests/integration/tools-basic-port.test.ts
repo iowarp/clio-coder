@@ -70,6 +70,26 @@ describe("ported basic coding tools", () => {
 		ok(result.output.split("\n").includes("src/index.ts"), result.output);
 	});
 
+	it("find only reports result limits when additional matches exist", async () => {
+		const root = scratchDir();
+		writeFileSync(join(root, "a.txt"), "a\n", "utf8");
+		writeFileSync(join(root, "b.txt"), "b\n", "utf8");
+
+		const exactLimit = await findTool.run({ pattern: "*.txt", path: root, limit: 2 });
+
+		strictEqual(exactLimit.kind, "ok");
+		if (exactLimit.kind !== "ok") return;
+		ok(!exactLimit.output.includes("results limit reached"), exactLimit.output);
+		strictEqual(exactLimit.details?.resultLimitReached, undefined);
+
+		const exceededLimit = await findTool.run({ pattern: "*.txt", path: root, limit: 1 });
+
+		strictEqual(exceededLimit.kind, "ok");
+		if (exceededLimit.kind !== "ok") return;
+		ok(exceededLimit.output.includes("1 results limit reached"), exceededLimit.output);
+		strictEqual(exceededLimit.details?.resultLimitReached, 1);
+	});
+
 	it("glob uses shared read-path normalization for the search root", async () => {
 		const root = scratchDir();
 		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");
