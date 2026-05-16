@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ActionClass } from "./action-classifier.js";
+import type { PathPolicyInput } from "./path-policy.js";
 
 export type ShellOperatorPolicy = "deny" | "allow";
 export type EnvironmentPolicyMode = "none" | "allowlist";
@@ -33,6 +34,7 @@ export interface LoadedProjectSafetyPolicy {
 	valid: boolean;
 	errors: ReadonlyArray<string>;
 	commands: ReadonlyArray<ProjectCommandPolicy>;
+	pathPolicy: PathPolicyInput;
 }
 
 const POLICY_RELATIVE_PATH = path.join(".clio", "safety.yaml");
@@ -45,7 +47,8 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"git_destructive",
 	"unknown",
 ]);
-const ROOT_KEYS = new Set(["version", "commands", "tasks"]);
+const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noDeletePaths"] as const;
+const ROOT_KEYS = new Set(["version", "commands", "tasks", ...PATH_POLICY_KEYS]);
 const COMMAND_KEYS = new Set([
 	"id",
 	"command",
@@ -77,7 +80,7 @@ export function projectSafetyPolicyPath(cwd: string = process.cwd()): string | n
 export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProjectSafetyPolicy {
 	const policyPath = projectSafetyPolicyPath(cwd);
 	if (policyPath === null) {
-		return { path: null, hash: null, valid: true, errors: [], commands: [] };
+		return { path: null, hash: null, valid: true, errors: [], commands: [], pathPolicy: {} };
 	}
 	let raw: string;
 	try {
@@ -89,6 +92,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			valid: false,
 			errors: [`cannot read project safety policy: ${err instanceof Error ? err.message : String(err)}`],
 			commands: [],
+			pathPolicy: {},
 		};
 	}
 	const hash = sha256(raw);
@@ -102,6 +106,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			valid: false,
 			errors: [`cannot parse project safety policy: ${err instanceof Error ? err.message : String(err)}`],
 			commands: [],
+			pathPolicy: {},
 		};
 	}
 }
@@ -110,7 +115,14 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 	const errors: string[] = [];
 	const commands: ProjectCommandPolicy[] = [];
 	if (!isPlainRecord(value)) {
-		return { path: policyPath, hash, valid: false, errors: ["policy root must be a mapping"], commands: [] };
+		return {
+			path: policyPath,
+			hash,
+			valid: false,
+			errors: ["policy root must be a mapping"],
+			commands: [],
+			pathPolicy: {},
+		};
 	}
 	for (const key of Object.keys(value)) {
 		if (!ROOT_KEYS.has(key)) errors.push(`unknown root key '${key}'`);
@@ -118,6 +130,7 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 	if (value.version !== 1) errors.push("version must be 1");
 	appendCommandPolicies(commands, errors, value.commands, "commands");
 	appendCommandPolicies(commands, errors, value.tasks, "tasks");
+	const pathPolicy = parsePathPolicy(value, errors);
 
 	const ids = new Set<string>();
 	for (const command of commands) {
@@ -131,7 +144,47 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 		valid: errors.length === 0,
 		errors,
 		commands: errors.length === 0 ? commands : [],
+		pathPolicy: errors.length === 0 ? pathPolicy : {},
 	};
+}
+
+function parsePathPolicy(value: Record<string, unknown>, errors: string[]): PathPolicyInput {
+	const out: PathPolicyInput = {};
+	for (const key of PATH_POLICY_KEYS) {
+		const parsed = parsePathList(value[key], key, errors);
+		if (parsed !== undefined) out[key] = parsed;
+	}
+	return out;
+}
+
+function parsePathList(value: unknown, key: (typeof PATH_POLICY_KEYS)[number], errors: string[]): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) {
+		errors.push(`${key} must be an array`);
+		return undefined;
+	}
+	const out: string[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item = value[index];
+		const label = `${key}[${index}]`;
+		if (typeof item !== "string" || item.trim().length === 0) {
+			errors.push(`${label} must be a non-empty string`);
+			continue;
+		}
+		const trimmed = item.trim();
+		if (path.isAbsolute(trimmed)) {
+			errors.push(`${label} must be relative to the policy root`);
+			continue;
+		}
+		const normalized = path.normalize(trimmed);
+		const segments = normalized.split(path.sep).filter((segment) => segment.length > 0);
+		if (segments.some((segment) => segment === "..")) {
+			errors.push(`${label} must not escape the policy root with '..'`);
+			continue;
+		}
+		out.push(trimmed);
+	}
+	return out;
 }
 
 function appendCommandPolicies(

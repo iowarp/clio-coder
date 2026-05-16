@@ -51,6 +51,12 @@ if a prompt fragment asks the model to proceed.
 
 ```yaml
 version: 1
+zeroAccessPaths:
+  - secrets
+readOnlyPaths:
+  - vendor
+noDeletePaths:
+  - src/generated
 commands:
   - id: local-test
     command: npm test
@@ -78,6 +84,14 @@ permissions. The policy is snapshotted for the active run so a model cannot
 edit the policy and immediately benefit from the new allowlist. Default-mode
 bash that does not match a project policy entry must also run with a cwd under
 the workspace root; otherwise the call is rejected as `bash-cwd-escape`.
+
+Path policies are also rooted at the policy root. `zeroAccessPaths` blocks
+read, write, and delete access; `readOnlyPaths` allows reads but blocks writes
+and deletes; `noDeletePaths` allows reads and writes but blocks deletes.
+The policy engine enforces these for typed file/search/list tools and for
+deterministic Bash write/delete targets such as redirects, `tee`, `cp`, `mv`,
+`rm`, and `find -delete`. Unknown shell behavior is not treated as a path-policy
+sandbox and remains governed by the command policy and damage-control layers.
 
 ## External CLI and SDK Runtimes
 
