@@ -10,6 +10,7 @@ import {
 	resolveConfigValueOrThrow,
 	resolveConfigValueUncached,
 	resolveDynamicConfigValue,
+	resolveDynamicHeaders,
 	resolveHeaders,
 	resolveStaticConfigValue,
 } from "../../src/core/resolve-config-value.js";
@@ -36,16 +37,26 @@ describe("core/resolve-config-value", () => {
 		);
 	});
 
-	it("resolves headers through the same value resolver", () => {
+	it("resolves headers through static value resolution", () => {
 		const resolved = resolveHeaders(
 			{
 				authorization: `Bearer $${"{CLIO_TOKEN}"}`,
 				"x-literal": "static",
+				"x-command": '!node -e "process.stdout.write(String(1))"',
 			},
 			{ env: { CLIO_TOKEN: "secret" } },
 		);
 		strictEqual(resolved?.authorization, "Bearer secret");
 		strictEqual(resolved?.["x-literal"], "static");
+		strictEqual(resolved?.["x-command"], '!node -e "process.stdout.write(String(1))"');
+	});
+
+	it("keeps command-backed headers behind explicit dynamic resolution", () => {
+		clearConfigValueCache();
+		const resolved = resolveDynamicHeaders({
+			"x-command": '!node -e "process.stdout.write(String(11))"',
+		});
+		strictEqual(resolved?.["x-command"], "11");
 	});
 
 	it("executes bang-prefixed shell commands and caches the result", () => {

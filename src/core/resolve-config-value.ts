@@ -125,6 +125,16 @@ export function resolveConfigValueOrThrow(
 	throw new Error(`Failed to resolve ${description}`);
 }
 
+export function resolveStaticConfigValueOrThrow(
+	config: string,
+	description: string,
+	options?: ResolveConfigValueOptions,
+): string {
+	const value = resolveStaticConfigValue(config, options);
+	if (value !== undefined) return value;
+	throw new Error(`Failed to resolve ${description}`);
+}
+
 export function resolveDynamicConfigValueOrThrow(
 	config: string,
 	description: string,
@@ -143,7 +153,20 @@ export function resolveHeaders(
 	if (!headers) return undefined;
 	const resolved: Record<string, string> = {};
 	for (const [key, value] of Object.entries(headers)) {
-		const next = resolveConfigValue(value, options);
+		const next = resolveStaticConfigValue(value, options);
+		if (next !== undefined && next.length > 0) resolved[key] = next;
+	}
+	return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+export function resolveDynamicHeaders(
+	headers: Readonly<Record<string, string>> | undefined,
+	options?: ResolveConfigValueOptions,
+): Record<string, string> | undefined {
+	if (!headers) return undefined;
+	const resolved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers)) {
+		const next = resolveDynamicConfigValue(value, options);
 		if (next !== undefined && next.length > 0) resolved[key] = next;
 	}
 	return Object.keys(resolved).length > 0 ? resolved : undefined;
@@ -157,7 +180,20 @@ export function resolveHeadersOrThrow(
 	if (!headers) return undefined;
 	const resolved: Record<string, string> = {};
 	for (const [key, value] of Object.entries(headers)) {
-		resolved[key] = resolveConfigValueOrThrow(value, `${description} header "${key}"`, options);
+		resolved[key] = resolveStaticConfigValueOrThrow(value, `${description} header "${key}"`, options);
+	}
+	return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+export function resolveDynamicHeadersOrThrow(
+	headers: Readonly<Record<string, string>> | undefined,
+	description: string,
+	options?: ResolveConfigValueOptions,
+): Record<string, string> | undefined {
+	if (!headers) return undefined;
+	const resolved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers)) {
+		resolved[key] = resolveDynamicConfigValueOrThrow(value, `${description} header "${key}"`, options);
 	}
 	return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
