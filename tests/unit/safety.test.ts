@@ -284,6 +284,36 @@ describe("safety/policy-engine", () => {
 		}
 	});
 
+	it("resolves relative bash cwd against the policy engine workspace", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-project-policy-relative-cwd-"));
+		try {
+			mkdirSync(join(dir, ".clio"), { recursive: true });
+			mkdirSync(join(dir, "tools"), { recursive: true });
+			writeFileSync(
+				join(dir, ".clio", "safety.yaml"),
+				[
+					"version: 1",
+					"commands:",
+					"  - id: generate",
+					"    command: npm run generate",
+					"    cwd: tools",
+					"    actionClass: execute",
+					"    shellOperators: deny",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: dir, selfDev: false });
+			const decision = engine.evaluate({ tool: "bash", args: { command: "npm run generate", cwd: "tools" } }, "default");
+
+			strictEqual(decision.kind, "allow");
+			strictEqual(decision.policySource, "project-policy");
+			strictEqual(decision.cwd, join(dir, "tools"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("enforces project path policies through the policy engine", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-project-path-policy-"));
 		try {

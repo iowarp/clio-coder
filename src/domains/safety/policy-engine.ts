@@ -464,7 +464,7 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 }
 
 function cwdArg(args: Record<string, unknown> | undefined, fallback: string): string {
-	return typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(args.cwd) : fallback;
+	return typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(fallback, args.cwd) : fallback;
 }
 
 function serializeArgs(args?: Record<string, unknown>): string {
