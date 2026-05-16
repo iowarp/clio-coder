@@ -19,9 +19,17 @@ let scratch: string;
 let oldEnv: NodeJS.ProcessEnv;
 let oldCwd: string;
 
-function writeExtension(root: string, id: string, description: string): void {
+function writeExtension(
+	root: string,
+	id: string,
+	description: string,
+	resources: { skills?: string; prompts?: string } = { skills: "skills", prompts: "prompts" },
+): void {
 	mkdirSync(join(root, "skills", "review"), { recursive: true });
 	mkdirSync(join(root, "prompts"), { recursive: true });
+	const resourceLines = Object.entries(resources).flatMap(([kind, resourcePath]) =>
+		resourcePath ? [`  ${kind}: ${resourcePath}`] : [],
+	);
 	writeFileSync(
 		join(root, "clio-extension.yaml"),
 		[
@@ -31,8 +39,7 @@ function writeExtension(root: string, id: string, description: string): void {
 			"version: 1.0.0",
 			`description: ${description}`,
 			"resources:",
-			"  skills: skills",
-			"  prompts: prompts",
+			...resourceLines,
 			"",
 		].join("\n"),
 		"utf8",
@@ -107,6 +114,28 @@ describe("extensions domain", () => {
 		strictEqual(roots[0]?.scope, "project");
 	});
 
+	it("reports duplicate ids during multi-package discovery", () => {
+		const bundle = join(scratch, "bundle");
+		const alpha = join(bundle, "alpha");
+		const beta = join(bundle, "beta");
+		writeExtension(alpha, "shared-pack", "Alpha package");
+		writeExtension(beta, "shared-pack", "Beta package");
+
+		const candidates = discoverExtensionPackages(bundle);
+
+		strictEqual(candidates.length, 2);
+		strictEqual(
+			candidates.every((candidate) => candidate.valid === false),
+			true,
+		);
+		strictEqual(
+			candidates.every((candidate) =>
+				candidate.diagnostics.some((diag) => diag.type === "error" && diag.message.includes("duplicate extension id")),
+			),
+			true,
+		);
+	});
+
 	it("reports malformed packages during discovery", () => {
 		const source = join(scratch, "bad");
 		mkdirSync(source, { recursive: true });
@@ -117,6 +146,40 @@ describe("extensions domain", () => {
 		strictEqual(candidates.length, 1);
 		strictEqual(candidates[0]?.valid, false);
 		ok(candidates[0]?.diagnostics.some((diag) => diag.type === "error"));
+	});
+
+	it("keeps a disabled effective project extension ahead of a user extension", () => {
+		const userSource = join(scratch, "user-source");
+		const projectSource = join(scratch, "project-source");
+		const repo = join(scratch, "repo");
+		mkdirSync(repo, { recursive: true });
+		writeExtension(userSource, "shared-pack", "User package");
+		writeExtension(projectSource, "shared-pack", "Project package");
+
+		installExtension(userSource, { scope: "user", cwd: repo });
+		installExtension(projectSource, { scope: "project", cwd: repo });
+		disableExtension("shared-pack", { scope: "project", cwd: repo });
+
+		const all = listInstalledExtensions(repo, { all: true });
+		const user = all.find((entry) => entry.scope === "user");
+		const project = all.find((entry) => entry.scope === "project");
+		strictEqual(user?.enabled, true);
+		strictEqual(user?.effective, false);
+		strictEqual(project?.enabled, false);
+		strictEqual(project?.effective, true);
+		strictEqual(enabledExtensionResourceRoots("skills", repo).length, 0);
+	});
+
+	it("ignores extension resource roots that escape the extension directory", () => {
+		const source = join(scratch, "source");
+		const outside = join(scratch, "outside");
+		mkdirSync(join(outside, "review"), { recursive: true });
+		writeExtension(source, "escape-pack", "Escape package", { skills: "../outside", prompts: "prompts" });
+
+		const installed = installExtension(source);
+		strictEqual(installed.diagnostics.length, 0);
+
+		strictEqual(enabledExtensionResourceRoots("skills").length, 0);
 	});
 
 	it("loads extension resources while preserving user and project override precedence", () => {
