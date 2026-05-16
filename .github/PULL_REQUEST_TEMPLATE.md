@@ -19,7 +19,7 @@
 
 The boundary checker enforces these. Confirm none are violated:
 
-- [ ] **Engine boundary.** Only `src/engine/**` value-imports `@mariozechner/pi-*`.
+- [ ] **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`.
 - [ ] **Worker isolation.** `src/worker/**` does not import `src/domains/**` except `src/domains/providers`.
 - [ ] **Domain independence.** No `src/domains/<x>/**` imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
 

@@ -13,7 +13,7 @@ Clio Coder is IOWarp's orchestrator coding agent. The pi SDK is a vendored engin
 
 ## Hard invariants
 
-1. Engine boundary. Only `src/engine/**` may value-import `@mariozechner/pi-*`.
+1. Engine boundary. Only `src/engine/**` may value-import `@earendil-works/pi-*`.
 2. Worker isolation. `src/worker/**` never imports `src/domains/**` except `src/domains/providers`.
 3. Domain independence. `src/domains/<x>/**` never imports `src/domains/<y>/extension.ts` for `y != x`.
 

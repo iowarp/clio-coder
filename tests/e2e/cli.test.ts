@@ -1041,7 +1041,7 @@ function seedEvidenceFixture(dataDir: string): { runId: string; evidenceId: stri
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		clioVersion: "0.1.3-e2e",
-		piMonoVersion: "0.70.2",
+		piMonoVersion: "0.74.0",
 		platform: "linux",
 		nodeVersion: "v22.0.0",
 		toolCalls: 1,

@@ -16,7 +16,7 @@ describe("context/clio-md", () => {
 			projectName: "Sample",
 			identity: "Sample is a TypeScript project. It exists to test CLIO.md parsing.",
 			conventions: ["Local imports end in `.js`."],
-			invariants: ["Engine boundary. Only `src/engine/**` may value-import `@mariozechner/pi-*`."],
+			invariants: ["Engine boundary. Only `src/engine/**` may value-import `@earendil-works/pi-*`."],
 			fingerprint,
 		});
 		const parsed = parseClioMd(text);

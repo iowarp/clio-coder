@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { OpenAICompletionsCompat } from "@mariozechner/pi-ai";
+import type { OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import type { ProvidersContract } from "../../../src/domains/providers/contract.js";
 import llamacppRuntime from "../../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import llamacppCompletionRuntime from "../../../src/domains/providers/runtimes/local-native/llamacpp-completion.js";

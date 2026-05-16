@@ -5,7 +5,7 @@ slug: clio-coder
 status: snapshot
 branch: feat/dev-mode-overhaul
 package: "@iowarp/clio-coder@0.1.2"
-pi-sdk: "@mariozechner/pi-* 0.70.x (lock 0.70.2)"
+pi-sdk: "@earendil-works/pi-* 0.74.0 (lock 0.74.0)"
 ---
 
 ## Summary
@@ -65,7 +65,7 @@ Three hard invariants are enforced statically by
 Violation of any rule blocks `npm run test` and CI.
 
 1. Engine boundary. Only files under `src/engine/**` may
-   value-import `@mariozechner/pi-*`. Type-only imports are tolerated
+   value-import `@earendil-works/pi-*`. Type-only imports are tolerated
    anywhere because they erase at compile time. Implemented as
    `rule1` in `runBoundaryCheck`. If a domain needs a pi-* type, it
    must be re-exported via `src/engine/types.ts` or hidden behind an
@@ -100,7 +100,7 @@ The project map from `CLIO.md`:
 ```text
 src/cli/           CLI entry points (clio, clio configure, clio doctor, ...)
 src/interactive/   terminal UI (chat loop, overlays, dashboard, keybindings)
-src/engine/        pi SDK boundary; the only place that value-imports @mariozechner/pi-*
+src/engine/        pi SDK boundary; the only place that value-imports @earendil-works/pi-*
 src/worker/        worker subprocess runtime and IPC
 src/domains/       domain logic (agents, prompts, providers, dispatch, safety, ...)
 src/harness/       self-development harness (hot reload, restart, watcher)

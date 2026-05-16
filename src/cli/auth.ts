@@ -7,6 +7,7 @@ import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
 import { nativeCliAuthStatus, runNativeCliLogin, runNativeCliLogout } from "./native-cli-auth.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
+import { promptOAuthSelection } from "./oauth-select.js";
 import {
 	type ConnectableProviderRow,
 	listConnectableProviderRows,
@@ -248,6 +249,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 					const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
 					return prompt.allowEmpty ? answer : answer.trim();
 				},
+				onSelect: (prompt) => promptOAuthSelection(rl, prompt),
 				onManualCodeInput: manualCodeInput.onManualCodeInput,
 				onProgress: (message) => {
 					process.stderr.write(`${message}\n`);

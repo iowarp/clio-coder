@@ -279,6 +279,28 @@ describe("rehydrateChatPanelFromTurns", () => {
 		ok(serialized.length < huge.length, `replay remained too large: ${serialized.length}`);
 	});
 
+	it("preserves routed responseModel metadata in model replay", () => {
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "a1",
+				parentTurnId: null,
+				timestamp: "2026-04-23T00:00:00.000Z",
+				role: "assistant",
+				payload: {
+					text: "routed",
+					model: "openrouter/auto",
+					responseModel: "anthropic/claude-sonnet-4.6",
+					responseId: "resp-1",
+				},
+			},
+		];
+
+		const messages = buildReplayAgentMessagesFromTurns(entries) as unknown as Array<Record<string, unknown>>;
+		strictEqual(messages[0]?.responseModel, "anthropic/claude-sonnet-4.6");
+		strictEqual(messages[0]?.responseId, "resp-1");
+	});
+
 	it("caps oversized retained rich content when rehydrating the visible chat panel", () => {
 		const panel = createChatPanel();
 		const huge = "fragmentexisting".repeat(3000);

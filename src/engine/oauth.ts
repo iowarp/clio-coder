@@ -10,9 +10,10 @@ import {
 	type OAuthLoginCallbacks,
 	type OAuthProviderId,
 	type OAuthProviderInterface,
+	type OAuthSelectPrompt,
 	findEnvKeys as piFindEnvKeys,
 	getEnvApiKey as piGetEnvApiKey,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
 	getOAuthProvider as piGetOAuthProvider,
 	getOAuthProviders as piGetOAuthProviders,
@@ -20,9 +21,9 @@ import {
 	registerOAuthProvider as piRegisterOAuthProvider,
 	resetOAuthProviders as piResetOAuthProviders,
 	unregisterOAuthProvider as piUnregisterOAuthProvider,
-} from "@mariozechner/pi-ai/oauth";
+} from "@earendil-works/pi-ai/oauth";
 
-export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProviderInterface };
+export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProviderInterface, OAuthSelectPrompt };
 
 export function getEngineEnvApiKey(providerId: string): string | undefined {
 	try {

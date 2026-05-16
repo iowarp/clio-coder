@@ -86,7 +86,7 @@ describe("providers/capabilities availableThinkingLevels", () => {
 		ok(levels.includes("xhigh"));
 	});
 
-	it("known anthropic catalog models use pi-ai supportsXhigh", () => {
+	it("known anthropic catalog models use pi-ai thinkingLevelMap", () => {
 		const sonnet = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "anthropic-extended" }), {
 			runtimeId: "anthropic",
 			modelId: "claude-sonnet-4-6",
@@ -101,28 +101,28 @@ describe("providers/capabilities availableThinkingLevels", () => {
 		deepStrictEqual(Array.from(opus), [...VALID_THINKING_LEVELS]);
 	});
 
-	it("openai-codex gpt-5.4 omits minimal but keeps xhigh", () => {
+	it("openai-codex gpt-5.4 follows the SDK thinking-level map", () => {
 		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "openai-codex" }), {
 			runtimeId: "openai-codex",
 			modelId: "gpt-5.4",
 		});
-		deepStrictEqual(Array.from(levels), ["off", "low", "medium", "high", "xhigh"]);
+		deepStrictEqual(Array.from(levels), ["off", "minimal", "low", "medium", "high", "xhigh"]);
 	});
 
-	it("openai-codex gpt-5.5 keeps xhigh", () => {
+	it("openai-codex gpt-5.5 follows the SDK thinking-level map", () => {
 		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "openai-codex" }), {
 			runtimeId: "openai-codex",
 			modelId: "gpt-5.5",
 		});
-		deepStrictEqual(Array.from(levels), ["off", "low", "medium", "high", "xhigh"]);
+		deepStrictEqual(Array.from(levels), ["off", "minimal", "low", "medium", "high", "xhigh"]);
 	});
 
-	it("openai-codex gpt-5.1-codex-mini only offers medium/high", () => {
+	it("openai-codex gpt-5.1-codex-mini follows the SDK thinking-level map", () => {
 		const levels = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "openai-codex" }), {
 			runtimeId: "openai-codex",
 			modelId: "gpt-5.1-codex-mini",
 		});
-		deepStrictEqual(Array.from(levels), ["off", "medium", "high"]);
+		deepStrictEqual(Array.from(levels), ["off", "minimal", "low", "medium", "high"]);
 	});
 
 	it("non-anthropic thinking format omits 'xhigh'", () => {

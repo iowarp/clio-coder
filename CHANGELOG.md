@@ -5,6 +5,19 @@ Keep a Changelog.
 
 ## Unreleased
 
+### Changed
+
+- Upgraded the Pi SDK boundary to the `@earendil-works/*` 0.74.0 package
+  scope and pinned `pi-agent-core`, `pi-ai`, and `pi-tui` to 0.74.0.
+- Clio now reads Pi's model-level `thinkingLevelMap` through
+  `getSupportedThinkingLevels()` and `clampThinkingLevel()` instead of the
+  older xhigh-only capability shortcut.
+
+### Fixed
+
+- SDK session-scoped resources are now cleaned up when Clio replaces an
+  interactive runtime, resets a session, or shuts down the TUI.
+
 ## 0.1.8 - 2026-05-11
 
 Clio Coder 0.1.8 wires the `claude-code-sdk` runtime into Clio's safety
@@ -602,7 +615,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 
 ### Notes
 
-- Pi SDK pin remains at `0.70.x` (current lock: `0.70.2`). Engine
+- Pi SDK pin remained on the previous package line. Engine
   boundary, worker isolation, and domain independence invariants
   unchanged.
 - Default safety mode remains `default`; `advise` and `super` modes
@@ -768,7 +781,7 @@ written by v0.1.2 remain readable.
 
 ### Notes
 
-- Pi SDK pin remains at `0.70.x` (current lock: `0.70.2`). Engine
+- Pi SDK pin remained on the previous package line. Engine
   boundary, worker isolation, and domain independence invariants
   unchanged.
 - Default safety mode remains `default`; `advise` and `super` modes
@@ -826,8 +839,8 @@ written by v0.1.2 remain readable.
 - Slash-command help and autocomplete present only canonical commands:
   `/model`, `/quit`, and `/receipts [verify <runId>]` replace duplicate
   spellings such as `/models`, `/exit`, and `/receipt verify <runId>`.
-- Provider catalog and cloud defaults realign with `pi-ai` 0.70.2; the
-  `@mariozechner/pi-*` line is pinned to 0.70.x with a current lock at 0.70.2.
+- Provider catalog and cloud defaults realign with the then-current `pi-ai`
+  package line.
 - Worker tool-call path validates once and threads telemetry hooks so the
   agent loop, dispatch board, and receipts share one source of truth.
 - Mode fragments must now enumerate the matrix tool set; a new regression

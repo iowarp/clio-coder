@@ -1,4 +1,4 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import { probeJson } from "../../probe/http.js";

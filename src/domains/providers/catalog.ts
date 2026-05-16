@@ -1,7 +1,7 @@
-import { createEngineAi, supportsEngineXhigh } from "../../engine/ai.js";
+import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
 import type { Api, KnownProvider, Model } from "../../engine/types.js";
 import { mergeCapabilities } from "./capabilities.js";
-import type { CapabilityFlags } from "./types/capability-flags.js";
+import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
 
@@ -57,9 +57,12 @@ export function capabilitiesFromCatalogModel(
 	};
 }
 
-export function catalogSupportsXhighForRuntime(runtimeId: string, wireModelId: string): boolean | undefined {
+export function catalogThinkingLevelsForRuntime(
+	runtimeId: string,
+	wireModelId: string,
+): ReadonlyArray<ThinkingLevel> | undefined {
 	const model = getCatalogModelForRuntime(runtimeId, wireModelId);
-	return model ? supportsEngineXhigh(model) : undefined;
+	return model ? (getEngineSupportedThinkingLevels(model) as ThinkingLevel[]) : undefined;
 }
 
 export interface CatalogBackedSynthesisInput {

@@ -1,5 +1,5 @@
 /**
- * Thin wrapper over @mariozechner/pi-ai. Domains consume this module, not
+ * Thin wrapper over @earendil-works/pi-ai. Domains consume this module, not
  * pi-ai directly. The model-lookup side-registry that used to live here is
  * gone; runtime descriptors under `src/domains/providers/runtimes/` own
  * model synthesis via `RuntimeDescriptor.synthesizeModel()`.
@@ -18,21 +18,24 @@ import {
 	getProviders,
 	type KnownProvider,
 	type Model,
+	type ModelThinkingLevel,
 	calculateCost as piCalculateCost,
+	clampThinkingLevel as piClampThinkingLevel,
+	cleanupSessionResources as piCleanupSessionResources,
 	getModel as piGetModel,
 	getOverflowPatterns as piGetOverflowPatterns,
+	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
 	parseJsonWithRepair as piParseJsonWithRepair,
 	parseStreamingJson as piParseStreamingJson,
 	stream as piStream,
-	supportsXhigh as piSupportsXhigh,
 	validateToolArguments as piValidateToolArguments,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 	type Tool,
 	type ToolCall,
 	type Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
 
@@ -78,8 +81,19 @@ function emptyUsage(): Usage {
 	};
 }
 
-export function supportsEngineXhigh(model: Model<Api>): boolean {
-	return piSupportsXhigh(model);
+export function getEngineSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): ModelThinkingLevel[] {
+	return piGetSupportedThinkingLevels(model);
+}
+
+export function clampEngineThinkingLevel<TApi extends Api>(
+	model: Model<TApi>,
+	requested: ModelThinkingLevel,
+): ModelThinkingLevel {
+	return piClampThinkingLevel(model, requested);
+}
+
+export function cleanupEngineSessionResources(sessionId?: string): void {
+	piCleanupSessionResources(sessionId);
 }
 
 export function isEngineContextOverflow(errorMessage: string, contextWindow?: number): boolean {

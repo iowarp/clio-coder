@@ -126,7 +126,7 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
 
 /**
  * Enforce the three static isolation rules:
- *   1. Only src/engine/** may value-import @mariozechner/pi-*. Type-only imports
+ *   1. Only src/engine/** may value-import @earendil-works/pi-*. Type-only imports
  *      are allowed anywhere because types erase at compile time and the
  *      RuntimeDescriptor contract in src/domains/providers inherently surfaces
  *      Model<Api>.
@@ -159,7 +159,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const inHarness = isWithin(filePath, harnessRoot);
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
-			if (specifier.startsWith("@mariozechner/pi-")) {
+			if (specifier.startsWith("@earendil-works/pi-")) {
 				if (!inEngine && !typeOnly) {
 					violations.push(
 						`rule1: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} outside src/engine (value import)`,

@@ -43,7 +43,7 @@ export type ClioKeybinding = keyof ClioAppKeybindings;
  * returned from `createKeybindingManager` accepts `clio.*` ids with full
  * TypeScript checking.
  */
-declare module "@mariozechner/pi-tui" {
+declare module "@earendil-works/pi-tui" {
 	interface Keybindings extends ClioAppKeybindings {}
 }
 

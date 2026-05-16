@@ -7,7 +7,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 
-import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor } from "../domains/providers/index.js";

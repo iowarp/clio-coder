@@ -52,7 +52,7 @@ npm run hooks:install
 
 The boundary checker enforces these:
 
-- Engine boundary: only `src/engine/**` value-imports pi SDK packages (`@mariozechner/pi-*`, currently pinned to the 0.70.x package line).
+- Engine boundary: only `src/engine/**` value-imports pi SDK packages (`@earendil-works/pi-*`, currently pinned to 0.74.0).
 - Worker isolation: `src/worker/**` value-imports only the worker-safe
   provider runtime rehydration modules under `src/domains/providers/**`;
   all other worker domain imports must be type-only.

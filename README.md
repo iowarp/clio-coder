@@ -680,7 +680,7 @@ Clio Coder keeps model execution, worker dispatch, interactive UI state, and dom
 
 Boundary tests enforce three rules at build time:
 
-1. **Engine boundary.** Only `src/engine/**` value-imports `@mariozechner/pi-*`. Type-only imports are allowed anywhere.
+1. **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`. Type-only imports are allowed anywhere.
 2. **Worker isolation.** `src/worker/**` never imports `src/domains/**` except `src/domains/providers`, which carries pure runtime descriptors the worker rehydrates from stdin.
 3. **Domain independence.** `src/domains/<x>/**` never imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
 
