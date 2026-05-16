@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { clioConfigDir } from "../../core/xdg.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
@@ -139,17 +139,47 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 				],
 			};
 		}
-		rmSync(targetRoot, { recursive: true, force: true });
 	}
-	mkdirSync(path.dirname(targetRoot), { recursive: true });
-	cpSync(source, targetRoot, {
-		recursive: true,
-		filter: (src) => path.basename(src) !== "state.json",
-	});
+	const parent = path.dirname(targetRoot);
+	const stagingRoot = path.join(parent, `.${candidate.manifest.id}.install-${process.pid}-${Date.now()}`);
+	const backupRoot = path.join(parent, `.${candidate.manifest.id}.backup-${process.pid}-${Date.now()}`);
+	let installedReplacement = false;
+	let movedExisting = false;
 	const state = readState(scope, cwd);
-	state.installed[candidate.manifest.id] = { installedAt: new Date().toISOString(), source };
-	state.disabled = state.disabled.filter((entry) => entry !== candidate.manifest?.id);
-	writeState(scope, state, cwd);
+	try {
+		mkdirSync(parent, { recursive: true });
+		rmSync(stagingRoot, { recursive: true, force: true });
+		rmSync(backupRoot, { recursive: true, force: true });
+		cpSync(source, stagingRoot, {
+			recursive: true,
+			filter: (src) => path.basename(src) !== "state.json",
+		});
+		if (existsSync(targetRoot)) {
+			renameSync(targetRoot, backupRoot);
+			movedExisting = true;
+		}
+		renameSync(stagingRoot, targetRoot);
+		installedReplacement = true;
+		state.installed[candidate.manifest.id] = { installedAt: new Date().toISOString(), source };
+		state.disabled = state.disabled.filter((entry) => entry !== candidate.manifest?.id);
+		writeState(scope, state, cwd);
+		rmSync(backupRoot, { recursive: true, force: true });
+	} catch (error) {
+		rmSync(stagingRoot, { recursive: true, force: true });
+		if (installedReplacement) rmSync(targetRoot, { recursive: true, force: true });
+		if (movedExisting && existsSync(backupRoot) && !existsSync(targetRoot)) {
+			renameSync(backupRoot, targetRoot);
+		}
+		return {
+			diagnostics: [
+				{
+					type: "error",
+					message: `extension ${candidate.manifest.id} install failed: ${error instanceof Error ? error.message : String(error)}`,
+					path: targetRoot,
+				},
+			],
+		};
+	}
 	const installed = findInstalled(candidate.manifest.id, cwd, scope);
 	return {
 		...(installed ? { extension: installed } : {}),
