@@ -6,6 +6,8 @@
  * are pure data: no class methods, no engine refs.
  */
 
+import type { ToolProfileName } from "../../tools/profiles.js";
+
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
 export type RunKind = "http" | "subprocess" | "sdk";
@@ -72,6 +74,7 @@ export interface RunReceiptSafetySummary {
 	dispatchScope: "any" | "readonly" | "none";
 	workerMode: string;
 	requestedActions: ReadonlyArray<string>;
+	toolProfile?: ToolProfileName;
 	runtimeLimitations: ReadonlyArray<string>;
 }
 
@@ -91,7 +94,6 @@ export interface RunReceiptReproducibility {
 		projectPolicyPath: string | null;
 		projectPolicyHash: string | null;
 		projectPolicyValid: boolean | null;
-		selfDev: boolean | null;
 	};
 }
 

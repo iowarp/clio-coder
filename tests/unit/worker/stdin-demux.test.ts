@@ -102,4 +102,13 @@ describe("worker/stdin-demux", () => {
 
 		await rejects(specPromise, /WorkerSpec.runtime version 999 is unsupported/);
 	});
+
+	it("rejects malformed consumed spec fields before approval routing starts", async () => {
+		const demux = createWorkerStdinDemux();
+		const specPromise = demux.readSpec();
+
+		demux.feed(`${specJson({ mode: "private-mode" })}\n`);
+
+		await rejects(specPromise, /WorkerSpec.mode/);
+	});
 });

@@ -31,7 +31,6 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import {
 	computeRetryDelayMs,
 	createRetryCountdown,
-	DEFAULT_RETRY_SETTINGS,
 	isRetryableErrorMessage,
 	type RetryCountdownHandle,
 	type RetrySettings,
@@ -44,6 +43,7 @@ import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
 import type { AgentStatusEvent } from "./status/types.js";
@@ -625,24 +625,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice(assessment.message);
 	};
 
-	const retrySettings = (): RetrySettings => {
-		const raw = deps.getSettings().retry;
-		return {
-			enabled: raw?.enabled ?? DEFAULT_RETRY_SETTINGS.enabled,
-			maxRetries:
-				typeof raw?.maxRetries === "number" && Number.isFinite(raw.maxRetries)
-					? Math.max(0, Math.floor(raw.maxRetries))
-					: DEFAULT_RETRY_SETTINGS.maxRetries,
-			baseDelayMs:
-				typeof raw?.baseDelayMs === "number" && Number.isFinite(raw.baseDelayMs)
-					? Math.max(0, Math.floor(raw.baseDelayMs))
-					: DEFAULT_RETRY_SETTINGS.baseDelayMs,
-			maxDelayMs:
-				typeof raw?.maxDelayMs === "number" && Number.isFinite(raw.maxDelayMs)
-					? Math.max(0, Math.floor(raw.maxDelayMs))
-					: DEFAULT_RETRY_SETTINGS.maxDelayMs,
-		};
-	};
+	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
 
 	const emitRetryStatus = (status: RetryStatusPayload): void => {
 		emit({ type: "retry_status", status });

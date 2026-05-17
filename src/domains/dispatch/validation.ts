@@ -5,6 +5,8 @@
  * on `ok` and gets either the typed spec or the list of reasons it failed.
  */
 
+import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
+
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface JobSpec {
@@ -16,6 +18,7 @@ export interface JobSpec {
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
 	requiredCapabilities?: ReadonlyArray<string>;
+	toolProfile?: ToolProfileName;
 	cwd?: string;
 	memorySection?: string;
 	supervised?: boolean;
@@ -33,6 +36,7 @@ const KNOWN_KEYS = new Set([
 	"model",
 	"thinkingLevel",
 	"requiredCapabilities",
+	"toolProfile",
 	"cwd",
 	"memorySection",
 	"supervised",
@@ -103,6 +107,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("toolProfile" in spec && spec.toolProfile !== undefined) {
+		if (typeof spec.toolProfile !== "string" || !isToolProfileName(spec.toolProfile)) {
+			errors.push("toolProfile must be one of: minimal-local|science-local|full-agent");
+		}
+	}
+
 	if ("cwd" in spec && spec.cwd !== undefined) {
 		if (typeof spec.cwd !== "string" || spec.cwd.length === 0) {
 			errors.push("cwd must be a non-empty string");
@@ -143,6 +153,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (Array.isArray(spec.requiredCapabilities)) {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
 	}
+	if (typeof spec.toolProfile === "string" && isToolProfileName(spec.toolProfile)) out.toolProfile = spec.toolProfile;
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
 	if (typeof spec.supervised === "boolean") out.supervised = spec.supervised;

@@ -146,7 +146,7 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 # (cloud APIs, local HTTP engines, CLI adapters, or third-party plugins under
 # ~/.clio/runtimes/).
 targets: []
-# Recommended self-development layout:
+# Example mixed local and hosted layout:
 #   clio configure --runtime openai-codex --id codex-pro --model gpt-5.4 --set-orchestrator --set-worker-default --worker-profile codex-mini --worker-profile-model gpt-5.4-mini
 #   clio configure --runtime claude-code-sdk --id claude-sdk-opus --model claude-opus-4-7 --worker-profile claude-opus
 #   clio configure --runtime copilot-cli --id copilot-sonnet --model claude-sonnet-4.6 --worker-profile copilot-sonnet

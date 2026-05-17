@@ -41,7 +41,11 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/disconnect [target]", action: "Disconnect a target", scope: "editor" },
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
 	{ keys: "/receipts [verify <runId>]", action: "Browse or verify receipts", scope: "editor" },
-	{ keys: "/run [--worker <profile>|--runtime <id>] <agent> <task>", action: "Dispatch agent", scope: "editor" },
+	{
+		keys: "/run [--worker <profile>|--runtime <id>|--tool-profile <profile>] <agent> <task>",
+		action: "Dispatch agent",
+		scope: "editor",
+	},
 	{ keys: "/quit", action: "Exit", scope: "editor" },
 ];
 

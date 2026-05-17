@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 
 export const BASH_MAX_OUTPUT_BYTES = 1_000_000;
 
-const CLIO_CONTROL_ENV_KEYS = ["CLIO_DEV", "CLIO_SELF_DEV", "CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
+const CLIO_CONTROL_ENV_KEYS = ["CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
 export interface BashCommandResult {
 	error: NodeJS.ErrnoException | null;

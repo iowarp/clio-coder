@@ -1,5 +1,4 @@
 import type { ClioSettings } from "../core/config.js";
-import type { DevHarnessSnapshot } from "../core/dev-harness-contract.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { UsageBreakdown } from "../domains/observability/index.js";
 import {
@@ -26,11 +25,9 @@ export interface FooterDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
-	getHarnessState?: () => DevHarnessSnapshot;
 	getStreaming?: () => boolean;
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
-	getSelfDevFooterLine?: () => string | null;
 	/**
 	 * Running session-level token totals. Drives the input/output footer
 	 * segment. Invoked on every refresh so late-arriving `message_end` usage
@@ -171,40 +168,13 @@ export function scopedSegment(settings: Readonly<ClioSettings>): string | null {
 	return `scoped:${n}/${scope.length}`;
 }
 
-const HARNESS_GLYPHS = {
-	hot: "⚡",
-	warn: "⚠",
-	restart: "⟳",
-	worker: "⟲",
-} as const;
-
 const STREAMING_FRAMES = ["|", "/", "-", "\\"] as const;
-
-export function formatHarnessIndicator(state: DevHarnessSnapshot): string | null {
-	if (state.kind === "idle") return null;
-	if (state.kind === "hot-ready") return `${HARNESS_GLYPHS.hot} ${state.message}`;
-	if (state.kind === "hot-failed") return `${HARNESS_GLYPHS.warn} ${state.message}`;
-	if (state.kind === "worker-pending") {
-		const plural = state.count === 1 ? "" : "s";
-		return `${HARNESS_GLYPHS.worker} worker refresh on next dispatch (${state.count} file${plural})`;
-	}
-	const first = state.files[0];
-	const extra = state.files.length > 1 ? ` +${state.files.length - 1}` : "";
-	const name = first ? first.split("/").slice(-2).join("/") : "unknown";
-	return `${HARNESS_GLYPHS.restart} restart required (${name}${extra}). press Ctrl+R`;
-}
 
 export function buildFooter(deps: FooterDeps): FooterPanel {
 	const view = new Text("");
 	let streamingFrame = 0;
 	let branchSlot: string | null = null;
 	const refresh = (): void => {
-		const selfDevLine = deps.getSelfDevFooterLine?.();
-		if (selfDevLine && selfDevLine.length > 0) {
-			view.setText(selfDevLine);
-			view.invalidate();
-			return;
-		}
 		const mode = deps.modes.current().toLowerCase();
 		const branchPart = branchSlot ? `${SEP}${branchSlot}` : "";
 		const settings = deps.getSettings?.();
@@ -257,11 +227,7 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 		const tokens = deps.getSessionTokens ? tokensSegment(deps.getSessionTokens()) : null;
 		const tokensPart = tokens ? `${SEP}${tokens}` : "";
 
-		let text = `Clio Coder${SEP}${mode}${branchPart}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
-		if (deps.getHarnessState) {
-			const indicator = formatHarnessIndicator(deps.getHarnessState());
-			if (indicator) text += `\n${ANSI_DIM}${indicator}${ANSI_RESET}`;
-		}
+		const text = `Clio Coder${SEP}${mode}${branchPart}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${streamingPart}`;
 		view.setText(text);
 		view.invalidate();
 	};

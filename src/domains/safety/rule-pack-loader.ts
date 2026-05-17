@@ -3,13 +3,10 @@
  *
  * v2 splits the flat v1 rule list into named packs:
  *   - base: always-on hard blocks (rm -rf /, dd of=/dev/, fork bombs, ...).
- *   - dev: self-development extras (git push, git reset --hard, gh pr merge).
  *   - super: privileged-mode extras (currently empty placeholder).
  *
- * The safety domain consumes the base pack; self-dev guards pull the dev
- * pack; an opt-in super pack lands in a future iteration. v1 schema is
- * tolerated for backward compatibility: a top-level `rules:` array is
- * mapped to packs[base].
+ * v1 schema is tolerated for backward compatibility: a top-level `rules:`
+ * array is mapped to packs[base].
  */
 
 import { readFileSync } from "node:fs";
@@ -19,11 +16,10 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { DamageControlRule, DamageControlRuleset } from "./damage-control.js";
 import { compileDamageControlRule } from "./rule-compiler.js";
 
-export type PackId = "base" | "dev" | "super";
+export type PackId = "base" | "super";
 
 export interface RulePacks {
 	base: DamageControlRuleset;
-	dev: DamageControlRuleset;
 	super: DamageControlRuleset;
 }
 
@@ -63,7 +59,6 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 		const baseRules = compilePackRules(parsed.rules, "base");
 		return {
 			base: { version: 1, rules: baseRules },
-			dev: emptyRuleset(1),
 			super: emptyRuleset(1),
 		};
 	}
@@ -77,12 +72,11 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 	}
 	const out: RulePacks = {
 		base: emptyRuleset(2),
-		dev: emptyRuleset(2),
 		super: emptyRuleset(2),
 	};
 	for (const rawPack of parsed.packs as RawPack[]) {
 		const packId = rawPack.id;
-		if (packId !== "base" && packId !== "dev" && packId !== "super") {
+		if (packId !== "base" && packId !== "super") {
 			throw new Error(`damage-control rules at ${yamlPath}: unknown pack id ${String(packId)}`);
 		}
 		const rules = compilePackRules(rawPack.rules, packId);
@@ -96,18 +90,16 @@ export function loadDefaultRulePacks(): RulePacks {
 }
 
 export interface ApplicablePacksOptions {
-	selfDev: boolean;
 	safetyMode: "default" | "advise" | "super" | string;
 }
 
 /**
  * Combine the rules from each active pack into a single flat list.
- * The base pack always applies. The dev pack applies when self-dev is
- * active. The super pack applies when the active safety mode is `super`.
+ * The base pack always applies. The super pack applies when the active
+ * safety mode is `super`.
  */
 export function applicablePacks(packs: RulePacks, options: ApplicablePacksOptions): DamageControlRule[] {
 	const out: DamageControlRule[] = [...packs.base.rules];
-	if (options.selfDev) out.push(...packs.dev.rules);
 	if (options.safetyMode === "super") out.push(...packs.super.rules);
 	return out;
 }

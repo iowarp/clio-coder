@@ -25,6 +25,12 @@ export function renderSummaryLines(summary: EvalSummary): string[] {
 		`tokens: ${summary.tokens}`,
 		`cost USD: ${formatCost(summary.costUsd)}`,
 		`wall time ms: ${summary.wallTimeMs}`,
+		`receipt-backed runs: ${summary.harness.receiptCount}`,
+		`tool calls: ${summary.harness.toolCalls}`,
+		`retries: ${summary.harness.retries}`,
+		`safety blocks: ${summary.harness.safetyBlocks}`,
+		`correction latency ms: ${summary.harness.correctionLatencyMs}`,
+		`validation evidence: ${summary.harness.validationEvidence}`,
 		`failure classes: ${formatFailureClasses(summary)}`,
 	];
 }

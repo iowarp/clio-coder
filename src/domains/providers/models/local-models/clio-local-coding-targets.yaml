@@ -11,8 +11,8 @@
 # docs/.superpowers/reference/llama-bench-findings.md
 #
 # This knowledge base is intentionally narrow. It describes only the local
-# models used for Clio self-development and leaves cloud GPT models to pi-ai's
-# native OpenAI and openai-codex catalogs.
+# models curated for Clio's local coding workflows and leaves cloud GPT models
+# to pi-ai's native OpenAI and openai-codex catalogs.
 #
 # Thinking semantics for these local families: the chain-of-thought is emitted
 # by the model's chat template (Qwen-style <think> blocks, Gemma 4 thinking
@@ -74,7 +74,7 @@
         medium: 4096
         high: 16384
       guidance: |
-        AgenticQwen is the tuned local default for Clio self-development on
+        AgenticQwen is the tuned local default for Clio source work on
         mini's llama.cpp server. Thinking emits through the qwen chat template;
         keep high reasoning for main-agent work and preserve visible thinking
         blocks in receipts.

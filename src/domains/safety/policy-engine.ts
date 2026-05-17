@@ -22,7 +22,6 @@ import { applicablePacks, getCachedDefaultRulePacks, type PackId, type RulePacks
 
 export type SafetyPolicySource =
 	| "damage-control:base"
-	| "damage-control:dev"
 	| "damage-control:super"
 	| "project-policy"
 	| "project-policy-invalid"
@@ -58,7 +57,6 @@ export interface SafetyPolicyMetadata {
 	projectPolicyHash: string | null;
 	projectPolicyValid: boolean;
 	projectPolicyErrors: ReadonlyArray<string>;
-	selfDev: boolean;
 	cwd: string;
 }
 
@@ -69,7 +67,6 @@ export interface SafetyPolicyEngine {
 
 export interface SafetyPolicyEngineOptions {
 	cwd?: string;
-	selfDev?: boolean;
 	rulePacks?: RulePacks;
 	projectPolicy?: LoadedProjectSafetyPolicy;
 }
@@ -101,7 +98,6 @@ const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, "run_tests", "run_lint"
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
-	const selfDev = options.selfDev ?? process.env.CLIO_SELF_DEV === "1";
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
 	const projectPolicyRoot = projectPolicy.path === null ? cwd : path.dirname(path.dirname(projectPolicy.path));
@@ -110,10 +106,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	function rulesFor(mode: string | undefined): SourcedRule[] {
 		const safetyMode = mode ?? "default";
 		const base: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
-		const dev: SourcedRule[] = selfDev ? packs.dev.rules.map((rule) => ({ rule, source: "damage-control:dev" })) : [];
 		const superRules: SourcedRule[] =
 			safetyMode === "super" ? packs.super.rules.map((rule) => ({ rule, source: "damage-control:super" })) : [];
-		return [...base, ...dev, ...superRules];
+		return [...base, ...superRules];
 	}
 
 	return {
@@ -221,7 +216,6 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				projectPolicyHash: projectPolicy.hash,
 				projectPolicyValid: projectPolicy.valid,
 				projectPolicyErrors: [...projectPolicy.errors, ...pathPolicy.diagnostics],
-				selfDev,
 				cwd,
 			};
 		},
@@ -487,7 +481,6 @@ function serializeArgs(args?: Record<string, unknown>): string {
 function rulePackHash(packs: RulePacks): string {
 	const payload: Record<PackId, Array<Record<string, unknown>>> = {
 		base: packPayload(packs.base.rules),
-		dev: packPayload(packs.dev.rules),
 		super: packPayload(packs.super.rules),
 	};
 	return createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex");
@@ -506,7 +499,7 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 
 export function activeDamageControlRulesForMetadata(
 	packs: RulePacks,
-	options: { selfDev: boolean; safetyMode: string },
+	options: { safetyMode: string },
 ): ReadonlyArray<DamageControlRule> {
 	return applicablePacks(packs, options);
 }

@@ -6,6 +6,14 @@ export type {
 	EvalComparisonSummary,
 } from "./compare.js";
 export { compareEvalArtifacts, EVAL_COMPARE_MATCHING_RULE, renderEvalComparison } from "./compare.js";
+export {
+	addEvalHarnessMetrics,
+	evalHarnessMetricsFromCommands,
+	evalHarnessMetricsFromReceipt,
+	subtractEvalHarnessMetrics,
+	sumEvalHarnessMetrics,
+	ZERO_EVAL_HARNESS_METRICS,
+} from "./metrics.js";
 export { renderEvalReport, renderSummaryLines } from "./report.js";
 export { runEvalTasks, summarizeEvalResults } from "./runner.js";
 export {
@@ -26,6 +34,7 @@ export type {
 	EvalCommandResult,
 	EvalFailureClass,
 	EvalFailureClassCount,
+	EvalHarnessMetrics,
 	EvalResult,
 	EvalRunArtifact,
 	EvalRunRecord,

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { evalHarnessMetricsFromCommands, sumEvalHarnessMetrics } from "./metrics.js";
 import type {
 	EvalCommandPhase,
 	EvalCommandResult,
@@ -60,6 +61,7 @@ export function summarizeEvalResults(records: ReadonlyArray<EvalRunRecord>): Eva
 		tokens: records.reduce((total, record) => total + record.tokens, 0),
 		costUsd: records.reduce((total, record) => total + record.costUsd, 0),
 		wallTimeMs: records.reduce((total, record) => total + record.wallTimeMs, 0),
+		harness: sumEvalHarnessMetrics(records),
 		failureClasses: [...failureCounts.entries()]
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([failureClass, count]) => ({ failureClass, count })),
@@ -145,6 +147,7 @@ function buildRecord(
 		tokens: 0,
 		costUsd: 0,
 		wallTimeMs,
+		harness: evalHarnessMetricsFromCommands(commands),
 		commands: [...commands],
 	};
 	if (failureClass !== undefined) record.failureClass = failureClass;

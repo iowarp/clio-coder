@@ -1,10 +1,8 @@
-import { join } from "node:path";
 import chalk from "chalk";
 import { runPrintMode } from "../cli/modes/index.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
-import type { DevHarnessHandle, DevHarnessIntrospection, SelfDevMode } from "../core/dev-harness-contract.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
@@ -68,33 +66,6 @@ import {
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 
-type SelfDevModule = typeof import("../selfdev/index.js");
-
-const SELFDEV_IMPORT_SPECIFIER = ["..", "selfdev", "index.js"].join("/");
-const SELFDEV_NOT_BUNDLED_MESSAGE =
-	"clio --dev: not bundled in public releases; build from source with CLIO_BUILD_PRIVATE=1\n";
-
-async function loadSelfDevModule(): Promise<SelfDevModule | null> {
-	try {
-		return (await import(SELFDEV_IMPORT_SPECIFIER)) as SelfDevModule;
-	} catch {
-		return null;
-	}
-}
-
-function userRequestedSelfDev(cliDev: boolean): boolean {
-	return cliDev || process.env.CLIO_DEV === "1" || process.env.CLIO_SELF_DEV === "1";
-}
-
-function emptyHarnessIntrospection(): DevHarnessIntrospection {
-	return {
-		last_restart_required_paths: [],
-		last_hot_succeeded: null,
-		last_hot_failed: null,
-		queue_depth: 0,
-	};
-}
-
 export interface BootResult {
 	exitCode: number;
 	bootTimeMs: number;
@@ -103,8 +74,6 @@ export interface BootResult {
 export interface BootOptions {
 	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
 	apiKey?: string;
-	/** Enable Clio self-development mode for the current process. */
-	dev?: boolean;
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
 	/** Run one non-interactive orchestrator turn and print the final text response. */
@@ -363,27 +332,6 @@ function cycleScoped(
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
-	const cliDev = options.dev === true;
-	const userSignalledDev = userRequestedSelfDev(cliDev);
-	const selfdev = userSignalledDev ? await loadSelfDevModule() : null;
-	if (userSignalledDev && selfdev === null) {
-		process.stderr.write(SELFDEV_NOT_BUNDLED_MESSAGE);
-		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
-	}
-	let selfDev: SelfDevMode | null = selfdev?.resolveSelfDevMode({ cliDev }) ?? null;
-	if (selfDev === null && userSignalledDev) {
-		// resolveSelfDevMode already wrote a clear stderr message; surface the
-		// gate failure as exit 1 instead of silently continuing in default mode.
-		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
-	}
-	if (selfDev && selfdev) {
-		selfDev = await selfdev.ensureSelfDevBranch(selfDev);
-		if (selfDev === null) {
-			// Branch step refused or failed; ensureSelfDevBranch already wrote the
-			// reason. The user explicitly signalled dev mode, so exit 1.
-			return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
-		}
-	}
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	installBusTracer();
@@ -392,7 +340,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	ensureClioState();
 	timer.mark("install check");
 
-	let harness: DevHarnessHandle | null = null;
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ExtensionsDomainModule,
@@ -404,24 +351,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ModesDomainModule,
 		createPromptsDomainModule({
 			noContextFiles: options.noContextFiles === true,
-			...(selfDev
-				? {
-						devRepoRoot: selfDev.repoRoot,
-						getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
-						renderSelfDevMemory: async () => selfdev?.renderDevMemoryFragment(selfDev.repoRoot) ?? "",
-					}
-				: {}),
 		}),
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		createDispatchDomainModule({
-			...(selfDev ? { selfDevMode: selfDev } : {}),
-			...(selfDev && selfdev ? { selfDevToolNames: selfdev.selfDevWorkerToolNames() } : {}),
-			...(selfDev ? { getSelfDevHarnessSnapshot: () => harness?.state.snapshot() ?? null } : {}),
-		}),
+		createDispatchDomainModule(),
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);
@@ -441,12 +377,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	timer.mark("session_start fired");
 
 	const interactive = !options.print && process.env.CLIO_INTERACTIVE === "1";
-	const selfDevLine = selfDev
-		? `${selfDev.source} | CLIO_SELF_DEV=1 | repo ${selfDev.repoRoot} | watching src/`
-		: undefined;
 	if (!interactive && !options.print) {
 		process.stdout.write(buildBanner());
-		if (selfDevLine) process.stdout.write(`  ${chalk.magenta(selfDevLine)}\n`);
 		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
 	}
 
@@ -515,20 +447,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 	});
-	if (selfDev && selfdev) {
-		selfdev.registerSelfDevTools(toolRegistry, {
-			mode: selfDev,
-			getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
-		});
-		selfdev.applySelfDevToolGuards(toolRegistry, selfDev, {
-			getHarnessSnapshot: () => harness?.state.snapshot() ?? null,
-		});
-	}
-
-	const allowedModesByName = new Map<string, ReadonlyArray<string>>();
-	for (const spec of toolRegistry.listAll()) {
-		if (spec.allowedModes) allowedModesByName.set(spec.name, spec.allowedModes);
-	}
 
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
 
@@ -618,35 +536,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 	}
 
-	if (selfDev && selfdev) {
-		const repoRoot = selfDev.repoRoot;
-		// Compile hot modules under the repo's node_modules so Node resolves
-		// bare imports (e.g. typebox) via the repo's installed deps. An XDG
-		// cache path would be outside any node_modules tree and break
-		// bare-specifier resolution.
-		const hotCacheRoot = join(repoRoot, "node_modules", ".clio-hot");
-		harness = selfdev.startHarness({
-			repoRoot,
-			cacheRoot: hotCacheRoot,
-			toolRegistry,
-			bus,
-			allowedModesByName,
-			getSessionId: () => session?.current()?.id ?? null,
-			shutdown: async (code?: number) => {
-				await termination.shutdown(code ?? 0);
-			},
-		});
-		termination.onDrain(() => {
-			harness?.stop();
-		});
-	}
-	const getSelfDevFooterLine = selfDev
-		? (selfdev?.createSelfDevFooterLine({
-				repoRoot: selfDev.repoRoot,
-				getHarnessIntrospection: () => harness?.state.introspection() ?? emptyHarnessIntrospection(),
-			}) ?? null)
-		: null;
-
 	await startInteractive({
 		bus,
 		modes,
@@ -660,9 +549,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
-		...(selfDev ? { selfDevRepoRoot: selfDev.repoRoot } : {}),
-		...(getSelfDevFooterLine ? { getSelfDevFooterLine } : {}),
-		...(selfDev && selfdev ? { openSelfDevDiffOverlay: selfdev.openDevDiffOverlay } : {}),
 		dataDir: clioDataDir(),
 		getSettings: () => config?.get() ?? readSettings(),
 		...(config
@@ -731,7 +617,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			});
 		},
 		writeSettings: (next) => persistSettings(next),
-		selfDev: Boolean(selfDev),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {
@@ -762,7 +647,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		onCycleScopedModelForward: () => cycleScoped("forward", getCurrentSettings, persistSettings),
 		onCycleScopedModelBackward: () => cycleScoped("backward", getCurrentSettings, persistSettings),
-		...(harness ? { harness } : {}),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

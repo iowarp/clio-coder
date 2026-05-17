@@ -1,4 +1,5 @@
-import type { EvalFailureClass, EvalRunArtifact, EvalRunRecord, EvalSummary } from "./types.js";
+import { subtractEvalHarnessMetrics } from "./metrics.js";
+import type { EvalFailureClass, EvalHarnessMetrics, EvalRunArtifact, EvalRunRecord, EvalSummary } from "./types.js";
 
 export const EVAL_COMPARE_MATCHING_RULE = "taskId+repeatIndex";
 
@@ -9,6 +10,7 @@ export interface EvalCompareTotals {
 	tokens: number;
 	costUsd: number;
 	wallTimeMs: number;
+	harness: EvalHarnessMetrics;
 }
 
 export interface EvalCompareDeltas {
@@ -16,6 +18,7 @@ export interface EvalCompareDeltas {
 	tokens: number;
 	costUsd: number;
 	wallTimeMs: number;
+	harness: EvalHarnessMetrics;
 }
 
 export interface EvalCompareResultRef {
@@ -113,6 +116,7 @@ export function compareEvalArtifacts(baseline: EvalRunArtifact, candidate: EvalR
 			tokens: candidateTotals.tokens - baselineTotals.tokens,
 			costUsd: candidateTotals.costUsd - baselineTotals.costUsd,
 			wallTimeMs: candidateTotals.wallTimeMs - baselineTotals.wallTimeMs,
+			harness: subtractEvalHarnessMetrics(candidateTotals.harness, baselineTotals.harness),
 		},
 		regressions,
 		improvements,
@@ -140,6 +144,11 @@ export function renderEvalComparison(summary: EvalComparisonSummary): string {
 		`token delta: ${formatSignedInteger(summary.deltas.tokens)}`,
 		`cost delta USD: ${formatSignedCost(summary.deltas.costUsd)}`,
 		`wall-time delta ms: ${formatSignedInteger(summary.deltas.wallTimeMs)}`,
+		`tool-call delta: ${formatSignedInteger(summary.deltas.harness.toolCalls)}`,
+		`retry delta: ${formatSignedInteger(summary.deltas.harness.retries)}`,
+		`safety-block delta: ${formatSignedInteger(summary.deltas.harness.safetyBlocks)}`,
+		`correction-latency delta ms: ${formatSignedInteger(summary.deltas.harness.correctionLatencyMs)}`,
+		`validation-evidence delta: ${formatSignedInteger(summary.deltas.harness.validationEvidence)}`,
 		`regressions: ${summary.regressions.length}`,
 		...formatMatchedChanges(summary.regressions),
 		`fixes/improvements: ${summary.improvements.length}`,
@@ -164,6 +173,7 @@ function summaryTotals(summary: EvalSummary): EvalCompareTotals {
 		tokens: summary.tokens,
 		costUsd: summary.costUsd,
 		wallTimeMs: summary.wallTimeMs,
+		harness: summary.harness,
 	};
 }
 

@@ -1,7 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { BusChannels } from "../../core/bus-events.js";
+import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
-import type { DevHarnessIntrospection } from "../../core/dev-harness-contract.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
@@ -15,22 +14,9 @@ import { sha256 } from "./hash.js";
 export interface PromptsBundleOptions {
 	/** When true, the dynamic context.files fragment renders the empty string. */
 	noContextFiles?: boolean;
-	/** Retained for CLI option compatibility. Project context now comes only from CLIO.md. */
-	devRepoRoot?: string;
-	getHarnessIntrospection?: () => DevHarnessIntrospection;
-	renderSelfDevMemory?: () => Promise<string>;
 }
 
-const SELF_DEV_FRAGMENT_IDS = [
-	"selfdev.identity",
-	"selfdev.authority",
-	"selfdev.iteration",
-	"selfdev.state",
-	"selfdev.memory",
-] as const;
-
-type SelfDevFragmentId = (typeof SELF_DEV_FRAGMENT_IDS)[number];
-type FragmentRenderer = () => Promise<string>;
+const CLIO_REPO_AWARENESS_ID = "context.clio-repo-awareness";
 
 export function createPromptsBundle(
 	context: DomainContext,
@@ -38,8 +24,6 @@ export function createPromptsBundle(
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
 	const suppressContextFiles = options.noContextFiles === true;
-	const includeSelfDev = typeof options.devRepoRoot === "string" && options.devRepoRoot.length > 0;
-	const renderers = includeSelfDev ? selfDevRenderers(options) : new Map<SelfDevFragmentId, FragmentRenderer>();
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -55,7 +39,7 @@ export function createPromptsBundle(
 
 	function reload(): void {
 		try {
-			table = loadFragments({ includeSelfDev });
+			table = loadFragments();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[clio:prompts] reload failed: ${msg}\n`);
@@ -93,13 +77,8 @@ export function createPromptsBundle(
 				mode: `modes.${currentMode}`,
 				safety: `safety.${safety}`,
 				dynamicInputs,
-				additionalFragments: await selfDevFragments(table, renderers),
+				additionalFragments: clioRepoAwarenessFragments(cwd),
 			});
-		},
-		getSelfDevWorkerPreamble() {
-			const fragment = table?.byId.get("selfdev.worker-preamble");
-			const body = fragment?.body.trim() ?? "";
-			return body.length > 0 ? body : null;
 		},
 		reload,
 	};
@@ -107,7 +86,7 @@ export function createPromptsBundle(
 	const extension: DomainExtension = {
 		async start() {
 			try {
-				table = loadFragments({ includeSelfDev });
+				table = loadFragments();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				process.stderr.write(`[clio:prompts] initial load failed: ${msg}\n`);
@@ -126,102 +105,24 @@ export function createPromptsBundle(
 	return { extension, contract };
 }
 
-function readGit(repoRoot: string, args: ReadonlyArray<string>): string | null {
-	try {
-		return execFileSync("git", ["-C", repoRoot, ...args], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		}).trim();
-	} catch {
-		return null;
-	}
-}
-
-function readGitLines(repoRoot: string, args: ReadonlyArray<string>): string[] {
-	const raw = readGit(repoRoot, args);
-	if (!raw) return [];
-	return raw.split(/\r?\n/).filter((line) => line.length > 0);
-}
-
-function defaultHarnessIntrospection(): DevHarnessIntrospection {
-	return {
-		last_restart_required_paths: [],
-		last_hot_succeeded: null,
-		last_hot_failed: null,
-		queue_depth: 0,
-	};
-}
-
-function harnessVerdict(state: DevHarnessIntrospection): string {
-	if (state.last_restart_required_paths.length > 0) return "restart-required";
-	if (state.queue_depth > 0) return `worker-pending:${state.queue_depth}`;
-	if (state.last_hot_failed) return "hot-failed";
-	if (state.last_hot_succeeded) return "hot-succeeded";
-	return "idle";
-}
-
-function createStateRenderer(options: PromptsBundleOptions): FragmentRenderer {
-	let cache: { at: number; body: string } | null = null;
-	return async () => {
-		const now = Date.now();
-		if (cache && now - cache.at < 1000) return cache.body;
-		const repoRoot = options.devRepoRoot ?? process.cwd();
-		const branch = readGit(repoRoot, ["branch", "--show-current"]) ?? "unknown";
-		const dirtyCount = readGitLines(repoRoot, ["status", "--short"]).length;
-		const harness = options.getHarnessIntrospection?.() ?? defaultHarnessIntrospection();
-		const lastHotReload = harness.last_hot_succeeded
-			? `${harness.last_hot_succeeded.path}:${harness.last_hot_succeeded.elapsedMs}`
-			: "none";
-		const lastRestart =
-			harness.last_restart_required_paths.length > 0
-				? (harness.last_restart_required_paths[harness.last_restart_required_paths.length - 1] ?? "none")
-				: "none";
-		const body = [
-			"## Live state",
-			`- branch: ${branch}`,
-			`- dirty: ${dirtyCount === 0 ? "clean" : `${dirtyCount} changed paths`}`,
-			`- harness: ${harnessVerdict(harness)}`,
-			`- last hot reload: ${lastHotReload}`,
-			`- last restart trigger: ${lastRestart}`,
-		].join("\n");
-		cache = { at: now, body };
-		return body;
-	};
-}
-
-function selfDevRenderers(options: PromptsBundleOptions): Map<SelfDevFragmentId, FragmentRenderer> {
-	const renderers = new Map<SelfDevFragmentId, FragmentRenderer>();
-	renderers.set("selfdev.state", createStateRenderer(options));
-	renderers.set("selfdev.memory", options.renderSelfDevMemory ?? (async () => ""));
-	return renderers;
-}
-
-async function selfDevFragments(
-	table: FragmentTable,
-	renderers: ReadonlyMap<SelfDevFragmentId, FragmentRenderer>,
-): Promise<RenderedPromptFragment[]> {
-	const rendered: RenderedPromptFragment[] = [];
-	for (const id of SELF_DEV_FRAGMENT_IDS) {
-		const fragment = table.byId.get(id);
-		if (!fragment) continue;
-		if (fragment.dynamic) {
-			const body = (await renderers.get(id)?.()) ?? "";
-			rendered.push({
-				id: fragment.id,
-				relPath: fragment.relPath,
-				body,
-				contentHash: sha256(body),
-				dynamic: true,
-			});
-			continue;
-		}
-		rendered.push({
-			id: fragment.id,
-			relPath: fragment.relPath,
-			body: fragment.body,
-			contentHash: fragment.contentHash,
-			dynamic: fragment.dynamic,
-		});
-	}
-	return rendered;
+function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
+	const awareness = detectClioCoderRepo(cwd);
+	if (!awareness.isClioCoderRepo || !awareness.repoRoot) return [];
+	const body = [
+		"# Clio Source Tree",
+		`Clio is operating inside her own source tree at ${awareness.repoRoot}.`,
+		"Requests about Clio herself may be handled as ordinary local source-code changes.",
+		"Clio may edit her source, run focused tests, rebuild, reload, and reconfigure only the local Clio installation for this user to test.",
+		"Community contribution requires explicit user intent and normal Git/GitHub etiquette.",
+		"Do not publish releases, push branches, open PRs, alter remotes, or modify shared/global installs unless the user explicitly asks.",
+	].join("\n");
+	return [
+		{
+			id: CLIO_REPO_AWARENESS_ID,
+			relPath: "inline/clio-repo-awareness",
+			body,
+			contentHash: sha256(body),
+			dynamic: true,
+		},
+	];
 }

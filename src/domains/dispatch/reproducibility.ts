@@ -27,7 +27,6 @@ export function collectReproducibilityMetadata(
 			projectPolicyPath: safety?.projectPolicyPath ?? null,
 			projectPolicyHash: safety?.projectPolicyHash ?? null,
 			projectPolicyValid: safety?.projectPolicyValid ?? null,
-			selfDev: safety?.selfDev ?? null,
 		},
 	};
 }

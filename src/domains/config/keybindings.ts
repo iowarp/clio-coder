@@ -27,7 +27,6 @@ export interface ClioAppKeybindings {
 	"clio.model.select": true;
 	"clio.model.cycleForward": true;
 	"clio.model.cycleBackward": true;
-	"clio.harness.restart": true;
 	"clio.tool.expand": true;
 	"clio.thinking.expand": true;
 	"clio.editor.external": true;
@@ -92,10 +91,6 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.model.cycleBackward": {
 		defaultKeys: "shift+ctrl+p",
 		description: "Cycle to previous scoped model",
-	},
-	"clio.harness.restart": {
-		defaultKeys: "ctrl+r",
-		description: "Restart the dev harness when engine edits are pending",
 	},
 	"clio.tool.expand": {
 		defaultKeys: "ctrl+o",

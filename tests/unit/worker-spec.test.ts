@@ -1,7 +1,8 @@
-import { deepStrictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import {
+	parseWorkerSpec,
 	serializeWorkerRuntimeDescriptor,
 	validateRehydratedWorkerRuntime,
 	WORKER_RUNTIME_DESCRIPTOR_VERSION,
@@ -57,6 +58,61 @@ describe("dispatch worker spec contract", () => {
 
 	it("accepts a rehydrated runtime whose worker-boundary fields match", () => {
 		validateRehydratedWorkerRuntime(spec(), runtime);
+	});
+
+	it("parses the worker spec fields consumed by worker entry and runtime", () => {
+		const parsed = parseWorkerSpec({
+			...spec(),
+			mode: "default",
+			thinkingLevel: "medium",
+			allowedTools: ["read", "bash"],
+			modelCapabilities: {
+				reasoning: true,
+				contextWindow: 128000,
+				maxTokens: 4096,
+			},
+			middlewareSnapshot: {
+				version: 1,
+				rules: [
+					{
+						id: "example-rule",
+						source: "builtin",
+						description: "example",
+						enabled: true,
+						hooks: ["before_tool"],
+						effectKinds: ["block_tool"],
+					},
+				],
+			},
+			supervised: true,
+			autoApprove: "deny",
+		});
+
+		strictEqual(parsed.mode, "default");
+		strictEqual(parsed.thinkingLevel, "medium");
+		deepStrictEqual(parsed.allowedTools, ["read", "bash"]);
+	});
+
+	it("rejects malformed consumed worker fields before runtime execution", () => {
+		throws(() => parseWorkerSpec({ ...spec(), task: "" }), /WorkerSpec\.task/);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec(),
+					endpoint: { id: "openai", runtime: "different-runtime" },
+				}),
+			/endpoint runtime mismatch/,
+		);
+		throws(() => parseWorkerSpec({ ...spec(), mode: "private-mode" }), /WorkerSpec\.mode/);
+		throws(() => parseWorkerSpec({ ...spec(), allowedTools: ["read", ""] }), /WorkerSpec\.allowedTools\[1\]/);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec(),
+					middlewareSnapshot: { version: 1, rules: [{ id: "bad" }] },
+				}),
+			/source/,
+		);
 	});
 
 	it("fails clearly when the worker rehydrates a different runtime descriptor shape", () => {

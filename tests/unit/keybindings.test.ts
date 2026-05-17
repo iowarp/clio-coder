@@ -35,8 +35,8 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 15 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 15);
+	it("app id list is exactly 14 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 14);
 	});
 
 	it("registers clio.thinking.expand with default ctrl+t", () => {
@@ -80,10 +80,6 @@ describe("interactive/keybinding-manager defaults", () => {
 
 	it("matches Ctrl+B against clio.dispatchBoard.toggle", () => {
 		strictEqual(manager.matches("\x02", "clio.dispatchBoard.toggle"), true);
-	});
-
-	it("matches Ctrl+R against clio.harness.restart", () => {
-		strictEqual(manager.matches("\x12", "clio.harness.restart"), true);
 	});
 
 	it("matches Ctrl+T against clio.thinking.expand", () => {

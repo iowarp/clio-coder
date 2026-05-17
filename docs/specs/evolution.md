@@ -41,7 +41,7 @@ Types live in `src/domains/evolution/manifest.ts` and are re-exported from `src/
 
 ## Status and scope notes
 
-v0.1.4 ships the manifest schema, the validator, the summarizer, and the three CLI subcommands. Manifest authoring is manual today; the M9 `evolver` agent recipe drafts manifests as Markdown plus a JSON block, and the operator commits the result. Auto-attribution against eval baselines is the M9 `attributor` recipe's job and is not enforced by the CLI. `clio --dev` does not yet refuse to hand off when no manifest exists; that gate is reserved for a later slice. The schema is intentionally not extensible: adding a new authority level requires editing `MANIFEST_AUTHORITY_LEVELS`.
+v0.1.4 ships the manifest schema, the validator, the summarizer, and the three CLI subcommands. Manifest authoring is manual today; the M9 `evolver` agent recipe drafts manifests as Markdown plus a JSON block, and the operator commits the result. Auto-attribution against eval baselines is the M9 `attributor` recipe's job and is not enforced by the CLI. Source-work handoff gates on missing manifests are reserved for a later slice. The schema is intentionally not extensible: adding a new authority level requires editing `MANIFEST_AUTHORITY_LEVELS`.
 
 ## References
 

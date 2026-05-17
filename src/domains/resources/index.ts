@@ -11,7 +11,6 @@ export type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./co
 export { resolveResourceCollisions } from "./collision.js";
 export {
 	DEFAULT_CONTEXT_FILE_NAMES,
-	loadDevContextFile,
 	loadProjectContextFiles,
 	type ProjectContextFile,
 	renderProjectContextFiles,

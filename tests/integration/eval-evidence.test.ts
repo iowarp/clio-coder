@@ -74,6 +74,14 @@ function evalArtifact(): EvalRunArtifact {
 			tokens: 0,
 			costUsd: 0,
 			wallTimeMs: 200,
+			harness: {
+				receiptCount: 0,
+				toolCalls: 0,
+				retries: 0,
+				safetyBlocks: 0,
+				correctionLatencyMs: 0,
+				validationEvidence: 2,
+			},
 			failureClasses: [{ failureClass: "verifier_failed", count: 1 }],
 		},
 		results: [
@@ -89,6 +97,14 @@ function evalArtifact(): EvalRunArtifact {
 				tokens: 0,
 				costUsd: 0,
 				wallTimeMs: 100,
+				harness: {
+					receiptCount: 0,
+					toolCalls: 0,
+					retries: 0,
+					safetyBlocks: 0,
+					correctionLatencyMs: 0,
+					validationEvidence: 1,
+				},
 				commands: [
 					{
 						phase: "verifier",
@@ -115,6 +131,14 @@ function evalArtifact(): EvalRunArtifact {
 				tokens: 0,
 				costUsd: 0,
 				wallTimeMs: 100,
+				harness: {
+					receiptCount: 0,
+					toolCalls: 0,
+					retries: 0,
+					safetyBlocks: 0,
+					correctionLatencyMs: 0,
+					validationEvidence: 1,
+				},
 				failureClass: "verifier_failed",
 				commands: [
 					{

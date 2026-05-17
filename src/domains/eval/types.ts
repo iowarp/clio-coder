@@ -56,6 +56,7 @@ export interface EvalResult {
 	tokens: number;
 	costUsd: number;
 	wallTimeMs: number;
+	harness: EvalHarnessMetrics;
 	failureClass?: EvalFailureClass;
 	receiptPath?: string;
 	evidenceId?: string;
@@ -74,6 +75,15 @@ export interface EvalFailureClassCount {
 	count: number;
 }
 
+export interface EvalHarnessMetrics {
+	receiptCount: number;
+	toolCalls: number;
+	retries: number;
+	safetyBlocks: number;
+	correctionLatencyMs: number;
+	validationEvidence: number;
+}
+
 export interface EvalSummary {
 	runs: number;
 	passed: number;
@@ -82,6 +92,7 @@ export interface EvalSummary {
 	tokens: number;
 	costUsd: number;
 	wallTimeMs: number;
+	harness: EvalHarnessMetrics;
 	failureClasses: EvalFailureClassCount[];
 }
 

@@ -661,7 +661,6 @@ src/interactive/   terminal UI
 src/engine/        model/provider engine boundary
 src/worker/        worker dispatch and runtime rehydration
 src/domains/       domain logic and built-in agent specs
-src/harness/       contributor-facing self-development harness
 tests/             unit, integration, boundary, and e2e tests
 ```
 
