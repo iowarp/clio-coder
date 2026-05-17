@@ -123,14 +123,15 @@ describe("bash tool environment", () => {
 	});
 
 	it("preserves partial output when a command times out", async () => {
+		const timeoutMs = 500;
 		const result = await bashTool.run({
 			command: "printf before; printf err >&2; sleep 5",
-			timeout_ms: 50,
+			timeout_ms: timeoutMs,
 		});
 
 		strictEqual(result.kind, "error");
 		if (result.kind !== "error") return;
 		ok(result.message.includes("before\nerr"), result.message);
-		ok(result.message.includes("bash: command timed out after 50ms"), result.message);
+		ok(result.message.includes(`bash: command timed out after ${timeoutMs}ms`), result.message);
 	});
 });
