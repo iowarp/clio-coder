@@ -30,6 +30,7 @@ import {
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
+import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import { validateEngineToolArguments } from "./ai.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
@@ -67,12 +68,11 @@ export interface ToolFinishEvent {
 	policySource?: string;
 }
 
-export type WorkerToolRegistrar = (registry: ToolRegistry) => void;
-
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
 	allowedTools?: ReadonlyArray<ToolName>;
 	mode: ModeName;
+	toolProfile?: ToolProfileName;
 	telemetry?: ToolTelemetry;
 }
 
@@ -227,7 +227,7 @@ function createWorkerModes(mode: ModeName): ModesContract {
  * workers do not share counts. The detector matches the orchestrator's
  * behaviour but skips audit-record bookkeeping which the worker does not own.
  */
-export function createWorkerSafety(options: { cwd?: string; selfDev?: boolean } = {}): SafetyContract {
+export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
 	const policyEngine = createSafetyPolicyEngine(options);
 	return {
@@ -444,7 +444,6 @@ export function createWorkerLoopGuard(opts: CreateWorkerLoopGuardOptions): Worke
 export function createWorkerToolRegistry(
 	mode: ModeName,
 	middlewareSnapshot?: MiddlewareSnapshot,
-	registerPrivateTools?: WorkerToolRegistrar,
 	safety: SafetyContract = createWorkerSafety(),
 ): ToolRegistry {
 	const registry = createRegistry({
@@ -453,7 +452,6 @@ export function createWorkerToolRegistry(
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
 	registerAllTools(registry);
-	registerPrivateTools?.(registry);
 	return registry;
 }
 
@@ -473,7 +471,7 @@ export function createWorkerToolRegistry(
  * When `allowedTools` is undefined, step 3 is skipped.
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
-	const modeIds = new Set(input.registry.listForMode(input.mode));
+	const modeIds = new Set(applyToolProfile(input.registry.listForMode(input.mode), input.toolProfile));
 	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
 	const specs: ToolSpec[] = [];
 	for (const name of modeIds) {

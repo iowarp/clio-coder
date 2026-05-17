@@ -17,10 +17,9 @@ afterEach(() => {
 });
 
 describe("safety/rule-pack-loader v2", () => {
-	it("loads base, dev, and super packs from the shipped yaml", () => {
+	it("loads base and super packs from the shipped yaml", () => {
 		const packs = loadDefaultRulePacks();
 		ok(packs.base.rules.length > 0, "base must carry the default kill-switches");
-		ok(packs.dev.rules.length > 0, "dev must carry self-development bash blocks");
 		strictEqual(packs.super.rules.length, 0, "super pack is an empty placeholder for now");
 	});
 
@@ -71,31 +70,16 @@ describe("safety/rule-pack-loader v2", () => {
 		}
 	});
 
-	it("dev pack matches the self-development git/gh blocks", () => {
+	it("applicablePacks returns base when mode is default", () => {
 		const packs = loadDefaultRulePacks();
-		const dev = { version: packs.dev.version, rules: packs.dev.rules };
-		ok(match("git push origin HEAD", dev));
-		ok(match("git push --force-with-lease", dev));
-		ok(match("git reset --hard HEAD", dev));
-		ok(match("gh pr merge 123", dev));
-	});
-
-	it("applicablePacks returns base only when self-dev is off and mode is default", () => {
-		const packs = loadDefaultRulePacks();
-		const rules = applicablePacks(packs, { selfDev: false, safetyMode: "default" });
+		const rules = applicablePacks(packs, { safetyMode: "default" });
 		strictEqual(rules.length, packs.base.rules.length);
-	});
-
-	it("applicablePacks returns base + dev when self-dev is on", () => {
-		const packs = loadDefaultRulePacks();
-		const rules = applicablePacks(packs, { selfDev: true, safetyMode: "default" });
-		strictEqual(rules.length, packs.base.rules.length + packs.dev.rules.length);
 	});
 
 	it("applicablePacks adds the super pack only when safetyMode is 'super'", () => {
 		const packs = loadDefaultRulePacks();
-		const noSuper = applicablePacks(packs, { selfDev: false, safetyMode: "advise" });
-		const withSuper = applicablePacks(packs, { selfDev: false, safetyMode: "super" });
+		const noSuper = applicablePacks(packs, { safetyMode: "advise" });
+		const withSuper = applicablePacks(packs, { safetyMode: "super" });
 		strictEqual(noSuper.length, packs.base.rules.length);
 		strictEqual(withSuper.length, packs.base.rules.length + packs.super.rules.length);
 	});
@@ -109,7 +93,6 @@ describe("safety/rule-pack-loader v2", () => {
 		);
 		const packs = loadRulePacks(yamlPath);
 		strictEqual(packs.base.rules.length, 1);
-		strictEqual(packs.dev.rules.length, 0);
 		strictEqual(packs.super.rules.length, 0);
 	});
 });

@@ -389,9 +389,8 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 
 ### Added — middleware
 
-- A pure middleware domain ships with declarative built-in rule
-  metadata and a deterministic no-op hook runner for future policy
-  wiring. Eleven hooks (`before_model`, `after_model`, `before_tool`,
+- A pure middleware domain ships with a deterministic hook runner for
+  future policy wiring. Eleven hooks (`before_model`, `after_model`, `before_tool`,
   `after_tool`, `before_finish`, `after_finish`, `on_blocked_tool`,
   `on_retry`, `on_compaction`, `on_dispatch_start`,
   `on_dispatch_end`) and six effect kinds (`inject_reminder`,
@@ -463,15 +462,8 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 ### Added — scientific-validation
 
 - A scientific-validation pack ships as a docs/spec at
-  `docs/specs/scientific-validation.md` plus three declarative
-  middleware rules in `src/domains/middleware/rules.ts`:
-  `science.no-existence-only-validation` reminds agents that file
-  existence does not validate scientific artifacts;
-  `science.preserve-checkpoints` marks validated checkpoint and
-  restart artifacts as protected against destructive cleanup; and
-  `science.unit-vs-scheduler-validation` distinguishes local unit
-  validation from scheduler-backed validation (`sbatch`, `srun`,
-  `qsub`, `flux run`).
+  `docs/specs/scientific-validation.md` plus the
+  `scientific-validator` agent recipe.
 - The spec covers the YAML validation contract format, supported
   artifact families (HDF5, NetCDF, Zarr, FITS, CSV, Parquet, VTK,
   ParaView output, Slurm output, MPI rank-sensitive tests, checkpoint
@@ -572,8 +564,8 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 - Tool registry middleware hooks enforce generic tool-surface
   effects: `block_tool` stops an admitted call before execution, and
   `annotate_tool_result` appends deterministic middleware
-  annotations to tool results. Built-in middleware remains no-op
-  until future policy domains produce effects.
+  annotations to tool results. The built-in middleware registry is
+  empty until rules have enforced behavior and tests.
 - Tool registry middleware hooks honor `protect_path` effects in
   in-memory protected-artifact state, pass validation command
   metadata to middleware, and block protected artifact writes or
@@ -639,8 +631,8 @@ Polish release on top of v0.1.2. Four user-visible TUI improvements
 (live tool output, bash echo, Ctrl+T thinking, footer git branch),
 local-runtime hardening for LM Studio and Ollama, CLIO.md as the
 canonical project instruction file, identity alignment with IOWarp's
-CLIO ecosystem of agentic science, self-development mode hardening,
-two CI substrate fixes, and a clean-clone smoke job to catch
+CLIO ecosystem of agentic science, two CI substrate fixes, and a
+clean-clone smoke job to catch
 dev-env-only test passes before the next tag. No breaking changes.
 No settings migration required. Sessions, receipts, and audit JSONL
 written by v0.1.2 remain readable.
@@ -694,20 +686,6 @@ written by v0.1.2 remain readable.
   detected local targets, replacing the prior generic openai-compat
   path.
 
-### Added — self-development mode
-
-- `clio --dev` requires a project-level `CLIO-dev.md` rule pack to
-  activate. Resolution checks `<repoRoot>/CLIO-dev.md` first, then
-  `<clioConfigDir>/CLIO-dev.md` (the XDG fallback respects
-  `CLIO_HOME` and `CLIO_CONFIG_DIR` for dev sandboxing). Missing
-  files fail boot with an explanatory stderr message naming the
-  expected paths.
-- On activation against a protected branch (`main`, `master`,
-  `trunk`, or detached HEAD), `clio --dev` prompts for a slug and
-  runs `git switch -c selfdev/YYYY-MM-DD-<slug>` before any engine
-  write. Cancellation or git failure surfaces as exit 1 instead of
-  silently editing the protected branch.
-
 ### Changed — local runtimes
 
 - `lmstudio-native` evicts non-target loaded models before each
@@ -746,11 +724,9 @@ written by v0.1.2 remain readable.
 ### Changed — safety rule packs
 
 - `damage-control-rules.yaml` is restructured under schema v2 as a
-  named `packs[]` list (`base`, `dev`, `super`). Historic kill-
-  switches stay under `base` (always-on); the dev pack carries every
-  regex previously inlined in the bash guard. The bash guard reads
-  the dev pack only when self-dev mode is active, so the base pack
-  is the sole source of truth in normal operation.
+  named `packs[]` list. Historic kill-switches stay under `base`
+  and elevated rules stay under `super`, keeping normal operation on
+  the base pack alone.
 
 ### Changed — CI
 
@@ -766,10 +742,6 @@ written by v0.1.2 remain readable.
   from PATH instead of hardcoding `fd`. Fixes the autocomplete on CI
   and on Debian/Ubuntu users who installed the `fd-find` apt
   package.
-- `clio --dev` accepts `CLIO_DEV_ALLOW_PROTECTED_BRANCH=1` as a
-  boot-time opt-out for the protected-branch guard. Mirrors the
-  existing `CLIO_DEV_ALLOW_ENGINE_WRITES=1` pattern; the per-write
-  guard remains in force.
 - `clio doctor --json` returns `{ok, fix, findings}`; `clio targets
   --json` returns `{targets: [...]}`. Both are now stable JSON
   envelopes with room for forward-compatible top-level fields.
@@ -948,9 +920,6 @@ you need a stable target.
 - **Dispatch and workers.** `clio run` spawns OS-isolated worker
   subprocesses with NDJSON IPC and heartbeats. Named worker profiles
   let the interactive session fan out across multiple runtimes.
-- **Self-development mode.** Hot-reload and restart-required signals for
-  developers editing Clio from inside Clio, with shell environment isolation
-  and tool guards.
 - **Receipts and audit.** Every run writes a receipt under
   `<dataDir>/receipts/<runId>.json` with token counts and USD cost.
 - **Safety model.** Three modes (`default`, `advise`, `super`) gate tool
@@ -962,8 +931,6 @@ you need a stable target.
 ### Known limits
 
 - Windows is best-effort until a later release.
-- The self-dev harness is a developer convenience, not a polished public
-  surface.
 - Some runtime slots (remote fan-out, broader MCP) are scaffolded but not
   admitted by dispatch yet.
 

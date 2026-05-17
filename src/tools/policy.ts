@@ -39,7 +39,7 @@ export function validateBuiltinToolPolicy(
 			errors.push(`tool ${spec.name} must declare allowedModes explicitly`);
 			continue;
 		}
-		const matrixModes = spec.bypassModeMatrix === true ? (spec.allowedModes ?? []) : matrixModesForTool(spec.name);
+		const matrixModes = matrixModesForTool(spec.name);
 		if (!sameModes(spec.allowedModes, matrixModes)) {
 			errors.push(
 				`tool ${spec.name} allowedModes=${sortedModes(spec.allowedModes)} does not match MODE_MATRIX=${sortedModes(matrixModes)}`,

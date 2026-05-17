@@ -126,7 +126,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 		strictEqual(kb.lookup("entirely-different-model"), null);
 	});
 
-	it("ships only the self-dev local target families in the production KB", () => {
+	it("ships only the curated local target families in the production KB", () => {
 		const kb = new FileKnowledgeBase(SOURCE_MODELS_DIR);
 		deepStrictEqual(
 			kb

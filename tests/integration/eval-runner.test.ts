@@ -112,9 +112,18 @@ tasks:
 		strictEqual(result?.exitCode, 0);
 		strictEqual(result?.tokens, 0);
 		strictEqual(result?.costUsd, 0);
+		deepStrictEqual(result?.harness, {
+			receiptCount: 0,
+			toolCalls: 0,
+			retries: 0,
+			safetyBlocks: 0,
+			correctionLatencyMs: 0,
+			validationEvidence: 1,
+		});
 		strictEqual(result?.failureClass, undefined);
 		strictEqual(artifact.summary.passed, 1);
 		strictEqual(artifact.summary.failed, 0);
+		strictEqual(artifact.summary.harness.validationEvidence, 1);
 	});
 
 	it("records a fail result and failure class for failing verifier commands", async () => {
@@ -149,6 +158,14 @@ tasks:
 				tokens: 0,
 				costUsd: 0,
 				wallTimeMs: 123,
+				harness: {
+					receiptCount: 0,
+					toolCalls: 0,
+					retries: 0,
+					safetyBlocks: 0,
+					correctionLatencyMs: 0,
+					validationEvidence: 1,
+				},
 				failureClasses: [{ failureClass: "verifier_failed", count: 1 }],
 			},
 			results: [
@@ -164,6 +181,14 @@ tasks:
 					tokens: 0,
 					costUsd: 0,
 					wallTimeMs: 123,
+					harness: {
+						receiptCount: 0,
+						toolCalls: 0,
+						retries: 0,
+						safetyBlocks: 0,
+						correctionLatencyMs: 0,
+						validationEvidence: 1,
+					},
 					evidenceId: "eval-eval-fixed",
 					commands: [],
 				},
@@ -185,6 +210,12 @@ tasks:
 				"tokens: 0",
 				"cost USD: 0.000000",
 				"wall time ms: 123",
+				"receipt-backed runs: 0",
+				"tool calls: 0",
+				"retries: 0",
+				"safety blocks: 0",
+				"correction latency ms: 0",
+				"validation evidence: 1",
 				"failure classes: verifier_failed=1",
 				"",
 			].join("\n"),

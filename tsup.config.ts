@@ -1,14 +1,12 @@
-import { rmSync } from "node:fs";
 import { defineConfig } from "tsup";
 
-const includeSelfdev = process.env.CLIO_BUILD_PRIVATE === "1";
-const baseEntries = {
+const entries = {
 	"cli/index": "src/cli/index.ts",
 	"worker/entry": "src/worker/entry.ts",
 };
 
 export default defineConfig({
-	entry: includeSelfdev ? { ...baseEntries, "selfdev/index": "src/selfdev/index.ts" } : baseEntries,
+	entry: entries,
 	format: ["esm"],
 	target: "node20",
 	platform: "node",
@@ -26,9 +24,4 @@ export default defineConfig({
 		"@silvia-odwyer/photon-node",
 		"typescript",
 	],
-	onSuccess: includeSelfdev
-		? undefined
-		: () => {
-				rmSync("dist/selfdev", { recursive: true, force: true });
-			},
 });

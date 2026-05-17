@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
 	compareEvalArtifacts,
 	type EvalFailureClass,
+	type EvalHarnessMetrics,
 	type EvalRunArtifact,
 	type EvalRunRecord,
 	renderEvalComparison,
@@ -76,6 +77,7 @@ describe("eval comparison", () => {
 			tokens: 34,
 			costUsd: 34,
 			wallTimeMs: 340,
+			harness: zeroHarness(),
 		});
 		deepStrictEqual(summary.candidate, {
 			passed: 3,
@@ -84,12 +86,14 @@ describe("eval comparison", () => {
 			tokens: 35,
 			costUsd: 35,
 			wallTimeMs: 350,
+			harness: zeroHarness(),
 		});
 		deepStrictEqual(summary.deltas, {
 			passRate: 0.16666666666666669,
 			tokens: 1,
 			costUsd: 1,
 			wallTimeMs: 10,
+			harness: zeroHarness(),
 		});
 		deepStrictEqual(
 			summary.regressions.map((change) => change.taskId),
@@ -150,6 +154,11 @@ describe("eval comparison", () => {
 				"token delta: -10",
 				"cost delta USD: -0.100000",
 				"wall-time delta ms: -100",
+				"tool-call delta: 0",
+				"retry delta: 0",
+				"safety-block delta: 0",
+				"correction-latency delta ms: 0",
+				"validation-evidence delta: 0",
 				"regressions: 1",
 				"  task=z-regresses repeat=0 baseline=eval-baseline-z-regresses-001 candidate=eval-candidate-z-regresses-001 failure=none->verifier_failed",
 				"fixes/improvements: 1",
@@ -164,6 +173,44 @@ describe("eval comparison", () => {
 				"",
 			].join("\n"),
 		);
+	});
+
+	it("compares receipt-backed harness metrics", () => {
+		const baseline = artifact("eval-baseline", [
+			record("eval-baseline", "task", 0, true, {
+				harness: {
+					receiptCount: 1,
+					toolCalls: 8,
+					retries: 2,
+					safetyBlocks: 1,
+					correctionLatencyMs: 500,
+					validationEvidence: 1,
+				},
+			}),
+		]);
+		const candidate = artifact("eval-candidate", [
+			record("eval-candidate", "task", 0, true, {
+				harness: {
+					receiptCount: 1,
+					toolCalls: 5,
+					retries: 0,
+					safetyBlocks: 0,
+					correctionLatencyMs: 300,
+					validationEvidence: 2,
+				},
+			}),
+		]);
+
+		const summary = compareEvalArtifacts(baseline, candidate);
+
+		deepStrictEqual(summary.deltas.harness, {
+			receiptCount: 0,
+			toolCalls: -3,
+			retries: -2,
+			safetyBlocks: -1,
+			correctionLatencyMs: -200,
+			validationEvidence: 1,
+		});
 	});
 
 	it("rejects duplicate task and repeat identities", () => {
@@ -185,6 +232,7 @@ interface RecordOptions {
 	costUsd?: number;
 	wallTimeMs?: number;
 	failureClass?: EvalFailureClass;
+	harness?: EvalHarnessMetrics;
 }
 
 function artifact(evalId: string, results: ReadonlyArray<EvalRunRecord>): EvalRunArtifact {
@@ -220,8 +268,20 @@ function record(
 		tokens: options.tokens ?? 0,
 		costUsd: options.costUsd ?? 0,
 		wallTimeMs: options.wallTimeMs ?? 0,
+		harness: options.harness ?? zeroHarness(),
 		commands: [],
 	};
 	if (options.failureClass !== undefined) record.failureClass = options.failureClass;
 	return record;
+}
+
+function zeroHarness(): EvalHarnessMetrics {
+	return {
+		receiptCount: 0,
+		toolCalls: 0,
+		retries: 0,
+		safetyBlocks: 0,
+		correctionLatencyMs: 0,
+		validationEvidence: 0,
+	};
 }

@@ -31,7 +31,7 @@ import {
  * undefined defers to the agent loop's global `toolExecution` setting.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
-export type ToolSourceScope = "core" | "domain" | "selfdev";
+export type ToolSourceScope = "core" | "domain";
 
 export interface ToolSourceInfo {
 	path: string;
@@ -63,12 +63,6 @@ export interface ToolSpec {
 	 * so two `bash` or `edit` calls in the same batch never run concurrently.
 	 */
 	executionMode?: ToolExecutionMode;
-	/**
-	 * Expose this tool through its own activation gate instead of the public
-	 * mode matrix. Self-development tools use this so normal prompt fragments
-	 * do not advertise private-only tools.
-	 */
-	bypassModeMatrix?: boolean;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<ToolResult>;
 }
@@ -292,7 +286,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
 		const visible = deps.modes.visibleTools();
-		if (!visible.has(spec.name) && spec.bypassModeMatrix !== true) {
+		if (!visible.has(spec.name)) {
 			return {
 				kind: "terminal",
 				verdict: { kind: "not_visible", reason: `tool ${spec.name} not in current mode's allowlist` },
@@ -358,15 +352,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		},
 		listForMode: (mode) =>
 			Array.from(tools.values())
-				.filter(
-					(t) =>
-						(MODE_MATRIX[mode].tools.has(t.name) || t.bypassModeMatrix === true) &&
-						(!t.allowedModes || t.allowedModes.includes(mode)),
-				)
+				.filter((t) => MODE_MATRIX[mode].tools.has(t.name) && (!t.allowedModes || t.allowedModes.includes(mode)))
 				.map((t) => t.name),
 		listVisible: () => {
 			const visible = deps.modes.visibleTools();
-			return Array.from(tools.values()).filter((t) => visible.has(t.name) || t.bypassModeMatrix === true);
+			return Array.from(tools.values()).filter((t) => visible.has(t.name));
 		},
 		async invoke(call, options) {
 			const outcome = admit(call);
@@ -417,10 +407,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 }
 
 function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec): SafetyDecision {
-	if (decision.classification.actionClass !== "unknown" || spec.bypassModeMatrix !== true) return decision;
+	if (decision.classification.actionClass !== "unknown") return decision;
 	const classification = {
 		actionClass: spec.baseActionClass,
-		reasons: [`registered private tool: ${spec.name}`],
+		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
 }

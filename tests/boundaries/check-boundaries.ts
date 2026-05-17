@@ -143,10 +143,6 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const workerRoot = path.join(srcRoot, "worker");
 	const domainsRoot = path.join(srcRoot, "domains");
 	const providersDomainRoot = path.join(domainsRoot, "providers");
-	const selfdevRoot = path.join(srcRoot, "selfdev");
-	const harnessRoot = path.join(srcRoot, "harness");
-	const toolsRoot = path.join(srcRoot, "tools");
-	const toolRegistryFile = path.join(toolsRoot, "registry.ts");
 
 	const violations: string[] = [];
 
@@ -158,9 +154,8 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const inEngine = isWithin(filePath, engineRoot);
 		const inWorker = isWithin(filePath, workerRoot);
 		const fromDomain = domainOf(filePath, domainsRoot);
-		const inHarness = isWithin(filePath, harnessRoot);
 
-		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference", dynamic = false) => {
+		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
 			if (specifier.startsWith("@earendil-works/pi-")) {
 				if (!inEngine && !typeOnly) {
 					violations.push(
@@ -172,13 +167,6 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 			if (!(specifier.startsWith(".") || specifier.startsWith("/"))) return;
 			const resolved = resolveRelativeImport(filePath, specifier);
-
-			if (!isWithin(filePath, selfdevRoot) && isWithin(resolved, selfdevRoot) && !dynamic) {
-				violations.push(
-					`rule5: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/selfdev; stable runtime paths must use src/core/dev-harness-contract.ts and lazy private loading`,
-				);
-				return;
-			}
 
 			if (inWorker && isWithin(resolved, domainsRoot)) {
 				if (!typeOnly && !isAllowedWorkerProviderValueImport(resolved, providersDomainRoot)) {
@@ -198,43 +186,10 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 					);
 				}
 			}
-
-			if (inHarness) {
-				if (isWithin(resolved, path.join(srcRoot, "engine")) && !typeOnly) {
-					violations.push(
-						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/engine (harness must not import pi-mono engine)`,
-					);
-					return;
-				}
-				if (isWithin(resolved, domainsRoot) && !typeOnly) {
-					violations.push(
-						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (harness may only value-import src/core, src/tools/registry.ts, and node)`,
-					);
-					return;
-				}
-				if (isWithin(resolved, toolsRoot) && !isWithin(resolved, toolRegistryFile) && !typeOnly) {
-					violations.push(
-						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves outside src/tools/registry.ts (harness may only value-import src/core, src/tools/registry.ts, and node)`,
-					);
-					return;
-				}
-				if (isWithin(resolved, path.join(srcRoot, "interactive")) && !typeOnly) {
-					violations.push(
-						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/interactive (harness must not reach into the TUI layer)`,
-					);
-					return;
-				}
-				if (isWithin(resolved, path.join(srcRoot, "worker")) && !typeOnly) {
-					violations.push(
-						`rule4: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/worker (harness is orchestrator-only)`,
-					);
-					return;
-				}
-			}
 		};
 
-		for (const { specifier, typeOnly, dynamic } of specifiers) {
-			evaluate(specifier, typeOnly, "import", dynamic);
+		for (const { specifier, typeOnly } of specifiers) {
+			evaluate(specifier, typeOnly, "import");
 		}
 
 		for (const ref of references) {

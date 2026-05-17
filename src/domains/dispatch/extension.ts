@@ -11,10 +11,10 @@
 
 import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
-import { type SelfDevMode, SelfDevToolNames } from "../../core/dev-harness-contract.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { ToolName } from "../../core/tool-names.js";
+import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
 import { serializeWorkerRuntimeDescriptor, WORKER_SPEC_VERSION } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
@@ -22,7 +22,6 @@ import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import type { ModesContract } from "../modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../modes/matrix.js";
-import type { PromptsContract } from "../prompts/index.js";
 import {
 	type CapabilityFlags,
 	type EndpointDescriptor,
@@ -84,35 +83,10 @@ export interface DispatchBundleOptions {
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
 	now?: () => number;
-	selfDevMode?: SelfDevMode;
-	selfDevToolNames?: ReadonlyArray<ToolName>;
-	getSelfDevHarnessSnapshot?: () => { kind: string; files?: ReadonlyArray<string> } | null;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
-const STALE_WRITES_OVERRIDE_ENV = "CLIO_DEV_ALLOW_STALE_WRITES";
 const DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS = 60000;
-
-export interface DispatchStaleProcessDetails {
-	stale_process: {
-		restart_required: true;
-		restart_required_paths: string[];
-		blocked_action: "worker_dispatch";
-		override_env: typeof STALE_WRITES_OVERRIDE_ENV;
-	};
-}
-
-export class DispatchStaleProcessError extends Error {
-	readonly details: DispatchStaleProcessDetails;
-
-	constructor(details: DispatchStaleProcessDetails) {
-		super(
-			`dispatch: stale process guard: restart-required is active; restart Clio before dispatching workers (${details.stale_process.restart_required_paths.join(", ")})`,
-		);
-		this.name = "DispatchStaleProcessError";
-		this.details = details;
-	}
-}
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -120,23 +94,6 @@ function sha256(input: string): string {
 
 function promptHash(systemPrompt: string): string | null {
 	return systemPrompt.length > 0 ? sha256(systemPrompt) : null;
-}
-
-function staleDispatchDetails(options: DispatchBundleOptions | undefined): DispatchStaleProcessDetails | null {
-	if (!options?.selfDevMode) return null;
-	if (process.env[STALE_WRITES_OVERRIDE_ENV] === "1") return null;
-	const snapshot = options.getSelfDevHarnessSnapshot?.();
-	if (snapshot?.kind !== "restart-required") return null;
-	const paths = [...(snapshot.files ?? [])];
-	if (paths.length === 0) return null;
-	return {
-		stale_process: {
-			restart_required: true,
-			restart_required_paths: paths,
-			blocked_action: "worker_dispatch",
-			override_env: STALE_WRITES_OVERRIDE_ENV,
-		},
-	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -197,23 +154,12 @@ function pickWorkerScope(safety: SafetyContract, mode: ModeName): ScopeSpec {
 export function deriveRequestedActions(
 	tools: ReadonlyArray<ToolName>,
 	safety: SafetyContract,
-	selfDevToolNames: ReadonlyArray<ToolName> = [],
 ): ReadonlyArray<ActionClass> {
-	const selfDev = new Set<string>(selfDevToolNames);
 	const actions = new Set<ActionClass>();
 	for (const tool of tools) {
-		const selfDevAction = selfDevActionClass(tool, selfDev);
-		const action = selfDevAction ?? safety.classify({ tool }).actionClass;
-		actions.add(action);
+		actions.add(safety.classify({ tool }).actionClass);
 	}
 	return [...actions].sort();
-}
-
-function selfDevActionClass(tool: string, selfDevTools: ReadonlySet<string>): ActionClass | null {
-	if (!selfDevTools.has(tool)) return null;
-	if (tool === SelfDevToolNames.ClioIntrospect || tool === SelfDevToolNames.ClioRecall) return "read";
-	if (tool === SelfDevToolNames.ClioRemember || tool === SelfDevToolNames.ClioMemoryMaintain) return "write";
-	return "unknown";
 }
 
 export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
@@ -222,13 +168,6 @@ export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | nu
 	if (memory.length === 0) return base;
 	if (base.length === 0) return memory;
 	return `${memory}\n\n${base}`;
-}
-
-function prependSelfDevPreamble(systemPrompt: string, prompts: PromptsContract | undefined): string {
-	const preamble = prompts?.getSelfDevWorkerPreamble()?.trim() ?? "";
-	if (preamble.length === 0) return systemPrompt;
-	if (systemPrompt.length === 0) return preamble;
-	return `${preamble}\n\n${systemPrompt}`;
 }
 
 interface ResolvedTarget {
@@ -247,6 +186,29 @@ interface WorkerTargetConfig {
 }
 
 type WorkerProfileMap = Record<string, WorkerTargetConfig>;
+
+interface WorkerTargets {
+	workerDefault: WorkerTargetConfig | null;
+	workerProfiles: WorkerProfileMap;
+}
+
+interface DispatchAdmissionStage {
+	currentMode: ModeName;
+	workerMode: ModeName;
+	allowedTools: ReadonlyArray<ToolName>;
+	requestedActions: ReadonlyArray<ActionClass>;
+	toolProfile?: ToolProfileName;
+}
+
+interface DispatchWorkerSpecInput {
+	req: DispatchRequest;
+	target: ResolvedTarget;
+	admission: DispatchAdmissionStage;
+	systemPrompt: string;
+	apiKey: string | undefined;
+	approval: DispatchAutoApproveDerivation;
+	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
+}
 
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
 	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
@@ -307,6 +269,85 @@ export function deriveAutoApproveForDispatch(
 		nextLimitations.push("headless ask auto-denied; pass --auto-approve to override");
 	}
 	return { supervised, autoApprove, runtimeLimitations: nextLimitations };
+}
+
+function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
+	const workerDefault = settings?.workers?.default
+		? {
+				endpoint: settings.workers.default.endpoint ?? null,
+				model: settings.workers.default.model ?? null,
+				thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
+			}
+		: null;
+	const workerProfiles: WorkerProfileMap = {};
+	for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
+		workerProfiles[name] = {
+			endpoint: profile.endpoint ?? null,
+			model: profile.model ?? null,
+			thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
+		};
+	}
+	return { workerDefault, workerProfiles };
+}
+
+function resolveDispatchAdmissionStage(
+	req: DispatchRequest,
+	recipe: AgentRecipe | null,
+	currentMode: ModeName,
+	visibleTools: ReadonlyArray<ToolName>,
+	safety: SafetyContract,
+): DispatchAdmissionStage {
+	const workerMode = recipe?.mode ?? currentMode;
+	const recipeTools = recipe?.tools;
+	const candidateTools =
+		recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : Array.from(visibleTools);
+	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
+	const requestedActions = deriveRequestedActions(allowedTools, safety);
+	const orchScope = pickOrchestratorScope(safety, currentMode);
+	if (orchScope === null) {
+		throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow dispatch`);
+	}
+	const workerScope = pickWorkerScope(safety, workerMode);
+	const verdict = admit(
+		{
+			requestedScope: workerScope,
+			orchestratorScope: orchScope,
+			requestedActions,
+			agentId: req.agentId,
+		},
+		safety.isSubset,
+	);
+	if (!verdict.admitted) {
+		throw new Error(`dispatch: admission denied: ${verdict.reason}`);
+	}
+	return {
+		currentMode,
+		workerMode,
+		allowedTools,
+		requestedActions,
+		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
+	};
+}
+
+export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerSpec {
+	const spec: WorkerSpec = {
+		specVersion: WORKER_SPEC_VERSION,
+		systemPrompt: input.systemPrompt,
+		task: input.req.task,
+		endpoint: input.target.endpoint,
+		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
+		runtimeId: input.target.runtime.id,
+		wireModelId: input.target.wireModelId,
+		thinkingLevel: input.target.modelCapabilities?.reasoning === false ? "off" : input.target.thinkingLevel,
+		allowedTools: input.admission.allowedTools,
+		mode: input.admission.workerMode,
+		middlewareSnapshot: input.middlewareSnapshot,
+		supervised: input.approval.supervised,
+	};
+	if (input.approval.autoApprove !== undefined) spec.autoApprove = input.approval.autoApprove;
+	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
+	if (input.apiKey) spec.apiKey = input.apiKey;
+	return spec;
 }
 
 function approvalResponseTimeoutMs(): number {
@@ -482,7 +523,6 @@ export function createDispatchBundle(
 	const modes: ModesContract = maybeModes;
 	const providers: ProvidersContract = maybeProviders;
 	const middleware: MiddlewareContract = maybeMiddleware;
-	const prompts = context.getContract<PromptsContract>("prompts");
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
@@ -571,10 +611,6 @@ export function createDispatchBundle(
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
-		const staleDetails = staleDispatchDetails(options);
-		if (staleDetails) {
-			throw new DispatchStaleProcessError(staleDetails);
-		}
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
@@ -587,58 +623,14 @@ export function createDispatchBundle(
 
 		const recipe = agents.get(req.agentId);
 		const currentMode = modes.current();
-		const workerMode = recipe?.mode ?? currentMode;
-		const recipeTools = recipe?.tools;
-		const allowedToolsBase =
-			recipeTools && recipeTools.length > 0 ? Array.from(recipeTools) : Array.from(modes.visibleTools());
-		const allowedTools = options?.selfDevMode
-			? [...new Set([...allowedToolsBase, ...(options.selfDevToolNames ?? [])])]
-			: allowedToolsBase;
-		const requestedActions = deriveRequestedActions(
-			allowedTools as ReadonlyArray<ToolName>,
-			safety,
-			options?.selfDevToolNames,
-		);
-		const orchScope = pickOrchestratorScope(safety, currentMode);
-		if (orchScope === null) {
-			throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow dispatch`);
-		}
-		const workerScope = pickWorkerScope(safety, workerMode);
+		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
 
-		const verdict = admit(
-			{
-				requestedScope: workerScope,
-				orchestratorScope: orchScope,
-				requestedActions,
-				agentId: req.agentId,
-			},
-			safety.isSubset,
-		);
-		if (!verdict.admitted) {
-			throw new Error(`dispatch: admission denied: ${verdict.reason}`);
-		}
-
-		const settings = config?.get();
-		const workerDefault = settings?.workers?.default
-			? {
-					endpoint: settings.workers.default.endpoint ?? null,
-					model: settings.workers.default.model ?? null,
-					thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
-				}
-			: null;
-		const workerProfiles: WorkerProfileMap = {};
-		for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
-			workerProfiles[name] = {
-				endpoint: profile.endpoint ?? null,
-				model: profile.model ?? null,
-				thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
-			};
-		}
-		const target = resolveDispatchTarget(req, recipe, workerDefault, workerProfiles, providers);
+		const targets = readWorkerTargets(config?.get());
+		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
 		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = prependSelfDevPreamble(buildSystemPrompt(req, recipe), prompts);
+		const systemPrompt = buildSystemPrompt(req, recipe);
 		const compiledPromptHash = promptHash(systemPrompt);
 
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
@@ -672,24 +664,15 @@ export function createDispatchBundle(
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
-		const spec: WorkerSpec = {
-			specVersion: WORKER_SPEC_VERSION,
+		const spec = buildDispatchWorkerSpec({
+			req,
+			target,
+			admission,
 			systemPrompt,
-			task: req.task,
-			endpoint: target.endpoint,
-			runtime: serializeWorkerRuntimeDescriptor(target.runtime),
-			runtimeId: target.runtime.id,
-			wireModelId: target.wireModelId,
-			thinkingLevel: target.modelCapabilities?.reasoning === false ? "off" : target.thinkingLevel,
-			allowedTools: allowedTools as ReadonlyArray<ToolName>,
-			mode: workerMode,
 			middlewareSnapshot: middleware.snapshot(),
-			supervised: approval.supervised,
-		};
-		if (approval.autoApprove !== undefined) spec.autoApprove = approval.autoApprove;
-		if (options?.selfDevMode) spec.selfDev = options.selfDevMode;
-		if (target.modelCapabilities) spec.modelCapabilities = target.modelCapabilities;
-		if (apiKey) spec.apiKey = apiKey;
+			apiKey,
+			approval,
+		});
 		let worker: SpawnedWorker;
 		try {
 			worker = spawnWorker(spec, { cwd });
@@ -863,8 +846,9 @@ export function createDispatchBundle(
 						decisions: safetyDecisionCounts,
 						blockedAttempts,
 						dispatchScope: MODE_MATRIX[currentMode].dispatchScope,
-						workerMode,
-						requestedActions,
+						workerMode: admission.workerMode,
+						requestedActions: admission.requestedActions,
+						...(admission.toolProfile !== undefined ? { toolProfile: admission.toolProfile } : {}),
 						runtimeLimitations: approval.runtimeLimitations,
 					},
 					reproducibility: collectReproducibilityMetadata(cwd, safetyMetadata),

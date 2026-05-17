@@ -27,7 +27,7 @@ Eval ids are deterministic: `eval-<startedAt-utc-compact>-<taskFileHash[:8]>`. T
 
 - `clio eval run --task-file <tasks.yaml> [--repeat <n>]` loads and validates the task file, runs every task `repeat` times in declaration order, builds an evidence corpus, persists the eval artifact, and prints the report. Exit code is `0` when every task passed and `1` when any task failed.
 - `clio eval report <evalId>` loads the persisted artifact and prints the same report `clio eval run` emits.
-- `clio eval compare <baselineEvalId> <candidateEvalId>` matches results by `taskId+repeatIndex` and prints matched, added, missing, regression, improvement, unchanged, failure-class, token, cost, wall-time, and pass-rate deltas.
+- `clio eval compare <baselineEvalId> <candidateEvalId>` matches results by `taskId+repeatIndex` and prints matched, added, missing, regression, improvement, unchanged, failure-class, token, cost, wall-time, pass-rate, and harness-metric deltas.
 
 `--repeat` defaults to `1`. `--task-file` is required for `run`. Both eval ids are required for `compare`.
 
@@ -39,9 +39,10 @@ Types live in `src/domains/eval/types.ts` and are re-exported from `src/domains/
 - `EvalTaskFile` carries `version: 1` and `tasks[]`. Validation is done by `loadEvalTaskFile` in `task-file.ts`.
 - `EvalCommandResult` carries one subprocess invocation: `phase` (`setup` or `verifier`), `index`, `command`, `exitCode`, `signal`, `timedOut`, `wallTimeMs`, `stdout`, `stderr`.
 - `EvalFailureClass` enumerates the closed failure taxonomy: `setup_failed`, `verifier_failed`, `timeout`, `cwd_missing`, `command_error`.
-- `EvalResult` is the public minimal record: `taskId`, `runId`, `pass`, `exitCode`, `tokens`, `costUsd`, `wallTimeMs`, optional `failureClass`, optional `receiptPath`, optional `evidenceId`.
+- `EvalHarnessMetrics` carries comparison axes that can be backed by run receipts: `receiptCount`, `toolCalls`, `retries`, `safetyBlocks`, `correctionLatencyMs`, and `validationEvidence`.
+- `EvalResult` is the public minimal record: `taskId`, `runId`, `pass`, `exitCode`, `tokens`, `costUsd`, `wallTimeMs`, `harness`, optional `failureClass`, optional `receiptPath`, optional `evidenceId`.
 - `EvalRunRecord` extends `EvalResult` with `repeatIndex`, `cwd`, `prompt`, `tags[]`, and `commands[]`.
-- `EvalSummary` aggregates `runs`, `passed`, `failed`, `passRate`, `tokens`, `costUsd`, `wallTimeMs`, and `failureClasses[]`.
+- `EvalSummary` aggregates `runs`, `passed`, `failed`, `passRate`, `tokens`, `costUsd`, `wallTimeMs`, `harness`, and `failureClasses[]`.
 - `EvalRunArtifact` is the persisted file shape: `version: 1`, `evalId`, `taskFile`, `taskFileHash`, `repeat`, `startedAt`, `endedAt`, `summary`, `results[]`.
 - `EvalComparisonSummary` carries the matched/added/missing buckets, regressions, improvements, failure-class changes, and per-axis deltas. Defined in `compare.ts` with `EVAL_COMPARE_MATCHING_RULE = "taskId+repeatIndex"`.
 
@@ -51,7 +52,7 @@ Types live in `src/domains/eval/types.ts` and are re-exported from `src/domains/
 2. Setup commands run before verifier commands. A non-zero setup exit fails the task with `failureClass: setup_failed`; a non-zero verifier exit fails with `failureClass: verifier_failed`.
 3. A missing `cwd` fails the task before any command runs with `failureClass: cwd_missing`.
 4. The per-task `timeoutMs` is enforced per command. A timed-out command fails with `failureClass: timeout`.
-5. Token, cost, and wall-time totals are aggregated from per-command durations only. v0.1.4 does not call any model from the eval runner; tokens and `costUsd` are recorded as `0` for verifier-only suites.
+5. Token, cost, and wall-time totals are aggregated from per-command durations only. The runner also records verifier command count as `harness.validationEvidence`. v0.1.4 does not call any model from the eval runner; tokens, `costUsd`, receipt count, tool calls, retries, safety blocks, and correction latency are recorded as `0` for verifier-only suites unless an external harness wrapper patches receipt-backed metrics onto each result.
 6. Each eval run writes a deterministic evidence corpus and patches `evidenceId` into every result before persisting the artifact. The same `evalId` always maps to the same `evidenceId`.
 7. The task file hash is recorded in the artifact and validated on `compare`. Comparing two artifacts produced by different task files is supported but the operator is responsible for deciding whether the comparison is meaningful.
 

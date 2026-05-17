@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { clioConfigDir } from "../../../core/xdg.js";
 import {
 	type InstructionSource,
 	type InstructionSourceKind,
@@ -18,8 +17,6 @@ const FILENAME_TO_KIND: Record<string, InstructionSourceKind> = {
 	"GEMINI.md": "gemini",
 };
 
-const DEV_FILE_NAME = "CLIO-dev.md";
-
 export interface ProjectContextFile {
 	path: string;
 	name: string;
@@ -30,7 +27,6 @@ export interface ProjectContextFile {
 export interface LoadProjectContextFilesInput {
 	cwd: string;
 	fileNames?: ReadonlyArray<string>;
-	devRepoRoot?: string;
 }
 
 function candidateDirs(cwd: string): string[] {
@@ -75,17 +71,6 @@ export function loadProjectContextFiles(input: LoadProjectContextFilesInput): Pr
 	return out;
 }
 
-export function loadDevContextFile(repoRoot: string): ProjectContextFile | null {
-	const candidates = [path.join(repoRoot, DEV_FILE_NAME), path.join(clioConfigDir(), DEV_FILE_NAME)];
-	for (const filePath of candidates) {
-		if (!existsSync(filePath)) continue;
-		const content = readFileIfPresent(filePath);
-		if (content === null) continue;
-		return { path: filePath, name: DEV_FILE_NAME, content, kind: "clio-dev" };
-	}
-	return null;
-}
-
 function toInstructionSources(files: ReadonlyArray<ProjectContextFile>): InstructionSource[] {
 	return files.map((file) => ({ path: file.path, kind: file.kind, sections: parseSections(file.content) }));
 }
@@ -96,7 +81,7 @@ export function renderProjectContextFiles(files: ReadonlyArray<ProjectContextFil
 	if (merged.text.length === 0) return "";
 	return [
 		"Earlier files are broader repository context; later files are more specific.",
-		"CLIO.md wins on conflicts; CLIO-dev.md (when present) overrides CLIO.md.",
+		"CLIO.md wins on conflicts.",
 		"",
 		merged.text,
 	].join("\n");

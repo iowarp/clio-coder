@@ -89,7 +89,7 @@ describe("cli configure and targets", () => {
 		ok(!raw.includes("endpoint: codex-pro"));
 	});
 
-	it("persists context and output caps for local self-dev targets", async () => {
+	it("persists context and output caps for local coding targets", async () => {
 		const code = await runTargetsCommand([
 			"add",
 			"--runtime",

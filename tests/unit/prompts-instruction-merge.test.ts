@@ -75,17 +75,6 @@ describe("prompts/instruction-merge mergeInstructions", () => {
 		strictEqual(lintOccurrences, 1);
 	});
 
-	it("CLIO-dev.md present overrides CLIO.md sections and is tagged [dev]", () => {
-		const clio = source("/repo/CLIO.md", "clio", "## Setup\n\nclio setup\n\n## Build\n\nclio build\n");
-		const dev = source("/repo/CLIO-dev.md", "clio-dev", "## Setup\n\ndev setup override\n");
-		const merged = mergeInstructions([clio, dev]);
-		ok(merged.text.includes("dev setup override"));
-		ok(!merged.text.includes("clio setup"));
-		ok(merged.text.includes("clio build"));
-		const devContrib = merged.contributors.find((c) => c.path === "/repo/CLIO-dev.md");
-		ok(devContrib?.tag === "dev");
-	});
-
 	it("non-CLIO closer-to-cwd source wins over more distant non-CLIO source", () => {
 		const parent = source("/repo/CLAUDE.md", "claude", "## Notes\n\nparent notes\n");
 		const child = source("/repo/pkg/CLAUDE.md", "claude", "## Notes\n\nchild notes\n");

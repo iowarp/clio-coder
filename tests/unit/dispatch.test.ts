@@ -56,6 +56,16 @@ describe("dispatch/validation", () => {
 		strictEqual(v.spec.workerRuntime, "copilot-cli");
 	});
 
+	it("accepts shipped tool profiles and rejects unknown profiles", () => {
+		const v = validateJobSpec({ agentId: "a", task: "t", toolProfile: "science-local" });
+		ok(v.ok);
+		strictEqual(v.spec.toolProfile, "science-local");
+
+		const invalid = validateJobSpec({ agentId: "a", task: "t", toolProfile: "unknown-profile" });
+		strictEqual(invalid.ok, false);
+		if (!invalid.ok) ok(invalid.errors.some((e) => e.includes("toolProfile")));
+	});
+
 	it("accepts supervised booleans and rejects other values", () => {
 		for (const supervised of [true, false]) {
 			const v = validateJobSpec({ agentId: "a", task: "t", supervised });

@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import type { DevHarnessHandle } from "../core/dev-harness-contract.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -31,7 +30,6 @@ import {
 	Editor,
 	isKeyRelease,
 	matchesKey,
-	type OverlayHandle,
 	ProcessTerminal,
 	type SelectItem,
 	Text,
@@ -179,16 +177,6 @@ export interface InteractiveDeps {
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
 	onCycleScopedModelBackward?: () => void;
-	/** Hot-reload harness handle. When present, the footer shows an indicator line and Ctrl+R triggers restart. */
-	harness?: DevHarnessHandle;
-	/** True when the dashboard should show the self-development mode badge. */
-	selfDev: boolean;
-	/** Repository root for private self-development UI affordances. */
-	selfDevRepoRoot?: string;
-	/** Private self-development footer line. Present only in dev mode. */
-	getSelfDevFooterLine?: () => string | null;
-	/** Private self-development diff overlay opener. Present only in dev mode. */
-	openSelfDevDiffOverlay?: (tui: TUI, repoRoot: string) => OverlayHandle;
 	onShutdown: () => Promise<void>;
 }
 
@@ -257,8 +245,7 @@ export type OverlayState =
 	| "tree"
 	| "message-picker"
 	| "cwd-fallback"
-	| "hotkeys"
-	| "dev-diff";
+	| "hotkeys";
 
 export interface KeyBindingDeps {
 	/**
@@ -344,10 +331,6 @@ export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface DevDiffOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -364,8 +347,7 @@ export interface OverlayKeyDeps
 		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
 		CwdFallbackOverlayKeyDeps,
-		HotkeysOverlayKeyDeps,
-		DevDiffOverlayKeyDeps {
+		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -636,15 +618,6 @@ export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps
 	return false;
 }
 
-/** Pure overlay key router for the self-development diff overlay. Esc closes; everything else is swallowed. */
-export function routeDevDiffOverlayKey(data: string, deps: DevDiffOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
-	return true;
-}
-
 /** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
 export function routeOverlayKey(
 	data: string,
@@ -717,9 +690,6 @@ export function routeOverlayKey(
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
 	}
-	if (overlayState === "dev-diff") {
-		return routeDevDiffOverlayKey(data, deps);
-	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
 	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
 	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
@@ -776,7 +746,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			};
 		},
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		selfDev: deps.selfDev,
 	});
 	const chatPanel = createChatPanel({
 		// Surface the bound `clio.tool.expand` key on collapsed tool sublines so
@@ -802,13 +771,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	const harness = deps.harness;
 	const footer = buildFooter({
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		...(harness ? { getHarnessState: () => harness.state.snapshot() } : {}),
-		...(deps.getSelfDevFooterLine ? { getSelfDevFooterLine: deps.getSelfDevFooterLine } : {}),
 		getStreaming: () => deps.chat.isStreaming(),
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
@@ -1173,9 +1139,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	let footerTicker: NodeJS.Timeout | null = null;
 	footerTicker = setInterval(() => {
-		const harnessActive = harness ? harness.state.snapshot().kind !== "idle" : false;
 		const statusActive = statusController.current().phase !== "idle";
-		if (!deps.chat.isStreaming() && !harnessActive && !statusActive) return;
+		if (!deps.chat.isStreaming() && !statusActive) return;
 		footer.refresh();
 		tui.requestRender();
 	}, 120);
@@ -2007,13 +1972,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openDevDiffOverlayState = (): void => {
-		if (!deps.selfDev || !deps.selfDevRepoRoot || !deps.openSelfDevDiffOverlay || overlayState !== "closed") return;
-		overlayState = "dev-diff";
-		overlayHandle = deps.openSelfDevDiffOverlay(tui, deps.selfDevRepoRoot);
-		tui.requestRender();
-	};
-
 	const toggleDispatchBoardOverlay = (): void => {
 		if (overlayState === "dispatch-board") {
 			closeOverlay();
@@ -2195,19 +2153,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 		if (overlayState === "closed" && keybindings.matches(data, "clio.thinking.expand") && !isKeyRelease(data)) {
 			if (chatPanel.toggleLastThinking()) tui.requestRender();
-			return { consume: true };
-		}
-
-		if (harness) {
-			const snap = harness.state.snapshot();
-			if (snap.kind === "restart-required" && keybindings.matches(data, "clio.harness.restart")) {
-				void harness.restart();
-				return { consume: true };
-			}
-		}
-
-		if (deps.selfDev && overlayState === "closed" && matchesKey(data, "alt+d") && !isKeyRelease(data)) {
-			openDevDiffOverlayState();
 			return { consume: true };
 		}
 

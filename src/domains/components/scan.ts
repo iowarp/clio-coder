@@ -80,12 +80,7 @@ const OWNER_BY_KIND: Record<ComponentKind, string> = {
 	"doc-spec": "docs",
 };
 
-const TOOL_HELPER_FILES = new Set([
-	"src/tools/bootstrap.ts",
-	"src/tools/registry.ts",
-	"src/selfdev/guards.ts",
-	"src/tools/truncate-utf8.ts",
-]);
+const TOOL_HELPER_FILES = new Set(["src/tools/bootstrap.ts", "src/tools/registry.ts", "src/tools/truncate-utf8.ts"]);
 
 const CONFIG_SCHEMA_FILES: ReadonlyArray<string> = [
 	"src/core/defaults.ts",
@@ -155,13 +150,10 @@ async function collectRecursive(
 }
 
 async function collectTools(root: string): Promise<HarnessComponent[]> {
-	const files = [...(await listFiles(join(root, "src/tools"))), ...(await listFiles(join(root, "src/selfdev/tools")))];
+	const files = await listFiles(join(root, "src/tools"));
 	const repoPaths = files
 		.map((filePath) => toRepoPath(root, filePath))
-		.filter(
-			(repoPath) =>
-				(repoPath.startsWith("src/tools/") || repoPath.startsWith("src/selfdev/tools/")) && repoPath.endsWith(".ts"),
-		)
+		.filter((repoPath) => repoPath.startsWith("src/tools/") && repoPath.endsWith(".ts"))
 		.sort((a, b) => a.localeCompare(b));
 	const components: HarnessComponent[] = [];
 	for (const repoPath of repoPaths) {

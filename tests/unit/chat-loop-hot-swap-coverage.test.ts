@@ -325,7 +325,6 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 					dynamicInputs: input.dynamicInputs,
 				};
 			},
-			getSelfDevWorkerPreamble: () => null,
 			reload: () => {},
 		};
 

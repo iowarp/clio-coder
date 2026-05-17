@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./metrics.js";
 import type {
 	EvalCommandResult,
 	EvalFailureClass,
 	EvalFailureClassCount,
+	EvalHarnessMetrics,
 	EvalRunArtifact,
 	EvalRunRecord,
 	EvalSummary,
@@ -112,6 +114,10 @@ function parseSummary(value: unknown, source: string): EvalSummary {
 		tokens: readNumber(value, source, "tokens"),
 		costUsd: readNumber(value, source, "costUsd"),
 		wallTimeMs: readNumber(value, source, "wallTimeMs"),
+		harness:
+			value.harness === undefined
+				? { ...ZERO_EVAL_HARNESS_METRICS }
+				: parseHarnessMetrics(value.harness, `${source}.harness`),
 		failureClasses: readArray(value, source, "failureClasses").map((entry, index) =>
 			parseFailureClassCount(entry, `${source}.failureClasses[${index}]`),
 		),
@@ -121,6 +127,9 @@ function parseSummary(value: unknown, source: string): EvalSummary {
 function parseRecord(value: unknown, source: string): EvalRunRecord {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const failureClass = readOptionalFailureClass(value, source, "failureClass");
+	const commands = readArray(value, source, "commands").map((entry, index) =>
+		parseCommand(entry, `${source}.commands[${index}]`),
+	);
 	const record: EvalRunRecord = {
 		taskId: readString(value, source, "taskId"),
 		runId: readString(value, source, "runId"),
@@ -133,9 +142,11 @@ function parseRecord(value: unknown, source: string): EvalRunRecord {
 		tokens: readNumber(value, source, "tokens"),
 		costUsd: readNumber(value, source, "costUsd"),
 		wallTimeMs: readNumber(value, source, "wallTimeMs"),
-		commands: readArray(value, source, "commands").map((entry, index) =>
-			parseCommand(entry, `${source}.commands[${index}]`),
-		),
+		harness:
+			value.harness === undefined
+				? evalHarnessMetricsFromCommands(commands)
+				: parseHarnessMetrics(value.harness, `${source}.harness`),
+		commands,
 	};
 	if (failureClass !== undefined) record.failureClass = failureClass;
 	const receiptPath = readOptionalString(value, source, "receiptPath");
@@ -143,6 +154,18 @@ function parseRecord(value: unknown, source: string): EvalRunRecord {
 	const evidenceId = readOptionalString(value, source, "evidenceId");
 	if (evidenceId !== undefined) record.evidenceId = evidenceId;
 	return record;
+}
+
+function parseHarnessMetrics(value: unknown, source: string): EvalHarnessMetrics {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	return {
+		receiptCount: readNumber(value, source, "receiptCount"),
+		toolCalls: readNumber(value, source, "toolCalls"),
+		retries: readNumber(value, source, "retries"),
+		safetyBlocks: readNumber(value, source, "safetyBlocks"),
+		correctionLatencyMs: readNumber(value, source, "correctionLatencyMs"),
+		validationEvidence: readNumber(value, source, "validationEvidence"),
+	};
 }
 
 function parseCommand(value: unknown, source: string): EvalCommandResult {

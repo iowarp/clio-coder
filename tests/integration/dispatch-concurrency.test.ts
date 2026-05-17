@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import type { ToolName } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
@@ -400,6 +400,59 @@ describe("dispatch concurrency gate", () => {
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("applies tool profiles before worker spec build and records the profile on receipts", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling, {
+			visibleTools: new Set<ToolName>([
+				ToolNames.Read,
+				ToolNames.Write,
+				ToolNames.Bash,
+				ToolNames.RunTests,
+				ToolNames.RunBuild,
+				ToolNames.GitStatus,
+			]),
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const captured: { spec?: WorkerSpec } = {};
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				captured.spec = spec;
+				return {
+					pid: 1006,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
+				};
+			},
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "profiled worker",
+				cwd: dataDir,
+				toolProfile: "minimal-local",
+			});
+			ok(captured.spec);
+			deepStrictEqual(captured.spec.allowedTools, [ToolNames.Read, ToolNames.GitStatus]);
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.safety?.toolProfile, "minimal-local");
+			deepStrictEqual(receipt.safety?.requestedActions, ["read"]);
 		} finally {
 			await bundle.extension.stop?.();
 		}

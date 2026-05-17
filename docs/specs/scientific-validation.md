@@ -5,7 +5,7 @@ Status: spec, advisory in v0.1.4
 
 ## Goal
 
-Agents working in scientific or HPC repositories must produce a typed validation contract instead of relying on file-existence checks. The contract is a declarative document that names artifacts, formats, tolerances, runtime assumptions, and validators. It is consumed by the `scientific-validator` agent recipe at `src/domains/agents/builtins/scientific-validator.md` and informs middleware reminders that nudge agents away from existence-only validation. The contract is data, not code; v0.1.4 ships the format, three declarative middleware rules, and one agent recipe. Runtime enforcement and validator implementations land in a later slice.
+Agents working in scientific or HPC repositories must produce a typed validation contract instead of relying on file-existence checks. The contract is a declarative document that names artifacts, formats, tolerances, runtime assumptions, and validators. It is consumed by the `scientific-validator` agent recipe at `src/domains/agents/builtins/scientific-validator.md`. The contract is data, not code; v0.1.4 ships the format and one agent recipe. Runtime enforcement, middleware rule ids, and validator implementations land in a later slice.
 
 ## Validation contract format
 
@@ -46,7 +46,7 @@ Field rules:
 4. `artifacts` is non-empty. Each entry names exactly one path and exactly one format. Per-element checks belong on the artifact entry; aggregate metrics belong on a separate validator command.
 5. `numerical_tolerances` may carry any subset of `{relative, absolute, ulp}`. Empty tolerance objects are rejected at validation time.
 6. `preserve` declares whether destructive cleanup tools may remove the artifact after validation. Checkpoint and restart artifacts default to `preserve: true`.
-7. `validators` lists either explicit shell commands (`pytest tests/test_grid.py`) or middleware rule ids (`science.no-existence-only-validation`).
+7. `validators` lists explicit shell commands (`pytest tests/test_grid.py`) or future validator ids once an enforced validator registry exists.
 8. `notes` carries operator-facing context that is not machine consumed.
 
 ## Supported artifact families
@@ -68,33 +68,27 @@ The `format` field accepts one of:
 
 Artifact families are case sensitive. New families must be added to this spec and to the `scientific-validator` recipe before the contract accepts them.
 
-## Rule taxonomy
+## Future Validator Taxonomy
 
-v0.1.4 ships three declarative middleware rules in `src/domains/middleware/rules.ts`. They are advisory metadata. The middleware runtime consumes them to compute `ruleIds` per hook; effect emission is the next slice.
+The following ids are design candidates only. They are not shipped in `src/domains/middleware/rules.ts` because the stable built-in middleware registry is empty until a rule has enforced behavior and tests.
 
 ### `science.no-existence-only-validation`
 
 Intent. Reminds agents that file existence does not validate scientific artifacts. A NetCDF file that is the wrong shape, an HDF5 dataset with missing attributes, or a checkpoint that does not load are failures regardless of `ls` output.
 
-Hooks observed: `before_finish`, `after_tool`.
-Effect kinds permitted: `inject_reminder`, `annotate_tool_result`.
-Status: declarative metadata only in v0.1.4; the middleware runtime emits no effects yet.
+Status: future validator/reminder id.
 
 ### `science.preserve-checkpoints`
 
 Intent. Marks validated checkpoint and restart artifacts as protected so destructive cleanup tools (`rm`, `git clean`, `find -delete`, `> file`) cannot remove them. Pairs with the protected-artifacts state in `src/domains/safety/protected-artifacts.ts` once enforcement lands.
 
-Hooks observed: `before_tool`, `after_tool`.
-Effect kinds permitted: `protect_path`, `inject_reminder`.
-Status: declarative metadata only in v0.1.4.
+Status: future protected-artifact validator/reminder id.
 
 ### `science.unit-vs-scheduler-validation`
 
 Intent. Distinguishes local unit validation (`pytest`, `ctest`, `make test`) from scheduler-backed validation (`sbatch`, `srun`, `qsub`, `flux run`). A scheduler exit code does not validate the produced artifacts; the contract must say which artifacts each path produces and how each one is checked after the queue completes.
 
-Hooks observed: `after_tool`, `before_finish`.
-Effect kinds permitted: `inject_reminder`, `annotate_tool_result`.
-Status: declarative metadata only in v0.1.4.
+Status: future scheduler-validation validator/reminder id.
 
 ## Worked example
 
@@ -130,8 +124,6 @@ artifacts:
 validators:
   - "ncdump -h out/region_west.nc"
   - "python tools/check_grid.py out/region_west.nc"
-  - science.no-existence-only-validation
-  - science.unit-vs-scheduler-validation
 notes: |
   The job is submitted with sbatch; the queue exit code is not a validator.
   Re-run check_grid.py after sacct reports COMPLETED.
@@ -155,9 +147,9 @@ Comparisons must distinguish per-element from aggregate metrics. A field that pa
 
 A scheduler-backed run is not the same as a unit validation. `sbatch script.sh` returns a job id, not a result; the queue exit status is a property of the queue, not of the artifacts the job produced. Polling completion (`squeue`, `sacct`, `flux jobs`) returns scheduler success or failure but says nothing about the scientific correctness of the produced files.
 
-The `science.unit-vs-scheduler-validation` rule is the canonical reminder. The contract must:
+The scheduler-validation validator id is reserved for a later enforced slice. The contract must:
 
-1. Declare `runtime.kind` so middleware can tell which path is in play.
+1. Declare `runtime.kind` so consumers can tell which path is in play.
 2. Name a post-job validator that reads the produced artifacts after the queue reports completion.
 3. Refuse to claim success when only the queue exit code is available.
 
@@ -168,7 +160,7 @@ The contract is an artifact, not a runtime call. Its lifecycle:
 1. The operator names a scientific task and points the agent at the relevant repository, build files, run scripts, and reference outputs.
 2. The `scientific-validator` recipe drafts the contract as a YAML document, restating the task and listing every artifact and validator.
 3. The contract is committed under the operator's chosen repository path. v0.1.4 does not impose a canonical location.
-4. Downstream slices add a contract validator and middleware effect emission. Until they ship, the contract is read by humans and by the agent recipe; the middleware rules are advisory metadata.
+4. Downstream slices add a contract validator and middleware effect emission. Until they ship, the contract is read by humans and by the agent recipe.
 5. When enforcement lands, the `validators[]` list executes after artifact production, and `preserve: true` paths are admitted to the protected-artifacts state.
 
 The contract is versioned by its `version` field; field additions that preserve backward compatibility do not bump the version. Removing or renaming a field is a `version: 2` change and requires a migration path for in-tree contracts.
@@ -179,12 +171,12 @@ This slice does not ship:
 
 - HDF5, NetCDF, Zarr, FITS, Parquet, or VTK runtime libraries. No new dependencies enter the package.
 - Live cluster integration. No Slurm, no MPI, no flux, no sacct calls.
-- Enforcement code. The three middleware rules are declarative metadata; the runtime emits no effects from them in v0.1.4.
+- Enforcement code. The stable built-in middleware registry is empty until rules have enforced behavior and tests.
 - Validator implementations. The `validators[]` field accepts strings; nothing executes them yet.
 - A linter for malformed contracts. The agent recipe drafts contracts; checking them is a later slice.
 
 ## References
 
 - `src/domains/agents/builtins/scientific-validator.md`: the agent recipe that drafts contracts in this format.
-- `src/domains/middleware/rules.ts`: the declarative built-in middleware rules, including the three `science.*` rules described above.
+- `src/domains/middleware/rules.ts`: the currently empty built-in middleware registry.
 - `docs/.superpowers/IMPROVE.md`, section M10: the roadmap entry that scoped this milestone.

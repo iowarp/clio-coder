@@ -68,7 +68,7 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 }
 
 function deps(
-	options: { selfDev?: boolean; contextTokens?: number | null; workspace?: WorkspaceSnapshot | null } = {},
+	options: { contextTokens?: number | null; workspace?: WorkspaceSnapshot | null } = {},
 ): WelcomeDashboardDeps {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.orchestrator.endpoint = "mini";
@@ -105,7 +105,6 @@ function deps(
 					? { tokens: null, contextWindow: 1000, percent: null }
 					: { tokens: options.contextTokens, contextWindow: 1000, percent: (options.contextTokens / 1000) * 100 },
 		getSettings: () => settings,
-		selfDev: options.selfDev ?? false,
 		...(options.workspace !== undefined ? { getWorkspaceSnapshot: () => options.workspace ?? null } : {}),
 	};
 }
@@ -128,7 +127,6 @@ describe("interactive/welcome-dashboard", () => {
 		ok(text.includes("Clio Coder"), text);
 		ok(!text.includes("Welcome Dashboard"), text);
 		ok(!text.includes("v0.1.2 · supervised repository work · ready"), text);
-		ok(!text.includes("CLIO_SELF_DEV"), text);
 		ok(text.includes("Context usage: 25%"), text);
 		ok(text.includes("Alt+M modes"), text);
 		ok(!text.includes("Shift+Tab modes"), text);
@@ -143,15 +141,6 @@ describe("interactive/welcome-dashboard", () => {
 		const lines = buildWelcomeDashboardLines(stats, 112);
 		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 		ok(text.includes("Context usage: idle"), text);
-	});
-
-	it("renders self-development as a magenta mode badge", () => {
-		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ selfDev: true })), 112);
-		const raw = lines.join("\n");
-		const text = __welcomeDashboardTest.stripAnsi(raw);
-		ok(text.includes("mode default · DEV MODE"), text);
-		ok(raw.includes("\u001b[38;5;207mDEV MODE"), raw);
-		ok(!text.includes("CLIO_SELF_DEV"), text);
 	});
 
 	it("renders a compact banner on narrow terminals", () => {

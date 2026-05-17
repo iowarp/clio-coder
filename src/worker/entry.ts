@@ -8,7 +8,6 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
-import type { SelfDevMode } from "../core/dev-harness-contract.js";
 import type { ToolName } from "../core/tool-names.js";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
@@ -19,17 +18,6 @@ import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
 
 type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
-type SelfDevModule = typeof import("../selfdev/index.js");
-
-const SELFDEV_IMPORT_SPECIFIER = ["..", "selfdev", "index.js"].join("/");
-
-async function loadSelfDevModule(): Promise<SelfDevModule | null> {
-	try {
-		return (await import(SELFDEV_IMPORT_SPECIFIER)) as SelfDevModule;
-	} catch {
-		return null;
-	}
-}
 
 async function main(): Promise<number> {
 	const demux = createWorkerStdinDemux();
@@ -72,18 +60,6 @@ async function main(): Promise<number> {
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
 	if (spec.autoApprove !== undefined) input.autoApprove = spec.autoApprove;
 	input.awaitApproval = demux.awaitApproval;
-	if (spec.selfDev) {
-		input.selfDev = spec.selfDev;
-		const selfdev = await loadSelfDevModule();
-		if (selfdev === null) {
-			process.stderr.write("[worker] selfdev module unavailable; private tools disabled\n");
-			stopHeartbeat();
-			return 2;
-		}
-		input.registerPrivateTools = (registry) => {
-			selfdev.registerSelfDevTools(registry, { mode: spec.selfDev as SelfDevMode });
-		};
-	}
 	if (spec.allowedTools !== undefined) {
 		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
 	} else {

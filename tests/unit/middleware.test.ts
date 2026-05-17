@@ -1,11 +1,10 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	BUILTIN_MIDDLEWARE_RULE_IDS,
 	createMiddlewareBundle,
 	createMiddlewareContractFromSnapshot,
 	createMiddlewareSnapshot,
-	MIDDLEWARE_EFFECT_KINDS,
 	MIDDLEWARE_HOOKS,
 	type MiddlewareHookInput,
 	validateMiddlewareEffect,
@@ -38,7 +37,7 @@ describe("middleware runtime", () => {
 		}
 	});
 
-	it("returns deterministic no-op hook results while preserving provenance", () => {
+	it("returns deterministic no-op hook results without advertising inactive rules", () => {
 		const contract = createMiddlewareBundle().contract;
 		const input: MiddlewareHookInput = {
 			hook: "before_tool",
@@ -56,11 +55,11 @@ describe("middleware runtime", () => {
 
 		deepStrictEqual(second, first);
 		deepStrictEqual(first.effects, []);
-		deepStrictEqual(first.ruleIds, ["publish-state-guard", "framework-reminder", "science.preserve-checkpoints"]);
+		deepStrictEqual(first.ruleIds, []);
 		notStrictEqual(first.input, input);
 	});
 
-	it("lists built-in rules in stable metadata order", () => {
+	it("ships no built-in no-op rules", () => {
 		const contract = createMiddlewareBundle().contract;
 		const first = contract.listRules();
 		const second = contract.listRules();
@@ -93,61 +92,16 @@ describe("middleware runtime", () => {
 			hook: "after_tool",
 			input: { hook: "after_tool", toolName: "read" },
 			effects: [],
-			ruleIds: [
-				"publish-state-guard",
-				"proxy-validation-detector",
-				"science.no-existence-only-validation",
-				"science.preserve-checkpoints",
-				"science.unit-vs-scheduler-validation",
-			],
+			ruleIds: [],
 		});
 	});
 
-	it("ships exactly eight built-in rules with the three science rules first-class", () => {
+	it("does not subscribe inactive built-ins to hooks", () => {
 		const rules = listMiddlewareRules();
-		strictEqual(rules.length, 8);
-		const ids = rules.map((rule) => rule.id);
-		ok(ids.includes("science.no-existence-only-validation"));
-		ok(ids.includes("science.preserve-checkpoints"));
-		ok(ids.includes("science.unit-vs-scheduler-validation"));
-		const scienceRules = rules.filter((rule) => rule.id.startsWith("science."));
-		strictEqual(scienceRules.length, 3);
-		const allowedHooks = new Set<string>(MIDDLEWARE_HOOKS);
-		const allowedEffects = new Set<string>(MIDDLEWARE_EFFECT_KINDS);
-		for (const rule of scienceRules) {
-			ok(rule.hooks.length > 0, `${rule.id} hooks must be non-empty`);
-			ok(rule.effectKinds.length > 0, `${rule.id} effectKinds must be non-empty`);
-			for (const hook of rule.hooks) ok(allowedHooks.has(hook), `${rule.id} bad hook ${hook}`);
-			for (const kind of rule.effectKinds) ok(allowedEffects.has(kind), `${rule.id} bad effect ${kind}`);
+		strictEqual(rules.length, 0);
+		for (const hook of MIDDLEWARE_HOOKS) {
+			deepStrictEqual(middlewareRuleIdsForHook(hook), []);
 		}
-	});
-
-	it("subscribes the science rules to the documented hooks", () => {
-		const beforeFinish = middlewareRuleIdsForHook("before_finish");
-		ok(beforeFinish.includes("finish-contract-check"));
-		ok(beforeFinish.includes("science.no-existence-only-validation"));
-		ok(beforeFinish.includes("science.unit-vs-scheduler-validation"));
-
-		const beforeTool = middlewareRuleIdsForHook("before_tool");
-		ok(beforeTool.includes("science.preserve-checkpoints"));
-
-		const afterTool = middlewareRuleIdsForHook("after_tool");
-		ok(afterTool.includes("science.no-existence-only-validation"));
-		ok(afterTool.includes("science.preserve-checkpoints"));
-		ok(afterTool.includes("science.unit-vs-scheduler-validation"));
-	});
-
-	it("clones science rules on each listMiddlewareRules call without sharing arrays", () => {
-		const first = listMiddlewareRules();
-		const second = listMiddlewareRules();
-		const firstScience = first.find((rule) => rule.id === "science.no-existence-only-validation");
-		const secondScience = second.find((rule) => rule.id === "science.no-existence-only-validation");
-		ok(firstScience);
-		ok(secondScience);
-		deepStrictEqual(secondScience, firstScience);
-		notStrictEqual(secondScience, firstScience);
-		notStrictEqual(secondScience.hooks, firstScience.hooks);
-		notStrictEqual(secondScience.effectKinds, firstScience.effectKinds);
 	});
 
 	it("rejects malformed declarative rule and effect data", () => {

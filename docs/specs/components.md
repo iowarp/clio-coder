@@ -53,7 +53,7 @@ Types live in `src/domains/components/types.ts` and are re-exported from `src/do
 
 ## Status and scope notes
 
-v0.1.4 ships the read-only registry, the snapshot writer, and the diff command. The registry is consumed manually today; a future slice will gate `clio --dev` handoffs on a recent snapshot when no change manifest exists. Component metadata is not persisted to `<dataDir>` automatically; snapshots are operator-managed files. The scanner has no plugin extension point; adding a new component kind requires an enum entry plus a scan rule.
+v0.1.4 ships the read-only registry, the snapshot writer, and the diff command. The registry is consumed manually today; a future slice will gate source-work handoffs on a recent snapshot when no change manifest exists. Component metadata is not persisted to `<dataDir>` automatically; snapshots are operator-managed files. The scanner has no plugin extension point; adding a new component kind requires an enum entry plus a scan rule.
 
 ## References
 

@@ -67,7 +67,6 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 			};
 			return result;
 		},
-		getSelfDevWorkerPreamble: () => null,
 		reload() {},
 	};
 	return { prompts, calls };

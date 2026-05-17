@@ -30,7 +30,6 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 
 Usage:
   clio                      start interactive repository chat
-  clio --dev                start self-development mode for this checkout
   clio --print, -p [@files...] <task>  run one non-interactive chat turn
   clio --mode json [@files...] <task>  stream one non-interactive turn as JSONL
   clio --version, -v        print the Clio Coder version
@@ -125,10 +124,8 @@ async function main(argv: string[]): Promise<number> {
 	if (flags.has("version") || flags.has("v")) return runVersionCommand();
 
 	const subArgs = subcommandIndex === -1 ? [] : rest.slice(subcommandIndex + 1);
-	const dev = flags.has("dev");
 	const bootOptions = {
 		...(apiKey === undefined ? {} : { apiKey }),
-		...(dev ? { dev: true } : {}),
 		...(noContextFiles ? { noContextFiles: true } : {}),
 	};
 	if (!subcommand) return runClioCommand(bootOptions);

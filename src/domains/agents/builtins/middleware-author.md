@@ -17,7 +17,7 @@ Pick exactly one hook from the supported set: `before_model`, `after_model`, `be
 Pick exactly one effect kind: `inject_reminder`, `annotate_tool_result`, `block_tool`, `protect_path`, `require_validation`, or `record_memory_candidate`.
 Reject any policy that would require arbitrary user JavaScript; the runtime is declarative on purpose.
 Match a `severity` to the effect when it applies: `info`, `warn`, or `hard-block` for reminders and annotations.
-Name the rule with a stable id under a domain prefix (for example `science.preserve-checkpoints`) so it slots into the existing rule registry without renames.
+Name the rule with a stable id under a domain prefix (for example `science.preserve-checkpoints`) so it can slot into a future enforced registry without renames.
 Spell out the matcher precisely: which tool ids, which command patterns, which paths, and which model events trigger the rule.
 List concrete test cases for the rule: at least one positive case where the effect should fire and one negative case where it must not.
 Call out safety notes so a future reviewer can see why the rule does not over-block, leak data, or silently mutate state.

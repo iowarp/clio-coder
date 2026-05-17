@@ -2,12 +2,11 @@
  * Interop-aware instruction merger.
  *
  * Replaces the old "concatenate every context file" strategy. Each source
- * (CLIO.md, CLAUDE.md, AGENTS.md, CODEX.md, GEMINI.md, CLIO-dev.md) is
+ * (CLIO.md, CLAUDE.md, AGENTS.md, CODEX.md, GEMINI.md) is
  * parsed into sections keyed by `^## ` header. The merger then composes a
  * single deterministic block where:
  *
  *   - CLIO.md wins on every section conflict;
- *   - CLIO-dev.md (when present) overrides CLIO.md;
  *   - among the rest, the source closest to cwd wins (later in the input
  *     array, since callers should pass parent-to-child);
  *   - byte-identical bodies across non-CLIO sources are de-duplicated;
@@ -21,7 +20,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-export type InstructionSourceKind = "clio" | "clio-dev" | "claude" | "agents" | "codex" | "gemini";
+export type InstructionSourceKind = "clio" | "claude" | "agents" | "codex" | "gemini";
 
 export interface InstructionSource {
 	path: string;
@@ -32,7 +31,6 @@ export interface InstructionSource {
 export interface InstructionContributor {
 	path: string;
 	sections: string[];
-	tag?: "dev";
 }
 
 export interface MergedInstructions {
@@ -91,16 +89,14 @@ function hashBody(body: string): string {
  * Merge a list of instruction sources into a single deterministic block.
  *
  * Sources should be passed in increasing-priority order for non-CLIO files
- * (parent-to-child closest-to-cwd). The CLIO.md and CLIO-dev.md sources
- * win regardless of position via the conflict policy described in the
- * module header.
+ * (parent-to-child closest-to-cwd). The CLIO.md source wins regardless of
+ * position via the conflict policy described in the module header.
  */
 export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): MergedInstructions {
 	if (sources.length === 0) return { text: "", contributors: [] };
 
 	const clio = sources.find((s) => s.kind === "clio") ?? null;
-	const dev = sources.find((s) => s.kind === "clio-dev") ?? null;
-	const others = sources.filter((s) => s.kind !== "clio" && s.kind !== "clio-dev");
+	const others = sources.filter((s) => s.kind !== "clio");
 
 	const picks: SectionPick[] = [];
 	const seenHeaders = new Set<string>();
@@ -125,12 +121,6 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 			if (!sectionOrder.includes(header)) sectionOrder.push(header);
 		}
 	}
-	if (dev) {
-		for (const header of dev.sections.keys()) {
-			if (header === PREAMBLE_KEY) continue;
-			if (!sectionOrder.includes(header)) sectionOrder.push(header);
-		}
-	}
 
 	// Preamble (content before the first H2) is emitted per-source so an
 	// unstructured AGENTS.md or CLAUDE.md still surfaces. Conflict policy
@@ -140,7 +130,6 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 	const orderForPreamble: InstructionSource[] = [];
 	if (clio) orderForPreamble.push(clio);
 	for (const src of others) orderForPreamble.push(src);
-	if (dev) orderForPreamble.push(dev);
 	for (const src of orderForPreamble) {
 		const body = src.sections.get(PREAMBLE_KEY);
 		if (body === undefined || body.length === 0) continue;
@@ -154,14 +143,7 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 
 	for (const header of sectionOrder) {
 		if (seenHeaders.has(header)) continue;
-		// Priority: dev override -> clio -> last-among-others (closest-to-cwd wins)
-		const devBody = dev?.sections.get(header);
-		if (devBody !== undefined && dev) {
-			picks.push({ header, body: devBody, contributorPath: dev.path });
-			recordContributor(dev.path, header);
-			seenHeaders.add(header);
-			continue;
-		}
+		// Priority: clio -> last-among-others (closest-to-cwd wins)
 		const clioBody = clio?.sections.get(header);
 		if (clioBody !== undefined && clio) {
 			picks.push({ header, body: clioBody, contributorPath: clio.path });
@@ -206,16 +188,11 @@ export function mergeInstructions(sources: ReadonlyArray<InstructionSource>): Me
 			orderedPaths.push(src.path);
 		}
 	}
-	if (dev && sectionContributors.has(dev.path)) orderedPaths.push(dev.path);
 
 	for (const path of orderedPaths) {
 		const sections = sectionContributors.get(path) ?? [];
-		const isDev = dev?.path === path;
-		const tag = isDev ? " [dev]" : "";
-		provenance.push(`<!-- ${path}${tag}: ${sections.join(", ")} -->`);
-		const entry: InstructionContributor = { path, sections };
-		if (isDev) entry.tag = "dev";
-		contributors.push(entry);
+		provenance.push(`<!-- ${path}: ${sections.join(", ")} -->`);
+		contributors.push({ path, sections });
 	}
 
 	const text = parts.length > 0 ? `${parts.join("\n\n")}\n${provenance.join("\n")}` : "";

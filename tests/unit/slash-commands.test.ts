@@ -1,4 +1,4 @@
-import { ok } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	dispatchSlashCommand,
@@ -7,6 +7,17 @@ import {
 } from "../../src/interactive/slash-commands.js";
 
 describe("interactive slash commands", () => {
+	it("parses /run tool profiles", () => {
+		const command = parseSlashCommand("/run --tool-profile science-local worker run tests");
+		strictEqual(command.kind, "run");
+		if (command.kind !== "run") throw new Error("expected run command");
+		strictEqual(command.options.toolProfile, "science-local");
+		strictEqual(command.agentId, "worker");
+		strictEqual(command.task, "run tests");
+
+		strictEqual(parseSlashCommand("/run --tool-profile unknown worker task").kind, "run-usage");
+	});
+
 	it("lists skills from the injected resources hook", () => {
 		let stdout = "";
 		const ctx = {

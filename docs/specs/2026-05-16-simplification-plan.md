@@ -19,7 +19,7 @@ This plan keeps the core engine focused on pi-sdk orchestration, context managem
   - activation and lifecycle wiring;
   - runtime registry mutation for tools, prompts, middleware, and agents.
 - Make activation outputs explicit value objects that can be diffed and tested before mutating registries.
-- Keep hot reload outside the stable core path. Treat reload/restart/private self-development machinery as dev-only unless production workflows prove otherwise.
+- Keep hot reload outside the stable core path. Treat reload/restart machinery as external developer tooling unless production workflows prove otherwise.
 - Add focused tests around duplicate ids, failed activation rollback, and extension-provided tool visibility.
 
 ## Resources

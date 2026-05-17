@@ -9,7 +9,6 @@
  * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
-import type { SelfDevMode } from "../core/dev-harness-contract.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModeName } from "../domains/modes/matrix.js";
@@ -38,7 +37,6 @@ import {
 	createWorkerToolRegistry,
 	resolveAgentTools,
 	type ToolTelemetry,
-	type WorkerToolRegistrar,
 } from "./worker-tools.js";
 
 export interface WorkerRunInput {
@@ -57,10 +55,6 @@ export interface WorkerRunInput {
 	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
-	/** Private tool registrar. Present only when the worker entry loaded a private extension. */
-	registerPrivateTools?: WorkerToolRegistrar;
-	/** Self-development metadata, when this worker has private self-dev tools. */
-	selfDev?: SelfDevMode;
 	autoApprove?: "allow" | "deny";
 	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
 	signal?: AbortSignal;
@@ -177,7 +171,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
 		if (input.allowedTools !== undefined) sdkInput.allowedTools = input.allowedTools;
 		if (input.signal !== undefined) sdkInput.signal = input.signal;
-		const sdkSafety = createWorkerSafety({ cwd: process.cwd(), selfDev: input.selfDev !== undefined });
+		const sdkSafety = createWorkerSafety({ cwd: process.cwd() });
 		sdkInput.safety = sdkSafety;
 		if (input.autoApprove !== undefined) sdkInput.autoApprove = input.autoApprove;
 		if (input.awaitApproval !== undefined) sdkInput.awaitApproval = input.awaitApproval;
@@ -197,8 +191,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// and the agent-loop guard share the same loop-detector state. Without this,
 	// the registry would create its own state and the beforeToolCall hook would
 	// be unable to observe repetition that already triggered admission.
-	const safety = createWorkerSafety({ selfDev: input.selfDev !== undefined, cwd: process.cwd() });
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, input.registerPrivateTools, safety);
+	const safety = createWorkerSafety({ cwd: process.cwd() });
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, safety);
 	const loopGuard = createWorkerLoopGuard({ safety });
 	const telemetry: ToolTelemetry = {
 		onStart(event) {

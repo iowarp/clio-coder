@@ -25,36 +25,30 @@ afterEach(() => {
 
 describe("bash tool environment", () => {
 	it("does not leak Clio control env into child commands by default", () => {
-		process.env.CLIO_DEV = "1";
-		process.env.CLIO_SELF_DEV = "1";
 		process.env.CLIO_INTERACTIVE = "1";
 		process.env.CLIO_RESUME_SESSION_ID = "session-123";
 
 		const env = buildToolEnv();
 
-		strictEqual(env.CLIO_DEV, undefined);
-		strictEqual(env.CLIO_SELF_DEV, undefined);
 		strictEqual(env.CLIO_INTERACTIVE, undefined);
 		strictEqual(env.CLIO_RESUME_SESSION_ID, undefined);
 	});
 
 	it("scrubs parent env even when a command string mentions control env", () => {
-		process.env.CLIO_DEV = "1";
-		process.env.CLIO_SELF_DEV = "1";
 		process.env.CLIO_INTERACTIVE = "1";
+		process.env.CLIO_RESUME_SESSION_ID = "session-123";
 
 		const env = buildToolEnv();
 
-		strictEqual(env.CLIO_DEV, undefined);
-		strictEqual(env.CLIO_SELF_DEV, undefined);
 		strictEqual(env.CLIO_INTERACTIVE, undefined);
+		strictEqual(env.CLIO_RESUME_SESSION_ID, undefined);
 	});
 
 	it("still allows explicit shell assignments inside the command", async () => {
-		process.env.CLIO_DEV = "parent";
+		process.env.CLIO_INTERACTIVE = "parent";
 
 		const result = await bashTool.run({
-			command: "CLIO_DEV=child printenv CLIO_DEV",
+			command: "CLIO_INTERACTIVE=child printenv CLIO_INTERACTIVE",
 		});
 
 		strictEqual(result.kind, "ok");
@@ -62,19 +56,17 @@ describe("bash tool environment", () => {
 	});
 
 	it("runs child commands with scrubbed control env", async () => {
-		process.env.CLIO_DEV = "1";
-		process.env.CLIO_SELF_DEV = "1";
 		process.env.CLIO_INTERACTIVE = "1";
+		process.env.CLIO_RESUME_SESSION_ID = "session-123";
 
-		const clioDev = "$" + "{CLIO_DEV-}";
-		const clioSelfDev = "$" + "{CLIO_SELF_DEV-}";
 		const clioInteractive = "$" + "{CLIO_INTERACTIVE-}";
+		const clioResume = "$" + "{CLIO_RESUME_SESSION_ID-}";
 		const result = await bashTool.run({
-			command: `printf "%s|%s|%s" "${clioDev}" "${clioSelfDev}" "${clioInteractive}"`,
+			command: `printf "%s|%s" "${clioInteractive}" "${clioResume}"`,
 		});
 
 		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") strictEqual(result.output.trim(), "||");
+		if (result.kind === "ok") strictEqual(result.output.trim(), "|");
 	});
 
 	it("honors abort signals for long-running commands", async () => {

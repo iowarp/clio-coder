@@ -7,6 +7,7 @@ import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/i
 import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
+import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -59,6 +60,7 @@ export interface RunCommandOptions {
 	endpoint?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
+	toolProfile?: ToolProfileName;
 	requiredCapabilities?: string[];
 }
 
@@ -104,6 +106,7 @@ export async function handleRun(
 			...(options.endpoint ? { endpoint: options.endpoint } : {}),
 			...(options.model ? { model: options.model } : {}),
 			...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+			...(options.toolProfile ? { toolProfile: options.toolProfile } : {}),
 			...(options.requiredCapabilities && options.requiredCapabilities.length > 0
 				? { requiredCapabilities: options.requiredCapabilities }
 				: {}),
@@ -169,6 +172,10 @@ function parseRunCommand(rest: string): SlashCommand {
 			const value = need();
 			if (!value || !VALID_RUN_THINKING.has(value as JobThinkingLevel)) return { kind: "run-usage" };
 			options.thinkingLevel = value as JobThinkingLevel;
+		} else if (part === "--tool-profile") {
+			const value = need();
+			if (!value || !isToolProfileName(value)) return { kind: "run-usage" };
+			options.toolProfile = value;
 		} else if (part === "--require") {
 			const value = need();
 			if (!value) return { kind: "run-usage" };
@@ -442,7 +449,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind === "run-usage") {
 				ctx.io.stdout(
-					"\nusage: /run [--worker <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--require <cap>] <agent> <task>\n",
+					"\nusage: /run [--worker <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>\n",
 				);
 				return;
 			}

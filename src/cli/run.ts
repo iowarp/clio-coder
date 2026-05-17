@@ -18,9 +18,10 @@ import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 
 const USAGE =
-	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
+	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
@@ -33,6 +34,7 @@ Flags:
   --model <wireId>          override the wire model id for this run
   --thinking <level>        thinking level: off|minimal|low|medium|high|xhigh
   --agent <recipe-id>       agent recipe (defaults to scout)
+  --tool-profile <name>     restrict worker tools: minimal-local|science-local|full-agent
   --require <capability>    capability the target must advertise (repeatable)
   --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
   --json                    stream events and the final receipt as JSON
@@ -47,6 +49,7 @@ interface ParsedArgs {
 	model?: string;
 	thinking?: JobThinkingLevel;
 	agentId?: string;
+	toolProfile?: ToolProfileName;
 	required: string[];
 	task: string;
 	json: boolean;
@@ -93,6 +96,10 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 			const v = need();
 			if (v === null) return null;
 			out.agentId = v;
+		} else if (a === "--tool-profile") {
+			const v = need();
+			if (v === null || !isToolProfileName(v)) return null;
+			out.toolProfile = v;
 		} else if (a === "--require") {
 			const v = need();
 			if (v === null) return null;
@@ -220,6 +227,7 @@ export async function runClioRun(
 	if (parsed.target) dispatchReq.endpoint = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
+	if (parsed.toolProfile) dispatchReq.toolProfile = parsed.toolProfile;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
 	dispatchReq.supervised = parsed.supervised === true;
 	if (parsed.autoApprove) dispatchReq.autoApprove = parsed.autoApprove;

@@ -10,7 +10,7 @@ import type { LocalModelQuirks } from "../../../src/domains/providers/types/loca
 import { synthesizeOrchestratorModel } from "../../../src/entry/orchestrator.js";
 
 describe("providers/runtimes/local synthesis", () => {
-	it("applies self-dev caps and local OpenAI-compatible request overrides", () => {
+	it("applies local-model caps and OpenAI-compatible request overrides", () => {
 		const kb: KnowledgeBaseHit = {
 			entry: {
 				family: "qwen3.6-35b-a3b",

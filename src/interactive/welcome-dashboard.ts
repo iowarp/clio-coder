@@ -27,7 +27,6 @@ export interface WelcomeDashboardDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getExtensionStats?: () => { active: number; installed: number };
-	selfDev: boolean;
 }
 
 export interface WelcomeDashboardStats {
@@ -47,7 +46,6 @@ export interface WelcomeDashboardStats {
 	safetyLevel: string;
 	theme: string;
 	thinkingLevel: string;
-	selfDev: boolean;
 	workspace: WorkspaceSnapshot | null;
 	currentAvailable: boolean;
 	activeCapabilities: string[];
@@ -247,7 +245,6 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		safetyLevel: settings?.safetyLevel ?? "auto-edit",
 		theme: settings?.theme ?? "default",
 		thinkingLevel: settings?.orchestrator?.thinkingLevel ?? "off",
-		selfDev: deps.selfDev,
 		workspace,
 		currentAvailable,
 		activeCapabilities,
@@ -259,9 +256,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	};
 }
 
-function modeStatus(stats: Pick<WelcomeDashboardStats, "mode" | "selfDev">): string {
-	const mode = styleForMode(stats.mode, `mode ${stats.mode}`);
-	return stats.selfDev ? `${mode} · ${color("DEV MODE", MAGENTA)}` : mode;
+function modeStatus(stats: Pick<WelcomeDashboardStats, "mode">): string {
+	return styleForMode(stats.mode, `mode ${stats.mode}`);
 }
 
 function compactLine(stats: WelcomeDashboardStats, width: number): string[] {
