@@ -61,6 +61,7 @@ describe("tool profiles", () => {
 		strictEqual(filtered.includes(ToolNames.RunLint), true);
 		strictEqual(filtered.includes(ToolNames.RunBuild), true);
 		strictEqual(filtered.includes(ToolNames.PackageScript), true);
+		strictEqual(filtered.includes(ToolNames.ValidateFrontend), true);
 		strictEqual(filtered.includes(ToolNames.Write), false);
 		strictEqual(filtered.includes(ToolNames.Edit), false);
 		strictEqual(filtered.includes(ToolNames.Bash), false);

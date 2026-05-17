@@ -14,7 +14,7 @@ import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
-const STANDARD_PACKAGE_SCRIPTS = new Set(["test", "lint", "build", "typecheck", "ci"]);
+const STANDARD_PACKAGE_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
 
 function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_DEFAULT_TIMEOUT_MS): number {
 	return typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? Math.floor(args.timeout_ms) : fallback;
@@ -154,9 +154,9 @@ export const runBuildTool: ToolSpec = packageScriptTool(
 
 export const packageScriptToolSpec: ToolSpec = {
 	name: ToolNames.PackageScript,
-	description: "Run one standard package.json script by name through `npm run <script>` with no shell.",
+	description: "Run one standard package.json validation script by name through `npm run <script>` with no shell.",
 	parameters: Type.Object({
-		script: Type.String({ description: "Script name. Must be one of test, lint, build, typecheck, ci." }),
+		script: Type.String({ description: "Script name. Must be one of test, test:e2e, lint, build, typecheck, ci." }),
 		args: Type.Optional(Type.Array(Type.String(), { description: "Additional plain arguments passed after --." })),
 		...commonExecParams,
 	}),

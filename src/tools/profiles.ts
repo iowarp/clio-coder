@@ -25,6 +25,7 @@ const SCIENCE_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.RunLint,
 	ToolNames.RunBuild,
 	ToolNames.PackageScript,
+	ToolNames.ValidateFrontend,
 ];
 
 const NARROW_TOOL_PROFILES: Readonly<Record<Exclude<ToolProfileName, "full-agent">, ReadonlySet<BuiltinToolName>>> = {

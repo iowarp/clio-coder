@@ -38,6 +38,13 @@ interface ToolCallEvidenceCandidate {
 	command: string;
 }
 
+const TYPED_VALIDATION_TOOL_SUMMARIES = new Map<string, string>([
+	["run_tests", "run_tests"],
+	["run_lint", "run_lint"],
+	["run_build", "run_build"],
+]);
+const PACKAGE_VALIDATION_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
+
 const COMPLETION_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(?:done|finished|complete|completed|implemented|fixed|resolved|updated|added|changed|removed|wired|shipped)\b/i,
 	/\ball set\b/i,
@@ -112,6 +119,12 @@ function collectRecentEvidence(
 		const call = bashValidationCall(entry);
 		if (call !== null) {
 			toolCalls.set(call.toolCallId, call);
+			continue;
+		}
+
+		const typedValidationCall = validationToolCall(entry);
+		if (typedValidationCall !== null) {
+			toolCalls.set(typedValidationCall.toolCallId, typedValidationCall);
 			continue;
 		}
 
@@ -205,6 +218,42 @@ function dispatchEvidenceCall(entry: unknown): ToolCallEvidenceCandidate | null 
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
 	return candidate;
+}
+
+function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (toolName === null) return null;
+	const summary = typedValidationSummary(toolName, payload);
+	if (summary === null) return null;
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	const candidate: ToolCallEvidenceCandidate = {
+		toolCallId,
+		command: summary,
+	};
+	const turnId = turnIdOf(entry);
+	if (turnId !== null) candidate.turnId = turnId;
+	return candidate;
+}
+
+function typedValidationSummary(toolName: string, payload: Record<string, unknown>): string | null {
+	const simple = TYPED_VALIDATION_TOOL_SUMMARIES.get(toolName);
+	if (simple !== undefined) return simple;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+	if (toolName === "package_script") {
+		const script = typeof args?.script === "string" ? args.script.trim() : "";
+		if (!PACKAGE_VALIDATION_SCRIPTS.has(script)) return null;
+		return `npm run ${script}`;
+	}
+	if (toolName === "validate_frontend") {
+		const path = typeof args?.path === "string" && args.path.trim().length > 0 ? args.path.trim() : "artifact";
+		return `validate_frontend ${path}`;
+	}
+	return null;
 }
 
 function successfulToolResultId(entry: unknown): string | null {

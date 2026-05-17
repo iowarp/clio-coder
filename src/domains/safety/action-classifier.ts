@@ -76,6 +76,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.RunLint:
 		case ToolNames.RunBuild:
 		case ToolNames.PackageScript:
+		case ToolNames.ValidateFrontend:
 			return "execute";
 		case ToolNames.Dispatch:
 			return "dispatch";

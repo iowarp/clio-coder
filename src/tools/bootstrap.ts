@@ -25,6 +25,7 @@ import {
 	runLintTool,
 	runTestsTool,
 } from "./safe-exec.js";
+import { validateFrontendTool } from "./validate-frontend.js";
 import { webFetchTool } from "./web-fetch.js";
 import { workspaceContextTool } from "./workspace-context.js";
 import { writeTool } from "./write.js";
@@ -117,6 +118,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	registry.register({
 		...withSourceInfo(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
+	});
+	registry.register({
+		...withSourceInfo(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({

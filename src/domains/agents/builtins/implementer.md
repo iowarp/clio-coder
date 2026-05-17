@@ -2,7 +2,7 @@
 name: Implementer
 description: Execution agent for concrete implementation and repair tasks.
 mode: default
-tools: [read, write, edit, run_tests, run_lint, run_build, package_script, grep, glob, ls, web_fetch, git_status, git_diff, git_log]
+tools: [read, write, edit, run_tests, run_lint, run_build, package_script, validate_frontend, grep, glob, ls, web_fetch, git_status, git_diff, git_log]
 model: null
 provider: null
 runtime: native
