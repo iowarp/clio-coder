@@ -3,20 +3,54 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## Unreleased
+## 0.1.9 - 2026-05-17
+
+Clio Coder 0.1.9 hardens local OpenAI-compatible model handling, especially
+llama.cpp mini targets and GPT-OSS/Harmony models. It centralizes effective
+thinking capability resolution so the UI, prompt runtime block, payload
+construction, stream parsing, receipts, and worker dispatch all share the same
+model-specific surface.
+
+### Added
+
+- Added a local model runtime-capabilities resolver that classifies real mini
+  model families, thinking mechanisms, supported levels, effective coercion,
+  request payload fields, and response parsers from one shared source.
+- Added GPT-OSS/Harmony response parsing for raw llama.cpp chat-template frames
+  and request synthesis for Harmony `reasoning_effort`.
+- Added tests for local model capability resolution, UI thinking surfaces,
+  footer/dashboard effective thinking display, Harmony payload construction,
+  streamed reasoning accounting, and constrained Harmony JSON responses.
 
 ### Changed
 
-- Upgraded the Pi SDK boundary to the `@earendil-works/*` 0.74.0 package
-  scope and pinned `pi-agent-core`, `pi-ai`, and `pi-tui` to 0.74.0.
-- Clio now reads Pi's model-level `thinkingLevelMap` through
-  `getSupportedThinkingLevels()` and `clampThinkingLevel()` instead of the
-  older xhigh-only capability shortcut.
+- `/thinking`, `/settings`, the welcome dashboard, footer, hot model switching,
+  prompt runtime block, and dispatch worker selection now display/use the
+  effective thinking level after model-specific coercion instead of raw
+  configured settings.
+- Local OpenAI-compatible targets now preserve server-owned sampler defaults;
+  Clio records and passes only the model-family fields it owns.
+- Worker dispatch now requires explicit allowed tool profiles and carries the
+  resolved effective thinking state through the worker spec.
 
 ### Fixed
 
-- SDK session-scoped resources are now cleaned up when Clio replaces an
-  interactive runtime, resets a session, or shuts down the TUI.
+- Fixed GPT-OSS/Harmony constrained JSON frames such as
+  `<|channel|>final <|constrain|>json<|message|>{...}` being routed as hidden
+  thinking or surfaced as parser errors instead of visible assistant text.
+- Fixed stale GPT-OSS/Harmony marker leakage from local OpenAI-compatible
+  streamed output.
+- Fixed prior assistant thinking blocks being replayed upstream on later
+  OpenAI-compatible turns.
+- Fixed duplicate local-model capability and thinking coercion paths that could
+  make UI display, prompt runtime text, and payload construction disagree.
+
+### Removed
+
+- Removed the retired self-development harness and associated prompt fragments,
+  tests, and diagnostic scaffolding.
+- Removed stale local-model helper paths that duplicated provider capability
+  resolution.
 
 ## 0.1.8 - 2026-05-11
 

@@ -18,11 +18,14 @@ import {
 
 const START = "<|start|>";
 const CHANNEL = "<|channel|>";
+const CONSTRAIN = "<|constrain|>";
 const MESSAGE = "<|message|>";
+const RECIPIENT = "<|recipient|>";
 const END = "<|end|>";
 const RETURN = "<|return|>";
 
-const MARKERS: ReadonlyArray<string> = [START, CHANNEL, MESSAGE, END, RETURN];
+const MARKERS: ReadonlyArray<string> = [START, CHANNEL, CONSTRAIN, MESSAGE, RECIPIENT, END, RETURN];
+const HEADER_METADATA_MARKERS: ReadonlyArray<string> = [CONSTRAIN, RECIPIENT];
 const MAX_MARKER_LENGTH = MARKERS.reduce((max, marker) => Math.max(max, marker.length), 0);
 
 export interface HarmonyParsedChunk {
@@ -128,7 +131,9 @@ export class HarmonyResponseParser {
 	}
 
 	private setChannel(rawChannel: string): void {
-		const channel = rawChannel.trim().toLowerCase();
+		const metadataIndex = firstHeaderMetadataIndex(rawChannel);
+		const channelText = metadataIndex === -1 ? rawChannel : rawChannel.slice(0, metadataIndex);
+		const channel = (channelText.trim().split(/\s+/, 1)[0] ?? "").toLowerCase();
 		this.route = channel === "final" ? "text" : "thinking";
 	}
 }
@@ -140,6 +145,15 @@ function emptyParsed(): HarmonyParsedChunk {
 function firstMarkerIndex(value: string): number {
 	let first = -1;
 	for (const marker of MARKERS) {
+		const idx = value.indexOf(marker);
+		if (idx !== -1 && (first === -1 || idx < first)) first = idx;
+	}
+	return first;
+}
+
+function firstHeaderMetadataIndex(value: string): number {
+	let first = -1;
+	for (const marker of HEADER_METADATA_MARKERS) {
 		const idx = value.indexOf(marker);
 		if (idx !== -1 && (first === -1 || idx < first)) first = idx;
 	}

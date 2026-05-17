@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.8-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.9-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,19 +30,16 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.8**.
+Clio Coder is currently in **alpha**. The current release is **v0.1.9**.
 
-## What's new in v0.1.8
+## What's new in v0.1.9
 
-A supervised-control and configure-hardening release. The headline is that the `claude-code-sdk` runtime now goes through Clio's safety policy with a real overlay for `ask` decisions, and `clio configure` rejects nonsense before it reaches the runtime.
+A local-model hardening release. The headline is that llama.cpp/OpenAI-compatible targets now resolve local model thinking capabilities through one shared path, including GPT-OSS/Harmony reasoning and JSON responses.
 
-- **Configure validation.** `clio configure --runtime <r> --model <m>` rejects models that are not in the runtime catalog (exit 2, with a known-models listing). `--context-window N` is rejected when it exceeds the catalog max. Both gates share a `--force` flag that warns instead of failing for advanced users.
-- **SDK canUseTool wired to Clio safety.** The `claude-code-sdk` runtime now calls Clio's `SafetyContract` for every Claude Code tool request. Allow / block / ask decisions match what native Clio workers would do for the same tool.
-- **Bidirectional approval IPC.** Workers and the orchestrator now talk both directions over the worker subprocess's stdin. `clio_tool_approval_request` and `clio_tool_approval_response` NDJSON messages carry safety asks to the TUI and decisions back to the worker.
-- **Tool-approval overlay.** Supervised SDK runs open a TUI overlay showing the Claude tool, arguments, classification, and policy hint. `[A]` allows once, `[D]` and `Esc` deny.
-- **`--auto-approve` flag.** `clio run --auto-approve <allow|deny>` skips the IPC handshake for headless runs. Unsupervised runs without the flag auto-deny ask decisions and record `"headless ask auto-denied; pass --auto-approve to override"` in the receipt.
-- **Receipt accounting for SDK gates.** SDK runs now record allow / elevated / blocked counts and populate `safety.blockedAttempts` so the receipt reflects what Clio actually gated.
-- **gemini-cli token fix.** Receipts for gemini runs now show real `tokenCount` values; the parser reads the per-call `stats` field gemini's `stream-json` emits.
+- **Local thinking surfaces.** Clio now centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, and worker dispatch agree on the effective thinking level.
+- **GPT-OSS/Harmony support.** GPT-OSS models use the OpenAI-compatible chat-completions path with Harmony reasoning effort passed through the request payload.
+- **Harmony JSON fix.** Raw Harmony constrained-final frames such as `<|constrain|>json` are routed to visible assistant text instead of surfacing as parser errors.
+- **Cleaner workers.** Dispatch now requires explicit allowed tool profiles and records effective thinking state in receipts.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
@@ -93,14 +90,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.1.8
+git checkout v0.1.9
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.8` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.9` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -689,7 +686,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 ## Roadmap
 
-Current release: **v0.1.8** alpha (supervised SDK control plus configure validation). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
+Current release: **v0.1.9** alpha (local model thinking and GPT-OSS/Harmony hardening). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
 
 Near-term:
 
