@@ -23,9 +23,9 @@ List and manage configured model targets.
 Usage:
   clio targets [--json] [--probe] [--target <id>]
   clio targets add [configure flags]
-  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]
-  clio targets workers [--json]
-  clio targets worker <profile> <id> [--model <id>] [--thinking <level>]
+  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]
+  clio targets fleet [--json]
+  clio targets profile <name> <id> [--model <id>] [--thinking <level>]
   clio targets convert <id> --runtime <runtimeId>
   clio targets remove <id>
   clio targets rename <old> <new>
@@ -89,8 +89,8 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	const subcommand = args[0];
 	if (subcommand === "add") return runConfigureCommand(args.slice(1));
 	if (subcommand === "use") return runUse(args.slice(1));
-	if (subcommand === "workers") return runWorkers(args.slice(1));
-	if (subcommand === "worker") return runWorker(args.slice(1));
+	if (subcommand === "fleet" || subcommand === "workers") return runFleet(args.slice(1));
+	if (subcommand === "profile" || subcommand === "worker") return runProfile(args.slice(1));
 	if (subcommand === "remove") return runRemove(args.slice(1));
 	if (subcommand === "rename") return runRename(args.slice(1));
 	if (subcommand === "convert") return runConvert(args.slice(1));
@@ -172,7 +172,7 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 			parsed.orchestratorModel = need();
 			continue;
 		}
-		if (arg === "--worker-model") {
+		if (arg === "--fleet-model" || arg === "--worker-model") {
 			parsed.workerModel = need();
 			continue;
 		}
@@ -191,7 +191,7 @@ function runUse(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--worker-model <id>]");
+		printError("usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]");
 		return 2;
 	}
 	ensureClioState();
@@ -207,7 +207,7 @@ function runUse(args: ReadonlyArray<string>): number {
 	settings.workers.default.endpoint = target.id;
 	settings.workers.default.model = parsed.workerModel ?? sharedModel;
 	writeSettings(settings);
-	printOk(`using target ${target.id} for chat and workers`);
+	printOk(`using target ${target.id} for chat and fleet dispatch`);
 	return 0;
 }
 
@@ -237,12 +237,12 @@ function parseWorkerArgs(args: ReadonlyArray<string>): WorkerProfileArgs | null 
 			continue;
 		}
 		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
-		throw new Error(`unknown targets worker argument: ${arg}`);
+		throw new Error(`unknown targets profile argument: ${arg}`);
 	}
 	return parsed;
 }
 
-function runWorker(args: ReadonlyArray<string>): number {
+function runProfile(args: ReadonlyArray<string>): number {
 	let parsed: WorkerProfileArgs | null;
 	try {
 		parsed = parseWorkerArgs(args);
@@ -251,7 +251,7 @@ function runWorker(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets worker <profile> <id> [--model <id>] [--thinking <level>]");
+		printError("usage: clio targets profile <name> <id> [--model <id>] [--thinking <level>]");
 		return 2;
 	}
 	ensureClioState();
@@ -268,11 +268,11 @@ function runWorker(args: ReadonlyArray<string>): number {
 		thinkingLevel: parsed.thinkingLevel ?? existing?.thinkingLevel ?? "off",
 	};
 	writeSettings(settings);
-	printOk(`worker profile ${parsed.name} -> ${target.id}`);
+	printOk(`fleet profile ${parsed.name} -> ${target.id}`);
 	return 0;
 }
 
-function runWorkers(args: ReadonlyArray<string>): number {
+function runFleet(args: ReadonlyArray<string>): number {
 	let json = false;
 	for (const arg of args) {
 		if (arg === "--json") {
@@ -280,10 +280,10 @@ function runWorkers(args: ReadonlyArray<string>): number {
 			continue;
 		}
 		if (arg === "--help" || arg === "-h") {
-			process.stdout.write("usage: clio targets workers [--json]\n");
+			process.stdout.write("usage: clio targets fleet [--json]\n");
 			return 0;
 		}
-		printError(`unknown targets workers argument: ${arg}`);
+		printError(`unknown targets fleet argument: ${arg}`);
 		return 2;
 	}
 	ensureClioState();
@@ -304,7 +304,7 @@ function runWorkers(args: ReadonlyArray<string>): number {
 		return 0;
 	}
 	if (rows.length === 0) {
-		process.stdout.write("no worker profiles configured. run `clio targets worker <profile> <id>` to add one.\n");
+		process.stdout.write("no fleet profiles configured. run `clio targets profile <name> <id>` to add one.\n");
 		return 0;
 	}
 	process.stdout.write(`${pad("profile", 18)}${pad("target", 16)}${pad("runtime", 20)}${pad("model", 30)}thinking\n`);

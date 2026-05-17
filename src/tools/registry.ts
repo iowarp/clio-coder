@@ -202,6 +202,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const parked: ParkedCall[] = [];
 	const superListeners = new Set<(call: ClassifierCall) => void>();
 	let protectedArtifactState = cloneProtectedArtifactState(deps.protectedArtifacts ?? { artifacts: [] });
+	const successfulDispatchesByTurn = new Map<string, Set<string>>();
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -211,17 +212,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): Promise<RegistryVerdict> => {
 		const existingProtectedBlock = protectedArtifactBlock(spec, call);
 		if (existingProtectedBlock) return { kind: "blocked", reason: existingProtectedBlock, decision };
+		const duplicateDispatch = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
+		if (duplicateDispatch !== null) return { kind: "blocked", reason: duplicateDispatch, decision };
 		const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
 		applyProtectPathEffects(beforeEffects, spec, call, options);
 		const block = firstBlockToolEffect(beforeEffects);
 		if (block) return { kind: "blocked", reason: block.reason, decision };
 		const protectedBlock = protectedArtifactBlock(spec, call);
+		const duplicateDispatchAfterHooks = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
+		if (duplicateDispatchAfterHooks !== null) return { kind: "blocked", reason: duplicateDispatchAfterHooks, decision };
 		if (protectedBlock) return { kind: "blocked", reason: protectedBlock, decision };
 		try {
 			const result = await spec.run(call.args ?? {}, options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
-			return { kind: "ok", result: applyToolResultEffects(result, afterEffects), decision };
+			const finalResult = applyToolResultEffects(result, afterEffects);
+			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
+			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			const result: ToolResult = { kind: "error", message };
@@ -413,6 +420,116 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
+}
+
+const DISPATCH_GUARD_TURN_LIMIT = 32;
+const DISPATCH_DEFAULT_AGENT_ID = "implementer";
+
+function dispatchDuplicateBlock(
+	successfulDispatchesByTurn: Map<string, Set<string>>,
+	spec: ToolSpec,
+	call: ClassifierCall,
+	options?: ToolInvokeOptions,
+): string | null {
+	if (spec.name !== ToolNames.Dispatch || !options?.turnId) return null;
+	const fingerprint = dispatchFingerprint(call.args);
+	if (fingerprint === null) return null;
+	const seen = successfulDispatchesByTurn.get(options.turnId);
+	if (!seen?.has(fingerprint)) return null;
+	const summary = dispatchSummary(call.args);
+	return `dispatch duplicate blocked: ${summary} already completed successfully in this user turn. Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`;
+}
+
+function rememberSuccessfulDispatch(
+	successfulDispatchesByTurn: Map<string, Set<string>>,
+	spec: ToolSpec,
+	call: ClassifierCall,
+	options: ToolInvokeOptions | undefined,
+	result: ToolResult,
+): void {
+	if (spec.name !== ToolNames.Dispatch || !options?.turnId || result.kind !== "ok") return;
+	const details = asRecord(result.details);
+	if (details?.exitCode !== 0) return;
+	const fingerprint = dispatchFingerprint(call.args);
+	if (fingerprint === null) return;
+	let seen = successfulDispatchesByTurn.get(options.turnId);
+	if (!seen) {
+		seen = new Set<string>();
+		successfulDispatchesByTurn.set(options.turnId, seen);
+		while (successfulDispatchesByTurn.size > DISPATCH_GUARD_TURN_LIMIT) {
+			const oldest = successfulDispatchesByTurn.keys().next().value;
+			if (typeof oldest !== "string") break;
+			successfulDispatchesByTurn.delete(oldest);
+		}
+	}
+	seen.add(fingerprint);
+}
+
+function dispatchFingerprint(args: unknown): string | null {
+	const record = asRecord(args);
+	if (record === null) return null;
+	const task = stringValue(record.task);
+	if (task === null) return null;
+	const normalized = {
+		agentId:
+			stringValue(record.agent_id) ??
+			stringValue(record.agentId) ??
+			stringValue(record.agent) ??
+			DISPATCH_DEFAULT_AGENT_ID,
+		task,
+		target: stringValue(record.target) ?? stringValue(record.endpoint) ?? "",
+		model: stringValue(record.model) ?? "",
+		profile:
+			stringValue(record.agent_profile) ?? stringValue(record.worker_profile) ?? stringValue(record.workerProfile) ?? "",
+		runtime:
+			stringValue(record.agent_runtime) ?? stringValue(record.worker_runtime) ?? stringValue(record.workerRuntime) ?? "",
+		toolProfile: stringValue(record.tool_profile) ?? stringValue(record.toolProfile) ?? "",
+		thinkingLevel: stringValue(record.thinking_level) ?? stringValue(record.thinkingLevel) ?? "",
+		cwd: stringValue(record.cwd) ?? "",
+		memorySection: stringValue(record.memory_section) ?? stringValue(record.memorySection) ?? "",
+		requiredCapabilities: stringArrayValue(record.required_capabilities ?? record.requiredCapabilities).sort(),
+	};
+	return stableJson(normalized);
+}
+
+function dispatchSummary(args: unknown): string {
+	const record = asRecord(args);
+	if (record === null) return "that dispatch";
+	const agentId =
+		stringValue(record.agent_id) ?? stringValue(record.agentId) ?? stringValue(record.agent) ?? DISPATCH_DEFAULT_AGENT_ID;
+	const task = stringValue(record.task) ?? "";
+	const taskSummary = task.length > 80 ? `${task.slice(0, 77)}...` : task;
+	return `agent=${agentId} task=${JSON.stringify(taskSummary)}`;
+}
+
+function stringValue(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function stringArrayValue(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value
+		.filter((item): item is string => typeof item === "string")
+		.map((item) => item.trim())
+		.filter(Boolean);
+}
+
+function stableJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+	if (value !== null && typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		return `{${Object.keys(record)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value);
 }
 
 function emitProtectedArtifactEvent(deps: RegistryDeps, event: ProtectedArtifactRegistryEvent): void {

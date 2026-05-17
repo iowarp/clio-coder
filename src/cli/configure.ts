@@ -27,7 +27,7 @@ import { validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio configure
 
-Configure model targets for chat and worker dispatch.
+Configure model targets for chat and fleet-agent dispatch.
 
 Usage:
   clio configure                   interactive wizard
@@ -41,10 +41,10 @@ Non-interactive flags:
   --url <host>                     target base URL (http(s):// or ws://)
   --model <wireModelId>            default model id for this target
   --orchestrator-model <id>        model to use when setting chat default
-  --worker-model <id>              model to use when setting worker default
-                                   (mutually exclusive with --worker-profile)
-  --worker-profile <name>          save this target as a named worker profile
-  --worker-profile-model <id>      model to use for --worker-profile
+  --fleet-model <id>               model to use when setting fleet default
+                                   (mutually exclusive with --agent-profile)
+  --agent-profile <name>           save this target as a named fleet profile
+  --agent-profile-model <id>       model to use for --agent-profile
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
   --force                          allow a model outside the runtime catalog
@@ -52,7 +52,7 @@ Non-interactive flags:
   --lifecycle <user-managed|clio-managed>
                                   resident model lifecycle policy
   --set-orchestrator               use this target for chat
-  --set-worker-default             use this target for workers
+  --set-fleet-default              use this target for the fleet default
   --context-window <N>             capability override
   --max-tokens <N>                 output token capability override
   --reasoning <true|false>         capability override
@@ -154,12 +154,15 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			case "--orchestrator-model":
 				out.orchestratorModel = need();
 				break;
+			case "--fleet-model":
 			case "--worker-model":
 				out.workerModel = need();
 				break;
+			case "--agent-profile":
 			case "--worker-profile":
 				out.workerProfile = need();
 				break;
+			case "--agent-profile-model":
 			case "--worker-profile-model":
 				out.workerProfileModel = need();
 				break;
@@ -186,6 +189,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			case "--set-orchestrator":
 				out.setOrchestrator = true;
 				break;
+			case "--set-fleet-default":
 			case "--set-worker-default":
 				out.setWorkerDefault = true;
 				break;
@@ -393,7 +397,7 @@ function setWorkerProfilePointer(
 	model?: string | null,
 ): void {
 	const trimmed = name.trim();
-	if (trimmed.length === 0) throw new Error("worker profile name must be non-empty");
+	if (trimmed.length === 0) throw new Error("fleet profile name must be non-empty");
 	settings.workers.profiles[trimmed] = {
 		endpoint: descriptor.id,
 		model: model ?? descriptor.defaultModel ?? null,
@@ -415,9 +419,9 @@ function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, pr
 		process.stdout.write(`  ${line}\n`);
 	}
 	if (settings.orchestrator.endpoint === descriptor.id) process.stdout.write("  orchestrator target\n");
-	if (settings.workers.default.endpoint === descriptor.id) process.stdout.write("  worker default\n");
+	if (settings.workers.default.endpoint === descriptor.id) process.stdout.write("  fleet default\n");
 	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-		if (profile.endpoint === descriptor.id) process.stdout.write(`  worker profile ${name}\n`);
+		if (profile.endpoint === descriptor.id) process.stdout.write(`  fleet profile ${name}\n`);
 	}
 	process.stdout.write(`\nsettings written to ${settingsPath()}\n`);
 }
@@ -549,16 +553,16 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		return 2;
 	}
 	if (args.workerProfileModel !== undefined && args.workerProfile === undefined) {
-		printError("--worker-profile-model requires --worker-profile");
+		printError("--agent-profile-model requires --agent-profile");
 		return 2;
 	}
 	if (args.workerProfile !== undefined && args.workerProfile.trim().length === 0) {
-		printError("--worker-profile must be non-empty");
+		printError("--agent-profile must be non-empty");
 		return 2;
 	}
 	if (args.workerProfile !== undefined && args.workerModel !== undefined) {
 		printError(
-			"--worker-model and --worker-profile conflict; use --worker-profile-model for the profile, or drop --worker-profile to set the worker default",
+			"--fleet-model and --agent-profile conflict; use --agent-profile-model for the profile, or drop --agent-profile to set the fleet default",
 		);
 		return 2;
 	}
@@ -1040,7 +1044,7 @@ async function runInteractive(
 		: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.endpoint);
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
-		: await askYesNo(rl, "use as worker default?", !settings.workers.default.endpoint);
+		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.endpoint);
 	const orchestratorModel = setOrchestrator
 		? (defaults.orchestratorModel ??
 			(await askModelChoice(
@@ -1055,7 +1059,7 @@ async function runInteractive(
 		? (defaults.workerModel ??
 			(await askModelChoice(
 				rl,
-				"Worker model",
+				"Fleet model",
 				wireModels,
 				settings.workers.default.endpoint === endpointId ? (settings.workers.default.model ?? model) : model,
 			)))

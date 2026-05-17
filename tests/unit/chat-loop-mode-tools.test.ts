@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../../src/domains/modes/matrix.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -90,9 +91,22 @@ function fakeProviders(): ProvidersContract {
 	};
 }
 
+function fakeDispatch(): DispatchContract {
+	return {
+		dispatch: async () => {
+			throw new Error("not used");
+		},
+		listRuns: () => [],
+		getRun: () => null,
+		abort: () => {},
+		drain: async () => {},
+	};
+}
+
 const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = {
 	default: [
 		"bash",
+		"dispatch",
 		"edit",
 		"entry_points",
 		"find",
@@ -113,6 +127,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"write",
 	],
 	advise: [
+		"dispatch",
 		"entry_points",
 		"find",
 		"find_symbol",
@@ -130,6 +145,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 	],
 	super: [
 		"bash",
+		"dispatch",
 		"edit",
 		"entry_points",
 		"find",
@@ -181,7 +197,7 @@ describe("interactive/chat-loop mode-aware tool resolution", () => {
 
 			const modes = liveModesAt(mode);
 			const toolRegistry = createRegistry({ safety: fakeSafety(), modes });
-			registerAllTools(toolRegistry);
+			registerAllTools(toolRegistry, { dispatch: fakeDispatch() });
 
 			let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
 			const agentState: {
@@ -258,7 +274,7 @@ describe("interactive/chat-loop mode-aware tool resolution", () => {
 		// post-toggle mode rather than the boot-time mode.
 		const modes = liveMutableModes("default");
 		const toolRegistry = createRegistry({ safety: fakeSafety(), modes });
-		registerAllTools(toolRegistry);
+		registerAllTools(toolRegistry, { dispatch: fakeDispatch() });
 
 		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
 		const agentState: {

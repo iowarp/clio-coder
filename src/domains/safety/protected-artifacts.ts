@@ -398,6 +398,10 @@ function validationMatch(executable: string, args: ReadonlyArray<string>): strin
 	if (executable === "npm") {
 		if (args[0] === "test") return "npm test";
 		if (args[0] === "run" && args[1] === "test") return "npm run test";
+		if (args[0] === "run" && args[1] === "test:e2e") return "npm run test:e2e";
+		if (args[0] === "run" && args[1] === "lint") return "npm run lint";
+		if (args[0] === "run" && args[1] === "build") return "npm run build";
+		if (args[0] === "run" && args[1] === "typecheck") return "npm run typecheck";
 	}
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";

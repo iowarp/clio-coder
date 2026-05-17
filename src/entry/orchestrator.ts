@@ -9,6 +9,8 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
+import { renderAgentCatalog } from "../domains/agents/catalog.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -413,6 +415,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
 	const prompts = result.getContract<PromptsContract>("prompts");
+	const agents = result.getContract<AgentsContract>("agents");
 	const resources = result.getContract<ResourcesContract>("resources");
 	const extensions = result.getContract<ExtensionsContract>("extensions");
 	const share = result.getContract<ShareContract>("share");
@@ -446,6 +449,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
+		dispatch,
+		bus,
 	});
 
 	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
@@ -489,6 +494,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		observability,
 		bus,
 		...(prompts ? { prompts } : {}),
+		...(agents ? { getAgentCatalog: () => renderAgentCatalog(agents.list()) } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: () => {
 			try {

@@ -38,8 +38,8 @@ Usage:
   clio configure            interactive first-run/configuration wizard
   clio targets              list configured targets, health, auth, and capabilities
   clio targets add          add a target interactively or via flags
-  clio targets use <id>     set chat and worker defaults to a target
-  clio targets worker       set a named worker profile
+  clio targets use <id>     set chat and fleet defaults to a target
+  clio targets profile      set a named fleet profile
   clio targets remove <id>  remove a target
   clio targets rename <old> <new>  rename a target
   clio models [search]      list models for configured targets
@@ -57,7 +57,7 @@ Usage:
   clio extensions           install, list, enable, disable, or remove extension packages
   clio share export|import  export or import Clio project/resource archives
   clio init [--yes]         bootstrap or refresh CLIO.md for this project
-  clio run <task>           dispatch a one-shot worker
+  clio run <task>           dispatch a one-shot fleet agent
   clio --help, -h           this message
 `;
 

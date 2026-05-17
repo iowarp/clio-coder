@@ -1,3 +1,5 @@
+import type { SafeEventBus } from "../core/event-bus.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
@@ -5,6 +7,7 @@ import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
 import { whereIsTool } from "./codewiki/where-is.js";
+import { createDispatchTool } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { globTool } from "./glob.js";
@@ -30,6 +33,8 @@ import { writeReviewTool } from "./write-review.js";
 
 export interface ToolBootstrapDeps {
 	session?: SessionContract;
+	dispatch?: DispatchContract;
+	bus?: SafeEventBus;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
@@ -134,6 +139,16 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...withSourceInfo(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
+	if (deps.dispatch) {
+		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };
+		registry.register({
+			...withSourceInfo(createDispatchTool(dispatchToolDeps), {
+				path: "src/tools/dispatch.ts",
+				scope: "core",
+			}),
+			allowedModes: everyMode,
+		});
+	}
 
 	const session = deps.session;
 	if (session) {
@@ -154,5 +169,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 
 	assertBuiltinToolPolicy(registry.listAll(), {
 		includeSessionTools: Boolean(session),
+		includeDispatchTools: Boolean(deps.dispatch),
 	});
 }

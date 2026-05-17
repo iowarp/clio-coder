@@ -40,6 +40,9 @@ function resultFromEvent(event: ChatLoopEvent, current: PrintResult): PrintResul
 	if (error) return { text: "", error };
 	const text = assistantText(message).trimEnd();
 	if (text.length === 0) return current;
+	if (isDiagnosticAssistantText(text) && current.text.length > 0 && !isDiagnosticAssistantText(current.text)) {
+		return current;
+	}
 	return { text, error: null };
 }
 

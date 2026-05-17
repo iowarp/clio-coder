@@ -23,6 +23,7 @@ export interface DynamicInputs {
 	sessionNotes?: string;
 	contextFiles?: string;
 	projectType?: string | null;
+	agentCatalog?: string;
 	memorySection?: string;
 	turnCount?: number;
 	clioVersion?: string;
@@ -135,6 +136,12 @@ function renderMemoryBlock(memorySection: string | undefined): string {
 	return `# Memory\n\n${trimmed}`;
 }
 
+function renderAgentCatalogBlock(agentCatalog: string | undefined): string {
+	const trimmed = agentCatalog?.trim() ?? "";
+	if (trimmed.length === 0) return "";
+	return `# Agent Fleet\n\n${trimmed}`;
+}
+
 function renderSessionBlock(inputs: DynamicInputs): string {
 	const sessionNotes = inputs.sessionNotes?.trim() ?? "";
 	const turnCount = typeof inputs.turnCount === "number" ? inputs.turnCount : 0;
@@ -176,6 +183,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	];
 	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
 	if (project.length > 0) parts.push(project);
+	const agentCatalog = renderAgentCatalogBlock(inputs.dynamicInputs.agentCatalog);
+	if (agentCatalog.length > 0) parts.push(agentCatalog);
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
 	if (memory.length > 0) parts.push(memory);
 	const session = renderSessionBlock(inputs.dynamicInputs);

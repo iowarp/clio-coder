@@ -31,7 +31,7 @@ import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
-import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
+import { createRegistry, type ToolInvokeOptions, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
 import { validateEngineToolArguments } from "./ai.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
@@ -74,6 +74,7 @@ export interface ResolveAgentToolsInput {
 	mode: ModeName;
 	toolProfile?: ToolProfileName;
 	telemetry?: ToolTelemetry;
+	invokeOptions?: () => Partial<ToolInvokeOptions>;
 }
 
 export interface InvokeWorkerToolOptions {
@@ -96,16 +97,20 @@ interface RunValidatedToolCallInput {
 	mode: ModeName;
 	signal?: AbortSignal;
 	telemetry?: ToolTelemetry;
+	invokeOptions?: Partial<ToolInvokeOptions>;
 }
 
 async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<WorkerAgentToolResult> {
 	const { spec, args, registry, mode, signal, telemetry } = input;
 	const startedAt = Date.now();
 	telemetry?.onStart?.({ tool: spec.name, mode, startedAt });
-	const invokeOpts = signal ? { signal } : undefined;
+	const invokeOpts: ToolInvokeOptions = {};
+	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
+	if (signal) invokeOpts.signal = signal;
+	const hasInvokeOpts = Object.keys(invokeOpts).length > 0;
 	let verdictPromise: ReturnType<typeof registry.invoke>;
 	try {
-		verdictPromise = registry.invoke({ tool: spec.name, args }, invokeOpts);
+		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
 		emitFinish(telemetry, spec.name, mode, startedAt, "error", { reason: errorMessage(err) });
 		throw err;
@@ -181,13 +186,16 @@ function toAgentTool(
 	registry: ToolRegistry,
 	mode: ModeName,
 	telemetry: ToolTelemetry | undefined,
+	invokeOptions: (() => Partial<ToolInvokeOptions>) | undefined,
 ): AgentTool<TSchema> {
 	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
 		parameters: spec.parameters,
 		label: spec.name,
-		async execute(_toolCallId: string, params: unknown, signal?: AbortSignal): Promise<WorkerAgentToolResult> {
+		async execute(toolCallId: string, params: unknown, signal?: AbortSignal): Promise<WorkerAgentToolResult> {
+			const options = invokeOptions?.() ?? {};
+			if (toolCallId.length > 0) options.toolCallId = toolCallId;
 			const callInput: RunValidatedToolCallInput = {
 				spec,
 				args: params as Record<string, unknown>,
@@ -196,6 +204,7 @@ function toAgentTool(
 			};
 			if (signal) callInput.signal = signal;
 			if (telemetry) callInput.telemetry = telemetry;
+			if (Object.keys(options).length > 0) callInput.invokeOptions = options;
 			return runValidatedToolCall(callInput);
 		},
 	};
@@ -479,7 +488,9 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);
 	}
-	return specs.map((spec) => toAgentTool(spec, input.registry, input.mode, input.telemetry)) as unknown as AgentTool[];
+	return specs.map((spec) =>
+		toAgentTool(spec, input.registry, input.mode, input.telemetry, input.invokeOptions),
+	) as unknown as AgentTool[];
 }
 
 /**

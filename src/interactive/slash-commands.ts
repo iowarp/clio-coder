@@ -153,11 +153,11 @@ function parseRunCommand(rest: string): SlashCommand {
 	while (i < parts.length) {
 		const part = parts[i];
 		if (!part?.startsWith("--")) break;
-		if (part === "--worker-profile" || part === "--worker") {
+		if (part === "--agent-profile" || part === "--worker-profile" || part === "--worker") {
 			const value = need();
 			if (!value) return { kind: "run-usage" };
 			options.workerProfile = value;
-		} else if (part === "--worker-runtime" || part === "--runtime") {
+		} else if (part === "--agent-runtime" || part === "--worker-runtime" || part === "--runtime") {
 			const value = need();
 			if (!value) return { kind: "run-usage" };
 			options.workerRuntime = value;
@@ -437,7 +437,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "run",
-		description: "Run a worker agent",
+		description: "Run a fleet agent",
 		argumentHint: "[options] <agent> <task>",
 		kinds: ["run", "run-usage"],
 		match(trimmed) {
@@ -450,7 +450,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind === "run-usage") {
 				ctx.io.stdout(
-					"\nusage: /run [--worker <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>\n",
+					"\nusage: /run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>\n",
 				);
 				return;
 			}

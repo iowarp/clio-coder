@@ -21,20 +21,20 @@ import { SessionDomainModule } from "../domains/session/index.js";
 import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 
 const USAGE =
-	'usage: clio run [--worker-profile <name>] [--worker-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
+	'usage: clio run [--agent-profile <name>] [--agent-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
-Dispatch a one-shot worker against a target and print the run receipt.
+Dispatch a one-shot Clio agent from the fleet and print the run receipt.
 
 Flags:
-  --worker-profile <name>   named worker profile to dispatch under
-  --worker-runtime <id>     pick the first profile whose endpoint uses this runtime
+  --agent-profile <name>    named fleet profile to dispatch under
+  --agent-runtime <id>      pick the first fleet profile whose endpoint uses this runtime
   --target <id>             explicit endpoint id (takes precedence over profile/runtime)
   --model <wireId>          override the wire model id for this run
   --thinking <level>        thinking level: off|minimal|low|medium|high|xhigh
-  --agent <recipe-id>       agent recipe (defaults to scout)
-  --tool-profile <name>     restrict worker tools: minimal-local|science-local|full-agent
+  --agent <recipe-id>       agent recipe (defaults to implementer)
+  --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the target must advertise (repeatable)
   --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
   --json                    stream events and the final receipt as JSON
@@ -71,11 +71,11 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
 		if (a === "--help" || a === "-h") {
 			return null;
 		}
-		if (a === "--worker-profile" || a === "--worker") {
+		if (a === "--agent-profile" || a === "--worker-profile" || a === "--worker") {
 			const v = need();
 			if (v === null) return null;
 			out.workerProfile = v;
-		} else if (a === "--worker-runtime" || a === "--runtime") {
+		} else if (a === "--agent-runtime" || a === "--worker-runtime" || a === "--runtime") {
 			const v = need();
 			if (v === null) return null;
 			out.workerRuntime = v;
@@ -154,12 +154,12 @@ export async function runClioRun(
 
 	if (parsed.target && parsed.workerProfile) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --worker-profile ${parsed.workerProfile} will be ignored\n`,
+			`clio run: --target ${parsed.target} takes precedence; --agent-profile ${parsed.workerProfile} will be ignored\n`,
 		);
 	}
 	if (parsed.target && parsed.workerRuntime) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --worker-runtime ${parsed.workerRuntime} will be ignored\n`,
+			`clio run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.workerRuntime} will be ignored\n`,
 		);
 	}
 
@@ -219,7 +219,7 @@ export async function runClioRun(
 	}
 
 	const dispatchReq: DispatchRequest = {
-		agentId: parsed.agentId ?? "scout",
+		agentId: parsed.agentId ?? "implementer",
 		task: parsed.task,
 	};
 	if (parsed.workerProfile) dispatchReq.workerProfile = parsed.workerProfile;
