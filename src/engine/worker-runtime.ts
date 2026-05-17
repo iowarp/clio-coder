@@ -49,8 +49,8 @@ export interface WorkerRunInput {
 	modelCapabilities?: Partial<CapabilityFlags>;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
-	/** Tool ids the agent is allowed to use. Defaults to the mode matrix. */
-	allowedTools?: ReadonlyArray<ToolName>;
+	/** Tool ids the worker is allowed to expose for this run. */
+	allowedTools: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
 	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
@@ -151,7 +151,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (input.signal !== undefined) subprocessInput.signal = input.signal;
 		if (input.sessionId !== undefined) subprocessInput.sessionId = input.sessionId;
 		if (input.mode !== undefined) subprocessInput.mode = input.mode;
-		if (input.allowedTools !== undefined) subprocessInput.allowedTools = input.allowedTools;
+		subprocessInput.allowedTools = input.allowedTools;
 		return startSubprocessWorkerRun(subprocessInput, emit);
 	}
 
@@ -169,7 +169,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		}
 		if (input.mode !== undefined) sdkInput.mode = input.mode;
 		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
-		if (input.allowedTools !== undefined) sdkInput.allowedTools = input.allowedTools;
+		sdkInput.allowedTools = input.allowedTools;
 		if (input.signal !== undefined) sdkInput.signal = input.signal;
 		const sdkSafety = createWorkerSafety({ cwd: process.cwd() });
 		sdkInput.safety = sdkSafety;
@@ -206,11 +206,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry,
 		mode,
 		telemetry,
-		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+		allowedTools: input.allowedTools,
 	});
-	if (tools.length === 0 && (input.allowedTools?.length ?? 0) > 0) {
+	if (tools.length === 0 && input.allowedTools.length > 0) {
 		process.stderr.write(
-			`[worker] warning: no tools resolved for mode=${mode} allowed=[${(input.allowedTools ?? []).join(",")}]\n`,
+			`[worker] warning: no tools resolved for mode=${mode} allowed=[${input.allowedTools.join(",")}]\n`,
 		);
 	}
 	const effectiveThinkingLevel = clampThinkingLevelForModel(model, input.thinkingLevel);

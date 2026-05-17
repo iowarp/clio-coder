@@ -18,6 +18,7 @@ function specJson(overrides: Record<string, unknown> = {}): string {
 		},
 		runtimeId: "openai",
 		wireModelId: "gpt-test",
+		allowedTools: ["read"],
 		...overrides,
 	});
 }

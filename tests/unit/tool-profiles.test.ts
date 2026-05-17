@@ -41,6 +41,19 @@ describe("tool profiles", () => {
 		strictEqual(filteredSet.has(ToolNames.WebFetch), false);
 	});
 
+	it("keeps narrow profiles within the default-mode local tool surface", () => {
+		for (const profile of ["minimal-local", "science-local"] as const) {
+			const exposed = toolProfileToolNames(profile);
+			if (exposed === null) throw new Error(`${profile} unexpectedly exposes full-agent tools`);
+			for (const tool of exposed) {
+				strictEqual(MODE_MATRIX.default.tools.has(tool), true, `${profile} exposes non-default tool ${tool}`);
+			}
+			for (const disallowed of [ToolNames.Write, ToolNames.Edit, ToolNames.Bash, ToolNames.WebFetch]) {
+				strictEqual(exposed.includes(disallowed), false, `${profile} exposes ${disallowed}`);
+			}
+		}
+	});
+
 	it("adds validation commands for science-local without adding general write or shell tools", () => {
 		const filtered: ReadonlyArray<ToolName> = applyToolProfile([...MODE_MATRIX.default.tools], "science-local");
 

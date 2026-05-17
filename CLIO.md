@@ -19,10 +19,10 @@ Clio Coder is IOWarp's orchestrator coding agent. The pi SDK is a vendored engin
 
 <!-- clio:fingerprint v1
 {
-  "initAt": "2026-05-04T01:57:19.822Z",
+  "initAt": "2026-05-17T02:27:46.835Z",
   "model": "local-bootstrap",
-  "gitHead": "57ef01b1a6d8b4bc829154ce19c862d555e92b52",
-  "treeHash": "29828ed99631e3334bf9f3c4e4947faa294a9ce6e45f5513c758d73b3d9557f2",
-  "loc": 83717
+  "gitHead": "c65ef60821cd24eb0c00804e8f933b1b1f8d36f7",
+  "treeHash": "8526cd22906b29678a31aad2a3fcd445c3d0fa0cb2fccbb61782b732e6d89c75",
+  "loc": 95310
 }
 -->

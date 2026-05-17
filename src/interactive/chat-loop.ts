@@ -1302,6 +1302,32 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return true;
 	};
 
+	const appendSubmittedUserTurn = (
+		agentRuntime: AgentRuntime,
+		text: string,
+		images: ReadonlyArray<ImageContent> | undefined,
+	): void => {
+		if (!deps.session) return;
+		if (!deps.session.current()) {
+			deps.session.create({
+				cwd: process.cwd(),
+				endpoint: agentRuntime.endpointId,
+				model: agentRuntime.wireModelId,
+			});
+		}
+		const userTurn = deps.session.append({
+			kind: "user",
+			parentId: lastTurnId,
+			payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
+			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
+		});
+		lastTurnId = userTurn.id;
+		const sessionId = deps.session.current()?.id ?? null;
+		if (sessionId) {
+			agentRuntime.agent.sessionId = sessionId;
+		}
+	};
+
 	return {
 		queueFollowUp(text: string): boolean {
 			const trimmed = text.trim();
@@ -1363,26 +1389,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
-			if (deps.session) {
-				if (!deps.session.current()) {
-					deps.session.create({
-						cwd: process.cwd(),
-						endpoint: agentRuntime.endpointId,
-						model: agentRuntime.wireModelId,
-					});
-				}
-				const userTurn = deps.session.append({
-					kind: "user",
-					parentId: lastTurnId,
-					payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
-					...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
-				});
-				lastTurnId = userTurn.id;
-				const sessionId = deps.session.current()?.id ?? null;
-				if (sessionId) {
-					agentRuntime.agent.sessionId = sessionId;
-				}
-			}
+			appendSubmittedUserTurn(agentRuntime, text, images);
 
 			agentRuntime.agent.state.tools = resolveRuntimeTools(deps);
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;

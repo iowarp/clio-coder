@@ -9,16 +9,21 @@ import {
 } from "../../src/domains/eval/index.js";
 
 describe("eval harness metrics", () => {
-	it("counts verifier commands as validation evidence", () => {
+	it("counts successful verifier commands as validation evidence", () => {
 		deepStrictEqual(
-			evalHarnessMetricsFromCommands([command("setup", 0), command("verifier", 0), command("verifier", 1)]),
+			evalHarnessMetricsFromCommands([
+				command("setup", 0),
+				command("verifier", 0),
+				{ ...command("verifier", 1), exitCode: 1 },
+				{ ...command("verifier", 2), timedOut: true },
+			]),
 			{
 				receiptCount: 0,
 				toolCalls: 0,
 				retries: 0,
 				safetyBlocks: 0,
 				correctionLatencyMs: 0,
-				validationEvidence: 2,
+				validationEvidence: 1,
 			},
 		);
 	});
