@@ -42,7 +42,7 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
 	{ keys: "/receipts [verify <runId>]", action: "Browse or verify receipts", scope: "editor" },
 	{
-		keys: "/run [--worker <profile>|--runtime <id>|--tool-profile <profile>] <agent> <task>",
+		keys: "/run [--agent-profile <profile>|--runtime <id>|--tool-profile <profile>] <agent> <task>",
 		action: "Dispatch agent",
 		scope: "editor",
 	},

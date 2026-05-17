@@ -14,6 +14,7 @@ const EXPECTED_IDS: ReadonlyArray<string> = [
 	// existing
 	"context-builder",
 	"delegate",
+	"implementer",
 	"planner",
 	"researcher",
 	"reviewer",

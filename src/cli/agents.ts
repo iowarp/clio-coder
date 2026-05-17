@@ -30,7 +30,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 		await result.stop();
 		return 1;
 	}
-	const recipes = agents.list();
+	const recipes = agents.list().filter((recipe) => recipe.id !== "worker");
 	if (json) {
 		const withoutBody = recipes.map(({ body: _body, ...rest }) => rest);
 		process.stdout.write(`${JSON.stringify(withoutBody, null, 2)}\n`);

@@ -26,6 +26,7 @@ export const ToolNames = {
 	FindSymbol: "find_symbol",
 	EntryPoints: "entry_points",
 	WhereIs: "where_is",
+	Dispatch: "dispatch",
 } as const;
 
 export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];

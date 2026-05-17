@@ -4,9 +4,11 @@ import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([ToolNames.WorkspaceContext]);
+const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
+	includeDispatchTools?: boolean;
 }
 
 export function matrixModesForTool(tool: ToolName): ReadonlyArray<ModeName> {
@@ -59,10 +61,12 @@ export function validateBuiltinToolPolicy(
 	}
 
 	const includeSessionTools = options.includeSessionTools ?? false;
+	const includeDispatchTools = options.includeDispatchTools ?? false;
 	const required = new Set<ToolName>();
 	for (const mode of ALL_MODES) {
 		for (const tool of MODE_MATRIX[mode].tools) {
 			if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) continue;
+			if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) continue;
 			required.add(tool);
 		}
 	}

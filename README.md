@@ -36,10 +36,10 @@ Clio Coder is currently in **alpha**. The current release is **v0.1.9**.
 
 A local-model hardening release. The headline is that llama.cpp/OpenAI-compatible targets now resolve local model thinking capabilities through one shared path, including GPT-OSS/Harmony reasoning and JSON responses.
 
-- **Local thinking surfaces.** Clio now centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, and worker dispatch agree on the effective thinking level.
+- **Local thinking surfaces.** Clio now centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, and agent dispatch agree on the effective thinking level.
 - **GPT-OSS/Harmony support.** GPT-OSS models use the OpenAI-compatible chat-completions path with Harmony reasoning effort passed through the request payload.
 - **Harmony JSON fix.** Raw Harmony constrained-final frames such as `<|constrain|>json` are routed to visible assistant text instead of surfacing as parser errors.
-- **Cleaner workers.** Dispatch now requires explicit allowed tool profiles and records effective thinking state in receipts.
+- **Cleaner fleet dispatch.** Dispatch now requires explicit allowed tool profiles and records effective thinking state in receipts.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
@@ -61,8 +61,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 | Feature | What it gives you |
 | --- | --- |
 | Interactive terminal UI | Work with an assistant inside your repository without leaving the shell. |
-| Target-first model configuration | Route chat and workers through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
-| Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `worker`, and other focused agents. |
+| Target-first model configuration | Route chat and the agent fleet through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
+| Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `implementer`, and other focused agents. |
 | Persistent sessions | Resume, fork, compact, and replay coding sessions. |
 | Project context | Use checked-in `CLIO.md` as the canonical project guide, with `/init` and `clio init` to fold existing agent instruction files into it. |
 | Safety modes | Use default, advise, or super mode to gate which tools the assistant can see. |
@@ -140,7 +140,7 @@ Migrate older `openai-compat` targets pointing at LM Studio or Ollama with `clio
 For OpenRouter free-model testing:
 
 ```bash
-clio configure --runtime openrouter --id openrouter-free --model tencent/hy3-preview:free --api-key-env OPENROUTER_API_KEY --set-orchestrator --set-worker-default
+clio configure --runtime openrouter --id openrouter-free --model tencent/hy3-preview:free --api-key-env OPENROUTER_API_KEY --set-orchestrator --set-fleet-default
 clio targets --probe --target openrouter-free
 ```
 
@@ -175,7 +175,7 @@ When something breaks, open an issue with `clio --version`, `node --version`, th
 | `clio init [--yes]` | Create or refresh `CLIO.md` and local project fingerprint state. |
 | `clio targets` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio targets add` | Add a target interactively or through flags. |
-| `clio targets use <id>` | Set chat and worker defaults to one target. |
+| `clio targets use <id>` | Set chat and fleet defaults to one target. |
 | `clio targets remove <id>` | Remove a target. |
 | `clio targets rename <old> <new>` | Rename a target id. |
 | `clio models [search] [--target <id>]` | List discovered or known models. |
@@ -199,7 +199,7 @@ When something breaks, open an issue with `clio --version`, `node --version`, th
 | `clio share import <path> [--dry-run] [--force]` | Import a Clio share archive with conflict reporting. |
 | `clio export --out <path>` / `clio import <path>` | Short aliases for `clio share export` and `clio share import`. |
 | `clio --print [@files...] "<task>"` (alias `-p`) | Run one non-interactive chat turn, optionally including text file references, and print only the assistant text. |
-| `clio run [flags] "<task>"` | Dispatch one worker non-interactively and write a receipt. |
+| `clio run [flags] "<task>"` | Dispatch one fleet agent non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
 | `clio --no-context-files` (alias `-nc`) | Top-level flag that skips loading `CLIO.md` project context for one invocation. |
@@ -222,7 +222,7 @@ Slash commands are available inside the terminal UI. Type `/` at the start of th
 
 | Command | Purpose |
 | --- | --- |
-| `/run <agent> <task>` | Dispatch a worker and stream its events into the transcript. |
+| `/run <agent> <task>` | Dispatch a fleet agent and stream its events into the transcript. |
 | `/init` | Create or refresh the checked-in `CLIO.md` project guide. |
 | `/targets` | Show target health, auth, runtime, model, and capabilities. |
 | `/connect [target]` | Connect to a target or runtime. |
@@ -260,7 +260,7 @@ Clio Coder ships with built-in agent specs for common coding workflows.
 | `reviewer` | Reviewing work against a plan or coding standard. |
 | `delegate` | Routing work across multiple sub-agents. |
 | `context-builder` | Building focused context bundles for downstream agents. |
-| `worker` | General bounded execution tasks. |
+| `implementer` | General bounded implementation and repair tasks. |
 | `memory-curator` | Proposing scoped memory records from evidence artifacts. |
 | `debugger` | Explaining a failing run, session, or evidence id. |
 | `regression-scout` | Finding likely regressions and targeted negative tests. |
@@ -296,7 +296,7 @@ Clio Coder is target-first. A target describes how to reach a model and what cap
 | Cloud APIs | `anthropic`, `openai`, `google`, `groq`, `mistral`, `openrouter`, `bedrock`, `deepseek` |
 | Local HTTP | `openai-compat`, `lmstudio-native`, `ollama-native`, `llamacpp`, `vllm`, `sglang`, `lemonade` |
 | CLI runtimes | `codex-cli`, `claude-code-cli`, `gemini-cli`, `copilot-cli`, `opencode-cli` |
-| SDK runtimes | `claude-code-sdk` (Claude Agent SDK worker path) |
+| SDK runtimes | `claude-code-sdk` (Claude Agent SDK dispatch path) |
 
 Runtime tiers:
 
@@ -306,7 +306,7 @@ Runtime tiers:
 | `cloud` | Managed API providers with API-key, OAuth, or platform auth. |
 | `local-native` | Local model runtimes reached through native HTTP or SDK surfaces. |
 | `cli-gold`, `cli-silver`, `cli-bronze`, `cli` | CLI-backed runtimes launched through installed command-line tools. |
-| `sdk` | In-process SDK worker paths such as the Claude Agent SDK. |
+| `sdk` | In-process SDK dispatch paths such as the Claude Agent SDK. |
 
 Inspect target state with:
 
@@ -359,6 +359,7 @@ orchestrator:
   model: Qwen3.6-35B-A3B-UD-Q4_K_XL
   thinkingLevel: off
 
+# Fleet defaults live under the legacy settings key `workers`.
 workers:
   default:
     target: mini
@@ -475,18 +476,18 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 | Mode | Behavior |
 | --- | --- |
 | `default` | Read, write, edit, search, typed git/test/build tools, and default-deny Bash. Bash only admits the curated allowlist or audited project policy entries. |
-| `advise` | Read-oriented analysis, planning, and review. Dispatch admission is readonly. Worker recipes that need write/execute scope are rejected. |
+| `advise` | Read-oriented analysis, planning, and review. Dispatch admission is readonly. Agent recipes that need write/execute scope are rejected. |
 | `super` | Explicit operator elevation. Base hard blocks still apply. External CLI/SDK runtimes do not map to bypass/full-access unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`. |
 
 `Alt+S` opens the super confirmation overlay for one-shot privileged calls. `safetyLevel` in settings (`suggest`, `auto-edit`, `full-auto`) shifts prompt posture but does not override the enforcement gate.
 
 ### Enforcement layers
 
-1. **Damage-control rules.** Base hard blocks for things like `rm -rf /`, `git push --force`, `dd` writes to block devices, fork bombs, and pipe-to-shell installers. Applied identically in the orchestrator and native workers. See `damage-control-rules.yaml`.
+1. **Damage-control rules.** Base hard blocks for things like `rm -rf /`, `git push --force`, `dd` writes to block devices, fork bombs, and pipe-to-shell installers. Applied identically in the orchestrator and dispatched agents. See `damage-control-rules.yaml`.
 2. **Default-deny Bash.** Default mode denies arbitrary Bash. The allowlist covers common engineering commands (see [docs/specs/safety-model.md](docs/specs/safety-model.md) for the full list). Anything else needs an audited project policy entry or super elevation. Shell operators are denied unless a project policy entry explicitly opts in.
 3. **Typed execution tools.** `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script` use fixed argv vectors with bounded cwd, timeouts, and output caps. No `/bin/bash -lc`.
 4. **Project policy.** `.clio/safety.yaml` (schema v1) defines reviewed commands with `id`, `command`, optional relative `cwd`, `timeoutMs`, `maxOutputBytes`, `actionClass`, `shellOperators`, `env`, `requireConfirmation`, `rationale`, `owner`, `comment`. Strict validation: unknown keys, wrong types, absolute cwd, and `..`-escaping cwd reject the entire policy. Entries without `cwd` are bound to the policy root. Active runs use the snapshot the engine loaded at start, so an agent cannot edit and benefit from the new allowlist in the same run.
-5. **Dispatch admission.** Worker scope must be a subset of orchestrator scope, and the worker's requested action classes must fit inside its scope. Unknown tools classify as `unknown` and fail closed.
+5. **Dispatch admission.** Dispatched-agent scope must be a subset of orchestrator scope, and the agent's requested action classes must fit inside its scope. Unknown tools classify as `unknown` and fail closed.
 6. **External runtimes.** Subprocess CLIs (Claude Code, Codex, Gemini, Copilot, OpenCode) and the Claude Agent SDK are delegated sandboxes. Clio chooses conservative permission modes by default and refuses to map super to bypass without the explicit opt-in flag. Receipts call out this limitation for those runtimes.
 
 The full spec lives in [docs/specs/safety-model.md](docs/specs/safety-model.md).
@@ -552,7 +553,7 @@ A receipt records:
 - estimated USD cost;
 - tool statistics;
 - safety decision counts and blocked attempts;
-- worker mode, dispatch scope, requested action classes, and external runtime limitations;
+- agent mode, dispatch scope, requested action classes, and external runtime limitations;
 - damage-control rule-pack hash and project safety policy fingerprint;
 - integrity metadata;
 - a SHA-256 hash over receipt fields plus the matching run ledger entry.
@@ -628,7 +629,7 @@ Redact secrets and private repository content.
 
 ## For AI assistants reading this README
 
-The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not imply production stability or invent commands, runtimes, or capabilities. Configuration is target-first (`targets[]` → `orchestrator` → `workers.default`). Inspect `CLIO.md` before proposing changes. Keep `default`, `advise`, and `super` modes distinct. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
+The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not imply production stability or invent commands, runtimes, or capabilities. Configuration is target-first (`targets[]` → `orchestrator` → fleet defaults; the legacy settings key is `workers.default`). Inspect `CLIO.md` before proposing changes. Keep `default`, `advise`, and `super` modes distinct. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
 
 ---
 
@@ -656,7 +657,7 @@ Core source areas:
 src/cli/           CLI entry points
 src/interactive/   terminal UI
 src/engine/        model/provider engine boundary
-src/worker/        worker dispatch and runtime rehydration
+src/worker/        internal worker runtime rehydration
 src/domains/       domain logic and built-in agent specs
 tests/             unit, integration, boundary, and e2e tests
 ```
@@ -672,12 +673,12 @@ CLIO.md
 
 ## Architecture notes
 
-Clio Coder keeps model execution, worker dispatch, interactive UI state, and domain logic separated.
+Clio Coder keeps model execution, agent dispatch, interactive UI state, and domain logic separated.
 
 Boundary tests enforce three rules at build time:
 
 1. **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`. Type-only imports are allowed anywhere.
-2. **Worker isolation.** `src/worker/**` never imports `src/domains/**` except `src/domains/providers`, which carries pure runtime descriptors the worker rehydrates from stdin.
+2. **Internal worker isolation.** `src/worker/**` never imports `src/domains/**` except `src/domains/providers`, which carries pure runtime descriptors the internal runtime rehydrates from stdin.
 3. **Domain independence.** `src/domains/<x>/**` never imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
 
 This keeps provider-specific code contained and the system easier to reason about as more runtimes and agents are added.

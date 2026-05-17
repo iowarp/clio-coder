@@ -99,21 +99,21 @@ export function buildSettingItems(
 		},
 		{
 			id: "workers.default.endpoint",
-			label: "workers.default.target",
+			label: "fleet.default.target",
 			currentValue: settings.workers.default.endpoint ?? "(unset)",
 			description: "/run target id. Edit settings.yaml.",
 		},
 		{
 			id: "workers.default.model",
-			label: "workers.default.model",
+			label: "fleet.default.model",
 			currentValue: settings.workers.default.model ?? "(unset)",
 			description: "/run wire model id. Edit settings.yaml.",
 		},
 		{
 			id: "workers.profiles",
-			label: "workers.profiles",
+			label: "fleet.profiles",
 			currentValue: `${profileEntries.length} (${profileSummary})`,
-			description: "Named worker profiles. Edit via clio targets worker or settings.yaml.",
+			description: "Named fleet profiles. Edit via clio targets profile or settings.yaml.",
 		},
 		{
 			id: "endpoints.count",

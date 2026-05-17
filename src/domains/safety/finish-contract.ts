@@ -5,7 +5,7 @@ export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 
 const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 
-export type FinishContractEvidenceKind = "validation_command" | "protected_artifact";
+export type FinishContractEvidenceKind = "validation_command" | "protected_artifact" | "dispatch_receipt";
 
 export interface FinishContractEvidence {
 	kind: FinishContractEvidenceKind;
@@ -99,6 +99,7 @@ function collectRecentEvidence(
 	const recent = recentEntries(entries, assistantTurnId, recentEntryLimit);
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
+	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
 	for (const entry of recent) {
@@ -114,8 +115,20 @@ function collectRecentEvidence(
 			continue;
 		}
 
+		const dispatchCall = dispatchEvidenceCall(entry);
+		if (dispatchCall !== null) {
+			dispatchCalls.set(dispatchCall.toolCallId, dispatchCall);
+			continue;
+		}
+
 		const resultId = successfulToolResultId(entry);
 		if (resultId !== null) {
+			const dispatchCandidate = dispatchCalls.get(resultId);
+			const dispatchReceipt = dispatchReceiptEvidence(entry, dispatchCandidate);
+			if (dispatchReceipt !== null) {
+				pushEvidence(evidence, seen, dispatchReceipt);
+				continue;
+			}
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) {
 				pushEvidence(evidence, seen, validationEvidence(candidate));
@@ -173,6 +186,27 @@ function bashValidationCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	return candidate;
 }
 
+function dispatchEvidenceCall(entry: unknown): ToolCallEvidenceCandidate | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (toolName !== "dispatch") return null;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+	const task = typeof args?.task === "string" ? args.task.trim() : "";
+	const agentId = stringFromFirst(args ?? {}, ["agent_id", "agentId", "agent"]) ?? "implementer";
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	const candidate: ToolCallEvidenceCandidate = {
+		toolCallId,
+		command: `agent=${agentId}${task.length > 0 ? ` task=${task}` : ""}`,
+	};
+	const turnId = turnIdOf(entry);
+	if (turnId !== null) candidate.turnId = turnId;
+	return candidate;
+}
+
 function successfulToolResultId(entry: unknown): string | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "message" || record.role !== "tool_result") return null;
@@ -183,6 +217,34 @@ function successfulToolResultId(entry: unknown): string | null {
 	const details = asRecord(result?.details);
 	if (details?.kind === "error") return null;
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
+}
+
+function dispatchReceiptEvidence(
+	entry: unknown,
+	candidate: ToolCallEvidenceCandidate | undefined,
+): FinishContractEvidence | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_result") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["toolName", "name", "tool"]);
+	if (toolName !== null && toolName !== "dispatch") return null;
+	const result = asRecord(payload.result);
+	const details = asRecord(result?.details);
+	if (details === null) return null;
+	if (details.exitCode !== 0) return null;
+	const runId = typeof details.runId === "string" && details.runId.length > 0 ? details.runId : "unknown";
+	const agentId =
+		typeof details.agentId === "string" && details.agentId.length > 0
+			? details.agentId
+			: (candidate?.command.match(/^agent=([^\s]+)/)?.[1] ?? "unknown");
+	const evidence: FinishContractEvidence = {
+		kind: "dispatch_receipt",
+		summary: `dispatch receipt passed: run ${runId} agent ${agentId}`,
+	};
+	const turnId = candidate?.turnId ?? turnIdOf(entry);
+	if (turnId !== null && turnId !== undefined) evidence.turnId = turnId;
+	return evidence;
 }
 
 function bashExecutionEvidence(entry: unknown): FinishContractEvidence | null {

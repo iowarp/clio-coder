@@ -42,6 +42,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.FindSymbol,
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
+			ToolNames.Dispatch,
 		]),
 		allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch"]),
 		dispatchScope: "any",
@@ -63,6 +64,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.FindSymbol,
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
+			ToolNames.Dispatch,
 		]),
 		// write_plan/write_review are the only "write" tools in advise, so the
 		// action class "write" is allowed ONLY for those two tools. The registry
@@ -93,6 +95,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.FindSymbol,
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
+			ToolNames.Dispatch,
 		]),
 		// git_destructive remains hard-blocked regardless of mode.
 		allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify"]),

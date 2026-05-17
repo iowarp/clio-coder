@@ -42,7 +42,7 @@ import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
@@ -192,6 +192,8 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: () => string;
+	/** Build the prompt-visible catalog of custom agents available through dispatch. */
+	getAgentCatalog?: () => string;
 }
 
 interface ChatLoopTarget {
@@ -342,13 +344,17 @@ function visibleToolSnapshot(modes: ModesContract): ToolName[] {
 	return Array.from(modes.visibleTools());
 }
 
-function resolveRuntimeTools(deps: CreateChatLoopDeps): ReturnType<typeof resolveAgentTools> {
+function resolveRuntimeTools(
+	deps: CreateChatLoopDeps,
+	invokeOptions?: () => Partial<ToolInvokeOptions>,
+): ReturnType<typeof resolveAgentTools> {
 	if (!deps.toolRegistry) return [];
-	return resolveAgentTools({
+	const input = {
 		registry: deps.toolRegistry,
 		allowedTools: visibleToolSnapshot(deps.modes),
 		mode: deps.modes.current(),
-	});
+	};
+	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
 }
 
 interface RunUsageSummary {
@@ -480,6 +486,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
 	let currentTurnHash: string | null = null;
+	let activeUserTurnId: string | null = null;
 	const queuedFollowUps: string[] = [];
 	const persistedUserEchoes: string[] = [];
 
@@ -508,6 +515,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const idx = persistedUserEchoes.indexOf(text);
 			if (idx >= 0) persistedUserEchoes.splice(idx, 1);
 		}
+	};
+
+	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
+		const options: Partial<ToolInvokeOptions> = {};
+		const sessionId = deps.session?.current()?.id ?? null;
+		if (sessionId) options.sessionId = sessionId;
+		const turnId = activeUserTurnId ?? lastTurnId;
+		if (turnId) options.turnId = turnId;
+		return options;
 	};
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
@@ -550,6 +566,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
+		activeUserTurnId = userTurn.id;
 	};
 
 	const appendToolCallTurn = (event: Extract<AgentEvent, { type: "tool_execution_start" }>): void => {
@@ -871,7 +888,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		const model = synthesizeModel(target);
 		const initialThinkingLevel = clampThinkingLevelForModel(model, target.thinkingLevel);
-		const tools = resolveRuntimeTools(deps);
+		const tools = resolveRuntimeTools(deps, currentToolInvokeOptions);
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
@@ -1211,6 +1228,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 			}
 		}
+		if (deps.getAgentCatalog) {
+			try {
+				const agentCatalog = deps.getAgentCatalog();
+				if (agentCatalog.trim().length > 0) dynamicInputs.agentCatalog = agentCatalog;
+			} catch (err) {
+				emitNotice(
+					`[Clio Coder] agent catalog load failed; continuing without fleet catalog: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
 		const safetyLevel = settings.safetyLevel ?? "auto-edit";
 		try {
 			const result = await deps.prompts.compileForTurn({
@@ -1305,8 +1332,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		agentRuntime: AgentRuntime,
 		text: string,
 		images: ReadonlyArray<ImageContent> | undefined,
-	): void => {
-		if (!deps.session) return;
+	): string | null => {
+		if (!deps.session) return null;
 		if (!deps.session.current()) {
 			deps.session.create({
 				cwd: process.cwd(),
@@ -1321,10 +1348,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
+		activeUserTurnId = userTurn.id;
 		const sessionId = deps.session.current()?.id ?? null;
 		if (sessionId) {
 			agentRuntime.agent.sessionId = sessionId;
 		}
+		return userTurn.id;
 	};
 
 	return {
@@ -1353,6 +1382,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
 			if (streaming) {
+				const hasImages = options.images !== undefined && options.images.length > 0;
+				const trimmed = text.trim();
+				if (!hasImages && trimmed.length > 0 && runtime) {
+					const message = {
+						role: "user",
+						content: trimmed,
+						timestamp: Date.now(),
+					} as AgentMessage;
+					queuedFollowUps.push(trimmed);
+					runtime.agent.followUp(message);
+					emitQueueUpdate();
+					emitNotice("[Clio Coder] follow-up queued for the active run. Press Esc to cancel instead.");
+					return;
+				}
 				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
 				return;
 			}
@@ -1390,7 +1433,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			appendSubmittedUserTurn(agentRuntime, text, images);
 
-			agentRuntime.agent.state.tools = resolveRuntimeTools(deps);
+			agentRuntime.agent.state.tools = resolveRuntimeTools(deps, currentToolInvokeOptions);
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 
@@ -1441,6 +1484,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await runCompactAndRetry(agentRuntime, text, overflow, images);
 			} finally {
 				streaming = false;
+				activeUserTurnId = null;
 			}
 		},
 		cancel(): void {

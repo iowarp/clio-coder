@@ -77,6 +77,8 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.RunBuild:
 		case ToolNames.PackageScript:
 			return "execute";
+		case ToolNames.Dispatch:
+			return "dispatch";
 		default:
 			return null;
 	}

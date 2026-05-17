@@ -149,7 +149,7 @@ describe("interactive/welcome-dashboard", () => {
 		const stats = deriveWelcomeDashboardStats(deps({ contextTokens: 250 }));
 		strictEqual(stats.activeTargets, 3);
 		strictEqual(stats.totalTargets, 3);
-		strictEqual(stats.workerProfiles, 2);
+		strictEqual(stats.fleetProfiles, 2);
 		strictEqual(stats.contextPercent, 25);
 		strictEqual(stats.localModels, 1);
 		strictEqual(stats.cloudModels, 1);

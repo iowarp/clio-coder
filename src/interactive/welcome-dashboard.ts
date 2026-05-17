@@ -37,7 +37,7 @@ export interface WelcomeDashboardStats {
 	activeTargets: number;
 	totalTargets: number;
 	runtimes: number;
-	workerProfiles: number;
+	fleetProfiles: number;
 	totalModels: number;
 	localModels: number;
 	cloudModels: number;
@@ -244,8 +244,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		activeTargets: statuses.filter(activeStatus).length,
 		totalTargets: statuses.length,
 		runtimes: new Set(statuses.map((status) => status.endpoint.runtime)).size,
-		workerProfiles:
-			Object.keys(settings?.workers?.profiles ?? {}).length + (settings?.workers?.default?.endpoint ? 1 : 0),
+		fleetProfiles: Object.keys(settings?.workers?.profiles ?? {}).length + (settings?.workers?.default?.endpoint ? 1 : 0),
 		totalModels: localModels + cloudModels + cliModels,
 		localModels,
 		cloudModels,
@@ -371,7 +370,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		[
 			`Context usage: ${pct}`,
 			`${bar(stats.contextPercent, 18)}  avg latency ${formatLatency(stats.avgLatencyMs)}`,
-			`Preferences: ${stats.safetyLevel} · theme ${stats.theme} · workers ${stats.workerProfiles}`,
+			`Preferences: ${stats.safetyLevel} · theme ${stats.theme} · fleet ${stats.fleetProfiles}`,
 		],
 		content,
 	)) {

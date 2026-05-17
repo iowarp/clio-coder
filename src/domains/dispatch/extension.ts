@@ -447,8 +447,8 @@ function resolveDispatchTarget(
 	let endpointId = req.endpoint ?? null;
 	if (!endpointId && req.workerProfile) {
 		const profile = workerProfiles[req.workerProfile];
-		if (!profile) throw new Error(`dispatch: worker profile '${req.workerProfile}' not configured`);
-		if (!profile.endpoint) throw new Error(`dispatch: worker profile '${req.workerProfile}' has no target`);
+		if (!profile) throw new Error(`dispatch: fleet profile '${req.workerProfile}' not configured`);
+		if (!profile.endpoint) throw new Error(`dispatch: fleet profile '${req.workerProfile}' has no target`);
 		selectedWorkerTarget = profile;
 		endpointId = profile.endpoint;
 	}
@@ -471,9 +471,7 @@ function resolveDispatchTarget(
 		endpointId = workerDefault?.endpoint ?? null;
 	}
 	if (!endpointId) {
-		throw new Error(
-			"dispatch: no target configured (set workers.default.target, add workers.profiles, or pass --target)",
-		);
+		throw new Error("dispatch: no target configured (set the fleet default, add a fleet profile, or pass target)");
 	}
 	const endpoint = providers.getEndpoint(endpointId);
 	if (!endpoint) throw new Error(`dispatch: target '${endpointId}' not found`);
@@ -483,7 +481,7 @@ function resolveDispatchTarget(
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
 	const wireModelId = req.model ?? recipe?.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
 	if (!wireModelId) {
-		throw new Error(`dispatch: no model for target '${endpointId}' (set worker profile model or target.defaultModel)`);
+		throw new Error(`dispatch: no model for target '${endpointId}' (set a fleet profile model or target.defaultModel)`);
 	}
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe?.thinkingLevel ??
