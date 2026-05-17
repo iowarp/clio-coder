@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ClioKeybinding } from "../../src/domains/config/keybindings.js";
+import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/index.js";
 import {
 	CTRL_C_DOUBLE_TAP_MS,
 	type CtrlCAction,
@@ -10,6 +11,88 @@ import {
 	routeOverlayKey,
 } from "../../src/interactive/index.js";
 import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
+
+function harmonyProviders(): ProvidersContract {
+	const status: EndpointStatus = {
+		endpoint: { id: "dynamo", runtime: "llamacpp", defaultModel: "openai/gpt-oss-20b" },
+		runtime: {
+			id: "llamacpp",
+			displayName: "llamacpp",
+			kind: "http",
+			tier: "protocol",
+			apiFamily: "openai-completions",
+			auth: "none",
+			knownModels: ["openai/gpt-oss-20b"],
+			defaultCapabilities: {
+				chat: true,
+				tools: true,
+				reasoning: true,
+				vision: false,
+				audio: false,
+				embeddings: false,
+				rerank: false,
+				fim: false,
+				contextWindow: 131072,
+				maxTokens: 32768,
+			},
+			synthesizeModel: () => {
+				throw new Error("not used");
+			},
+		},
+		available: true,
+		reason: "ready",
+		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+		capabilities: {
+			chat: true,
+			tools: true,
+			toolCallFormat: "openai",
+			reasoning: true,
+			thinkingFormat: "harmony",
+			vision: false,
+			audio: false,
+			embeddings: false,
+			rerank: false,
+			fim: false,
+			contextWindow: 131072,
+			maxTokens: 32768,
+		},
+		discoveredModels: ["openai/gpt-oss-20b"],
+	};
+	return {
+		list: () => [status],
+		knowledgeBase: null,
+		getDetectedReasoning: () => null,
+	} as unknown as ProvidersContract;
+}
+
+function cascadeProviders(): ProvidersContract {
+	const status = harmonyProviders().list()[0] as EndpointStatus;
+	return {
+		list: () => [
+			{
+				...status,
+				endpoint: { id: "dynamo", runtime: "lmstudio-native", defaultModel: "nemotron-cascade-2-30b-a3b-i1" },
+				capabilities: {
+					...status.capabilities,
+					thinkingFormat: "qwen-chat-template",
+				},
+			},
+		],
+		knowledgeBase: {
+			lookup: () => ({
+				matchKind: "alias",
+				entry: {
+					family: "nemotron-cascade-2-30b-a3b",
+					matchPatterns: ["nemotron-cascade-2"],
+					capabilities: { thinkingFormat: "qwen-chat-template" },
+					quirks: { thinking: { mechanism: "on-off" } },
+				},
+			}),
+			entries: () => [],
+		},
+		getDetectedReasoning: () => null,
+	} as unknown as ProvidersContract;
+}
 
 function classify(overrides: Partial<Parameters<typeof resolveCtrlCAction>[0]> = {}): CtrlCAction {
 	return resolveCtrlCAction({
@@ -133,6 +216,34 @@ describe("settings overlay compaction controls", () => {
 		applySettingChange(settings, "compaction.threshold", "0.9");
 		strictEqual(settings.compaction.auto, false);
 		strictEqual(settings.compaction.threshold, 0.9);
+	});
+});
+
+describe("settings overlay thinking controls", () => {
+	it("shows the effective model-compatible thinking level", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "dynamo";
+		settings.orchestrator.model = "openai/gpt-oss-20b";
+		settings.orchestrator.thinkingLevel = "off";
+		const items = buildSettingItems(settings, { providers: harmonyProviders() });
+		const thinking = items.find((item) => item.id === "orchestrator.thinkingLevel");
+
+		ok(thinking, "orchestrator.thinkingLevel row should be visible");
+		strictEqual(thinking.currentValue, "low");
+		strictEqual(thinking.values?.includes("off"), false);
+	});
+
+	it("restricts on/off model controls to off and on", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "dynamo";
+		settings.orchestrator.model = "nemotron-cascade-2-30b-a3b-i1";
+		settings.orchestrator.thinkingLevel = "high";
+		const items = buildSettingItems(settings, { providers: cascadeProviders() });
+		const thinking = items.find((item) => item.id === "orchestrator.thinkingLevel");
+
+		ok(thinking, "orchestrator.thinkingLevel row should be visible");
+		strictEqual(thinking.currentValue, "on");
+		strictEqual(thinking.values?.join(","), "off,on");
 	});
 });
 

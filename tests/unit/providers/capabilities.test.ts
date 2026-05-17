@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { mergeCapabilities } from "../../../src/domains/providers/capabilities.js";
 import { resolveModelCapabilities } from "../../../src/domains/providers/model-capabilities.js";
+import { resolveModelRuntimeCapabilities } from "../../../src/domains/providers/model-runtime-capabilities.js";
 import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../../../src/domains/providers/types/capability-flags.js";
 import {
@@ -131,9 +132,78 @@ describe("providers/capabilities availableThinkingLevels", () => {
 		ok(!levels.includes("xhigh"));
 	});
 
+	it("harmony exposes only GPT-OSS reasoning effort levels", () => {
+		const byFormat = availableThinkingLevels(base({ reasoning: true, thinkingFormat: "harmony" }));
+		deepStrictEqual(Array.from(byFormat), ["low", "medium", "high"]);
+
+		const byModel = availableThinkingLevels(base({ reasoning: true }), {
+			runtimeId: "llamacpp",
+			modelId: "openai/gpt-oss-20b",
+		});
+		deepStrictEqual(Array.from(byModel), ["low", "medium", "high"]);
+	});
+
 	it("VALID_THINKING_LEVELS is a 6-element readonly tuple", () => {
 		strictEqual(VALID_THINKING_LEVELS.length, 6);
 		deepStrictEqual(Array.from(VALID_THINKING_LEVELS), ["off", "minimal", "low", "medium", "high", "xhigh"]);
+	});
+});
+
+describe("providers/model-runtime-capabilities", () => {
+	it("resolves GPT-OSS Harmony as low/medium/high with Harmony request and response handling", () => {
+		const resolved = resolveModelRuntimeCapabilities({
+			targetId: "dynamo",
+			runtimeId: "llamacpp",
+			apiFamily: "openai-completions",
+			modelId: "openai/gpt-oss-20b",
+			capabilities: base({ reasoning: true }),
+			configuredThinkingLevel: "off",
+		});
+
+		strictEqual(resolved.family, "openai-gpt-oss");
+		deepStrictEqual(Array.from(resolved.thinking.supportedLevels), ["low", "medium", "high"]);
+		strictEqual(resolved.thinking.effectiveLevel, "low");
+		strictEqual(resolved.thinking.display, "low");
+		strictEqual(resolved.request.reasoningEffort, "low");
+		deepStrictEqual(resolved.request.chatTemplateKwargs, { reasoning_effort: "low" });
+		strictEqual(resolved.response.parser, "harmony");
+	});
+
+	it("resolves on/off local models without surfacing fake effort levels", () => {
+		const resolved = resolveModelRuntimeCapabilities({
+			targetId: "dynamo",
+			runtimeId: "lmstudio-native",
+			apiFamily: "lmstudio-native",
+			modelId: "nemotron-cascade-2-30b-a3b-i1",
+			capabilities: base({ reasoning: true, thinkingFormat: "qwen-chat-template" }),
+			quirks: { thinking: { mechanism: "on-off" } },
+			configuredThinkingLevel: "high",
+		});
+
+		deepStrictEqual(Array.from(resolved.thinking.supportedLevels), ["off", "low"]);
+		strictEqual(resolved.thinking.effectiveLevel, "low");
+		strictEqual(resolved.thinking.display, "on");
+		deepStrictEqual(resolved.request.chatTemplateKwargs, { enable_thinking: true });
+		ok(resolved.thinking.notice.includes("high was coerced to on"));
+	});
+
+	it("marks budget-token levels as advisory when the target cannot enforce them", () => {
+		const resolved = resolveModelRuntimeCapabilities({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			apiFamily: "openai-completions",
+			modelId: "qwen3.6-coder-local",
+			capabilities: base({ reasoning: true, thinkingFormat: "qwen-chat-template" }),
+			quirks: { thinking: { mechanism: "budget-tokens", budgetByLevel: { low: 1024, medium: 4096, high: 8192 } } },
+			configuredThinkingLevel: "medium",
+		});
+
+		deepStrictEqual(Array.from(resolved.thinking.supportedLevels), ["off", "low", "medium", "high"]);
+		strictEqual(resolved.thinking.effectiveLevel, "medium");
+		strictEqual(resolved.thinking.display, "medium");
+		strictEqual(resolved.request.budgetTokens, 4096);
+		strictEqual(resolved.request.budgetEnforcement, "informational");
+		ok(resolved.thinking.notice.includes("advisory"));
 	});
 });
 

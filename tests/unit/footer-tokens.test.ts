@@ -1,6 +1,22 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatFooterTokens, tokensSegment } from "../../src/interactive/footer-panel.js";
+import type { ResolvedThinkingCapability } from "../../src/domains/providers/index.js";
+import { formatFooterTokens, thinkingSuffixForFooter, tokensSegment } from "../../src/interactive/footer-panel.js";
+
+function thinking(overrides: Partial<ResolvedThinkingCapability>): ResolvedThinkingCapability {
+	return {
+		thinkingActive: false,
+		mechanism: "none",
+		noticeKind: "applied",
+		notice: "",
+		configuredLevel: "off",
+		effectiveLevel: "off",
+		supportedLevels: ["off"],
+		display: "off",
+		budgetEnforcement: "none",
+		...overrides,
+	};
+}
 
 describe("formatFooterTokens", () => {
 	it("renders 0 and small values without a suffix", () => {
@@ -74,5 +90,39 @@ describe("tokensSegment", () => {
 			totalTokens: 300,
 		});
 		strictEqual(segment, "↑100 ↓200 r64");
+	});
+});
+
+describe("thinkingSuffixForFooter", () => {
+	it("renders on/off models with display semantics instead of raw levels", () => {
+		const suffix = thinkingSuffixForFooter(
+			thinking({
+				thinkingActive: true,
+				mechanism: "on-off",
+				configuredLevel: "high",
+				effectiveLevel: "low",
+				supportedLevels: ["off", "low"],
+				display: "on",
+			}),
+		);
+
+		strictEqual(suffix.includes("◆ on"), true);
+		strictEqual(suffix.includes("high"), false);
+	});
+
+	it("renders Harmony effort levels directly from the resolved display", () => {
+		const suffix = thinkingSuffixForFooter(
+			thinking({
+				thinkingActive: true,
+				mechanism: "effort-levels",
+				configuredLevel: "off",
+				effectiveLevel: "low",
+				supportedLevels: ["low", "medium", "high"],
+				display: "low",
+			}),
+		);
+
+		strictEqual(suffix.includes("◆ low"), true);
+		strictEqual(suffix.includes("off"), false);
 	});
 });

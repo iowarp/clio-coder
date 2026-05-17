@@ -95,7 +95,8 @@ function isThinkingFormat(
 		value === "zai" ||
 		value === "anthropic-extended" ||
 		value === "deepseek-r1" ||
-		value === "openai-codex"
+		value === "openai-codex" ||
+		value === "harmony"
 	);
 }
 

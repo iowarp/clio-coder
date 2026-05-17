@@ -27,6 +27,7 @@ import {
 	type EndpointDescriptor,
 	type ProvidersContract,
 	type RuntimeDescriptor,
+	resolveEndpointRuntimeCapabilities,
 	resolveModelCapabilities,
 	type ThinkingLevel,
 	targetRequiresAuth,
@@ -351,7 +352,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
 		runtimeId: input.target.runtime.id,
 		wireModelId: input.target.wireModelId,
-		thinkingLevel: input.target.modelCapabilities?.reasoning === false ? "off" : input.target.thinkingLevel,
+		thinkingLevel: input.target.thinkingLevel,
 		allowedTools: input.admission.allowedTools,
 		mode: input.admission.workerMode,
 		middlewareSnapshot: input.middlewareSnapshot,
@@ -488,13 +489,24 @@ function resolveDispatchTarget(
 		recipe?.thinkingLevel ??
 		fallbackWorkerTarget?.thinkingLevel ??
 		"off") as ThinkingLevel;
+	const modelCapabilities = capabilityInfoForModel(providers, endpoint.id, wireModelId);
+	const effectiveThinkingLevel = modelCapabilities
+		? resolveEndpointRuntimeCapabilities(
+				endpoint,
+				runtime,
+				wireModelId,
+				modelCapabilities,
+				providers.knowledgeBase,
+				thinkingLevel,
+			).thinking.effectiveLevel
+		: thinkingLevel;
 	return {
 		endpoint,
 		runtime,
 		wireModelId,
-		thinkingLevel,
+		thinkingLevel: effectiveThinkingLevel,
 		capabilities: capabilityInfoForEndpoint(providers, endpoint.id),
-		modelCapabilities: capabilityInfoForModel(providers, endpoint.id, wireModelId),
+		modelCapabilities,
 	};
 }
 

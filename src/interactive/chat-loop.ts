@@ -12,6 +12,7 @@ import {
 	type ProvidersContract,
 	type RuntimeDescriptor,
 	resolveModelCapabilities,
+	resolveModelRuntimeCapabilitiesForModel,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -36,9 +37,8 @@ import {
 	type RetrySettings,
 } from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
-import { clampEngineThinkingLevel, cleanupEngineSessionResources } from "../engine/ai.js";
+import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
-import { applyThinkingMechanism } from "../engine/apis/thinking-mechanism.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
@@ -781,7 +781,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * pi-agent-core for the active model.
 	 */
 	const clampThinkingLevelForModel = (model: Model<never>, requested: ThinkingLevel): ThinkingLevel => {
-		return clampEngineThinkingLevel(model, requested) as ThinkingLevel;
+		return resolveModelRuntimeCapabilitiesForModel(model, requested).thinking.effectiveLevel;
 	};
 
 	const cleanupSdkSessionResources = (sessionId: string | undefined): void => {
@@ -1175,7 +1175,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		const settings = deps.getSettings();
 		const modelState = agentRuntime.agent.state.model as
-			| { contextWindow?: number; reasoning?: boolean; clio?: { quirks?: LocalModelQuirks } }
+			| (Model<never> & { clio?: { quirks?: LocalModelQuirks } })
 			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		// Read the thinking budget from the live agent state, which reflects
@@ -1185,19 +1185,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// telling the model a budget it does not have.
 		const runtimeThinkingLevel = agentRuntime.agent.state.thinkingLevel as ThinkingLevel | undefined;
 		const effectiveLevel: ThinkingLevel = runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off";
-		const applied = applyThinkingMechanism(modelState?.clio?.quirks, effectiveLevel, {
-			reasoning: modelState?.reasoning === true,
-		});
+		const resolved = modelState ? resolveModelRuntimeCapabilitiesForModel(modelState, effectiveLevel) : null;
+		const applied = resolved?.thinking;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 		const workspaceProjectType = deps.session?.current()?.workspace?.projectType;
 		const dynamicInputs: DynamicInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
-			thinkingBudget: effectiveLevel,
-			thinkingMechanism: applied.mechanism,
-			thinkingApplied: applied.noticeKind,
-			thinkingNotice: applied.notice,
+			thinkingBudget: resolved?.thinking.display ?? effectiveLevel,
+			thinkingMechanism: applied?.mechanism ?? "none",
+			thinkingApplied: applied?.noticeKind ?? "applied",
+			thinkingNotice: applied?.notice ?? "",
 			...(guidance ? { thinkingGuidance: guidance } : {}),
 			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
 			turnCount: 0,

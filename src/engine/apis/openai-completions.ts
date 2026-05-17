@@ -16,12 +16,16 @@ import {
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
-
+import {
+	type AppliedThinking,
+	type ResolvedModelRuntimeCapabilities,
+	resolveModelRuntimeCapabilitiesForModel,
+} from "../../domains/providers/model-runtime-capabilities.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
-import { type AppliedThinking, applyThinkingMechanism } from "./thinking-mechanism.js";
 
 /**
  * Average characters-per-token for the English/code reasoning streams pi-ai
@@ -58,20 +62,6 @@ function pickSamplingProfile(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * Vendors whose openai-compat surface accepts a structured `thinking` field
- * with a numeric budget. The list intentionally excludes the qwen and
- * llama.cpp surfaces, where the budget stays informational and surfaces only
- * through the prompt Runtime block.
- */
-function acceptsBudgetTokensField(model: Model<"openai-completions">): boolean {
-	const fmt = model.compat?.thinkingFormat;
-	if (!fmt) return false;
-	// Pi-ai surfaces 'openrouter' and 'zai' with vendor-specific reasoning
-	// shapes that already accept a budget object.
-	return fmt === "openrouter" || fmt === "zai";
 }
 
 /**
@@ -118,29 +108,32 @@ type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined
 function applyThinkingPayload(
 	payload: Record<string, unknown>,
 	applied: AppliedThinking,
-	model: Model<"openai-completions">,
+	resolved: ResolvedModelRuntimeCapabilities,
 ): Record<string, unknown> {
 	if (applied.mechanism === "always-on" || applied.mechanism === "none") return payload;
 	const next: Record<string, unknown> = { ...payload };
-	if (applied.mechanism === "effort-levels" && applied.effort && next.reasoning_effort === undefined) {
-		next.reasoning_effort = applied.effort;
+	if (
+		resolved.request.reasoningEffort &&
+		(next.reasoning_effort === undefined || resolved.response.parser === "harmony")
+	) {
+		next.reasoning_effort = resolved.request.reasoningEffort;
+	}
+	if (resolved.request.chatTemplateKwargs) {
+		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
+		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
 	}
 	if (
 		applied.mechanism === "budget-tokens" &&
-		applied.budgetTokens !== undefined &&
+		resolved.request.budgetTokens !== undefined &&
 		next.thinking === undefined &&
-		acceptsBudgetTokensField(model)
+		resolved.request.budgetEnforcement === "enforced"
 	) {
 		// Only vendors whose openai-compat surface advertises a structured
 		// thinking budget (e.g. anthropic-extended on routed providers) get
 		// the field. The `qwen-chat-template` and llama.cpp surfaces do not
 		// accept it; in those cases the budget stays informational and the
 		// model only learns about it through the prompt Runtime block.
-		next.thinking = { type: "enabled", budget_tokens: applied.budgetTokens };
-	}
-	if (applied.mechanism === "on-off" && applied.chatTemplateKwargs) {
-		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-		next.chat_template_kwargs = { ...existing, ...applied.chatTemplateKwargs };
+		next.thinking = { type: "enabled", budget_tokens: resolved.request.budgetTokens };
 	}
 	return next;
 }
@@ -153,7 +146,7 @@ function applyThinkingPayload(
  */
 function composeSamplingOnPayload(
 	profile: SamplingProfile,
-	applied: AppliedThinking | undefined,
+	resolved: ResolvedModelRuntimeCapabilities | undefined,
 	base: AnyOnPayload | undefined,
 ): AnyOnPayload {
 	return async (payload, model) => {
@@ -161,7 +154,7 @@ function composeSamplingOnPayload(
 			return base ? await base(payload, model) : undefined;
 		}
 		let next = applyOpenAISamplingProfile(payload, profile);
-		if (applied) next = applyThinkingPayload(next, applied, model as Model<"openai-completions">);
+		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -174,12 +167,15 @@ function composeSamplingOnPayload(
  * Variant of `composeSamplingOnPayload` for cases where there is no catalog
  * sampler but we still need to inject thinking-mechanism fields.
  */
-function composeThinkingOnPayload(applied: AppliedThinking, base: AnyOnPayload | undefined): AnyOnPayload {
+function composeThinkingOnPayload(
+	resolved: ResolvedModelRuntimeCapabilities,
+	base: AnyOnPayload | undefined,
+): AnyOnPayload {
 	return async (payload, model) => {
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const next = applyThinkingPayload(payload, applied, model as Model<"openai-completions">);
+		const next = applyThinkingPayload(payload, resolved.thinking, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -191,8 +187,9 @@ function composeThinkingOnPayload(applied: AppliedThinking, base: AnyOnPayload |
 function withSamplingOverrides<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
 	options: TOptions | undefined,
-	applied: AppliedThinking,
+	resolved: ResolvedModelRuntimeCapabilities,
 ): TOptions | undefined {
+	const applied = resolved.thinking;
 	const profile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
 	if (
 		!profile &&
@@ -205,9 +202,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
 	if (profile) {
-		merged.onPayload = composeSamplingOnPayload(profile, applied, options?.onPayload);
+		merged.onPayload = composeSamplingOnPayload(profile, resolved, options?.onPayload);
 	} else {
-		merged.onPayload = composeThinkingOnPayload(applied, options?.onPayload);
+		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;
 }
@@ -360,11 +357,14 @@ function withReasoningTokenEstimate(
  */
 function stripSentinelsFromStream(
 	source: ReturnType<typeof streamOpenAICompletions>,
+	resolved: ResolvedModelRuntimeCapabilities,
 ): ReturnType<typeof streamOpenAICompletions> {
 	const sanitized = createAssistantMessageEventStream();
 	(async () => {
 		try {
+			const parseHarmony = resolved.response.parser === "harmony";
 			const strippers = new Map<number, ReturnType<typeof createSentinelStripper>>();
+			const harmonyParsers = new Map<number, HarmonyResponseParser>();
 			const safeText = new Map<number, string>();
 			const ensureStripper = (idx: number): ReturnType<typeof createSentinelStripper> => {
 				const existing = strippers.get(idx);
@@ -374,15 +374,30 @@ function stripSentinelsFromStream(
 				safeText.set(idx, "");
 				return created;
 			};
+			const ensureHarmonyParser = (idx: number): HarmonyResponseParser => {
+				const existing = harmonyParsers.get(idx);
+				if (existing) return existing;
+				const created = new HarmonyResponseParser();
+				harmonyParsers.set(idx, created);
+				return created;
+			};
 			const rewritePartialText = (event: AssistantMessageEvent, idx: number, value: string): void => {
 				if (!("partial" in event)) return;
 				const block = event.partial.content[idx];
 				if (block && block.type === "text") block.text = value;
 			};
+			const sanitizeChunk = (idx: number, chunk: string): string => {
+				const harmonySafe = parseHarmony ? ensureHarmonyParser(idx).push(chunk).text : chunk;
+				return ensureStripper(idx).push(harmonySafe);
+			};
+			const flushChunk = (idx: number): string => {
+				const harmonyTail = parseHarmony ? ensureHarmonyParser(idx).flush().text : "";
+				const stripper = ensureStripper(idx);
+				return stripper.push(harmonyTail) + stripper.flush();
+			};
 			for await (const event of source) {
 				if (event.type === "text_delta") {
-					const stripper = ensureStripper(event.contentIndex);
-					const safeChunk = stripper.push(event.delta);
+					const safeChunk = sanitizeChunk(event.contentIndex, event.delta);
 					const accumulated = (safeText.get(event.contentIndex) ?? "") + safeChunk;
 					safeText.set(event.contentIndex, accumulated);
 					rewritePartialText(event, event.contentIndex, accumulated);
@@ -391,8 +406,7 @@ function stripSentinelsFromStream(
 					continue;
 				}
 				if (event.type === "text_end") {
-					const stripper = ensureStripper(event.contentIndex);
-					const tail = stripper.flush();
+					const tail = flushChunk(event.contentIndex);
 					let accumulated = safeText.get(event.contentIndex) ?? "";
 					if (tail.length > 0) {
 						accumulated += tail;
@@ -409,6 +423,7 @@ function stripSentinelsFromStream(
 					}
 					sanitized.push({ ...event, content: accumulated });
 					strippers.delete(event.contentIndex);
+					harmonyParsers.delete(event.contentIndex);
 					continue;
 				}
 				if (event.type === "done" || event.type === "error") {
@@ -483,11 +498,11 @@ function guardMalformedToolCalls(
 	return guarded;
 }
 
-function appliedThinkingForModel(model: Model<"openai-completions">, level: ThinkingLevel): AppliedThinking {
-	return applyThinkingMechanism(clioQuirks(model), level, {
-		reasoning: model.reasoning === true,
-		...(model.compat?.thinkingFormat ? { thinkingFormat: model.compat.thinkingFormat } : {}),
-	});
+function resolvedCapabilitiesForModel(
+	model: Model<"openai-completions">,
+	level: ThinkingLevel,
+): ResolvedModelRuntimeCapabilities {
+	return resolveModelRuntimeCapabilitiesForModel(model, level);
 }
 
 export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
@@ -496,12 +511,13 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		const replayContext = stripThinkingFromHistory(context);
 		// Bare `stream` callers don't communicate thinking state; fall back to
 		// the model's reasoning capability so the catalog still applies.
-		const applied = appliedThinkingForModel(model, model.reasoning === true ? "medium" : "off");
-		const withSamplers = withSamplingOverrides(model, options, applied);
+		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
+		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					streamOpenAICompletions(model, replayContext, withRemainingContextBudget(model, replayContext, withSamplers)),
+					resolved,
 				),
 			),
 			model,
@@ -510,8 +526,8 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 	},
 	streamSimple: (model, context, options?: SimpleStreamOptions) => {
 		const replayContext = stripThinkingFromHistory(context);
-		const applied = appliedThinkingForModel(model, thinkingLevelFromSimple(options));
-		const withSamplers = withSamplingOverrides(model, options, applied);
+		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
+		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
@@ -520,6 +536,7 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 						replayContext,
 						withRemainingContextBudget(model, replayContext, withSamplers),
 					),
+					resolved,
 				),
 			),
 			model,

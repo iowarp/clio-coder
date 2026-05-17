@@ -67,6 +67,41 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 	} as EndpointStatus;
 }
 
+function harmonyStatus(): EndpointStatus {
+	const row = status({ id: "dynamo", runtimeId: "llamacpp", model: "openai/gpt-oss-20b" });
+	return {
+		...row,
+		capabilities: {
+			...row.capabilities,
+			thinkingFormat: "harmony",
+		},
+	};
+}
+
+function cascadeStatus(): EndpointStatus {
+	const row = status({ id: "dynamo", runtimeId: "lmstudio-native", model: "nemotron-cascade-2-30b-a3b-i1" });
+	return {
+		...row,
+		capabilities: {
+			...row.capabilities,
+			thinkingFormat: "qwen-chat-template",
+		},
+	};
+}
+
+const cascadeKnowledgeBase = {
+	lookup: () => ({
+		matchKind: "alias",
+		entry: {
+			family: "nemotron-cascade-2-30b-a3b",
+			matchPatterns: ["nemotron-cascade-2"],
+			capabilities: { thinkingFormat: "qwen-chat-template" },
+			quirks: { thinking: { mechanism: "on-off" } },
+		},
+	}),
+	entries: () => [],
+} as ProvidersContract["knowledgeBase"];
+
 function deps(
 	options: { contextTokens?: number | null; workspace?: WorkspaceSnapshot | null } = {},
 ): WelcomeDashboardDeps {
@@ -119,6 +154,39 @@ describe("interactive/welcome-dashboard", () => {
 		strictEqual(stats.localModels, 1);
 		strictEqual(stats.cloudModels, 1);
 		strictEqual(stats.cliModels, 1);
+	});
+
+	it("shows the effective thinking level when settings contain an unavailable one", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "dynamo";
+		settings.orchestrator.model = "openai/gpt-oss-20b";
+		settings.orchestrator.thinkingLevel = "off";
+		const localDeps = deps({ contextTokens: 250 });
+		const stats = deriveWelcomeDashboardStats({
+			...localDeps,
+			providers: { list: () => [harmonyStatus()], knowledgeBase: null } as unknown as ProvidersContract,
+			getSettings: () => settings,
+		});
+
+		strictEqual(stats.thinkingLevel, "low");
+	});
+
+	it("shows on/off thinking semantics instead of raw configured levels", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "dynamo";
+		settings.orchestrator.model = "nemotron-cascade-2-30b-a3b-i1";
+		settings.orchestrator.thinkingLevel = "high";
+		const localDeps = deps({ contextTokens: 250 });
+		const stats = deriveWelcomeDashboardStats({
+			...localDeps,
+			providers: {
+				list: () => [cascadeStatus()],
+				knowledgeBase: cascadeKnowledgeBase,
+			} as unknown as ProvidersContract,
+			getSettings: () => settings,
+		});
+
+		strictEqual(stats.thinkingLevel, "on");
 	});
 
 	it("renders a wide dashboard without exceeding the viewport", () => {

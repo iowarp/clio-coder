@@ -2,12 +2,11 @@ import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { UsageBreakdown } from "../domains/observability/index.js";
 import {
-	availableThinkingLevels,
-	type CapabilityFlags,
 	type ProvidersContract,
-	resolveModelCapabilities,
+	type ResolvedModelRuntimeCapabilities,
+	type ResolvedThinkingCapability,
+	resolveModelRuntimeCapabilitiesForProviders,
 } from "../domains/providers/index.js";
-import { extractLocalModelQuirks, type ThinkingMechanism } from "../domains/providers/types/local-model-quirks.js";
 import { Text } from "../engine/tui.js";
 import { getCurrentBranch } from "../utils/git.js";
 import type { AgentStatus } from "./status/index.js";
@@ -84,10 +83,8 @@ export interface FooterPanel {
 interface OrchestratorTarget {
 	endpointId: string;
 	wireModelId: string;
-	runtimeId: string;
 	healthStatus: "healthy" | "degraded" | "unknown" | "down";
-	capabilities: CapabilityFlags | null;
-	thinkingMechanism: ThinkingMechanism | null;
+	resolved: ResolvedModelRuntimeCapabilities | null;
 }
 
 function resolveOrchestratorTarget(
@@ -98,19 +95,16 @@ function resolveOrchestratorTarget(
 	const wireModelId = settings.orchestrator?.model?.trim();
 	if (!endpointId || !wireModelId) return null;
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
-	const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-	const quirks = extractLocalModelQuirks(kbHit?.entry.quirks);
 	return {
 		endpointId,
 		wireModelId,
-		runtimeId: status?.runtime?.id ?? status?.endpoint.runtime ?? "",
 		healthStatus: status?.health.status ?? "unknown",
-		capabilities: status
-			? resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
-					detectedReasoning: providers.getDetectedReasoning(endpointId, wireModelId),
-				})
-			: null,
-		thinkingMechanism: quirks?.thinking?.mechanism ?? null,
+		resolved: resolveModelRuntimeCapabilitiesForProviders(
+			providers,
+			endpointId,
+			wireModelId,
+			settings.orchestrator?.thinkingLevel ?? "off",
+		),
 	};
 }
 
@@ -126,25 +120,22 @@ function resolveOrchestratorTarget(
  * Returns the empty string when the segment is suppressed (e.g. providers
  * report only the `off` level for the active model).
  */
-export function thinkingSuffixForFooter(
-	mechanism: ThinkingMechanism | null,
-	level: string,
-	availableLevelCount: number,
-): string {
-	if (mechanism === "none") {
+export function thinkingSuffixForFooter(thinking: ResolvedThinkingCapability | null): string {
+	if (!thinking) return "";
+	const word = thinking.display;
+	if (thinking.mechanism === "none") {
 		return `${SEP}${ANSI_DIM}${GLYPH_OPEN} off${ANSI_RESET}`;
 	}
-	if (mechanism === "always-on") {
-		return `${SEP}${GLYPH} forced`;
+	if (thinking.mechanism === "always-on") {
+		return `${SEP}${GLYPH} ${word}`;
 	}
-	if (mechanism === "on-off") {
-		const word = level === "off" ? "off" : "on";
+	if (thinking.mechanism === "on-off") {
 		const piece = `${SEP}${GLYPH} ${word}`;
 		return word === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
 	}
-	if (availableLevelCount > 1) {
-		const piece = `${SEP}${GLYPH} ${level}`;
-		return level === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
+	if (thinking.supportedLevels.length > 1) {
+		const piece = `${SEP}${GLYPH} ${word}`;
+		return word === "off" ? `${ANSI_DIM}${piece}${ANSI_RESET}` : piece;
 	}
 	return "";
 }
@@ -192,13 +183,8 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 		const scopedPart = scoped ? `${SEP}${scoped}` : "";
 
 		let suffix = "";
-		if (target?.capabilities) {
-			const available = availableThinkingLevels(target.capabilities, {
-				runtimeId: target.runtimeId,
-				modelId: target.wireModelId,
-			});
-			const level = settings?.orchestrator?.thinkingLevel ?? "off";
-			suffix = thinkingSuffixForFooter(target.thinkingMechanism, level, available.length);
+		if (target?.resolved) {
+			suffix = thinkingSuffixForFooter(target.resolved.thinking);
 		}
 
 		const status = deps.getAgentStatus?.();

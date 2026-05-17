@@ -18,13 +18,14 @@ import type {
 	RuntimeDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
+import { resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
 import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import { clampEngineThinkingLevel, registerFauxFromEnv } from "./ai.js";
+import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
@@ -122,7 +123,7 @@ function applyModelCapabilities(model: Model<never>, caps: Partial<CapabilityFla
 
 function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLevel | undefined): ThinkingLevel {
 	const level = requested ?? "off";
-	return clampEngineThinkingLevel(model, level) as ThinkingLevel;
+	return resolveModelRuntimeCapabilitiesForModel(model, level).thinking.effectiveLevel;
 }
 
 /**

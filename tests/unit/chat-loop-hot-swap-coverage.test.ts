@@ -338,8 +338,8 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 			createAgent: () => {
 				const { handle, recorder } = createRecorder("reasoning-model", true);
 				// Mirror the pi-agent-core init: thinkingLevel passed in initialState
-				// flows onto state. Force a value that matches what
-				// clampThinkingLevelForModel(reasoningModel, "high") would yield.
+				// flows onto state. Reconciliation should replace this raw setting
+				// with the resolver's on/off effective level before the turn.
 				recorder.state.thinkingLevel = "high";
 				recorder.state.model = { id: "reasoning-model", reasoning: true, contextWindow: 4096 };
 				recorders.push(recorder);
@@ -349,7 +349,7 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 
 		await loop.submit("first");
 		strictEqual(compileCalls.length, 1);
-		strictEqual(compileCalls[0]?.dynamicInputs.thinkingBudget, "high", "first turn uses high");
+		strictEqual(compileCalls[0]?.dynamicInputs.thinkingBudget, "on", "first turn surfaces on/off thinking");
 		strictEqual(compileCalls[0]?.dynamicInputs.contextWindow, 4096);
 
 		// Hot-swap to a model that does not support reasoning. The clamp must
@@ -469,8 +469,8 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 		strictEqual(creations, 1, "thinking-level change must not rebuild the agent");
 		strictEqual(
 			recorders[0]?.state.thinkingLevel,
-			"medium",
-			"agent.state.thinkingLevel reflects the settings change without a rebuild",
+			"low",
+			"agent.state.thinkingLevel reflects the resolved effective level without a rebuild",
 		);
 	});
 

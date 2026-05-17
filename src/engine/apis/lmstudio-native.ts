@@ -32,12 +32,13 @@ import {
 	type LLMTool,
 	LMStudioClient,
 } from "@lmstudio/sdk";
+import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
+import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
-import { applyThinkingMechanism } from "./thinking-mechanism.js";
 
 const EMPTY_TOOL_ARGUMENTS_ERROR =
 	"LM Studio SDK returned empty tool-call arguments; this model's chat template may not be compatible. Try the openai-compat runtime against the same gateway.";
@@ -187,9 +188,10 @@ export interface LmStudioRunDeps {
 /**
  * Out-of-band hints from the api-provider wrapper. `thinkingLevel` is the
  * Clio ThinkingLevel for the in-flight turn; `runStream` resolves it through
- * `applyThinkingMechanism` to pick the catalog sampling profile. The bare
- * `stream` path (no SimpleStreamOptions) leaves it undefined, in which case
- * the helper falls back to the model's `reasoning` capability flag.
+ * the provider-domain runtime capability layer before choosing catalog
+ * sampling. The bare `stream` path (no SimpleStreamOptions) leaves it
+ * undefined, in which case the helper falls back to the model's `reasoning`
+ * capability flag.
  */
 export interface RunStreamHints {
 	thinkingLevel?: ThinkingLevel;
@@ -796,13 +798,31 @@ export function runStream(
 			type GemmaState = "idle" | "thought" | "toolcall";
 			let gemmaPending = "";
 			let gemmaState: GemmaState = "idle";
+			const responseParser = resolveModelRuntimeCapabilitiesForModel(model, thinkingLevelFromHintOrModel(hints, model))
+				.response.parser;
+			const harmonyParser = responseParser === "harmony" ? new HarmonyResponseParser() : null;
 			const flushGemmaPending = () => {
 				if (gemmaPending.length === 0) return;
 				if (gemmaState === "thought") emitThinking(gemmaPending);
 				else if (gemmaState === "idle" && !GEMMA_BARE_THOUGHT_ONLY_RE.test(gemmaPending)) emitText(gemmaPending);
 				gemmaPending = "";
 			};
+			const flushNonReasoningPending = () => {
+				if (harmonyParser) {
+					const parsed = harmonyParser.flush();
+					emitThinking(parsed.thinking);
+					emitText(parsed.text);
+					return;
+				}
+				flushGemmaPending();
+			};
 			const routeNonReasoningChunk = (chunk: string) => {
+				if (harmonyParser) {
+					const parsed = harmonyParser.push(chunk);
+					emitThinking(parsed.thinking);
+					emitText(parsed.text);
+					return;
+				}
 				gemmaPending += chunk;
 				while (true) {
 					if (gemmaState === "thought") {
@@ -885,7 +905,7 @@ export function runStream(
 						return;
 					}
 					if (fragment.reasoningType === "reasoning") {
-						flushGemmaPending();
+						flushNonReasoningPending();
 						reasoningTokensAccum += fragment.tokensCount ?? 0;
 						emitThinking(fragment.content, 0);
 						return;
@@ -893,7 +913,7 @@ export function runStream(
 					routeNonReasoningChunk(fragment.content);
 				},
 				onToolCallRequestStart: (callId) => {
-					flushGemmaPending();
+					flushNonReasoningPending();
 					gemmaState = "idle";
 					closeActiveText();
 					closeActiveThinking();
@@ -960,21 +980,20 @@ export function runStream(
 			predictionOpts.maxTokens = requestedMaxTokens;
 			// Apply catalog sampling quirks first; explicit StreamOptions overrides
 			// (set on `options`) win where they are present. The catalog profile is
-			// chosen by thinking activity, derived through applyThinkingMechanism so
+			// chosen by thinking activity, derived through the central resolver so
 			// the sampler choice matches the actual surface the model exposes
 			// (effort-levels, budget-tokens, on-off, always-on, none). The bare
 			// `stream` path leaves `hints.thinkingLevel` unset and falls back to
 			// medium when the model advertises reasoning.
 			const requestedThinkingLevel = thinkingLevelFromHintOrModel(hints, model);
-			const applied = applyThinkingMechanism(clioQuirks(model), requestedThinkingLevel, {
-				reasoning: model.reasoning === true,
-			});
+			const resolved = resolveModelRuntimeCapabilitiesForModel(model, requestedThinkingLevel);
+			const applied = resolved.thinking;
 			// The LM Studio SDK has no separate thinking-budget channel; the budget
 			// from `applied.budgetTokens` is informational only here and surfaces
 			// through the prompt Runtime block. `maxPredictedTokens` stays driven
 			// by the remaining-context budget so a budget-tokens family does not
 			// unexpectedly truncate output.
-			const samplingProfile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
+			const samplingProfile = pickSamplingProfile(resolved.quirks ?? clioQuirks(model), applied.thinkingActive);
 			if (samplingProfile) {
 				if (samplingProfile.temperature !== undefined) predictionOpts.temperature = samplingProfile.temperature;
 				if (samplingProfile.topP !== undefined) predictionOpts.topPSampling = samplingProfile.topP;
@@ -992,7 +1011,7 @@ export function runStream(
 			// that closed channel; the post-result `if (aborted) throw` below
 			// still surfaces a late user-driven abort to the caller.
 			predictionDone = true;
-			flushGemmaPending();
+			flushNonReasoningPending();
 			closeActiveText();
 			closeActiveThinking();
 			// Write usage before any throw so the error path (tool-extraction failure,
