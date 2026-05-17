@@ -10,15 +10,12 @@ export const readTool: ToolSpec = {
 	description: `Read the contents of a file as UTF-8 text. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_MAX_BYTES / 1024
 	}KB (whichever hits first). Use offset/limit for large files; when the result is truncated, continue with the suggested offset until complete.`,
-	parameters: Type.Object(
-		{
-			path: Type.Optional(Type.String({ description: "Path to the file to read (relative or absolute)." })),
-			file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
-			offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)." })),
-			limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read." })),
-		},
-		{ anyOf: [{ required: ["path"] }, { required: ["file_path"] }] },
-	),
+	parameters: Type.Object({
+		path: Type.Optional(Type.String({ description: "Path to the file to read (relative or absolute)." })),
+		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
+		offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)." })),
+		limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read." })),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args): Promise<ToolResult> {

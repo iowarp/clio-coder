@@ -218,14 +218,14 @@ describe("engine/worker-tools registry wiring", () => {
 			strictEqual(editResult.content[0]?.type, "text");
 			strictEqual(readFileSync(writePath, "utf8"), "new\n");
 
-			await rejects(invokeWorkerTool(readRegistry, ToolNames.Read, {}), /Validation failed for tool "read"/);
+			await rejects(invokeWorkerTool(readRegistry, ToolNames.Read, {}), /read: missing path argument/);
 			await rejects(
 				invokeWorkerTool(writeRegistry, ToolNames.Write, { content: "missing path" }),
-				/Validation failed for tool "write"/,
+				/write: missing path argument/,
 			);
 			await rejects(
 				invokeWorkerTool(writeRegistry, ToolNames.Edit, { old_string: "new", new_string: "old" }),
-				/Validation failed for tool "edit"/,
+				/edit: missing path argument/,
 			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
