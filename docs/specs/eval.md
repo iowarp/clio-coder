@@ -1,11 +1,11 @@
 # Local Eval Runner
 
 Date: 2026-04-29
-Status: shipped in v0.1.4
+Status: current
 
 ## Goal
 
-The eval domain provides a reproducible way to compare harness changes across local task suites. A YAML task file declares one or more tasks with explicit setup commands, verifier commands, a per-task timeout, and tag metadata. The runner executes setup and verifier commands as subprocesses against the task's `cwd`, captures stdout, stderr, exit codes, signals, and wall time, and persists the result as a stable `EvalRunArtifact` JSON. Each eval run also writes a deterministic evidence corpus and links the generated `evidenceId` back into every result. The CLI surface is `clio eval run`, `clio eval report`, and `clio eval compare`.
+The eval domain provides a reproducible way to compare harness changes across local task suites. A YAML task file declares one or more tasks with setup commands, verifier commands, a per-task timeout, and tag metadata. The runner executes setup and verifier commands as subprocesses against the task's `cwd`, captures stdout, stderr, exit codes, signals, and wall time, and persists the result as a stable `EvalRunArtifact` JSON. Each eval run also writes a deterministic evidence corpus and links the generated `evidenceId` back into every result. The CLI surface is `clio eval run`, `clio eval report`, and `clio eval compare`.
 
 ## Data layout
 
@@ -39,7 +39,7 @@ Types live in `src/domains/eval/types.ts` and are re-exported from `src/domains/
 - `EvalTaskFile` carries `version: 1` and `tasks[]`. Validation is done by `loadEvalTaskFile` in `task-file.ts`.
 - `EvalCommandResult` carries one subprocess invocation: `phase` (`setup` or `verifier`), `index`, `command`, `exitCode`, `signal`, `timedOut`, `wallTimeMs`, `stdout`, `stderr`.
 - `EvalFailureClass` enumerates the closed failure taxonomy: `setup_failed`, `verifier_failed`, `timeout`, `cwd_missing`, `command_error`.
-- `EvalHarnessMetrics` carries comparison axes that can be backed by run receipts: `receiptCount`, `toolCalls`, `retries`, `safetyBlocks`, `correctionLatencyMs`, and `validationEvidence`.
+- `EvalHarnessMetrics` carries comparison axes that can be backed by run receipts: `receiptCount`, `toolCalls`, `retries`, `safetyBlocks`, `correctionLatencyMs`, and `validationEvidence` (count of successful verifier commands).
 - `EvalResult` is the public minimal record: `taskId`, `runId`, `pass`, `exitCode`, `tokens`, `costUsd`, `wallTimeMs`, `harness`, optional `failureClass`, optional `receiptPath`, optional `evidenceId`.
 - `EvalRunRecord` extends `EvalResult` with `repeatIndex`, `cwd`, `prompt`, `tags[]`, and `commands[]`.
 - `EvalSummary` aggregates `runs`, `passed`, `failed`, `passRate`, `tokens`, `costUsd`, `wallTimeMs`, `harness`, and `failureClasses[]`.
@@ -52,13 +52,13 @@ Types live in `src/domains/eval/types.ts` and are re-exported from `src/domains/
 2. Setup commands run before verifier commands. A non-zero setup exit fails the task with `failureClass: setup_failed`; a non-zero verifier exit fails with `failureClass: verifier_failed`.
 3. A missing `cwd` fails the task before any command runs with `failureClass: cwd_missing`.
 4. The per-task `timeoutMs` is enforced per command. A timed-out command fails with `failureClass: timeout`.
-5. Token, cost, and wall-time totals are aggregated from per-command durations only. The runner also records verifier command count as `harness.validationEvidence`. v0.1.4 does not call any model from the eval runner; tokens, `costUsd`, receipt count, tool calls, retries, safety blocks, and correction latency are recorded as `0` for verifier-only suites unless an external harness wrapper patches receipt-backed metrics onto each result.
+5. `wallTimeMs` is aggregated from subprocess `command.wallTimeMs` values. `tokens` and `costUsd` stay `0` for verifier-only suites because subprocess commands do not produce model usage data. `validationEvidence` counts successful verifier commands (`phase === "verifier"`, `exitCode === 0`, and `timedOut === false`). The eval runner itself does not call a model; receipt-based `receiptCount`, `toolCalls`, `retries`, `safetyBlocks`, and `correctionLatencyMs` are currently `0` unless an external harness wrapper patches receipt-backed metrics onto each result.
 6. Each eval run writes a deterministic evidence corpus and patches `evidenceId` into every result before persisting the artifact. The same `evalId` always maps to the same `evidenceId`.
 7. The task file hash is recorded in the artifact and validated on `compare`. Comparing two artifacts produced by different task files is supported but the operator is responsible for deciding whether the comparison is meaningful.
 
 ## Status and scope notes
 
-v0.1.4 ships repo-local YAML task files, the deterministic verifier runner, the evidence link, the report renderer, and the baseline/candidate comparator. Model calls are not yet made by the runner; the path is wired so future slices can plug in agent invocations between `setup` and `verifier`. There is no built-in suite registry; the operator points at any YAML file. Cross-machine reproducibility is the operator's responsibility because cwd, environment, and installed tooling are not pinned by the runner.
+The current eval surface ships repo-local YAML task files, the deterministic verifier runner, evidence linking, the report renderer, and the baseline/candidate comparator. Model calls are not made by the runner. There is no built-in suite registry; the operator points at any YAML file. Cross-machine reproducibility is the operator's responsibility because cwd, environment, and installed tooling are not pinned by the runner.
 
 ## References
 
@@ -70,5 +70,5 @@ v0.1.4 ships repo-local YAML task files, the deterministic verifier runner, the 
 - `src/domains/eval/report.ts`: human-readable report rendering.
 - `src/domains/eval/index.ts`: public domain entry.
 - `src/cli/eval.ts`: CLI wiring.
-- `tests/unit/eval-runner.test.ts`, `tests/unit/eval-evidence.test.ts`, `tests/unit/eval-compare.test.ts`: regression coverage.
+- `tests/integration/eval-runner.test.ts`, `tests/integration/eval-evidence.test.ts`, `tests/unit/eval-compare.test.ts`: regression coverage.
 - `docs/.superpowers/IMPROVE.md` section M7: roadmap entry.

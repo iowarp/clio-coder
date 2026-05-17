@@ -5,33 +5,63 @@ Keep a Changelog.
 
 ## 0.1.9 - 2026-05-17
 
-Clio Coder 0.1.9 hardens local OpenAI-compatible model handling, especially
-llama.cpp mini targets and GPT-OSS/Harmony models. It centralizes effective
-thinking capability resolution so the UI, prompt runtime block, payload
-construction, stream parsing, receipts, and worker dispatch all share the same
-model-specific surface.
+Clio Coder 0.1.9 is a broad hardening release on top of the v0.1.6
+non-interactive CLI baseline and the v0.1.7/v0.1.8 safety and approval work.
+It makes fleet dispatch a first-class agent primitive, removes the retired
+internal dev harness, tightens local OpenAI-compatible model handling,
+adds frontend validation without shell access, and hardens the interactive TUI
+around active-run follow-ups and cancellation.
 
 ### Added
 
+- Added `dispatch` as a first-class tool for bounded fleet-agent handoffs. The
+  orchestrator prompt now includes the Agent Fleet catalog, unnamed dispatches
+  default to `implementer`, and duplicate dispatch requests are guarded before
+  they can loop.
+- Added `validate_frontend`, a typed execution tool for frontend artifacts. It
+  validates `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` files under the
+  workspace root; checks HTML tag structure, local script/style references,
+  JavaScript syntax, CSS balance, and optional headless browser loading.
 - Added a local model runtime-capabilities resolver that classifies real mini
   model families, thinking mechanisms, supported levels, effective coercion,
   request payload fields, and response parsers from one shared source.
 - Added GPT-OSS/Harmony response parsing for raw llama.cpp chat-template frames
   and request synthesis for Harmony `reasoning_effort`.
+- Added finish-contract evidence for successful typed validation tools,
+  including `run_tests`, `run_lint`, `run_build`, standard `package_script`
+  validation scripts, `validate_frontend`, dispatch receipts, and protected
+  artifact records.
+- Added active-run TUI coverage for plain follow-up queuing and `Esc`
+  cancellation.
 - Added tests for local model capability resolution, UI thinking surfaces,
   footer/dashboard effective thinking display, Harmony payload construction,
-  streamed reasoning accounting, and constrained Harmony JSON responses.
+  streamed reasoning accounting, constrained Harmony JSON responses, dispatch
+  tool behavior, frontend validation, finish-contract evidence, and active-run
+  TUI control.
 
 ### Changed
 
 - `/thinking`, `/settings`, the welcome dashboard, footer, hot model switching,
-  prompt runtime block, and dispatch worker selection now display/use the
+  prompt runtime block, and fleet-agent selection now display/use the
   effective thinking level after model-specific coercion instead of raw
   configured settings.
 - Local OpenAI-compatible targets now preserve server-owned sampler defaults;
   Clio records and passes only the model-family fields it owns.
-- Worker dispatch now requires explicit allowed tool profiles and carries the
-  resolved effective thinking state through the worker spec.
+- Fleet dispatch now requires explicit allowed tool profiles and carries the
+  resolved effective thinking state through the internal worker spec.
+- Built-in implementer-style agents are prompted to inspect changed frontend
+  artifacts and run `validate_frontend` before claiming HTML/CSS/JS work is
+  complete.
+- `clio run`, `clio targets`, prompt text, receipts, and README-facing copy now
+  use fleet/agent terminology. The legacy `workers` settings key remains for
+  compatibility with existing config files.
+- Print mode now preserves the last valid assistant answer when a later
+  diagnostic assistant message is emitted, instead of replacing the answer with
+  advisory text.
+- Eval harness metrics now count validation evidence only for successful,
+  non-timed-out verifier commands.
+- Public component inventory now includes the frontend validator as a
+  hot-reloadable enforcing tool implementation.
 
 ### Fixed
 
@@ -42,13 +72,21 @@ model-specific surface.
   streamed output.
 - Fixed prior assistant thinking blocks being replayed upstream on later
   OpenAI-compatible turns.
+- Fixed OpenAI Codex file-tool schema aliases so file/path arguments serialize
+  through the expected schema shape.
+- Fixed active-run TUI behavior where follow-up text and cancellation could
+  leave the operator without a clear queued-turn or cancelled-run signal.
+- Fixed frontend completion claims being able to pass the advisory finish
+  contract without a meaningful artifact validation path.
 - Fixed duplicate local-model capability and thinking coercion paths that could
   make UI display, prompt runtime text, and payload construction disagree.
 
 ### Removed
 
-- Removed the retired self-development harness and associated prompt fragments,
+- Removed the retired internal dev harness and associated prompt fragments,
   tests, and diagnostic scaffolding.
+- Removed user-facing `--dev` mode and internal dev prompt surfaces from
+  the CLI/TUI runtime.
 - Removed stale local-model helper paths that duplicated provider capability
   resolution.
 
