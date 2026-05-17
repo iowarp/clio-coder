@@ -26,9 +26,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Install fd-find
+      - name: Install fd-find and ripgrep
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fd-find
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep
       - run: npm ci --prefer-offline --no-audit --no-fund
       - run: npm run ci
