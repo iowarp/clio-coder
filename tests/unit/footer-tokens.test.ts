@@ -1,7 +1,16 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ResolvedThinkingCapability } from "../../src/domains/providers/index.js";
-import { formatFooterTokens, thinkingSuffixForFooter, tokensSegment } from "../../src/interactive/footer-panel.js";
+import { visibleWidth } from "../../src/engine/tui.js";
+import {
+	buildCtxBar,
+	contextSegment,
+	dispatchSegment,
+	fitFooterText,
+	formatFooterTokens,
+	thinkingSuffixForFooter,
+	tokensSegment,
+} from "../../src/interactive/footer-panel.js";
 
 function thinking(overrides: Partial<ResolvedThinkingCapability>): ResolvedThinkingCapability {
 	return {
@@ -64,6 +73,7 @@ describe("tokensSegment", () => {
 		// surfaces up/down token deltas during a run.
 		strictEqual((segment as string).includes("↑1.2k"), true);
 		strictEqual((segment as string).includes("↓567"), true);
+		strictEqual((segment as string).includes("Σ2k"), true);
 	});
 	it("renders counters even when input/output are 0 but totalTokens is positive", () => {
 		// Dispatch-run usage only fills totalTokens (no per-kind breakdown).
@@ -89,7 +99,79 @@ describe("tokensSegment", () => {
 			reasoningTokens: 64,
 			totalTokens: 300,
 		});
-		strictEqual(segment, "↑100 ↓200 r64");
+		strictEqual(segment, "↑100 ↓200 r64 Σ300");
+	});
+});
+
+describe("contextSegment", () => {
+	it("formats context usage with percent, compact token labels, and a bounded bar", () => {
+		strictEqual(buildCtxBar(50), "████░░░░");
+		const segment = contextSegment({ tokens: 32_000, contextWindow: 128_000, percent: 25 });
+		strictEqual(segment, "CTX 25% 32k/128k ██░░░░░░");
+	});
+
+	it("keeps unknown usage visible when the context window is known", () => {
+		const segment = contextSegment({ tokens: null, contextWindow: 8192, percent: null });
+		strictEqual(segment, "CTX ?% ?/8.2k ░░░░░░░░");
+	});
+
+	it("suppresses context when no context window is available", () => {
+		strictEqual(contextSegment({ tokens: 12, contextWindow: 0, percent: null }), null);
+	});
+});
+
+describe("dispatchSegment", () => {
+	it("summarizes active, completed, failed, and token counts from dispatch rows", () => {
+		const segment = dispatchSegment([
+			{
+				runId: "run-1",
+				agentId: "coder",
+				runtimeKind: "http",
+				runtimeId: "openai",
+				endpointId: "local",
+				wireModelId: "qwen",
+				status: "running",
+				elapsedMs: 10,
+				tokenCount: 1000,
+				costUsd: 0,
+			},
+			{
+				runId: "run-2",
+				agentId: "reviewer",
+				runtimeKind: "sdk",
+				runtimeId: "claude",
+				endpointId: "remote",
+				wireModelId: "sonnet",
+				status: "completed",
+				elapsedMs: 20,
+				tokenCount: 2000,
+				costUsd: 0,
+			},
+			{
+				runId: "run-3",
+				agentId: "debugger",
+				runtimeKind: "subprocess",
+				runtimeId: "codex",
+				endpointId: "codex",
+				wireModelId: "gpt",
+				status: "dead",
+				elapsedMs: 30,
+				tokenCount: 500,
+				costUsd: 0,
+			},
+		]);
+		strictEqual(segment, "dispatch 1 active 1 done 1 fail 3.5ktok");
+	});
+
+	it("suppresses dispatch metadata until at least one row exists", () => {
+		strictEqual(dispatchSegment([]), null);
+	});
+});
+
+describe("fitFooterText", () => {
+	it("truncates footer text to the terminal width using visible width", () => {
+		const line = fitFooterText("Clio Coder · [DEFAULT] · endpoint/model · CTX 95% ████████", 32);
+		strictEqual(visibleWidth(line) <= 32, true);
 	});
 });
 

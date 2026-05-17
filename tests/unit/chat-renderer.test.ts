@@ -36,11 +36,11 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("you: hi"), `missing first user line:\n${text}`);
-		ok(text.includes("Clio Coder: hello"), `missing first assistant:\n${text}`);
-		ok(text.includes("you: next"), `missing second user:\n${text}`);
-		ok(text.includes("Clio Coder: response"), `missing second assistant:\n${text}`);
-		ok(text.indexOf("you: hi") < text.indexOf("Clio Coder: response"), "turn order preserved");
+		ok(text.includes("> hi"), `missing first user line:\n${text}`);
+		ok(text.includes("◈ hello"), `missing first assistant:\n${text}`);
+		ok(text.includes("> next"), `missing second user:\n${text}`);
+		ok(text.includes("◈ response"), `missing second assistant:\n${text}`);
+		ok(text.indexOf("> hi") < text.indexOf("◈ response"), "turn order preserved");
 	});
 
 	it("stops after uptoTurnId inclusive so fork replay drops the post-fork tail", () => {
@@ -53,8 +53,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns, { uptoTurnId: "a1" });
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("you: first"), text);
-		ok(text.includes("Clio Coder: reply1"), text);
+		ok(text.includes("> first"), text);
+		ok(text.includes("◈ reply1"), text);
 		ok(!text.includes("second"), `post-fork content leaked: ${text}`);
 		ok(!text.includes("reply2"), `post-fork content leaked: ${text}`);
 	});
@@ -71,8 +71,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("you: hi"), text);
-		ok(text.includes("Clio Coder: done"), text);
+		ok(text.includes("> hi"), text);
+		ok(text.includes("◈ done"), text);
 		ok(text.includes("system: system boot"), text);
 		ok(text.includes("▸ ls(.)"), text);
 		ok(text.includes("│ x"), text);
@@ -91,8 +91,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("you: raw-string-user"), text);
-		ok(text.includes("Clio Coder: structured-assistant"), text);
+		ok(text.includes("> raw-string-user"), text);
+		ok(text.includes("◈ structured-assistant"), text);
 	});
 
 	it("rehydrates persisted assistant thinking content as folded reasoning", () => {
@@ -116,7 +116,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("Thinking..."), text);
 		ok(!text.includes("Need to read the exact payload shape."), text);
-		ok(text.includes("Clio Coder: I will inspect the payload."), text);
+		ok(text.includes("◈ I will inspect the payload."), text);
 		strictEqual(panel.toggleLastThinking(), true);
 		const expanded = strip(panel.render(96).join("\n"));
 		ok(expanded.includes("Need to read the exact payload shape."), expanded);
@@ -130,8 +130,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("you: real"), text);
-		strictEqual((text.match(/you:/g) ?? []).length, 1, `extra user lines in:\n${text}`);
+		ok(text.includes("> real"), text);
+		strictEqual((text.match(/^>/gm) ?? []).length, 1, `extra user lines in:\n${text}`);
 	});
 
 	it("renders branch and compaction summary entries and keeps the compacted suffix", () => {
@@ -191,11 +191,11 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("[compaction summary]"), text);
 		ok(text.includes("Old prompt and answer were compacted."), text);
-		ok(text.includes("you: kept prompt"), text);
+		ok(text.includes("> kept prompt"), text);
 		ok(text.includes("[branch summary]"), text);
 		ok(text.includes("Inherited branch work."), text);
-		ok(text.includes("Clio Coder: after compaction"), text);
-		ok(!text.includes("you: old prompt"), `pre-compaction prefix leaked:\n${text}`);
+		ok(text.includes("◈ after compaction"), text);
+		ok(!text.includes("> old prompt"), `pre-compaction prefix leaked:\n${text}`);
 
 		const selected = selectReplayEntries(entries).map((entry) => entry.turnId);
 		strictEqual(selected.join(","), "c1,u2,b1,a2");
@@ -418,8 +418,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 
 		rehydrateChatPanelFromTurns(panel, entries);
 		const rendered = strip(panel.render(120).join("\n"));
-		ok(!rendered.includes("Clio Coder: setup docs"), rendered);
-		ok(rendered.includes("Clio Coder: actual answer"), rendered);
+		ok(!rendered.includes("◈ setup docs"), rendered);
+		ok(rendered.includes("◈ actual answer"), rendered);
 	});
 
 	it("replays retry status entries and excludes failed assistant attempts from model context", () => {
@@ -461,9 +461,9 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, entries);
 		const text = strip(panel.render(96).join("\n"));
-		ok(text.includes("Clio Coder: [error] rate limit 429"), text);
+		ok(text.includes("◈ [error] rate limit 429"), text);
 		ok(text.includes("[retry] attempt 1/3 scheduled in 2s: rate limit 429"), text);
-		ok(text.includes("Clio Coder: ok now"), text);
+		ok(text.includes("◈ ok now"), text);
 
 		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
 		ok(!serialized.includes("rate limit 429"), serialized);
@@ -559,7 +559,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		rehydrateChatPanelFromTurns(panel, entries);
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("[protected] dist/report.txt after npm test exit 0: validation passed"), text);
-		ok(text.includes("you: continue"), text);
+		ok(text.includes("> continue"), text);
 
 		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
 		ok(!serialized.includes("dist/report.txt"), serialized);

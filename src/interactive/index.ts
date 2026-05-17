@@ -48,7 +48,7 @@ import {
 	renderBashExecutionEntry,
 } from "./chat-renderer.js";
 import { openCostOverlay } from "./cost-overlay.js";
-import { createDispatchBoardStore, formatDispatchBoardLines } from "./dispatch-board.js";
+import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
@@ -773,6 +773,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
+	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const footer = buildFooter({
 		modes: deps.modes,
 		providers: deps.providers,
@@ -781,6 +782,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => deps.observability.sessionTokens(),
+		getContextUsage: () => deps.chat.contextUsage(),
+		getDispatchRows: () => dispatchBoardStore.rows(),
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
@@ -802,9 +805,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// The super-confirm overlay is rebuilt per open because its body and width
 	// depend on the origin (keybind vs tool). The `renderSuperOverlayLinesForOrigin`
 	// helper produces both variants from `super-overlay.ts`.
-	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
+	const taskIsland = new Text("", 0, 0);
+	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
 	const io: RunIo = {
 		stdout: (s) => process.stdout.write(s),
@@ -1178,10 +1182,25 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// stays at the prior value for one-shot grants.
 	let superConfirmJustFired = false;
 	process.removeAllListeners("SIGINT");
+	const taskIslandHandle = tui.showOverlay(taskIsland, {
+		anchor: "top-right",
+		width: taskIslandWidth,
+		margin: { top: 1, right: 1 },
+		nonCapturing: true,
+		visible: (width, height) => width >= 80 && height >= 18,
+	});
+	taskIslandHandle.setHidden(true);
 
 	const renderDispatchBoard = (): void => {
 		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"));
 		dispatchBoard.invalidate();
+	};
+
+	const renderTaskIsland = (): void => {
+		const rows = dispatchBoardStore.rows();
+		taskIslandHandle.setHidden(overlayState !== "closed" || rows.length === 0);
+		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
+		taskIsland.invalidate();
 	};
 
 	const stopDispatchBoardTicker = (): void => {
@@ -1289,6 +1308,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
 			openSuperOverlay("tool");
 		}
+		renderTaskIsland();
 		tui.requestRender();
 	};
 
@@ -2001,6 +2021,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		clearInterval(keepAlive);
 		if (footerTicker) clearInterval(footerTicker);
 		stopDispatchBoardTicker();
+		taskIslandHandle.hide();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
 		unsubscribeStatus();
@@ -2057,26 +2078,41 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const dispatchBoardRenderUnsubscribers = [
 		deps.bus.on(BusChannels.DispatchEnqueued, () => {
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchStarted, () => {
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchProgress, () => {
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchCompleted, () => {
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchFailed, () => {
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
 			tui.requestRender();

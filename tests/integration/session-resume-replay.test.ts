@@ -90,10 +90,10 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
 
-		ok(text.includes("you: what is 2+2"), `first user turn missing:\n${text}`);
-		ok(text.includes("Clio Coder: four"), `first assistant turn missing:\n${text}`);
-		ok(text.includes("you: thanks"), `second user turn missing:\n${text}`);
-		ok(text.includes("Clio Coder: you are welcome"), `second assistant turn missing:\n${text}`);
+		ok(text.includes("> what is 2+2"), `first user turn missing:\n${text}`);
+		ok(text.includes("◈ four"), `first assistant turn missing:\n${text}`);
+		ok(text.includes("> thanks"), `second user turn missing:\n${text}`);
+		ok(text.includes("◈ you are welcome"), `second assistant turn missing:\n${text}`);
 	});
 
 	it("replays compaction summaries and derives the resumed leaf from tree state", async () => {
@@ -144,13 +144,13 @@ describe("resume rehydrates the chat panel from a persisted session", () => {
 
 		ok(text.includes("[compaction summary]"), `summary block missing:\n${text}`);
 		ok(text.includes("Old context and answer were summarized."), text);
-		ok(text.includes("you: kept question"), text);
+		ok(text.includes("> kept question"), text);
 		ok(text.includes("▸ read"), text);
 		ok(text.includes("read ok"), text);
 		ok(text.includes("bash: $ npm test"), text);
 		ok(text.includes("tests passed"), text);
-		ok(text.includes("Clio Coder: kept answer"), text);
-		ok(!text.includes("you: old context"), `pre-compaction prefix leaked:\n${text}`);
+		ok(text.includes("◈ kept answer"), text);
+		ok(!text.includes("> old context"), `pre-compaction prefix leaked:\n${text}`);
 
 		const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 		const serialized = JSON.stringify(replayMessages);

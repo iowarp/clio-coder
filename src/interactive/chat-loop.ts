@@ -917,6 +917,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 
 		handle.agent.subscribe(async (event) => {
+			if (event.type === "agent_end" && deps.observability) {
+				const summary = sumRunUsage(event.messages);
+				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
+					deps.observability.recordTokens(
+						localRuntime.endpointId,
+						localRuntime.wireModelId,
+						summary.tokens,
+						summary.costUsd,
+						{
+							input: summary.input,
+							output: summary.output,
+							cacheRead: summary.cacheRead,
+							cacheWrite: summary.cacheWrite,
+							reasoningTokens: summary.reasoning,
+							totalTokens: summary.tokens,
+							apiCalls: summary.apiCalls,
+						},
+					);
+				}
+			}
 			emit(event);
 			if (event.type === "message_update") {
 				const assistantEvent = event.assistantMessageEvent as {
@@ -951,26 +971,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (event.type === "tool_execution_end") {
 				appendToolResultTurn(event);
-			}
-			if (event.type === "agent_end" && deps.observability) {
-				const summary = sumRunUsage(event.messages);
-				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
-					deps.observability.recordTokens(
-						localRuntime.endpointId,
-						localRuntime.wireModelId,
-						summary.tokens,
-						summary.costUsd,
-						{
-							input: summary.input,
-							output: summary.output,
-							cacheRead: summary.cacheRead,
-							cacheWrite: summary.cacheWrite,
-							reasoningTokens: summary.reasoning,
-							totalTokens: summary.tokens,
-							apiCalls: summary.apiCalls,
-						},
-					);
-				}
 			}
 			if (event.type === "agent_end") {
 				emitFinishContractAdvisory(event.messages);
