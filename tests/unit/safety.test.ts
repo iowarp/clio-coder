@@ -42,6 +42,10 @@ describe("safety/action-classifier", () => {
 		strictEqual(classify({ tool: "bash", args: { command: "ls -la" } }).actionClass, "execute");
 	});
 
+	it("typed frontend validation classifies as execute", () => {
+		strictEqual(classify({ tool: "validate_frontend", args: { path: "index.html" } }).actionClass, "execute");
+	});
+
 	it("git destructive patterns escalate to git_destructive", () => {
 		strictEqual(classify({ tool: "bash", args: { command: "git push --force" } }).actionClass, "git_destructive");
 		strictEqual(classify({ tool: "bash", args: { command: "git reset --hard HEAD" } }).actionClass, "git_destructive");
@@ -626,6 +630,38 @@ describe("safety/finish-contract", () => {
 				kind: "protected_artifact",
 				summary: "protected artifact recorded: dist/report.json",
 				turnId: "protected-1",
+			},
+		]);
+	});
+
+	it("allows a completion claim with typed frontend validation evidence", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Changed the dashboard and it is complete.",
+			assistantTurnId: "assistant-1",
+			sessionEntries: [
+				messageEntry("user-1", "user", { text: "fix the dashboard" }),
+				messageEntry("tool-call-1", "tool_call", {
+					toolCallId: "call-1",
+					name: "validate_frontend",
+					args: { path: "dashboard.html" },
+				}),
+				messageEntry("tool-result-1", "tool_result", {
+					toolCallId: "call-1",
+					toolName: "validate_frontend",
+					result: { content: [{ type: "text", text: "passed" }], details: { kind: "ok" } },
+					isError: false,
+				}),
+				messageEntry("assistant-1", "assistant", { text: "Changed the dashboard and it is complete." }),
+			],
+		});
+
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "validation_evidence");
+		deepStrictEqual(assessment.evidence, [
+			{
+				kind: "validation_command",
+				summary: "validation command passed: validate_frontend dashboard.html",
+				turnId: "tool-call-1",
 			},
 		]);
 	});

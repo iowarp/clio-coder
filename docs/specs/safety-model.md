@@ -29,9 +29,10 @@ blocked in every mode.
 
 The production direction is L5: remove arbitrary Bash from common workflows and
 replace it with typed tools. v0.1.7 adds `git_status`, `git_diff`, `git_log`,
-`run_tests`, `run_lint`, `run_build`, and `package_script` so models can perform
-common engineering actions through fixed argv vectors, cwd constraints,
-timeouts, output caps, and structured results.
+`run_tests`, `run_lint`, `run_build`, `package_script`, and `validate_frontend`
+so models can perform common engineering and frontend validation actions through
+fixed argv vectors or in-process validators, cwd constraints, timeouts, output
+caps, and structured results.
 
 ## Modes Versus Safety Levels
 

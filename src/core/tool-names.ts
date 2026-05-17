@@ -20,6 +20,7 @@ export const ToolNames = {
 	RunLint: "run_lint",
 	RunBuild: "run_build",
 	PackageScript: "package_script",
+	ValidateFrontend: "validate_frontend",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
 	WorkspaceContext: "workspace_context",

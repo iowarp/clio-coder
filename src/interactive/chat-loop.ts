@@ -1491,6 +1491,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const wasStreaming = streaming;
 			retryCountdown?.cancel();
 			runtime?.agent.abort();
+			if (wasStreaming) {
+				emitNotice("[Clio Coder] active response cancelled.");
+			}
 			if (wasStreaming && deps.bus) {
 				deps.bus.emit(BusChannels.RunAborted, {
 					source: "stream_cancel",

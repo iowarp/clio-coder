@@ -316,6 +316,53 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("Enter queues plain follow-up text while the model is streaming", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		const fixture = await startFollowUpFixture();
+		writeOpenAICompatFixture(configDir, fixture.url);
+		const p = spawnClioPty({ env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("first prompt\r");
+			await withTimeout(fixture.firstRequestStarted, 15_000, "first request");
+			p.send("queued prompt\r");
+			await p.expect(/follow-up queued/, 10_000);
+			await withTimeout(fixture.secondRequestStarted, 15_000, "second request");
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "first prompt").length, 1);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "queued prompt").length, 1);
+		} finally {
+			p.kill();
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("Esc cancels the active streaming response instead of queueing text", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		const fixture = await startFollowUpFixture();
+		writeOpenAICompatFixture(configDir, fixture.url);
+		const p = spawnClioPty({ env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("first prompt\r");
+			await withTimeout(fixture.firstRequestStarted, 15_000, "first request");
+			p.send("\x1b");
+			await p.expect(/cancelled/, 10_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "first prompt").length, 1);
+			strictEqual(fixture.requests.filter((body) => lastUserMessageText(body) === "queued prompt").length, 0);
+		} finally {
+			p.kill();
+			await closeServer(fixture.server);
+		}
+	});
+
 	it("interactive @image file references attach images to chat submissions", async () => {
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
 		ok(configDir);
