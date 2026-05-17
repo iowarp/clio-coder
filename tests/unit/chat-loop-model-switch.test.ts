@@ -182,13 +182,14 @@ describe("interactive/chat-loop model switch", () => {
 		strictEqual(states[0]?.model.reasoning, false);
 		strictEqual(states[0]?.thinkingLevel, "off", "clamps when the new model lacks reasoning");
 
-		// And a follow-up swap to a reasoning-capable model honors the request.
+		// And a follow-up swap to a reasoning-capable generic local model resolves
+		// the request through the on/off surface instead of preserving a fake level.
 		settings.orchestrator.model = "another-think-model";
 		synthesizedReasoning = true;
 		synthesizedContextWindow = 8192;
 		await loop.submit("with thinking");
 		strictEqual(agentCreations, 1);
-		strictEqual(states[0]?.thinkingLevel, "high");
+		strictEqual(states[0]?.thinkingLevel, "low");
 	});
 
 	it("rebuilds the agent when the endpoint or runtime changes", async () => {

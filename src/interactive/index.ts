@@ -69,6 +69,8 @@ import {
 	openThinkingOverlay,
 	readThinkingLevel,
 	resolveAvailableThinkingLevels,
+	resolveThinkingCapability,
+	resolveThinkingLabeler,
 } from "./overlays/thinking-selector.js";
 import {
 	openToolApprovalOverlay,
@@ -1691,9 +1693,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "thinking";
 		const settings = deps.getSettings?.();
-		const current = settings ? readThinkingLevel(settings) : "off";
+		const current = settings
+			? (resolveThinkingCapability(deps.providers, settings)?.effectiveLevel ?? readThinkingLevel(settings))
+			: "off";
 		const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
-		overlayHandle = openThinkingOverlay(tui, {
+		const thinkingOverlayDeps: Parameters<typeof openThinkingOverlay>[1] = {
 			current,
 			available,
 			onSelect: (next) => {
@@ -1701,7 +1705,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				footer.refresh();
 			},
 			onClose: () => closeOverlay(),
-		});
+			...(settings ? { labelFor: resolveThinkingLabeler(deps.providers, settings) } : {}),
+		};
+		overlayHandle = openThinkingOverlay(tui, thinkingOverlayDeps);
 		tui.requestRender();
 	};
 

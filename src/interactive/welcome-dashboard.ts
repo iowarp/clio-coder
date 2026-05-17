@@ -1,7 +1,11 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
-import type { EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
+import {
+	type EndpointStatus,
+	type ProvidersContract,
+	resolveModelRuntimeCapabilitiesForProviders,
+} from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
@@ -214,6 +218,15 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const extensionStats = deps.getExtensionStats?.() ?? { active: 0, installed: 0 };
 	const currentAvailable = current ? activeStatus(current) : false;
 	const activeCapabilities = capabilityLabels(current);
+	const thinkingLevel =
+		resolveModelRuntimeCapabilitiesForProviders(
+			deps.providers,
+			settings?.orchestrator?.endpoint,
+			settings?.orchestrator?.model,
+			settings?.orchestrator?.thinkingLevel ?? "off",
+		)?.thinking.display ??
+		settings?.orchestrator?.thinkingLevel ??
+		"off";
 	const projectFamiliarity = scoreProjectFamiliarity({
 		workspace,
 		contextPercent,
@@ -244,7 +257,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		mode: deps.modes.current().toLowerCase(),
 		safetyLevel: settings?.safetyLevel ?? "auto-edit",
 		theme: settings?.theme ?? "default",
-		thinkingLevel: settings?.orchestrator?.thinkingLevel ?? "off",
+		thinkingLevel,
 		workspace,
 		currentAvailable,
 		activeCapabilities,

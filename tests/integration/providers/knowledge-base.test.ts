@@ -140,6 +140,7 @@ describe("providers/knowledge-base FileKnowledgeBase", () => {
 				"gemopus-4-31b-it",
 				"nemotron-3-nano-omni-30b-a3b-reasoning",
 				"nemotron-cascade-2-30b-a3b",
+				"openai-gpt-oss",
 				"qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled",
 				"qwen3.6-27b",
 				"qwen3.6-35b-a3b",

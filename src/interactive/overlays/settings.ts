@@ -1,9 +1,9 @@
 import type { ClioSettings } from "../../core/config.js";
 import {
-	availableThinkingLevels,
 	type ProvidersContract,
-	resolveModelCapabilities,
-	type ThinkingLevel,
+	resolveModelRuntimeCapabilitiesForProviders,
+	thinkingLevelChoiceLabel,
+	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
 import {
 	Box,
@@ -51,22 +51,18 @@ export function buildSettingItems(
 	const compaction = settings.compaction;
 	const retry = settings.retry;
 	const terminal = settings.terminal;
-	const status = options?.providers?.list().find((entry) => entry.endpoint.id === settings.orchestrator.endpoint);
-	const detectedReasoning =
-		options?.providers && settings.orchestrator.endpoint && settings.orchestrator.model
-			? options.providers.getDetectedReasoning(settings.orchestrator.endpoint, settings.orchestrator.model)
-			: null;
-	const availableThinking = status
-		? availableThinkingLevels(
-				resolveModelCapabilities(status, settings.orchestrator.model, options?.providers?.knowledgeBase ?? null, {
-					detectedReasoning,
-				}),
-				{
-					runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-					...(settings.orchestrator.model ? { modelId: settings.orchestrator.model } : {}),
-				},
-			)
-		: (["off"] as ReadonlyArray<ThinkingLevel>);
+	const resolvedThinking = options?.providers
+		? resolveModelRuntimeCapabilitiesForProviders(
+				options.providers,
+				settings.orchestrator.endpoint,
+				settings.orchestrator.model,
+				settings.orchestrator.thinkingLevel ?? "off",
+			)?.thinking
+		: null;
+	const displayedThinkingLevel = resolvedThinking?.display ?? settings.orchestrator.thinkingLevel ?? "off";
+	const thinkingValues = resolvedThinking
+		? resolvedThinking.supportedLevels.map((level) => thinkingLevelChoiceLabel(resolvedThinking.mechanism, level))
+		: (["off"] as string[]);
 	return [
 		{
 			id: "defaultMode",
@@ -85,8 +81,8 @@ export function buildSettingItems(
 		{
 			id: "orchestrator.thinkingLevel",
 			label: "orchestrator.thinkingLevel",
-			currentValue: settings.orchestrator.thinkingLevel ?? "off",
-			values: Array.from(availableThinking),
+			currentValue: displayedThinkingLevel,
+			values: thinkingValues,
 			description: "Reasoning budget for the chat loop.",
 		},
 		{
@@ -229,16 +225,7 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			if (value === "suggest" || value === "auto-edit" || value === "full-auto") settings.safetyLevel = value;
 			return;
 		case "orchestrator.thinkingLevel":
-			if (
-				value === "off" ||
-				value === "minimal" ||
-				value === "low" ||
-				value === "medium" ||
-				value === "high" ||
-				value === "xhigh"
-			) {
-				settings.orchestrator.thinkingLevel = value;
-			}
+			settings.orchestrator.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.orchestrator.thinkingLevel;
 			return;
 		case "compaction.auto":
 			if (value === "true" || value === "false") settings.compaction.auto = value === "true";

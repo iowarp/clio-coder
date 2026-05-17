@@ -389,6 +389,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 				runtimeId: endpoint.runtime,
 				lifecycle: endpointLifecycle(endpoint),
 				...(endpoint.gateway === true ? { gateway: true } : {}),
+				...(kb?.entry.family ? { family: kb.entry.family } : {}),
 				...(quirks ? { quirks } : {}),
 			},
 		};

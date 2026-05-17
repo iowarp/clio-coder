@@ -25,12 +25,15 @@ import {
 	type Tool as OllamaTool,
 	type ToolCall as OllamaToolCall,
 } from "ollama";
-import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
+import {
+	type AppliedThinking,
+	resolveModelRuntimeCapabilitiesForModel,
+	type ThinkingLevel,
+} from "../../domains/providers/index.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
-import { type AppliedThinking, applyThinkingMechanism } from "./thinking-mechanism.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
 
@@ -40,6 +43,7 @@ interface ClioRuntimeMetadata {
 		runtimeId: string;
 		lifecycle: "user-managed" | "clio-managed";
 		gateway?: boolean;
+		family?: string;
 		quirks?: LocalModelQuirks;
 	};
 }
@@ -170,10 +174,11 @@ function buildRequest(
 	};
 	if (context.tools && context.tools.length > 0) req.tools = context.tools.map(toolToOllama);
 	const opts: Partial<OllamaOptions> = {};
-	const applied = applyThinkingMechanism(clioQuirks(model), thinkingLevel, { reasoning: model.reasoning === true });
+	const resolved = resolveModelRuntimeCapabilitiesForModel(model, thinkingLevel);
+	const applied = resolved.thinking;
 	const think = ollamaThinkValue(applied);
 	if (think !== undefined) req.think = think;
-	const samplingProfile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
+	const samplingProfile = pickSamplingProfile(resolved.quirks ?? clioQuirks(model), applied.thinkingActive);
 	if (samplingProfile) applyOllamaSamplingProfile(opts, samplingProfile);
 	if (options?.temperature !== undefined) opts.temperature = options.temperature;
 	opts.num_predict = remainingContextMaxTokens(model, context, options);

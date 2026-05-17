@@ -1,9 +1,10 @@
 import type { ClioSettings } from "../../core/config.js";
 import {
-	availableThinkingLevels,
 	type ProvidersContract,
-	resolveModelCapabilities,
+	type ResolvedThinkingCapability,
+	resolveModelRuntimeCapabilitiesForProviders,
 	type ThinkingLevel,
+	thinkingLevelChoiceLabel,
 } from "../../domains/providers/index.js";
 import { extractLocalModelQuirks, type ThinkingMechanism } from "../../domains/providers/types/local-model-quirks.js";
 import {
@@ -40,6 +41,7 @@ const DESCRIPTIONS: Record<ThinkingLevel, string> = {
 export interface OpenThinkingOverlayDeps {
 	current: ThinkingLevel;
 	available: readonly ThinkingLevel[];
+	labelFor?: (level: ThinkingLevel) => string;
 	onSelect: (next: ThinkingLevel) => void;
 	onClose: () => void;
 }
@@ -54,16 +56,23 @@ class ThinkingOverlayBox extends Box {
 	}
 }
 
-export function buildThinkingItems(current: ThinkingLevel, available: readonly ThinkingLevel[]): SelectItem[] {
-	return available.map((lvl) => ({
-		value: lvl,
-		label: `${lvl === current ? "●" : " "} ${lvl}`,
-		description: DESCRIPTIONS[lvl] ?? "",
-	}));
+export function buildThinkingItems(
+	current: ThinkingLevel,
+	available: readonly ThinkingLevel[],
+	labelFor: (level: ThinkingLevel) => string = (level) => level,
+): SelectItem[] {
+	return available.map((lvl) => {
+		const label = labelFor(lvl);
+		return {
+			value: lvl,
+			label: `${lvl === current ? "●" : " "} ${label}`,
+			description: label === "on" ? "thinking enabled" : (DESCRIPTIONS[lvl] ?? ""),
+		};
+	});
 }
 
 export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): OverlayHandle {
-	const items = buildThinkingItems(deps.current, deps.available);
+	const items = buildThinkingItems(deps.current, deps.available, deps.labelFor);
 	const list = new SelectList(items, deps.available.length, THINKING_THEME);
 	const initialIndex = Math.max(0, deps.available.indexOf(deps.current));
 	list.setSelectedIndex(initialIndex);
@@ -84,36 +93,39 @@ export function readThinkingLevel(settings: Readonly<ClioSettings>): ThinkingLev
 	return settings.orchestrator.thinkingLevel ?? "off";
 }
 
+export function resolveThinkingCapability(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): ResolvedThinkingCapability | null {
+	const resolved = resolveModelRuntimeCapabilitiesForProviders(
+		providers,
+		settings.orchestrator.endpoint,
+		settings.orchestrator.model,
+		settings.orchestrator.thinkingLevel ?? "off",
+	);
+	return resolved?.thinking ?? null;
+}
+
 /**
- * Thinking levels permitted for the active orchestrator target. Looks up the
- * target's merged `CapabilityFlags` via `providers.list()` and gates the list
- * through `availableThinkingLevels`. Unknown or unconfigured targets return
- * `["off"]` so the overlay degrades to a no-op single-option picker.
- *
- * The level list is further constrained by the family's thinking mechanism:
- * `on-off` collapses to {off, low}; `always-on` collapses to a single placeholder
- * (`high`); `none` collapses to {off}. The overlay reads the same mechanism so
- * the descriptions stay aligned with the row set.
+ * Thinking levels permitted for the active orchestrator target. This is the
+ * same resolved surface used by the runtime payload builders and dashboard.
+ * Unknown or unconfigured targets return `["off"]` so the overlay degrades to
+ * a no-op single-option picker.
  */
 export function resolveAvailableThinkingLevels(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 ): ReadonlyArray<ThinkingLevel> {
-	const endpointId = settings.orchestrator.endpoint?.trim();
-	const wireModelId = settings.orchestrator.model?.trim();
-	if (!endpointId) return ["off"];
-	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
-	if (!status) return ["off"];
-	const detectedReasoning = wireModelId ? providers.getDetectedReasoning(endpointId, wireModelId) : null;
-	const baseAvailable = availableThinkingLevels(
-		resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning }),
-		{
-			runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-			...(wireModelId ? { modelId: wireModelId } : {}),
-		},
-	);
-	const mechanism = wireModelId ? mechanismForModel(providers, wireModelId) : null;
-	return restrictLevelsByMechanism(baseAvailable, mechanism);
+	return resolveThinkingCapability(providers, settings)?.supportedLevels ?? ["off"];
+}
+
+export function resolveThinkingLabeler(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): (level: ThinkingLevel) => string {
+	const thinking = resolveThinkingCapability(providers, settings);
+	const mechanism = thinking?.mechanism ?? null;
+	return (level) => thinkingLevelChoiceLabel(mechanism, level);
 }
 
 /**
@@ -128,22 +140,7 @@ export function mechanismForModel(providers: ProvidersContract, wireModelId: str
 }
 
 /**
- * Collapse the available level list to the rows the overlay should show for
- * a given mechanism. The overlay caller still passes through the resolved
- * level on `onSelect`; the engine's `applyThinkingMechanism` re-coerces if
- * the user picks an unsupported intermediate level via /thinking <level>.
+ * Back-compat export for tests and older callers. New UI and runtime paths
+ * should ask `resolveThinkingCapability` for the full effective surface.
  */
-export function restrictLevelsByMechanism(
-	levels: ReadonlyArray<ThinkingLevel>,
-	mechanism: ThinkingMechanism | null,
-): ReadonlyArray<ThinkingLevel> {
-	if (mechanism === "none") return ["off"];
-	if (mechanism === "always-on") return ["high"];
-	if (mechanism === "on-off") {
-		const out: ThinkingLevel[] = [];
-		if (levels.includes("off")) out.push("off");
-		out.push("low");
-		return out;
-	}
-	return levels;
-}
+export { restrictThinkingLevelsByMechanism as restrictLevelsByMechanism } from "../thinking-level-policy.js";

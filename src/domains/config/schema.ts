@@ -32,6 +32,7 @@ const ThinkingFormatSchema = Type.Union([
 	Type.Literal("anthropic-extended"),
 	Type.Literal("deepseek-r1"),
 	Type.Literal("openai-codex"),
+	Type.Literal("harmony"),
 ]);
 
 const StructuredOutputsSchema = Type.Union([

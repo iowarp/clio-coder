@@ -15,6 +15,7 @@ export interface ClioLocalModelMetadata {
 		runtimeId: string;
 		lifecycle: LocalModelLifecycle;
 		gateway?: boolean;
+		family?: string;
 		quirks?: LocalModelQuirks;
 	};
 }
@@ -33,7 +34,9 @@ export function endpointLifecycle(endpoint: EndpointDescriptor): LocalModelLifec
 	return endpoint.lifecycle ?? "user-managed";
 }
 
-function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["thinkingFormat"] | undefined {
+function openAIThinkingFormat(
+	caps: CapabilityFlags,
+): OpenAICompletionsCompat["thinkingFormat"] | "harmony" | undefined {
 	switch (caps.thinkingFormat) {
 		case "qwen-chat-template":
 		case "openrouter":
@@ -41,6 +44,8 @@ function openAIThinkingFormat(caps: CapabilityFlags): OpenAICompletionsCompat["t
 			return caps.thinkingFormat;
 		case "deepseek-r1":
 			return "deepseek";
+		case "harmony":
+			return "harmony";
 		default:
 			return undefined;
 	}
@@ -56,7 +61,7 @@ function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {
 		supportsStrictMode: false,
 	};
 	const thinkingFormat = openAIThinkingFormat(caps);
-	if (thinkingFormat) compat.thinkingFormat = thinkingFormat;
+	if (thinkingFormat) (compat as unknown as { thinkingFormat?: string }).thinkingFormat = thinkingFormat;
 	return compat;
 }
 
@@ -101,6 +106,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			runtimeId: endpoint.runtime,
 			lifecycle: endpointLifecycle(endpoint),
 			...(endpoint.gateway === true ? { gateway: true } : {}),
+			...(kb?.entry.family ? { family: kb.entry.family } : {}),
 			...(quirks ? { quirks } : {}),
 		},
 	};

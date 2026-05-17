@@ -1026,4 +1026,91 @@ describe("engine/lmstudio-native runStream", () => {
 		// invariant is that it does NOT equal the budget.
 		ok(capturedMaxTokens !== 16384, `expected maxPredictedTokens != budget; got ${capturedMaxTokens}`);
 	});
+
+	it("routes raw GPT-OSS Harmony analysis to thinking and final to visible text", async () => {
+		const model = {
+			id: "openai/gpt-oss-20b",
+			name: "openai/gpt-oss-20b",
+			api: "lmstudio-native",
+			provider: "lmstudio",
+			baseUrl: "ws://127.0.0.1:1234",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 131072,
+			maxTokens: 32768,
+		} satisfies Parameters<typeof runStream>[0];
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof runStream>[1];
+		const deps: NonNullable<Parameters<typeof runStream>[3]> = {
+			createClient: () => ({
+				files: {
+					prepareImageBase64: async () => {
+						throw new Error("unexpected image input");
+					},
+				},
+				llm: {
+					listLoaded: async () => [],
+					model: async () => ({
+						respond: (_history, opts) => {
+							for (const content of [
+								"<|start|>assistant<|channel|>analysis<|message|>think",
+								" carefully<|end|><|start|>assistant<|channel|>",
+								"final<|message|>Hi there!",
+							]) {
+								opts.onPredictionFragment?.({
+									content,
+									tokensCount: 0,
+									containsDrafted: false,
+									reasoningType: "none",
+									isStructural: false,
+								});
+							}
+							return {
+								result: async () => ({
+									stats: {
+										promptTokensCount: 4,
+										predictedTokensCount: 28,
+										totalTokensCount: 32,
+										stopReason: "eosFound",
+									},
+								}),
+							};
+						},
+					}),
+				},
+			}),
+			ensureResident: async () => {},
+			discoverLoadedContext: async () => undefined,
+		};
+
+		const events = runStream(model, context, undefined, deps);
+		const textDeltas: string[] = [];
+		const thinkingDeltas: string[] = [];
+		let finalText = "";
+		let finalThinking = "";
+		for await (const event of events) {
+			if (event.type === "text_delta") textDeltas.push(event.delta);
+			if (event.type === "thinking_delta") thinkingDeltas.push(event.delta);
+			if (event.type === "done") {
+				finalText = event.message.content
+					.filter((block) => block.type === "text")
+					.map((block) => block.text)
+					.join("");
+				finalThinking = event.message.content
+					.filter((block) => block.type === "thinking")
+					.map((block) => block.thinking)
+					.join("");
+			}
+		}
+
+		strictEqual(textDeltas.join(""), "Hi there!");
+		strictEqual(thinkingDeltas.join(""), "think carefully");
+		strictEqual(finalText, "Hi there!");
+		strictEqual(finalThinking, "think carefully");
+		strictEqual(`${finalText}${finalThinking}`.includes("<|start|>"), false);
+		strictEqual(`${finalText}${finalThinking}`.includes("<|channel|>"), false);
+		strictEqual(`${finalText}${finalThinking}`.includes("<|message|>"), false);
+	});
 });

@@ -1,4 +1,5 @@
 import { catalogThinkingLevelsForRuntime } from "../catalog.js";
+import { isHarmonyModelId } from "../model-family.js";
 
 export type ToolCallFormat = "openai" | "anthropic" | "hermes" | "llama3-json" | "mistral" | "qwen" | "xml";
 
@@ -8,7 +9,8 @@ export type ThinkingFormat =
 	| "zai"
 	| "anthropic-extended"
 	| "deepseek-r1"
-	| "openai-codex";
+	| "openai-codex"
+	| "harmony";
 
 export type StructuredOutputMode = "json-schema" | "gbnf" | "xgrammar" | "none";
 
@@ -48,6 +50,7 @@ export type ThinkingLevel = (typeof VALID_THINKING_LEVELS)[number];
 const THINKING_LEVELS_WITHOUT_XHIGH: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
 const THINKING_LEVELS_OPENAI_5_1_MINI: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
 const THINKING_LEVELS_OPENAI_5_2_PLUS: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
+const THINKING_LEVELS_HARMONY: ReadonlyArray<ThinkingLevel> = ["low", "medium", "high"];
 
 function normalizeModelId(modelId: string | undefined): string | undefined {
 	if (!modelId) return undefined;
@@ -76,6 +79,9 @@ export function availableThinkingLevels(
 	options?: { runtimeId?: string; modelId?: string },
 ): ReadonlyArray<ThinkingLevel> {
 	if (!caps.reasoning) return ["off"];
+	if (caps.thinkingFormat === "harmony" || isHarmonyModelId(options?.modelId)) {
+		return THINKING_LEVELS_HARMONY;
+	}
 	const catalogLevels =
 		options?.runtimeId && options.modelId
 			? catalogThinkingLevelsForRuntime(options.runtimeId, options.modelId)

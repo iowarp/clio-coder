@@ -30,9 +30,9 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	availableThinkingLevels,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
+	resolveModelRuntimeCapabilitiesForProviders,
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
@@ -579,30 +579,32 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		onSetThinkingLevel: (level) => {
+			const current = getCurrentSettings();
+			const nextLevel =
+				resolveModelRuntimeCapabilitiesForProviders(
+					providers,
+					current.orchestrator.endpoint,
+					current.orchestrator.model,
+					level,
+				)?.thinking.effectiveLevel ?? "off";
 			updateSettings((current) => {
-				current.orchestrator.thinkingLevel = level;
+				current.orchestrator.thinkingLevel = nextLevel;
 			});
 		},
 		onCycleThinking: () => {
 			const current = getCurrentSettings();
-			const status = providers.list().find((entry) => entry.endpoint.id === current.orchestrator.endpoint);
-			const detectedReasoning =
-				current.orchestrator.endpoint && current.orchestrator.model
-					? providers.getDetectedReasoning(current.orchestrator.endpoint, current.orchestrator.model)
-					: null;
-			const available = status
-				? availableThinkingLevels(
-						resolveModelCapabilities(status, current.orchestrator.model, providers.knowledgeBase, {
-							detectedReasoning,
-						}),
-						{
-							runtimeId: status.runtime?.id ?? status.endpoint.runtime,
-							...(current.orchestrator.model ? { modelId: current.orchestrator.model } : {}),
-						},
-					)
-				: (["off"] as ThinkingLevel[]);
+			const thinking = resolveModelRuntimeCapabilitiesForProviders(
+				providers,
+				current.orchestrator.endpoint,
+				current.orchestrator.model,
+				current.orchestrator.thinkingLevel ?? "off",
+			)?.thinking;
+			const effectiveAvailable = thinking?.supportedLevels ?? (["off"] as ThinkingLevel[]);
 			updateSettings((next) => {
-				next.orchestrator.thinkingLevel = advanceThinkingLevel(next.orchestrator.thinkingLevel ?? "off", available);
+				next.orchestrator.thinkingLevel = advanceThinkingLevel(
+					thinking?.effectiveLevel ?? next.orchestrator.thinkingLevel ?? "off",
+					effectiveAvailable,
+				);
 			});
 		},
 		onSelectModel: ({ endpoint, model }) => {

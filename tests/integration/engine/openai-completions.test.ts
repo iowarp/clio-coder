@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
@@ -330,6 +330,87 @@ describe("engine/openai-completions", () => {
 		}
 	});
 
+	it("strips raw GPT-OSS Harmony final-channel markers from openai-compatible text", async () => {
+		let server: Server | null = createServer((_req, res) => {
+			res.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			});
+			for (const content of [
+				"<|start|>assistant<|channel|>",
+				"final<|message|>Hi there!",
+				" What can I help with today?",
+			]) {
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-harmony",
+						object: "chat.completion.chunk",
+						created: 1,
+						model: "openai/gpt-oss-20b",
+						choices: [{ index: 0, delta: { content } }],
+					})}\n\n`,
+				);
+			}
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-harmony",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "openai/gpt-oss-20b",
+					choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+					usage: { prompt_tokens: 4, completion_tokens: 12, total_tokens: 16 },
+				})}\n\n`,
+			);
+			res.end("data: [DONE]\n\n");
+		});
+		await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+		const addr = server.address() as AddressInfo;
+		const model = {
+			id: "openai/gpt-oss-20b",
+			name: "openai/gpt-oss-20b",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: `http://127.0.0.1:${addr.port}/v1`,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 131072,
+			maxTokens: 32768,
+			compat: { maxTokensField: "max_tokens", supportsUsageInStreaming: true },
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[0];
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		try {
+			const events = openAICompletionsApiProvider.stream(model, context, { apiKey: "sk-test" });
+			const deltas: string[] = [];
+			let finalText = "";
+			for await (const event of events) {
+				if (event.type === "text_delta") deltas.push(event.delta);
+				if (event.type === "done") {
+					finalText = event.message.content
+						.filter((block) => block.type === "text")
+						.map((block) => block.text)
+						.join("");
+				}
+			}
+			const streamedText = deltas.join("");
+			strictEqual(streamedText, "Hi there! What can I help with today?");
+			strictEqual(finalText, streamedText);
+			strictEqual(streamedText.includes("<|start|>"), false);
+			strictEqual(streamedText.includes("<|channel|>"), false);
+			strictEqual(streamedText.includes("<|message|>"), false);
+		} finally {
+			await new Promise<void>((resolve) => {
+				const active = server;
+				server = null;
+				active?.close(() => resolve());
+			});
+		}
+	});
+
 	it("strips prior assistant thinking from upstream request body on replay", async () => {
 		// Capture the request body the wrapper sends upstream so we can assert
 		// no prior chain-of-thought leaks back into the next request via
@@ -541,5 +622,45 @@ describe("engine/openai-completions", () => {
 
 		const body = asRecord(capturedPayload);
 		strictEqual(body.thinking, undefined, "qwen-chat-template surface must not gain a thinking field");
+	});
+
+	it("sends Harmony reasoning_effort through OpenAI-compatible payloads", async () => {
+		const model = {
+			id: "openai/gpt-oss-20b",
+			name: "openai/gpt-oss-20b",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1234/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 131072,
+			maxTokens: 32768,
+			compat: {
+				maxTokensField: "max_tokens",
+				thinkingFormat: "harmony" as never,
+			},
+		} satisfies Parameters<typeof openAICompletionsApiProvider.streamSimple>[0];
+		const context = {
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.streamSimple>[1];
+
+		let capturedPayload: unknown;
+		const events = openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "sk-test",
+			reasoning: "minimal",
+			onPayload: (payload) => {
+				capturedPayload = payload;
+				throw new Error("captured request body");
+			},
+		});
+
+		for await (const _event of events) {
+			// drain
+		}
+
+		const body = asRecord(capturedPayload);
+		strictEqual(body.reasoning_effort, "low");
+		deepStrictEqual(body.chat_template_kwargs, { reasoning_effort: "low" });
 	});
 });

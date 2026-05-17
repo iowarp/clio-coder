@@ -28,6 +28,39 @@ export { mergeCapabilities } from "./capabilities.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 export { ProvidersManifest } from "./manifest.js";
 export { resolveModelCapabilities } from "./model-capabilities.js";
+export {
+	inferLocalModelFamily,
+	isHarmonyModelId,
+	type LocalModelFamily,
+	normalizeModelIdForFamily,
+} from "./model-family.js";
+export {
+	type AppliedThinking,
+	type AppliedThinkingNoticeKind,
+	applyThinkingMechanism,
+	coerceThinkingLevelForRuntime,
+	effectiveThinkingLevel,
+	harmonyReasoningEffort,
+	inferThinkingMechanism,
+	isHarmonyThinkingFormat,
+	type ResolvedModelRuntimeCapabilities,
+	type ResolvedRequestCapability,
+	type ResolvedResponseCapability,
+	type ResolvedThinkingCapability,
+	type ResponseParserKind,
+	resolveEndpointRuntimeCapabilities,
+	resolveModelRuntimeCapabilities,
+	resolveModelRuntimeCapabilitiesForModel,
+	resolveModelRuntimeCapabilitiesForProviders,
+	resolveModelRuntimeCapabilitiesForStatus,
+	restrictThinkingLevelsByMechanism,
+	sortedSupportedThinkingLevels,
+	supportedThinkingLevelLabels,
+	type ThinkingBudgetEnforcement,
+	thinkingLevelChoiceLabel,
+	thinkingLevelDisplayWord,
+	thinkingLevelFromChoiceLabel,
+} from "./model-runtime-capabilities.js";
 export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
 export {
 	type ResolvedModelRef,

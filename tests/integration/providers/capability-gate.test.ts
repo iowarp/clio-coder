@@ -365,7 +365,7 @@ describe("dispatch capability gate", () => {
 			strictEqual(harness.spawnCalls.length, 1);
 			strictEqual(harness.spawnCalls[0]?.endpoint.id, "tools-worker");
 			strictEqual(harness.spawnCalls[0]?.wireModelId, "tools-model");
-			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "medium");
+			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "low");
 		} finally {
 			await harness.cleanup();
 		}
@@ -411,7 +411,7 @@ describe("dispatch capability gate", () => {
 			strictEqual(harness.spawnCalls.length, 1);
 			strictEqual(harness.spawnCalls[0]?.endpoint.id, "claude-sdk-opus");
 			strictEqual(harness.spawnCalls[0]?.wireModelId, "claude-opus-4-7");
-			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "high");
+			strictEqual(harness.spawnCalls[0]?.thinkingLevel, "low");
 		} finally {
 			await harness.cleanup();
 		}
