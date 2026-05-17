@@ -1,5 +1,19 @@
 import { type Component, Markdown, type MarkdownTheme, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import {
+	AGENT_GLYPH,
+	AMBER,
+	BLUE_REASON,
+	BOLD,
+	DIM,
+	GREEN_OK,
+	ITALIC,
+	RED_CRIT,
+	RESET,
+	TEAL,
+	UNDERLINE,
+	USER_GLYPH,
+} from "./palette.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	previewResult,
@@ -10,12 +24,6 @@ import {
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
 import type { StatusPhase, VerbRender } from "./status/index.js";
-
-const ANSI_RESET = "\u001b[0m";
-const ANSI_BOLD = "\u001b[1m";
-const ANSI_DIM = "\u001b[2m";
-const ANSI_ITALIC = "\u001b[3m";
-const ANSI_UNDERLINE = "\u001b[4m";
 
 /**
  * Markdown theme for the assistant stream. pi-tui's Markdown renderer calls
@@ -28,20 +36,20 @@ const ANSI_UNDERLINE = "\u001b[4m";
  * block indent) survive stripping.
  */
 const CHAT_MARKDOWN_THEME: MarkdownTheme = {
-	heading: (text) => `${ANSI_BOLD}${text}${ANSI_RESET}`,
+	heading: (text) => `${BOLD}${text}${RESET}`,
 	link: (text) => text,
-	linkUrl: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	code: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
+	linkUrl: (text) => `${DIM}${text}${RESET}`,
+	code: (text) => `${DIM}${text}${RESET}`,
 	codeBlock: (text) => text,
-	codeBlockBorder: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	quote: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	quoteBorder: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	hr: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
+	codeBlockBorder: (text) => `${DIM}${text}${RESET}`,
+	quote: (text) => `${DIM}${text}${RESET}`,
+	quoteBorder: (text) => `${DIM}${text}${RESET}`,
+	hr: (text) => `${DIM}${text}${RESET}`,
 	listBullet: (text) => text,
-	bold: (text) => `${ANSI_BOLD}${text}${ANSI_RESET}`,
-	italic: (text) => `${ANSI_ITALIC}${text}${ANSI_RESET}`,
+	bold: (text) => `${BOLD}${text}${RESET}`,
+	italic: (text) => `${ITALIC}${text}${RESET}`,
 	strikethrough: (text) => text,
-	underline: (text) => `${ANSI_UNDERLINE}${text}${ANSI_RESET}`,
+	underline: (text) => `${UNDERLINE}${text}${RESET}`,
 };
 
 /**
@@ -127,6 +135,7 @@ type TranscriptEntry =
 			pending: boolean;
 			statusLine?: AssistantStatusLine | null | undefined;
 			summaryLine?: string | null | undefined;
+			isError: boolean;
 	  }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
@@ -219,10 +228,12 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	return seg.md.render(width);
 }
 
-const CLIO_PREFIX = "Clio Coder: ";
+const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
+const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
+const USER_PREFIX = `${TEAL}${USER_GLYPH}${RESET} `;
 
 /**
- * Prefix the first rendered line of the active assistant entry with "Clio Coder: ".
+ * Prefix the first rendered line of the active assistant entry with the agent glyph.
  * pi-tui's Markdown renderer right-pads every line to the requested width so
  * background colors extend edge-to-edge (markdown.js:104-107), so a line
  * returned at width=N already has visible width N. Prepending the assistant
@@ -233,10 +244,10 @@ const CLIO_PREFIX = "Clio Coder: ";
  * Trim the trailing pad before prefixing, then re-wrap in case the content
  * itself was already close to `width` and the prefix pushes it past.
  */
-function prefixClioLabel(lines: string[], width: number): string[] {
+function prefixClioLabel(lines: string[], width: number, prefix: string): string[] {
 	if (lines.length === 0) return lines;
 	const first = lines[0]?.replace(/ +$/, "") ?? "";
-	const prefixed = `${CLIO_PREFIX}${first}`;
+	const prefixed = `${prefix}${first}`;
 	const wrappedFirst = wrapTextWithAnsi(prefixed, width);
 	return [...wrappedFirst, ...lines.slice(1)];
 }
@@ -257,7 +268,7 @@ const THINKING_LINE_LIMIT = 12;
  */
 function renderThinkingLines(thinking: string, expanded: boolean, width: number): string[] {
 	if (thinking.length === 0) return [];
-	const dimWrap = (s: string): string => `${ANSI_DIM}${s}${ANSI_RESET}`;
+	const dimWrap = (s: string): string => `${DIM}${s}${RESET}`;
 	if (!expanded) {
 		const lineBudget = Math.max(1, width);
 		return [dimWrap(truncateToWidth(THINKING_HIDDEN_LABEL, lineBudget, "...", false))];
@@ -272,10 +283,17 @@ function renderThinkingLines(thinking: string, expanded: boolean, width: number)
 	for (const raw of visible) {
 		const wrappedLines = raw.length === 0 ? [""] : wrapTextWithAnsi(raw, bodyWidth);
 		for (const wrapped of wrappedLines) {
-			out.push(`${dimWrap("│ ")}${dimWrap(wrapped)}`);
+			out.push(`${BLUE_REASON}│ ${RESET}${DIM}${wrapped}${RESET}`);
 		}
 	}
 	return out;
+}
+
+function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string {
+	if (toneHint === "error") return `${RED_CRIT}${text}${RESET}`;
+	if (toneHint === "warn") return `${AMBER}${text}${RESET}`;
+	if (toneHint === "ok") return `${GREEN_OK}${text}${RESET}`;
+	return `${DIM}${text}${RESET}`;
 }
 
 function renderToolSegmentLines(
@@ -334,7 +352,7 @@ function renderEntryLines(
 		return entry.renderBlock(width);
 	}
 	if (entry.role === "user") {
-		return wrapTextWithAnsi(`you: ${entry.text}`, width);
+		return wrapTextWithAnsi(`${USER_PREFIX}${entry.text}`, width);
 	}
 	if (entry.role === "retryStatus") {
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
@@ -349,6 +367,7 @@ function renderEntryLines(
 	if (entry.thinking.length > 0 && entry.pending === false) {
 		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width));
 	}
+	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	let labeled = false;
 	for (const seg of entry.segments) {
 		if (seg.kind === "text") {
@@ -356,7 +375,7 @@ function renderEntryLines(
 			const rendered = renderTextSegmentLines(seg, width);
 			if (rendered.length === 0) continue;
 			if (!labeled) {
-				lines.push(...prefixClioLabel(rendered, width));
+				lines.push(...prefixClioLabel(rendered, width, clioPrefix));
 				labeled = true;
 			} else {
 				lines.push(...rendered);
@@ -371,15 +390,15 @@ function renderEntryLines(
 		entry.statusLine !== undefined &&
 		!(entry.statusLine.phase === "writing" && hasStreamingText(entry));
 	if (!labeled && !hasVisibleOutput(entry)) {
-		lines.push(CLIO_PREFIX);
+		lines.push(clioPrefix.trimEnd());
 		if (shouldRenderStatus) {
-			lines.push(`  ${ANSI_DIM}${entry.statusLine?.verb ?? ""}${ANSI_RESET}`);
+			lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
 		}
 	} else if (shouldRenderStatus) {
-		lines.push(`  ${ANSI_DIM}${entry.statusLine?.verb ?? ""}${ANSI_RESET}`);
+		lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
 	}
 	if (entry.summaryLine && !entry.pending) {
-		lines.push(`  ${ANSI_DIM}· ${entry.summaryLine}${ANSI_RESET}`);
+		lines.push(`  ${DIM}· ${entry.summaryLine}${RESET}`);
 	}
 	return lines;
 }
@@ -413,6 +432,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			thinking: "",
 			expandedThinking: thinkingExpanded,
 			pending: false,
+			isError: false,
 		};
 		transcript.push(entry);
 		return entry;
@@ -616,6 +636,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const terminalError = extractAssistantTerminalError(event.message);
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
 				const assistant = ensureAssistant();
+				if (terminalError.length > 0) assistant.isError = true;
 				if (thinking.length > 0) {
 					assistant.thinking = thinking;
 					assistant.expandedThinking = thinkingExpanded;

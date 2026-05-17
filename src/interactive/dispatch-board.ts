@@ -75,6 +75,7 @@ const STATUS_WIDTH = 9;
 const ELAPSED_WIDTH = 9;
 const TOKENS_WIDTH = 10;
 const USD_WIDTH = 10;
+export const TASK_ISLAND_WIDTH = 44;
 
 const EMPTY_MESSAGE = "No dispatch runs yet.";
 const HINT_MESSAGE = "[Esc] close";
@@ -170,6 +171,25 @@ function renderRowContent(row: DispatchBoardRow): string {
 		rightCell(formatElapsedMs(row.elapsedMs), ELAPSED_WIDTH),
 		rightCell(formatTokenCount(row.tokenCount), TOKENS_WIDTH),
 		rightCell(formatUsd(row.costUsd), USD_WIDTH),
+	]);
+}
+
+function statusGlyph(status: DispatchBoardStatus): string {
+	if (status === "running") return ">";
+	if (status === "stale") return "!";
+	if (status === "enqueued") return "+";
+	if (status === "completed") return "✓";
+	if (status === "aborted") return "⊘";
+	return "✗";
+}
+
+function renderTaskIslandRow(row: DispatchBoardRow): string {
+	return buildContentLine([
+		statusGlyph(row.status),
+		leftCell(row.agentId, 9),
+		leftCell(`${row.endpointId}/${row.wireModelId}`, 17),
+		rightCell(formatElapsedMs(row.elapsedMs), 7),
+		rightCell(formatTokenCount(row.tokenCount), 6),
 	]);
 }
 
@@ -275,6 +295,19 @@ export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>):
 		...body.map((line) => frameLine(line)),
 		frameLine(HINT_MESSAGE),
 		borderLine(),
+	];
+}
+
+export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
+	const visibleRows = rows.slice(0, Math.max(1, maxRows));
+	const body = visibleRows.length > 0 ? visibleRows.map(renderTaskIslandRow) : ["No dispatch runs"];
+	const hidden = rows.length - visibleRows.length;
+	if (hidden > 0) body.push(`+ ${hidden} more`);
+	const content = body.map((line) => leftCell(line, TASK_ISLAND_WIDTH));
+	return [
+		brandedAsciiTopBorder(" Tasks ", TASK_ISLAND_WIDTH + 2),
+		...content.map((line) => brandedAsciiContentRow(line, TASK_ISLAND_WIDTH)),
+		brandedAsciiBottomBorder(TASK_ISLAND_WIDTH + 2),
 	];
 }
 

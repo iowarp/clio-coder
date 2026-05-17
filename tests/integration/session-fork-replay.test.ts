@@ -101,10 +101,10 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		rehydrateChatPanelFromTurns(panel, parentTurns, { uptoTurnId: a2.id });
 		const text = strip(panel.render(80).join("\n"));
 
-		ok(text.includes("you: first"), `first user missing:\n${text}`);
-		ok(text.includes("Clio Coder: reply1"), `first assistant missing:\n${text}`);
-		ok(text.includes("you: second"), `fork-point user missing:\n${text}`);
-		ok(text.includes("Clio Coder: reply2"), `fork-point assistant missing:\n${text}`);
+		ok(text.includes("> first"), `first user missing:\n${text}`);
+		ok(text.includes("◈ reply1"), `first assistant missing:\n${text}`);
+		ok(text.includes("> second"), `fork-point user missing:\n${text}`);
+		ok(text.includes("◈ reply2"), `fork-point assistant missing:\n${text}`);
 		ok(!text.includes("third"), `post-fork user turn leaked:\n${text}`);
 		ok(!text.includes("reply3"), `post-fork assistant turn leaked:\n${text}`);
 	});
@@ -141,7 +141,7 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("[branch summary]"), text);
 		ok(text.includes("The abandoned branch edited src/app.ts."), text);
-		ok(text.includes("you: second"), text);
+		ok(text.includes("> second"), text);
 		ok(text.includes("▸ bash"), text);
 		ok(text.includes("tests passed"), text);
 
