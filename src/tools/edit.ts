@@ -86,21 +86,18 @@ export const editTool: ToolSpec = {
 	name: ToolNames.Edit,
 	description:
 		"Edit a single file using exact text replacement. Prefer edits[] with one or more {oldText,newText} replacements. Each oldText must match a unique, non-overlapping region of the original file. Legacy old_string/new_string input is accepted.",
-	parameters: Type.Object(
-		{
-			path: Type.Optional(Type.String({ description: "Path to the file to edit (relative or absolute)." })),
-			file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
-			edits: Type.Optional(Type.Array(editEntrySchema, { description: "One or more targeted replacements." })),
-			oldText: Type.Optional(Type.String({ description: "Legacy/direct exact text to replace." })),
-			newText: Type.Optional(Type.String({ description: "Legacy/direct replacement text." })),
-			old_string: Type.Optional(Type.String({ description: "Legacy alias for oldText." })),
-			new_string: Type.Optional(Type.String({ description: "Legacy alias for newText." })),
-			replace_all: Type.Optional(
-				Type.Boolean({ description: "Legacy compatibility: replace every occurrence of old_string/new_string." }),
-			),
-		},
-		{ anyOf: [{ required: ["path"] }, { required: ["file_path"] }] },
-	),
+	parameters: Type.Object({
+		path: Type.Optional(Type.String({ description: "Path to the file to edit (relative or absolute)." })),
+		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
+		edits: Type.Optional(Type.Array(editEntrySchema, { description: "One or more targeted replacements." })),
+		oldText: Type.Optional(Type.String({ description: "Legacy/direct exact text to replace." })),
+		newText: Type.Optional(Type.String({ description: "Legacy/direct replacement text." })),
+		old_string: Type.Optional(Type.String({ description: "Legacy alias for oldText." })),
+		new_string: Type.Optional(Type.String({ description: "Legacy alias for newText." })),
+		replace_all: Type.Optional(
+			Type.Boolean({ description: "Legacy compatibility: replace every occurrence of old_string/new_string." }),
+		),
+	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
