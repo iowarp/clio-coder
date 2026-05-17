@@ -13,7 +13,9 @@ export const ZERO_EVAL_HARNESS_METRICS: EvalHarnessMetrics = {
 export function evalHarnessMetricsFromCommands(commands: ReadonlyArray<EvalCommandResult>): EvalHarnessMetrics {
 	return {
 		...ZERO_EVAL_HARNESS_METRICS,
-		validationEvidence: commands.filter((command) => command.phase === "verifier").length,
+		validationEvidence: commands.filter(
+			(command) => command.phase === "verifier" && command.exitCode === 0 && !command.timedOut,
+		).length,
 	};
 }
 

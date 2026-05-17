@@ -53,6 +53,7 @@ rl.on("line", (line) => {
 				},
 				runtimeId: "x",
 				wireModelId: "m",
+				allowedTools: ["bash"],
 			},
 			{ workerEntryPath: stubEntry },
 		);

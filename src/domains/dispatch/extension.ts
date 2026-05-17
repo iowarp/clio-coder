@@ -210,6 +210,19 @@ interface DispatchWorkerSpecInput {
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 }
 
+interface DispatchLifecycleStage {
+	recipe: AgentRecipe | null;
+	currentMode: ModeName;
+	admission: DispatchAdmissionStage;
+	target: ResolvedTarget;
+	cwd: string;
+	systemPrompt: string;
+	compiledPromptHash: string | null;
+	apiKey: string | undefined;
+	runtimeKind: RunKind;
+	approval: DispatchAutoApproveDerivation;
+}
+
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
 	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
 }
@@ -342,7 +355,6 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 		allowedTools: input.admission.allowedTools,
 		mode: input.admission.workerMode,
 		middlewareSnapshot: input.middlewareSnapshot,
-		supervised: input.approval.supervised,
 	};
 	if (input.approval.autoApprove !== undefined) spec.autoApprove = input.approval.autoApprove;
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
@@ -601,6 +613,42 @@ export function createDispatchBundle(
 		heartbeatTimer = null;
 	}
 
+	async function resolveLifecycle(req: DispatchRequest): Promise<DispatchLifecycleStage> {
+		const recipe = agents.get(req.agentId);
+		const currentMode = modes.current();
+		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
+		const targets = readWorkerTargets(config?.get());
+		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
+		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
+
+		const cwd = req.cwd ?? process.cwd();
+		const systemPrompt = buildSystemPrompt(req, recipe);
+		const compiledPromptHash = promptHash(systemPrompt);
+		const auth = targetRequiresAuth(target.endpoint, target.runtime)
+			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
+			: null;
+		// pi-ai's openai-completions provider refuses to stream without an apiKey
+		// even when the target is a local server that ignores Authorization headers.
+		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
+		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
+		// requiring the user to invent a credential.
+		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
+		const runtimeKind: RunKind = target.runtime.kind;
+		const approval = deriveAutoApproveForDispatch(req, runtimeLimitations(runtimeKind, target.runtime.id));
+		return {
+			recipe,
+			currentMode,
+			admission,
+			target,
+			cwd,
+			systemPrompt,
+			compiledPromptHash,
+			apiKey,
+			runtimeKind,
+			approval,
+		};
+	}
+
 	async function dispatch(req: DispatchRequest): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -621,29 +669,7 @@ export function createDispatchBundle(
 			}
 		}
 
-		const recipe = agents.get(req.agentId);
-		const currentMode = modes.current();
-		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
-
-		const targets = readWorkerTargets(config?.get());
-		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
-		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
-
-		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = buildSystemPrompt(req, recipe);
-		const compiledPromptHash = promptHash(systemPrompt);
-
-		const auth = targetRequiresAuth(target.endpoint, target.runtime)
-			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
-			: null;
-		// pi-ai's openai-completions provider refuses to stream without an apiKey
-		// even when the target is a local server that ignores Authorization headers.
-		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
-		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
-		// requiring the user to invent a credential.
-		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
-		const runtimeKind: RunKind = target.runtime.kind;
-		const approval = deriveAutoApproveForDispatch(req, runtimeLimitations(runtimeKind, target.runtime.id));
+		const lifecycle = await resolveLifecycle(req);
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
@@ -666,16 +692,16 @@ export function createDispatchBundle(
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const spec = buildDispatchWorkerSpec({
 			req,
-			target,
-			admission,
-			systemPrompt,
+			target: lifecycle.target,
+			admission: lifecycle.admission,
+			systemPrompt: lifecycle.systemPrompt,
 			middlewareSnapshot: middleware.snapshot(),
-			apiKey,
-			approval,
+			apiKey: lifecycle.apiKey,
+			approval: lifecycle.approval,
 		});
 		let worker: SpawnedWorker;
 		try {
-			worker = spawnWorker(spec, { cwd });
+			worker = spawnWorker(spec, { cwd: lifecycle.cwd });
 		} catch (error) {
 			releaseWorkerSlot();
 			throw error;
@@ -749,12 +775,12 @@ export function createDispatchBundle(
 		const envelope = ledgerRef.create({
 			agentId: req.agentId,
 			task: req.task,
-			endpointId: target.endpoint.id,
-			wireModelId: target.wireModelId,
-			runtimeId: target.runtime.id,
-			runtimeKind,
+			endpointId: lifecycle.target.endpoint.id,
+			wireModelId: lifecycle.target.wireModelId,
+			runtimeId: lifecycle.target.runtime.id,
+			runtimeKind: lifecycle.runtimeKind,
 			sessionId: null,
-			cwd,
+			cwd: lifecycle.cwd,
 		});
 		ledgerRef.update(
 			envelope.id,
@@ -766,18 +792,18 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
 			agentId: req.agentId,
-			endpointId: target.endpoint.id,
-			wireModelId: target.wireModelId,
-			runtimeId: target.runtime.id,
-			runtimeKind,
+			endpointId: lifecycle.target.endpoint.id,
+			wireModelId: lifecycle.target.wireModelId,
+			runtimeId: lifecycle.target.runtime.id,
+			runtimeKind: lifecycle.runtimeKind,
 		});
 		context.bus.emit(BusChannels.DispatchStarted, {
 			runId: envelope.id,
 			agentId: req.agentId,
-			endpointId: target.endpoint.id,
-			wireModelId: target.wireModelId,
-			runtimeId: target.runtime.id,
-			runtimeKind,
+			endpointId: lifecycle.target.endpoint.id,
+			wireModelId: lifecycle.target.wireModelId,
+			runtimeId: lifecycle.target.runtime.id,
+			runtimeKind: lifecycle.runtimeKind,
 			pid,
 		});
 
@@ -787,20 +813,92 @@ export function createDispatchBundle(
 			runId: envelope.id,
 			abort,
 			promise: workerDone.then(() => undefined),
-			recipe,
+			recipe: lifecycle.recipe,
 			startedAt,
-			endpointId: target.endpoint.id,
-			wireModelId: target.wireModelId,
-			runtimeId: target.runtime.id,
-			runtimeKind,
+			endpointId: lifecycle.target.endpoint.id,
+			wireModelId: lifecycle.target.wireModelId,
+			runtimeId: lifecycle.target.runtime.id,
+			runtimeKind: lifecycle.runtimeKind,
 			agentId: req.agentId,
 			task: req.task,
-			cwd,
+			cwd: lifecycle.cwd,
 			aborted: false,
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			terminalStatusOverride: null,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
+		};
+
+		const buildReceiptDraft = (
+			result: { exitCode?: number | null },
+			endedAt: string,
+			status: RunStatus,
+		): RunReceiptDraft => {
+			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
+			const pricing = lifecycle.target.endpoint.pricing;
+			const costUsd = pricing
+				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
+				: 0;
+			const safetyMetadata = safety.policy?.metadata(lifecycle.currentMode) ?? null;
+			return {
+				runId: envelope.id,
+				agentId: req.agentId,
+				task: req.task,
+				endpointId: lifecycle.target.endpoint.id,
+				wireModelId: lifecycle.target.wireModelId,
+				runtimeId: lifecycle.target.runtime.id,
+				runtimeKind: lifecycle.runtimeKind,
+				startedAt,
+				endedAt,
+				exitCode: receiptExitCode,
+				tokenCount: tokenMeter.inputTokens + tokenMeter.outputTokens,
+				reasoningTokenCount: tokenMeter.reasoningTokens,
+				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
+				costUsd,
+				compiledPromptHash: lifecycle.compiledPromptHash,
+				staticCompositionHash: null,
+				clioVersion: readClioVersion(),
+				piMonoVersion: readPiMonoVersion(),
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: countToolCalls(toolStats),
+				toolStats: snapshotToolStats(toolStats),
+				safety: {
+					decisions: safetyDecisionCounts,
+					blockedAttempts,
+					dispatchScope: MODE_MATRIX[lifecycle.currentMode].dispatchScope,
+					workerMode: lifecycle.admission.workerMode,
+					requestedActions: lifecycle.admission.requestedActions,
+					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					runtimeLimitations: lifecycle.approval.runtimeLimitations,
+				},
+				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
+				sessionId: null,
+			};
+		};
+
+		const emitTerminalDispatchEvent = (receipt: RunReceipt, status: RunStatus): void => {
+			const startMs = Date.parse(receipt.startedAt);
+			const endMs = Date.parse(receipt.endedAt);
+			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+			const payload = {
+				runId: envelope.id,
+				agentId: req.agentId,
+				endpointId: lifecycle.target.endpoint.id,
+				wireModelId: lifecycle.target.wireModelId,
+				runtimeId: lifecycle.target.runtime.id,
+				runtimeKind: lifecycle.runtimeKind,
+				tokenCount: receipt.tokenCount,
+				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
+				costUsd: receipt.costUsd,
+				durationMs,
+				exitCode: receipt.exitCode,
+			};
+			if (status === "completed") {
+				context.bus.emit(BusChannels.DispatchCompleted, payload);
+				return;
+			}
+			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: status });
 		};
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
@@ -811,94 +909,23 @@ export function createDispatchBundle(
 					activeRun.terminalStatusOverride ??
 					(activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed");
 				activeRun.terminalStatusOverride = status;
-				const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
-				const pricing = target.endpoint.pricing;
-				const costUsd = pricing
-					? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
-					: 0;
-				const tokenCount = tokenMeter.inputTokens + tokenMeter.outputTokens;
-				const reasoningTokenCount = tokenMeter.reasoningTokens;
-				const safetyMetadata = safety.policy?.metadata(currentMode) ?? null;
-				const receiptDraft: RunReceiptDraft = {
-					runId: envelope.id,
-					agentId: req.agentId,
-					task: req.task,
-					endpointId: target.endpoint.id,
-					wireModelId: target.wireModelId,
-					runtimeId: target.runtime.id,
-					runtimeKind,
-					startedAt,
-					endedAt,
-					exitCode: receiptExitCode,
-					tokenCount,
-					reasoningTokenCount,
-					...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
-					costUsd,
-					compiledPromptHash,
-					staticCompositionHash: null,
-					clioVersion: readClioVersion(),
-					piMonoVersion: readPiMonoVersion(),
-					platform: process.platform,
-					nodeVersion: process.version,
-					toolCalls: countToolCalls(toolStats),
-					toolStats: snapshotToolStats(toolStats),
-					safety: {
-						decisions: safetyDecisionCounts,
-						blockedAttempts,
-						dispatchScope: MODE_MATRIX[currentMode].dispatchScope,
-						workerMode: admission.workerMode,
-						requestedActions: admission.requestedActions,
-						...(admission.toolProfile !== undefined ? { toolProfile: admission.toolProfile } : {}),
-						runtimeLimitations: approval.runtimeLimitations,
-					},
-					reproducibility: collectReproducibilityMetadata(cwd, safetyMetadata),
-					sessionId: null,
-				};
-				ledgerRef.update(envelope.id, {
+				const receiptDraft = buildReceiptDraft(result, endedAt, status);
+				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					endedAt,
-					exitCode: receiptExitCode,
-					tokenCount,
-					reasoningTokenCount,
-					costUsd,
+					exitCode: receiptDraft.exitCode,
+					tokenCount: receiptDraft.tokenCount,
+					costUsd: receiptDraft.costUsd,
 					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt.current) } : {}),
-				});
+				};
+				if (receiptDraft.reasoningTokenCount !== undefined) {
+					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
+				}
+				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
-				const startMs = Date.parse(receipt.startedAt);
-				const endMs = Date.parse(receipt.endedAt);
-				const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
-				if (status === "completed") {
-					context.bus.emit(BusChannels.DispatchCompleted, {
-						runId: envelope.id,
-						agentId: req.agentId,
-						endpointId: target.endpoint.id,
-						wireModelId: target.wireModelId,
-						runtimeId: target.runtime.id,
-						runtimeKind,
-						tokenCount: receipt.tokenCount,
-						reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-						costUsd: receipt.costUsd,
-						durationMs,
-						exitCode: receiptExitCode,
-					});
-				} else {
-					context.bus.emit(BusChannels.DispatchFailed, {
-						runId: envelope.id,
-						agentId: req.agentId,
-						endpointId: target.endpoint.id,
-						wireModelId: target.wireModelId,
-						runtimeId: target.runtime.id,
-						runtimeKind,
-						tokenCount: receipt.tokenCount,
-						reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-						costUsd: receipt.costUsd,
-						durationMs,
-						exitCode: receiptExitCode,
-						reason: status,
-					});
-				}
+				emitTerminalDispatchEvent(receipt, status);
 				return receipt;
 			} finally {
 				releaseWorkerSlot();

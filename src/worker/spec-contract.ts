@@ -35,10 +35,9 @@ export interface WorkerSpec {
 	sessionId?: string;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
-	allowedTools?: ReadonlyArray<ToolName>;
+	allowedTools: ReadonlyArray<ToolName>;
 	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
-	supervised?: boolean;
 	autoApprove?: "allow" | "deny";
 }
 
@@ -282,8 +281,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
 	readOptionalEnum(spec, "mode", "WorkerSpec", MODE_NAMES);
 	readOptionalEnum(spec, "autoApprove", "WorkerSpec", AUTO_APPROVE_VALUES);
-	readOptionalBoolean(spec, "supervised", "WorkerSpec");
-	if (spec.allowedTools !== undefined) validateAllowedTools(spec.allowedTools);
+	validateAllowedTools(spec.allowedTools);
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);

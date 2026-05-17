@@ -1,4 +1,3 @@
-import { middlewareRuleIdsForHook } from "./rules.js";
 import type { MiddlewareHookInput, MiddlewareHookResult } from "./types.js";
 
 export function runMiddlewareHook(input: MiddlewareHookInput): MiddlewareHookResult {
@@ -6,7 +5,7 @@ export function runMiddlewareHook(input: MiddlewareHookInput): MiddlewareHookRes
 		hook: input.hook,
 		input: cloneHookInput(input),
 		effects: [],
-		ruleIds: middlewareRuleIdsForHook(input.hook),
+		ruleIds: [],
 	};
 }
 

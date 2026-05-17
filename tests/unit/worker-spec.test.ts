@@ -42,6 +42,7 @@ function spec(): WorkerSpec {
 		runtime: serializeWorkerRuntimeDescriptor(runtime),
 		runtimeId: runtime.id,
 		wireModelId: "gpt-test",
+		allowedTools: ["read"],
 	};
 }
 
@@ -84,7 +85,6 @@ describe("dispatch worker spec contract", () => {
 					},
 				],
 			},
-			supervised: true,
 			autoApprove: "deny",
 		});
 
@@ -95,6 +95,9 @@ describe("dispatch worker spec contract", () => {
 
 	it("rejects malformed consumed worker fields before runtime execution", () => {
 		throws(() => parseWorkerSpec({ ...spec(), task: "" }), /WorkerSpec\.task/);
+		const missingAllowedTools = { ...spec() } as Record<string, unknown>;
+		Reflect.deleteProperty(missingAllowedTools, "allowedTools");
+		throws(() => parseWorkerSpec(missingAllowedTools), /WorkerSpec\.allowedTools/);
 		throws(
 			() =>
 				parseWorkerSpec({

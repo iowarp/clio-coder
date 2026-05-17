@@ -8,7 +8,6 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
-import type { ToolName } from "../core/tool-names.js";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -52,6 +51,7 @@ async function main(): Promise<number> {
 		runtime,
 		wireModelId: spec.wireModelId,
 		mode,
+		allowedTools: spec.allowedTools,
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;
@@ -60,12 +60,6 @@ async function main(): Promise<number> {
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
 	if (spec.autoApprove !== undefined) input.autoApprove = spec.autoApprove;
 	input.awaitApproval = demux.awaitApproval;
-	if (spec.allowedTools !== undefined) {
-		input.allowedTools = spec.allowedTools as ReadonlyArray<ToolName>;
-	} else {
-		process.stderr.write("[worker] warning: spec missing allowedTools; falling back to mode matrix\n");
-	}
-
 	const handle = startWorkerRun(input, emitEvent);
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);

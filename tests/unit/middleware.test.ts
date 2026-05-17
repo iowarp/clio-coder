@@ -10,7 +10,7 @@ import {
 	validateMiddlewareEffect,
 	validateMiddlewareRule,
 } from "../../src/domains/middleware/index.js";
-import { listMiddlewareRules, middlewareRuleIdsForHook } from "../../src/domains/middleware/rules.js";
+import { listMiddlewareRules } from "../../src/domains/middleware/rules.js";
 
 describe("middleware runtime", () => {
 	it("covers every canonical hook name with a no-op result", () => {
@@ -96,11 +96,11 @@ describe("middleware runtime", () => {
 		});
 	});
 
-	it("does not subscribe inactive built-ins to hooks", () => {
+	it("does not ship inactive built-ins into stable execution", () => {
 		const rules = listMiddlewareRules();
 		strictEqual(rules.length, 0);
 		for (const hook of MIDDLEWARE_HOOKS) {
-			deepStrictEqual(middlewareRuleIdsForHook(hook), []);
+			deepStrictEqual(createMiddlewareBundle().contract.runHook({ hook }).ruleIds, []);
 		}
 	});
 
