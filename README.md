@@ -34,12 +34,16 @@ Clio Coder is currently in **alpha**. The current release is **v0.1.9**.
 
 ## What's new in v0.1.9
 
-A local-model hardening release. The headline is that llama.cpp/OpenAI-compatible targets now resolve local model thinking capabilities through one shared path, including GPT-OSS/Harmony reasoning and JSON responses.
+A hardening release on top of the v0.1.6 print-mode baseline. v0.1.9 combines safer fleet dispatch, local-model capability resolution, frontend validation, TUI cancellation fixes, stronger release evidence, and removal of the retired internal dev harness.
 
-- **Local thinking surfaces.** Clio now centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, and agent dispatch agree on the effective thinking level.
-- **GPT-OSS/Harmony support.** GPT-OSS models use the OpenAI-compatible chat-completions path with Harmony reasoning effort passed through the request payload.
-- **Harmony JSON fix.** Raw Harmony constrained-final frames such as `<|constrain|>json` are routed to visible assistant text instead of surfacing as parser errors.
-- **Cleaner fleet dispatch.** Dispatch now requires explicit allowed tool profiles and records effective thinking state in receipts.
+- **Fleet-agent dispatch.** `dispatch` is now a first-class tool for bounded agent handoffs. The default handoff is `implementer`, the prompt includes the Agent Fleet catalog, duplicate dispatches are guarded, and successful dispatch receipts count as completion evidence.
+- **Local thinking surfaces.** Clio centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, stream parsing, receipts, and agent dispatch agree on the effective thinking level.
+- **GPT-OSS/Harmony support.** GPT-OSS models use the OpenAI-compatible chat-completions path with Harmony reasoning effort passed through the request payload, and constrained-final Harmony frames are surfaced as visible assistant text.
+- **Frontend validation without shell access.** `validate_frontend` checks HTML tag balance, local script and stylesheet references, JavaScript syntax, CSS brace/comment/string balance, and optional headless browser loading for changed frontend artifacts.
+- **TUI active-run control.** Plain follow-up text entered while a response is running queues as the next turn; `Esc` cancels the active response and emits an explicit cancellation line instead of leaving the UI ambiguous.
+- **Cleaner safety and release posture.** Typed execution tools, package-script validation, dispatch receipts, frontend validation, and protected artifacts all feed the finish-contract advisory path. The retired internal dev harness is gone from the runtime surface.
+
+Since v0.1.6, Clio Coder also gained JSONL non-interactive mode, typed safe execution tools, default-deny Bash, project path policy, Claude Code SDK approval routing, extension packages, share archives, component snapshots, deterministic evidence corpora, local evals, scoped memory, and the current fleet-agent recipe catalog.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
@@ -63,6 +67,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 | Interactive terminal UI | Work with an assistant inside your repository without leaving the shell. |
 | Target-first model configuration | Route chat and the agent fleet through local HTTP runtimes, cloud APIs, OAuth-backed runtimes, or CLI-backed tools. |
 | Built-in coding agents | Dispatch `scout`, `planner`, `reviewer`, `implementer`, and other focused agents. |
+| Typed validation tools | Let agents run common git, test, lint, build, package-script, and frontend validation paths without shelling through `/bin/bash -lc`. |
 | Persistent sessions | Resume, fork, compact, and replay coding sessions. |
 | Project context | Use checked-in `CLIO.md` as the canonical project guide, with `/init` and `clio init` to fold existing agent instruction files into it. |
 | Safety modes | Use default, advise, or super mode to gate which tools the assistant can see. |
@@ -199,6 +204,7 @@ When something breaks, open an issue with `clio --version`, `node --version`, th
 | `clio share import <path> [--dry-run] [--force]` | Import a Clio share archive with conflict reporting. |
 | `clio export --out <path>` / `clio import <path>` | Short aliases for `clio share export` and `clio share import`. |
 | `clio --print [@files...] "<task>"` (alias `-p`) | Run one non-interactive chat turn, optionally including text file references, and print only the assistant text. |
+| `clio --mode json [@files...] "<task>"` | Run one non-interactive turn as JSONL events. |
 | `clio run [flags] "<task>"` | Dispatch one fleet agent non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
@@ -490,6 +496,8 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 5. **Dispatch admission.** Dispatched-agent scope must be a subset of orchestrator scope, and the agent's requested action classes must fit inside its scope. Unknown tools classify as `unknown` and fail closed.
 6. **External runtimes.** Subprocess CLIs (Claude Code, Codex, Gemini, Copilot, OpenCode) and the Claude Agent SDK are delegated sandboxes. Clio chooses conservative permission modes by default and refuses to map super to bypass without the explicit opt-in flag. Receipts call out this limitation for those runtimes.
 
+`validate_frontend` is the frontend-specific typed validator. It accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` files under the workspace root. HTML checks include tag balance, inline/local JavaScript syntax, local stylesheet existence and CSS balance, skipped external/root-relative references, and an optional browser load in `auto`, `required`, or `off` mode.
+
 The full spec lives in [docs/specs/safety-model.md](docs/specs/safety-model.md).
 
 ---
@@ -599,6 +607,8 @@ Run this inside the TUI for the resolved binding table:
 /hotkeys
 ```
 
+When a response is already running, pressing Enter with plain follow-up text queues that text for the next turn. `Esc` cancels the active response and prints `[Clio Coder] active response cancelled.` so the transcript records what happened.
+
 ---
 
 ## Troubleshooting
@@ -629,7 +639,7 @@ Redact secrets and private repository content.
 
 ## For AI assistants reading this README
 
-The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not imply production stability or invent commands, runtimes, or capabilities. Configuration is target-first (`targets[]` → `orchestrator` → fleet defaults; the legacy settings key is `workers.default`). Inspect `CLIO.md` before proposing changes. Keep `default`, `advise`, and `super` modes distinct. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
+The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not imply production stability or invent commands, runtimes, or capabilities. Configuration is target-first (`targets[]` -> `orchestrator` -> fleet defaults; the legacy settings key is `workers.default`). Inspect `CLIO.md` before proposing changes. Keep `default`, `advise`, and `super` modes distinct. Prefer typed tools over Bash, run `validate_frontend` for frontend artifacts, and cite receipts/evidence when claiming a dispatch or validation succeeded. The old internal dev harness is retired and is not an available subsystem. Recommend `clio doctor`, `clio targets --probe`, and receipts when debugging.
 
 ---
 
@@ -687,14 +697,14 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 ## Roadmap
 
-Current release: **v0.1.9** alpha (local model thinking and GPT-OSS/Harmony hardening). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
+Current release: **v0.1.9** alpha (fleet dispatch, typed validation, frontend validation, TUI hardening, and local model thinking / GPT-OSS-Harmony hardening). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
 
 Near-term:
 
 - MCP support;
 - broader runtime hardening and clearer first-run ergonomics;
 - more complete context and resource loading;
-- stronger docs for local model workflows;
+- stronger docs for local model, frontend, and fleet-agent workflows;
 - closer integration with CLIO Core and CLIO Agent.
 
 Longer horizon:

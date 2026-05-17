@@ -1,7 +1,7 @@
 # Harness Component Registry
 
 Date: 2026-04-29
-Status: shipped in v0.1.4
+Status: current
 
 ## Goal
 
@@ -13,7 +13,8 @@ The components domain reads from the repository tree, not from `<dataDir>`. A sn
 
 - `src/domains/prompts/fragments/**/*.md` for prompt fragments.
 - `src/domains/agents/builtins/**/*.md` for agent recipes.
-- `src/tools/*.ts` for tool implementations and tool helpers.
+- `src/tools/*.ts` for tool implementations and tool helpers, including
+  first-class frontend validation in `src/tools/validate-frontend.ts`.
 - `src/domains/providers/runtimes/**/*.ts` for runtime descriptors.
 - `damage-control-rules.yaml` for safety rule packs (one component per parseable pack id).
 - `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/config/schema.ts` for config schemas.
@@ -53,7 +54,7 @@ Types live in `src/domains/components/types.ts` and are re-exported from `src/do
 
 ## Status and scope notes
 
-v0.1.4 ships the read-only registry, the snapshot writer, and the diff command. The registry is consumed manually today; a future slice will gate source-work handoffs on a recent snapshot when no change manifest exists. Component metadata is not persisted to `<dataDir>` automatically; snapshots are operator-managed files. The scanner has no plugin extension point; adding a new component kind requires an enum entry plus a scan rule.
+The current registry ships the read-only inventory, snapshot writer, and diff command. Component metadata is not persisted to `<dataDir>` automatically; snapshots are operator-managed files. The scanner has no plugin extension point; adding a new component kind requires an enum entry plus a scan rule.
 
 ## References
 
@@ -64,5 +65,5 @@ v0.1.4 ships the read-only registry, the snapshot writer, and the diff command. 
 - `src/domains/components/diff.ts`: snapshot comparison.
 - `src/domains/components/index.ts`: public domain entry.
 - `src/cli/components.ts`: CLI wiring.
-- `tests/unit/components-scan.test.ts`, `tests/unit/components-snapshot.test.ts`, `tests/unit/components-diff.test.ts`: regression coverage.
+- `tests/integration/components-scan.test.ts`, `tests/unit/components-diff.test.ts`: regression coverage.
 - `docs/.superpowers/IMPROVE.md` section M1: roadmap entry.

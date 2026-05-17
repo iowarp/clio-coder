@@ -1,11 +1,15 @@
 # Long-Term Memory Domain
 
 Date: 2026-04-29
-Status: shipped in v0.1.4
+Status: current
 
 ## Goal
 
-The memory domain stores scoped, approved, evidence-linked lessons learned from prior runs and injects a compact section into the system prompt when matching memory exists. Records are proposed from evidence corpora, approved or rejected by the operator, and pruned by deterministic staleness rules. Retrieval is gated by approval state, scope, evidence presence, regression history, a fixed token budget, and a hard item-count cap. Memory is the only consumer of the curation lifecycle: it does not mutate prompts or settings outside the dedicated `memory.dynamic` prompt fragment slot. The CLI surface is `clio memory list`, `clio memory propose`, `clio memory approve`, `clio memory reject`, and `clio memory prune`.
+The memory domain stores scoped, operator-approved, evidence-linked lessons from prior runs and injects a compact prompt section for qualifying matches. Records are proposed from evidence artifacts, approved or rejected by the operator, and pruned by deterministic staleness rules.
+
+Memory is injected only via the dedicated prompt path (`memory.dynamic`) in the active session and one-shot agent prompts; it does not change tool policy or runtime settings.
+
+CLI entry points are `clio memory list`, `clio memory propose`, `clio memory approve`, `clio memory reject`, and `clio memory prune`.
 
 ## Data layout
 
@@ -24,6 +28,7 @@ The file is `{ version: 1, records[] }`. Records are sorted on write by `(scope,
 - `clio memory approve <memoryId>` flips a record to `approved: true`, sets `lastVerifiedAt` to the current time, and clears any `rejectedAt` field.
 - `clio memory reject <memoryId>` flips `approved` to `false` and stamps `rejectedAt`. The record is preserved so it does not get re-proposed automatically.
 - `clio memory prune --stale` removes records whose `lastVerifiedAt` (or `createdAt` if never verified) is older than the staleness window, and prints the count removed.
+- `clio memory list` accepts no `--from-evidence`, memory-id, or `--stale` flags.
 
 ## Public types
 
@@ -48,10 +53,20 @@ Types live in `src/domains/memory/types.ts` and are re-exported from `src/domain
 7. Staleness compares against `lastVerifiedAt` when present, otherwise `createdAt`. A record with an unparsable timestamp is treated as stale.
 8. The retrieval section is omitted entirely when no record applies; the `memory.dynamic` prompt fragment slot resolves to an empty string and the consumer must treat a missing section as a no-op.
 9. The memory section is built by `buildMemoryPromptSection()` and is the only sanctioned shape; consumers do not hand-format memory into prompts.
+10. `clio memory propose` is idempotent by evidence id; repeated calls reuse the same `memoryId` and return either `created=true` or existing record status.
+11. Memory records are evidence-driven but not automatically tied to finish-contract completion claims; approval still requires explicit operator action.
 
 ## Status and scope notes
 
-Memory was deliberately de-domain-modulated in v0.1.4: it does not export a `manifest`, `contract`, or `extension` and is not registered as a domain module. Consumers import directly from `src/domains/memory/index.ts`. The domain is consumed by both the chat-loop and the worker dispatch path: `src/cli/run.ts` calls `loadMemoryRecordsSync` and passes the rendered section through `DispatchRequest.memorySection`, and `dispatch.buildSystemPrompt` prepends the section to whichever base prompt wins (`req.systemPrompt` or `recipe.body`). Workers see the same gated memory the orchestrator does. Proposal heuristics in `proposal.ts` are intentionally simple in v0.1.4: the `memory-curator` agent recipe is the long-term path for deriving high-quality candidate records.
+Memory is intentionally domain-light: there is no manifest, extension, or separate domain lifecycle. Consumers import directly from `src/domains/memory/index.ts`.
+
+Current call sites are:
+
+- chat-loop injection in interactive sessions.
+- one-shot dispatch in `clio run`, which injects the same rendered section into the fleet-agent prompt.
+- `clio memory propose`, which creates candidates from evidence with no automatic promotion.
+
+The `memory-curator` agent recipe remains the long-term drafting path for higher-quality candidates.
 
 ## References
 

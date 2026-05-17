@@ -1,6 +1,6 @@
 # Clio Coder Safety Model
 
-This document describes the v0.1.7 safety architecture.
+This document describes the current Clio Coder safety architecture.
 
 ## Enforcement Layers
 
@@ -28,17 +28,37 @@ parked for super confirmation; `git_destructive` and base hard blocks remain
 blocked in every mode.
 
 The production direction is L5: remove arbitrary Bash from common workflows and
-replace it with typed tools. v0.1.7 adds `git_status`, `git_diff`, `git_log`,
-`run_tests`, `run_lint`, `run_build`, `package_script`, and `validate_frontend`
-so models can perform common engineering and frontend validation actions through
-fixed argv vectors or in-process validators, cwd constraints, timeouts, output
-caps, and structured results.
+replace it with typed tools. Current typed tools include `git_status`,
+`git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`,
+`package_script`, and `validate_frontend`, so models can perform common
+engineering and frontend validation actions through fixed argv vectors or
+in-process validators, cwd constraints, timeouts, output caps, and structured
+results.
 
-## Modes Versus Safety Levels
+`validate_frontend` is the new typed frontend checker:
+
+- it validates `.html`/`.htm`, `.css`, `.js`, `.mjs`, and `.cjs` artifacts
+- HTML validation includes structural tag checks plus local `<script>` and
+  `<style>/<link rel="stylesheet">` traversal
+- JavaScript validation includes inline script syntax plus local script reference
+  loading and parser checks (`node --check` for module form)
+- CSS validation is parser-level brace/quote/comment balance checking
+- browser validation (`browser=auto|required|off`) optionally validates loadability in
+  a local headless browser when available
+- malformed paths, workspace escapes, and missing files fail the check with
+  typed, structured evidence in the tool result
+
+Finish-contract advice uses the same typed verification evidence model: a successful
+`run_tests`, `run_lint`, `run_build`, approved `package_script` execution
+(`test`, `test:e2e`, `lint`, `build`, `typecheck`, `ci`), or a successful
+`validate_frontend` call satisfies completion-advice checks without requiring a
+fresh bash command pattern.
+
+## Modes and Fleet Dispatch Scope
 
 Modes are enforcement:
 
-- `advise`: read-oriented; dispatch scope is readonly.
+- `advise`: read-oriented; fleet dispatch scope is readonly.
 - `default`: normal repository work; Bash is default-deny.
 - `super`: explicit elevation; base hard blocks still apply.
 
@@ -113,7 +133,7 @@ policy source, command, cwd, mode, policy hash, and redacted arguments where
 available.
 
 Run receipts include tool stats, safety decision counts, blocked attempts,
-worker mode, dispatch scope, requested actions, runtime limitations, cwd, git
-branch, git commit, dirty-state count/hash, damage-control rule-pack hash, and
-project policy fingerprint. The receipt integrity digest covers the new fields
-when present.
+internal `workerMode` (for runtime/config compatibility), dispatch scope,
+requested actions, runtime limitations, cwd, git branch, git commit,
+dirty-state count/hash, damage-control rule-pack hash, and project policy
+fingerprint. The receipt integrity digest covers the new fields when present.

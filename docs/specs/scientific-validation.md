@@ -1,15 +1,23 @@
 # Scientific Validation Contract
 
 Date: 2026-04-29
-Status: spec, advisory in v0.1.4
+Status: advisory spec, active
 
 ## Goal
 
-Agents working in scientific or HPC repositories must produce a typed validation contract instead of relying on file-existence checks. The contract is a declarative document that names artifacts, formats, tolerances, runtime assumptions, and validators. It is consumed by the `scientific-validator` agent recipe at `src/domains/agents/builtins/scientific-validator.md`. The contract is data, not code; v0.1.4 ships the format and one agent recipe. Runtime enforcement, middleware rule ids, and validator implementations land in a later slice.
+Scientific workflows should not treat file existence as proof of correctness. A
+scientific validation contract is a typed artifact record that names artifacts,
+formats, tolerances, and runtime assumptions for an expected result.
+
+Contracts are consumed by the `scientific-validator` agent recipe at
+`src/domains/agents/builtins/scientific-validator.md`. The current runtime behavior
+is advisory: contracts are drafted and reviewed, and enforcement (execution of
+the listed validators) is not yet fully wired.
 
 ## Validation contract format
 
-The contract is a YAML document. YAML is preferred because the eval suite at `src/domains/eval/` already accepts YAML task files and the same parser path can be reused.
+The contract is a YAML document. YAML is preferred because the evaluator pipeline
+already consumes YAML task files.
 
 Top-level fields:
 
@@ -40,59 +48,57 @@ notes: <free text, optional>
 
 Field rules:
 
-1. `version` is the integer `1`. Bump when a backwards-incompatible field lands.
-2. `task` is a single-paragraph restatement of what the contract validates.
-3. `runtime.kind` declares the execution surface so middleware can distinguish local unit runs from scheduler-backed runs. `local` covers `pytest`, `ctest`, plain shell invocations. `slurm` covers `sbatch`, `srun`, `salloc`. `mpi` covers `mpirun`, `mpiexec`, `flux run`. `other` is a documented escape hatch.
-4. `artifacts` is non-empty. Each entry names exactly one path and exactly one format. Per-element checks belong on the artifact entry; aggregate metrics belong on a separate validator command.
-5. `numerical_tolerances` may carry any subset of `{relative, absolute, ulp}`. Empty tolerance objects are rejected at validation time.
-6. `preserve` declares whether destructive cleanup tools may remove the artifact after validation. Checkpoint and restart artifacts default to `preserve: true`.
-7. `validators` lists explicit shell commands (`pytest tests/test_grid.py`) or future validator ids once an enforced validator registry exists.
-8. `notes` carries operator-facing context that is not machine consumed.
+1. `version` is the integer `1` unless a backward-incompatible field schema change requires bumping to `2`.
+2. `task` should restate what this contract is validating in one paragraph.
+3. `runtime.kind` records execution mode for downstream interpretation. `local` covers unit commands (`pytest`, `ctest`, plain shell), while `slurm`/`mpi`/`other` are scheduler-orchestration-aware contexts.
+4. `artifacts` must be non-empty. Each entry names one path and one format.
+5. Empty tolerance objects are rejected; at least one of `relative`, `absolute`, or `ulp` may be supplied.
+6. `preserve` controls whether cleanup tools are allowed to delete the artifact under this contract.
+7. `validators` should list explicit shell commands today (for example `pytest tests/test_grid.py`) and may later include middleware ids once a validator registry is shipped.
+8. `notes` captures operator context that is not machine-owned.
 
 ## Supported artifact families
 
-The `format` field accepts one of:
+`format` accepts:
 
-- HDF5: validate group hierarchy, dataset shape, dtype, attributes.
-- NetCDF: validate variables, dimensions, attributes, CF conventions when declared.
-- Zarr: validate group hierarchy, chunk shape, dtype, attributes.
-- FITS: validate HDU list, header cards, image axes, data dtype.
-- CSV: validate header schema, row count, per-column dtype.
-- Parquet: validate schema, partition layout, row count, dictionary encoding when declared.
-- VTK and ParaView output: validate mesh topology, field array names, field array shapes.
-- Slurm job output: parse `stdout`, `stderr`, exit code, sacct fields when available.
-- MPI rank-sensitive tests: per-rank artifact comparison, often paired with a rank count from `runtime.ranks`.
-- Checkpoint files: opaque binary blobs. Validate size, checksum, and format magic bytes; declare `preserve: true`.
-- Simulation restart artifacts: a stricter checkpoint family. The validator confirms the artifact loads and that a downstream step can resume from it. `preserve: true` is mandatory.
-- Plots and generated figures: path-and-checksum descriptors only. Visual inspection is operator scope, not validator scope.
+- HDF5
+- NetCDF
+- Zarr
+- FITS
+- CSV
+- Parquet
+- VTK and ParaView
+- Slurm job output
+- MPI rank-sensitive tests
+- Checkpoint files
+- Simulation restart artifacts
+- Plots and generated figures (path+checksum descriptors only)
 
-Artifact families are case sensitive. New families must be added to this spec and to the `scientific-validator` recipe before the contract accepts them.
+Artifact-family terms are case sensitive. New families must be added to this spec
+and the `scientific-validator` recipe before acceptance.
 
-## Future Validator Taxonomy
+## Future validator taxonomy
 
-The following ids are design candidates only. They are not shipped in `src/domains/middleware/rules.ts` because the stable built-in middleware registry is empty until a rule has enforced behavior and tests.
+The following ids are design candidates. They are not currently enforced by the
+middleware runtime, and they exist only as design direction for future slices:
 
 ### `science.no-existence-only-validation`
 
-Intent. Reminds agents that file existence does not validate scientific artifacts. A NetCDF file that is the wrong shape, an HDF5 dataset with missing attributes, or a checkpoint that does not load are failures regardless of `ls` output.
-
-Status: future validator/reminder id.
+Intent: reject the pattern of treating a present file as sufficient validation.
 
 ### `science.preserve-checkpoints`
 
-Intent. Marks validated checkpoint and restart artifacts as protected so destructive cleanup tools (`rm`, `git clean`, `find -delete`, `> file`) cannot remove them. Pairs with the protected-artifacts state in `src/domains/safety/protected-artifacts.ts` once enforcement lands.
-
-Status: future protected-artifact validator/reminder id.
+Intent: mark validated checkpoint and restart artifacts as protected so cleanup
+operations cannot remove them while downstream reuse depends on them.
 
 ### `science.unit-vs-scheduler-validation`
 
-Intent. Distinguishes local unit validation (`pytest`, `ctest`, `make test`) from scheduler-backed validation (`sbatch`, `srun`, `qsub`, `flux run`). A scheduler exit code does not validate the produced artifacts; the contract must say which artifacts each path produces and how each one is checked after the queue completes.
-
-Status: future scheduler-validation validator/reminder id.
+Intent: ensure scheduler-backed validations (`sbatch`, `srun`, etc.) are tied to
+post-completion artifact checks, not queue status alone.
 
 ## Worked example
 
-A minimal contract for a NetCDF post-processing task on a Slurm cluster:
+A minimal contract for a Slurm-backed NetCDF workflow:
 
 ```yaml
 version: 1
@@ -125,58 +131,55 @@ validators:
   - "ncdump -h out/region_west.nc"
   - "python tools/check_grid.py out/region_west.nc"
 notes: |
-  The job is submitted with sbatch; the queue exit code is not a validator.
-  Re-run check_grid.py after sacct reports COMPLETED.
+  The run is submitted with sbatch; queue exit status is not a completion check.
+  Re-run check_grid.py after job completion is observed.
 ```
 
-The contract is consumed by the `scientific-validator` recipe, which restates the task, lists artifact families covered, and names the strictest tolerance and the most likely silent-regression check before handing off.
+The `scientific-validator` recipe summarizes this contract and the likely strictest
+tolerance before operator handoff.
 
 ## Numerical tolerances
 
-Scientific validation must declare tolerance type explicitly. Three types are admitted:
+Accepted tolerance types:
 
-1. `relative`: fractional difference, applied per element unless declared aggregate.
-2. `absolute`: additive difference, applied per element unless declared aggregate.
-3. `ulp`: unit in the last place, integer count of representable floats between the candidate and the reference.
+1. `relative`: fractional difference, usually applied per element.
+2. `absolute`: additive difference, usually applied per element.
+3. `ulp`: integer count of representable float steps between candidates and references.
 
-Default tolerance when nothing is stated is `relative: 1e-6`. The default is conservative enough to catch silent regressions in single-precision and double-precision pipelines, and loose enough to absorb non-determinism in fused multiply-add and parallel reductions.
-
-Comparisons must distinguish per-element from aggregate metrics. A field that passes a per-element relative tolerance can still fail an aggregate L2 norm check, and the contract must say which one is the gating check.
+Default tolerance when omitted is `relative: 1e-6`.
 
 ## HPC and scheduler distinctions
 
-A scheduler-backed run is not the same as a unit validation. `sbatch script.sh` returns a job id, not a result; the queue exit status is a property of the queue, not of the artifacts the job produced. Polling completion (`squeue`, `sacct`, `flux jobs`) returns scheduler success or failure but says nothing about the scientific correctness of the produced files.
+Scheduler workflows are a different validation class from unit runs. `sbatch`-style
+invocation returns scheduler metadata, not artifact correctness. The contract should
+name post-completion checks and validators explicitly.
 
-The scheduler-validation validator id is reserved for a later enforced slice. The contract must:
-
-1. Declare `runtime.kind` so consumers can tell which path is in play.
-2. Name a post-job validator that reads the produced artifacts after the queue reports completion.
-3. Refuse to claim success when only the queue exit code is available.
+Current finish-contract safety checks already treat typed validation commands as evidence;
+`validate_frontend` is recognized as such a check in safety/evidence workflows, but
+there is no automatic contract executor yet.
 
 ## Lifecycle
 
-The contract is an artifact, not a runtime call. Its lifecycle:
+The contract is an artifact file, not a runtime call.
 
-1. The operator names a scientific task and points the agent at the relevant repository, build files, run scripts, and reference outputs.
-2. The `scientific-validator` recipe drafts the contract as a YAML document, restating the task and listing every artifact and validator.
-3. The contract is committed under the operator's chosen repository path. v0.1.4 does not impose a canonical location.
-4. Downstream slices add a contract validator and middleware effect emission. Until they ship, the contract is read by humans and by the agent recipe.
-5. When enforcement lands, the `validators[]` list executes after artifact production, and `preserve: true` paths are admitted to the protected-artifacts state.
-
-The contract is versioned by its `version` field; field additions that preserve backward compatibility do not bump the version. Removing or renaming a field is a `version: 2` change and requires a migration path for in-tree contracts.
+1. Operator defines task goals, build scripts, runtime assumptions, and validation commands.
+2. `scientific-validator` drafts the contract from these inputs.
+3. Operator commits the contract at a chosen path (no canonical enforced path in this slice).
+4. Current tooling reads/uses the contract for documentation and workflow discipline; enforcement is a later slice.
+5. `preserve: true` marks artifacts for future cleanup protection once validation enforcement lands.
 
 ## Out of scope
 
 This slice does not ship:
 
-- HDF5, NetCDF, Zarr, FITS, Parquet, or VTK runtime libraries. No new dependencies enter the package.
-- Live cluster integration. No Slurm, no MPI, no flux, no sacct calls.
-- Enforcement code. The stable built-in middleware registry is empty until rules have enforced behavior and tests.
-- Validator implementations. The `validators[]` field accepts strings; nothing executes them yet.
-- A linter for malformed contracts. The agent recipe drafts contracts; checking them is a later slice.
+- Runtime libraries for scientific artifact parsing/validation families.
+- Automatic validator execution of `validators[]`.
+- Full scheduler integration checks in this slice (queue completion handling remains operator-driven in workflows).
+- A migration linter for malformed contracts.
 
 ## References
 
-- `src/domains/agents/builtins/scientific-validator.md`: the agent recipe that drafts contracts in this format.
-- `src/domains/middleware/rules.ts`: the currently empty built-in middleware registry.
-- `docs/.superpowers/IMPROVE.md`, section M10: the roadmap entry that scoped this milestone.
+- `src/domains/agents/builtins/scientific-validator.md`: recipe that drafts contracts.
+- `src/domains/middleware/rules.ts`: registry currently remains empty for these validator ids.
+- `src/domains/safety/finish-contract.ts`: completion-evidence model used by current safety workflow.
+- `docs/.superpowers/IMPROVE.md`, section M10: roadmap entry.

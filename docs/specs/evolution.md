@@ -1,11 +1,17 @@
 # Change Manifest and Evolve CLI
 
 Date: 2026-04-29
-Status: shipped in v0.1.4
+Status: current
 
 ## Goal
 
-The evolution domain makes meaningful harness improvement proposals typed and falsifiable. A change manifest is a JSON document that names the iteration, the base git sha, and one or more typed `ManifestChange` entries. Each change declares its authority level, the components or files it touches, the evidence that motivated it, the failure it targets, predicted fixes and regressions, a validation plan, and a rollback plan. The manifest is the unit that downstream slices (attribution, regression scouting, rollback) will key off. The CLI surface is `clio evolve manifest init`, `clio evolve manifest validate <path>`, and `clio evolve manifest summarize <path>`.
+The evolution domain defines typed, falsifiable change manifests for meaningful harness work. A manifest is a JSON document that names the iteration, base git SHA, and one or more typed `ManifestChange` entries. Each change declares authority level, touched components/files, evidence that motivated the change, predicted fixes/regressions, a validation plan, and a rollback plan.
+
+The CLI surface is:
+
+- `clio evolve manifest init`
+- `clio evolve manifest validate <path>`
+- `clio evolve manifest summarize <path>`
 
 ## Data layout
 
@@ -13,7 +19,7 @@ The evolution domain has no persistent storage. Manifests are JSON files the ope
 
 ## Public CLI surface
 
-- `clio evolve manifest init` writes a populated `ChangeManifest` template to stdout, including one example `ManifestChange` with `iterationId: exploratory-1`, a placeholder `baseGitSha`, an empty `evidenceRefs[]`, and a `validationPlan` of `["npm run test"]`. The template is intentionally minimal and is expected to be edited before validation.
+- `clio evolve manifest init` writes a populated `ChangeManifest` template to stdout, including one example `ManifestChange` with `iterationId: exploratory-1`, a placeholder `baseGitSha`, an optional `evidenceRefs[]`, and a default `validationPlan` of `["npm run test"]`. The template is expected to be edited before validation.
 - `clio evolve manifest validate <path>` parses the JSON at `<path>`, runs structural validation, and exits 0 with `manifest valid (N change[s])` or exits 1 with one issue per line under `manifest invalid (N issue[s])`. Each issue carries a JSON-pointer-style `path` (`$.changes[0].rollbackPlan`) and a one-sentence message.
 - `clio evolve manifest summarize <path>` validates the manifest, then prints a multi-line summary: iteration id, base sha, change count, deduplicated authority levels, deduplicated component ids, deduplicated changed files, deduplicated predicted regressions, and total validation step count.
 
@@ -41,7 +47,11 @@ Types live in `src/domains/evolution/manifest.ts` and are re-exported from `src/
 
 ## Status and scope notes
 
-v0.1.4 ships the manifest schema, the validator, the summarizer, and the three CLI subcommands. Manifest authoring is manual today; the M9 `evolver` agent recipe drafts manifests as Markdown plus a JSON block, and the operator commits the result. Auto-attribution against eval baselines is the M9 `attributor` recipe's job and is not enforced by the CLI. Source-work handoff gates on missing manifests are reserved for a later slice. The schema is intentionally not extensible: adding a new authority level requires editing `MANIFEST_AUTHORITY_LEVELS`.
+Manifest authoring is manual today. The `evolver` agent recipe can draft manifest JSON for operators, but the operator still owns final edits and commit.
+
+Auto-attribution against eval baselines is outside this CLI contract. Source-work handoff gates on missing manifests are deferred.
+
+The schema is intentionally not extensible; adding a new authority level requires editing `MANIFEST_AUTHORITY_LEVELS`.
 
 ## References
 
