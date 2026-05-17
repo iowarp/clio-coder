@@ -18,7 +18,7 @@ import {
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
-import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "./scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "./scope.js";
 
 interface ModeChangedPayload {
 	from: string | null;
@@ -308,7 +308,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			loopState = next;
 			return verdict;
 		},
-		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
+		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: SUPER_SCOPE },
 		isSubset,
 		policy: { metadata: (mode) => (policyEngine ?? createSafetyPolicyEngine()).metadata(mode) },
 		audit: { recordCount: () => recordCount },

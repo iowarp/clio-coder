@@ -1163,6 +1163,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 	const integrity = value.integrity;
 	if (!isRecord(integrity)) throw new Error(`${source}.integrity: expected object`);
 	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
+	const failureMessage = readOptionalString(value.failureMessage);
 	return {
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
@@ -1174,6 +1175,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		startedAt: readString(value, source, "startedAt"),
 		endedAt: readString(value, source, "endedAt"),
 		exitCode: readNumber(value, source, "exitCode"),
+		...(failureMessage !== null ? { failureMessage } : {}),
 		tokenCount: readNumber(value, source, "tokenCount"),
 		...(reasoningTokenCount !== undefined ? { reasoningTokenCount } : {}),
 		costUsd: readNumber(value, source, "costUsd"),

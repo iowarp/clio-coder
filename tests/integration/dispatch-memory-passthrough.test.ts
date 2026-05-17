@@ -19,7 +19,7 @@ import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../..
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -130,6 +130,7 @@ function stubContext(): DomainContext & { bus: ReturnType<typeof createSafeEvent
 		scopes: {
 			default: DEFAULT_SCOPE,
 			readonly: DEFAULT_SCOPE,
+			advise: ADVISE_SCOPE,
 			super: DEFAULT_SCOPE,
 		},
 		isSubset,

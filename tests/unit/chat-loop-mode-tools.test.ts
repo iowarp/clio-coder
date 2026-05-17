@@ -19,7 +19,7 @@ function fakeSafety(): SafetyContract {
 		evaluate: (call: Parameters<SafetyContract["evaluate"]>[0]) =>
 			({ kind: "allow", classification: classifyAction(call) }) as never,
 		observeLoop: (key: string) => ({ looping: false, key, count: 1 }) as never,
-		scopes: { default: new Set(), readonly: new Set(), super: new Set() } as never,
+		scopes: { default: new Set(), readonly: new Set(), advise: new Set(), super: new Set() } as never,
 		isSubset: () => true,
 		audit: { recordCount: () => 0 },
 	} as unknown as SafetyContract;

@@ -129,7 +129,8 @@ export async function handleRun(
 			typeof receipt.reasoningTokenCount === "number" && receipt.reasoningTokenCount > 0
 				? ` reasoning=${receipt.reasoningTokenCount}`
 				: "";
-		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning}\n`);
+		const failure = receipt.failureMessage ? ` error=${receipt.failureMessage}` : "";
+		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning}${failure}\n`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		io.stderr(`[run] failed: ${msg}\n`);

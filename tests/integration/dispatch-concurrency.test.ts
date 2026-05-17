@@ -19,7 +19,7 @@ import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../..
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 
 interface Deferred<T> {
@@ -180,6 +180,7 @@ function stubContext(
 		scopes: {
 			default: DEFAULT_SCOPE,
 			readonly: DEFAULT_SCOPE,
+			advise: ADVISE_SCOPE,
 			super: DEFAULT_SCOPE,
 		},
 		isSubset,
@@ -656,6 +657,55 @@ describe("dispatch concurrency gate", () => {
 			]);
 			strictEqual(envelope?.tokenCount, 140);
 			strictEqual(envelope?.reasoningTokenCount, 12);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("records provider failure messages on dispatch receipts", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const events = (async function* () {
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					usage: { input: 0, output: 0 },
+					model: "openrouter/free",
+					stopReason: "error",
+					errorMessage: "401 User not found.",
+				},
+			};
+		})();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1008,
+				promise: exit.promise,
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
+			}),
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "failing provider task" });
+			for await (const _ of handle.events) {
+				// drain so failure accounting observes the worker message_end event
+			}
+
+			exit.resolve({ exitCode: 1, signal: null });
+			const receipt = await handle.finalPromise;
+
+			strictEqual(receipt.exitCode, 1);
+			strictEqual(receipt.failureMessage, "401 User not found.");
 		} finally {
 			await bundle.extension.stop?.();
 		}

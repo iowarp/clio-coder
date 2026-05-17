@@ -19,7 +19,7 @@ import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../..
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, isSubset } from "../../../src/domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../../src/domains/safety/scope.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -122,7 +122,7 @@ function setupHarness(
 		classify: () => ({ actionClass: "read", reasons: [] }),
 		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
-		scopes: { default: DEFAULT_SCOPE, readonly: DEFAULT_SCOPE, super: DEFAULT_SCOPE },
+		scopes: { default: DEFAULT_SCOPE, readonly: DEFAULT_SCOPE, advise: ADVISE_SCOPE, super: DEFAULT_SCOPE },
 		isSubset,
 		audit: { recordCount: () => 0 },
 	};

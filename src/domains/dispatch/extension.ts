@@ -147,7 +147,7 @@ export function pickOrchestratorScope(safety: SafetyContract, mode: ModeName): S
 }
 
 function pickWorkerScope(safety: SafetyContract, mode: ModeName): ScopeSpec {
-	if (mode === "advise") return safety.scopes.readonly;
+	if (mode === "advise") return safety.scopes.advise;
 	if (mode === "super") return safety.scopes.super;
 	return safety.scopes.default;
 }
@@ -727,6 +727,7 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		let failureMessage: string | undefined;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
 				const event = raw as {
@@ -737,6 +738,8 @@ export function createDispatchBundle(
 						model?: unknown;
 						responseModel?: unknown;
 						responseId?: unknown;
+						stopReason?: unknown;
+						errorMessage?: unknown;
 					};
 					payload?: {
 						tool?: string;
@@ -761,6 +764,10 @@ export function createDispatchBundle(
 					const responseId = readStringOrNull(event.message.responseId);
 					if (model !== null || responseModel !== null || responseId !== null) {
 						upstreamResponses.push({ model, responseModel, responseId });
+					}
+					if (event.message.stopReason === "error") {
+						const message = readStringOrNull(event.message.errorMessage);
+						if (message !== null) failureMessage = message;
 					}
 				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
@@ -863,6 +870,7 @@ export function createDispatchBundle(
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
+				...(failureMessage !== undefined ? { failureMessage } : {}),
 				tokenCount: tokenMeter.inputTokens + tokenMeter.outputTokens,
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),

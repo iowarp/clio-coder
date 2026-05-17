@@ -46,6 +46,13 @@ export const READONLY_SCOPE: ScopeSpec = {
 	allowDispatch: false,
 };
 
+export const ADVISE_SCOPE: ScopeSpec = {
+	allowedActions: new Set<ActionClass>(["read", "write"]),
+	allowedWriteRoots: [process.cwd()],
+	allowNetwork: true,
+	allowDispatch: false,
+};
+
 export const DEFAULT_SCOPE: ScopeSpec = {
 	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch"]),
 	allowedWriteRoots: [process.cwd()],

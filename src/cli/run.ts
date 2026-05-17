@@ -280,7 +280,8 @@ export async function runClioRun(
 function formatReceipt(r: RunReceipt): string {
 	const reasoning =
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.endpointId} model=${r.wireModelId} tokens=${r.tokenCount}${reasoning} start=${r.startedAt} end=${r.endedAt}`;
+	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.endpointId} model=${r.wireModelId} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

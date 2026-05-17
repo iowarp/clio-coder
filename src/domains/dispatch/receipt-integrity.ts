@@ -77,6 +77,9 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 		toolStats: receipt.toolStats,
 		sessionId: receipt.sessionId,
 	};
+	if (receipt.failureMessage !== undefined) {
+		draft.failureMessage = receipt.failureMessage;
+	}
 	if (receipt.reasoningTokenCount !== undefined) {
 		draft.reasoningTokenCount = receipt.reasoningTokenCount;
 	}
