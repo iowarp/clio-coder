@@ -38,7 +38,12 @@ export interface SafetyContract {
 	observeLoop(key: string, now?: number): LoopVerdict;
 
 	/** Read-only exposure of canonical scope specs. */
-	scopes: { readonly default: ScopeSpec; readonly readonly: ScopeSpec; readonly super: ScopeSpec };
+	scopes: {
+		readonly default: ScopeSpec;
+		readonly readonly: ScopeSpec;
+		readonly advise: ScopeSpec;
+		readonly super: ScopeSpec;
+	};
 
 	/** Subset check used by dispatch admission (Phase 6). */
 	isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean;

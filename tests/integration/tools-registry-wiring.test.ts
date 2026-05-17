@@ -15,7 +15,7 @@ import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { ModeName } from "../../src/domains/modes/matrix.js";
 import type { Classification, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
 import { createAgentProgress } from "../../src/engine/tui.js";
 import {
 	createWorkerToolRegistry,
@@ -62,7 +62,7 @@ function makeSafety(classification: Classification, decisions: ClassifierCall[])
 			return decision;
 		},
 		observeLoop: (key) => ({ looping: false, key, count: 1 }),
-		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
+		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: SUPER_SCOPE },
 		isSubset: () => true,
 		audit: { recordCount: () => 0 },
 	};

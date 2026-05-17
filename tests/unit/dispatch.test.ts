@@ -7,7 +7,7 @@ import { deriveRequestedActions, pickOrchestratorScope } from "../../src/domains
 import { classifyHeartbeat } from "../../src/domains/dispatch/heartbeat.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
-import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("dispatch/validation", () => {
 	it("accepts minimal spec", () => {
@@ -145,10 +145,26 @@ describe("dispatch/admission", () => {
 
 	it("honors mode dispatchScope when picking the orchestrator scope", () => {
 		const safety = {
-			scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: DEFAULT_SCOPE },
+			scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: DEFAULT_SCOPE },
 		} as never;
 		strictEqual(pickOrchestratorScope(safety, "advise"), READONLY_SCOPE);
 		strictEqual(pickOrchestratorScope(safety, "default"), DEFAULT_SCOPE);
+	});
+
+	it("admits advise worker writers under a default orchestrator without granting execute or dispatch", () => {
+		const verdict = admit(
+			{
+				requestedScope: ADVISE_SCOPE,
+				orchestratorScope: DEFAULT_SCOPE,
+				requestedActions: ["read", "write"],
+				agentId: "planner",
+			},
+			isSubset,
+		);
+		strictEqual(verdict.admitted, true);
+		strictEqual(ADVISE_SCOPE.allowedActions.has("execute"), false);
+		strictEqual(ADVISE_SCOPE.allowedActions.has("dispatch"), false);
+		strictEqual(ADVISE_SCOPE.allowDispatch, false);
 	});
 
 	it("advise dispatch scope denies default worker recipes that expose write or bash", () => {

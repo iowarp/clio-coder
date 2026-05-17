@@ -114,6 +114,7 @@ export interface RunReceipt {
 	startedAt: string;
 	endedAt: string;
 	exitCode: number;
+	failureMessage?: string;
 	tokenCount: number;
 	reasoningTokenCount?: number;
 	upstreamResponses?: RunReceiptUpstreamResponse[];

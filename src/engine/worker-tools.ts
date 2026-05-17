@@ -28,7 +28,7 @@ import {
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
-import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
+import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
@@ -263,7 +263,7 @@ export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContra
 			loopState = next;
 			return verdict;
 		},
-		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, super: SUPER_SCOPE },
+		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: SUPER_SCOPE },
 		isSubset,
 		policy: { metadata: (mode) => policyEngine.metadata(mode) },
 		audit: { recordCount: () => 0 },
