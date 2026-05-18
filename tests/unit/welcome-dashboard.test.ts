@@ -89,6 +89,22 @@ function cascadeStatus(): EndpointStatus {
 	};
 }
 
+function qwenSelectedStatus(): EndpointStatus {
+	const row = status({ id: "dynamo", runtimeId: "lmstudio-native", model: "nemotron-cascade-2-30b-a3b-i1" });
+	return {
+		...row,
+		endpoint: {
+			...row.endpoint,
+			wireModels: ["nemotron-cascade-2-30b-a3b-i1", "qwen3.6-27b"],
+		},
+		capabilities: {
+			...row.capabilities,
+			contextWindow: 1_048_576,
+			maxTokens: 65_536,
+		},
+	};
+}
+
 const cascadeKnowledgeBase = {
 	lookup: () => ({
 		matchKind: "alias",
@@ -99,6 +115,21 @@ const cascadeKnowledgeBase = {
 			quirks: { thinking: { mechanism: "on-off" } },
 		},
 	}),
+	entries: () => [],
+} as ProvidersContract["knowledgeBase"];
+
+const qwenKnowledgeBase = {
+	lookup: (modelId: string) =>
+		modelId === "qwen3.6-27b"
+			? {
+					matchKind: "alias",
+					entry: {
+						family: "qwen3.6-27b",
+						matchPatterns: ["qwen3.6-27b"],
+						capabilities: { contextWindow: 262_144, maxTokens: 32_768, tools: true, reasoning: true },
+					},
+				}
+			: null,
 	entries: () => [],
 } as ProvidersContract["knowledgeBase"];
 
@@ -187,6 +218,25 @@ describe("interactive/welcome-dashboard", () => {
 		});
 
 		strictEqual(stats.thinkingLevel, "on");
+	});
+
+	it("shows selected model capabilities instead of endpoint-default capabilities", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "dynamo";
+		settings.orchestrator.model = "qwen3.6-27b";
+		const localDeps = deps({ contextTokens: 250 });
+		const stats = deriveWelcomeDashboardStats({
+			...localDeps,
+			providers: {
+				list: () => [qwenSelectedStatus()],
+				knowledgeBase: qwenKnowledgeBase,
+				getDetectedReasoning: () => null,
+			} as unknown as ProvidersContract,
+			getSettings: () => settings,
+		});
+
+		ok(stats.activeCapabilities.includes("262k ctx"), stats.activeCapabilities.join(", "));
+		ok(!stats.activeCapabilities.includes("1049k ctx"), stats.activeCapabilities.join(", "));
 	});
 
 	it("renders a wide dashboard without exceeding the viewport", () => {
