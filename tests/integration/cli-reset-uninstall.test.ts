@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { runResetCommand } from "../../src/cli/reset.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
+import { runUpgradeCommand } from "../../src/cli/upgrade.js";
 import { initializeClioHome } from "../../src/core/init.js";
+import { readClioVersion } from "../../src/core/package-root.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -99,5 +101,81 @@ describe("cli reset and uninstall", () => {
 	it("initializeClioHome creates evidence and memory data directories", () => {
 		ok(existsSync(join(scratch, "data", "evidence")));
 		ok(existsSync(join(scratch, "data", "memory")));
+	});
+
+	it("initializeClioHome refreshes stale install metadata to the current package version", () => {
+		const installPath = join(scratch, "data", "install.json");
+		writeFileSync(
+			installPath,
+			`${JSON.stringify(
+				{
+					version: "0.0.0",
+					installedAt: "2026-01-01T00:00:00.000Z",
+					platform: process.platform,
+					nodeVersion: process.version,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		initializeClioHome();
+
+		const parsed = JSON.parse(readFileSync(installPath, "utf8")) as { version?: string; installedAt?: string };
+		strictEqual(parsed.version, readClioVersion());
+		ok(parsed.installedAt !== "2026-01-01T00:00:00.000Z");
+	});
+
+	it("upgrade refreshes stale install metadata after the install and migration flow", async () => {
+		const installPath = join(scratch, "data", "install.json");
+		writeFileSync(
+			installPath,
+			`${JSON.stringify(
+				{
+					version: "0.0.0",
+					installedAt: "2026-01-01T00:00:00.000Z",
+					platform: process.platform,
+					nodeVersion: process.version,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		process.env.CLIO_TEST_UPGRADE_NO_NETWORK = "1";
+
+		const code = await runUpgradeCommand(["--skip-migrations"]);
+
+		strictEqual(code, 0);
+		const parsed = JSON.parse(readFileSync(installPath, "utf8")) as { version?: string; installedAt?: string };
+		strictEqual(parsed.version, readClioVersion());
+		ok(parsed.installedAt !== "2026-01-01T00:00:00.000Z");
+	});
+
+	it("upgrade post-install phase refreshes metadata under the active binary", async () => {
+		const installPath = join(scratch, "data", "install.json");
+		writeFileSync(
+			installPath,
+			`${JSON.stringify(
+				{
+					version: "0.0.0",
+					installedAt: "2026-01-01T00:00:00.000Z",
+					platform: process.platform,
+					nodeVersion: process.version,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		process.env.CLIO_TEST_UPGRADE_NO_NETWORK = "1";
+
+		const code = await runUpgradeCommand(["--post-install", "--skip-migrations"]);
+
+		strictEqual(code, 0);
+		const parsed = JSON.parse(readFileSync(installPath, "utf8")) as { version?: string; installedAt?: string };
+		strictEqual(parsed.version, readClioVersion());
+		ok(parsed.installedAt !== "2026-01-01T00:00:00.000Z");
 	});
 });

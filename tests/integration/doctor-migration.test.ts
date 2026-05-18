@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
+import { readClioVersion } from "../../src/core/package-root.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { runDoctor, runDoctorRuntimeChecks } from "../../src/domains/lifecycle/doctor.js";
 
@@ -107,6 +108,39 @@ describe("doctor legacy runtime migration", () => {
 		const second = runDoctor();
 		const stillWarning = second.find((finding) => finding.name === "target mini" && finding.detail.includes("--fix"));
 		strictEqual(stillWarning, undefined, "expected the warning to disappear after --fix");
+	});
+
+	it("warns on stale install metadata and --fix refreshes it", () => {
+		const dataDir = join(scratch, "data");
+		runDoctor({ fix: true });
+		writeFileSync(
+			join(dataDir, "install.json"),
+			`${JSON.stringify(
+				{
+					version: "0.0.0",
+					installedAt: "2026-01-01T00:00:00.000Z",
+					platform: process.platform,
+					nodeVersion: process.version,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		const stale = runDoctor();
+		const staleMetadata = stale.find((finding) => finding.name === "state metadata");
+		ok(staleMetadata);
+		strictEqual(staleMetadata.ok, false);
+		ok(staleMetadata.detail.includes("stale 0.0.0"));
+		ok(staleMetadata.detail.includes(readClioVersion()));
+		ok(staleMetadata.detail.includes("doctor --fix"));
+
+		const fixed = runDoctor({ fix: true });
+		const freshMetadata = fixed.find((finding) => finding.name === "state metadata");
+		ok(freshMetadata);
+		strictEqual(freshMetadata.ok, true);
+		ok(freshMetadata.detail.startsWith(`${readClioVersion()} @`));
 	});
 
 	it("warns but does not auto-migrate manual-hint legacy runtimes", () => {

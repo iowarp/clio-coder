@@ -622,6 +622,7 @@ When a response is already running, pressing Enter with plain follow-up text que
 | Source changes do not appear | Re-run `npm run build`; the linked CLI points at `dist/`. |
 | Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
 | State appears corrupted | Run `clio doctor`; if needed, run `clio doctor --fix`. |
+| Doctor reports stale state metadata | Run `clio doctor --fix`; upgrades also refresh install metadata after reinstalling. |
 | You need a clean start | Use `clio reset --state`, `--auth`, `--config`, or `--all` depending on what you want to remove. |
 
 For issue reports, include:
