@@ -112,10 +112,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	}
 
 	const state = readStateInfo();
+	const stateCurrent = Boolean(state && state.version === version.clio);
 	findings.push({
-		ok: Boolean(state),
+		ok: stateCurrent,
 		name: "state metadata",
-		detail: state ? `${state.version} @ ${state.installedAt}` : "missing",
+		detail: state
+			? stateCurrent
+				? `${state.version} @ ${state.installedAt}`
+				: `stale ${state.version} @ ${state.installedAt}; current ${version.clio} (run \`clio doctor --fix\`)`
+			: "missing",
 	});
 
 	for (const finding of legacyRuntimeFindings(options.fix === true)) {

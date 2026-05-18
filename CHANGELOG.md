@@ -78,6 +78,10 @@ around active-run follow-ups and cancellation.
   leave the operator without a clear queued-turn or cancelled-run signal.
 - Fixed frontend completion claims being able to pass the advisory finish
   contract without a meaningful artifact validation path.
+- Fixed install/upgrade lifecycle metadata so `clio doctor` flags stale
+  `install.json` versions, `clio doctor --fix` refreshes them to the current
+  package version, and `clio upgrade` re-enters the installed CLI before
+  running migrations and metadata repair.
 - Fixed duplicate local-model capability and thinking coercion paths that could
   make UI display, prompt runtime text, and payload construction disagree.
 

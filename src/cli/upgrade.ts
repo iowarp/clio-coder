@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { loadDomains } from "../core/domain-loader.js";
+import { initializeClioHome } from "../core/init.js";
 import { clioDataDir } from "../core/xdg.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { LifecycleContract } from "../domains/lifecycle/contract.js";
@@ -13,7 +14,7 @@ type Channel = (typeof CHANNELS)[number];
 
 const HELP = `clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 
-Reinstall Clio Coder via npm and apply any pending data-dir migrations.
+Reinstall Clio Coder via npm, refresh state metadata, and apply pending data-dir migrations.
 
 Flags:
   --dry-run             print planned actions without changing anything
@@ -26,6 +27,7 @@ interface UpgradeOptions {
 	channel: Channel;
 	skipMigrations: boolean;
 	help: boolean;
+	postInstall: boolean;
 }
 
 function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
@@ -33,6 +35,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let channel: Channel = "latest";
 	let skipMigrations = false;
 	let help = false;
+	let postInstall = false;
 	for (const arg of argv) {
 		if (arg === "upgrade") continue;
 		if (arg === "--help" || arg === "-h") {
@@ -47,6 +50,10 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 			skipMigrations = true;
 			continue;
 		}
+		if (arg === "--post-install") {
+			postInstall = true;
+			continue;
+		}
 		if (arg.startsWith("--channel=")) {
 			const value = arg.slice("--channel=".length);
 			if (!(CHANNELS as ReadonlyArray<string>).includes(value)) {
@@ -57,7 +64,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		}
 		throw new Error(`unknown upgrade argument: ${arg}`);
 	}
-	return { dryRun, channel, skipMigrations, help };
+	return { dryRun, channel, skipMigrations, help, postInstall };
 }
 
 function streamPrefixed(source: NodeJS.ReadableStream, sink: NodeJS.WritableStream): void {
@@ -88,6 +95,37 @@ async function runNpmInstall(channel: Channel): Promise<void> {
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
 			else reject(new Error(`npm exited with code ${code ?? -1}`));
+		});
+	});
+}
+
+async function runDoctorFixAfterInstall(): Promise<void> {
+	const args = ["doctor", "--fix"];
+	process.stdout.write(`[upgrade] clio ${args.join(" ")}\n`);
+	await new Promise<void>((resolve, reject) => {
+		const child = spawn("clio", args, { stdio: ["ignore", "pipe", "pipe"] });
+		streamPrefixed(child.stdout, process.stdout);
+		streamPrefixed(child.stderr, process.stderr);
+		child.on("error", reject);
+		child.on("exit", (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`clio doctor --fix exited with code ${code ?? -1}`));
+		});
+	});
+}
+
+async function runPostInstallUpgrade(opts: UpgradeOptions): Promise<void> {
+	const args = ["upgrade", "--post-install", `--channel=${opts.channel}`];
+	if (opts.skipMigrations) args.push("--skip-migrations");
+	process.stdout.write(`[upgrade] clio ${args.join(" ")}\n`);
+	await new Promise<void>((resolve, reject) => {
+		const child = spawn("clio", args, { stdio: ["ignore", "pipe", "pipe"] });
+		streamPrefixed(child.stdout, process.stdout);
+		streamPrefixed(child.stderr, process.stderr);
+		child.on("error", reject);
+		child.on("exit", (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`clio upgrade --post-install exited with code ${code ?? -1}`));
 		});
 	});
 }
@@ -128,11 +166,21 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		return 0;
 	}
 
-	if (noNetwork) {
+	if (opts.postInstall) {
+		process.stdout.write("[upgrade] running post-install checks with the active clio binary\n");
+	} else if (noNetwork) {
 		process.stdout.write("[upgrade] CLIO_TEST_UPGRADE_NO_NETWORK set, skipping npm install\n");
 	} else {
 		try {
 			await runNpmInstall(opts.channel);
+		} catch (err) {
+			printError(err instanceof Error ? err.message : String(err));
+			return 1;
+		}
+		try {
+			await runPostInstallUpgrade(opts);
+			printOk(`${before} -> post-install checks complete`);
+			return 0;
 		} catch (err) {
 			printError(err instanceof Error ? err.message : String(err));
 			return 1;
@@ -161,6 +209,18 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 			}
 		} finally {
 			await loaded.stop();
+		}
+	}
+
+	if (noNetwork) {
+		initializeClioHome();
+		process.stdout.write("[upgrade] refreshed state metadata\n");
+	} else {
+		try {
+			await runDoctorFixAfterInstall();
+		} catch (err) {
+			printError(err instanceof Error ? err.message : String(err));
+			return 1;
 		}
 	}
 

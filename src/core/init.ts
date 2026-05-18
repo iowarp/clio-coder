@@ -21,6 +21,13 @@ export interface InitReport {
 
 const SUBDIRS = ["sessions", "audit", "state", "agents", "prompts", "receipts", "evidence", "evals", "memory"] as const;
 
+interface InstallMetadata {
+	version: string;
+	installedAt: string;
+	platform: string;
+	nodeVersion: string;
+}
+
 export function initializeClioHome(): InitReport {
 	enforceHomePrefixGuard();
 
@@ -79,18 +86,48 @@ export function initializeClioHome(): InitReport {
 	}
 
 	const installPath = join(dataDir, "install.json");
-	if (!existsSync(installPath)) {
+	const installMetadata = readInstallMetadata(installPath);
+	const currentVersion = readClioVersion();
+	if (
+		!installMetadata ||
+		installMetadata.version !== currentVersion ||
+		installMetadata.platform !== process.platform ||
+		installMetadata.nodeVersion !== process.version
+	) {
 		const payload = {
-			version: readClioVersion(),
+			version: currentVersion,
 			installedAt: new Date().toISOString(),
 			platform: process.platform,
 			nodeVersion: process.version,
 		};
-		writeFileSync(installPath, JSON.stringify(payload, null, 2), "utf8");
-		created.push(installPath);
+		writeFileSync(installPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+		if (!installMetadata) created.push(installPath);
 	}
 
 	return { configDir, dataDir, cacheDir, createdPaths: created, touchedSettings: touched };
+}
+
+function readInstallMetadata(path: string): InstallMetadata | null {
+	if (!existsSync(path)) return null;
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<InstallMetadata>;
+		if (
+			typeof parsed.version === "string" &&
+			typeof parsed.installedAt === "string" &&
+			typeof parsed.platform === "string" &&
+			typeof parsed.nodeVersion === "string"
+		) {
+			return {
+				version: parsed.version,
+				installedAt: parsed.installedAt,
+				platform: parsed.platform,
+				nodeVersion: parsed.nodeVersion,
+			};
+		}
+	} catch {
+		// Repaired below by overwriting install.json with current metadata.
+	}
+	return null;
 }
 
 /**
