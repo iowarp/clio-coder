@@ -2,8 +2,10 @@ import type { ClioSettings } from "../core/config.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
+	type CapabilityFlags,
 	type EndpointStatus,
 	type ProvidersContract,
+	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
@@ -139,8 +141,7 @@ function findCurrentStatus(
 	return statuses.find((status) => status.endpoint.id === endpointId) ?? null;
 }
 
-function capabilityLabels(status: EndpointStatus | null): string[] {
-	const caps = status?.capabilities;
+function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
 	const out: string[] = [];
 	if (caps.tools) out.push("tools");
@@ -151,6 +152,20 @@ function capabilityLabels(status: EndpointStatus | null): string[] {
 	if (typeof caps.contextWindow === "number" && caps.contextWindow > 0)
 		out.push(`${Math.round(caps.contextWindow / 1000)}k ctx`);
 	return out.slice(0, 5);
+}
+
+function selectedModelCapabilities(
+	status: EndpointStatus | null,
+	settings: Readonly<ClioSettings> | undefined,
+	providers: ProvidersContract,
+): CapabilityFlags | null {
+	if (!status) return null;
+	const wireModelId = settings?.orchestrator?.model ?? status.endpoint.defaultModel ?? null;
+	const detectedReasoning =
+		wireModelId && typeof providers.getDetectedReasoning === "function"
+			? providers.getDetectedReasoning(status.endpoint.id, wireModelId)
+			: null;
+	return resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning });
 }
 
 function scoreProjectFamiliarity(input: {
@@ -217,7 +232,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	const extensionStats = deps.getExtensionStats?.() ?? { active: 0, installed: 0 };
 	const currentAvailable = current ? activeStatus(current) : false;
-	const activeCapabilities = capabilityLabels(current);
+	const activeCapabilities = capabilityLabels(selectedModelCapabilities(current, settings, deps.providers));
 	const thinkingLevel =
 		resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
