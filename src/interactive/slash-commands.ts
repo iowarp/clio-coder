@@ -20,7 +20,7 @@ export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
 	| { kind: "init" }
-	| { kind: "skills" }
+	| { kind: "skills"; query?: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
 	| { kind: "share"; args: string }
@@ -311,18 +311,31 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skills",
-		description: "List skills",
+		description: "Browse or search skills",
+		argumentHint: "[query]",
 		kinds: ["skills"],
 		match(trimmed) {
-			return trimmed === "/skills" ? { kind: "skills" } : null;
+			if (trimmed === "/skills") return { kind: "skills" };
+			if (trimmed.startsWith("/skills ")) {
+				const query = trimmed.slice("/skills ".length).trim();
+				return query.length > 0 ? { kind: "skills", query } : { kind: "skills" };
+			}
+			return null;
 		},
-		handle(_command, ctx) {
+		handle(command, ctx) {
+			if (command.kind !== "skills") return;
 			const list = ctx.listSkills();
-			if (list.items.length === 0) {
-				ctx.io.stdout("\nskills: none\n");
+			const query = command.query?.toLowerCase();
+			const items = query
+				? list.items.filter(
+						(skill) => skill.name.toLowerCase().includes(query) || skill.description.toLowerCase().includes(query),
+					)
+				: list.items;
+			if (items.length === 0) {
+				ctx.io.stdout(query ? `\nskills: no matches for "${command.query}"\n` : "\nskills: none\n");
 				return;
 			}
-			const rows = list.items.map((skill) => {
+			const rows = items.map((skill) => {
 				const usage = `/skill:${skill.name}`;
 				return `  ${usage.padEnd(28)} ${skill.description}`;
 			});

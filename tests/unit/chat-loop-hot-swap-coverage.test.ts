@@ -322,6 +322,9 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 					staticCompositionHash: "static",
 					renderedPromptHash: "rendered",
 					fragmentManifest: [],
+					segmentManifest: [],
+					staticShellHash: "static",
+					staticShellTokenEstimate: 1,
 					dynamicInputs: input.dynamicInputs,
 				};
 			},

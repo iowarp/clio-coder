@@ -882,6 +882,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (event.type === "agent_start" && showProgress) agentProgress.start();
 		else if (event.type === "agent_end") agentProgress.stop();
 	});
+	const unsubscribeAbortedProgress = deps.bus.on(BusChannels.RunAborted, () => {
+		agentProgress.stop();
+	});
 	// Repaint the footer whenever an assistant message completes so the
 	// running `in:/out:` token counters reflect the latest usage. The
 	// existing 120ms ticker only refreshes while streaming, which means the
@@ -2027,6 +2030,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeStatus();
 		statusController.dispose();
 		unsubscribeProgress();
+		unsubscribeAbortedProgress();
 		unsubscribeFooterTokens();
 		unsubscribeModeTheme();
 		unsubscribeSuperRequired();

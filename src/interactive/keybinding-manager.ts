@@ -24,7 +24,12 @@
  */
 
 import type { ClioSettings } from "../core/config.js";
-import { CLIO_APP_KEYBINDING_IDS, CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
+import {
+	CLIO_APP_KEYBINDING_IDS,
+	CLIO_APP_KEYBINDINGS,
+	CLIO_KEYBINDINGS,
+	type ClioKeybinding,
+} from "../domains/config/keybindings.js";
 import {
 	type Keybinding,
 	type KeybindingConflict,
@@ -45,6 +50,8 @@ export interface TerminalKeySupport {
 	name: string;
 	supportsCsiU: boolean;
 	reason: string;
+	altLetterMode?: "meta" | "text";
+	ideReservedKeys?: ReadonlyArray<string>;
 }
 
 export interface PlatformKeybindingWarning {
@@ -52,6 +59,7 @@ export interface PlatformKeybindingWarning {
 	keys: ReadonlyArray<string>;
 	terminal: string;
 	reason: string;
+	source: "default" | "user";
 }
 
 export interface ClioKeybindingManager {
@@ -229,21 +237,41 @@ export function detectTerminalKeySupport(
 	const kittyWindow = envValue(env, "KITTY_WINDOW_ID");
 	const normalized = `${term} ${termProgram}`.toLowerCase();
 	if (kittyWindow.length > 0 || normalized.includes("xterm-kitty") || normalized.includes("kitty")) {
-		return { name: "kitty", supportsCsiU: true, reason: "Kitty keyboard protocol detected" };
+		return { name: "kitty", supportsCsiU: true, reason: "Kitty keyboard protocol detected", altLetterMode: "meta" };
 	}
 	if (normalized.includes("wezterm") || normalized.includes("ghostty")) {
-		return { name: termProgram || term || "modern terminal", supportsCsiU: true, reason: "CSI-u capable terminal" };
+		return {
+			name: termProgram || term || "modern terminal",
+			supportsCsiU: true,
+			reason: "CSI-u capable terminal",
+			altLetterMode: "meta",
+		};
+	}
+	if (termProgram === "Apple_Terminal" || termProgram === "iTerm.app") {
+		return {
+			name: termProgram,
+			supportsCsiU: false,
+			reason: "macOS terminal may treat Option-letter as text input",
+			altLetterMode: "text",
+		};
 	}
 	if (termProgram.toLowerCase() === "vscode") {
-		return { name: "vscode", supportsCsiU: false, reason: "VS Code terminal does not reliably emit CSI-u" };
+		return {
+			name: "vscode",
+			supportsCsiU: false,
+			reason: "VS Code terminal does not reliably emit CSI-u",
+			altLetterMode: "meta",
+			ideReservedKeys: ["ctrl+p", "shift+ctrl+p", "ctrl+l"],
+		};
 	}
 	if (term.startsWith("screen") || term.startsWith("tmux")) {
-		return { name: term, supportsCsiU: false, reason: "terminal multiplexer may block CSI-u" };
+		return { name: term, supportsCsiU: false, reason: "terminal multiplexer may block CSI-u", altLetterMode: "meta" };
 	}
 	return {
 		name: termProgram || term || "legacy terminal",
 		supportsCsiU: false,
 		reason: "CSI-u support not detected",
+		altLetterMode: "meta",
 	};
 }
 
@@ -265,30 +293,60 @@ function normalizeBindingValue(value: KeyId | KeyId[] | undefined): string[] {
 	return (Array.isArray(value) ? value : [value]).map(String);
 }
 
+function defaultBindingValue(id: ClioKeybinding): string[] {
+	const value = CLIO_APP_KEYBINDINGS[id].defaultKeys;
+	return normalizeBindingValue(value as KeyId | KeyId[]);
+}
+
+function normalizeKeyForRisk(keyId: string): string {
+	return keyId.toLowerCase().replace(/^ctrl\+shift\+/, "shift+ctrl+");
+}
+
+function keyUsesAltLetter(keyId: string): boolean {
+	const parts = keyId.toLowerCase().split("+");
+	if (parts.length !== 2 || parts[0] !== "alt") return false;
+	const base = parts[1] ?? "";
+	return base.length === 1 && base >= "a" && base <= "z";
+}
+
+function terminalReservedReason(keyId: string): string | null {
+	const key = normalizeKeyForRisk(keyId);
+	if (key === "ctrl+s" || key === "ctrl+q") return "terminal flow control may intercept this chord";
+	if (key === "ctrl+z") return "shell job control may suspend the process";
+	return null;
+}
+
+function keyRiskReason(keyId: string, support: TerminalKeySupport): string | null {
+	const key = normalizeKeyForRisk(keyId);
+	if (!support.supportsCsiU && keyRequiresCsiU(key)) return `needs CSI-u; ${support.reason}`;
+	if (support.altLetterMode === "text" && keyUsesAltLetter(key)) return support.reason;
+	if (support.ideReservedKeys?.map(normalizeKeyForRisk).includes(key)) return `${support.name} may reserve this chord`;
+	return terminalReservedReason(key);
+}
+
 export function detectPlatformKeybindingWarnings(
 	userBindings: Readonly<KeybindingsConfig>,
 	support: TerminalKeySupport = detectTerminalKeySupport(),
 ): ReadonlyArray<PlatformKeybindingWarning> {
-	if (support.supportsCsiU) return [];
 	const warnings: PlatformKeybindingWarning[] = [];
-	for (const [id, value] of Object.entries(userBindings)) {
-		if (!(id in CLIO_KEYBINDINGS)) continue;
-		const blocked = normalizeBindingValue(value).filter(keyRequiresCsiU);
-		if (blocked.length === 0) continue;
-		warnings.push({
-			id,
-			keys: blocked,
-			terminal: support.name,
-			reason: support.reason,
-		});
+	for (const id of CLIO_APP_KEYBINDING_IDS) {
+		const userValue = userBindings[id];
+		const source = userValue === undefined ? "default" : "user";
+		const keys = userValue === undefined ? defaultBindingValue(id) : normalizeBindingValue(userValue);
+		const risky = keys.filter((key) => keyRiskReason(key, support) !== null);
+		if (risky.length === 0) continue;
+		const firstReason = keyRiskReason(risky[0] ?? "", support) ?? support.reason;
+		warnings.push({ id, keys: risky, terminal: support.name, reason: firstReason, source });
 	}
 	return warnings;
 }
 
 export function formatPlatformKeybindingNotice(warnings: ReadonlyArray<PlatformKeybindingWarning>): string {
 	const count = warnings.reduce((sum, entry) => sum + entry.keys.length, 0);
-	const detail = warnings.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}"`)).join(", ");
-	return `Clio Coder: ${count} keybinding${count === 1 ? "" : "s"} may not fire in this terminal (CSI-u unavailable): ${detail}. Rebind in settings.yaml or inspect /hotkeys.\n`;
+	const detail = warnings
+		.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}" (${entry.source}, ${entry.reason})`))
+		.join(", ");
+	return `Clio keybinding notice: ${count} keybinding${count === 1 ? "" : "s"} may not fire reliably in this terminal: ${detail}. Rebind in settings.yaml or inspect /hotkeys.\n`;
 }
 
 function joinKeys(keys: ReadonlyArray<KeyId>): string {
@@ -308,6 +366,7 @@ function buildManager(
 		keys: [...entry.keys] as ReadonlyArray<string>,
 		terminal: entry.terminal,
 		reason: entry.reason,
+		source: entry.source,
 	}));
 	return {
 		matches(data, id) {

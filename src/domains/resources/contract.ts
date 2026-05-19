@@ -13,6 +13,7 @@ export interface ResourcesContract extends DomainContract {
 	contextFiles(cwd: string): ProjectContextFile[];
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
+	skillsCatalog(cwd?: string): string;
 	expandSkillInvocation(text: string, cwd?: string): SkillExpansion;
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;

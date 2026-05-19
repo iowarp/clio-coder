@@ -460,10 +460,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (invalidBindings.length > 0) {
 		process.stderr.write(formatInvalidKeybindingNotice(invalidBindings));
 	}
-	const platformWarnings = detectPlatformKeybindingWarnings(
-		validatedKeybindings.valid,
-		detectTerminalKeySupport(process.env),
-	);
+	const platformWarnings = process.stdin.isTTY
+		? detectPlatformKeybindingWarnings(validatedKeybindings.valid, detectTerminalKeySupport(process.env))
+		: [];
 	if (platformWarnings.length > 0) {
 		process.stderr.write(formatPlatformKeybindingNotice(platformWarnings));
 	}

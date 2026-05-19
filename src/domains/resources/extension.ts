@@ -19,6 +19,9 @@ export function createResourcesBundle(_context: DomainContext): DomainBundle<Res
 		skills(cwd) {
 			return loader.skills(cwd);
 		},
+		skillsCatalog(cwd) {
+			return loader.skillsCatalog(cwd);
+		},
 		expandSkillInvocation(text, cwd) {
 			return loader.expandSkillInvocation(text, cwd);
 		},

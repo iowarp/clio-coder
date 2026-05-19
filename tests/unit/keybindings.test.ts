@@ -136,7 +136,7 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		strictEqual(keyRequiresCsiU("ctrl+p"), false);
 	});
 
-	it("warns only for user bindings that cannot fire on legacy terminals", () => {
+	it("warns for active bindings that cannot fire on legacy terminals", () => {
 		const { valid } = validateKeybindings({
 			"clio.model.cycleBackward": "shift+ctrl+p",
 			"clio.exit": "ctrl+d",
@@ -148,7 +148,26 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		});
 		strictEqual(warnings.length, 1);
 		strictEqual(warnings[0]?.id, "clio.model.cycleBackward");
+		strictEqual(warnings[0]?.source, "user");
 		deepStrictEqual([...(warnings[0]?.keys ?? [])], ["shift+ctrl+p"]);
+	});
+
+	it("warns for default IDE and macOS terminal shortcut risks", () => {
+		const vscodeWarnings = detectPlatformKeybindingWarnings({}, detectTerminalKeySupport({ TERM_PROGRAM: "vscode" }));
+		ok(vscodeWarnings.some((warning) => warning.id === "clio.model.cycleForward" && warning.source === "default"));
+		ok(vscodeWarnings.some((warning) => warning.id === "clio.model.select" && warning.source === "default"));
+
+		const macWarnings = detectPlatformKeybindingWarnings(
+			{},
+			detectTerminalKeySupport({ TERM_PROGRAM: "Apple_Terminal" }),
+		);
+		ok(macWarnings.some((warning) => warning.id === "clio.mode.cycle" && warning.reason.includes("Option-letter")));
+	});
+
+	it("warns for user bindings that choose terminal-reserved flow-control keys", () => {
+		const { valid } = validateKeybindings({ "clio.session.tree": "ctrl+s" });
+		const warnings = detectPlatformKeybindingWarnings(valid, detectTerminalKeySupport({ TERM: "xterm-256color" }));
+		ok(warnings.some((warning) => warning.id === "clio.session.tree" && warning.reason.includes("flow control")));
 	});
 
 	it("does not warn on CSI-u capable terminals", () => {
@@ -168,10 +187,12 @@ describe("interactive/keybinding-manager platform warnings", () => {
 				keys: ["shift+ctrl+p"],
 				terminal: "xterm-256color",
 				reason: "CSI-u support not detected",
+				source: "user",
 			},
 		]);
-		ok(notice.startsWith("Clio Coder: 1 keybinding may not fire"), notice);
+		ok(notice.startsWith("Clio keybinding notice: 1 keybinding may not fire reliably"), notice);
 		ok(notice.includes(`clio.model.cycleBackward="shift+ctrl+p"`), notice);
+		ok(notice.includes("user"), notice);
 		ok(notice.includes("/hotkeys"), notice);
 		ok(notice.endsWith("\n"));
 	});

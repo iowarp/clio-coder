@@ -12,7 +12,13 @@ import {
 	type PromptTemplate,
 	type PromptTemplateExpansion,
 } from "./prompts/loader.js";
-import { expandSkillInvocationInput, loadSkills, type Skill, type SkillExpansion } from "./skills/loader.js";
+import {
+	expandSkillInvocationInput,
+	formatSkillsCatalogForPrompt,
+	loadSkills,
+	type Skill,
+	type SkillExpansion,
+} from "./skills/loader.js";
 
 export interface ResourceList<T> {
 	items: T[];
@@ -28,6 +34,7 @@ export interface ResourcesLoader {
 	contextFiles(cwd?: string, options?: Omit<LoadProjectContextFilesInput, "cwd">): ProjectContextFile[];
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd?: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
+	skillsCatalog(cwd?: string): string;
 	expandSkillInvocation(text: string, cwd?: string): SkillExpansion;
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
@@ -49,6 +56,9 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		skills(cwd = defaultCwd) {
 			return loadSkills({ cwd });
+		},
+		skillsCatalog(cwd = defaultCwd) {
+			return formatSkillsCatalogForPrompt(loadSkills({ cwd }));
 		},
 		expandSkillInvocation(text, cwd = defaultCwd) {
 			return expandSkillInvocationInput(text, loadSkills({ cwd }));

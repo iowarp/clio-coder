@@ -65,11 +65,13 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.FindSymbol:
 		case ToolNames.EntryPoints:
 		case ToolNames.WhereIs:
+		case ToolNames.ReadSkill:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:
 		case ToolNames.WritePlan:
 		case ToolNames.WriteReview:
+		case ToolNames.CreateSkill:
 			return "write";
 		case ToolNames.Bash:
 		case ToolNames.RunTests:

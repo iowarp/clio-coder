@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { expandSkillInvocationInput, loadSkills } from "../../src/domains/resources/index.js";
+import {
+	expandSkillInvocationInput,
+	formatSkillsCatalogForPrompt,
+	loadSkills,
+} from "../../src/domains/resources/index.js";
 
 let scratch: string;
 
@@ -75,5 +79,32 @@ describe("resources skills", () => {
 		ok(expanded.text.includes("References are relative to"), expanded.text);
 		ok(expanded.text.includes("Read references before reviewing."), expanded.text);
 		ok(expanded.text.endsWith("\n\nsrc/app.ts"), expanded.text);
+	});
+
+	it("formats a skills catalog with names and descriptions only", () => {
+		const root = join(scratch, "skills");
+		mkdirSync(join(root, "allowed"), { recursive: true });
+		mkdirSync(join(root, "blocked"), { recursive: true });
+		writeFileSync(
+			join(root, "allowed", "SKILL.md"),
+			"---\nname: allowed\ndescription: Use for review work\n---\nAlways include full body details.\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(root, "blocked", "SKILL.md"),
+			"---\nname: blocked\ndescription: Do not load via model\ndisable-model-invocation: true\n---\nSecret skill content that should be hidden.\n",
+			"utf8",
+		);
+
+		const skills = loadSkills({ roots: [{ path: root, scope: "user" }] });
+		strictEqual(skills.items.length, 2);
+		strictEqual(skills.items[0]?.disableModelInvocation, false);
+		strictEqual(skills.items[1]?.disableModelInvocation, true);
+
+		const catalog = formatSkillsCatalogForPrompt(skills);
+		strictEqual(catalog.includes('<skill name="allowed"'), true);
+		strictEqual(catalog.includes("<description>Use for review work</description>"), true);
+		strictEqual(catalog.includes("Always include full body details"), false);
+		strictEqual(catalog.includes('<skill name="blocked"'), false);
 	});
 });

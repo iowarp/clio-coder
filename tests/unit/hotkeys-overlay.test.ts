@@ -22,7 +22,7 @@ describe("interactive/overlays/hotkeys", () => {
 		);
 		const lines = formatHotkeysLines(buildHotkeyEntries(manager), 70, { warnings: manager.platformWarnings() });
 		const text = lines.join("\n");
-		ok(text.includes("needs CSI-u"), text);
+		ok(text.includes("may not fire"), text);
 		ok(text.includes("clio.model.cycleBackward"), text);
 	});
 

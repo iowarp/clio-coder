@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ProvidersContract, ResolvedModelRef } from "../../src/domains/providers/index.js";
 import {
 	dispatchSlashCommand,
 	parseSlashCommand,
@@ -48,6 +49,108 @@ describe("interactive slash commands", () => {
 		ok(stdout.includes("skills:"), stdout);
 		ok(stdout.includes("/skill:review"), stdout);
 		ok(stdout.includes("Review files"), stdout);
+	});
+
+	it("filters /skills by case-insensitive name or description query", () => {
+		let stdout = "";
+		const ctx = {
+			io: {
+				stdout: (text: string) => {
+					stdout += text;
+				},
+				stderr: () => {},
+			},
+			listSkills: () => ({
+				diagnostics: [],
+				items: [
+					{
+						name: "review",
+						description: "Review files",
+						content: "Review",
+						filePath: "/tmp/review/SKILL.md",
+						baseDir: "/tmp/review",
+						sourceInfo: { path: "/tmp/review/SKILL.md", scope: "user" },
+						disableModelInvocation: false,
+					},
+					{
+						name: "bench",
+						description: "Benchmark kernels",
+						content: "Bench",
+						filePath: "/tmp/bench/SKILL.md",
+						baseDir: "/tmp/bench",
+						sourceInfo: { path: "/tmp/bench/SKILL.md", scope: "user" },
+						disableModelInvocation: false,
+					},
+				],
+			}),
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/skills REVIEW"), ctx);
+
+		ok(stdout.includes("/skill:review"), stdout);
+		ok(!stdout.includes("/skill:bench"), stdout);
+
+		stdout = "";
+		dispatchSlashCommand(parseSlashCommand("/skills missing"), ctx);
+		ok(stdout.includes('no matches for "missing"'), stdout);
+	});
+
+	it("parses and applies /model pattern commands", () => {
+		const command = parseSlashCommand("/model mini/qwen:high");
+		strictEqual(command.kind, "model-set");
+		if (command.kind !== "model-set") throw new Error("expected model-set command");
+		strictEqual(command.pattern, "mini/qwen:high");
+
+		let stdout = "";
+		const appliedRefs: ResolvedModelRef[] = [];
+		const providers = {
+			list: () => [
+				{
+					endpoint: { id: "mini", runtime: "stub", defaultModel: "qwen" },
+					runtime: { id: "stub" },
+					discoveredModels: [],
+				},
+			],
+		} as unknown as ProvidersContract;
+		const ctx = {
+			io: {
+				stdout: (text: string) => {
+					stdout += text;
+				},
+				stderr: () => {},
+			},
+			providers,
+			applyModelRef: (ref: ResolvedModelRef) => appliedRefs.push(ref),
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(command, ctx);
+
+		const applied = appliedRefs[0];
+		ok(applied, "expected /model to apply a resolved ref");
+		strictEqual(applied?.endpoint, "mini");
+		strictEqual(applied?.model, "qwen");
+		strictEqual(applied?.thinkingLevel, "high");
+		ok(stdout.includes("[/model] active: mini/qwen thinking=high"), stdout);
+	});
+
+	it("reports /model pattern resolution errors", () => {
+		let stderr = "";
+		const ctx = {
+			io: {
+				stdout: () => {},
+				stderr: (text: string) => {
+					stderr += text;
+				},
+			},
+			providers: { list: () => [] } as Partial<ProvidersContract> as ProvidersContract,
+			applyModelRef: () => {
+				throw new Error("should not apply");
+			},
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/model missing"), ctx);
+
+		ok(stderr.includes("no targets configured"), stderr);
 	});
 
 	it("lists prompt templates from the injected resources hook", () => {

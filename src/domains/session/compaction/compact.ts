@@ -18,6 +18,11 @@ import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import { calculateContextTokens, getLastAssistantUsage } from "./tokens.js";
 
+interface FileOperations {
+	read: Set<string>;
+	modified: Set<string>;
+}
+
 /**
  * Default system prompt for the summarization call. Kept inline so a
  * session with no `compaction.systemPrompt` override still produces stable
@@ -148,6 +153,90 @@ function buildTurnPrefixUserText(conversationText: string, instructions?: string
 	return `<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${suffix}`;
 }
 
+function createFileOps(): FileOperations {
+	return { read: new Set(), modified: new Set() };
+}
+
+function recordFileOperation(fileOps: FileOperations, operation: unknown, filePath: unknown): void {
+	if (typeof filePath !== "string" || filePath.trim().length === 0) return;
+	const normalized = filePath.trim();
+	if (operation === "read") {
+		fileOps.read.add(normalized);
+		return;
+	}
+	if (operation === "write" || operation === "edit" || operation === "create" || operation === "delete") {
+		fileOps.modified.add(normalized);
+	}
+}
+
+function payloadObject(payload: unknown): Record<string, unknown> | null {
+	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
+}
+
+function contentBlocks(payload: unknown): ReadonlyArray<Record<string, unknown>> {
+	const content = payloadObject(payload)?.content;
+	if (!Array.isArray(content)) return [];
+	return content.filter((block): block is Record<string, unknown> => !!block && typeof block === "object");
+}
+
+function extractPathArg(args: unknown): string | null {
+	const obj = payloadObject(args);
+	if (!obj) return null;
+	const candidate = obj.path ?? obj.file_path ?? obj.filePath;
+	return typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : null;
+}
+
+function extractFileOpsFromMessage(entry: SessionEntry, fileOps: FileOperations): void {
+	if (entry.kind !== "message") return;
+	if (entry.role === "tool_call") {
+		const obj = payloadObject(entry.payload);
+		if (!obj) return;
+		const name = typeof obj.name === "string" ? obj.name : typeof obj.toolName === "string" ? obj.toolName : "";
+		recordFileOperation(fileOps, name, extractPathArg(obj.args ?? obj.arguments ?? obj.input));
+		return;
+	}
+	if (entry.role !== "assistant") return;
+	for (const block of contentBlocks(entry.payload)) {
+		if (block.type !== "toolCall") continue;
+		const name = typeof block.name === "string" ? block.name : "";
+		recordFileOperation(fileOps, name, extractPathArg(block.arguments ?? block.args ?? block.input));
+	}
+}
+
+function extractFileOpsFromPriorSummary(summary: string, fileOps: FileOperations): void {
+	for (const [, body] of summary.matchAll(/<read-files>\n([\s\S]*?)\n<\/read-files>/g)) {
+		for (const filePath of (body ?? "").split("\n")) recordFileOperation(fileOps, "read", filePath);
+	}
+	for (const [, body] of summary.matchAll(/<modified-files>\n([\s\S]*?)\n<\/modified-files>/g)) {
+		for (const filePath of (body ?? "").split("\n")) recordFileOperation(fileOps, "edit", filePath);
+	}
+}
+
+function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
+	const fileOps = createFileOps();
+	for (const entry of entries) {
+		if (entry.kind === "fileEntry") {
+			recordFileOperation(fileOps, entry.operation, entry.path);
+			continue;
+		}
+		if (entry.kind === "compactionSummary") {
+			extractFileOpsFromPriorSummary(entry.summary, fileOps);
+			continue;
+		}
+		extractFileOpsFromMessage(entry, fileOps);
+	}
+	return fileOps;
+}
+
+function formatFileOperations(fileOps: FileOperations): string {
+	const modified = [...fileOps.modified].sort();
+	const readOnly = [...fileOps.read].filter((filePath) => !fileOps.modified.has(filePath)).sort();
+	const sections: string[] = [];
+	if (readOnly.length > 0) sections.push(`<read-files>\n${readOnly.join("\n")}\n</read-files>`);
+	if (modified.length > 0) sections.push(`<modified-files>\n${modified.join("\n")}\n</modified-files>`);
+	return sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "";
+}
+
 async function runSummaryStream(
 	input: CompactInput,
 	userText: string,
@@ -212,6 +301,8 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const turnPrefix = cut.isSplitTurn
 		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
 		: [];
+	const priorSummary = prevCompactionIndex >= 0 ? input.entries[prevCompactionIndex] : undefined;
+	const fileOps = extractFileOps([...(priorSummary ? [priorSummary] : []), ...pre, ...turnPrefix]);
 	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
 
 	if (pre.length === 0 && turnPrefix.length === 0) {
@@ -243,7 +334,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		}
 	}
 
-	const summary = summaryParts.join("\n\n---\n\n").trim();
+	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}`.trim();
 
 	return {
 		summary,

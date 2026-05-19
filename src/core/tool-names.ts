@@ -28,6 +28,8 @@ export const ToolNames = {
 	EntryPoints: "entry_points",
 	WhereIs: "where_is",
 	Dispatch: "dispatch",
+	ReadSkill: "read_skill",
+	CreateSkill: "create_skill",
 } as const;
 
 export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];
