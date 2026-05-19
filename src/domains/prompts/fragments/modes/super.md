@@ -10,7 +10,7 @@ Super mode unlocks system_modify actions parked by default and advise.
 Use it only when normal workspace permissions cannot complete the task.
 Keep elevated actions narrow and auditable.
 
-Available tools: read, write, edit, bash, grep, find, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend, workspace_context, find_symbol, entry_points, where_is, dispatch.
+Available tools: read, write, edit, bash, grep, find, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend, workspace_context, find_symbol, entry_points, where_is, dispatch, read_skill, create_skill.
 The tool surface mirrors default; super only admits system_modify commands
 such as sudo, package installs, and service restarts. git_destructive
 remains hard-blocked.

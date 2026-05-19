@@ -106,6 +106,7 @@ function fakeDispatch(): DispatchContract {
 const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = {
 	default: [
 		"bash",
+		"create_skill",
 		"dispatch",
 		"edit",
 		"entry_points",
@@ -119,6 +120,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"ls",
 		"package_script",
 		"read",
+		"read_skill",
 		"run_build",
 		"run_lint",
 		"run_tests",
@@ -139,6 +141,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"grep",
 		"ls",
 		"read",
+		"read_skill",
 		"web_fetch",
 		"where_is",
 		"write_plan",
@@ -146,6 +149,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 	],
 	super: [
 		"bash",
+		"create_skill",
 		"dispatch",
 		"edit",
 		"entry_points",
@@ -159,6 +163,7 @@ const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = 
 		"ls",
 		"package_script",
 		"read",
+		"read_skill",
 		"run_build",
 		"run_lint",
 		"run_tests",

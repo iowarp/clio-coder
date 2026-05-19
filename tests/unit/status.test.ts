@@ -368,4 +368,48 @@ describe("status/controller", () => {
 			controller.dispose();
 		}
 	});
+
+	it("moves to ended with cancelled summary when RunAborted fires on the bus", () => {
+		let clock = 0;
+		const bus = createSafeEventBus();
+		const chatListeners = new Set<(event: never) => void>();
+		const providers = {
+			list: () => [],
+		} as unknown as ProvidersContract;
+		const controller = createStatusController({
+			chat: {
+				submit: async () => undefined,
+				queueFollowUp: () => false,
+				clearQueuedFollowUps: () => [],
+				queuedMessages: () => ({ followUp: [] }),
+				cancel: () => undefined,
+				onEvent: (listener) => {
+					chatListeners.add(listener as (event: never) => void);
+					return () => chatListeners.delete(listener as (event: never) => void);
+				},
+				getSessionId: () => "session-1",
+				isStreaming: () => false,
+				contextUsage: () => ({ tokens: null, contextWindow: 0, percent: null }),
+				compact: async () => undefined,
+				resetForSession: () => undefined,
+				dispose: () => undefined,
+			},
+			providers,
+			bus,
+			now: () => clock,
+			setInterval: () => 0,
+			clearInterval: () => undefined,
+			setTimeout: () => 0,
+			clearTimeout: () => undefined,
+		});
+		try {
+			for (const listener of chatListeners) listener({ type: "agent_start" } as never);
+			clock = 100;
+			bus.emit(BusChannels.RunAborted, { runId: "session-1", reason: "user cancelled stream" });
+			strictEqual(controller.current().phase, "ended");
+			strictEqual(controller.current().summary?.stopReason, "cancelled");
+		} finally {
+			controller.dispose();
+		}
+	});
 });

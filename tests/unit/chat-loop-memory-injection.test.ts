@@ -63,6 +63,9 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 				text: `system|memorySection=${input.dynamicInputs.memorySection ?? ""}`,
 				renderedPromptHash: "rendered",
 				fragmentManifest: [],
+				segmentManifest: [],
+				staticShellHash: "static",
+				staticShellTokenEstimate: 1,
 				dynamicInputs: { ...input.dynamicInputs },
 			};
 			return result;

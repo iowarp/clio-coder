@@ -29,6 +29,7 @@ export {
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
 export {
 	expandSkillInvocationInput,
+	formatSkillsCatalogForPrompt,
 	loadSkills,
 	type Skill,
 	type SkillExpansion,

@@ -1,4 +1,4 @@
-import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -431,6 +431,42 @@ describe("prompts/compiler runtime block", () => {
 });
 
 describe("prompts/compiler one hash invariant", () => {
+	it("segments the prompt for caching and keeps the static shell under budget", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				contextWindow: 200000,
+				thinkingBudget: "off",
+				turnCount: 1,
+				skillsCatalog: [
+					"# Skills",
+					"",
+					"<available_skills>",
+					'  <skill name="review" scope="project">',
+					"    <description>Review changed files.</description>",
+					"  </skill>",
+					"</available_skills>",
+				].join("\n"),
+				memorySection: "- preserve architecture decisions",
+				contextFiles: "<project-context>\nRepo rules\n</project-context>",
+			},
+		});
+
+		deepStrictEqual(
+			result.segmentManifest.map((segment) => segment.id),
+			["identity", "mode", "safety", "runtime", "skills-catalog", "memory", "project-context", "history-summary"],
+		);
+		ok(result.staticShellTokenEstimate > 0, JSON.stringify(result.segmentManifest));
+		ok(result.staticShellTokenEstimate < 1500, `static shell was ${result.staticShellTokenEstimate} tokens`);
+		ok(result.staticShellHash.length > 0);
+		ok(result.text.indexOf("# Skills") < result.text.indexOf("# Memory"), result.text);
+		ok(result.text.indexOf("# Memory") < result.text.indexOf("# Project"), result.text);
+	});
+
 	it("produces the same renderedPromptHash for byte-identical inputs", () => {
 		const a = compile(loadFragments(), {
 			identity: "identity.clio",

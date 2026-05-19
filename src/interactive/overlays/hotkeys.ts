@@ -99,7 +99,10 @@ export function formatHotkeysLines(
 	for (const warning of options.warnings ?? []) {
 		const keys = warning.keys.map(formatKey).join(" / ");
 		lines.push(
-			brandedContentRow(pad(`! ${warning.id}: ${keys} needs CSI-u (${warning.terminal})`, contentWidth), contentWidth),
+			brandedContentRow(
+				pad(`! ${warning.id}: ${keys} may not fire (${warning.terminal}: ${warning.reason})`, contentWidth),
+				contentWidth,
+			),
 		);
 	}
 	if ((options.warnings ?? []).length > 0) {

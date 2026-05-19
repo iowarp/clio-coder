@@ -6,6 +6,7 @@ import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract } from "../context/index.js";
 import type { ModesContract } from "../modes/contract.js";
 import type { ModeName } from "../modes/index.js";
+import type { ResourcesContract } from "../resources/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileForTurnInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
@@ -35,6 +36,10 @@ export function createPromptsBundle(
 
 	function contextDomain(): ContextContract | undefined {
 		return context.getContract<ContextContract>("context");
+	}
+
+	function resources(): ResourcesContract | undefined {
+		return context.getContract<ResourcesContract>("resources");
 	}
 
 	function reload(): void {
@@ -71,7 +76,12 @@ export function createPromptsBundle(
 				contextFiles = projectContext?.text ?? "";
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
-			const dynamicInputs = contextFiles.length > 0 ? { ...input.dynamicInputs, contextFiles } : input.dynamicInputs;
+			const skillsCatalog = resources()?.skillsCatalog(cwd) ?? "";
+			const dynamicInputs = {
+				...input.dynamicInputs,
+				...(contextFiles.length > 0 ? { contextFiles } : {}),
+				...(skillsCatalog.length > 0 ? { skillsCatalog } : {}),
+			};
 			return compile(table, {
 				identity: "identity.clio",
 				mode: `modes.${currentMode}`,

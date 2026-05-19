@@ -113,6 +113,21 @@ function sessionInfo(turnId: string, targetTurnId: string, label: string): Sessi
 	};
 }
 
+function fileEntry(
+	turnId: string,
+	path: string,
+	operation: "read" | "write" | "edit" | "create" | "delete",
+): SessionEntry {
+	return {
+		kind: "fileEntry",
+		turnId,
+		parentTurnId: null,
+		timestamp: "2026-04-17T00:00:06.500Z",
+		path,
+		operation,
+	};
+}
+
 function compactionSummary(turnId: string, summary: string, firstKeptTurnId: string): SessionEntry {
 	return {
 		kind: "compactionSummary",
@@ -520,6 +535,76 @@ describe("session/compaction/compact iterative compaction", () => {
 				!allObserved.includes("prior structured summary text"),
 				"iterative compaction must not re-summarize the prior compactionSummary's body",
 			);
+		} finally {
+			faux.unregister();
+		}
+	});
+});
+
+describe("session/compaction/compact file operation context", () => {
+	it("appends read and modified file lists to the generated summary", async () => {
+		const faux = registerFauxProvider({
+			provider: "faux-compaction-file-ops",
+			models: [{ id: "faux-compactor-files", contextWindow: 200_000 }],
+		});
+		try {
+			faux.setResponses([
+				fauxAssistantMessage("## Goal\nSummarize file work.", { stopReason: "stop" }),
+				fauxAssistantMessage("Active file turn prefix.", { stopReason: "stop" }),
+			]);
+			const model = faux.getModel() as unknown as Model<never>;
+			const assistantWithToolCalls = assistantMessage("a1", "", "u1");
+			(assistantWithToolCalls as { payload: unknown }).payload = {
+				content: [
+					{ type: "toolCall", name: "read", arguments: { path: "src/read-only.ts" } },
+					{ type: "toolCall", name: "edit", arguments: { path: "src/changed.ts" } },
+				],
+			};
+			const entries: SessionEntry[] = [
+				userMessage("u1", "old context ".repeat(2000), null),
+				assistantWithToolCalls,
+				fileEntry("f1", "src/generated.ts", "create"),
+				userMessage("u2", "recent request", "a1"),
+				assistantMessage("a2", "recent answer", "u2"),
+			];
+
+			const result = await compact({ entries, model, keepRecentTokens: 3 });
+
+			ok(result.summary.includes("<read-files>\nsrc/read-only.ts\n</read-files>"), result.summary);
+			ok(result.summary.includes("<modified-files>"), result.summary);
+			ok(result.summary.includes("src/changed.ts"), result.summary);
+			ok(result.summary.includes("src/generated.ts"), result.summary);
+		} finally {
+			faux.unregister();
+		}
+	});
+
+	it("carries prior compaction file lists forward without scanning pre-summary entries", async () => {
+		const faux = registerFauxProvider({
+			provider: "faux-compaction-prior-file-ops",
+			models: [{ id: "faux-compactor-prior-files", contextWindow: 200_000 }],
+		});
+		try {
+			faux.setResponses([fauxAssistantMessage("## Goal\nSummarize recent work.", { stopReason: "stop" })]);
+			const model = faux.getModel() as unknown as Model<never>;
+			const entries: SessionEntry[] = [
+				fileEntry("f-ancient", "src/ancient.ts", "edit"),
+				compactionSummary(
+					"c-prior",
+					"prior summary\n\n<read-files>\nsrc/prior-read.ts\n</read-files>\n\n<modified-files>\nsrc/prior-edit.ts\n</modified-files>",
+					"u-recent",
+				),
+				userMessage("u-recent", "x".repeat(4_000), "c-prior"),
+				assistantMessage("a-recent", "y".repeat(4_000), "u-recent"),
+				userMessage("u-tail", "z".repeat(4_000), "a-recent"),
+				assistantMessage("a-tail", "tail reply", "u-tail"),
+			];
+
+			const result = await compact({ entries, model, keepRecentTokens: 200 });
+
+			ok(result.summary.includes("src/prior-read.ts"), result.summary);
+			ok(result.summary.includes("src/prior-edit.ts"), result.summary);
+			ok(!result.summary.includes("src/ancient.ts"), result.summary);
 		} finally {
 			faux.unregister();
 		}

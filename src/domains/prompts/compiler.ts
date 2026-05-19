@@ -24,6 +24,7 @@ export interface DynamicInputs {
 	contextFiles?: string;
 	projectType?: string | null;
 	agentCatalog?: string;
+	skillsCatalog?: string;
 	memorySection?: string;
 	turnCount?: number;
 	clioVersion?: string;
@@ -35,6 +36,13 @@ export interface FragmentManifestEntry {
 	relPath: string;
 	contentHash: string;
 	dynamic: boolean;
+}
+
+export interface PromptSegmentManifestEntry {
+	id: string;
+	contentHash: string;
+	dynamic: boolean;
+	tokenEstimate: number;
 }
 
 export interface RenderedPromptFragment {
@@ -49,6 +57,9 @@ export interface CompileResult {
 	text: string;
 	renderedPromptHash: string;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
+	segmentManifest: ReadonlyArray<PromptSegmentManifestEntry>;
+	staticShellHash: string;
+	staticShellTokenEstimate: number;
 	dynamicInputs: Readonly<DynamicInputs>;
 }
 
@@ -142,6 +153,12 @@ function renderAgentCatalogBlock(agentCatalog: string | undefined): string {
 	return `# Agent Fleet\n\n${trimmed}`;
 }
 
+function renderSkillsCatalogBlock(skillsCatalog: string | undefined): string {
+	const trimmed = skillsCatalog?.trim() ?? "";
+	if (trimmed.length === 0) return "";
+	return trimmed.startsWith("# Skills") ? trimmed : `# Skills\n\n${trimmed}`;
+}
+
 function renderSessionBlock(inputs: DynamicInputs): string {
 	const sessionNotes = inputs.sessionNotes?.trim() ?? "";
 	const turnCount = typeof inputs.turnCount === "number" ? inputs.turnCount : 0;
@@ -155,6 +172,30 @@ function renderSessionBlock(inputs: DynamicInputs): string {
 	return lines.join("\n");
 }
 
+function estimatePromptTokens(text: string): number {
+	const trimmed = text.trim();
+	if (trimmed.length === 0) return 0;
+	return Math.ceil(trimmed.length / 4);
+}
+
+function pushSegment(
+	segments: PromptSegmentManifestEntry[],
+	parts: string[],
+	id: string,
+	body: string,
+	dynamic: boolean,
+): void {
+	const trimmed = body.trim();
+	if (trimmed.length === 0) return;
+	parts.push(trimmed);
+	segments.push({
+		id,
+		contentHash: sha256(trimmed),
+		dynamic,
+		tokenEstimate: estimatePromptTokens(trimmed),
+	});
+}
+
 /**
  * Compile a Clio prompt from the supplied fragment table and inputs.
  *
@@ -162,8 +203,8 @@ function renderSessionBlock(inputs: DynamicInputs): string {
  * renders a single one-line directive followed by the active mode's safety
  * fragment body. Everything else renders inline from typed DynamicInputs:
  * runtime metadata (provider, model, context window, thinking mechanism,
- * thinking applied/notice/guidance, family guidance), project context,
- * memory section, and session state.
+ * thinking applied/notice/guidance, family guidance), skills catalog, memory,
+ * project context, and session state.
  *
  * One reproducibility hash travels with the rendered text: `renderedPromptHash`
  * is sha256 over the final text. Receipts written by older builds remain
@@ -175,27 +216,31 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const safety = lookupFragment(table, inputs.safety, "safety");
 
 	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
-	const parts: string[] = [
-		identity.body.trim(),
-		mode.body.trim(),
-		renderSafetySection(safety, safetyLevel),
-		renderRuntimeBlock(inputs.dynamicInputs),
-	];
-	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
-	if (project.length > 0) parts.push(project);
+	const parts: string[] = [];
+	const segmentManifest: PromptSegmentManifestEntry[] = [];
+	pushSegment(segmentManifest, parts, "identity", identity.body, false);
+	pushSegment(segmentManifest, parts, "mode", mode.body, false);
+	pushSegment(segmentManifest, parts, "safety", renderSafetySection(safety, safetyLevel), false);
+	pushSegment(segmentManifest, parts, "runtime", renderRuntimeBlock(inputs.dynamicInputs), true);
 	const agentCatalog = renderAgentCatalogBlock(inputs.dynamicInputs.agentCatalog);
-	if (agentCatalog.length > 0) parts.push(agentCatalog);
+	pushSegment(segmentManifest, parts, "tools-and-agents", agentCatalog, true);
+	const skillsCatalog = renderSkillsCatalogBlock(inputs.dynamicInputs.skillsCatalog);
+	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true);
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
-	if (memory.length > 0) parts.push(memory);
+	pushSegment(segmentManifest, parts, "memory", memory, true);
+	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
+	pushSegment(segmentManifest, parts, "project-context", project, true);
 	const session = renderSessionBlock(inputs.dynamicInputs);
-	if (session.length > 0) parts.push(session);
+	pushSegment(segmentManifest, parts, "history-summary", session, true);
 	for (const fragment of inputs.additionalFragments ?? []) {
-		const body = fragment.body.trim();
-		if (body.length > 0) parts.push(body);
+		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic);
 	}
 
 	const text = parts.join("\n\n");
 	const renderedPromptHash = sha256(text);
+	const staticShellText = parts.slice(0, 4).join("\n\n");
+	const staticShellHash = sha256(staticShellText);
+	const staticShellTokenEstimate = estimatePromptTokens(staticShellText);
 
 	const manifestFragments: LoadedFragment[] = [identity, mode, safety];
 	const fragmentManifest: FragmentManifestEntry[] = manifestFragments.map((f) => ({
@@ -217,6 +262,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		text,
 		renderedPromptHash,
 		fragmentManifest,
+		segmentManifest,
+		staticShellHash,
+		staticShellTokenEstimate,
 		dynamicInputs: { ...inputs.dynamicInputs },
 	};
 }

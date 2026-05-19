@@ -25,6 +25,7 @@ import {
 	runLintTool,
 	runTestsTool,
 } from "./safe-exec.js";
+import { createReadSkillTool, createSkillTool } from "./skills.js";
 import { validateFrontendTool } from "./validate-frontend.js";
 import { webFetchTool } from "./web-fetch.js";
 import { workspaceContextTool } from "./workspace-context.js";
@@ -143,6 +144,17 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({
 		...withSourceInfo(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
 		allowedModes: everyMode,
+	});
+	const skillToolDeps = {
+		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
+	};
+	registry.register({
+		...withSourceInfo(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		allowedModes: everyMode,
+	});
+	registry.register({
+		...withSourceInfo(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		allowedModes: defaultAndSuper,
 	});
 	if (deps.dispatch) {
 		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };

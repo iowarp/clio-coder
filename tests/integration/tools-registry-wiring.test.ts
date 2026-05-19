@@ -644,6 +644,19 @@ describe("engine/worker-tools registry wiring", () => {
 		deepStrictEqual(validateBuiltinToolPolicy(registry.listAll()), []);
 	});
 
+	it("exposes read_skill in advise/default/super and gates create_skill to writable modes", () => {
+		const defaultTools = new Set(createWorkerToolRegistry("default").listForMode("default"));
+		const adviseTools = new Set(createWorkerToolRegistry("advise").listForMode("advise"));
+		const superTools = new Set(createWorkerToolRegistry("super").listForMode("super"));
+
+		strictEqual(defaultTools.has(ToolNames.ReadSkill), true);
+		strictEqual(defaultTools.has(ToolNames.CreateSkill), true);
+		strictEqual(adviseTools.has(ToolNames.ReadSkill), true);
+		strictEqual(adviseTools.has(ToolNames.CreateSkill), false);
+		strictEqual(superTools.has(ToolNames.ReadSkill), true);
+		strictEqual(superTools.has(ToolNames.CreateSkill), true);
+	});
+
 	it("listForMode intersects spec allowedModes with MODE_MATRIX", () => {
 		const registry = createRegistry({
 			safety: makeSafety({ actionClass: "write", reasons: ["test"] }, []),

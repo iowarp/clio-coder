@@ -217,6 +217,31 @@ function escapeXmlAttribute(value: string): string {
 	return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeXmlText(value: string): string {
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function formatSkillsCatalogForPrompt(skills: SkillList): string {
+	const visible = skills.items.filter((skill) => !skill.disableModelInvocation);
+	if (visible.length === 0) return "";
+	const lines = [
+		"# Skills",
+		"",
+		"Use skills when their descriptions match the task. This catalog intentionally includes only names and descriptions; call read_skill to load the full SKILL.md body and resolve any referenced files relative to that skill's base directory.",
+		"",
+		"<available_skills>",
+	];
+	for (const skill of visible) {
+		lines.push(
+			`  <skill name="${escapeXmlAttribute(skill.name)}" scope="${escapeXmlAttribute(skill.sourceInfo.scope)}">`,
+		);
+		lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);
+		lines.push("  </skill>");
+	}
+	lines.push("</available_skills>");
+	return lines.join("\n");
+}
+
 function parseSkillCommand(input: string): { name: string; args: string } | null {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/skill:")) return null;

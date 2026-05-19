@@ -137,6 +137,57 @@ describe("resources domain", () => {
 		}
 	});
 
+	it("compiles prompts with a skills catalog that contains only name+description", async () => {
+		const repo = join(scratch, "repo");
+		const configDir = process.env.CLIO_CONFIG_DIR;
+		ok(configDir, "CLIO_CONFIG_DIR should be set by the test harness");
+		mkdirSync(join(configDir, "skills", "review"), { recursive: true });
+		mkdirSync(join(configDir, "skills", "disabled"), { recursive: true });
+		writeFileSync(
+			join(configDir, "skills", "review", "SKILL.md"),
+			"---\nname: review\ndescription: Load this from the catalog\n---\nLoad full body details here.\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(configDir, "skills", "disabled", "SKILL.md"),
+			"---\nname: disabled\ndescription: Should not appear in model-facing catalog\ndisable-model-invocation: true\n---\nThis body must not appear in prompt text.\n",
+			"utf8",
+		);
+
+		const loaded = await loadDomains([
+			ConfigDomainModule,
+			ResourcesDomainModule,
+			ContextDomainModule,
+			SafetyDomainModule,
+			ModesDomainModule,
+			createPromptsDomainModule(),
+		]);
+		try {
+			const resources = loaded.getContract<ResourcesContract>("resources");
+			ok(resources, "resources contract should be available");
+			const catalog = resources.skillsCatalog(repo);
+			strictEqual(catalog.includes('<skill name="review"'), true);
+			strictEqual(catalog.includes("<description>Load this from the catalog</description>"), true);
+			strictEqual(catalog.includes("Load full body details here"), false);
+			strictEqual(catalog.includes('<skill name="disabled"'), false);
+
+			const prompts = loaded.getContract<PromptsContract>("prompts");
+			ok(prompts, "prompts contract should be available");
+			const compiled = await prompts.compileForTurn({
+				cwd: repo,
+				overrideMode: "default",
+				safetyLevel: "auto-edit",
+				dynamicInputs: {},
+			});
+			ok(compiled.text.includes("# Skills"), compiled.text);
+			ok(compiled.text.includes('name="review"'), compiled.text);
+			strictEqual(compiled.text.includes("Load full body details here"), false);
+			strictEqual(compiled.text.includes("This body must not appear in prompt text."), false);
+		} finally {
+			await loaded.stop();
+		}
+	});
+
 	it("keeps CLIO.md-first prompt compilation while the resources domain is loaded", async () => {
 		const repo = join(scratch, "repo");
 		mkdirSync(repo, { recursive: true });
