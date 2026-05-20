@@ -35,6 +35,7 @@ export interface LoadedProjectSafetyPolicy {
 	errors: ReadonlyArray<string>;
 	commands: ReadonlyArray<ProjectCommandPolicy>;
 	pathPolicy: PathPolicyInput;
+	disableDefaultPathPolicy: boolean;
 }
 
 const POLICY_RELATIVE_PATH = path.join(".clio", "safety.yaml");
@@ -48,7 +49,7 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"unknown",
 ]);
 const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noDeletePaths"] as const;
-const ROOT_KEYS = new Set(["version", "commands", "tasks", ...PATH_POLICY_KEYS]);
+const ROOT_KEYS = new Set(["version", "commands", "tasks", "disableDefaultPathPolicy", ...PATH_POLICY_KEYS]);
 const COMMAND_KEYS = new Set([
 	"id",
 	"command",
@@ -80,7 +81,7 @@ export function projectSafetyPolicyPath(cwd: string = process.cwd()): string | n
 export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProjectSafetyPolicy {
 	const policyPath = projectSafetyPolicyPath(cwd);
 	if (policyPath === null) {
-		return { path: null, hash: null, valid: true, errors: [], commands: [], pathPolicy: {} };
+		return { path: null, hash: null, valid: true, errors: [], commands: [], pathPolicy: {}, disableDefaultPathPolicy: false };
 	}
 	let raw: string;
 	try {
@@ -93,6 +94,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			errors: [`cannot read project safety policy: ${err instanceof Error ? err.message : String(err)}`],
 			commands: [],
 			pathPolicy: {},
+			disableDefaultPathPolicy: false,
 		};
 	}
 	const hash = sha256(raw);
@@ -107,6 +109,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			errors: [`cannot parse project safety policy: ${err instanceof Error ? err.message : String(err)}`],
 			commands: [],
 			pathPolicy: {},
+			disableDefaultPathPolicy: false,
 		};
 	}
 }
@@ -122,6 +125,7 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 			errors: ["policy root must be a mapping"],
 			commands: [],
 			pathPolicy: {},
+			disableDefaultPathPolicy: false,
 		};
 	}
 	for (const key of Object.keys(value)) {
@@ -131,6 +135,10 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 	appendCommandPolicies(commands, errors, value.commands, "commands");
 	appendCommandPolicies(commands, errors, value.tasks, "tasks");
 	const pathPolicy = parsePathPolicy(value, errors);
+	const disableDefaultPathPolicy =
+		value.disableDefaultPathPolicy === undefined
+			? false
+			: booleanField(value, "disableDefaultPathPolicy", "policy", errors);
 
 	const ids = new Set<string>();
 	for (const command of commands) {
@@ -145,6 +153,7 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 		errors,
 		commands: errors.length === 0 ? commands : [],
 		pathPolicy: errors.length === 0 ? pathPolicy : {},
+		disableDefaultPathPolicy: errors.length === 0 ? disableDefaultPathPolicy : false,
 	};
 }
 

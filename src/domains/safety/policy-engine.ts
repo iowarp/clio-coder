@@ -4,6 +4,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { ModeName } from "../modes/matrix.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
+import { DEFAULT_DAMAGE_CONTROL_PATH_POLICY, mergePathPolicyInputs } from "./default-path-policy.js";
 import {
 	type CompiledPathPolicy,
 	compilePathPolicy,
@@ -101,7 +102,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
 	const projectPolicyRoot = projectPolicy.path === null ? cwd : path.dirname(path.dirname(projectPolicy.path));
-	const pathPolicy = compilePathPolicy(projectPolicy.pathPolicy, projectPolicyRoot);
+	const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
+		? projectPolicy.pathPolicy
+		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
+	const pathPolicy = compilePathPolicy(pathPolicyInput, projectPolicyRoot);
 
 	function rulesFor(mode: string | undefined): SourcedRule[] {
 		const safetyMode = mode ?? "default";
