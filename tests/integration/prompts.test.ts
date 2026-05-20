@@ -227,6 +227,7 @@ describe("prompts/compiler context files", () => {
 				async runBootstrap() {
 					throw new Error("not used");
 				},
+				startupHints: () => [],
 				renderPromptContext(cwd) {
 					strictEqual(cwd, scratch);
 					return {
@@ -268,6 +269,7 @@ describe("prompts/compiler context files", () => {
 				async runBootstrap() {
 					throw new Error("not used");
 				},
+				startupHints: () => [],
 				renderPromptContext() {
 					return {
 						text: "<project-context>\nshould-not-appear\n</project-context>",

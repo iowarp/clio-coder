@@ -446,6 +446,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const extensions = result.getContract<ExtensionsContract>("extensions");
 	const share = result.getContract<ShareContract>("share");
 	const contextDomain = result.getContract<ContextContract>("context");
+	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
 	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
 			"Clio Coder: chat mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -485,13 +486,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;
 	if (invalidBindings.length > 0) {
-		process.stderr.write(formatInvalidKeybindingNotice(invalidBindings));
+		const notice = formatInvalidKeybindingNotice(invalidBindings);
+		if (interactive) initialNotices.push(notice);
+		else process.stderr.write(notice);
 	}
 	const platformWarnings = process.stdin.isTTY
 		? detectPlatformKeybindingWarnings(validatedKeybindings.valid, detectTerminalKeySupport(process.env))
 		: [];
 	if (platformWarnings.length > 0) {
-		process.stderr.write(formatPlatformKeybindingNotice(platformWarnings));
+		const notice = formatPlatformKeybindingNotice(platformWarnings);
+		if (interactive) initialNotices.push(notice);
+		else process.stderr.write(notice);
 	}
 	const persistSettings = (next: ClioSettings): void => {
 		if (config?.set) {
@@ -575,6 +580,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		observability,
 		chat,
+		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
 		...(share ? { share } : {}),

@@ -279,6 +279,8 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.send("!!printf 'bash-output'\r");
 			await p.expect(/excluded from context/, 10_000);
 			await p.expect(/bash-output/, 10_000);
+			const commandEchoes = p.output().match(/bash: \$ printf 'bash-output'/g) ?? [];
+			strictEqual(commandEchoes.length, 1, "expected local bash command to render once");
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);

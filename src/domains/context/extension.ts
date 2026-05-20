@@ -34,7 +34,8 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 	return { text: pieces.join("\n\n"), clioMd, warnings };
 }
 
-function emitStartupHints(cwd: string): void {
+function collectStartupHints(cwd: string): string[] {
+	const hints: string[] = [];
 	let projectType: ReturnType<typeof detectProjectType>;
 	try {
 		projectType = detectProjectType(cwd);
@@ -43,28 +44,32 @@ function emitStartupHints(cwd: string): void {
 	}
 	const clio = tryReadClioMd(cwd);
 	if (!clio && projectType !== "unknown") {
-		process.stderr.write("clio: No CLIO.md detected. Run /init or `clio init` to bootstrap.\n");
+		hints.push("clio: No CLIO.md detected. Run /init or `clio init` to bootstrap.");
 	}
 	if (clio && !clio.ok) {
-		process.stderr.write(`clio: malformed CLIO.md ignored: ${clio.error}\n`);
+		hints.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
 	}
 	if (clio?.ok && clio.value.firstInit) {
-		process.stderr.write("clio: CLIO.md has no fingerprint footer. Run /init to refresh.\n");
+		hints.push("clio: CLIO.md has no fingerprint footer. Run /init to refresh.");
 	}
 	const state = readClioState(cwd);
-	if (!state) return;
+	if (!state) return hints;
 	const reference = state.bootstrapFingerprint ?? state.fingerprint;
 	const current = computeFingerprint(cwd);
 	if (isStale(reference, current)) {
-		process.stderr.write("clio: CLIO.md fingerprint differs from current project state. Run /init to refresh.\n");
+		hints.push("clio: CLIO.md fingerprint differs from current project state. Run /init to refresh.");
 	}
+	return hints;
 }
 
 export function createContextBundle(_context: DomainContext): DomainBundle<ContextContract> {
 	let lastCwd = process.cwd();
+	let startupHints: string[] = [];
 	const onStart = (): void => {
 		lastCwd = process.cwd();
-		emitStartupHints(lastCwd);
+		startupHints = collectStartupHints(lastCwd);
+		if (process.env.CLIO_INTERACTIVE === "1") return;
+		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
 
 	const extension: DomainExtension = {
@@ -95,6 +100,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 	const contract: ContextContract = {
 		runBootstrap,
 		renderPromptContext,
+		startupHints: () => [...startupHints],
 	};
 
 	return { extension, contract };
