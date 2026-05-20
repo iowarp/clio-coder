@@ -80,7 +80,18 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"venv/",
 		"target/",
 	],
-	noDeletePaths: ["~/.claude/", "CLAUDE.md", "LICENSE", "LICENSE.*", "COPYING", "COPYING.*", "NOTICE", "PATENTS", "README.md", "README.*"],
+	noDeletePaths: [
+		"~/.claude/",
+		"CLAUDE.md",
+		"LICENSE",
+		"LICENSE.*",
+		"COPYING",
+		"COPYING.*",
+		"NOTICE",
+		"PATENTS",
+		"README.md",
+		"README.*",
+	],
 };
 
 export function mergePathPolicyInputs(base: PathPolicyInput, override: PathPolicyInput): PathPolicyInput {

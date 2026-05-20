@@ -140,10 +140,7 @@ describe("safety/path-policy", () => {
 	});
 
 	it("matches reference-style tilde and wildcard path policies", () => {
-		const policy = compilePathPolicy(
-			{ zeroAccessPaths: ["~/.ssh/", "*.env", "*-credentials.json"] },
-			"/repo",
-		);
+		const policy = compilePathPolicy({ zeroAccessPaths: ["~/.ssh/", "*.env", "*-credentials.json"] }, "/repo");
 
 		strictEqual(evaluatePathPolicy(policy, "read", join(homedir(), ".ssh", "config")).kind, "block");
 		strictEqual(evaluatePathPolicy(policy, "read", "/repo/services/api.env").kind, "block");
