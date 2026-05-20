@@ -1,5 +1,6 @@
 import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { readFileArgsAsync } from "../core/file-references.js";
 import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -7,7 +8,6 @@ import { ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
-import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -18,148 +18,138 @@ import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
+import type { ImageContent } from "../engine/types.js";
+import { isToolProfileName } from "../tools/profiles.js";
+import { parseRunCliArgs, type RunCliArgs } from "./args.js";
+import { runClioCommand } from "./clio.js";
+import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
+import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 
 const USAGE =
-	'usage: clio run [--agent-profile <name>] [--agent-runtime <runtimeId>] [--target <id>] [--model <wireId>] [--thinking <level>] [--agent <recipe-id>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <capability>] [--auto-approve <allow|deny>] [--json] "<task>"\n';
+	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--json] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
-Dispatch a one-shot Clio agent from the fleet and print the run receipt.
+Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
 
 Flags:
-  --agent-profile <name>    named fleet profile to dispatch under
+  --target <id>             one-run main-agent or dispatch target override
+  --model <wireId>          one-run model override
+  --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh
+  --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
+  --agent <recipe-id>       dispatch a fleet agent instead of the main agent
+  --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose endpoint uses this runtime
-  --target <id>             explicit endpoint id (takes precedence over profile/runtime)
-  --model <wireId>          override the wire model id for this run
-  --thinking <level>        thinking level: off|minimal|low|medium|high|xhigh
-  --agent <recipe-id>       agent recipe (defaults to implementer)
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
-  --require <capability>    capability the target must advertise (repeatable)
+  --require <capability>    capability the dispatch target must advertise (repeatable)
   --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
-  --json                    stream events and the final receipt as JSON
 `;
 
-const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
-
-interface ParsedArgs {
-	workerProfile?: string;
-	workerRuntime?: string;
-	target?: string;
-	model?: string;
-	thinking?: JobThinkingLevel;
-	agentId?: string;
-	toolProfile?: ToolProfileName;
-	required: string[];
-	task: string;
-	json: boolean;
-	autoApprove?: "allow" | "deny";
-	supervised?: boolean;
+function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
+	return (
+		parsed.agentProfile !== undefined ||
+		parsed.agentRuntime !== undefined ||
+		parsed.toolProfile !== undefined ||
+		parsed.required.length > 0 ||
+		parsed.autoApprove !== undefined ||
+		parsed.supervised
+	);
 }
 
-function parseArgs(args: ReadonlyArray<string>): ParsedArgs | null {
-	const out: ParsedArgs = { required: [], task: "", json: false };
-	const taskParts: string[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const a = args[i];
-		const need = (): string | null => {
-			const v = args[i + 1];
-			if (v === undefined) return null;
-			i += 1;
-			return v;
-		};
-		if (a === "--help" || a === "-h") {
-			return null;
-		}
-		if (a === "--agent-profile" || a === "--worker-profile" || a === "--worker") {
-			const v = need();
-			if (v === null) return null;
-			out.workerProfile = v;
-		} else if (a === "--agent-runtime" || a === "--worker-runtime" || a === "--runtime") {
-			const v = need();
-			if (v === null) return null;
-			out.workerRuntime = v;
-		} else if (a === "--target") {
-			const v = need();
-			if (v === null) return null;
-			out.target = v;
-		} else if (a === "--model") {
-			const v = need();
-			if (v === null) return null;
-			out.model = v;
-		} else if (a === "--thinking") {
-			const v = need();
-			if (v === null) return null;
-			if (!VALID_THINKING.includes(v as JobThinkingLevel)) return null;
-			out.thinking = v as JobThinkingLevel;
-		} else if (a === "--agent") {
-			const v = need();
-			if (v === null) return null;
-			out.agentId = v;
-		} else if (a === "--tool-profile") {
-			const v = need();
-			if (v === null || !isToolProfileName(v)) return null;
-			out.toolProfile = v;
-		} else if (a === "--require") {
-			const v = need();
-			if (v === null) return null;
-			out.required.push(v);
-		} else if (a === "--auto-approve") {
-			const v = need();
-			if (v === null) return null;
-			const normalized = v.toLowerCase();
-			if (normalized !== "allow" && normalized !== "deny") {
-				throw new Error("--auto-approve must be 'allow' or 'deny'");
-			}
-			out.autoApprove = normalized;
-		} else if (a === "--supervised") {
-			out.supervised = true;
-		} else if (a === "--json") {
-			out.json = true;
-		} else if (a?.startsWith("-")) {
-			return null;
-		} else if (typeof a === "string") {
-			taskParts.push(a);
-		}
+async function assemblePrompt(
+	parsed: RunCliArgs,
+): Promise<{ prompt: string; images?: ReadonlyArray<ImageContent> } | null> {
+	const stdinContent = await readPipedStdin();
+	const fileRefs = await readFileArgsAsync(parsed.fileArgs, { cwd: process.cwd(), missing: "error" });
+	for (const diagnostic of fileRefs.diagnostics) {
+		process.stderr.write(`error: ${diagnostic.message}\n`);
 	}
-	out.task = taskParts.join(" ").trim();
-	return out;
+	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return null;
+	const initial = buildInitialMessage({
+		messages: parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [],
+		...(stdinContent !== undefined ? { stdinContent } : {}),
+		...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
+		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
+	});
+	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
+		process.stderr.write("clio run: empty task\n");
+		process.stderr.write(USAGE);
+		return null;
+	}
+	return {
+		prompt: initial.initialMessage,
+		...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
+	};
 }
 
 export async function runClioRun(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean } = {},
 ): Promise<number> {
-	if (args.includes("--help") || args.includes("-h")) {
+	const parsed = parseRunCliArgs(args);
+	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	let parsed: ParsedArgs | null;
-	try {
-		parsed = parseArgs(args);
-	} catch (err) {
-		process.stderr.write(`clio run: ${err instanceof Error ? err.message : String(err)}\n`);
+	for (const diagnostic of parsed.diagnostics) {
+		process.stderr.write(`clio run: ${diagnostic.message}\n`);
+	}
+	if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 		process.stderr.write(USAGE);
 		return 2;
 	}
-	if (parsed === null) {
-		process.stderr.write(USAGE);
-		return 2;
-	}
-	if (parsed.task.length === 0) {
-		process.stderr.write("clio run: empty task\n");
+	if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
+		process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
 		process.stderr.write(USAGE);
 		return 2;
 	}
 
-	if (parsed.target && parsed.workerProfile) {
+	const assembled = await assemblePrompt(parsed);
+	if (!assembled) return 2;
+
+	if (parsed.agentId === undefined) {
+		takeOverStdout();
+		try {
+			const code = await runClioCommand({
+				...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
+				...(options.noContextFiles ? { noContextFiles: true } : {}),
+				headless: {
+					prompt: assembled.prompt,
+					mode: parsed.json ? "json" : "text",
+					...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
+					...(parsed.target !== undefined ? { target: parsed.target } : {}),
+					...(parsed.model !== undefined ? { model: parsed.model } : {}),
+					...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+				},
+			});
+			await flushRawStdout();
+			return code;
+		} finally {
+			restoreStdout();
+		}
+	}
+
+	return runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, options);
+}
+
+async function runDispatch(
+	parsed: RunCliArgs & { agentId: string },
+	task: string,
+	options: { apiKey?: string; noContextFiles?: boolean },
+): Promise<number> {
+	if (parsed.toolProfile !== undefined && !isToolProfileName(parsed.toolProfile)) {
+		process.stderr.write("clio run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
+		process.stderr.write(USAGE);
+		return 2;
+	}
+	if (parsed.target && parsed.agentProfile) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --agent-profile ${parsed.workerProfile} will be ignored\n`,
+			`clio run: --target ${parsed.target} takes precedence; --agent-profile ${parsed.agentProfile} will be ignored\n`,
 		);
 	}
-	if (parsed.target && parsed.workerRuntime) {
+	if (parsed.target && parsed.agentRuntime) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.workerRuntime} will be ignored\n`,
+			`clio run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.agentRuntime} will be ignored\n`,
 		);
 	}
 
@@ -193,13 +183,13 @@ export async function runClioRun(
 			return 1;
 		}
 		const settings = readSettings();
-		const profileEndpointId = parsed.workerProfile
-			? settings.workers?.profiles?.[parsed.workerProfile]?.endpoint
+		const profileEndpointId = parsed.agentProfile
+			? settings.workers?.profiles?.[parsed.agentProfile]?.endpoint
 			: undefined;
 		const runtimeByEndpoint = new Map(settings.endpoints.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
-		const runtimeEndpointId = parsed.workerRuntime
+		const runtimeEndpointId = parsed.agentRuntime
 			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
-					(profile) => profile?.endpoint && runtimeByEndpoint.get(profile.endpoint) === parsed.workerRuntime,
+					(profile) => profile?.endpoint && runtimeByEndpoint.get(profile.endpoint) === parsed.agentRuntime,
 				)?.endpoint
 			: undefined;
 		const targetEndpointId =
@@ -219,11 +209,11 @@ export async function runClioRun(
 	}
 
 	const dispatchReq: DispatchRequest = {
-		agentId: parsed.agentId ?? "implementer",
-		task: parsed.task,
+		agentId: parsed.agentId,
+		task,
 	};
-	if (parsed.workerProfile) dispatchReq.workerProfile = parsed.workerProfile;
-	if (parsed.workerRuntime) dispatchReq.workerRuntime = parsed.workerRuntime;
+	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
+	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;
 	if (parsed.target) dispatchReq.endpoint = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;

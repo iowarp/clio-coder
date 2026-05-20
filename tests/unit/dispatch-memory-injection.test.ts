@@ -52,7 +52,8 @@ describe("dispatch/extension buildSystemPrompt", () => {
 			memorySection: "# Memory\n\nlesson alpha",
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
-		strictEqual(out, "# Memory\n\nlesson alpha\n\nRECIPE BODY");
+		ok(out.startsWith("# Memory\n\nlesson alpha\n\n# Dispatch Task Contract"));
+		ok(out.endsWith("\n\nRECIPE BODY"));
 	});
 
 	it("prepends memorySection to req.systemPrompt when both are set, ignoring recipe body", () => {
@@ -63,30 +64,37 @@ describe("dispatch/extension buildSystemPrompt", () => {
 			systemPrompt: "OVERRIDE PROMPT",
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
-		strictEqual(out, "# Memory\n\nlesson beta\n\nOVERRIDE PROMPT");
+		ok(out.startsWith("# Memory\n\nlesson beta\n\n# Dispatch Task Contract"));
+		ok(out.endsWith("\n\nOVERRIDE PROMPT"));
+		strictEqual(out.includes("RECIPE BODY"), false);
 	});
 
-	it("returns the base prompt unchanged when memorySection is undefined", () => {
+	it("wraps the base prompt with the dispatch task contract when memorySection is undefined", () => {
 		const req: DispatchRequest = { agentId: "scout", task: "look" };
 		const out = buildSystemPrompt(req, baseRecipe);
-		strictEqual(out, "RECIPE BODY");
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.includes("The assigned task is authoritative"));
+		ok(out.endsWith("\n\nRECIPE BODY"));
 	});
 
-	it("returns the base prompt unchanged when memorySection is the empty string", () => {
+	it("wraps the base prompt when memorySection is the empty string", () => {
 		const req: DispatchRequest = { agentId: "scout", task: "look", memorySection: "" };
 		const out = buildSystemPrompt(req, baseRecipe);
-		strictEqual(out, "RECIPE BODY");
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.endsWith("\n\nRECIPE BODY"));
 	});
 
 	it("treats whitespace-only memorySection as empty (no separator, no prefix)", () => {
 		const req: DispatchRequest = { agentId: "scout", task: "look", memorySection: "   \n\t  " };
 		const out = buildSystemPrompt(req, baseRecipe);
-		strictEqual(out, "RECIPE BODY");
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.endsWith("\n\nRECIPE BODY"));
 	});
 
-	it("falls back to empty string when neither systemPrompt, recipe, nor memorySection are present", () => {
+	it("falls back to the dispatch task contract when neither systemPrompt, recipe, nor memorySection are present", () => {
 		const req: DispatchRequest = { agentId: "scout", task: "look" };
 		const out = buildSystemPrompt(req, null);
-		strictEqual(out, "");
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.includes("Do not invent a different task"));
 	});
 });

@@ -12,10 +12,6 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 	version: string;
 };
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
-const PNG_1X1 = Buffer.from(
-	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-	"base64",
-);
 
 function seedTargets(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
@@ -137,6 +133,7 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 				"      vision: true",
 				"    wireModels:",
 				"      - mock-model",
+				"      - alternate-model",
 			].join("\n"),
 		)
 		.replace(/^ {2}target: null$/m, "  target: mock-chat")
@@ -175,39 +172,6 @@ function findUserPrompt(requests: ReadonlyArray<Record<string, unknown>>, expect
 	return false;
 }
 
-function findUserPromptWithImage(
-	requests: ReadonlyArray<Record<string, unknown>>,
-	expectedText: string,
-	expectedMimeType: string,
-): boolean {
-	for (const body of requests) {
-		const messages = body.messages;
-		if (!Array.isArray(messages)) continue;
-		for (const entry of messages) {
-			if (!entry || typeof entry !== "object" || !("role" in entry) || entry.role !== "user") continue;
-			if (!("content" in entry) || !Array.isArray(entry.content)) continue;
-			const content = entry.content as unknown[];
-			const hasText = content.some(
-				(block: unknown) =>
-					block &&
-					typeof block === "object" &&
-					"type" in block &&
-					block.type === "text" &&
-					"text" in block &&
-					block.text === expectedText,
-			);
-			const hasImage = content.some((block: unknown) => {
-				if (!block || typeof block !== "object" || !("type" in block) || block.type !== "image_url") return false;
-				const imageUrl = "image_url" in block ? block.image_url : undefined;
-				if (!imageUrl || typeof imageUrl !== "object" || !("url" in imageUrl)) return false;
-				return typeof imageUrl.url === "string" && imageUrl.url.startsWith(`data:${expectedMimeType};base64,`);
-			});
-			if (hasText && hasImage) return true;
-		}
-	}
-	return false;
-}
-
 describe("clio cli e2e", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
@@ -231,7 +195,10 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stdout, /Clio Coder command line/);
 		match(result.stdout, /Usage:/);
 		match(result.stdout, /clio doctor/);
+		match(result.stdout, /clio run \[flags\] <task>/);
 		match(result.stdout, /--no-context-files/);
+		ok(!result.stdout.includes("--print"), "top-level print mode should not be in help");
+		ok(!result.stdout.includes("--mode json"), "top-level JSON mode should not be in help");
 	});
 
 	it("--no-context-files is accepted at the top level without breaking subcommand parsing", async () => {
@@ -261,102 +228,30 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stdout, /non-interactive boot/);
 	});
 
-	it("--print runs one chat turn and keeps stdout to the assistant text", async () => {
+	it("clio run uses the main agent and keeps stdout to the assistant text", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
-		const fixture = await startOpenAICompatFixture("print ok");
+		const fixture = await startOpenAICompatFixture("run ok");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--print", "say ok"], {
+			const result = await runCli(["run", "say ok"], {
 				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
-			strictEqual(result.stdout, "print ok\n");
-			ok(!/Clio Coder/.test(result.stdout), "banner must not leak to print stdout");
-			ok(findUserPrompt(fixture.requests, "say ok"), `missing print prompt in ${JSON.stringify(fixture.requests)}`);
+			strictEqual(result.stdout, "run ok\n");
+			ok(!/Clio Coder/.test(result.stdout), "banner must not leak to run stdout");
+			ok(findUserPrompt(fixture.requests, "say ok"), `missing run prompt in ${JSON.stringify(fixture.requests)}`);
 		} finally {
 			await closeServer(fixture.server);
 		}
 	});
 
-	it("--print merges piped stdin with the argv prompt", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
-		const fixture = await startOpenAICompatFixture("merged ok");
-		try {
-			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["-p", "Summarize"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
-				input: "stdin body\n",
-				timeoutMs: 20_000,
-			});
-			strictEqual(result.code, 0, `stderr=${result.stderr}`);
-			strictEqual(result.stdout, "merged ok\n");
-			ok(
-				findUserPrompt(fixture.requests, "stdin body\nSummarize"),
-				`missing merged prompt in ${JSON.stringify(fixture.requests)}`,
-			);
-		} finally {
-			await closeServer(fixture.server);
-		}
-	});
-
-	it("--print expands @file arguments into file blocks before the prompt", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
-		writeFileSync(join(scratch.dir, "notes.md"), "file body\n", "utf8");
-		const fixture = await startOpenAICompatFixture("file ok");
-		try {
-			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--print", "@notes.md", "Summarize"], {
-				cwd: scratch.dir,
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
-				timeoutMs: 20_000,
-			});
-			strictEqual(result.code, 0, `stderr=${result.stderr}`);
-			strictEqual(result.stdout, "file ok\n");
-			const expected = `<file name="${join(scratch.dir, "notes.md")}">\nfile body\n\n</file>\nSummarize`;
-			ok(findUserPrompt(fixture.requests, expected), `missing @file prompt in ${JSON.stringify(fixture.requests)}`);
-		} finally {
-			await closeServer(fixture.server);
-		}
-	});
-
-	it("--print attaches image @file arguments to the user message", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
-		writeFileSync(join(scratch.dir, "pixel.png"), PNG_1X1);
-		const fixture = await startOpenAICompatFixture("image ok");
-		try {
-			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--print", "@pixel.png", "Describe"], {
-				cwd: scratch.dir,
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
-				timeoutMs: 20_000,
-			});
-			strictEqual(result.code, 0, `stderr=${result.stderr}`);
-			strictEqual(result.stdout, "image ok\n");
-			const expectedText = `<file name="${join(scratch.dir, "pixel.png")}"></file>\nDescribe`;
-			ok(
-				findUserPromptWithImage(fixture.requests, expectedText, "image/png"),
-				`missing image prompt in ${JSON.stringify(fixture.requests)}`,
-			);
-		} finally {
-			await closeServer(fixture.server);
-		}
-	});
-
-	it("--print without a prompt exits 2 with usage on stderr only", async () => {
-		const result = await runCli(["--print"], { env: scratch.env });
-		strictEqual(result.code, 2);
-		strictEqual(result.stdout, "");
-		match(result.stderr, /print mode requires a prompt/);
-		match(result.stderr, /usage: clio --print/);
-	});
-
-	it("--mode json streams the one-shot turn as JSONL", async () => {
+	it("clio run --json streams the main-agent turn as JSONL", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const fixture = await startOpenAICompatFixture("json ok");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--mode", "json", "say ok"], {
+			const result = await runCli(["run", "say ok", "--json"], {
 				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
@@ -366,6 +261,8 @@ describe("clio cli e2e", { concurrency: false }, () => {
 			ok(header, "expected JSONL session header");
 			strictEqual(header.type, "session");
 			strictEqual(typeof header.id, "string");
+			strictEqual(header.endpoint, "mock-chat");
+			strictEqual(header.model, "mock-model");
 			const events = records.slice(1);
 			ok(
 				events.some((event) => event.type === "agent_start"),
@@ -389,17 +286,30 @@ describe("clio cli e2e", { concurrency: false }, () => {
 				events.some((event) => event.type === "agent_end"),
 				"expected agent_end event",
 			);
-			ok(findUserPrompt(fixture.requests, "say ok"), `missing JSON mode prompt in ${JSON.stringify(fixture.requests)}`);
+			ok(findUserPrompt(fixture.requests, "say ok"), `missing JSON run prompt in ${JSON.stringify(fixture.requests)}`);
 		} finally {
 			await closeServer(fixture.server);
 		}
 	});
 
-	it("--mode rpc is reserved and does not pollute stdout", async () => {
-		const result = await runCli(["--mode", "rpc", "hello"], { env: scratch.env });
-		strictEqual(result.code, 2);
-		strictEqual(result.stdout, "");
-		match(result.stderr, /--mode rpc is not implemented yet/);
+	it("clio run --model sends a one-run main-agent model override", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("model ok");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["run", "say ok", "--model", "alternate-model"], {
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			strictEqual(result.stdout, "model ok\n");
+			ok(
+				fixture.requests.some((request) => request.model === "alternate-model"),
+				`missing override model in ${JSON.stringify(fixture.requests)}`,
+			);
+		} finally {
+			await closeServer(fixture.server);
+		}
 	});
 
 	it("configure --help exits 0 and prints target usage", async () => {
@@ -841,14 +751,15 @@ describe("clio cli e2e", { concurrency: false }, () => {
 		match(result.stderr, /--api-key supplied but no active orchestrator target is configured/);
 	});
 
-	it("clio run --api-key with no resolvable target exits 2 with a stderr hint", async () => {
+	it("clio run --api-key with no active main-agent target exits 1 with a stderr hint", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const result = await runCli(["--api-key", "OVERRIDE-sk-flag", "run", "hello"], {
 			env: scratch.env,
 			timeoutMs: 15_000,
 		});
-		strictEqual(result.code, 2);
-		match(result.stderr, /--api-key supplied but no target resolved/);
+		strictEqual(result.code, 1);
+		match(result.stderr, /--api-key supplied but no active orchestrator target is configured/);
+		match(result.stderr, /orchestrator not configured/);
 	});
 
 	it("clio run --auto-approve allow accepts the flag", async () => {

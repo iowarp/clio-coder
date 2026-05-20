@@ -138,6 +138,14 @@ function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+const DISPATCH_TASK_CONTRACT = [
+	"# Dispatch Task Contract",
+	"The assigned task is authoritative. The role guidance below is not itself a task.",
+	"Do not invent a different task, source tree, file path, or implementation plan.",
+	"If the assigned task asks for an exact response, a direct answer, or says not to inspect files or use tools, answer directly without tool calls.",
+	"Use tools only when they are necessary for the assigned task and allowed by the configured tool profile.",
+].join("\n");
+
 export function pickOrchestratorScope(safety: SafetyContract, mode: ModeName): ScopeSpec | null {
 	const dispatchScope = MODE_MATRIX[mode].dispatchScope;
 	if (dispatchScope === "none") return null;
@@ -165,10 +173,10 @@ export function deriveRequestedActions(
 
 export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
 	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
+	const guardedBase = base.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${base}` : DISPATCH_TASK_CONTRACT;
 	const memory = req.memorySection?.trim() ?? "";
-	if (memory.length === 0) return base;
-	if (base.length === 0) return memory;
-	return `${memory}\n\n${base}`;
+	if (memory.length === 0) return guardedBase;
+	return `${memory}\n\n${guardedBase}`;
 }
 
 interface ResolvedTarget {
