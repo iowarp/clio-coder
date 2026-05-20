@@ -54,7 +54,7 @@ export type StatusInputEvent =
 	| ForceCancelledStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
-const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "thinking", "writing", "tool_running"]);
+const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
 
 function isOverlayPhase(phase: StatusPhase): phase is OverlayPhase {
 	return OVERLAY_PHASES.has(phase);
@@ -212,8 +212,12 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				localRuntime: ctx.localRuntime,
 				...(ctx.runId !== undefined ? { runId: ctx.runId } : {}),
 			};
-		case "turn_start":
-			return refreshMeaningful(prev, ctx);
+		case "turn_start": {
+			const base = activePhaseAfterStuck(prev);
+			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
+			if (base === "preparing") return { ...next, phase: "waiting_model", resumePhase: undefined };
+			return next;
+		}
 		case "message_start": {
 			const next = refreshMeaningful(prev, ctx);
 			const role = (event.message as { role?: unknown }).role;
@@ -235,14 +239,18 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		case "thinking_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing" || base === "writing") return { ...next, phase: "thinking", resumePhase: undefined };
+			if (base === "preparing" || base === "waiting_model" || base === "writing") {
+				return { ...next, phase: "thinking", resumePhase: undefined };
+			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
 		}
 		case "text_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing" || base === "thinking") return { ...next, phase: "writing", resumePhase: undefined };
+			if (base === "preparing" || base === "waiting_model" || base === "thinking") {
+				return { ...next, phase: "writing", resumePhase: undefined };
+			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
 		}

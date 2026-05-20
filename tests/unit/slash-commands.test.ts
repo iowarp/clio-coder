@@ -8,6 +8,24 @@ import {
 } from "../../src/interactive/slash-commands.js";
 
 describe("interactive slash commands", () => {
+	it("renders /help through stdout for the interactive surface", () => {
+		let stdout = "";
+		const ctx = {
+			io: {
+				stdout: (text: string) => {
+					stdout += text;
+				},
+				stderr: () => {},
+			},
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/help"), ctx);
+
+		ok(stdout.includes("commands:"), stdout);
+		ok(stdout.includes("/help"), stdout);
+		ok(stdout.includes("/hotkeys"), stdout);
+	});
+
 	it("parses /run tool profiles", () => {
 		const command = parseSlashCommand("/run --tool-profile science-local worker run tests");
 		strictEqual(command.kind, "run");

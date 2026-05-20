@@ -17,22 +17,31 @@ describe("status/resolveFooterVerb", () => {
 		strictEqual(v?.text.includes("preparing"), true);
 	});
 
-	it("preparing tier 2 on local renders waiting on model", () => {
+	it("preparing tier 2 renders harness preparation", () => {
 		const v = resolveFooterVerb(
 			{ ...INITIAL_STATUS, phase: "preparing", since: 0, lastMeaningfulAt: 0, localRuntime: true, watchdogTier: 2 },
 			45_000,
 			120,
 		);
-		strictEqual(v?.text.includes("waiting on model"), true);
+		strictEqual(v?.text.includes("still preparing harness"), true);
 	});
 
-	it("thinking tier 2 renders still thinking", () => {
+	it("waiting_model on local renders waiting on local model", () => {
+		const v = resolveFooterVerb(
+			{ ...INITIAL_STATUS, phase: "waiting_model", since: 0, lastMeaningfulAt: 0, localRuntime: true },
+			3000,
+			120,
+		);
+		strictEqual(v?.text.includes("waiting on local model"), true);
+	});
+
+	it("thinking tier 2 renders still receiving thinking", () => {
 		const v = resolveFooterVerb(
 			{ ...INITIAL_STATUS, phase: "thinking", since: 0, lastMeaningfulAt: 0, watchdogTier: 2 },
 			45_000,
 			120,
 		);
-		strictEqual(v?.text.includes("still thinking"), true);
+		strictEqual(v?.text.includes("still receiving thinking"), true);
 	});
 
 	it("below 60 cols drops elapsed", () => {

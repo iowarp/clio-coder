@@ -7,7 +7,7 @@ import { createStatusController } from "../../src/interactive/status/controller.
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { buildSummary } from "../../src/interactive/status/summary.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
-import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
+import { resolveFooterVerb, resolveInlineVerb } from "../../src/interactive/status/verbs.js";
 
 describe("status/reduceStatus", () => {
 	it("idle transitions to preparing on agent_start", () => {
@@ -32,6 +32,20 @@ describe("status/reduceStatus", () => {
 		strictEqual(next.lastMeaningfulAt, 150);
 	});
 
+	it("turn_start makes provider/model wait visible", () => {
+		const prep = { ...INITIAL_STATUS, phase: "preparing" as const, since: 100, lastMeaningfulAt: 100 };
+		const next = reduceStatus(prep, { type: "turn_start" }, { now: 150, localRuntime: false });
+		strictEqual(next.phase, "waiting_model");
+		strictEqual(resolveInlineVerb(next, 150, 120)?.text, "Waiting on provider · 0s");
+	});
+
+	it("local model wait is called out separately", () => {
+		const prep = { ...INITIAL_STATUS, phase: "preparing" as const, since: 100, lastMeaningfulAt: 100 };
+		const next = reduceStatus(prep, { type: "turn_start" }, { now: 150, localRuntime: true });
+		strictEqual(next.phase, "waiting_model");
+		strictEqual(resolveInlineVerb(next, 150, 120)?.text, "Waiting on local model · 0s");
+	});
+
 	it("preparing transitions to writing on first text_delta", () => {
 		const prep = { ...INITIAL_STATUS, phase: "preparing" as const, since: 100, lastMeaningfulAt: 100 };
 		const next = reduceStatus(
@@ -44,6 +58,20 @@ describe("status/reduceStatus", () => {
 		);
 		strictEqual(next.phase, "writing");
 		strictEqual(next.lastMeaningfulAt, 1000);
+	});
+
+	it("waiting_model transitions to streaming response on first text_delta", () => {
+		const waiting = { ...INITIAL_STATUS, phase: "waiting_model" as const, since: 100, lastMeaningfulAt: 150 };
+		const next = reduceStatus(
+			waiting,
+			{ type: "text_delta", contentIndex: 0, delta: "Hi", partialText: "Hi" },
+			{
+				now: 1000,
+				localRuntime: false,
+			},
+		);
+		strictEqual(next.phase, "writing");
+		strictEqual(resolveInlineVerb(next, 1000, 120)?.text, "Streaming response · 0s");
 	});
 
 	it("preparing transitions to tool_running on tool_execution_start", () => {

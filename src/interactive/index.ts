@@ -47,6 +47,7 @@ import {
 	rehydrateChatPanelFromTurns,
 	renderBashExecutionEntry,
 } from "./chat-renderer.js";
+import { createCommandOutputRunIo } from "./command-output.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
@@ -810,13 +811,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const taskIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
-	const io: RunIo = {
-		stdout: (s) => process.stdout.write(s),
-		stderr: (s) => process.stderr.write(s),
-	};
-
 	const chatRenderer = createCoalescingChatRenderer({
 		chatPanel,
+		requestRender: () => tui.requestRender(),
+	});
+
+	const io: RunIo = createCommandOutputRunIo({
+		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	});
 	const unsubscribeChat = deps.chat.onEvent((event) => {
@@ -1095,8 +1096,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const submitEditorText = (text: string): void => {
-		if (runEditorBash(text)) return;
-		dispatchSlashCommand(parseSlashCommand(text), slashCtx);
+		const trimmed = text.trim();
+		if (trimmed.length === 0) return;
+		const bashCommand = parseEditorBashCommand(text);
+		if (bashCommand) {
+			if (!deps.chat.isStreaming() && !activeEditorBash) editor.setText("");
+			if (runEditorBash(text)) tui.requestRender();
+			return;
+		}
+		editor.setText("");
+		dispatchSlashCommand(parseSlashCommand(trimmed), slashCtx);
+		tui.requestRender();
 	};
 
 	const queueFollowUpFromEditor = (): void => {

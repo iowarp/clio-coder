@@ -1,6 +1,7 @@
 export type StatusPhase =
 	| "idle"
 	| "preparing"
+	| "waiting_model"
 	| "thinking"
 	| "writing"
 	| "tool_running"
