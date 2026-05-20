@@ -1,28 +1,36 @@
-export type CliOutputMode = "text" | "json" | "rpc";
+import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
 	message: string;
 }
 
-export interface PrintCliArgs {
-	print: boolean;
+export interface RunCliArgs {
 	help: boolean;
-	mode: CliOutputMode;
+	json: boolean;
+	target?: string;
+	model?: string;
+	thinking?: JobThinkingLevel;
+	agentId?: string;
+	agentProfile?: string;
+	agentRuntime?: string;
+	toolProfile?: string;
+	required: string[];
+	autoApprove?: "allow" | "deny";
+	supervised: boolean;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
 }
 
-function isMode(value: string): value is CliOutputMode {
-	return value === "text" || value === "json" || value === "rpc";
-}
+const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
-export function parsePrintCliArgs(argv: ReadonlyArray<string>): PrintCliArgs {
-	const parsed: PrintCliArgs = {
-		print: false,
+export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
+	const parsed: RunCliArgs = {
 		help: false,
-		mode: "text",
+		json: false,
+		required: [],
+		supervised: false,
 		fileArgs: [],
 		messages: [],
 		diagnostics: [],
@@ -30,31 +38,85 @@ export function parsePrintCliArgs(argv: ReadonlyArray<string>): PrintCliArgs {
 
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
-		if (arg === "--print" || arg === "-p") {
-			parsed.print = true;
-			continue;
-		}
+		const need = (flag: string): string | null => {
+			const value = argv[i + 1];
+			if (value === undefined) {
+				parsed.diagnostics.push({ type: "error", message: `${flag} requires a value` });
+				return null;
+			}
+			i += 1;
+			return value;
+		};
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
 			continue;
 		}
-		if (arg === "--mode") {
-			parsed.print = true;
-			const value = argv[i + 1];
-			if (value === undefined) {
-				parsed.diagnostics.push({ type: "error", message: "--mode requires text, json, or rpc" });
-				continue;
+		if (arg === "--json") {
+			parsed.json = true;
+			continue;
+		}
+		if (arg === "--target") {
+			const value = need(arg);
+			if (value !== null) parsed.target = value;
+			continue;
+		}
+		if (arg === "--model") {
+			const value = need(arg);
+			if (value !== null) parsed.model = value;
+			continue;
+		}
+		if (arg === "--thinking") {
+			const value = need(arg);
+			if (value !== null) {
+				if (VALID_THINKING.includes(value as JobThinkingLevel)) parsed.thinking = value as JobThinkingLevel;
+				else
+					parsed.diagnostics.push({
+						type: "error",
+						message: "--thinking must be one of: off|minimal|low|medium|high|xhigh",
+					});
 			}
-			i += 1;
-			if (!isMode(value)) {
-				parsed.diagnostics.push({ type: "error", message: `invalid --mode value: ${value}` });
-				continue;
+			continue;
+		}
+		if (arg === "--agent") {
+			const value = need(arg);
+			if (value !== null) parsed.agentId = value;
+			continue;
+		}
+		if (arg === "--agent-profile" || arg === "--worker-profile" || arg === "--worker") {
+			const value = need(arg);
+			if (value !== null) parsed.agentProfile = value;
+			continue;
+		}
+		if (arg === "--agent-runtime" || arg === "--worker-runtime" || arg === "--runtime") {
+			const value = need(arg);
+			if (value !== null) parsed.agentRuntime = value;
+			continue;
+		}
+		if (arg === "--tool-profile") {
+			const value = need(arg);
+			if (value !== null) parsed.toolProfile = value;
+			continue;
+		}
+		if (arg === "--require") {
+			const value = need(arg);
+			if (value !== null) parsed.required.push(value);
+			continue;
+		}
+		if (arg === "--auto-approve") {
+			const value = need(arg);
+			if (value !== null) {
+				const normalized = value.toLowerCase();
+				if (normalized === "allow" || normalized === "deny") parsed.autoApprove = normalized;
+				else parsed.diagnostics.push({ type: "error", message: "--auto-approve must be 'allow' or 'deny'" });
 			}
-			parsed.mode = value;
+			continue;
+		}
+		if (arg === "--supervised") {
+			parsed.supervised = true;
 			continue;
 		}
 		if (arg?.startsWith("-")) {
-			parsed.diagnostics.push({ type: "error", message: `unknown print-mode option: ${arg}` });
+			parsed.diagnostics.push({ type: "error", message: `unknown clio run option: ${arg}` });
 			continue;
 		}
 		if (arg !== undefined) {

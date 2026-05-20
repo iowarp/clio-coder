@@ -3,14 +3,14 @@ import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { serializeJsonLine } from "./jsonl.js";
 
-export interface PrintModeOptions {
+export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
 	mode?: "text" | "json";
 	getSessionHeader?: () => unknown | null;
 }
 
-interface PrintResult {
+interface HeadlessMainAgentResult {
 	text: string;
 	error: string | null;
 }
@@ -33,7 +33,7 @@ function assistantError(message: AgentMessage | undefined): string | null {
 	return stopReason === "aborted" ? "request aborted" : "provider returned an error";
 }
 
-function resultFromEvent(event: ChatLoopEvent, current: PrintResult): PrintResult {
+function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
 	if (event.type !== "message_end") return current;
 	const message = event.message;
 	const error = assistantError(message);
@@ -50,9 +50,9 @@ function isDiagnosticAssistantText(text: string): boolean {
 	return text.startsWith("[Clio Coder]") || text.startsWith("[/");
 }
 
-export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): Promise<number> {
+export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	const mode = options.mode ?? "text";
-	let result: PrintResult = { text: "", error: null };
+	let result: HeadlessMainAgentResult = { text: "", error: null };
 	let jsonHeaderWritten = false;
 	const writeJsonHeader = (): void => {
 		if (jsonHeaderWritten) return;
@@ -82,7 +82,7 @@ export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): P
 		return 1;
 	}
 	if (result.text.length === 0) {
-		process.stderr.write("clio print: no assistant response\n");
+		process.stderr.write("clio run: no assistant response\n");
 		return 1;
 	}
 	if (isDiagnosticAssistantText(result.text)) {
@@ -94,3 +94,5 @@ export async function runPrintMode(chat: ChatLoop, options: PrintModeOptions): P
 	await flushRawStdout();
 	return 0;
 }
+
+export const runPrintMode = runHeadlessMainAgent;

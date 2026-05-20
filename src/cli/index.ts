@@ -1,6 +1,4 @@
-import { readFileArgsAsync } from "../core/file-references.js";
 import { runAgentsCommand } from "./agents.js";
-import { parsePrintCliArgs } from "./args.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
@@ -11,10 +9,8 @@ import { runEvidenceCommand } from "./evidence.js";
 import { runEvolveCommand } from "./evolve.js";
 import { runExtensionsCommand } from "./extensions.js";
 import { runInitCommand } from "./init.js";
-import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
-import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
 import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
@@ -30,8 +26,7 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 
 Usage:
   clio                      start interactive repository chat
-  clio --print, -p [@files...] <task>  run one non-interactive chat turn
-  clio --mode json [@files...] <task>  stream one non-interactive turn as JSONL
+  clio run [flags] <task>   run one headless main-agent turn
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
   clio --no-context-files, -nc  skip CLIO.md project-context injection
@@ -57,62 +52,12 @@ Usage:
   clio extensions           install, list, enable, disable, or remove extension packages
   clio share export|import  export or import Clio project/resource archives
   clio init [--yes]         bootstrap or refresh CLIO.md for this project
-  clio run <task>           dispatch a one-shot fleet agent
   clio --help, -h           this message
 `;
 
 async function main(argv: string[]): Promise<number> {
 	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
 	const { noContextFiles, rest } = extractNoContextFilesFlag(afterApiKey);
-	const printArgs = parsePrintCliArgs(rest);
-	if (printArgs.print) {
-		takeOverStdout();
-		try {
-			if (printArgs.help) {
-				process.stdout.write(HELP);
-				await flushRawStdout();
-				return 0;
-			}
-			for (const diagnostic of printArgs.diagnostics) {
-				printError(diagnostic.message);
-			}
-			if (printArgs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
-			if (printArgs.mode === "rpc") {
-				printError(`--mode ${printArgs.mode} is not implemented yet; use --print for text mode`);
-				return 2;
-			}
-			const stdinContent = await readPipedStdin();
-			const fileRefs = await readFileArgsAsync(printArgs.fileArgs, { cwd: process.cwd(), missing: "error" });
-			for (const diagnostic of fileRefs.diagnostics) {
-				printError(diagnostic.message);
-			}
-			if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
-			const initial = buildInitialMessage({
-				messages: printArgs.messages.length > 0 ? [printArgs.messages.join(" ")] : [],
-				...(stdinContent !== undefined ? { stdinContent } : {}),
-				...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
-				...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
-			});
-			if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
-				printError("print mode requires a prompt on argv or stdin");
-				process.stdout.write('usage: clio --print [@files...] "task"\n');
-				return 2;
-			}
-			const result = await runClioCommand({
-				...(apiKey === undefined ? {} : { apiKey }),
-				...(noContextFiles ? { noContextFiles: true } : {}),
-				print: {
-					prompt: initial.initialMessage,
-					mode: printArgs.mode,
-					...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
-				},
-			});
-			await flushRawStdout();
-			return result;
-		} finally {
-			restoreStdout();
-		}
-	}
 	const { flags, positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));

@@ -203,9 +203,8 @@ When something breaks, open an issue with `clio --version`, `node --version`, th
 | `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles into a Clio share archive. |
 | `clio share import <path> [--dry-run] [--force]` | Import a Clio share archive with conflict reporting. |
 | `clio export --out <path>` / `clio import <path>` | Short aliases for `clio share export` and `clio share import`. |
-| `clio --print [@files...] "<task>"` (alias `-p`) | Run one non-interactive chat turn, optionally including text file references, and print only the assistant text. |
-| `clio --mode json [@files...] "<task>"` | Run one non-interactive turn as JSONL events. |
-| `clio run [flags] "<task>"` | Dispatch one fleet agent non-interactively and write a receipt. |
+| `clio run "<task>" [flags]` | Run one headless main-agent turn; use `--json` for JSONL events. |
+| `clio run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio --version` | Print the installed version. |
 | `clio --no-context-files` (alias `-nc`) | Top-level flag that skips loading `CLIO.md` project context for one invocation. |
@@ -214,10 +213,9 @@ Example:
 
 ```bash
 clio run \
-  --agent scout \
+  "Find the test command and summarize the project structure." \
   --target mini \
-  --model Qwen3.6-35B-A3B-UD-Q4_K_XL \
-  "Find the test command and summarize the project structure."
+  --model AgenticQwen-30B-A3B-i1-Q4_K_M
 ```
 
 ---

@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { runPrintMode } from "../cli/modes/index.js";
+import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
@@ -78,8 +78,15 @@ export interface BootOptions {
 	apiKey?: string;
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
-	/** Run one non-interactive orchestrator turn and print the final text response. */
-	print?: { prompt: string; images?: ReadonlyArray<ImageContent>; mode?: "text" | "json" };
+	/** Run one non-interactive main-agent turn. */
+	headless?: {
+		prompt: string;
+		images?: ReadonlyArray<ImageContent>;
+		mode?: "text" | "json";
+		target?: string;
+		model?: string;
+		thinking?: ThinkingLevel;
+	};
 }
 
 function buildBanner(): string {
@@ -102,6 +109,25 @@ function printJsonSessionHeader(meta: SessionMeta | null): Record<string, unknow
 		model: meta.model,
 		clioVersion: meta.clioVersion,
 	};
+}
+
+function applyHeadlessSettingsOverlay(
+	settings: ClioSettings,
+	overrides: BootOptions["headless"] | undefined,
+): ClioSettings {
+	const next = structuredClone(settings);
+	if (!overrides) return next;
+	const previousEndpoint = next.orchestrator.endpoint;
+	if (overrides.target !== undefined) {
+		next.orchestrator.endpoint = overrides.target;
+		if (overrides.model === undefined && (previousEndpoint !== overrides.target || !next.orchestrator.model)) {
+			const endpoint = next.endpoints.find((entry) => entry.id === overrides.target);
+			if (endpoint) next.orchestrator.model = endpoint.defaultModel ?? null;
+		}
+	}
+	if (overrides.model !== undefined) next.orchestrator.model = overrides.model;
+	if (overrides.thinking !== undefined) next.orchestrator.thinkingLevel = overrides.thinking;
+	return next;
 }
 
 interface CompactionResolution {
@@ -378,8 +404,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
 
-	const interactive = !options.print && process.env.CLIO_INTERACTIVE === "1";
-	if (!interactive && !options.print) {
+	const interactive = !options.headless && process.env.CLIO_INTERACTIVE === "1";
+	if (!interactive && !options.headless) {
 		process.stdout.write(buildBanner());
 		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
 	}
@@ -391,7 +417,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (!providers) {
 			process.stderr.write("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
-			const settingsNow = config?.get() ?? readSettings();
+			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
 			const activeEndpointId = settingsNow.orchestrator?.endpoint;
 			const endpoint = resolveEndpoint(providers, activeEndpointId);
 			const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
@@ -403,7 +429,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	if (!interactive && !options.print) {
+	if (!interactive && !options.headless) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
@@ -453,7 +479,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 	});
 
-	const getCurrentSettings = (): ClioSettings => structuredClone(config?.get() ?? readSettings());
+	const getCurrentSettings = (): ClioSettings =>
+		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
 
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;
@@ -486,7 +513,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 
 	const chat = createChatLoop({
-		getSettings: () => config?.get() ?? readSettings(),
+		getSettings: getCurrentSettings,
 		modes,
 		providers,
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
@@ -518,9 +545,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 	});
 
-	if (options.print) {
-		const skillExpansion = resources?.expandSkillInvocation(options.print.prompt, process.cwd());
-		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.print.prompt;
+	if (options.headless) {
+		const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());
+		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.headless.prompt;
 		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
 		const fileExpansion = await expandInlineFileReferencesAsync(
 			promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
@@ -530,11 +557,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				missing: "leave",
 			},
 		);
-		const images = [...(options.print.images ?? []), ...fileExpansion.images];
-		const code = await runPrintMode(chat, {
+		const images = [...(options.headless.images ?? []), ...fileExpansion.images];
+		const code = await runHeadlessMainAgent(chat, {
 			prompt: fileExpansion.text,
 			...(images.length > 0 ? { images } : {}),
-			mode: options.print.mode ?? "text",
+			mode: options.headless.mode ?? "text",
 			getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 		});
 		await termination.shutdown(code);
