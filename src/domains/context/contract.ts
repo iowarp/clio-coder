@@ -11,4 +11,5 @@ export interface ProjectPromptContext {
 export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
+	startupHints(): string[];
 }

@@ -116,6 +116,8 @@ export interface InteractiveDeps {
 	dispatch: DispatchContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
+	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
+	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
 	share?: ShareContract;
@@ -820,6 +822,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	});
+	for (const notice of deps.initialNotices ?? []) {
+		io.stderr(notice.endsWith("\n") ? notice : `${notice}\n`);
+	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
 		if (event.type === "queue_update") {
 			followUpQueuePanel.setMessages(event.followUp);
@@ -942,7 +947,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return true;
 		}
 
-		io.stdout(`bash: $ ${parsed.command}\n`);
 		void (async () => {
 			try {
 				const result = await runBashCommand(parsed.command, {
