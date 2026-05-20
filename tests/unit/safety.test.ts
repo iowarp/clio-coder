@@ -1,6 +1,6 @@
 import { deepStrictEqual, notStrictEqual, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { classify } from "../../src/domains/safety/action-classifier.js";
@@ -137,6 +137,18 @@ describe("safety/path-policy", () => {
 
 		deepStrictEqual(policy.diagnostics, ["zeroAccessPaths: path must not be empty"]);
 		strictEqual(policy.entries.length, 0);
+	});
+
+	it("matches reference-style tilde and wildcard path policies", () => {
+		const policy = compilePathPolicy(
+			{ zeroAccessPaths: ["~/.ssh/", "*.env", "*-credentials.json"] },
+			"/repo",
+		);
+
+		strictEqual(evaluatePathPolicy(policy, "read", join(homedir(), ".ssh", "config")).kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/services/api.env").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/app-credentials.json").kind, "block");
+		strictEqual(evaluatePathPolicy(policy, "read", "/repo/src/app.ts").kind, "allow");
 	});
 });
 
@@ -352,6 +364,41 @@ describe("safety/policy-engine", () => {
 			const sourceDelete = engine.evaluate({ tool: "bash", args: { command: "rm src/app.ts", cwd: dir } }, "super");
 			strictEqual(sourceDelete.kind, "block");
 			strictEqual(sourceDelete.reasonCode, "path-policy:noDeletePaths");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("applies default damage-control path policy before project customization", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-default-path-policy-"));
+		try {
+			const engine = createSafetyPolicyEngine({ cwd: dir });
+
+			const envRead = engine.evaluate({ tool: "read", args: { path: ".env" } }, "default");
+			strictEqual(envRead.kind, "block");
+			strictEqual(envRead.reasonCode, "path-policy:zeroAccessPaths");
+
+			const distWrite = engine.evaluate({ tool: "write", args: { path: "dist/index.js" } }, "default");
+			strictEqual(distWrite.kind, "block");
+			strictEqual(distWrite.reasonCode, "path-policy:readOnlyPaths");
+
+			const readmeDelete = engine.evaluate({ tool: "bash", args: { command: "rm README.md", cwd: dir } }, "super");
+			strictEqual(readmeDelete.kind, "block");
+			strictEqual(readmeDelete.reasonCode, "path-policy:noDeletePaths");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("lets project policy disable default path policy when explicitly requested", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-disable-default-path-policy-"));
+		try {
+			mkdirSync(join(dir, ".clio"));
+			writeFileSync(join(dir, ".clio", "safety.yaml"), "version: 1\ndisableDefaultPathPolicy: true\n", "utf8");
+			const engine = createSafetyPolicyEngine({ cwd: dir });
+
+			const envRead = engine.evaluate({ tool: "read", args: { path: ".env" } }, "default");
+			strictEqual(envRead.kind, "allow");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

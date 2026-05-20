@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import path from "node:path";
 
 export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noDeletePaths";
@@ -13,6 +14,7 @@ export interface PathPolicyEntry {
 	kind: PathPolicyKind;
 	path: string;
 	source: string;
+	pattern?: RegExp;
 }
 
 export interface CompiledPathPolicy {
@@ -40,8 +42,15 @@ export function isSameOrDescendant(candidatePath: string, policyPath: string): b
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function expandTilde(rawPath: string): string {
+	if (rawPath === "~") return homedir();
+	if (rawPath.startsWith("~/")) return path.join(homedir(), rawPath.slice(2));
+	return rawPath;
+}
+
 function normalizePolicyEntry(rawPath: string, root: string): string {
-	return path.resolve(root, rawPath.trim());
+	const expanded = expandTilde(rawPath.trim());
+	return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(root, expanded);
 }
 
 function blocksOperation(kind: PathPolicyKind, operation: PathPolicyOperation): boolean {
@@ -61,7 +70,10 @@ export function compilePathPolicy(input: PathPolicyInput, root = process.cwd()):
 				diagnostics.push(`${kind}: path must not be empty`);
 				continue;
 			}
-			entries.push({ kind, path: normalizePolicyEntry(trimmed, resolvedRoot), source: trimmed });
+			const entry: PathPolicyEntry = { kind, path: normalizePolicyEntry(trimmed, resolvedRoot), source: trimmed };
+			const pattern = compilePathPattern(trimmed, resolvedRoot);
+			if (pattern !== null) entry.pattern = pattern;
+			entries.push(entry);
 		}
 	}
 	return {
@@ -77,10 +89,14 @@ export function evaluatePathPolicy(
 	targetPath: string,
 	cwd = policy.root,
 ): PathPolicyDecision {
-	const resolvedTarget = path.resolve(cwd, targetPath);
+	const expanded = expandTilde(targetPath);
+	const resolvedTarget = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(cwd, expanded);
+	const normalizedResolvedTarget = normalizeSeparators(resolvedTarget);
+	const normalizedRelativeTarget = normalizeSeparators(path.relative(policy.root, resolvedTarget));
+	const normalizedRawTarget = normalizeSeparators(targetPath);
 	for (const entry of policy.entries) {
 		if (!blocksOperation(entry.kind, operation)) continue;
-		if (!isSameOrDescendant(resolvedTarget, entry.path)) continue;
+		if (!matchesEntry(entry, resolvedTarget, normalizedResolvedTarget, normalizedRelativeTarget, normalizedRawTarget)) continue;
 		return {
 			kind: "block",
 			reasonCode: `path-policy:${entry.kind}`,
@@ -90,4 +106,43 @@ export function evaluatePathPolicy(
 		};
 	}
 	return { kind: "allow" };
+}
+
+function matchesEntry(
+	entry: PathPolicyEntry,
+	resolvedTarget: string,
+	normalizedResolvedTarget: string,
+	normalizedRelativeTarget: string,
+	normalizedRawTarget: string,
+): boolean {
+	if (isSameOrDescendant(resolvedTarget, entry.path)) return true;
+	if (entry.pattern === undefined) return false;
+	return (
+		entry.pattern.test(normalizedResolvedTarget) ||
+		entry.pattern.test(normalizedRelativeTarget) ||
+		entry.pattern.test(normalizedRawTarget)
+	);
+}
+
+function compilePathPattern(rawPath: string, root: string): RegExp | null {
+	if (!rawPath.includes("*")) return null;
+	const expanded = expandTilde(rawPath.trim());
+	const source = path.isAbsolute(expanded) ? expanded : path.join(root, expanded);
+	const normalized = normalizeSeparators(source);
+	const relative = normalizeSeparators(path.isAbsolute(expanded) ? expanded : expanded);
+	const absolutePattern = segmentPattern(normalized);
+	const relativePattern = segmentPattern(relative);
+	return new RegExp(`(?:${absolutePattern})|(?:${relativePattern})`);
+}
+
+function segmentPattern(rawPath: string): string {
+	const escaped = rawPath
+		.split(\"*\")
+		.map((part) => part.replace(/[.+^${}()|[\\]\\\\]/g, \"\\\\$&\"))
+		.join(\"[^/]*\");
+	return `(?:^|/)${escaped}(?:$|/)`;
+}
+
+function normalizeSeparators(value: string): string {
+	return value.split(path.sep).join(\"/\");
 }
