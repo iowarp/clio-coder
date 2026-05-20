@@ -137,12 +137,12 @@ function compilePathPattern(rawPath: string, root: string): RegExp | null {
 
 function segmentPattern(rawPath: string): string {
 	const escaped = rawPath
-		.split(\"*\")
-		.map((part) => part.replace(/[.+^${}()|[\\]\\\\]/g, \"\\\\$&\"))
-		.join(\"[^/]*\");
+		.split("*")
+		.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+		.join("[^/]*");
 	return `(?:^|/)${escaped}(?:$|/)`;
 }
 
 function normalizeSeparators(value: string): string {
-	return value.split(path.sep).join(\"/\");
+	return value.split(path.sep).join("/");
 }
