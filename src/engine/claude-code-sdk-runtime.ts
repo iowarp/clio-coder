@@ -19,6 +19,7 @@ import { evaluateClaudeToolCall, mapClaudeToolName } from "./sdk-policy-bridge.j
 import type {
 	SessionfulRuntime,
 	SessionRuntimeHook,
+	SessionRuntimePromptMessage,
 	SessionRuntimeSendTurnInput,
 	SessionRuntimeSession,
 	SessionRuntimeStartInput,
@@ -409,6 +410,9 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 		}
 		const turn = makeActiveTurn();
 		context.activeTurn = turn;
+		for (const message of input.dynamicPromptMessages ?? []) {
+			context.promptQueue.push(syntheticContextMessage(message));
+		}
 		context.promptQueue.push({
 			type: "user",
 			message: { role: "user", content: input.task },
@@ -678,6 +682,7 @@ class ClaudeCodeSdkRuntime implements SessionfulRuntime {
 
 export interface ClaudeCodeSdkWorkerRunInput extends SessionRuntimeStartInput {
 	task: string;
+	dynamicPromptMessages?: ReadonlyArray<SessionRuntimePromptMessage>;
 	safety?: SafetyContract;
 	autoApprove?: "allow" | "deny";
 	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
@@ -701,6 +706,7 @@ export function startClaudeCodeSdkWorkerRun(
 		const turnInput: SessionRuntimeSendTurnInput = {
 			threadId: session.threadId,
 			task: input.task,
+			dynamicPromptMessages: input.dynamicPromptMessages ?? [],
 			wireModelId: input.wireModelId,
 		};
 		if (input.mode !== undefined) turnInput.mode = input.mode;
@@ -717,6 +723,17 @@ export function startClaudeCodeSdkWorkerRun(
 		abort: () => {
 			if (threadId) void runtime.interruptTurn(threadId, turnId);
 		},
+	};
+}
+
+function syntheticContextMessage(message: SessionRuntimePromptMessage): SDKUserMessage {
+	return {
+		type: "user",
+		message: { role: "user", content: message.body },
+		parent_tool_use_id: null,
+		isSynthetic: true,
+		shouldQuery: false,
+		origin: { kind: "coordinator" },
 	};
 }
 

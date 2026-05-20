@@ -319,11 +319,14 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 				compileCalls.push(input);
 				return {
 					text: "compiled",
-					staticCompositionHash: "static",
+					systemPrompt: "compiled",
+					dynamicPromptFragments: [],
 					renderedPromptHash: "rendered",
 					fragmentManifest: [],
 					segmentManifest: [],
 					staticShellHash: "static",
+					sessionShellHash: "session",
+					dynamicHash: "dynamic",
 					staticShellTokenEstimate: 1,
 					dynamicInputs: input.dynamicInputs,
 				};

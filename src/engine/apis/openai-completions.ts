@@ -138,6 +138,21 @@ function applyThinkingPayload(
 	return next;
 }
 
+export function applyLlamaCppPromptCachePayload(
+	payload: Record<string, unknown>,
+	model: Model<Api>,
+): Record<string, unknown> {
+	const metadata = runtimeMetadata(model);
+	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
+	if (payload.cache_prompt !== undefined) return payload;
+	return { ...payload, cache_prompt: true };
+}
+
+function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boolean {
+	const metadata = runtimeMetadata(model);
+	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp";
+}
+
 /**
  * Compose an `onPayload` hook over any caller-supplied one. Catalog overrides
  * apply first so the caller's hook sees the mutated body and can override or
@@ -153,7 +168,7 @@ function composeSamplingOnPayload(
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		let next = applyOpenAISamplingProfile(payload, profile);
+		let next = applyLlamaCppPromptCachePayload(applyOpenAISamplingProfile(payload, profile), model);
 		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
@@ -175,7 +190,7 @@ function composeThinkingOnPayload(
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const next = applyThinkingPayload(payload, resolved.thinking, resolved);
+		const next = applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model), resolved.thinking, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -191,7 +206,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 ): TOptions | undefined {
 	const applied = resolved.thinking;
 	const profile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
+	const promptCache = shouldApplyLlamaCppPromptCache(model);
 	if (
+		!promptCache &&
 		!profile &&
 		applied.mechanism !== "effort-levels" &&
 		applied.mechanism !== "budget-tokens" &&
@@ -265,8 +282,8 @@ function hasEmptyArguments(args: Record<string, unknown>): boolean {
 	return Object.keys(args).length === 0;
 }
 
-function runtimeMetadata(model: Model<"openai-completions">): NonNullable<ClioRuntimeMetadata["clio"]> | undefined {
-	return (model as Model<"openai-completions"> & ClioRuntimeMetadata).clio;
+function runtimeMetadata(model: Model<Api>): NonNullable<ClioRuntimeMetadata["clio"]> | undefined {
+	return (model as Model<Api> & ClioRuntimeMetadata).clio;
 }
 
 function malformedToolArgsMessage(

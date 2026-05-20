@@ -4,7 +4,12 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type { CompileResult, DynamicInputs } from "../domains/prompts/compiler.js";
+import type {
+	CompileResult,
+	DynamicInputs,
+	DynamicPromptFragment,
+	PromptSegmentManifestEntry,
+} from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
@@ -193,7 +198,7 @@ export interface CreateChatLoopDeps {
 	 */
 	getMemorySection?: () => string;
 	/** Build the prompt-visible catalog of custom agents available through dispatch. */
-	getAgentCatalog?: () => string;
+	getAgentCatalog?: () => string | { stable?: string; volatile?: string };
 }
 
 interface ChatLoopTarget {
@@ -208,6 +213,16 @@ interface AgentRuntime {
 	endpointId: string;
 	runtimeId: string;
 	wireModelId: string;
+	lastSessionShellHash: string | null;
+}
+
+interface PromptDiagnostics {
+	renderedPromptHash: string;
+	staticShellHash: string;
+	sessionShellHash: string;
+	dynamicHash: string;
+	systemPromptReused: boolean;
+	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
 }
 
 function notConfiguredNotice(): string {
@@ -320,6 +335,82 @@ function noticeMessage(text: string): AgentMessage {
 		stopReason: "stop",
 		timestamp: Date.now(),
 	} as AgentMessage;
+}
+
+const CLIO_PROMPT_CONTEXT_MARKER = "__clioPromptContext";
+
+interface InternalPromptContextMarker {
+	kind: "dynamic-turn-context";
+	fragmentId: string;
+	contentHash: string;
+}
+
+function isInternalPromptContextMessage(message: AgentMessage | undefined): boolean {
+	if (!message || typeof message !== "object" || message === null) return false;
+	return (message as unknown as Record<string, unknown>)[CLIO_PROMPT_CONTEXT_MARKER] !== undefined;
+}
+
+function dynamicPromptMessage(fragment: DynamicPromptFragment): AgentMessage {
+	const message = {
+		role: "user",
+		content: [{ type: "text", text: fragment.body }],
+		timestamp: Date.now(),
+		[CLIO_PROMPT_CONTEXT_MARKER]: {
+			kind: "dynamic-turn-context",
+			fragmentId: fragment.id,
+			contentHash: fragment.contentHash,
+		} satisfies InternalPromptContextMarker,
+	};
+	return message as AgentMessage;
+}
+
+function submittedUserMessage(text: string, images: ReadonlyArray<ImageContent> | undefined): AgentMessage {
+	const content = images ? [{ type: "text", text } as const, ...images] : [{ type: "text", text } as const];
+	return {
+		role: "user",
+		content,
+		timestamp: Date.now(),
+	} as AgentMessage;
+}
+
+function promptMessagesForTurn(
+	compileResult: CompileResult | null,
+	text: string,
+	images: ReadonlyArray<ImageContent> | undefined,
+): AgentMessage[] {
+	const messages = (compileResult?.dynamicPromptFragments ?? []).map(dynamicPromptMessage);
+	messages.push(submittedUserMessage(text, images));
+	return messages;
+}
+
+function promptDiagnostics(result: CompileResult, systemPromptReused: boolean): PromptDiagnostics {
+	return {
+		renderedPromptHash: result.renderedPromptHash,
+		staticShellHash: result.staticShellHash,
+		sessionShellHash: result.sessionShellHash,
+		dynamicHash: result.dynamicHash,
+		systemPromptReused,
+		tiers: result.segmentManifest.map((segment) => ({
+			id: segment.id,
+			tier: segment.tier,
+			contentHash: segment.contentHash,
+			tokenEstimate: segment.tokenEstimate,
+		})),
+	};
+}
+
+function applyAgentCatalogInput(
+	dynamicInputs: DynamicInputs,
+	catalog: string | { stable?: string; volatile?: string },
+): void {
+	if (typeof catalog === "string") {
+		if (catalog.trim().length > 0) dynamicInputs.agentCatalogStable = catalog;
+		return;
+	}
+	const stable = catalog.stable?.trim() ?? "";
+	const volatile = catalog.volatile?.trim() ?? "";
+	if (stable.length > 0) dynamicInputs.agentCatalogStable = stable;
+	if (volatile.length > 0) dynamicInputs.agentCatalogDelta = volatile;
 }
 
 /**
@@ -486,6 +577,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// entries appended during that turn stamp this value so downstream
 	// analysis can reproduce exactly which fragments the model saw.
 	let currentTurnHash: string | null = null;
+	let currentPromptDiagnostics: PromptDiagnostics | null = null;
 	let activeUserTurnId: string | null = null;
 	const queuedFollowUps: string[] = [];
 	const persistedUserEchoes: string[] = [];
@@ -530,6 +622,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!message || message.role !== "assistant") return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		if (currentPromptDiagnostics) payload.promptDiagnostics = currentPromptDiagnostics;
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = deps.session.append({
@@ -543,6 +636,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const appendQueuedUserTurn = (message: AgentMessage): void => {
 		if (!message || message.role !== "user") return;
+		if (isInternalPromptContextMessage(message)) {
+			if (runtime) {
+				const messages = runtime.agent.state.messages;
+				const idx = messages.lastIndexOf(message);
+				if (idx >= 0) runtime.agent.state.messages = [...messages.slice(0, idx), ...messages.slice(idx + 1)];
+			}
+			return;
+		}
 		const text = extractUserText(message).trim();
 		if (text.length === 0) return;
 		const persistedEchoIdx = persistedUserEchoes.indexOf(text);
@@ -562,7 +663,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const userTurn = deps.session.append({
 			kind: "user",
 			parentId: lastTurnId,
-			payload: { text },
+			payload: currentPromptDiagnostics ? { text, promptDiagnostics: currentPromptDiagnostics } : { text },
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
@@ -931,11 +1032,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			endpointId: target.endpoint.id,
 			runtimeId: target.runtime.id,
 			wireModelId: target.wireModelId,
+			lastSessionShellHash: null,
 		};
 
 		handle.agent.subscribe(async (event) => {
-			if (event.type === "agent_end" && deps.observability) {
-				const summary = sumRunUsage(event.messages);
+			const publicEvent =
+				event.type === "message_start" || event.type === "message_end"
+					? isInternalPromptContextMessage(event.message)
+						? null
+						: event
+					: event.type === "agent_end"
+						? { ...event, messages: event.messages.filter((message) => !isInternalPromptContextMessage(message)) }
+						: event;
+			if (publicEvent?.type === "agent_end" && deps.observability) {
+				const summary = sumRunUsage(publicEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
 					deps.observability.recordTokens(
 						localRuntime.endpointId,
@@ -954,9 +1064,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					);
 				}
 			}
-			emit(event);
-			if (event.type === "message_update") {
-				const assistantEvent = event.assistantMessageEvent as {
+			if (publicEvent) emit(publicEvent);
+			if (publicEvent?.type === "message_update") {
+				const assistantEvent = publicEvent.assistantMessageEvent as {
 					type: string;
 					contentIndex?: number;
 					delta?: string;
@@ -990,7 +1100,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				appendToolResultTurn(event);
 			}
 			if (event.type === "agent_end") {
-				emitFinishContractAdvisory(event.messages);
+				emitFinishContractAdvisory(publicEvent?.type === "agent_end" ? publicEvent.messages : event.messages);
 			}
 		});
 
@@ -1172,13 +1282,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * Compile the prompt for the current turn, write the rendered text into
-	 * `state.systemPrompt`, and capture the renderedPromptHash so the user
-	 * and assistant entries appended this turn can carry it. Runs on every
-	 * `submit` so any mode/safety/provider change since the last turn is
-	 * picked up; compile is O(fragment table) and sha256 hashing, well under
-	 * a millisecond, so unconditional recompile beats per-turn change
-	 * detection.
+	 * Compile the prompt for the current turn, write only the stable shell into
+	 * `state.systemPrompt`, and capture the renderedPromptHash so the user and
+	 * assistant entries appended this turn can carry it. Dynamic prompt
+	 * fragments return separately and are sent as marked user messages directly
+	 * before the real user turn; the subscriber removes them from in-memory
+	 * state after the provider call sees them, so they do not become durable
+	 * conversation history.
 	 *
 	 * Throws are swallowed and downgraded to a user-visible notice because
 	 * a dead prompts domain must not block chat. The fallback identity
@@ -1188,6 +1298,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const compilePromptForTurn = async (agentRuntime: AgentRuntime): Promise<CompileResult | null> => {
 		if (!deps.prompts) {
 			currentTurnHash = null;
+			currentPromptDiagnostics = null;
 			return null;
 		}
 		const settings = deps.getSettings();
@@ -1231,7 +1342,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (deps.getAgentCatalog) {
 			try {
 				const agentCatalog = deps.getAgentCatalog();
-				if (agentCatalog.trim().length > 0) dynamicInputs.agentCatalog = agentCatalog;
+				applyAgentCatalogInput(dynamicInputs, agentCatalog);
 			} catch (err) {
 				emitNotice(
 					`[Clio Coder] agent catalog load failed; continuing without fleet catalog: ${err instanceof Error ? err.message : String(err)}`,
@@ -1246,11 +1357,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				safetyLevel,
 				cwd: process.cwd(),
 			});
-			agentRuntime.agent.state.systemPrompt = result.text;
+			const systemPromptReused = agentRuntime.lastSessionShellHash === result.sessionShellHash;
+			if (!systemPromptReused) {
+				agentRuntime.agent.state.systemPrompt = result.systemPrompt;
+				agentRuntime.lastSessionShellHash = result.sessionShellHash;
+			}
 			currentTurnHash = result.renderedPromptHash;
+			currentPromptDiagnostics = promptDiagnostics(result, systemPromptReused);
 			return result;
 		} catch (err) {
 			currentTurnHash = null;
+			currentPromptDiagnostics = null;
 			emitNotice(
 				`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 			);
@@ -1344,7 +1461,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const userTurn = deps.session.append({
 			kind: "user",
 			parentId: lastTurnId,
-			payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
+			payload: {
+				...(images ? { content: [{ type: "text", text }, ...images] } : { text }),
+				...(currentPromptDiagnostics ? { promptDiagnostics: currentPromptDiagnostics } : {}),
+			},
 			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
@@ -1417,7 +1537,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// safety level, provider, and model changes since the last turn
 			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
 			// side-effect so the user + assistant appends below stamp it.
-			await compilePromptForTurn(agentRuntime);
+			const compileResult = await compilePromptForTurn(agentRuntime);
 
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
 			// the threshold so /compact integration tests and live drills can
@@ -1439,7 +1559,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			streaming = true;
 			try {
-				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text, images));
+				const promptMessages = promptMessagesForTurn(compileResult, text, images);
+				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
 				// pi-agent-core 0.74.0 does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
@@ -1485,6 +1606,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} finally {
 				streaming = false;
 				activeUserTurnId = null;
+				currentPromptDiagnostics = null;
 			}
 		},
 		cancel(): void {

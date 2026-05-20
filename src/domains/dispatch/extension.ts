@@ -15,7 +15,11 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import type { ToolName } from "../../core/tool-names.js";
 import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
-import { serializeWorkerRuntimeDescriptor, WORKER_SPEC_VERSION } from "../../worker/spec-contract.js";
+import {
+	serializeWorkerRuntimeDescriptor,
+	WORKER_SPEC_VERSION,
+	type WorkerPromptMessage,
+} from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -97,6 +101,14 @@ function promptHash(systemPrompt: string): string | null {
 	return systemPrompt.length > 0 ? sha256(systemPrompt) : null;
 }
 
+function promptCompositionHash(parts: ReadonlyArray<string>): string | null {
+	const text = parts
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0)
+		.join("\n\n");
+	return text.length > 0 ? sha256(text) : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -172,11 +184,28 @@ export function deriveRequestedActions(
 }
 
 export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
-	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
-	const guardedBase = base.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${base}` : DISPATCH_TASK_CONTRACT;
+	const guardedBase = buildStableSystemPrompt(req, recipe);
 	const memory = req.memorySection?.trim() ?? "";
 	if (memory.length === 0) return guardedBase;
-	return `${memory}\n\n${guardedBase}`;
+	return `${guardedBase}\n\n${memory}`;
+}
+
+export function buildStableSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
+	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
+	const guardedBase = base.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${base}` : DISPATCH_TASK_CONTRACT;
+	return guardedBase;
+}
+
+export function buildDynamicPromptMessages(req: DispatchRequest): WorkerPromptMessage[] {
+	const memory = req.memorySection?.trim() ?? "";
+	if (memory.length === 0) return [];
+	return [
+		{
+			id: "dispatch-memory",
+			body: memory,
+			contentHash: sha256(memory),
+		},
+	];
 }
 
 interface ResolvedTarget {
@@ -214,6 +243,7 @@ interface DispatchWorkerSpecInput {
 	target: ResolvedTarget;
 	admission: DispatchAdmissionStage;
 	systemPrompt: string;
+	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
 	apiKey: string | undefined;
 	approval: DispatchAutoApproveDerivation;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
@@ -226,7 +256,11 @@ interface DispatchLifecycleStage {
 	target: ResolvedTarget;
 	cwd: string;
 	systemPrompt: string;
+	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
 	compiledPromptHash: string | null;
+	staticCompositionHash: string | null;
+	sessionShellHash: string | null;
+	dynamicHash: string | null;
 	apiKey: string | undefined;
 	runtimeKind: RunKind;
 	approval: DispatchAutoApproveDerivation;
@@ -355,6 +389,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 	const spec: WorkerSpec = {
 		specVersion: WORKER_SPEC_VERSION,
 		systemPrompt: input.systemPrompt,
+		dynamicPromptMessages: input.dynamicPromptMessages,
 		task: input.req.task,
 		endpoint: input.target.endpoint,
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
@@ -640,8 +675,13 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = buildSystemPrompt(req, recipe);
-		const compiledPromptHash = promptHash(systemPrompt);
+		const systemPrompt = buildStableSystemPrompt(req, recipe);
+		const dynamicPromptMessages = buildDynamicPromptMessages(req);
+		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
+		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
+		const staticCompositionHash = promptHash(systemPrompt);
+		const sessionShellHash = staticCompositionHash;
+		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
 			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
 			: null;
@@ -660,7 +700,11 @@ export function createDispatchBundle(
 			target,
 			cwd,
 			systemPrompt,
+			dynamicPromptMessages,
 			compiledPromptHash,
+			staticCompositionHash,
+			sessionShellHash,
+			dynamicHash,
 			apiKey,
 			runtimeKind,
 			approval,
@@ -705,7 +749,7 @@ export function createDispatchBundle(
 			}
 		}
 
-		const tokenMeter = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const spec = buildDispatchWorkerSpec({
@@ -713,6 +757,7 @@ export function createDispatchBundle(
 			target: lifecycle.target,
 			admission: lifecycle.admission,
 			systemPrompt: lifecycle.systemPrompt,
+			dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 			middlewareSnapshot: middleware.snapshot(),
 			apiKey: lifecycle.apiKey,
 			approval: lifecycle.approval,
@@ -764,6 +809,8 @@ export function createDispatchBundle(
 					const u = event.message.usage;
 					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
 					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+					tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+					tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
 					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
 					const model = readStringOrNull(event.message.model);
 					const responseModel = readStringOrNull(event.message.responseModel);
@@ -806,6 +853,9 @@ export function createDispatchBundle(
 			runtimeKind: lifecycle.runtimeKind,
 			sessionId: null,
 			cwd: lifecycle.cwd,
+			staticShellHash: lifecycle.staticCompositionHash,
+			sessionShellHash: lifecycle.sessionShellHash,
+			dynamicHash: lifecycle.dynamicHash,
 		});
 		ledgerRef.update(
 			envelope.id,
@@ -862,9 +912,14 @@ export function createDispatchBundle(
 			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
 			const pricing = lifecycle.target.endpoint.pricing;
 			const costUsd = pricing
-				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 + (tokenMeter.outputTokens * pricing.output) / 1_000_000
+				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
+					(tokenMeter.outputTokens * pricing.output) / 1_000_000 +
+					(tokenMeter.cacheReadTokens * (pricing.cacheRead ?? 0)) / 1_000_000 +
+					(tokenMeter.cacheWriteTokens * (pricing.cacheWrite ?? 0)) / 1_000_000
 				: 0;
 			const safetyMetadata = safety.policy?.metadata(lifecycle.currentMode) ?? null;
+			const tokenCount =
+				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -877,12 +932,19 @@ export function createDispatchBundle(
 				endedAt,
 				exitCode: receiptExitCode,
 				...(failureMessage !== undefined ? { failureMessage } : {}),
-				tokenCount: tokenMeter.inputTokens + tokenMeter.outputTokens,
+				tokenCount,
+				inputTokenCount: tokenMeter.inputTokens,
+				outputTokenCount: tokenMeter.outputTokens,
+				cacheReadTokenCount: tokenMeter.cacheReadTokens,
+				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				costUsd,
 				compiledPromptHash: lifecycle.compiledPromptHash,
-				staticCompositionHash: null,
+				staticCompositionHash: lifecycle.staticCompositionHash,
+				staticShellHash: lifecycle.staticCompositionHash,
+				sessionShellHash: lifecycle.sessionShellHash,
+				dynamicHash: lifecycle.dynamicHash,
 				clioVersion: readClioVersion(),
 				piMonoVersion: readPiMonoVersion(),
 				platform: process.platform,
@@ -915,7 +977,12 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				tokenCount: receipt.tokenCount,
+				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
+				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
+				staticShellHash: receipt.staticShellHash ?? null,
+				sessionShellHash: receipt.sessionShellHash ?? null,
+				dynamicHash: receipt.dynamicHash ?? null,
 				costUsd: receipt.costUsd,
 				durationMs,
 				exitCode: receipt.exitCode,
@@ -942,6 +1009,15 @@ export function createDispatchBundle(
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
 					costUsd: receiptDraft.costUsd,
+					staticShellHash: receiptDraft.staticShellHash ?? null,
+					sessionShellHash: receiptDraft.sessionShellHash ?? null,
+					dynamicHash: receiptDraft.dynamicHash ?? null,
+					...(receiptDraft.cacheReadTokenCount !== undefined
+						? { cacheReadTokenCount: receiptDraft.cacheReadTokenCount }
+						: {}),
+					...(receiptDraft.cacheWriteTokenCount !== undefined
+						? { cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount }
+						: {}),
 					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt.current) } : {}),
 				};
 				if (receiptDraft.reasoningTokenCount !== undefined) {

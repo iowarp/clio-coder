@@ -25,6 +25,7 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import type { WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
@@ -43,6 +44,7 @@ import {
 export interface WorkerRunInput {
 	sessionId?: string;
 	systemPrompt: string;
+	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	task: string;
 	endpoint: EndpointDescriptor;
 	runtime: RuntimeDescriptor;
@@ -126,6 +128,37 @@ function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLeve
 	return resolveModelRuntimeCapabilitiesForModel(model, level).thinking.effectiveLevel;
 }
 
+function promptMessage(fragment: WorkerPromptMessage): AgentMessage {
+	return {
+		role: "user",
+		content: [{ type: "text", text: fragment.body }],
+		timestamp: Date.now(),
+	} as AgentMessage;
+}
+
+function taskMessage(task: string): AgentMessage {
+	return {
+		role: "user",
+		content: [{ type: "text", text: task }],
+		timestamp: Date.now(),
+	} as AgentMessage;
+}
+
+function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
+	const messages = (input.dynamicPromptMessages ?? []).map(promptMessage);
+	messages.push(taskMessage(input.task));
+	return messages;
+}
+
+function taskWithDynamicPromptContext(input: WorkerRunInput): string {
+	const dynamic = input.dynamicPromptMessages ?? [];
+	if (dynamic.length === 0) return input.task;
+	// Subprocess CLIs expose one prompt string through argv/stdin, not an
+	// ordered role/message transport. Keep the volatile context adjacent to the
+	// task without pretending those runtimes can preserve provider message roles.
+	return [...dynamic.map((fragment) => fragment.body), input.task].join("\n\n");
+}
+
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -143,7 +176,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.runtime.kind === "subprocess") {
 		const subprocessInput: Parameters<typeof startSubprocessWorkerRun>[0] = {
 			systemPrompt: input.systemPrompt,
-			task: input.task,
+			task: taskWithDynamicPromptContext(input),
 			endpoint: input.endpoint,
 			runtime: input.runtime,
 			wireModelId: input.wireModelId,
@@ -159,6 +192,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.runtime.kind === "sdk" && input.runtime.id === "claude-code-sdk") {
 		const sdkInput: Parameters<typeof startClaudeCodeSdkWorkerRun>[0] = {
 			systemPrompt: input.systemPrompt,
+			dynamicPromptMessages: input.dynamicPromptMessages ?? [],
 			task: input.task,
 			endpoint: input.endpoint,
 			runtime: input.runtime,
@@ -250,7 +284,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const promise = (async (): Promise<WorkerRunResult> => {
 		try {
-			await agent.prompt(input.task);
+			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();
 			const messages = agent.state.messages;

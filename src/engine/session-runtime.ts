@@ -3,6 +3,12 @@ import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import type { AgentEvent, AgentMessage } from "./types.js";
 
+export interface SessionRuntimePromptMessage {
+	id: string;
+	body: string;
+	contentHash: string;
+}
+
 export interface SessionRuntimeStartInput {
 	threadId?: string;
 	resumeSessionId?: string;
@@ -19,6 +25,7 @@ export interface SessionRuntimeStartInput {
 export interface SessionRuntimeSendTurnInput {
 	threadId: string;
 	task: string;
+	dynamicPromptMessages?: ReadonlyArray<SessionRuntimePromptMessage>;
 	wireModelId?: string;
 	mode?: ModeName;
 }

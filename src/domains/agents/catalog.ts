@@ -3,7 +3,12 @@ import type { AgentRecipe } from "./recipe.js";
 const INTERNAL_AGENT_IDS = new Set(["worker"]);
 const DEFAULT_DISPATCH_AGENT_ID = "implementer";
 
-export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {
+export interface AgentCatalogSections {
+	stable: string;
+	volatile: string;
+}
+
+export function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
 	const publicRecipes = recipes
 		.filter((recipe) => !INTERNAL_AGENT_IDS.has(recipe.id))
 		.slice()
@@ -16,7 +21,7 @@ export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string 
 		"After a dispatch succeeds, use that receipt/output as evidence and synthesize the answer instead of repeating the same dispatch.",
 	];
 
-	if (publicRecipes.length === 0) return lines.join("\n");
+	if (publicRecipes.length === 0) return { stable: lines.join("\n"), volatile: "" };
 
 	lines.push("", "Available agents:");
 	for (const recipe of publicRecipes) {
@@ -27,5 +32,10 @@ export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string 
 		lines.push(`- ${recipe.id} (${mode}, ${source})${suffix}`);
 	}
 
-	return lines.join("\n");
+	return { stable: lines.join("\n"), volatile: "" };
+}
+
+export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {
+	const sections = renderAgentCatalogSections(recipes);
+	return [sections.stable, sections.volatile].filter((part) => part.trim().length > 0).join("\n\n");
 }

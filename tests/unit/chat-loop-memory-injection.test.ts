@@ -61,10 +61,23 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 			calls.push(input);
 			const result: CompileResult = {
 				text: `system|memorySection=${input.dynamicInputs.memorySection ?? ""}`,
+				systemPrompt: "stable-system",
+				dynamicPromptFragments: input.dynamicInputs.memorySection
+					? [
+							{
+								id: "memory",
+								body: input.dynamicInputs.memorySection,
+								contentHash: "memory-hash",
+								tokenEstimate: 1,
+							},
+						]
+					: [],
 				renderedPromptHash: "rendered",
 				fragmentManifest: [],
 				segmentManifest: [],
 				staticShellHash: "static",
+				sessionShellHash: "session",
+				dynamicHash: input.dynamicInputs.memorySection ? "dynamic-memory" : "dynamic-empty",
 				staticShellTokenEstimate: 1,
 				dynamicInputs: { ...input.dynamicInputs },
 			};
@@ -75,9 +88,16 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 	return { prompts, calls };
 }
 
-function noopAgent(): EngineAgentHandle {
+function noopAgent(captured?: { prompts: unknown[]; systemPrompts?: string[] }): EngineAgentHandle {
+	let systemPrompt = "";
 	const state = {
-		systemPrompt: "",
+		get systemPrompt() {
+			return systemPrompt;
+		},
+		set systemPrompt(value: string) {
+			systemPrompt = value;
+			captured?.systemPrompts?.push(value);
+		},
 		model: {} as never,
 		thinkingLevel: "off" as const,
 		tools: [],
@@ -96,7 +116,18 @@ function noopAgent(): EngineAgentHandle {
 				cb = null;
 			};
 		},
-		prompt: async () => {
+		prompt: async (input?: unknown) => {
+			captured?.prompts.push(input);
+			if (Array.isArray(input)) {
+				for (const message of input) {
+					await cb?.({ type: "message_end", message: message as AgentMessage });
+				}
+			} else if (typeof input === "string") {
+				await cb?.({
+					type: "message_end",
+					message: { role: "user", content: [{ type: "text", text: input }], timestamp: 0 } as AgentMessage,
+				});
+			}
 			const message: AgentMessage = {
 				role: "assistant",
 				content: [{ type: "text", text: "ok" }],
@@ -141,6 +172,90 @@ describe("chat-loop memory injection", () => {
 
 		strictEqual(calls.length, 1);
 		strictEqual(calls[0]?.dynamicInputs.memorySection, memorySection);
+	});
+
+	it("sends dynamic prompt fragments before the user turn without surfacing them as chat messages", async () => {
+		const { settings, providers } = createProviders();
+		const { prompts } = createPromptsRecorder();
+		const captured = { prompts: [] as unknown[] };
+		const messageTexts: string[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: {
+				current: () => "default",
+				setMode: () => "default",
+				cycleNormal: () => "default",
+				visibleTools: () => new Set(),
+				isToolVisible: () => false,
+				isActionAllowed: () => true,
+				requestSuper: () => {},
+				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
+			},
+			providers,
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			prompts,
+			getMemorySection: () => "# Memory\n\n- hidden dynamic memory",
+			createAgent: () => noopAgent(captured),
+		});
+		const unsub = loop.onEvent((event) => {
+			if (event.type !== "message_end") return;
+			const content = (event.message as { content?: ReadonlyArray<{ type?: string; text?: string }> }).content ?? [];
+			for (const item of content) {
+				if (item?.type === "text" && typeof item.text === "string") messageTexts.push(item.text);
+			}
+		});
+		try {
+			await loop.submit("hello");
+		} finally {
+			unsub();
+		}
+
+		const prompt = captured.prompts[0];
+		ok(Array.isArray(prompt));
+		strictEqual(prompt.length, 2);
+		ok(JSON.stringify(prompt[0]).includes("hidden dynamic memory"));
+		ok(JSON.stringify(prompt[1]).includes("hello"));
+		strictEqual(
+			messageTexts.some((text) => text.includes("hidden dynamic memory")),
+			false,
+		);
+		ok(messageTexts.includes("hello"));
+		ok(messageTexts.includes("ok"));
+	});
+
+	it("does not rewrite the stable system prompt when only dynamic memory changes", async () => {
+		const { settings, providers } = createProviders();
+		const { prompts } = createPromptsRecorder();
+		const captured = { prompts: [] as unknown[], systemPrompts: [] as string[] };
+		let memorySection = "# Memory\n\n- first";
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			modes: {
+				current: () => "default",
+				setMode: () => "default",
+				cycleNormal: () => "default",
+				visibleTools: () => new Set(),
+				isToolVisible: () => false,
+				isActionAllowed: () => true,
+				requestSuper: () => {},
+				confirmSuper: () => "super",
+				elevatedModeFor: () => null,
+			},
+			providers,
+			knownEndpoints: () => new Set(["stub-endpoint"]),
+			prompts,
+			getMemorySection: () => memorySection,
+			createAgent: () => noopAgent(captured),
+		});
+
+		await loop.submit("first");
+		memorySection = "# Memory\n\n- second";
+		await loop.submit("second");
+
+		strictEqual(captured.systemPrompts.length, 1);
+		strictEqual(captured.systemPrompts[0], "stable-system");
+		ok(JSON.stringify(captured.prompts[1]).includes("second"));
 	});
 
 	it("does not set memorySection when getMemorySection returns empty", async () => {

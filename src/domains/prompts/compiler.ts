@@ -24,6 +24,8 @@ export interface DynamicInputs {
 	contextFiles?: string;
 	projectType?: string | null;
 	agentCatalog?: string;
+	agentCatalogStable?: string;
+	agentCatalogDelta?: string;
 	skillsCatalog?: string;
 	memorySection?: string;
 	turnCount?: number;
@@ -42,6 +44,7 @@ export interface PromptSegmentManifestEntry {
 	id: string;
 	contentHash: string;
 	dynamic: boolean;
+	tier: PromptTier;
 	tokenEstimate: number;
 }
 
@@ -53,12 +56,28 @@ export interface RenderedPromptFragment {
 	dynamic: boolean;
 }
 
+export type PromptTier = "static-shell" | "session-shell" | "dynamic-turn";
+
+export interface DynamicPromptFragment {
+	id: string;
+	body: string;
+	contentHash: string;
+	tokenEstimate: number;
+}
+
 export interface CompileResult {
+	/** Full prompt text retained for older callers and reproducibility. */
 	text: string;
+	/** Stable provider-facing system prompt: static shell + semi-static session shell. */
+	systemPrompt: string;
+	/** Ordered volatile fragments to send as messages before the real user turn. */
+	dynamicPromptFragments: ReadonlyArray<DynamicPromptFragment>;
 	renderedPromptHash: string;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
 	segmentManifest: ReadonlyArray<PromptSegmentManifestEntry>;
 	staticShellHash: string;
+	sessionShellHash: string;
+	dynamicHash: string;
 	staticShellTokenEstimate: number;
 	dynamicInputs: Readonly<DynamicInputs>;
 }
@@ -153,6 +172,16 @@ function renderAgentCatalogBlock(agentCatalog: string | undefined): string {
 	return `# Agent Fleet\n\n${trimmed}`;
 }
 
+function renderAgentCatalogStableBlock(agentCatalog: string | undefined): string {
+	return renderAgentCatalogBlock(agentCatalog);
+}
+
+function renderAgentCatalogDeltaBlock(agentCatalog: string | undefined): string {
+	const trimmed = agentCatalog?.trim() ?? "";
+	if (trimmed.length === 0) return "";
+	return `# Agent Fleet Status\n\n${trimmed}`;
+}
+
 function renderSkillsCatalogBlock(skillsCatalog: string | undefined): string {
 	const trimmed = skillsCatalog?.trim() ?? "";
 	if (trimmed.length === 0) return "";
@@ -184,6 +213,7 @@ function pushSegment(
 	id: string,
 	body: string,
 	dynamic: boolean,
+	tier: PromptTier,
 ): void {
 	const trimmed = body.trim();
 	if (trimmed.length === 0) return;
@@ -192,6 +222,7 @@ function pushSegment(
 		id,
 		contentHash: sha256(trimmed),
 		dynamic,
+		tier,
 		tokenEstimate: estimatePromptTokens(trimmed),
 	});
 }
@@ -218,28 +249,55 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
 	const parts: string[] = [];
 	const segmentManifest: PromptSegmentManifestEntry[] = [];
-	pushSegment(segmentManifest, parts, "identity", identity.body, false);
-	pushSegment(segmentManifest, parts, "mode", mode.body, false);
-	pushSegment(segmentManifest, parts, "safety", renderSafetySection(safety, safetyLevel), false);
-	pushSegment(segmentManifest, parts, "runtime", renderRuntimeBlock(inputs.dynamicInputs), true);
-	const agentCatalog = renderAgentCatalogBlock(inputs.dynamicInputs.agentCatalog);
-	pushSegment(segmentManifest, parts, "tools-and-agents", agentCatalog, true);
+	pushSegment(segmentManifest, parts, "identity", identity.body, false, "static-shell");
+	pushSegment(segmentManifest, parts, "mode", mode.body, false, "static-shell");
+	pushSegment(segmentManifest, parts, "safety", renderSafetySection(safety, safetyLevel), false, "static-shell");
+	pushSegment(segmentManifest, parts, "runtime", renderRuntimeBlock(inputs.dynamicInputs), true, "session-shell");
+	const stableAgentCatalog = renderAgentCatalogStableBlock(
+		inputs.dynamicInputs.agentCatalogStable ?? inputs.dynamicInputs.agentCatalog,
+	);
+	pushSegment(segmentManifest, parts, "tools-and-agents", stableAgentCatalog, true, "session-shell");
+	const volatileAgentCatalog = renderAgentCatalogDeltaBlock(inputs.dynamicInputs.agentCatalogDelta);
+	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn");
 	const skillsCatalog = renderSkillsCatalogBlock(inputs.dynamicInputs.skillsCatalog);
-	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true);
+	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell");
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
-	pushSegment(segmentManifest, parts, "memory", memory, true);
+	pushSegment(segmentManifest, parts, "memory", memory, true, "dynamic-turn");
 	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
-	pushSegment(segmentManifest, parts, "project-context", project, true);
+	pushSegment(segmentManifest, parts, "project-context", project, true, "dynamic-turn");
 	const session = renderSessionBlock(inputs.dynamicInputs);
-	pushSegment(segmentManifest, parts, "history-summary", session, true);
+	pushSegment(segmentManifest, parts, "history-summary", session, true, "dynamic-turn");
 	for (const fragment of inputs.additionalFragments ?? []) {
-		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic);
+		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic, "session-shell");
 	}
 
 	const text = parts.join("\n\n");
 	const renderedPromptHash = sha256(text);
-	const staticShellText = parts.slice(0, 4).join("\n\n");
+	const staticShellParts = segmentManifest
+		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+		.filter((entry) => entry.segment.tier === "static-shell")
+		.map((entry) => entry.body);
+	const sessionShellParts = segmentManifest
+		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+		.filter((entry) => entry.segment.tier === "static-shell" || entry.segment.tier === "session-shell")
+		.map((entry) => entry.body);
+	const dynamicFragments = segmentManifest
+		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+		.filter((entry) => entry.segment.tier === "dynamic-turn")
+		.map(
+			({ segment, body }): DynamicPromptFragment => ({
+				id: segment.id,
+				body,
+				contentHash: segment.contentHash,
+				tokenEstimate: segment.tokenEstimate,
+			}),
+		);
+	const staticShellText = staticShellParts.join("\n\n");
+	const systemPrompt = sessionShellParts.join("\n\n");
+	const dynamicText = dynamicFragments.map((fragment) => fragment.body).join("\n\n");
 	const staticShellHash = sha256(staticShellText);
+	const sessionShellHash = sha256(systemPrompt);
+	const dynamicHash = sha256(dynamicText);
 	const staticShellTokenEstimate = estimatePromptTokens(staticShellText);
 
 	const manifestFragments: LoadedFragment[] = [identity, mode, safety];
@@ -260,10 +318,14 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 
 	return {
 		text,
+		systemPrompt,
+		dynamicPromptFragments: dynamicFragments,
 		renderedPromptHash,
 		fragmentManifest,
 		segmentManifest,
 		staticShellHash,
+		sessionShellHash,
+		dynamicHash,
 		staticShellTokenEstimate,
 		dynamicInputs: { ...inputs.dynamicInputs },
 	};

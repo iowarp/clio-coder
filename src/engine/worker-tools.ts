@@ -488,6 +488,7 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);
 	}
+	specs.sort((a, b) => a.name.localeCompare(b.name));
 	return specs.map((spec) =>
 		toAgentTool(spec, input.registry, input.mode, input.telemetry, input.invokeOptions),
 	) as unknown as AgentTool[];

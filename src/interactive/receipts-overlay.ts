@@ -314,6 +314,11 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (typeof tokenCount !== "number" || !Number.isFinite(tokenCount) || tokenCount < 0) {
 		return { ok: false, reason: `tokenCount out of range: ${String(tokenCount)}` };
 	}
+	for (const key of ["inputTokenCount", "outputTokenCount", "cacheReadTokenCount", "cacheWriteTokenCount"] as const) {
+		if (key in r && !isNonNegativeFiniteNumber(r[key])) {
+			return { ok: false, reason: `${key} out of range: ${String(r[key])}` };
+		}
+	}
 	const costUsd = r.costUsd;
 	if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
 		return { ok: false, reason: `costUsd out of range: ${String(costUsd)}` };

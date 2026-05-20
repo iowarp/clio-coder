@@ -183,7 +183,7 @@ afterEach(() => {
 });
 
 describe("dispatch memory passthrough", () => {
-	it("forwards a non-empty memorySection into WorkerSpec.systemPrompt verbatim", async () => {
+	it("forwards a non-empty memorySection as a dynamic worker prompt message after the stable contract", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-mem-"));
 		tempDirs.push(dataDir);
 		process.env.CLIO_DATA_DIR = dataDir;
@@ -239,18 +239,24 @@ describe("dispatch memory passthrough", () => {
 				memorySection,
 			});
 			ok(captured.spec, "spawnWorker was called");
-			ok(captured.spec.systemPrompt.startsWith("# Memory"), "systemPrompt begins with the memory header");
-			ok(captured.spec.systemPrompt.includes("mem-0123456789abcdef"), "rendered memory record id flows through");
+			ok(captured.spec.systemPrompt.startsWith("# Dispatch Task Contract"));
+			strictEqual(captured.spec.systemPrompt.includes("mem-0123456789abcdef"), false);
+			strictEqual(captured.spec.dynamicPromptMessages?.length, 1);
+			strictEqual(captured.spec.dynamicPromptMessages?.[0]?.id, "dispatch-memory");
+			ok(captured.spec.dynamicPromptMessages?.[0]?.body.includes("mem-0123456789abcdef"));
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 0);
-			strictEqual(receipt.compiledPromptHash, sha256(captured.spec.systemPrompt));
+			strictEqual(receipt.staticCompositionHash, sha256(captured.spec.systemPrompt));
+			strictEqual(receipt.sessionShellHash, receipt.staticCompositionHash);
+			strictEqual(receipt.dynamicHash, sha256(memorySection));
+			strictEqual(receipt.compiledPromptHash, sha256(`${captured.spec.systemPrompt}\n\n${memorySection}`));
 		} finally {
 			await bundle.extension.stop?.();
 		}
 	});
 
-	it("leaves systemPrompt empty when no memorySection is supplied and no recipe is present", async () => {
+	it("uses the stable dispatch contract and no dynamic prompt messages when no memorySection is supplied", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-mem-"));
 		tempDirs.push(dataDir);
 		process.env.CLIO_DATA_DIR = dataDir;
@@ -280,10 +286,12 @@ describe("dispatch memory passthrough", () => {
 				task: "no memory case",
 			});
 			ok(captured.spec);
-			strictEqual(captured.spec.systemPrompt, "");
+			ok(captured.spec.systemPrompt.startsWith("# Dispatch Task Contract"));
+			strictEqual(captured.spec.dynamicPromptMessages?.length, 0);
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
-			strictEqual(receipt.compiledPromptHash, null);
+			strictEqual(receipt.compiledPromptHash, sha256(captured.spec.systemPrompt));
+			strictEqual(receipt.dynamicHash, sha256(""));
 		} finally {
 			await bundle.extension.stop?.();
 		}

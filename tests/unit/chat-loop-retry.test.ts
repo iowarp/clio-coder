@@ -34,6 +34,22 @@ function userMessage(text: string): AgentMessage {
 	return { role: "user", content: [{ type: "text", text }], timestamp: 0 } as AgentMessage;
 }
 
+function promptText(input: unknown): string {
+	const message = Array.isArray(input) ? input.at(-1) : input;
+	if (typeof message === "string") return message;
+	if (!message || typeof message !== "object") return "";
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	for (const item of content) {
+		if (item && typeof item === "object" && (item as { type?: unknown }).type === "text") {
+			const text = (item as { text?: unknown }).text;
+			if (typeof text === "string") return text;
+		}
+	}
+	return "";
+}
+
 function assistantMessage(text: string): AgentMessage {
 	return {
 		role: "assistant",
@@ -619,7 +635,8 @@ describe("interactive/chat-loop transient retry", () => {
 						state: agentState,
 						sessionId: undefined,
 						subscribe: () => () => {},
-						prompt: async (text: string) => {
+						prompt: async (input: unknown) => {
+							const text = promptText(input);
 							strictEqual(text, "continue");
 							const serialized = JSON.stringify(agentState.messages);
 							promptSawSummary = serialized.includes("compacted live provider context");
@@ -690,7 +707,8 @@ describe("interactive/chat-loop transient retry", () => {
 							subscribeCb = cb;
 							return () => {};
 						},
-						prompt: async (text: string) => {
+						prompt: async (input: unknown) => {
+							const text = promptText(input);
 							promptTexts.push(text);
 							if (promptTexts.length === 1) {
 								agentState.messages.push(userMessage(text));
