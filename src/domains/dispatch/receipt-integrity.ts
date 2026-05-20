@@ -80,8 +80,29 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 	if (receipt.failureMessage !== undefined) {
 		draft.failureMessage = receipt.failureMessage;
 	}
+	if (receipt.inputTokenCount !== undefined) {
+		draft.inputTokenCount = receipt.inputTokenCount;
+	}
+	if (receipt.outputTokenCount !== undefined) {
+		draft.outputTokenCount = receipt.outputTokenCount;
+	}
+	if (receipt.cacheReadTokenCount !== undefined) {
+		draft.cacheReadTokenCount = receipt.cacheReadTokenCount;
+	}
+	if (receipt.cacheWriteTokenCount !== undefined) {
+		draft.cacheWriteTokenCount = receipt.cacheWriteTokenCount;
+	}
 	if (receipt.reasoningTokenCount !== undefined) {
 		draft.reasoningTokenCount = receipt.reasoningTokenCount;
+	}
+	if (receipt.staticShellHash !== undefined) {
+		draft.staticShellHash = receipt.staticShellHash;
+	}
+	if (receipt.sessionShellHash !== undefined) {
+		draft.sessionShellHash = receipt.sessionShellHash;
+	}
+	if (receipt.dynamicHash !== undefined) {
+		draft.dynamicHash = receipt.dynamicHash;
 	}
 	if (receipt.upstreamResponses !== undefined) {
 		draft.upstreamResponses = receipt.upstreamResponses;
@@ -111,7 +132,12 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		sessionId: envelope.sessionId,
 		cwd: envelope.cwd,
 		tokenCount: envelope.tokenCount,
+		cacheReadTokenCount: envelope.cacheReadTokenCount,
+		cacheWriteTokenCount: envelope.cacheWriteTokenCount,
 		reasoningTokenCount: envelope.reasoningTokenCount,
+		staticShellHash: envelope.staticShellHash,
+		sessionShellHash: envelope.sessionShellHash,
+		dynamicHash: envelope.dynamicHash,
 		costUsd: envelope.costUsd,
 	};
 }
@@ -168,7 +194,12 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["endedAt", receipt.endedAt, envelope.endedAt],
 		["exitCode", receipt.exitCode, envelope.exitCode],
 		["tokenCount", receipt.tokenCount, envelope.tokenCount],
+		["cacheReadTokenCount", receipt.cacheReadTokenCount ?? 0, envelope.cacheReadTokenCount ?? 0],
+		["cacheWriteTokenCount", receipt.cacheWriteTokenCount ?? 0, envelope.cacheWriteTokenCount ?? 0],
 		["reasoningTokenCount", receipt.reasoningTokenCount ?? 0, envelope.reasoningTokenCount ?? 0],
+		["staticShellHash", receipt.staticShellHash ?? null, envelope.staticShellHash ?? null],
+		["sessionShellHash", receipt.sessionShellHash ?? null, envelope.sessionShellHash ?? null],
+		["dynamicHash", receipt.dynamicHash ?? null, envelope.dynamicHash ?? null],
 		["costUsd", receipt.costUsd, envelope.costUsd],
 		["sessionId", receipt.sessionId, envelope.sessionId],
 	];

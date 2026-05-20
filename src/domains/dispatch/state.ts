@@ -272,6 +272,9 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				cwd: input.cwd,
 				tokenCount: 0,
 				reasoningTokenCount: 0,
+				...(input.staticShellHash !== undefined ? { staticShellHash: input.staticShellHash } : {}),
+				...(input.sessionShellHash !== undefined ? { sessionShellHash: input.sessionShellHash } : {}),
+				...(input.dynamicHash !== undefined ? { dynamicHash: input.dynamicHash } : {}),
 				costUsd: 0,
 			};
 			runs.unshift(envelope);

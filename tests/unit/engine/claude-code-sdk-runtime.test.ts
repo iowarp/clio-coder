@@ -1,7 +1,12 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { Query as ClaudeQuery, Options as ClaudeQueryOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+	Query as ClaudeQuery,
+	Options as ClaudeQueryOptions,
+	SDKMessage,
+	SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import type { ToolName } from "../../../src/core/tool-names.js";
 import { EMPTY_CAPABILITIES } from "../../../src/domains/providers/types/capability-flags.js";
@@ -10,6 +15,7 @@ import type { RuntimeDescriptor } from "../../../src/domains/providers/types/run
 import {
 	createClaudeCodeSdkRuntime,
 	mapClioModeToClaudePermission,
+	startClaudeCodeSdkWorkerRun,
 } from "../../../src/engine/claude-code-sdk-runtime.js";
 import type { AgentEvent } from "../../../src/engine/types.js";
 
@@ -192,6 +198,75 @@ describe("Claude Code SDK runtime", () => {
 
 		strictEqual(controls.setModelCalls[0], "claude-opus-4-7");
 		strictEqual(controls.setPermissionModeCalls[0], "plan");
+	});
+
+	it("sends worker dynamic prompt messages as non-querying synthetic context before the task", async () => {
+		const controls: FakeQueryControls = {
+			setModelCalls: [],
+			setPermissionModeCalls: [],
+			interruptCalls: 0,
+			closed: false,
+		};
+		const capturedPrompts: SDKUserMessage[] = [];
+		const handle = startClaudeCodeSdkWorkerRun(
+			{
+				systemPrompt: "stable contract",
+				dynamicPromptMessages: [
+					{ id: "dispatch-memory", body: "# Memory\n\n- lesson", contentHash: "hash-memory" },
+					{ id: "dispatch-context", body: "# Context\n\nruntime churn", contentHash: "hash-context" },
+				],
+				task: "do the work",
+				endpoint,
+				runtime,
+				wireModelId: "claude-sonnet-4-6",
+			},
+			() => undefined,
+			{
+				createQuery: ({ prompt }) => {
+					async function* iterate(): AsyncGenerator<SDKMessage, void> {
+						for await (const message of prompt) {
+							capturedPrompts.push(message);
+							if (message.shouldQuery === false) continue;
+							yield resultMessage("done");
+							return;
+						}
+					}
+					const generator = iterate();
+					return Object.assign(generator, {
+						async interrupt() {
+							controls.interruptCalls += 1;
+						},
+						async setPermissionMode(mode: string) {
+							controls.setPermissionModeCalls.push(mode);
+						},
+						async setModel(model?: string) {
+							controls.setModelCalls.push(model);
+						},
+						async setMaxThinkingTokens(_maxThinkingTokens: number | null) {},
+						close() {
+							controls.closed = true;
+						},
+					}) as ClaudeQuery;
+				},
+			},
+		);
+
+		const result = await handle.promise;
+
+		strictEqual(result.exitCode, 0);
+		deepStrictEqual(
+			capturedPrompts.map((message) => ({
+				content: message.message.content,
+				isSynthetic: message.isSynthetic,
+				shouldQuery: message.shouldQuery,
+			})),
+			[
+				{ content: "# Memory\n\n- lesson", isSynthetic: true, shouldQuery: false },
+				{ content: "# Context\n\nruntime churn", isSynthetic: true, shouldQuery: false },
+				{ content: "do the work", isSynthetic: undefined, shouldQuery: undefined },
+			],
+		);
+		strictEqual(controls.closed, true);
 	});
 
 	it("runs lifecycle hooks in start and stop order", async () => {

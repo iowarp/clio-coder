@@ -45,18 +45,19 @@ describe("dispatch/extension buildSystemPrompt", () => {
 		filepath: "/builtin/scout.md",
 	};
 
-	it("prepends a non-empty memorySection to the recipe body with a blank-line separator", () => {
+	it("appends a non-empty memorySection after the stable dispatch contract and recipe body", () => {
 		const req: DispatchRequest = {
 			agentId: "scout",
 			task: "look",
 			memorySection: "# Memory\n\nlesson alpha",
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
-		ok(out.startsWith("# Memory\n\nlesson alpha\n\n# Dispatch Task Contract"));
-		ok(out.endsWith("\n\nRECIPE BODY"));
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.includes("\n\nRECIPE BODY\n\n# Memory\n\nlesson alpha"));
+		ok(out.indexOf("# Dispatch Task Contract") < out.indexOf("# Memory"), out);
 	});
 
-	it("prepends memorySection to req.systemPrompt when both are set, ignoring recipe body", () => {
+	it("appends memorySection to req.systemPrompt when both are set, ignoring recipe body", () => {
 		const req: DispatchRequest = {
 			agentId: "scout",
 			task: "look",
@@ -64,8 +65,8 @@ describe("dispatch/extension buildSystemPrompt", () => {
 			systemPrompt: "OVERRIDE PROMPT",
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
-		ok(out.startsWith("# Memory\n\nlesson beta\n\n# Dispatch Task Contract"));
-		ok(out.endsWith("\n\nOVERRIDE PROMPT"));
+		ok(out.startsWith("# Dispatch Task Contract"));
+		ok(out.includes("\n\nOVERRIDE PROMPT\n\n# Memory\n\nlesson beta"));
 		strictEqual(out.includes("RECIPE BODY"), false);
 	});
 

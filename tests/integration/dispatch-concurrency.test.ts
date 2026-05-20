@@ -647,7 +647,12 @@ describe("dispatch concurrency gate", () => {
 			const envelope = bundle.contract.getRun(handle.runId);
 
 			strictEqual(receipt.tokenCount, 140);
+			strictEqual(receipt.inputTokenCount, 100);
+			strictEqual(receipt.outputTokenCount, 40);
+			strictEqual(receipt.cacheReadTokenCount, 0);
+			strictEqual(receipt.cacheWriteTokenCount, 0);
 			strictEqual(receipt.reasoningTokenCount, 12);
+			ok(receipt.staticCompositionHash);
 			deepStrictEqual(receipt.upstreamResponses, [
 				{
 					model: "openrouter/auto",
@@ -657,6 +662,64 @@ describe("dispatch concurrency gate", () => {
 			]);
 			strictEqual(envelope?.tokenCount, 140);
 			strictEqual(envelope?.reasoningTokenCount, 12);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("preserves provider prompt-cache usage fields in dispatch receipts and ledger rows", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const events = (async function* () {
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					usage: {
+						input: 100,
+						output: 40,
+						cacheRead: 700,
+						cacheWrite: 50,
+					},
+				},
+			};
+		})();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1009,
+				promise: exit.promise,
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
+			}),
+		});
+		await bundle.extension.start();
+
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cache usage task" });
+			for await (const _ of handle.events) {
+				// drain so token accounting observes the worker message_end event
+			}
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			const envelope = bundle.contract.getRun(handle.runId);
+
+			strictEqual(receipt.tokenCount, 890);
+			strictEqual(receipt.inputTokenCount, 100);
+			strictEqual(receipt.outputTokenCount, 40);
+			strictEqual(receipt.cacheReadTokenCount, 700);
+			strictEqual(receipt.cacheWriteTokenCount, 50);
+			strictEqual(envelope?.tokenCount, 890);
+			strictEqual(envelope?.cacheReadTokenCount, 700);
+			strictEqual(envelope?.cacheWriteTokenCount, 50);
 		} finally {
 			await bundle.extension.stop?.();
 		}

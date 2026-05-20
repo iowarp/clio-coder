@@ -25,6 +25,7 @@ export interface SerializedWorkerRuntimeDescriptor {
 export interface WorkerSpec {
 	specVersion: typeof WORKER_SPEC_VERSION;
 	systemPrompt: string;
+	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	task: string;
 	endpoint: EndpointDescriptor;
 	runtime: SerializedWorkerRuntimeDescriptor;
@@ -39,6 +40,12 @@ export interface WorkerSpec {
 	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	autoApprove?: "allow" | "deny";
+}
+
+export interface WorkerPromptMessage {
+	id: string;
+	body: string;
+	contentHash: string;
 }
 
 const RUNTIME_KINDS = ["http", "subprocess", "sdk"] as const satisfies ReadonlyArray<RuntimeKind>;
@@ -120,6 +127,17 @@ function readRecord(value: unknown, source: string): Record<string, unknown> {
 		throw new Error(`${source} must be an object`);
 	}
 	return value as Record<string, unknown>;
+}
+
+function readWorkerPromptMessages(value: unknown, source: string): void {
+	if (value === undefined) return;
+	if (!Array.isArray(value)) throw new Error(`${source} must be an array`);
+	for (let index = 0; index < value.length; index++) {
+		const entry = readRecord(value[index], `${source}[${index}]`);
+		readString(entry.id, `${source}[${index}].id`);
+		readString(entry.body, `${source}[${index}].body`);
+		readString(entry.contentHash, `${source}[${index}].contentHash`);
+	}
 }
 
 function readString(value: unknown, source: string, options?: { allowEmpty?: boolean }): string {
@@ -273,6 +291,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readEnum(runtime.apiFamily, "WorkerSpec.runtime.apiFamily", RUNTIME_API_FAMILIES);
 	readEnum(runtime.auth, "WorkerSpec.runtime.auth", RUNTIME_AUTHS);
 	readString(spec.systemPrompt, "WorkerSpec.systemPrompt", { allowEmpty: true });
+	readWorkerPromptMessages(spec.dynamicPromptMessages, "WorkerSpec.dynamicPromptMessages");
 	readString(spec.task, "WorkerSpec.task");
 	validateEndpoint(spec.endpoint, runtimeId);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");

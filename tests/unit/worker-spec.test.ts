@@ -66,6 +66,7 @@ describe("dispatch worker spec contract", () => {
 			...spec(),
 			mode: "default",
 			thinkingLevel: "medium",
+			dynamicPromptMessages: [{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" }],
 			allowedTools: ["read", "bash"],
 			modelCapabilities: {
 				reasoning: true,
@@ -90,6 +91,9 @@ describe("dispatch worker spec contract", () => {
 
 		strictEqual(parsed.mode, "default");
 		strictEqual(parsed.thinkingLevel, "medium");
+		deepStrictEqual(parsed.dynamicPromptMessages, [
+			{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" },
+		]);
 		deepStrictEqual(parsed.allowedTools, ["read", "bash"]);
 	});
 
@@ -108,6 +112,14 @@ describe("dispatch worker spec contract", () => {
 		);
 		throws(() => parseWorkerSpec({ ...spec(), mode: "private-mode" }), /WorkerSpec\.mode/);
 		throws(() => parseWorkerSpec({ ...spec(), allowedTools: ["read", ""] }), /WorkerSpec\.allowedTools\[1\]/);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec(),
+					dynamicPromptMessages: [{ id: "dispatch-memory", body: "", contentHash: "abc" }],
+				}),
+			/WorkerSpec\.dynamicPromptMessages\[0\]\.body/,
+		);
 		throws(
 			() =>
 				parseWorkerSpec({

@@ -465,8 +465,113 @@ describe("prompts/compiler one hash invariant", () => {
 		ok(result.staticShellTokenEstimate > 0, JSON.stringify(result.segmentManifest));
 		ok(result.staticShellTokenEstimate < 1500, `static shell was ${result.staticShellTokenEstimate} tokens`);
 		ok(result.staticShellHash.length > 0);
+		ok(result.sessionShellHash.length > 0);
+		ok(result.dynamicHash.length > 0);
+		ok(result.systemPrompt.includes("# Runtime"), result.systemPrompt);
+		ok(result.systemPrompt.includes("# Skills"), result.systemPrompt);
+		strictEqual(result.systemPrompt.includes("# Memory"), false);
+		ok(result.dynamicPromptFragments.some((fragment) => fragment.id === "memory"));
+		ok(result.dynamicPromptFragments.some((fragment) => fragment.id === "project-context"));
 		ok(result.text.indexOf("# Skills") < result.text.indexOf("# Memory"), result.text);
 		ok(result.text.indexOf("# Memory") < result.text.indexOf("# Project"), result.text);
+	});
+
+	it("keeps dynamic churn out of the static and session shell hashes", () => {
+		const base = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				contextWindow: 200000,
+				thinkingBudget: "off",
+				memorySection: "- original lesson",
+				contextFiles: "<project-context>\nRepo rules A\n</project-context>",
+			},
+		});
+		const changedDynamic = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				contextWindow: 200000,
+				thinkingBudget: "off",
+				memorySection: "- updated lesson",
+				contextFiles: "<project-context>\nRepo rules B\n</project-context>",
+			},
+		});
+
+		strictEqual(changedDynamic.staticShellHash, base.staticShellHash);
+		strictEqual(changedDynamic.sessionShellHash, base.sessionShellHash);
+		notStrictEqual(changedDynamic.dynamicHash, base.dynamicHash);
+		notStrictEqual(changedDynamic.renderedPromptHash, base.renderedPromptHash);
+	});
+
+	it("changes the session shell hash when semi-static runtime inputs change", () => {
+		const a = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { provider: "stub", model: "model-a" },
+		});
+		const b = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: { provider: "stub", model: "model-b" },
+		});
+
+		strictEqual(a.staticShellHash, b.staticShellHash);
+		notStrictEqual(a.sessionShellHash, b.sessionShellHash);
+	});
+
+	it("keeps stable agent fleet declarations in the session shell across dynamic churn", () => {
+		const stableFleet = "Clio manages a fleet.\n\nAvailable agents:\n- scout (advise, builtin) - inspect";
+		const base = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				agentCatalogStable: stableFleet,
+				memorySection: "- original lesson",
+			},
+		});
+		const changedDynamic = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				agentCatalogStable: stableFleet,
+				memorySection: "- updated lesson",
+			},
+		});
+		const changedFleet = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				agentCatalogStable: `${stableFleet}\n- implementer (default, builtin) - modify`,
+				memorySection: "- updated lesson",
+			},
+		});
+
+		ok(base.systemPrompt.includes("# Agent Fleet"), base.systemPrompt);
+		strictEqual(
+			base.dynamicPromptFragments.some((fragment) => fragment.id === "tools-and-agents"),
+			false,
+		);
+		strictEqual(changedDynamic.sessionShellHash, base.sessionShellHash);
+		notStrictEqual(changedDynamic.dynamicHash, base.dynamicHash);
+		notStrictEqual(changedFleet.sessionShellHash, base.sessionShellHash);
 	});
 
 	it("produces the same renderedPromptHash for byte-identical inputs", () => {

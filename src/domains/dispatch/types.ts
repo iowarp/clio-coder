@@ -37,6 +37,11 @@ export interface RunEnvelope {
 	cwd: string;
 	tokenCount: number;
 	reasoningTokenCount?: number;
+	cacheReadTokenCount?: number;
+	cacheWriteTokenCount?: number;
+	staticShellHash?: string | null;
+	sessionShellHash?: string | null;
+	dynamicHash?: string | null;
 	costUsd: number;
 }
 
@@ -116,11 +121,18 @@ export interface RunReceipt {
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;
+	inputTokenCount?: number;
+	outputTokenCount?: number;
+	cacheReadTokenCount?: number;
+	cacheWriteTokenCount?: number;
 	reasoningTokenCount?: number;
 	upstreamResponses?: RunReceiptUpstreamResponse[];
 	costUsd: number;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
+	staticShellHash?: string | null;
+	sessionShellHash?: string | null;
+	dynamicHash?: string | null;
 	clioVersion: string;
 	piMonoVersion: string;
 	platform: string;
