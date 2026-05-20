@@ -33,14 +33,19 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "idle":
 			return null;
 		case "preparing":
-			return { text: tier >= 2 && status.localRuntime ? "waiting on model" : "preparing", toneHint: "normal" };
+			return { text: tier >= 2 ? "still preparing harness" : "preparing harness", toneHint: "normal" };
+		case "waiting_model":
+			return {
+				text: tier >= 2 ? "still waiting on model" : status.localRuntime ? "waiting on local model" : "waiting on provider",
+				toneHint: "normal",
+			};
 		case "thinking":
-			return { text: tier >= 2 ? "still thinking" : "thinking", toneHint: "normal" };
+			return { text: tier >= 2 ? "still receiving thinking" : "receiving thinking", toneHint: "normal" };
 		case "writing":
-			return { text: "writing", toneHint: "normal" };
+			return { text: "streaming response", toneHint: "normal" };
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
-			return { text: tier >= 2 ? `still running ${name}` : `tool: ${name}`, toneHint: "normal" };
+			return { text: tier >= 2 ? `still running tool: ${name}` : `running tool: ${name}`, toneHint: "normal" };
 		}
 		case "tool_blocked":
 			return { text: "awaiting confirmation", toneHint: "warn" };
@@ -53,7 +58,9 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: "compacting context", toneHint: "normal" };
 		case "dispatching": {
 			const agent = status.dispatch?.agentName;
-			return { text: agent ? `dispatching ${agent}` : "dispatching", toneHint: "normal" };
+			if (tier >= 2)
+				return { text: agent ? `awaiting agent result: ${agent}` : "awaiting agent result", toneHint: "normal" };
+			return { text: agent ? `dispatching agent: ${agent}` : "dispatching agent", toneHint: "normal" };
 		}
 		case "stuck":
 			return { text: "stuck", toneHint: "error" };

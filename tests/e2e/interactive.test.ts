@@ -257,6 +257,21 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
+	it("/help renders in the TUI and leaves the editor ready for /quit", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			p.send("/help\r");
+			await p.expect(/commands:/, 10_000);
+			await p.expect(/Run \/hotkeys/, 10_000);
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit after /help, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
+		}
+	});
+
 	it("!!command runs local bash and marks the output excluded from context", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
