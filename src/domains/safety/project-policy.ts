@@ -81,7 +81,15 @@ export function projectSafetyPolicyPath(cwd: string = process.cwd()): string | n
 export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProjectSafetyPolicy {
 	const policyPath = projectSafetyPolicyPath(cwd);
 	if (policyPath === null) {
-		return { path: null, hash: null, valid: true, errors: [], commands: [], pathPolicy: {}, disableDefaultPathPolicy: false };
+		return {
+			path: null,
+			hash: null,
+			valid: true,
+			errors: [],
+			commands: [],
+			pathPolicy: {},
+			disableDefaultPathPolicy: false,
+		};
 	}
 	let raw: string;
 	try {

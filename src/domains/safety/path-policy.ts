@@ -96,7 +96,8 @@ export function evaluatePathPolicy(
 	const normalizedRawTarget = normalizeSeparators(targetPath);
 	for (const entry of policy.entries) {
 		if (!blocksOperation(entry.kind, operation)) continue;
-		if (!matchesEntry(entry, resolvedTarget, normalizedResolvedTarget, normalizedRelativeTarget, normalizedRawTarget)) continue;
+		if (!matchesEntry(entry, resolvedTarget, normalizedResolvedTarget, normalizedRelativeTarget, normalizedRawTarget))
+			continue;
 		return {
 			kind: "block",
 			reasonCode: `path-policy:${entry.kind}`,
