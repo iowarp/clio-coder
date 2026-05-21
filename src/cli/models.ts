@@ -110,8 +110,8 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
-		const discovered = status.discoveredModels.length > 0 ? status.discoveredModels : fallbackModels(status);
-		if (discovered.length === 0) {
+		const modelIds = modelIdsForStatus(status);
+		if (modelIds.length === 0) {
 			const caps = resolveRowCapabilities(status, status.endpoint.defaultModel ?? null, providers);
 			rows.push({
 				targetId: status.endpoint.id,
@@ -121,7 +121,7 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 			});
 			continue;
 		}
-		for (const modelId of discovered) {
+		for (const modelId of modelIds) {
 			const caps = resolveRowCapabilities(status, modelId, providers);
 			rows.push({ targetId: status.endpoint.id, runtimeId, modelId, ...formatCapabilities(caps) });
 		}
@@ -129,15 +129,30 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 	return rows;
 }
 
-function fallbackModels(status: EndpointStatus): string[] {
-	const wire = status.endpoint.wireModels;
-	if (wire && wire.length > 0) return [...wire];
-	if (status.runtime) {
-		const known = listKnownModelsForRuntime(status.runtime.id);
-		if (known.length > 0) return known;
+function modelIdsForStatus(status: EndpointStatus): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	const add = (id: string | undefined): void => {
+		const trimmed = id?.trim() ?? "";
+		if (trimmed.length === 0 || seen.has(trimmed)) return;
+		seen.add(trimmed);
+		out.push(trimmed);
+	};
+	const configured = status.endpoint.wireModels ?? [];
+	if (configured.length > 0 || status.discoveredModels.length > 0) {
+		for (const id of configured) add(id);
+		add(status.endpoint.defaultModel);
+		for (const id of status.discoveredModels) add(id);
+		return out;
 	}
-	if (status.endpoint.defaultModel) return [status.endpoint.defaultModel];
-	return [];
+	const known = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
+	if (known.length > 0) {
+		add(status.endpoint.defaultModel);
+		for (const id of known) add(id);
+		return out;
+	}
+	add(status.endpoint.defaultModel);
+	return out;
 }
 
 function resolveRowCapabilities(status: EndpointStatus, modelId: string | null, providers: ProvidersContract) {

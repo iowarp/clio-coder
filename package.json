@@ -47,6 +47,7 @@
 		"src/domains/agents/builtins/**",
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
+		"docs/*.md",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",
