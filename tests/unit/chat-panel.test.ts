@@ -642,6 +642,24 @@ describe("chat-panel active entry update", () => {
 		);
 	});
 
+	it("truncates long assistant summary metadata to the render width", () => {
+		const panel = createChatPanel();
+		const width = 95;
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "done" }] } as never,
+		});
+		panel.setSummaryLine(
+			"1m 9s · mini/Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL · ↑32344 ↓3664 · reasoning:2274 · 13 tools (4 ✗) ✓",
+		);
+		const lines = panel.render(width);
+		for (const line of lines) {
+			ok(visibleWidth(line) <= width, `line exceeds width (${visibleWidth(line)} > ${width}): ${JSON.stringify(line)}`);
+		}
+		const text = strip(lines.join("\n"));
+		ok(text.includes("mini/Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL"), text);
+	});
+
 	it("leaves streaming text (pre-message_end) as plain lines to avoid partial-markdown garbage", () => {
 		// Streaming deltas arrive char-by-char; half-typed fences and bullets
 		// would render as broken markdown if we piped deltas through the
