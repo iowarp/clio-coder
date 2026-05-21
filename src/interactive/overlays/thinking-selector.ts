@@ -6,7 +6,6 @@ import {
 	type ThinkingLevel,
 	thinkingLevelChoiceLabel,
 } from "../../domains/providers/index.js";
-import { extractLocalModelQuirks, type ThinkingMechanism } from "../../domains/providers/types/local-model-quirks.js";
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
 import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
@@ -29,7 +28,7 @@ export interface OpenThinkingOverlayDeps {
 	onClose: () => void;
 }
 
-export function buildThinkingItems(
+function buildThinkingItems(
 	current: ThinkingLevel,
 	available: readonly ThinkingLevel[],
 	labelFor: (level: ThinkingLevel) => string = (level) => level,
@@ -98,17 +97,6 @@ export function resolveThinkingLabeler(
 	const thinking = resolveThinkingCapability(providers, settings);
 	const mechanism = thinking?.mechanism ?? null;
 	return (level) => thinkingLevelChoiceLabel(mechanism, level);
-}
-
-/**
- * Read the family thinking mechanism for a given wire model id. Returns null
- * when the catalog does not annotate the family. Cheap: lookup is the only
- * fs-touching call and the KB is loaded once per process.
- */
-export function mechanismForModel(providers: ProvidersContract, wireModelId: string): ThinkingMechanism | null {
-	const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-	const quirks = extractLocalModelQuirks(kbHit?.entry.quirks);
-	return quirks?.thinking?.mechanism ?? null;
 }
 
 /**

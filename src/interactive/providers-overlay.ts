@@ -1,10 +1,15 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
+import type {
+	CapabilityFlags,
+	EndpointStatus,
+	ProvidersContract,
+	RuntimeResolutionDiagnostic,
+} from "../domains/providers/index.js";
 import { type Component, Loader, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 import {
 	brandedBottomBorder,
-	brandedErrorRow,
+	brandedRuntimeResolutionDiagnosticRow,
 	brandedTextRow,
 	brandedTopBorder,
 	FocusBox,
@@ -105,10 +110,18 @@ function resolveContentWidth(contentWidth?: number): number {
 	return Math.max(1, contentWidth ?? DEFAULT_CONTENT_WIDTH);
 }
 
+function probeDiagnostic(err: unknown): RuntimeResolutionDiagnostic {
+	return {
+		severity: "error",
+		code: "probe-failed",
+		message: err instanceof Error ? err.message : String(err),
+	};
+}
+
 function formatProvidersOverlayLines(
 	statuses: ReadonlyArray<EndpointStatus>,
 	options?: {
-		error?: string | null;
+		error?: RuntimeResolutionDiagnostic | null;
 		selectedId?: string | null;
 		contentWidth?: number;
 		authByEndpoint?: ReadonlyMap<string, string>;
@@ -117,7 +130,7 @@ function formatProvidersOverlayLines(
 	const contentWidth = resolveContentWidth(options?.contentWidth);
 	const lines: string[] = [topBorder(contentWidth)];
 	if (options?.error) {
-		lines.push(brandedErrorRow(`probe error: ${options.error}`, contentWidth));
+		lines.push(brandedRuntimeResolutionDiagnosticRow(options.error, contentWidth));
 		lines.push(brandedTextRow("", contentWidth));
 	}
 	if (statuses.length === 0) {
@@ -144,7 +157,7 @@ class ProvidersOverlayView implements Component {
 	constructor(
 		private getState: () => {
 			statuses: ReadonlyArray<EndpointStatus>;
-			error: string | null;
+			error: RuntimeResolutionDiagnostic | null;
 			selectedId: string | null;
 			authByEndpoint: ReadonlyMap<string, string>;
 		},
@@ -183,7 +196,7 @@ export function openProvidersOverlay(
 ): OverlayHandle {
 	const lifecycle = new AbortController();
 	let statuses: ReadonlyArray<EndpointStatus> = providers.list();
-	let error: string | null = null;
+	let error: RuntimeResolutionDiagnostic | null = null;
 	let selectedId: string | null = statuses[0]?.endpoint.id ?? null;
 	const buildAuthMap = (): ReadonlyMap<string, string> => {
 		const out = new Map<string, string>();
@@ -232,7 +245,7 @@ export function openProvidersOverlay(
 				try {
 					await providers.probeEndpoint(selectedId as string);
 				} catch (err) {
-					error = err instanceof Error ? err.message : String(err);
+					error = probeDiagnostic(err);
 				}
 				statuses = providers.list();
 				tui.requestRender();
@@ -244,7 +257,7 @@ export function openProvidersOverlay(
 				try {
 					await providers.probeAllLive();
 				} catch (err) {
-					error = err instanceof Error ? err.message : String(err);
+					error = probeDiagnostic(err);
 				}
 				statuses = providers.list();
 				tui.requestRender();
@@ -288,7 +301,7 @@ export function openProvidersOverlay(
 		tui.requestRender();
 	});
 
-	const finalize = (nextError: string | null): void => {
+	const finalize = (nextError: RuntimeResolutionDiagnostic | null): void => {
 		if (lifecycle.signal.aborted) return;
 		loader.stop();
 		box.clear();
@@ -304,11 +317,11 @@ export function openProvidersOverlay(
 	};
 
 	void (async () => {
-		let probeError: string | null = null;
+		let probeError: RuntimeResolutionDiagnostic | null = null;
 		try {
 			await providers.probeAllLive();
 		} catch (err) {
-			probeError = err instanceof Error ? err.message : String(err);
+			probeError = probeDiagnostic(err);
 		}
 		if (lifecycle.signal.aborted) return;
 		finalize(probeError);

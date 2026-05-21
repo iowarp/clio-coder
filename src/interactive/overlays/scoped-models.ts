@@ -2,12 +2,12 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import { matchesKey, type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
 import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { modelsForEndpoint } from "./model-selector.js";
+import { modelsForEndpoint, resolveOverlayRuntimeTarget, runtimeCapabilitySummary } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
 const VISIBLE_ROWS = 12;
 
-export interface ScopedItemsInput {
+interface ScopedItemsInput {
 	providers: ProvidersContract;
 	currentScope: ReadonlyArray<string>;
 }
@@ -20,24 +20,33 @@ export interface ScopedItemsInput {
  * Rows pre-check the entries already present in `currentScope`. Globs are
  * gone; every entry is a literal string match.
  */
-export function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
+function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
 	const active = new Set(input.currentScope);
 	const items: SelectItem[] = [];
 	for (const status of input.providers.list()) {
 		const ep = status.endpoint;
 		const runtimeName = status.runtime?.displayName ?? ep.runtime;
 		const epKey = ep.id;
+		const defaultModel = ep.defaultModel?.trim();
+		const endpointResolution = defaultModel
+			? resolveOverlayRuntimeTarget({ providers: input.providers, status, wireModelId: defaultModel })
+			: null;
 		items.push({
 			value: epKey,
 			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${runtimeName}  ${epKey}`,
-			description: "endpoint-level scope",
+			description: endpointResolution
+				? `endpoint-level scope  ${runtimeCapabilitySummary(endpointResolution)}`
+				: "endpoint-level scope",
 		});
 		for (const wireModel of modelsForEndpoint(status)) {
 			const key = `${ep.id}/${wireModel}`;
+			const resolved = resolveOverlayRuntimeTarget({ providers: input.providers, status, wireModelId: wireModel });
 			items.push({
 				value: key,
 				label: `${active.has(key) ? "[x]" : "[ ]"} ${runtimeName}  ${ep.id}/${wireModel}`,
-				description: "endpoint/model scope",
+				description: resolved.diagnostics.some((entry) => entry.severity === "error")
+					? (resolved.diagnostics.find((entry) => entry.severity === "error")?.message ?? "unresolved target")
+					: runtimeCapabilitySummary(resolved),
 			});
 		}
 	}
