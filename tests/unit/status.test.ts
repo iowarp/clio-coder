@@ -192,6 +192,7 @@ describe("status/reduceStatus", () => {
 			{ now: 300, localRuntime: false },
 		);
 		strictEqual(dispatching.phase, "compacting");
+		deepStrictEqual([...(dispatching.activePhases ?? [])].sort(), ["compacting", "dispatching"]);
 
 		const dispatchPopped = reduceStatus(
 			dispatching,
@@ -199,6 +200,7 @@ describe("status/reduceStatus", () => {
 			{ now: 400, localRuntime: false },
 		);
 		strictEqual(dispatchPopped.phase, "compacting");
+		deepStrictEqual([...(dispatchPopped.activePhases ?? [])], ["compacting"]);
 
 		const compactPopped = reduceStatus(
 			dispatchPopped,
@@ -206,6 +208,7 @@ describe("status/reduceStatus", () => {
 			{ now: 500, localRuntime: false },
 		);
 		strictEqual(compactPopped.phase, "writing");
+		strictEqual(compactPopped.activePhases, undefined);
 		strictEqual(compactPopped.overlayStack?.length, 0);
 		strictEqual(compactPopped.dispatch, undefined);
 	});
