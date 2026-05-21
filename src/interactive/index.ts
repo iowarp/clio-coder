@@ -1916,11 +1916,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openMessagePickerOverlay(tui, {
 			session: sessionContract,
 			onFork: (parentTurnId) => {
-				// Capture the parent session id BEFORE fork swaps the
-				// contract's current pointer; the pre-fork transcript lives
-				// on the parent session's current.jsonl, and we need it for
-				// replay into the new branch's chat panel.
-				const parentSessionId = sessionContract.current()?.id ?? null;
 				try {
 					if (deps.onForkSession) {
 						deps.onForkSession(parentTurnId);
@@ -1928,25 +1923,20 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						sessionContract.fork(parentTurnId);
 					}
 					chatPanel.reset();
-					if (parentSessionId) {
+					const forkedSessionId = sessionContract.current()?.id ?? null;
+					if (forkedSessionId) {
 						try {
-							const parentTurns = openSession(parentSessionId).turns();
-							rehydrateChatPanelFromTurns(chatPanel, parentTurns, { uptoTurnId: parentTurnId });
-							const replayMessages = buildReplayAgentMessagesFromTurns(parentTurns, { uptoTurnId: parentTurnId });
-							deps.chat.resetForSession(null, replayMessages);
+							const forkedTurns = openSession(forkedSessionId).turns();
+							rehydrateChatPanelFromTurns(chatPanel, forkedTurns, { uptoTurnId: parentTurnId });
+							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns, { uptoTurnId: parentTurnId });
+							deps.chat.resetForSession(parentTurnId, replayMessages);
 						} catch (err) {
 							const msg = err instanceof Error ? err.message : String(err);
 							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
 							deps.chat.resetForSession(null);
 						}
 					}
-					// The new branch starts a fresh tree (tree.json is empty on
-					// the fork; the parent-pointer lives on meta.json), so the
-					// next user turn must parent to null. When replay succeeds,
-					// resetForSession still seeds the provider context from the
-					// selected parent prefix so the visible fork transcript and
-					// model memory agree.
-					if (!parentSessionId) deps.chat.resetForSession(null);
+					if (!forkedSessionId) deps.chat.resetForSession(null);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/fork] fork failed: ${msg}\n`);

@@ -1,4 +1,11 @@
+import {
+	type ClioTurnRecord,
+	readSessionFileEntries,
+	type SessionTreeNode,
+	sessionPaths,
+} from "../../../engine/session.js";
 import type { SessionMeta } from "../contract.js";
+import { isSessionEntry, isSessionHeader } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 
@@ -27,6 +34,127 @@ export interface ForkResult {
 	parentMeta: SessionMeta;
 }
 
+interface LinkedRecord {
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	treeKind: SessionTreeNode["kind"] | null;
+	raw: unknown;
+}
+
+const LEGACY_TURN_KINDS: readonly ClioTurnRecord["kind"][] = [
+	"user",
+	"assistant",
+	"tool_call",
+	"tool_result",
+	"system",
+	"checkpoint",
+];
+
+function isLegacyTurnKind(value: unknown): value is ClioTurnRecord["kind"] {
+	return typeof value === "string" && (LEGACY_TURN_KINDS as readonly string[]).includes(value);
+}
+
+function isLegacyTurnRecord(value: unknown): value is ClioTurnRecord {
+	if (!value || typeof value !== "object") return false;
+	const v = value as Record<string, unknown>;
+	return (
+		typeof v.id === "string" &&
+		(v.parentId === null || typeof v.parentId === "string") &&
+		typeof v.at === "string" &&
+		isLegacyTurnKind(v.kind)
+	);
+}
+
+function linkedRecordFromEntry(entry: unknown): LinkedRecord | null {
+	if (isSessionHeader(entry)) return null;
+	if (isSessionEntry(entry)) {
+		return {
+			id: entry.turnId,
+			parentId: entry.parentTurnId,
+			timestamp: entry.timestamp,
+			treeKind: entry.kind === "message" ? entry.role : null,
+			raw: entry,
+		};
+	}
+	if (isLegacyTurnRecord(entry)) {
+		return {
+			id: entry.id,
+			parentId: entry.parentId,
+			timestamp: entry.at,
+			treeKind: entry.kind,
+			raw: entry,
+		};
+	}
+	return null;
+}
+
+function traceAncestry(records: ReadonlyArray<LinkedRecord>, leafTurnId: string): LinkedRecord[] {
+	const byId = new Map<string, LinkedRecord>();
+	for (const record of records) byId.set(record.id, record);
+	const path: LinkedRecord[] = [];
+	let current = byId.get(leafTurnId);
+	if (!current) throw new Error(`session.fork: parent turn not found: ${leafTurnId}`);
+	const seen = new Set<string>();
+	while (current) {
+		if (seen.has(current.id)) throw new Error(`session.fork: cycle in parent chain at ${current.id}`);
+		seen.add(current.id);
+		path.unshift(current);
+		if (current.parentId === null) break;
+		const next = byId.get(current.parentId);
+		if (!next) throw new Error(`session.fork: broken parent chain at ${current.id}`);
+		current = next;
+	}
+	return path;
+}
+
+function treeFromLinearPath(path: ReadonlyArray<LinkedRecord>): SessionTreeNode[] {
+	return path
+		.filter((record): record is LinkedRecord & { treeKind: SessionTreeNode["kind"] } => record.treeKind !== null)
+		.map((record) => ({
+			id: record.id,
+			parentId: record.parentId,
+			at: record.timestamp,
+			kind: record.treeKind,
+		}));
+}
+
+function sidecarBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>): boolean {
+	if (!isSessionEntry(entry)) return false;
+	if (entry.kind === "taskLedger") return entry.parentTurnId === null || pathIds.has(entry.parentTurnId);
+	if (entry.kind === "label") return pathIds.has(entry.targetTurnId);
+	if (entry.kind === "sessionInfo" && entry.targetTurnId) return pathIds.has(entry.targetTurnId);
+	return false;
+}
+
+function branchEntriesFromParent(
+	parentMeta: SessionMeta,
+	leafTurnId: string,
+): {
+	parentCurrentPath: string;
+	entries: unknown[];
+	tree: SessionTreeNode[];
+} {
+	const parentCurrentPath = sessionPaths(parentMeta).current;
+	const parsed = readSessionFileEntries(parentCurrentPath);
+	const linked = parsed.map(linkedRecordFromEntry).filter((entry): entry is LinkedRecord => entry !== null);
+	const path = traceAncestry(linked, leafTurnId);
+	const pathIds = new Set(path.map((record) => record.id));
+	const leafIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry)?.id === leafTurnId);
+	const entries = parsed.filter((entry, index) => {
+		if (isSessionHeader(entry)) return false;
+		const linkedEntry = linkedRecordFromEntry(entry);
+		if (linkedEntry && pathIds.has(linkedEntry.id)) return true;
+		if (leafIndex >= 0 && index > leafIndex) return false;
+		return sidecarBelongsToPath(entry, pathIds);
+	});
+	return {
+		parentCurrentPath,
+		entries,
+		tree: treeFromLinearPath(path),
+	};
+}
+
 /**
  * Fork the given state into a new session. Closes the prior writer
  * best-effort so the on-disk endedAt marker is written; the caller is
@@ -34,16 +162,20 @@ export interface ForkResult {
  */
 export function forkFromState(input: ForkInput): ForkResult {
 	const parentMeta = input.from.meta;
-	// Best-effort close of the prior writer before switching. Fire-and-forget:
-	// close() persists tree.json and meta.json atomically; waiting would tie
-	// every fork to disk latency.
+	// close() only performs synchronous filesystem work before resolving, so
+	// the following read sees a fully flushed parent transcript.
 	void input.from.writer.close();
+	const branch = branchEntriesFromParent(parentMeta, input.parentTurnId);
 
 	const cwd = input.cwd ?? parentMeta.cwd;
 	const next = startSession({
 		cwd,
 		model: parentMeta.model,
 		endpoint: parentMeta.endpoint,
+		initialEntries: branch.entries,
+		initialTree: branch.tree,
+		parentSession: branch.parentCurrentPath,
+		parentTurnId: input.parentTurnId,
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
 	return { next, parentMeta };

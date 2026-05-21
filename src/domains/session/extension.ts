@@ -2,8 +2,9 @@ import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { openSession } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
+import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import type { SessionInfoEntry } from "./entries.js";
+import type { LabelEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
 import {
 	appendEntry,
@@ -74,9 +75,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// happens only when the overlay opens.
 		const previews = new Map<string, string>();
 		try {
-			for (const turn of openSession(sessionId).turns()) {
-				const text = buildTurnPreview({ kind: turn.kind, payload: turn.payload });
-				if (text.length > 0) previews.set(turn.id, text);
+			for (const entry of collectSessionEntries(openSession(sessionId).turns())) {
+				if (entry.kind !== "message") continue;
+				const text = buildTurnPreview({ kind: entry.role, payload: entry.payload });
+				if (text.length > 0) previews.set(entry.turnId, text);
 			}
 		} catch {
 			// Best-effort: if the on-disk transcript cannot be read, fall back
@@ -184,15 +186,15 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// off the tree), so parentTurnId is left null.
 			if (state && state.meta.id === targetId) {
 				appendEntry(state, {
-					kind: "sessionInfo",
+					kind: "label",
 					parentTurnId: null,
 					targetTurnId: turnId,
 					label,
 				} as SessionEntryInput);
 				return;
 			}
-			const entry: SessionInfoEntry = {
-				kind: "sessionInfo",
+			const entry: LabelEntry = {
+				kind: "label",
 				turnId: newTurnId(),
 				parentTurnId: null,
 				timestamp: new Date().toISOString(),

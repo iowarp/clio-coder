@@ -1070,6 +1070,10 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 		const label = entry.name ?? (entry.label === undefined ? "" : entry.label);
 		return label.length === 0 ? [`${prefix} sessionInfo`] : [`${prefix} sessionInfo: ${truncateText(label, 120)}`];
 	}
+	if (entry.kind === "label") {
+		const label = entry.label === undefined ? "" : ` ${truncateText(entry.label, 120)}`;
+		return [`${prefix} label ${entry.targetTurnId}:${label}`];
+	}
 	if (entry.kind === "protectedArtifact") {
 		const artifact = protectedArtifactFromSessionEntry(entry);
 		const tool = entry.toolName === undefined ? "" : ` tool=${entry.toolName}`;
@@ -1079,6 +1083,11 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 				: ` validation=${artifact.validationCommand}${artifact.validationExitCode === undefined ? "" : ` exit=${artifact.validationExitCode}`}`;
 		return [
 			`${prefix} protectedArtifact protect:${tool} ${artifact.path} source=${artifact.source}${validation} reason=${truncateText(artifact.reason, 120)}`,
+		];
+	}
+	if (entry.kind === "taskLedger") {
+		return [
+			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,
 		];
 	}
 	if (entry.kind === "custom") return [`${prefix} custom:${entry.customType} ${previewUnknown(entry.data)}`];

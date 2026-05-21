@@ -5,6 +5,7 @@ import {
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
 	resumeSession as engineResumeSession,
+	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
@@ -36,11 +37,19 @@ export function startSession(input: {
 	cwd: string;
 	model?: string | null;
 	endpoint?: string | null;
+	initialEntries?: ReadonlyArray<unknown>;
+	initialTree?: ReadonlyArray<SessionTreeNode>;
+	parentSession?: string;
+	parentTurnId?: string;
 }): SessionManagerState {
 	const { meta, writer } = engineCreateSession({
 		cwd: input.cwd,
 		model: input.model ?? null,
 		endpoint: input.endpoint ?? null,
+		...(input.initialEntries !== undefined ? { initialEntries: input.initialEntries } : {}),
+		...(input.initialTree !== undefined ? { initialTree: input.initialTree } : {}),
+		...(input.parentSession !== undefined ? { parentSession: input.parentSession } : {}),
+		...(input.parentTurnId !== undefined ? { parentTurnId: input.parentTurnId } : {}),
 	});
 	return { meta: meta as SessionMeta, writer };
 }

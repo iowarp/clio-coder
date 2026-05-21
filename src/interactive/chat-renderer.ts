@@ -646,7 +646,9 @@ export function buildReplayAgentMessagesFromTurns(
 			case "thinkingLevelChange":
 			case "fileEntry":
 			case "sessionInfo":
+			case "label":
 			case "protectedArtifact":
+			case "taskLedger":
 				break;
 		}
 	}
@@ -785,6 +787,9 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			case "sessionInfo":
 				if (entry.name || entry.label) chatPanel.appendReplayBlock((width) => renderSessionInfoEntry(entry, width));
+				break;
+			case "label":
+			case "taskLedger":
 				break;
 		}
 	}
