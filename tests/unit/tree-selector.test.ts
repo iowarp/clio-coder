@@ -75,6 +75,7 @@ describe("tree-selector delete submode rendering", () => {
 		);
 		view.handleInput("d");
 		view.handleInput("y");
+		view.handleInput("\r");
 		const rendered = view.render(TREE_OVERLAY_WIDTH).join("\n");
 		ok(
 			rendered.includes("[tree] cannot delete the currently-open session"),
@@ -99,8 +100,34 @@ describe("tree-selector delete submode rendering", () => {
 		);
 		view.handleInput("d");
 		view.handleInput("y");
+		strictEqual(called, false);
+		view.handleInput("\r");
 		strictEqual(called, true);
 		const rendered = view.render(TREE_OVERLAY_WIDTH).join("\n");
 		ok(rendered.includes("deleted"), `rendered:\n${rendered}`);
+	});
+
+	it("cancels delete confirmation instead of treating one y key as confirmation", () => {
+		const snapshot = buildSnapshot("s1");
+		let called = false;
+		const view = createTreeOverlayViewForTesting(
+			{
+				session: fakeSession(snapshot, () => {
+					called = true;
+				}),
+				onSwitchBranch: () => {},
+				onClose: () => {},
+			},
+			snapshot,
+		);
+		view.handleInput("d");
+		view.handleInput("y");
+		strictEqual(called, false);
+		const pending = view.render(TREE_OVERLAY_WIDTH).join("\n");
+		ok(pending.includes("typed:y"), `pending confirmation missing; rendered:\n${pending}`);
+		view.handleInput("n");
+		strictEqual(called, false);
+		const cancelled = view.render(TREE_OVERLAY_WIDTH).join("\n");
+		ok(!cancelled.includes("typed:y"), `confirmation did not cancel; rendered:\n${cancelled}`);
 	});
 });
