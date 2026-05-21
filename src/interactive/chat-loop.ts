@@ -14,10 +14,13 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
 	type EndpointDescriptor,
+	firstRuntimeResolutionError,
 	type ProvidersContract,
+	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
-	resolveModelCapabilities,
+	refineRuntimeTargetWithModelHints,
 	resolveModelRuntimeCapabilitiesForModel,
+	resolveRuntimeTarget,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -205,7 +208,7 @@ interface ChatLoopTarget {
 	endpoint: EndpointDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
-	thinkingLevel: ThinkingLevel;
+	runtimeResolution: ResolvedRuntimeTarget;
 }
 
 interface AgentRuntime {
@@ -213,6 +216,7 @@ interface AgentRuntime {
 	endpointId: string;
 	runtimeId: string;
 	wireModelId: string;
+	runtimeResolution: ResolvedRuntimeTarget;
 	lastSessionShellHash: string | null;
 }
 
@@ -825,43 +829,35 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const endpointId = settings.orchestrator.endpoint?.trim();
 		const wireModelId = settings.orchestrator.model?.trim();
 		if (!endpointId || !wireModelId) return null;
-		const endpoint = deps.providers.getEndpoint(endpointId);
-		if (!endpoint) {
-			throw new Error(`[Clio Coder] orchestrator target='${endpointId}' not found in settings.targets`);
-		}
-		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
-		if (!runtimeDesc) {
-			throw new Error(`[Clio Coder] orchestrator runtime='${endpoint.runtime}' not registered`);
-		}
-		if (runtimeDesc.kind === "subprocess") {
-			throw new Error(
-				`[Clio Coder] target '${endpointId}' uses a subprocess runtime (${runtimeDesc.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
-			);
+		const resolved = resolveRuntimeTarget(deps.providers, {
+			endpointId,
+			wireModelId,
+			requestedThinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+			use: "orchestrator",
+			requireTools: deps.modes.visibleTools().size > 0,
+			requireOutputBudget: true,
+		});
+		if (!resolved.ok) {
+			const message = firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics[0]?.message;
+			throw new Error(`[Clio Coder] ${message ?? "orchestrator target resolution failed"}`);
 		}
 		return {
-			endpoint,
-			runtime: runtimeDesc,
-			wireModelId,
-			thinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+			endpoint: resolved.target.endpoint,
+			runtime: resolved.target.runtime,
+			wireModelId: resolved.target.wireModelId,
+			runtimeResolution: resolved.target,
 		};
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
 		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
-		const detectedReasoning = deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId);
+		target.runtimeResolution = refineRuntimeTargetWithModelHints(target.runtimeResolution, synth);
 		const mutable = synth as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
-		const status = deps.providers.list().find((entry) => entry.endpoint.id === target.endpoint.id);
-		if (status) {
-			const caps = resolveModelCapabilities(status, target.wireModelId, deps.providers.knowledgeBase, {
-				detectedReasoning,
-			});
-			mutable.contextWindow = caps.contextWindow;
-			mutable.maxTokens = caps.maxTokens;
-			mutable.reasoning = caps.reasoning;
-		} else if (detectedReasoning === true && mutable.reasoning !== true) {
-			mutable.reasoning = true;
-		}
+		const caps = target.runtimeResolution.capabilities;
+		mutable.contextWindow = caps.contextWindow;
+		mutable.maxTokens = caps.maxTokens;
+		mutable.reasoning = caps.reasoning;
 		return synth as unknown as Model<never>;
 	};
 
@@ -876,30 +872,35 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					runtime.endpointId === target.endpoint.id &&
 					runtime.wireModelId === target.wireModelId
 				) {
-					const liveModel = runtime.agent.state.model as { reasoning?: boolean } | undefined;
-					if (liveModel && liveModel.reasoning !== reasoning) liveModel.reasoning = reasoning;
-					const requested = deps.getSettings().orchestrator.thinkingLevel ?? "off";
-					if (requested !== "off") {
-						runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(
-							runtime.agent.state.model as Model<never>,
-							requested,
-						);
+					const refreshed = resolveRuntimeTarget(deps.providers, {
+						endpointId: target.endpoint.id,
+						wireModelId: target.wireModelId,
+						requestedThinkingLevel: deps.getSettings().orchestrator.thinkingLevel ?? "off",
+						use: "orchestrator",
+						requireTools: deps.modes.visibleTools().size > 0,
+						requireOutputBudget: true,
+					});
+					if (!refreshed.ok) return;
+					const liveModel = runtime.agent.state.model as
+						| { contextWindow?: number; maxTokens?: number; reasoning?: boolean }
+						| undefined;
+					const runtimeResolution = liveModel
+						? refineRuntimeTargetWithModelHints(refreshed.target, liveModel)
+						: refreshed.target;
+					if (liveModel) {
+						const caps = runtimeResolution.capabilities;
+						liveModel.contextWindow = caps.contextWindow;
+						liveModel.maxTokens = caps.maxTokens;
+						liveModel.reasoning = caps.reasoning;
 					}
+					runtime.agent.state.thinkingLevel = runtimeResolution.effectiveThinkingLevel;
+					runtime.runtimeResolution = runtimeResolution;
 				}
 			})
 			.catch(() => {
 				// Probe failures are non-fatal; the cache stays cold and /thinking
 				// keeps showing the runtime defaults until the next probe attempt.
 			});
-	};
-
-	/**
-	 * Mirror pi-coding-agent's model-level thinking clamp. The orchestrator's
-	 * requested level is preserved in settings; this only governs what reaches
-	 * pi-agent-core for the active model.
-	 */
-	const clampThinkingLevelForModel = (model: Model<never>, requested: ThinkingLevel): ThinkingLevel => {
-		return resolveModelRuntimeCapabilitiesForModel(model, requested).thinking.effectiveLevel;
 	};
 
 	const cleanupSdkSessionResources = (sessionId: string | undefined): void => {
@@ -952,10 +953,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// or Alt+T); reconcile the clamped level so the next prompt
 			// dispatches under the current intent without forcing a rebuild.
 			ensureReasoningProbe(target);
-			const desiredLevel = clampThinkingLevelForModel(runtime.agent.state.model as Model<never>, target.thinkingLevel);
+			const runtimeResolution = refineRuntimeTargetWithModelHints(target.runtimeResolution, runtime.agent.state.model);
+			const desiredLevel = runtimeResolution.effectiveThinkingLevel;
 			if (runtime.agent.state.thinkingLevel !== desiredLevel) {
 				runtime.agent.state.thinkingLevel = desiredLevel;
 			}
+			runtime.runtimeResolution = runtimeResolution;
 			return runtime;
 		}
 
@@ -974,7 +977,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const nextModel = synthesizeModel(target);
 			runtime.agent.state.model = nextModel;
 			runtime.wireModelId = target.wireModelId;
-			runtime.agent.state.thinkingLevel = clampThinkingLevelForModel(nextModel, target.thinkingLevel);
+			const effectiveThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
+			runtime.agent.state.thinkingLevel = effectiveThinkingLevel;
+			runtime.runtimeResolution = target.runtimeResolution;
 			appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
 			// Ollama pins the active model with keep_alive=-1; fire a one-shot
@@ -988,7 +993,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 
 		const model = synthesizeModel(target);
-		const initialThinkingLevel = clampThinkingLevelForModel(model, target.thinkingLevel);
+		const initialThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
 		const tools = resolveRuntimeTools(deps, currentToolInvokeOptions);
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
@@ -1032,6 +1037,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			endpointId: target.endpoint.id,
 			runtimeId: target.runtime.id,
 			wireModelId: target.wireModelId,
+			runtimeResolution: target.runtimeResolution,
 			lastSessionShellHash: null,
 		};
 

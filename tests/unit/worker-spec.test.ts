@@ -66,6 +66,37 @@ describe("dispatch worker spec contract", () => {
 			...spec(),
 			mode: "default",
 			thinkingLevel: "medium",
+			runtimeResolution: {
+				targetId: "openai",
+				runtimeId: "openai",
+				runtimeKind: "http",
+				apiFamily: "openai-responses",
+				auth: "api-key",
+				authRequired: true,
+				wireModelId: "gpt-test",
+				requestedThinkingLevel: "high",
+				effectiveThinkingLevel: "medium",
+				capabilities: {
+					chat: true,
+					tools: true,
+					reasoning: true,
+					vision: false,
+					streaming: true,
+					contextWindow: 128000,
+					maxTokens: 4096,
+				},
+				thinking: {
+					mechanism: "effort-levels",
+					display: "medium",
+					supportedLevels: ["off", "low", "medium", "high"],
+					budgetEnforcement: "none",
+					noticeKind: "applied",
+					notice: "",
+				},
+				request: { reasoningEffort: "medium", budgetEnforcement: "none" },
+				response: { parser: "none", stripTokenizerSentinels: true },
+				diagnostics: [{ severity: "warning", code: "thinking-coerced", message: "coerced" }],
+			},
 			dynamicPromptMessages: [{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" }],
 			allowedTools: ["read", "bash"],
 			modelCapabilities: {
@@ -95,6 +126,8 @@ describe("dispatch worker spec contract", () => {
 			{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" },
 		]);
 		deepStrictEqual(parsed.allowedTools, ["read", "bash"]);
+		strictEqual(parsed.runtimeResolution?.runtimeId, "openai");
+		strictEqual(parsed.runtimeResolution?.effectiveThinkingLevel, "medium");
 	});
 
 	it("rejects malformed consumed worker fields before runtime execution", () => {
@@ -112,6 +145,14 @@ describe("dispatch worker spec contract", () => {
 		);
 		throws(() => parseWorkerSpec({ ...spec(), mode: "private-mode" }), /WorkerSpec\.mode/);
 		throws(() => parseWorkerSpec({ ...spec(), allowedTools: ["read", ""] }), /WorkerSpec\.allowedTools\[1\]/);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec(),
+					runtimeResolution: { targetId: "openai", runtimeId: "openai", capabilities: { chat: true } },
+				}),
+			/WorkerSpec\.runtimeResolution\.runtimeKind/,
+		);
 		throws(
 			() =>
 				parseWorkerSpec({

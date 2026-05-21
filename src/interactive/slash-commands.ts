@@ -594,9 +594,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		argumentHint: "[pattern[:thinking]]",
 		kinds: ["model", "model-set"],
 		match(trimmed) {
-			if (trimmed === "/model") return { kind: "model" };
-			if (trimmed.startsWith("/model ")) {
-				const pattern = trimmed.slice("/model ".length).trim();
+			if (trimmed === "/model" || trimmed === "/models") return { kind: "model" };
+			for (const prefix of ["/model ", "/models "]) {
+				if (!trimmed.startsWith(prefix)) continue;
+				const pattern = trimmed.slice(prefix.length).trim();
 				if (pattern.length > 0) return { kind: "model-set", pattern };
 			}
 			return null;

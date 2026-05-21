@@ -7,6 +7,7 @@
  */
 
 import type { ToolProfileName } from "../../tools/profiles.js";
+import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
@@ -141,6 +142,8 @@ export interface RunReceipt {
 	toolStats: ToolCallStat[];
 	safety?: RunReceiptSafetySummary;
 	reproducibility?: RunReceiptReproducibility;
+	/** Effective target/runtime/model/thinking/capability decision for this run. */
+	runtimeResolution?: RuntimeTargetSnapshot;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

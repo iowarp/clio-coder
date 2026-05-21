@@ -58,6 +58,13 @@ export interface TerminalSettings {
 	showTerminalProgress: boolean;
 }
 
+export interface ModelSelectorSettings {
+	/** Exact target/model refs shown in the focused model picker. */
+	favorites: string[];
+	/** Maximum number of recently selected target/model refs to retain. */
+	recentLimit: number;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -79,6 +86,10 @@ export const DEFAULT_SETTINGS = {
 		profiles: {} as WorkerProfiles,
 	},
 	scope: [] as string[],
+	modelSelector: {
+		favorites: [] as string[],
+		recentLimit: 12,
+	} as ModelSelectorSettings,
 	budget: {
 		sessionCeilingUsd: 5,
 		concurrency: "auto" as "auto" | number,
@@ -94,6 +105,7 @@ export const DEFAULT_SETTINGS = {
 	keybindings: {} as Record<string, string | string[]>,
 	state: {
 		lastMode: "default" as "default" | "advise" | "super",
+		recentModels: [] as string[],
 	},
 	compaction: {
 		threshold: 0.8,
@@ -210,6 +222,12 @@ workers:
 # Ctrl+P cycling order: plain target ids or "target/model" refs.
 scope: []
 
+# /models focused picker. Favorites are exact "target/model" refs shown before
+# the full search catalog. Recent models are stored under state.recentModels.
+modelSelector:
+  favorites: []
+  recentLimit: 12
+
 # Session budget guardrails.
 budget:
   sessionCeilingUsd: 5
@@ -225,6 +243,7 @@ keybindings: {}
 # Transient session state. Clio Coder rewrites this block; do not hand-edit.
 state:
   lastMode: default
+  recentModels: []
 
 # Context compaction controls (Phase 12).
 #   threshold    fraction (0..1) of the orchestrator's contextWindow at which

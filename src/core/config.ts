@@ -416,6 +416,26 @@ function normalizeWorkerProfiles(
 	return out;
 }
 
+function normalizeModelRefs(value: unknown, endpoints: ReadonlyArray<ClioSettings["endpoints"][number]>): string[] {
+	const byId = new Map(endpoints.map((endpoint) => [endpoint.id, endpoint] as const));
+	const seen = new Set<string>();
+	const out: string[] = [];
+	if (!Array.isArray(value)) return out;
+	for (const entry of value) {
+		const trimmed = trimString(entry);
+		if (!trimmed) continue;
+		const [endpointId, ...modelParts] = trimmed.split("/");
+		if (!endpointId || !byId.has(endpointId) || modelParts.length === 0) continue;
+		const model = modelParts.join("/").trim();
+		if (!model) continue;
+		const normalized = `${endpointId}/${model}`;
+		if (seen.has(normalized)) continue;
+		seen.add(normalized);
+		out.push(normalized);
+	}
+	return out;
+}
+
 function normalizeScope(
 	value: unknown,
 	endpoints: ReadonlyArray<ClioSettings["endpoints"][number]>,
@@ -545,6 +565,16 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	}
 
 	settings.scope = normalizeScope(raw.scope, settings.endpoints);
+	if (isPlainObject(raw.modelSelector)) {
+		settings.modelSelector.favorites = normalizeModelRefs(raw.modelSelector.favorites, settings.endpoints);
+		if (
+			typeof raw.modelSelector.recentLimit === "number" &&
+			Number.isFinite(raw.modelSelector.recentLimit) &&
+			raw.modelSelector.recentLimit >= 1
+		) {
+			settings.modelSelector.recentLimit = Math.floor(raw.modelSelector.recentLimit);
+		}
+	}
 	if (settings.scope.length === 0) {
 		const legacyProvider = isPlainObject(raw.provider) ? raw.provider : undefined;
 		settings.scope = normalizeLegacyScope(legacyProvider?.scope, settings.endpoints, legacyEndpoints.pairToEndpointId);
@@ -609,6 +639,10 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 		if (raw.state.lastMode === "default" || raw.state.lastMode === "advise" || raw.state.lastMode === "super") {
 			settings.state.lastMode = raw.state.lastMode;
 		}
+		settings.state.recentModels = normalizeModelRefs(raw.state.recentModels, settings.endpoints).slice(
+			0,
+			settings.modelSelector.recentLimit,
+		);
 	}
 
 	if (isPlainObject(raw.compaction)) {

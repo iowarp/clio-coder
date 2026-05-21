@@ -1760,6 +1760,20 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				deps.onSelectModel?.(ref);
 				footer.refresh();
 			},
+			onToggleFavorite: (ref, favorite) => {
+				if (!deps.getSettings || !deps.writeSettings) return;
+				const next = structuredClone(deps.getSettings()) as ClioSettings;
+				const value = `${ref.endpoint}/${ref.model}`;
+				const current = new Set(next.modelSelector?.favorites ?? []);
+				if (favorite) current.add(value);
+				else current.delete(value);
+				next.modelSelector = {
+					...(next.modelSelector ?? { recentLimit: 12, favorites: [] }),
+					favorites: [...current],
+				};
+				deps.writeSettings(next);
+				footer.refresh();
+			},
 			onClose: () => closeOverlay(),
 		});
 		tui.requestRender();

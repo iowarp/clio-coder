@@ -69,6 +69,19 @@ export {
 	splitThinkingSuffix,
 } from "./resolver.js";
 export {
+	firstRuntimeResolutionError,
+	type ResolvedRuntimeTarget,
+	type RuntimeCapabilityDecision,
+	type RuntimeResolutionDiagnostic,
+	type RuntimeResolutionSeverity,
+	type RuntimeResolutionUse,
+	type RuntimeTargetResolution,
+	type RuntimeTargetSnapshot,
+	refineRuntimeTargetWithModelHints,
+	resolveRuntimeTarget,
+	runtimeTargetSnapshot,
+} from "./runtime-resolution.js";
+export {
 	buildProviderSupportEntry,
 	compareProviderSupportEntries,
 	configuredEndpointsForRuntime,
@@ -102,4 +115,5 @@ export type {
 	RuntimeAuth,
 	RuntimeDescriptor,
 	RuntimeKind,
+	RuntimeTier,
 } from "./types/runtime-descriptor.js";

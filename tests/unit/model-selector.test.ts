@@ -270,6 +270,115 @@ describe("interactive/model-selector", () => {
 		ok(result.items[1]?.description?.includes("8kctx") ?? false);
 	});
 
+	it("defaults the model overlay to focused active, favorite, recent, and target-default rows", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "openai";
+		settings.orchestrator.model = "gpt-5.4";
+		settings.modelSelector.favorites = ["openai/gpt-5.4-mini"];
+		settings.state.recentModels = ["openai/gpt-5.4-pro"];
+		const runtime = {
+			id: "openai-codex",
+			displayName: "OpenAI Codex",
+			kind: "http",
+			apiFamily: "openai-codex-responses",
+			auth: "oauth",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => {
+				throw new Error("unused");
+			},
+		} as const;
+		const providers: ProvidersContract = {
+			list: () => [
+				{
+					endpoint: {
+						id: "openai",
+						runtime: "openai-codex",
+						defaultModel: "gpt-5.4",
+						wireModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-pro"],
+					},
+					runtime,
+					available: true,
+					reason: "ready",
+					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 100 },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true, contextWindow: 272000 },
+					discoveredModels: [],
+				},
+				{
+					endpoint: {
+						id: "local",
+						runtime: "openai-codex",
+						defaultModel: "local-default",
+						wireModels: ["local-default", "local-bulk-001"],
+					},
+					runtime,
+					available: true,
+					reason: "ready",
+					health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 10 },
+					capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8192 },
+					discoveredModels: [],
+				},
+			],
+			getEndpoint: () => null,
+			getRuntime: () => null,
+			probeAll: async () => undefined,
+			probeAllLive: async () => undefined,
+			probeEndpoint: async () => null,
+			disconnectEndpoint: () => null,
+			auth: {
+				statusForTarget: () => ({
+					providerId: "openai-codex",
+					available: true,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				}),
+				resolveForTarget: async () => {
+					throw new Error("unused");
+				},
+				getStored: () => null,
+				listStored: () => [],
+				setApiKey: () => undefined,
+				remove: () => undefined,
+				login: async () => undefined,
+				logout: () => undefined,
+				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => undefined,
+				clearRuntimeOverrideForTarget: () => undefined,
+			},
+			credentials: { hasKey: () => false, get: () => null, set: () => undefined, remove: () => undefined },
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
+			knowledgeBase: null,
+		};
+
+		const result = buildModelItems({ settings, providers });
+		strictEqual(result.rows.find((row) => row.value === "openai/gpt-5.4")?.visibleByDefault, true);
+		strictEqual(result.rows.find((row) => row.value === "openai/gpt-5.4-mini")?.favorite, true);
+		strictEqual(result.rows.find((row) => row.value === "openai/gpt-5.4-pro")?.recent, true);
+		strictEqual(result.rows.find((row) => row.value === "local/local-default")?.visibleByDefault, true);
+		strictEqual(result.rows.find((row) => row.value === "local/local-bulk-001")?.visibleByDefault, false);
+
+		const focus = __modelSelectorTest.renderModelOverlayLines({
+			rows: result.rows,
+			summary: result.summary,
+			selectedIndex: 0,
+			query: "",
+			width: 96,
+		});
+		ok(!focus.some((line) => line.includes("local-bulk-001")), focus.join("\n"));
+		const search = __modelSelectorTest.renderModelOverlayLines({
+			rows: result.rows,
+			summary: result.summary,
+			selectedIndex: 0,
+			query: "bulk",
+			width: 96,
+		});
+		ok(
+			search.some((line) => line.includes("local-bulk-001")),
+			search.join("\n"),
+		);
+	});
+
 	it("keeps key model metadata visible on narrow framed overlays", () => {
 		const longModel = "Qwen3.6-35B-A3B-UD-Q4_K_XL-extra-long-local-build";
 		const width = __modelSelectorTest.resolveOverlayWidth(80) - 4;
@@ -356,7 +465,7 @@ describe("interactive/model-selector", () => {
 			query: "studio 262k",
 			width,
 		});
-		ok(filtered[0]?.includes('filter "studio 262k"'), filtered.join("\n"));
+		ok(filtered[0]?.includes('search "studio 262k"'), filtered.join("\n"));
 		ok(
 			filtered.some((line) => line.includes("LM Studio")),
 			filtered.join("\n"),

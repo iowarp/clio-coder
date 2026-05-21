@@ -8,6 +8,7 @@ import type {
 	RuntimeAuth,
 	RuntimeDescriptor,
 	RuntimeKind,
+	RuntimeTargetSnapshot,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 
@@ -36,6 +37,8 @@ export interface WorkerSpec {
 	sessionId?: string;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
+	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
+	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
 	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
@@ -111,6 +114,10 @@ const MIDDLEWARE_EFFECT_KINDS = [
 	"require_validation",
 	"record_memory_candidate",
 ] as const;
+const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
+const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
+const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;
+const THINKING_NOTICE_KINDS = ["applied", "ignored-on-off", "always-on", "unsupported"] as const;
 
 export function serializeWorkerRuntimeDescriptor(runtime: RuntimeDescriptor): SerializedWorkerRuntimeDescriptor {
 	return {
@@ -251,6 +258,62 @@ function validateAllowedTools(value: unknown): void {
 	}
 }
 
+function validateRuntimeCapabilityDecision(value: unknown, source: string): void {
+	const caps = readRecord(value, source);
+	for (const key of ["chat", "tools", "reasoning", "vision", "streaming"] as const) {
+		if (typeof caps[key] !== "boolean") throw new Error(`${source}.${key} must be a boolean`);
+	}
+	for (const key of ["contextWindow", "maxTokens"] as const) {
+		const n = caps[key];
+		if (typeof n !== "number" || !Number.isFinite(n) || n < 0)
+			throw new Error(`${source}.${key} must be a non-negative finite number`);
+	}
+}
+
+function validateRuntimeResolution(value: unknown): void {
+	if (value === undefined) return;
+	const resolution = readRecord(value, "WorkerSpec.runtimeResolution");
+	readString(resolution.targetId, "WorkerSpec.runtimeResolution.targetId");
+	readString(resolution.runtimeId, "WorkerSpec.runtimeResolution.runtimeId");
+	readEnum(resolution.runtimeKind, "WorkerSpec.runtimeResolution.runtimeKind", RUNTIME_KINDS);
+	readEnum(resolution.apiFamily, "WorkerSpec.runtimeResolution.apiFamily", RUNTIME_API_FAMILIES);
+	readEnum(resolution.auth, "WorkerSpec.runtimeResolution.auth", RUNTIME_AUTHS);
+	if (typeof resolution.authRequired !== "boolean") {
+		throw new Error("WorkerSpec.runtimeResolution.authRequired must be a boolean");
+	}
+	readString(resolution.wireModelId, "WorkerSpec.runtimeResolution.wireModelId");
+	readEnum(resolution.requestedThinkingLevel, "WorkerSpec.runtimeResolution.requestedThinkingLevel", THINKING_LEVELS);
+	readEnum(resolution.effectiveThinkingLevel, "WorkerSpec.runtimeResolution.effectiveThinkingLevel", THINKING_LEVELS);
+	validateRuntimeCapabilityDecision(resolution.capabilities, "WorkerSpec.runtimeResolution.capabilities");
+	const thinking = readRecord(resolution.thinking, "WorkerSpec.runtimeResolution.thinking");
+	readEnum(thinking.mechanism, "WorkerSpec.runtimeResolution.thinking.mechanism", THINKING_MECHANISMS);
+	readString(thinking.display, "WorkerSpec.runtimeResolution.thinking.display", { allowEmpty: true });
+	for (const level of readStringArray(
+		thinking.supportedLevels,
+		"WorkerSpec.runtimeResolution.thinking.supportedLevels",
+	)) {
+		readEnum(level, "WorkerSpec.runtimeResolution.thinking.supportedLevels[]", THINKING_LEVELS);
+	}
+	readEnum(
+		thinking.budgetEnforcement,
+		"WorkerSpec.runtimeResolution.thinking.budgetEnforcement",
+		THINKING_BUDGET_ENFORCEMENTS,
+	);
+	readEnum(thinking.noticeKind, "WorkerSpec.runtimeResolution.thinking.noticeKind", THINKING_NOTICE_KINDS);
+	readString(thinking.notice, "WorkerSpec.runtimeResolution.thinking.notice", { allowEmpty: true });
+	readRecord(resolution.request, "WorkerSpec.runtimeResolution.request");
+	readRecord(resolution.response, "WorkerSpec.runtimeResolution.response");
+	if (!Array.isArray(resolution.diagnostics)) {
+		throw new Error("WorkerSpec.runtimeResolution.diagnostics must be an array");
+	}
+	for (let index = 0; index < resolution.diagnostics.length; index += 1) {
+		const diag = readRecord(resolution.diagnostics[index], `WorkerSpec.runtimeResolution.diagnostics[${index}]`);
+		readEnum(diag.severity, `WorkerSpec.runtimeResolution.diagnostics[${index}].severity`, RUNTIME_RESOLUTION_SEVERITIES);
+		readString(diag.code, `WorkerSpec.runtimeResolution.diagnostics[${index}].code`);
+		readString(diag.message, `WorkerSpec.runtimeResolution.diagnostics[${index}].message`);
+	}
+}
+
 function validateMiddlewareSnapshot(value: unknown): void {
 	const snapshot = readRecord(value, "WorkerSpec.middlewareSnapshot");
 	if (snapshot.version !== 1) throw new Error("WorkerSpec.middlewareSnapshot version must be 1");
@@ -301,6 +364,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalEnum(spec, "mode", "WorkerSpec", MODE_NAMES);
 	readOptionalEnum(spec, "autoApprove", "WorkerSpec", AUTO_APPROVE_VALUES);
 	validateAllowedTools(spec.allowedTools);
+	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);

@@ -345,6 +345,13 @@ export function advanceScopedTarget(
 	return { endpoint, model: endpointDescriptor?.defaultModel ?? null };
 }
 
+function rememberRecentModel(settings: ClioSettings, endpoint: string, model: string): void {
+	const value = `${endpoint}/${model}`;
+	const limit = Math.max(1, Math.floor(settings.modelSelector?.recentLimit ?? 12));
+	const previous = settings.state.recentModels ?? [];
+	settings.state.recentModels = [value, ...previous.filter((entry) => entry !== value)].slice(0, limit);
+}
+
 function cycleScoped(
 	direction: "forward" | "backward",
 	readCurrent: () => Readonly<ClioSettings> = readSettings,
@@ -649,6 +656,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			updateSettings((current) => {
 				current.orchestrator.endpoint = endpoint;
 				current.orchestrator.model = model;
+				rememberRecentModel(current, endpoint, model);
 			});
 		},
 		onSetScope: (scope) => {

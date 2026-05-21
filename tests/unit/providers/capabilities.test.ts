@@ -2,8 +2,10 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { mergeCapabilities } from "../../../src/domains/providers/capabilities.js";
+import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../../src/domains/providers/index.js";
 import { resolveModelCapabilities } from "../../../src/domains/providers/model-capabilities.js";
 import { resolveModelRuntimeCapabilities } from "../../../src/domains/providers/model-runtime-capabilities.js";
+import { resolveRuntimeTarget, runtimeTargetSnapshot } from "../../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../../src/domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../../../src/domains/providers/types/capability-flags.js";
 import {
@@ -204,6 +206,190 @@ describe("providers/model-runtime-capabilities", () => {
 		strictEqual(resolved.request.budgetTokens, 4096);
 		strictEqual(resolved.request.budgetEnforcement, "informational");
 		ok(resolved.thinking.notice.includes("advisory"));
+	});
+});
+
+describe("providers/runtime-resolution", () => {
+	function plainRuntime(overrides: Partial<RuntimeDescriptor> = {}): RuntimeDescriptor {
+		return {
+			id: "plain-http",
+			displayName: "Plain HTTP",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: base({ tools: true, reasoning: false }),
+			synthesizeModel: () => ({ id: "plain", provider: "openai" }) as never,
+			...overrides,
+		};
+	}
+
+	function providersFor(runtime: RuntimeDescriptor, status?: EndpointStatus): ProvidersContract {
+		const endpoint = status?.endpoint ?? {
+			id: "mini",
+			runtime: runtime.id,
+			defaultModel: "nemotron-cascade-2-30b-a3b-i1",
+		};
+		return {
+			list: () => (status ? [status] : []),
+			getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+			getRuntime: (id) => (id === runtime.id ? runtime : null),
+			probeAll: async () => {},
+			probeAllLive: async () => {},
+			probeEndpoint: async () => status ?? null,
+			disconnectEndpoint: () => status ?? null,
+			getDetectedReasoning: () => null,
+			probeReasoningForModel: async () => null,
+			auth: {
+				statusForTarget: () => ({
+					providerId: runtime.id,
+					available: true,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				}),
+				resolveForTarget: async () => ({
+					providerId: runtime.id,
+					available: true,
+					credentialType: null,
+					source: "none",
+					detail: null,
+				}),
+				getStored: () => null,
+				listStored: () => [],
+				setApiKey: () => {},
+				remove: () => {},
+				login: async () => {},
+				logout: () => {},
+				getOAuthProviders: () => [],
+				setRuntimeOverrideForTarget: () => {},
+				clearRuntimeOverrideForTarget: () => {},
+			},
+			credentials: { hasKey: () => false, get: () => null, set: () => {}, remove: () => {} },
+			knowledgeBase: null,
+		};
+	}
+
+	it("reports missing target, runtime, and model configuration before model resolution", () => {
+		const runtime = plainRuntime();
+
+		const unconfiguredTarget = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "",
+			wireModelId: "plain",
+		});
+		strictEqual(unconfiguredTarget.ok, false);
+		strictEqual(unconfiguredTarget.diagnostics[0]?.code, "target-not-configured");
+
+		const missingTarget = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "missing",
+			wireModelId: "plain",
+		});
+		strictEqual(missingTarget.ok, false);
+		strictEqual(missingTarget.diagnostics[0]?.code, "target-not-found");
+
+		const missingRuntimeProviders: ProvidersContract = { ...providersFor(runtime), getRuntime: () => null };
+		const missingRuntime = resolveRuntimeTarget(missingRuntimeProviders, {
+			endpointId: "mini",
+			wireModelId: "plain",
+		});
+		strictEqual(missingRuntime.ok, false);
+		strictEqual(missingRuntime.diagnostics[0]?.code, "runtime-not-registered");
+
+		const missingModelProviders: ProvidersContract = {
+			...providersFor(runtime),
+			getEndpoint: (id) => (id === "mini" ? { id: "mini", runtime: runtime.id } : null),
+		};
+		const missingModel = resolveRuntimeTarget(missingModelProviders, { endpointId: "mini" });
+		strictEqual(missingModel.ok, false);
+		strictEqual(missingModel.diagnostics[0]?.code, "model-not-configured");
+	});
+
+	it("blocks subprocess runtimes for orchestrator and print surfaces", () => {
+		const runtime = plainRuntime({
+			id: "claude-code-cli",
+			displayName: "Claude Code CLI",
+			kind: "subprocess",
+			apiFamily: "subprocess-claude-code",
+			auth: "cli",
+		});
+
+		const orchestrator = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "mini",
+			wireModelId: "claude-sonnet-4-6",
+			use: "orchestrator",
+		});
+		const print = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "mini",
+			wireModelId: "claude-sonnet-4-6",
+			use: "print",
+		});
+
+		strictEqual(orchestrator.ok, false);
+		strictEqual(orchestrator.diagnostics[0]?.code, "subprocess-orchestrator-unsupported");
+		strictEqual(print.ok, false);
+		strictEqual(print.diagnostics[0]?.code, "subprocess-orchestrator-unsupported");
+	});
+
+	it("keeps tools and output-budget incompatibilities as non-fatal diagnostics", () => {
+		const runtime = plainRuntime({ defaultCapabilities: base({ tools: false, maxTokens: 0 }) });
+
+		const resolved = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "mini",
+			wireModelId: "plain",
+			requireTools: true,
+			requireOutputBudget: true,
+			use: "orchestrator",
+		});
+
+		ok(resolved.ok);
+		ok(resolved.diagnostics.some((entry) => entry.code === "tools-unsupported"));
+		ok(resolved.diagnostics.some((entry) => entry.code === "output-budget-unknown"));
+	});
+
+	it("keeps requested and effective thinking decisions in one descriptor", () => {
+		const runtime: RuntimeDescriptor = {
+			id: "lmstudio-native",
+			displayName: "LM Studio",
+			kind: "http",
+			apiFamily: "lmstudio-native",
+			auth: "none",
+			defaultCapabilities: base({ reasoning: true, thinkingFormat: "qwen-chat-template", tools: true }),
+			synthesizeModel: () => ({ id: "nemotron-cascade-2-30b-a3b-i1", provider: "lmstudio" }) as never,
+		};
+
+		const resolved = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "mini",
+			wireModelId: "nemotron-cascade-2-30b-a3b-i1",
+			requestedThinkingLevel: "high",
+			use: "orchestrator",
+			requireTools: true,
+		});
+
+		ok(resolved.ok);
+		strictEqual(resolved.target.requestedThinkingLevel, "high");
+		strictEqual(resolved.target.effectiveThinkingLevel, "low");
+		strictEqual(resolved.target.modelRuntime.thinking.display, "on");
+		ok(resolved.target.diagnostics.some((entry) => entry.code === "thinking-coerced"));
+
+		const snapshot = runtimeTargetSnapshot(resolved.target);
+		strictEqual(snapshot.targetId, "mini");
+		strictEqual(snapshot.runtimeId, "lmstudio-native");
+		strictEqual(snapshot.requestedThinkingLevel, "high");
+		strictEqual(snapshot.effectiveThinkingLevel, "low");
+		strictEqual(snapshot.thinking.display, "on");
+	});
+
+	it("rejects required capabilities before dispatch can spawn", () => {
+		const runtime = plainRuntime({ defaultCapabilities: base({ tools: false, reasoning: false }) });
+
+		const resolved = resolveRuntimeTarget(providersFor(runtime), {
+			endpointId: "mini",
+			wireModelId: "plain",
+			requiredCapabilities: ["tools"],
+			use: "dispatch",
+		});
+
+		strictEqual(resolved.ok, false);
+		ok(resolved.diagnostics.some((entry) => entry.code === "required-capability-missing"));
 	});
 });
 
