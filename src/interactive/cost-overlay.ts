@@ -2,7 +2,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
-import { brandedBottomBorder, brandedContentRow, brandedDividerRow, brandedTopBorder } from "./overlay-frame.js";
+import { brandedBottomBorder, brandedDividerRow, brandedTextRow, brandedTopBorder } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
 const TITLE_PREFIX = "─ Session usage";
@@ -22,10 +22,6 @@ export interface CostRow {
 	reasoningTokens: number;
 	apiCalls: number;
 	usd: number;
-}
-
-function padContent(text: string, contentWidth: number): string {
-	return brandedContentRow(text, contentWidth);
 }
 
 function topBorder(contentWidth: number, sessionId: string | null): string {
@@ -154,21 +150,21 @@ export function formatCostOverlayLines(
 	const contentWidth = Math.max(1, options?.contentWidth ?? DEFAULT_CONTENT_WIDTH);
 	const lines: string[] = [topBorder(contentWidth, options?.sessionId ?? null)];
 	for (const line of formatSummaryLines(totalUsd, totalTokens, rows)) {
-		lines.push(padContent(line, contentWidth));
+		lines.push(brandedTextRow(line, contentWidth));
 	}
 	lines.push(dividerRow(contentWidth));
 	if (rows.length === 0) {
-		lines.push(padContent("no token usage recorded for this session", contentWidth));
+		lines.push(brandedTextRow("no token usage recorded for this session", contentWidth));
 	} else {
 		for (const [index, row] of rows.entries()) {
-			if (index > 0) lines.push(padContent("", contentWidth));
+			if (index > 0) lines.push(brandedTextRow("", contentWidth));
 			for (const line of formatRowLines(row)) {
-				lines.push(padContent(line, contentWidth));
+				lines.push(brandedTextRow(line, contentWidth));
 			}
 		}
 	}
-	lines.push(padContent("", contentWidth));
-	lines.push(padContent(HINT, contentWidth));
+	lines.push(brandedTextRow("", contentWidth));
+	lines.push(brandedTextRow(HINT, contentWidth));
 	lines.push(bottomBorder(contentWidth));
 	return lines;
 }

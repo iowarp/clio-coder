@@ -1,7 +1,6 @@
 import type { ModeName } from "../domains/modes/index.js";
+import { IDENTITY } from "./overlay-frame.js";
 import { AMBER, RED_CRIT, RESET } from "./palette.js";
-
-const IDENTITY = (text: string): string => text;
 
 export function styleForMode(mode: ModeName | string, text: string): string {
 	if (mode === "advise") return `${AMBER}${text}${RESET}`;

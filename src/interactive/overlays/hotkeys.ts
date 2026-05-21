@@ -1,6 +1,6 @@
 import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
 import type { ClioKeybindingManager, PlatformKeybindingWarning } from "../keybinding-manager.js";
-import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "../overlay-frame.js";
+import { brandedBottomBorder, brandedTextRow, brandedTopBorder } from "../overlay-frame.js";
 import { formatKeybindingDetailLines } from "./keybinding-detail.js";
 
 export const HOTKEYS_OVERLAY_WIDTH = 74;
@@ -71,6 +71,7 @@ function formatKey(raw: string): string {
 		.join(" / ");
 }
 
+/** @internal */
 export function buildHotkeyEntries(manager: ClioKeybindingManager): ReadonlyArray<HotkeyEntry> {
 	const dynamic: HotkeyEntry[] = manager.hotkeyEntries().map((row) => ({
 		id: row.id,
@@ -82,11 +83,12 @@ export function buildHotkeyEntries(manager: ClioKeybindingManager): ReadonlyArra
 	return [...dynamic, ...SLASH_HOTKEYS];
 }
 
-function pad(text: string, width: number): string {
+function fitCell(text: string, width: number): string {
 	if (text.length >= width) return truncateToWidth(text, width, "", true);
 	return text.padEnd(width);
 }
 
+/** @internal */
 export function formatHotkeysLines(
 	entries: ReadonlyArray<HotkeyEntry>,
 	contentWidth: number = HOTKEYS_OVERLAY_WIDTH - 4,
@@ -99,26 +101,23 @@ export function formatHotkeysLines(
 	for (const warning of options.warnings ?? []) {
 		const keys = warning.keys.map(formatKey).join(" / ");
 		lines.push(
-			brandedContentRow(
-				pad(`! ${warning.id}: ${keys} may not fire (${warning.terminal}: ${warning.reason})`, contentWidth),
-				contentWidth,
-			),
+			brandedTextRow(`! ${warning.id}: ${keys} may not fire (${warning.terminal}: ${warning.reason})`, contentWidth),
 		);
 	}
 	if ((options.warnings ?? []).length > 0) {
-		lines.push(brandedContentRow(pad("", contentWidth), contentWidth));
+		lines.push(brandedTextRow("", contentWidth));
 	}
 	let lastScope: string | null = null;
 	entries.forEach((hk, index) => {
 		if (hk.scope !== lastScope) {
 			lastScope = hk.scope;
-			lines.push(brandedContentRow(pad(`── ${hk.scope.toUpperCase()}`, contentWidth), contentWidth));
+			lines.push(brandedTextRow(`── ${hk.scope.toUpperCase()}`, contentWidth));
 		}
 		const marker = index === options.selectedIndex ? ">" : " ";
-		const row = `${marker} ${pad(hk.keys, keysCol)}  ${pad(hk.action, actionCol)}`;
-		lines.push(brandedContentRow(pad(row, contentWidth), contentWidth));
+		const row = `${marker} ${fitCell(hk.keys, keysCol)}  ${fitCell(hk.action, actionCol)}`;
+		lines.push(brandedTextRow(row, contentWidth));
 	});
-	lines.push(brandedContentRow(pad("[Up/Down] select  [E] details  [Esc] close", contentWidth), contentWidth));
+	lines.push(brandedTextRow("[Up/Down] select  [E] details  [Esc] close", contentWidth));
 	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }

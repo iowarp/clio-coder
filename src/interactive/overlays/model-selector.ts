@@ -6,13 +6,14 @@ import { listKnownModelsForRuntime, resolveModelCapabilities } from "../../domai
 import {
 	type Component,
 	getKeybindings,
+	matchesKey,
 	type OverlayHandle,
 	type SelectItem,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
-import { clioFrame, clioTitle, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioError, clioFrame, clioTitle, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -31,8 +32,6 @@ const BACKSPACE = "\x7f";
 const BACKSPACE_ALT = "\b";
 const CTRL_U = "\x15";
 const TAB = "\t";
-const ENTER = "\r";
-const ENTER_LF = "\n";
 
 function resolveOverlayWidth(terminalColumns: number): number {
 	// Default 82 fits a typical 80-col terminal with margin. On wider
@@ -632,7 +631,7 @@ export function renderModelOverlayLines(input: {
 		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
-	if (refreshLine) lines.push(clioFrame(fitLine(refreshLine, width)));
+	if (refreshLine) lines.push((input.refreshError ? clioError : clioFrame)(fitLine(refreshLine, width)));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
@@ -817,7 +816,7 @@ class ModelOverlayView implements Component {
 			this.move(1);
 			return;
 		}
-		if (kb.matches(data, "tui.select.confirm") || data === ENTER || data === ENTER_LF) {
+		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
 			const row = this.selectedRow();
 			if (row?.selectable) this.onSelect({ endpoint: row.endpoint, model: row.model });
 			this.onClose();
@@ -904,6 +903,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 }
 
+/** @internal */
 export const __modelSelectorTest = {
 	formatModelRow,
 	modelColumns,

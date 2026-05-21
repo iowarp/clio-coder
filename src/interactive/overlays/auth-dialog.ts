@@ -1,106 +1,7 @@
-import { Box, Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
+import { FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
-
-class AuthDialogBox extends Box {
-	private readonly titleView = new Text("");
-	private readonly bodyView = new Text("");
-	private readonly promptView = new Text("");
-	private readonly input = new Input();
-	private readonly hintView = new Text("");
-	private lines: string[] = [];
-	private promptLabel: string | null = null;
-	private resolver: ((value: string) => void) | undefined;
-	private rejecter: ((error: Error) => void) | undefined;
-
-	constructor(
-		title: string,
-		private readonly onCancel: () => void,
-	) {
-		super(1, 0);
-		this.titleView.setText(title);
-		this.input.onSubmit = () => {
-			if (!this.resolver) return;
-			const resolve = this.resolver;
-			this.resolver = undefined;
-			this.rejecter = undefined;
-			const value = this.input.getValue();
-			this.promptLabel = null;
-			this.input.setValue("");
-			this.rebuild();
-			resolve(value);
-		};
-		this.input.onEscape = () => {
-			this.cancel();
-		};
-		this.rebuild();
-	}
-
-	private rebuild(): void {
-		this.clear();
-		this.addChild(this.titleView);
-		this.bodyView.setText(this.lines.join("\n"));
-		this.addChild(this.bodyView);
-		if (this.promptLabel) {
-			this.promptView.setText(this.promptLabel);
-			this.hintView.setText("[Enter] submit  [Esc] cancel");
-			this.addChild(this.promptView);
-			this.addChild(this.input);
-			this.addChild(this.hintView);
-		} else {
-			this.hintView.setText("[Esc] cancel");
-			this.addChild(this.hintView);
-		}
-		this.invalidate();
-	}
-
-	private rejectPending(message: string): void {
-		if (!this.rejecter) return;
-		const reject = this.rejecter;
-		this.resolver = undefined;
-		this.rejecter = undefined;
-		this.promptLabel = null;
-		this.input.setValue("");
-		this.rebuild();
-		reject(new Error(message));
-	}
-
-	handleInput(data: string): void {
-		if (this.promptLabel) {
-			this.input.handleInput(data);
-		}
-	}
-
-	setLines(lines: ReadonlyArray<string>): void {
-		this.lines = [...lines];
-		this.rebuild();
-	}
-
-	appendLine(line: string): void {
-		this.lines = [...this.lines, line];
-		this.rebuild();
-	}
-
-	prompt(label: string): Promise<string> {
-		this.promptLabel = label;
-		this.input.setValue("");
-		this.rebuild();
-		return new Promise((resolve, reject) => {
-			this.resolver = resolve;
-			this.rejecter = reject;
-		});
-	}
-
-	cancel(): void {
-		this.rejectPending("cancelled");
-		this.onCancel();
-	}
-
-	dismiss(): void {
-		this.rejectPending("dismissed");
-	}
-}
 
 export interface AuthDialogHandle {
 	handle: OverlayHandle;
@@ -113,17 +14,121 @@ export interface AuthDialogHandle {
 	};
 }
 
+function createAuthDialogController(
+	title: string,
+	onCancel: () => void,
+): {
+	box: FocusBox;
+	controller: AuthDialogHandle["controller"];
+} {
+	const titleView = new Text("");
+	const bodyView = new Text("");
+	const promptView = new Text("");
+	const input = new Input();
+	const hintView = new Text("");
+	let lines: string[] = [];
+	let promptLabel: string | null = null;
+	let resolver: ((value: string) => void) | undefined;
+	let rejecter: ((error: Error) => void) | undefined;
+
+	titleView.setText(title);
+	const box = new FocusBox([], {
+		onInput: (data) => {
+			if (promptLabel) input.handleInput(data);
+		},
+	});
+
+	input.onSubmit = () => {
+		if (!resolver) return;
+		const resolve = resolver;
+		resolver = undefined;
+		rejecter = undefined;
+		const value = input.getValue();
+		promptLabel = null;
+		input.setValue("");
+		rebuild();
+		resolve(value);
+	};
+	input.onEscape = () => {
+		cancel();
+	};
+	rebuild();
+
+	return {
+		box,
+		controller: {
+			setLines,
+			appendLine,
+			prompt,
+			cancel,
+			dismiss,
+		},
+	};
+
+	function rebuild(): void {
+		box.clear();
+		box.addChild(titleView);
+		bodyView.setText(lines.join("\n"));
+		box.addChild(bodyView);
+		if (promptLabel) {
+			promptView.setText(promptLabel);
+			hintView.setText("[Enter] submit  [Esc] cancel");
+			box.addChild(promptView);
+			box.addChild(input);
+			box.addChild(hintView);
+		} else {
+			hintView.setText("[Esc] cancel");
+			box.addChild(hintView);
+		}
+		box.invalidate();
+	}
+
+	function rejectPending(message: string): void {
+		if (!rejecter) return;
+		const reject = rejecter;
+		resolver = undefined;
+		rejecter = undefined;
+		promptLabel = null;
+		input.setValue("");
+		rebuild();
+		reject(new Error(message));
+	}
+
+	function setLines(nextLines: ReadonlyArray<string>): void {
+		lines = [...nextLines];
+		rebuild();
+	}
+
+	function appendLine(line: string): void {
+		lines = [...lines, line];
+		rebuild();
+	}
+
+	function prompt(label: string): Promise<string> {
+		promptLabel = label;
+		input.setValue("");
+		rebuild();
+		return new Promise((resolve, reject) => {
+			resolver = resolve;
+			rejecter = reject;
+		});
+	}
+
+	function cancel(): void {
+		rejectPending("cancelled");
+		onCancel();
+	}
+
+	function dismiss(): void {
+		rejectPending("dismissed");
+	}
+}
+
 export function openAuthDialog(tui: TUI, title: string, onCancel: () => void): AuthDialogHandle {
-	const box = new AuthDialogBox(title, onCancel);
+	const { box, controller } = createAuthDialogController(title, onCancel);
 	const handle = showClioOverlayFrame(tui, box, { anchor: "center", width: AUTH_DIALOG_WIDTH, title: "Auth" });
 	return {
 		handle,
-		controller: {
-			setLines: (lines) => box.setLines(lines),
-			appendLine: (line) => box.appendLine(line),
-			prompt: (label) => box.prompt(label),
-			cancel: () => box.cancel(),
-			dismiss: () => box.dismiss(),
-		},
+		controller,
 	};
 }
