@@ -11,7 +11,7 @@ describe("context/sibling-files", () => {
 		try {
 			writeFileSync(join(dir, "CLAUDE.md"), "claude", "utf8");
 			mkdirSync(join(dir, ".cursor", "rules"), { recursive: true });
-			writeFileSync(join(dir, ".cursor", "rules", "rules.md"), "cursor", "utf8");
+			writeFileSync(join(dir, ".cursor", "rules", "rules.mdc"), "cursor", "utf8");
 			const files = loadSiblingContextFiles(dir, { includeGlobal: false });
 			strictEqual(
 				files.some((file) => file.path.endsWith("CLAUDE.md")),
@@ -27,15 +27,12 @@ describe("context/sibling-files", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-sibling-"));
 		const home = mkdtempSync(join(tmpdir(), "clio-sibling-home-"));
 		try {
-			mkdirSync(join(home, ".claude"), { recursive: true });
-			mkdirSync(join(home, ".config", "agents"), { recursive: true });
-			writeFileSync(join(home, ".claude", "CLAUDE.md"), "global claude", "utf8");
-			writeFileSync(join(home, ".config", "agents", "rules.md"), "global agents", "utf8");
+			mkdirSync(join(home, ".codex"), { recursive: true });
+			writeFileSync(join(home, ".codex", "AGENTS.md"), "global codex", "utf8");
 
-			const files = loadSiblingContextFiles(dir, { homeDir: home });
+			const files = loadSiblingContextFiles(dir, { homeDir: home, includeGlobal: true });
 
-			ok(files.some((file) => file.source === "global" && file.content === "global claude"));
-			ok(files.some((file) => file.source === "global" && file.content === "global agents"));
+			ok(files.some((file) => file.source === "global" && file.content === "global codex"));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 			rmSync(home, { recursive: true, force: true });
@@ -46,8 +43,8 @@ describe("context/sibling-files", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-sibling-"));
 		const home = mkdtempSync(join(tmpdir(), "clio-sibling-home-"));
 		try {
-			mkdirSync(join(home, ".claude"), { recursive: true });
-			writeFileSync(join(home, ".claude", "CLAUDE.md"), "global claude", "utf8");
+			mkdirSync(join(home, ".codex"), { recursive: true });
+			writeFileSync(join(home, ".codex", "AGENTS.md"), "global codex", "utf8");
 
 			const files = loadSiblingContextFiles(dir, { homeDir: home, includeGlobal: false });
 

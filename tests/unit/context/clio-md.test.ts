@@ -27,7 +27,22 @@ describe("context/clio-md", () => {
 			strictEqual(parsed.value.fingerprint?.treeHash, fingerprint.treeHash);
 			strictEqual(parsed.value.conventions.length, 1);
 			strictEqual(parsed.value.invariants.length, 1);
+			strictEqual(parsed.value.importedAgentContext, null);
 		}
+	});
+
+	it("round-trips imported agent context sections", () => {
+		const text = serializeClioMd({
+			projectName: "Sample",
+			identity: "Sample is a TypeScript project. It exists to test CLIO.md parsing.",
+			conventions: [],
+			invariants: [],
+			importedAgentContext: "Conflict policy: CLIO wins.\n\n### Source provenance\n\n- Claude Code: `CLAUDE.md`.",
+			fingerprint,
+		});
+		const parsed = parseClioMd(text);
+		ok(parsed.ok);
+		if (parsed.ok) ok(parsed.value.importedAgentContext?.includes("Source provenance"));
 	});
 
 	it("allows user-authored CLIO.md without a footer", () => {

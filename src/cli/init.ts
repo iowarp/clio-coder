@@ -3,9 +3,15 @@ import { createInterface } from "node:readline/promises";
 import { runBootstrap } from "../domains/context/index.js";
 
 const HELP = `Usage:
-  clio init [--yes]
+  clio init [--yes] [--preview] [--adopt] [--global]
 
 Bootstrap or refresh CLIO.md for the current project.
+
+Options:
+  --preview        scan supported agent configs and show the compact plan without writing files
+  --adopt          include provenance-rich imported agent context in CLIO.md
+  --global         include explicitly opted-in global imports (currently ~/.codex/AGENTS.md)
+  --yes, -y        add .clio/ to .gitignore without prompting
 `;
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
@@ -37,6 +43,9 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			stderr: (s) => process.stderr.write(s),
 		},
 		confirmGitignore: () => confirmGitignore(assumeYes),
+		preview: hasFlag(args, "--preview"),
+		adopt: hasFlag(args, "--adopt"),
+		includeGlobalImports: hasFlag(args, "--global") || hasFlag(args, "--include-global"),
 	});
 	return 0;
 }

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
+import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import {
 	type ParsedClioMd,
@@ -59,6 +60,9 @@ function collectStartupHints(cwd: string): string[] {
 	if (isStale(reference, current)) {
 		hints.push("clio: CLIO.md fingerprint differs from current project state. Run /init to refresh.");
 	}
+	if (state.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
+		hints.push("clio: Imported agent context changed. Run /init --adopt to refresh.");
+	}
 	return hints;
 }
 
@@ -90,6 +94,8 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				projectType,
 				fingerprint,
 				...(state?.bootstrapFingerprint ? { bootstrapFingerprint: state.bootstrapFingerprint } : {}),
+				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
+				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
 				lastSessionAt: new Date().toISOString(),
 				...(lastIndexedAt ? { lastIndexedAt } : {}),

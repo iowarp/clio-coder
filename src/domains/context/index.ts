@@ -7,6 +7,13 @@ export const ContextDomainModule: DomainModule = {
 	createExtension: createContextBundle,
 };
 
+export {
+	type AdoptionScanResult,
+	adoptionSnapshotsHash,
+	adoptionSourcesChanged,
+	renderImportedAgentContext,
+	scanAgentConfigs,
+} from "./adoption.js";
 export { type RunBootstrapInput, type RunBootstrapResult, runBootstrap } from "./bootstrap.js";
 export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 export { buildCodewiki, readCodewiki, writeCodewiki } from "./codewiki/indexer.js";

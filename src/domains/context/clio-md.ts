@@ -14,6 +14,7 @@ export interface ParsedClioMd {
 	identity: string;
 	conventions: string[];
 	invariants: string[];
+	importedAgentContext: string | null;
 	fingerprint: ClioMdFingerprintFooter | null;
 	firstInit: boolean;
 	warnings: string[];
@@ -26,6 +27,7 @@ export interface SerializeClioMdInput {
 	identity: string;
 	conventions: ReadonlyArray<string>;
 	invariants: ReadonlyArray<string>;
+	importedAgentContext?: string;
 	fingerprint: ClioMdFingerprintFooter;
 }
 
@@ -186,6 +188,7 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	const sections = readSections(afterH1);
 	const conventions = parseBullets(sections.get("conventions") ?? "");
 	const invariants = parseNumbered(sections.get("hard invariants") ?? "");
+	const importedAgentContext = sections.get("imported agent context") ?? null;
 	if (conventions.length > 6) errors.push("conventions must contain at most 6 bullets");
 	if (invariants.length > 3) errors.push("hard invariants must contain at most 3 numbered rules");
 	for (const [index, item] of conventions.entries()) {
@@ -203,6 +206,7 @@ export function parseClioMd(source: string): ClioMdParseResult {
 			identity,
 			conventions,
 			invariants,
+			importedAgentContext,
 			fingerprint: footerResult.footer,
 			firstInit: footerResult.firstInit,
 			warnings,
@@ -225,6 +229,10 @@ function renderWithoutParse(input: SerializeClioMdInput): string {
 	if (input.invariants.length > 0) {
 		lines.push("", "## Hard invariants", "", ...input.invariants.map((item, index) => `${index + 1}. ${item.trim()}`));
 	}
+	const imported = input.importedAgentContext?.trim();
+	if (imported && imported.length > 0) {
+		lines.push("", "## Imported agent context", "", imported);
+	}
 	const footer = JSON.stringify(input.fingerprint, null, 2);
 	return `${lines.join("\n")}\n\n<!-- clio:fingerprint v1\n${footer}\n-->\n`;
 }
@@ -245,6 +253,9 @@ export function renderProjectContextFragment(parsed: ParsedClioMd): string {
 	}
 	if (parsed.invariants.length > 0) {
 		sections.push("## Hard invariants", ...parsed.invariants.map((item, index) => `${index + 1}. ${item}`));
+	}
+	if (parsed.importedAgentContext) {
+		sections.push("## Imported agent context", parsed.importedAgentContext);
 	}
 	return `<project-context>\n${sections.join("\n\n")}\n</project-context>`;
 }
