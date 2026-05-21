@@ -6,6 +6,13 @@ export interface BoundaryCheckResult {
 }
 
 const jsSuffixRegex = /\.m?jsx?$/;
+const piPackagePrefix = "@earendil-works/pi-";
+const allowedPiTypeImportSpecifiersOutsideEngine = new Set([
+	// Provider runtime descriptors intentionally expose erased pi-ai Model<Api>
+	// shapes so domains can describe model/runtime capabilities without owning
+	// pi runtime values.
+	"@earendil-works/pi-ai",
+]);
 
 function walk(dir: string): string[] {
 	let entries: import("node:fs").Dirent[];
@@ -127,10 +134,8 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
 
 /**
  * Enforce the three static isolation rules:
- *   1. Only src/engine/** may value-import @earendil-works/pi-*. Type-only imports
- *      are allowed anywhere because types erase at compile time and the
- *      RuntimeDescriptor contract in src/domains/providers inherently surfaces
- *      Model<Api>.
+ *   1. Only src/engine/** may value-import @earendil-works/pi-*. Type-only
+ *      imports outside src/engine/** must be explicitly allowlisted above.
  *   2. src/worker/** never value-imports src/domains/** EXCEPT the worker-safe
  *      provider runtime registry, builtin descriptors, and plugin loader used
  *      to rehydrate runtime descriptors from stdin. Type-only imports are
@@ -156,10 +161,15 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const fromDomain = domainOf(filePath, domainsRoot);
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
-			if (specifier.startsWith("@earendil-works/pi-")) {
+			if (specifier.startsWith(piPackagePrefix)) {
 				if (!inEngine && !typeOnly) {
 					violations.push(
 						`rule1: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} outside src/engine (value import)`,
+					);
+				}
+				if (!inEngine && typeOnly && !allowedPiTypeImportSpecifiersOutsideEngine.has(specifier)) {
+					violations.push(
+						`rule1: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} outside src/engine (type-only import is not explicitly allowed)`,
 					);
 				}
 				return;
