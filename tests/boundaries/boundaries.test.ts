@@ -35,6 +35,45 @@ describe("boundaries", () => {
 		strictEqual(result.violations.length, 0);
 	});
 
+	it("allows explicit non-engine pi-ai type imports", () => {
+		const root = fixtureProject({
+			"src/domains/providers/types/runtime-descriptor.ts":
+				'import type { Api, Model } from "@earendil-works/pi-ai";\nexport type RuntimeModel = Model<Api>;',
+		});
+
+		strictEqual(runBoundaryCheck(root).violations.length, 0);
+	});
+
+	it("rejects non-engine pi value imports", () => {
+		const root = fixtureProject({
+			"src/domains/providers/registry.ts":
+				'import { getModel } from "@earendil-works/pi-ai";\nexport const model = getModel;',
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule1") && violation.includes("value import")),
+			result.violations.join("\n"),
+		);
+	});
+
+	it("rejects non-engine pi type imports that are not explicitly allowed", () => {
+		const root = fixtureProject({
+			"src/domains/agents/state.ts":
+				'import type { AgentState } from "@earendil-works/pi-agent-core";\nexport type AgentStateSnapshot = AgentState;',
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some(
+				(violation) => violation.includes("rule1") && violation.includes("type-only import is not explicitly allowed"),
+			),
+			result.violations.join("\n"),
+		);
+	});
+
 	it("allows only worker-safe provider runtime rehydration imports", () => {
 		const root = fixtureProject({
 			"src/worker/runtime-registry.ts": [
