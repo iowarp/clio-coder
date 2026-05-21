@@ -152,7 +152,7 @@ describe("status/reduceStatus", () => {
 		strictEqual(next.retry, undefined);
 	});
 
-	it("supports overlay stacking in LIFO order", () => {
+	it("keeps overlay stacking working when the visible overlay pops first", () => {
 		const base = { ...INITIAL_STATUS, phase: "writing" as const, since: 100, lastMeaningfulAt: 100 };
 		const blocked = reduceStatus(
 			base,
@@ -164,7 +164,7 @@ describe("status/reduceStatus", () => {
 			{ type: "retry_status", status: { phase: "scheduled", attempt: 1, maxAttempts: 2, delayMs: 500 } },
 			{ now: 300, localRuntime: false },
 		);
-		strictEqual(retrying.phase, "retrying");
+		strictEqual(retrying.phase, "tool_blocked");
 		const popped = reduceStatus(
 			retrying,
 			{ type: "retry_status", status: { phase: "recovered", attempt: 1, maxAttempts: 2 } },
@@ -177,6 +177,37 @@ describe("status/reduceStatus", () => {
 			{ now: 500, localRuntime: false },
 		);
 		strictEqual(restored.phase, "writing");
+	});
+
+	it("removes background overlays when pops arrive out of order", () => {
+		const base = { ...INITIAL_STATUS, phase: "writing" as const, since: 100, lastMeaningfulAt: 100 };
+		const compacting = reduceStatus(
+			base,
+			{ type: "overlay_push", overlay: "compacting" },
+			{ now: 200, localRuntime: false },
+		);
+		const dispatching = reduceStatus(
+			compacting,
+			{ type: "overlay_push", overlay: "dispatching", data: { agentName: "worker-a" } },
+			{ now: 300, localRuntime: false },
+		);
+		strictEqual(dispatching.phase, "compacting");
+
+		const dispatchPopped = reduceStatus(
+			dispatching,
+			{ type: "overlay_pop", overlay: "dispatching" },
+			{ now: 400, localRuntime: false },
+		);
+		strictEqual(dispatchPopped.phase, "compacting");
+
+		const compactPopped = reduceStatus(
+			dispatchPopped,
+			{ type: "overlay_pop", overlay: "compacting" },
+			{ now: 500, localRuntime: false },
+		);
+		strictEqual(compactPopped.phase, "writing");
+		strictEqual(compactPopped.overlayStack?.length, 0);
+		strictEqual(compactPopped.dispatch, undefined);
 	});
 
 	it("agent_end transitions active phase to ended with summary", () => {
