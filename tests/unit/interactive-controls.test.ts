@@ -9,6 +9,7 @@ import {
 	type OverlayKeyDeps,
 	resolveCtrlCAction,
 	routeOverlayKey,
+	routeResumeOverlayKey,
 } from "../../src/interactive/index.js";
 import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
 
@@ -197,6 +198,20 @@ describe("routeOverlayKey dispatch-board toggle", () => {
 		const consumed = routeOverlayKey(DISPATCH_TOGGLE, "dispatch-board", deps, matches);
 		strictEqual(consumed, true);
 		strictEqual(shutdown.count, 1);
+	});
+});
+
+describe("routeResumeOverlayKey", () => {
+	it("leaves Escape to the focused session selector for split-sequence disambiguation", () => {
+		let closed = 0;
+		const consumed = routeResumeOverlayKey("\x1b", {
+			closeOverlay: () => {
+				closed += 1;
+			},
+		});
+
+		strictEqual(consumed, false);
+		strictEqual(closed, 0);
 	});
 });
 

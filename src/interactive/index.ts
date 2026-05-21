@@ -548,14 +548,11 @@ export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDe
 }
 
 /**
- * Pure overlay key router for the /resume overlay. Esc closes; arrows and
- * Enter fall through to the focused SelectList.
+ * Pure overlay key router for the /resume overlay. The session selector owns
+ * Esc because it buffers raw escape bytes long enough to distinguish a real
+ * Escape key from a latency-split arrow sequence.
  */
-export function routeResumeOverlayKey(data: string, deps: ResumeOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
+export function routeResumeOverlayKey(_data: string, _deps: ResumeOverlayKeyDeps): boolean {
 	return false;
 }
 
@@ -683,7 +680,7 @@ export function routeOverlayKey(
 		return routeSettingsOverlayKey(data, deps);
 	}
 	if (overlayState === "resume") {
-		// SelectList owns arrows and Enter; route only Esc here.
+		// Session selector owns Esc, arrows, Enter, and search input.
 		return routeResumeOverlayKey(data, deps);
 	}
 	if (overlayState === "tree") {

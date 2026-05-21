@@ -31,11 +31,14 @@ function buildSnapshot(sessionId: string): TreeSnapshot {
 	};
 }
 
-function fakeSession(snapshot: TreeSnapshot, onDelete: () => void): SessionContract {
+function fakeSession(
+	snapshot: TreeSnapshot,
+	onDelete: (sessionId: string, options: { keepFiles?: boolean } | undefined) => void,
+): SessionContract {
 	const session: Partial<SessionContract> = {
 		tree: () => snapshot,
-		deleteSession: () => {
-			onDelete();
+		deleteSession: (sessionId, options) => {
+			onDelete(sessionId, options);
 		},
 	};
 	return session as SessionContract;
@@ -129,5 +132,31 @@ describe("tree-selector delete submode rendering", () => {
 		strictEqual(called, false);
 		const cancelled = view.render(TREE_OVERLAY_WIDTH).join("\n");
 		ok(!cancelled.includes("typed:y"), `confirmation did not cancel; rendered:\n${cancelled}`);
+	});
+
+	it("requires Enter before Shift+D tombstones the selected session", () => {
+		const snapshot = buildSnapshot("s1");
+		const deletes: Array<{ sessionId: string; keepFiles: boolean | undefined }> = [];
+		const view = createTreeOverlayViewForTesting(
+			{
+				session: fakeSession(snapshot, (sessionId, options) => {
+					deletes.push({ sessionId, keepFiles: options?.keepFiles });
+				}),
+				onSwitchBranch: () => {},
+				onClose: () => {},
+			},
+			snapshot,
+		);
+
+		view.handleInput("D");
+		view.handleInput("y");
+		strictEqual(deletes.length, 0);
+		view.handleInput("\r");
+		const deleted = deletes[0];
+		ok(deleted);
+		strictEqual(deleted.sessionId, "s1");
+		strictEqual(deleted.keepFiles, true);
+		const rendered = view.render(TREE_OVERLAY_WIDTH).join("\n");
+		ok(rendered.includes("tombstoned"), `rendered:\n${rendered}`);
 	});
 });
