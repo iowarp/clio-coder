@@ -4,17 +4,15 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import {
-	Box,
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
-	type SelectListTheme,
 	Text,
 	type TUI,
 	truncateToWidth,
 } from "../engine/tui.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "./overlay-frame.js";
 
 export const RECEIPTS_OVERLAY_WIDTH = 78;
 export const RECEIPTS_OVERLAY_MAX_VISIBLE = 10;
@@ -27,16 +25,19 @@ const MODEL_COL_WIDTH = 16;
 const EXIT_COL_WIDTH = 5;
 const TOKENS_COL_WIDTH = 12;
 const RECEIPT_SUFFIX_WIDTH = 22;
+const RECEIPT_GAP_WIDTH = 6;
 
-const IDENTITY = (s: string): string => s;
+type ReceiptColumn = "id" | "agent" | "endpoint" | "model" | "exit" | "tokens" | "cost";
 
-const RECEIPTS_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
+interface ReceiptRowParts {
+	id: string;
+	agent: string;
+	endpoint: string;
+	model: string;
+	exit: string;
+	tokens: string;
+	cost: string;
+}
 
 const RECEIPTS_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 48,
@@ -44,7 +45,7 @@ const RECEIPTS_LAYOUT: SelectListLayoutOptions = {
 	truncatePrimary: ({ text, maxWidth }) => truncateReceiptLabel(text, maxWidth),
 };
 
-export function shortRunId(runId: string): string {
+function shortRunId(runId: string): string {
 	if (!runId) return "-";
 	return runId.length <= SHORT_ID_LEN ? runId : runId.slice(0, SHORT_ID_LEN);
 }
@@ -66,8 +67,93 @@ function formatReceiptUsd(usd: number): string {
 	return `$${Math.max(0, usd).toFixed(2)}`;
 }
 
+function receiptParts(env: RunEnvelope): ReceiptRowParts {
+	return {
+		id: shortRunId(env.id),
+		agent: env.agentId || "-",
+		endpoint: env.endpointId || "-",
+		model: env.wireModelId || "-",
+		exit: env.exitCode === null ? "e=?" : `e=${env.exitCode}`,
+		tokens: formatReceiptTokens(env.tokenCount, env.reasoningTokenCount),
+		cost: formatReceiptUsd(env.costUsd),
+	};
+}
+
+function receiptWidths(maxWidth: number, parts: ReceiptRowParts): Record<ReceiptColumn, number> {
+	const widths: Record<ReceiptColumn, number> = {
+		id: SHORT_ID_LEN,
+		agent: AGENT_COL_WIDTH,
+		endpoint: ENDPOINT_COL_WIDTH,
+		model: MODEL_COL_WIDTH,
+		exit: EXIT_COL_WIDTH,
+		tokens: TOKENS_COL_WIDTH,
+		cost: Math.max(4, parts.cost.length),
+	};
+	const minimums: Record<ReceiptColumn, number> = {
+		id: 4,
+		agent: 3,
+		endpoint: 4,
+		model: 4,
+		exit: 3,
+		tokens: 4,
+		cost: Math.max(4, Math.min(widths.cost, parts.cost.length)),
+	};
+	const totalWidth = (): number =>
+		widths.id +
+		widths.agent +
+		widths.endpoint +
+		widths.model +
+		widths.exit +
+		widths.tokens +
+		widths.cost +
+		RECEIPT_GAP_WIDTH;
+	let overflow = totalWidth() - maxWidth;
+	for (const column of ["model", "endpoint", "agent", "tokens", "id"] as const) {
+		if (overflow <= 0) break;
+		const shrink = Math.min(overflow, widths[column] - minimums[column]);
+		widths[column] -= shrink;
+		overflow -= shrink;
+	}
+	for (const column of ["model", "endpoint", "agent", "tokens", "id"] as const) {
+		if (overflow <= 0) break;
+		const shrink = Math.min(overflow, widths[column] - 1);
+		widths[column] -= shrink;
+		overflow -= shrink;
+	}
+	return widths;
+}
+
+function parseReceiptRow(text: string): ReceiptRowParts | null {
+	const parts = text.trim().split(/\s+/);
+	if (parts.length < 7) return null;
+	const [id, agent, endpoint, model, exit, tokens, cost] = parts;
+	if (!id || !agent || !endpoint || !model || !exit || !tokens || !cost) return null;
+	return { id, agent, endpoint, model, exit, tokens, cost };
+}
+
+function formatReceiptParts(parts: ReceiptRowParts, maxWidth: number): string {
+	const widths = receiptWidths(maxWidth, parts);
+	const row = [
+		fitLeft(parts.id, widths.id),
+		fitLeft(parts.agent, widths.agent),
+		fitLeft(parts.endpoint, widths.endpoint),
+		fitLeft(parts.model, widths.model),
+		fitLeft(parts.exit, widths.exit),
+		formatReceiptCell(parts.tokens, widths.tokens, "right"),
+		formatReceiptCell(parts.cost, widths.cost, "right"),
+	].join(" ");
+	return row.length > maxWidth ? truncateToWidth(row, maxWidth, "") : row;
+}
+
+function formatReceiptCell(text: string, width: number, align: "left" | "right"): string {
+	const clipped = text.length > width ? text.slice(0, width) : text;
+	return align === "right" ? clipped.padStart(width) : clipped.padEnd(width);
+}
+
 function truncateReceiptLabel(text: string, maxWidth: number): string {
 	if (maxWidth <= 0) return "";
+	const parts = parseReceiptRow(text);
+	if (parts) return formatReceiptParts(parts, maxWidth);
 	if (text.length <= maxWidth) return text;
 	const suffixWidth = Math.min(RECEIPT_SUFFIX_WIDTH, Math.max(0, maxWidth - 4));
 	const prefixWidth = maxWidth - suffixWidth - 3;
@@ -75,17 +161,11 @@ function truncateReceiptLabel(text: string, maxWidth: number): string {
 	return `${truncateToWidth(text, prefixWidth, "")}...${text.slice(-suffixWidth)}`;
 }
 
-export function formatReceiptRow(env: RunEnvelope): string {
-	const id = fitLeft(shortRunId(env.id), SHORT_ID_LEN);
-	const agent = fitLeft(env.agentId || "-", AGENT_COL_WIDTH);
-	const endpoint = fitLeft(env.endpointId || "-", ENDPOINT_COL_WIDTH);
-	const model = fitLeft(env.wireModelId || "-", MODEL_COL_WIDTH);
-	const exit = fitLeft(env.exitCode === null ? "e=?" : `e=${env.exitCode}`, EXIT_COL_WIDTH);
-	const tokens = formatReceiptTokens(env.tokenCount, env.reasoningTokenCount).padStart(TOKENS_COL_WIDTH);
-	return `${id} ${agent} ${endpoint} ${model} ${exit} ${tokens} ${formatReceiptUsd(env.costUsd)}`;
+function formatReceiptRow(env: RunEnvelope): string {
+	return formatReceiptParts(receiptParts(env), Number.POSITIVE_INFINITY);
 }
 
-export function buildReceiptItems(envelopes: ReadonlyArray<RunEnvelope>): SelectItem[] {
+function buildReceiptItems(envelopes: ReadonlyArray<RunEnvelope>): SelectItem[] {
 	return envelopes.map((env) => ({
 		value: env.id,
 		label: formatReceiptRow(env),
@@ -95,18 +175,6 @@ export function buildReceiptItems(envelopes: ReadonlyArray<RunEnvelope>): Select
 
 export function formatReceiptsHeader(count: number): string {
 	return count === 0 ? "─ Receipts (empty) ─" : `─ Receipts (${count}) ─`;
-}
-
-// pi-tui's Box has no input handling; forward keystrokes to the SelectList
-// child so Up/Down/Enter reach it while the overlay owns focus.
-class ReceiptsOverlayBox extends Box {
-	constructor(private readonly selectList: SelectList | null) {
-		super(1, 0);
-	}
-
-	handleInput(data: string): void {
-		this.selectList?.handleInput(data);
-	}
 }
 
 export interface OpenReceiptsOverlayOptions {
@@ -129,14 +197,14 @@ export function openReceiptsOverlay(
 	const selectList =
 		items.length === 0
 			? null
-			: new SelectList(items, options?.maxVisible ?? RECEIPTS_OVERLAY_MAX_VISIBLE, RECEIPTS_THEME, RECEIPTS_LAYOUT);
+			: new SelectList(items, options?.maxVisible ?? RECEIPTS_OVERLAY_MAX_VISIBLE, DEFAULT_SELECT_THEME, RECEIPTS_LAYOUT);
 	if (selectList && options?.onSelect) {
 		selectList.onSelect = (item: SelectItem): void => options.onSelect?.(item.value);
 	}
-	const box = new ReceiptsOverlayBox(selectList);
-	box.addChild(selectList ?? new Text("no dispatch runs yet", 0, 0));
-	box.addChild(new Text("", 0, 0));
-	box.addChild(new Text(RECEIPTS_OVERLAY_HINT, 0, 0));
+	const box = new FocusBox(
+		[selectList ?? new Text("no dispatch runs yet", 0, 0), new Text("", 0, 0), new Text(RECEIPTS_OVERLAY_HINT, 0, 0)],
+		{ inputTarget: selectList },
+	);
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: RECEIPTS_OVERLAY_WIDTH,
