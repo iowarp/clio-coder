@@ -398,7 +398,7 @@ function renderEntryLines(
 		lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
 	}
 	if (entry.summaryLine && !entry.pending) {
-		lines.push(`  ${DIM}· ${entry.summaryLine}${RESET}`);
+		lines.push(truncateToWidth(`  ${DIM}· ${entry.summaryLine}${RESET}`, width, "...", true));
 	}
 	return lines;
 }
