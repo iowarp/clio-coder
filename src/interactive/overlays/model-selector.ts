@@ -1,8 +1,16 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
-import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../../domains/providers/index.js";
-import { listKnownModelsForRuntime, resolveModelCapabilities } from "../../domains/providers/index.js";
+import type {
+	CapabilityFlags,
+	EndpointStatus,
+	ProvidersContract,
+	ResolvedRuntimeTarget,
+	RuntimeCapabilityDecision,
+	RuntimeResolutionDiagnostic,
+	ThinkingLevel,
+} from "../../domains/providers/index.js";
+import { listKnownModelsForRuntime, resolveRuntimeTarget } from "../../domains/providers/index.js";
 import {
 	type Component,
 	getKeybindings,
@@ -13,7 +21,14 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
-import { clioError, clioFrame, clioTitle, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	clioError,
+	clioFrame,
+	clioTitle,
+	formatRuntimeResolutionDiagnostic,
+	runtimeResolutionDiagnosticLine,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -71,7 +86,7 @@ function healthGlyph(status: EndpointStatus): string {
 	}
 }
 
-export function capabilityBadges(caps: CapabilityFlags): string {
+function capabilityBadges(caps: CapabilityFlags): string {
 	let badges = "";
 	if (caps.tools) badges += "T";
 	if (caps.reasoning) badges += "R";
@@ -90,12 +105,12 @@ function compactTokenCount(value: number): string {
 	return `${rounded}`;
 }
 
-function contextWindowLabel(caps: CapabilityFlags): string {
-	return `${compactTokenCount(caps.contextWindow)}ctx`;
+function contextDecisionLabel(decisions: RuntimeCapabilityDecision): string {
+	return `${compactTokenCount(decisions.contextWindow)}ctx`;
 }
 
-function maxTokensLabel(caps: CapabilityFlags): string {
-	return compactTokenCount(caps.maxTokens);
+function maxTokensDecisionLabel(decisions: RuntimeCapabilityDecision): string {
+	return compactTokenCount(decisions.maxTokens);
 }
 
 function uniqueModels(ids: ReadonlyArray<string>): string[] {
@@ -144,6 +159,10 @@ export interface ModelRow {
 	healthGlyph: string;
 	healthText: string;
 	caps: CapabilityFlags;
+	capabilityDecisions?: RuntimeCapabilityDecision;
+	thinking?: string;
+	streaming?: boolean;
+	diagnostics?: RuntimeResolutionDiagnostic[];
 	badges: string;
 	context: string;
 	maxTokens: string;
@@ -218,6 +237,87 @@ function modelCandidatesForEndpoint(status: EndpointStatus): ModelCandidate[] {
 	}
 	if (defaultModel) return [{ id: defaultModel, source: "default" }];
 	return [];
+}
+
+function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFlags): RuntimeCapabilityDecision {
+	const kind = status.runtime?.kind;
+	return {
+		chat: caps.chat,
+		tools: caps.tools,
+		reasoning: caps.reasoning,
+		vision: caps.vision,
+		streaming: kind === "http" || kind === "sdk" || kind === "subprocess",
+		contextWindow: caps.contextWindow,
+		maxTokens: caps.maxTokens,
+	};
+}
+
+function providersWithStatusFallback(providers: ProvidersContract, status: EndpointStatus): ProvidersContract {
+	return {
+		...providers,
+		getEndpoint: (id) => providers.getEndpoint(id) ?? (id === status.endpoint.id ? status.endpoint : null),
+		getRuntime: (id) => providers.getRuntime(id) ?? (status.runtime && id === status.runtime.id ? status.runtime : null),
+	};
+}
+
+interface OverlayRuntimeResolution {
+	target: ResolvedRuntimeTarget | null;
+	diagnostics: RuntimeResolutionDiagnostic[];
+	capabilities: CapabilityFlags;
+	capabilityDecisions: RuntimeCapabilityDecision;
+	thinking: string;
+	streaming: boolean;
+}
+
+/** Resolve the same runtime/capability descriptor used by the footer and chat loop for one overlay row. */
+export function resolveOverlayRuntimeTarget(input: {
+	providers: ProvidersContract;
+	status: EndpointStatus;
+	wireModelId: string;
+	requestedThinkingLevel?: ThinkingLevel;
+}): OverlayRuntimeResolution {
+	const resolution = resolveRuntimeTarget(providersWithStatusFallback(input.providers, input.status), {
+		endpointId: input.status.endpoint.id,
+		wireModelId: input.wireModelId,
+		requestedThinkingLevel: input.requestedThinkingLevel ?? "off",
+		use: "orchestrator",
+		requireTools: true,
+		requireStreaming: true,
+		requireOutputBudget: true,
+	});
+	if (resolution.ok) {
+		return {
+			target: resolution.target,
+			diagnostics: resolution.diagnostics,
+			capabilities: resolution.target.capabilities,
+			capabilityDecisions: resolution.target.capabilityDecisions,
+			thinking: resolution.target.modelRuntime.thinking.display,
+			streaming: resolution.target.capabilityDecisions.streaming,
+		};
+	}
+	const capabilities = input.status.capabilities;
+	const decisions = fallbackCapabilityDecisions(input.status, capabilities);
+	return {
+		target: null,
+		diagnostics: resolution.diagnostics,
+		capabilities,
+		capabilityDecisions: decisions,
+		thinking: "unresolved",
+		streaming: decisions.streaming,
+	};
+}
+
+export function runtimeCapabilitySummary(resolution: OverlayRuntimeResolution): string {
+	const caps = resolution.capabilityDecisions;
+	const parts = [
+		`${compactTokenCount(caps.contextWindow)}ctx`,
+		`${compactTokenCount(caps.maxTokens)}max`,
+		`thinking:${resolution.thinking}`,
+		`streaming:${caps.streaming ? "yes" : "no"}`,
+	];
+	if (caps.tools) parts.push("tools");
+	if (caps.vision) parts.push("vision");
+	return parts.join("  ");
 }
 
 function modelBucket(status: EndpointStatus): ModelBucket {
@@ -337,7 +437,18 @@ export function buildModelItems(deps: {
 		const bucket = modelBucket(status);
 		const singleEndpoint = list.length === 1;
 		if (candidates.length === 0) {
-			const rowCaps = status.capabilities;
+			const fallbackModel = endpoint.defaultModel?.trim() ?? "";
+			const resolution =
+				fallbackModel.length > 0
+					? resolveOverlayRuntimeTarget({
+							providers: deps.providers,
+							status,
+							wireModelId: fallbackModel,
+							requestedThinkingLevel: deps.settings.orchestrator?.thinkingLevel,
+						})
+					: null;
+			const rowCaps = resolution?.capabilities ?? status.capabilities;
+			const decisions = resolution?.capabilityDecisions ?? fallbackCapabilityDecisions(status, rowCaps);
 			const row: ModelRow = {
 				value: endpoint.id,
 				endpoint: endpoint.id,
@@ -354,9 +465,15 @@ export function buildModelItems(deps: {
 				healthGlyph: healthGlyph(status),
 				healthText: healthText(status),
 				caps: rowCaps,
+				capabilityDecisions: decisions,
+				thinking: resolution?.thinking ?? "unresolved",
+				streaming: decisions.streaming,
+				diagnostics: resolution?.diagnostics ?? [
+					{ severity: "error", code: "model-not-configured", message: `target '${endpoint.id}' has no model configured` },
+				],
 				badges: capabilityBadges(rowCaps),
-				context: contextWindowLabel(rowCaps),
-				maxTokens: maxTokensLabel(rowCaps),
+				context: contextDecisionLabel(decisions),
+				maxTokens: maxTokensDecisionLabel(decisions),
 				active: endpoint.id === activeEndpoint,
 				scoped: scopeSet.has(endpoint.id),
 				favorite: false,
@@ -377,10 +494,14 @@ export function buildModelItems(deps: {
 		for (const candidate of candidates) {
 			const wireModel = candidate.id;
 			const rowRef = `${endpoint.id}/${wireModel}`;
-			const detectedReasoning = deps.providers.getDetectedReasoning(endpoint.id, wireModel);
-			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase, {
-				detectedReasoning,
+			const resolution = resolveOverlayRuntimeTarget({
+				providers: deps.providers,
+				status,
+				wireModelId: wireModel,
+				requestedThinkingLevel: deps.settings.orchestrator?.thinkingLevel,
 			});
+			const rowCaps = resolution.capabilities;
+			const decisions = resolution.capabilityDecisions;
 			const badges = capabilityBadges(rowCaps);
 			const exactScopeHit = scopeSet.has(rowRef);
 			const endpointScopeHit = scopeSet.has(endpoint.id);
@@ -407,9 +528,13 @@ export function buildModelItems(deps: {
 				healthGlyph: healthGlyph(status),
 				healthText: healthText(status),
 				caps: rowCaps,
+				capabilityDecisions: decisions,
+				thinking: resolution.thinking,
+				streaming: resolution.streaming,
+				diagnostics: resolution.diagnostics,
 				badges,
-				context: contextWindowLabel(rowCaps),
-				maxTokens: maxTokensLabel(rowCaps),
+				context: contextDecisionLabel(decisions),
+				maxTokens: maxTokensDecisionLabel(decisions),
 				active,
 				scoped: scopeHit,
 				favorite,
@@ -501,7 +626,7 @@ function formatModelHeader(width: number): string {
 	return clioFrame(fitLine(line, width));
 }
 
-export function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
+function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
 	const columns = modelColumns(width);
 	const pointer = selected ? "→" : " ";
 	const prefix = `${pointer} ${row.healthGlyph} ${activeMark(row)} `;
@@ -556,9 +681,13 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	return [
 		fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width),
 		fitLine(
-			`source ${sourceLabel(row.source)} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · ${capabilityNames(row.caps)}`,
+			`source ${sourceLabel(row.source)} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
 			width,
 		),
+		...(row.diagnostics ?? [])
+			.filter((entry) => entry.severity !== "info")
+			.slice(0, 2)
+			.map((entry) => runtimeResolutionDiagnosticLine(entry, width)),
 	];
 }
 
@@ -600,14 +729,14 @@ function visibleSlice<T>(
 
 function refreshStatusLine(
 	refreshing: ModelRefreshScope | null | undefined,
-	error: string | null | undefined,
+	error: RuntimeResolutionDiagnostic | null | undefined,
 ): string | null {
 	if (refreshing)
 		return refreshing === "all" ? "refreshing all targets and model catalogs…" : "refreshing selected target models…";
-	return error ? `refresh error: ${error}` : null;
+	return error ? formatRuntimeResolutionDiagnostic(error) : null;
 }
 
-export function renderModelOverlayLines(input: {
+function renderModelOverlayLines(input: {
 	rows: ReadonlyArray<ModelRow>;
 	summary: ModelOverlaySummary;
 	selectedIndex: number;
@@ -615,7 +744,7 @@ export function renderModelOverlayLines(input: {
 	width: number;
 	showAll?: boolean;
 	refreshing?: ModelRefreshScope | null;
-	refreshError?: string | null;
+	refreshError?: RuntimeResolutionDiagnostic | null;
 }): string[] {
 	const width = Math.max(1, input.width);
 	const query = input.query.trim();
@@ -682,7 +811,7 @@ class ModelOverlayView implements Component {
 	private rows: ModelRow[];
 	private summary: ModelOverlaySummary;
 	private refreshing: ModelRefreshScope | null = null;
-	private refreshError: string | null = null;
+	private refreshError: RuntimeResolutionDiagnostic | null = null;
 
 	constructor(
 		rows: ReadonlyArray<ModelRow>,
@@ -793,7 +922,11 @@ class ModelOverlayView implements Component {
 					: await this.refreshActions.selected?.(selected?.endpoint ?? "");
 			if (next) this.replaceItems(next, preferredValue);
 		} catch (err) {
-			this.refreshError = err instanceof Error ? err.message : String(err);
+			this.refreshError = {
+				severity: "error",
+				code: "probe-failed",
+				message: err instanceof Error ? err.message : String(err),
+			};
 		} finally {
 			this.refreshing = null;
 			this.refreshActions.requestRender?.();

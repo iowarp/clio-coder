@@ -1,3 +1,4 @@
+import type { RuntimeResolutionDiagnostic } from "../domains/providers/index.js";
 import {
 	Box,
 	type Component,
@@ -106,6 +107,25 @@ export function brandedTextRow(text: string, contentWidth: number): string {
 
 export function brandedErrorRow(text: string, contentWidth: number): string {
 	return brandedContentRow(clioError(text), contentWidth);
+}
+
+export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {
+	return `${diagnostic.severity}: ${diagnostic.code}: ${diagnostic.message}`;
+}
+
+export function runtimeResolutionDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
+	return clioError(fitDiagnosticLine(diagnostic, width));
+}
+
+export function brandedRuntimeResolutionDiagnosticRow(
+	diagnostic: RuntimeResolutionDiagnostic,
+	contentWidth: number,
+): string {
+	return brandedErrorRow(formatRuntimeResolutionDiagnostic(diagnostic), contentWidth);
+}
+
+function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
+	return padAnsi(formatRuntimeResolutionDiagnostic(diagnostic), Math.max(1, width));
 }
 
 export function brandedAsciiTopBorder(label: string, innerWidth: number): string {
