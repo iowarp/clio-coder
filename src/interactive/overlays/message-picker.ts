@@ -1,5 +1,7 @@
+import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
-import { type ClioTurnRecord, openSession } from "../../engine/session.js";
+import type { MessageEntry } from "../../domains/session/entries.js";
+import { openSession } from "../../engine/session.js";
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
 import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
@@ -62,20 +64,22 @@ interface MessagePickerRow {
 }
 
 /**
- * Pure transformer: given the ClioTurnRecord list of a session, return one
+ * Pure transformer: given the persisted JSONL records of a session, return one
  * row per assistant turn in reverse-chronological order. Exposed for unit
  * tests so the overlay layer stays render-only.
  */
-function buildMessagePickerRows(turns: ReadonlyArray<ClioTurnRecord>): MessagePickerRow[] {
-	const assistantTurns = turns.filter((t) => t.kind === "assistant");
+function buildMessagePickerRows(turns: ReadonlyArray<unknown>): MessagePickerRow[] {
+	const assistantTurns = collectSessionEntries(turns).filter(
+		(entry): entry is MessageEntry => entry.kind === "message" && entry.role === "assistant",
+	);
 	const rows: MessagePickerRow[] = [];
 	for (let i = assistantTurns.length - 1; i >= 0; i--) {
 		const turn = assistantTurns[i];
 		if (!turn) continue;
 		rows.push({
-			turnId: turn.id,
-			shortId: shortTurnId(turn.id),
-			at: turn.at,
+			turnId: turn.turnId,
+			shortId: shortTurnId(turn.turnId),
+			at: turn.timestamp,
 			preview: firstLineClamped(payloadPreview(turn.payload), PREVIEW_WIDTH),
 		});
 	}

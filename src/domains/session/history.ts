@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir } from "../../core/xdg.js";
-import { atomicWrite, cwdHash, sessionPaths } from "../../engine/session.js";
+import { atomicWrite, cwdHash, readSessionFileEntries, sessionPaths } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
-import { isSessionEntry, type SessionInfoEntry } from "./entries.js";
+import { isSessionEntry, type LabelEntry, type SessionInfoEntry } from "./entries.js";
 
 /**
  * Walks `clioDataDir()/sessions/<cwdHash>/` and returns every session meta
@@ -98,20 +98,7 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		labels: new Map(),
 	};
 	if (!existsSync(currentPath)) return result;
-	let raw: string;
-	try {
-		raw = readFileSync(currentPath, "utf8");
-	} catch {
-		return result;
-	}
-	for (const line of raw.split("\n")) {
-		if (line.length === 0) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(line);
-		} catch {
-			continue;
-		}
+	for (const parsed of readSessionFileEntries(currentPath)) {
 		if (!parsed || typeof parsed !== "object") continue;
 		const obj = parsed as Record<string, unknown>;
 		const ts = typeof obj.timestamp === "string" ? obj.timestamp : typeof obj.at === "string" ? obj.at : null;
@@ -141,6 +128,13 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 				if (!existing || existing.timestamp <= info.timestamp) {
 					result.labels.set(info.targetTurnId, { label: info.label, timestamp: info.timestamp });
 				}
+			}
+		}
+		if (isSessionEntry(parsed) && parsed.kind === "label") {
+			const label = parsed as LabelEntry;
+			const existing = result.labels.get(label.targetTurnId);
+			if (!existing || existing.timestamp <= label.timestamp) {
+				result.labels.set(label.targetTurnId, { label: label.label ?? "", timestamp: label.timestamp });
 			}
 		}
 	}

@@ -1,6 +1,13 @@
-import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { atomicWrite, openSession, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import {
+	atomicWrite,
+	openSession,
+	readSessionFileEntries,
+	type SessionTreeNode,
+	sessionPaths,
+	writeJsonlFileAtomic,
+} from "../../../engine/session.js";
 import { isSessionEntry, type SessionEntry, type SessionInfoEntry } from "../entries.js";
 
 /**
@@ -47,16 +54,8 @@ function readRichEntries(sessionId: string): SessionEntry[] {
 	const meta = openSession(sessionId).meta();
 	const paths = sessionPaths(meta);
 	if (!existsSync(paths.current)) return [];
-	const raw = readFileSync(paths.current, "utf8");
 	const out: SessionEntry[] = [];
-	for (const line of raw.split("\n")) {
-		if (line.length === 0) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(line);
-		} catch {
-			continue;
-		}
+	for (const parsed of readSessionFileEntries(paths.current)) {
 		if (isSessionEntry(parsed)) out.push(parsed);
 	}
 	return out;
@@ -75,9 +74,8 @@ function readRichEntries(sessionId: string): SessionEntry[] {
 export function resolveLabelMap(entries: ReadonlyArray<SessionEntry>): Map<string, ResolvedLabel> {
 	const out = new Map<string, ResolvedLabel>();
 	for (const entry of entries) {
-		if (entry.kind !== "sessionInfo") continue;
-		const info = entry as SessionInfoEntry;
-		if (!info.targetTurnId) continue;
+		const info = labelFields(entry);
+		if (!info) continue;
 		const existing = out.get(info.targetTurnId);
 		if (existing && existing.timestamp > info.timestamp) continue;
 		if (info.label === undefined || info.label === "") {
@@ -86,6 +84,19 @@ export function resolveLabelMap(entries: ReadonlyArray<SessionEntry>): Map<strin
 		}
 		out.set(info.targetTurnId, { label: info.label, timestamp: info.timestamp });
 	}
+	return out;
+}
+
+function labelFields(entry: SessionEntry): { targetTurnId: string; timestamp: string; label?: string } | null {
+	if (entry.kind === "label") return entry;
+	if (entry.kind !== "sessionInfo") return null;
+	const info = entry as SessionInfoEntry;
+	if (!info.targetTurnId) return null;
+	const out: { targetTurnId: string; timestamp: string; label?: string } = {
+		targetTurnId: info.targetTurnId,
+		timestamp: info.timestamp,
+	};
+	if (info.label !== undefined) out.label = info.label;
 	return out;
 }
 
@@ -98,16 +109,8 @@ export function resolveLabelMap(entries: ReadonlyArray<SessionEntry>): Map<strin
 export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry): void {
 	const meta = openSession(sessionId).meta();
 	const paths = sessionPaths(meta);
-	const line = `${JSON.stringify(entry)}\n`;
-	const fd = openSync(paths.current, "a");
-	try {
-		appendFileSync(fd, line);
-		fsyncSync(fd);
-	} finally {
-		// openSync returns an fd; appendFileSync with an fd number leaves the
-		// caller responsible for closing it.
-		closeSync(fd);
-	}
+	const entries = readSessionFileEntries(paths.current);
+	writeJsonlFileAtomic(paths.current, [...entries, entry]);
 }
 
 /**

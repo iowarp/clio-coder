@@ -58,6 +58,16 @@ export interface ClioSessionMeta {
 
 export const CURRENT_SESSION_FORMAT_VERSION = 2;
 
+export interface ClioSessionJsonlHeader {
+	type: "session";
+	version: number;
+	id: string;
+	timestamp: string;
+	cwd: string;
+	parentSession?: string;
+	parentTurnId?: string;
+}
+
 export interface ClioTurnRecord {
 	id: string;
 	parentId: string | null;
@@ -96,7 +106,9 @@ export interface ClioSessionWriter {
 
 export interface ClioSessionReader {
 	meta(): ClioSessionMeta;
-	turns(): ReadonlyArray<ClioTurnRecord>;
+	turns(): ReadonlyArray<unknown>;
+	fileEntries(): ReadonlyArray<unknown>;
+	header(): ClioSessionJsonlHeader | null;
 	tree(): ReadonlyArray<SessionTreeNode>;
 }
 
@@ -134,6 +146,136 @@ export function atomicWrite(targetPath: string, contents: string | Uint8Array): 
 	renameSync(tmp, targetPath);
 }
 
+export interface SessionJsonlWarning {
+	path: string;
+	line: number;
+	message: string;
+}
+
+export type SessionJsonlWarningSink = (warning: SessionJsonlWarning) => void;
+
+export interface SessionJsonlReadOptions {
+	onWarning?: SessionJsonlWarningSink;
+}
+
+export interface SessionJsonlWriteOptions {
+	beforeRename?: (tmpPath: string, targetPath: string) => void;
+}
+
+function defaultSessionJsonlWarning(warning: SessionJsonlWarning): void {
+	process.stderr.write(`[clio:session] ${warning.path}:${warning.line}: ${warning.message}\n`);
+}
+
+function fsyncDirectory(path: string): void {
+	let fd: number | null = null;
+	try {
+		fd = openSync(path, "r");
+		fsyncSync(fd);
+	} catch {
+		// Some filesystems/platforms reject directory fsync. The temp-file
+		// fsync + rename still preserves the important no-torn-file property.
+	} finally {
+		if (fd !== null) closeSync(fd);
+	}
+}
+
+function serializeJsonl(entries: ReadonlyArray<unknown>): string {
+	if (entries.length === 0) return "";
+	return `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+}
+
+/**
+ * Rewrite a JSONL file through `<target>.tmp` and rename over the target.
+ * A crash or interruption before the rename leaves the original target
+ * untouched; recovery readers ignore leftover tmp files.
+ */
+export function writeJsonlFileAtomic(
+	targetPath: string,
+	entries: ReadonlyArray<unknown>,
+	options: SessionJsonlWriteOptions = {},
+): void {
+	const dir = dirname(targetPath);
+	mkdirSync(dir, { recursive: true });
+	const tmp = `${targetPath}.tmp`;
+	const fd = openSync(tmp, "w");
+	try {
+		writeSync(fd, serializeJsonl(entries));
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	options.beforeRename?.(tmp, targetPath);
+	renameSync(tmp, targetPath);
+	fsyncDirectory(dir);
+}
+
+export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
+	if (!existsSync(path)) return [];
+	const raw = readFileSync(path, "utf8");
+	const entries: unknown[] = [];
+	const warn = options.onWarning ?? defaultSessionJsonlWarning;
+	const lines = raw.split("\n");
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index] ?? "";
+		if (line.trim().length === 0) continue;
+		try {
+			entries.push(JSON.parse(line) as unknown);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			warn({ path, line: index + 1, message: `invalid JSON skipped: ${message}` });
+		}
+	}
+	return entries;
+}
+
+function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
+	if (!value || typeof value !== "object") return false;
+	const v = value as Record<string, unknown>;
+	return (
+		v.type === "session" && typeof v.id === "string" && typeof v.timestamp === "string" && typeof v.cwd === "string"
+	);
+}
+
+function sessionHeaderFromMeta(
+	meta: ClioSessionMeta,
+	options: { parentSession?: string; parentTurnId?: string } = {},
+): ClioSessionJsonlHeader {
+	const header: ClioSessionJsonlHeader = {
+		type: "session",
+		version: CURRENT_SESSION_FORMAT_VERSION,
+		id: meta.id,
+		timestamp: meta.createdAt,
+		cwd: meta.cwd,
+	};
+	if (options.parentSession !== undefined) header.parentSession = options.parentSession;
+	if (options.parentTurnId !== undefined) header.parentTurnId = options.parentTurnId;
+	return header;
+}
+
+function ensureSessionHeader(
+	meta: ClioSessionMeta,
+	entries: ReadonlyArray<unknown>,
+	options: { parentSession?: string; parentTurnId?: string } = {},
+): unknown[] {
+	const first = entries[0];
+	if (isSessionJsonlHeader(first)) return [...entries];
+	return [sessionHeaderFromMeta(meta, options), ...entries];
+}
+
+function recordFromTurn(turn: ClioTurnRecord): unknown {
+	const entry: Record<string, unknown> = {
+		kind: "message",
+		turnId: turn.id,
+		parentTurnId: turn.parentId,
+		timestamp: turn.at,
+		role: turn.kind,
+		payload: turn.payload,
+	};
+	if (turn.dynamicInputs !== undefined) entry.dynamicInputs = turn.dynamicInputs;
+	if (turn.renderedPromptHash !== undefined) entry.renderedPromptHash = turn.renderedPromptHash;
+	return entry;
+}
+
 function newTurnId(): string {
 	const n = BigInt(`0x${randomBytes(8).toString("hex")}`);
 	const raw = n.toString(36);
@@ -166,22 +308,74 @@ function readMetaFile(path: string): ClioSessionMeta {
 	return JSON.parse(raw) as ClioSessionMeta;
 }
 
-function readTurnsFile(path: string): ClioTurnRecord[] {
-	if (!existsSync(path)) return [];
-	const raw = readFileSync(path, "utf8");
-	const out: ClioTurnRecord[] = [];
-	for (const line of raw.split("\n")) {
-		if (line.length === 0) continue;
-		out.push(JSON.parse(line) as ClioTurnRecord);
-	}
-	return out;
-}
-
 function readTreeFile(path: string): SessionTreeNode[] {
 	if (!existsSync(path)) return [];
 	const raw = readFileSync(path, "utf8");
 	if (raw.trim().length === 0) return [];
 	return JSON.parse(raw) as SessionTreeNode[];
+}
+
+const TURN_KINDS: readonly ClioTurnRecord["kind"][] = [
+	"user",
+	"assistant",
+	"tool_call",
+	"tool_result",
+	"system",
+	"checkpoint",
+];
+
+function isTurnKind(value: unknown): value is ClioTurnRecord["kind"] {
+	return typeof value === "string" && (TURN_KINDS as readonly string[]).includes(value);
+}
+
+function nullableString(value: unknown): value is string | null {
+	return value === null || typeof value === "string";
+}
+
+function treeNodeFromFileEntry(entry: unknown): SessionTreeNode | null {
+	if (!entry || typeof entry !== "object" || isSessionJsonlHeader(entry)) return null;
+	const value = entry as Record<string, unknown>;
+	if (
+		typeof value.id === "string" &&
+		nullableString(value.parentId) &&
+		typeof value.at === "string" &&
+		isTurnKind(value.kind)
+	) {
+		return { id: value.id, parentId: value.parentId, at: value.at, kind: value.kind };
+	}
+	if (
+		value.kind === "message" &&
+		typeof value.turnId === "string" &&
+		nullableString(value.parentTurnId) &&
+		typeof value.timestamp === "string" &&
+		isTurnKind(value.role)
+	) {
+		return { id: value.turnId, parentId: value.parentTurnId, at: value.timestamp, kind: value.role };
+	}
+	return null;
+}
+
+function treeFromFileEntries(fileEntries: ReadonlyArray<unknown>): SessionTreeNode[] {
+	const nodes: SessionTreeNode[] = [];
+	for (const entry of fileEntries) {
+		const node = treeNodeFromFileEntry(entry);
+		if (node) nodes.push(node);
+	}
+	return nodes;
+}
+
+function sameTreeNode(a: SessionTreeNode | undefined, b: SessionTreeNode): boolean {
+	return !!a && a.parentId === b.parentId && a.at === b.at && a.kind === b.kind;
+}
+
+function recoverTreeFromJsonl(diskTree: SessionTreeNode[], fileEntries: ReadonlyArray<unknown>): SessionTreeNode[] {
+	const recovered = treeFromFileEntries(fileEntries);
+	if (recovered.length === 0) return diskTree;
+	const byId = new Map(diskTree.map((node) => [node.id, node]));
+	for (const node of recovered) {
+		if (!sameTreeNode(byId.get(node.id), node)) return recovered;
+	}
+	return diskTree;
 }
 
 function findSessionDir(id: string): string {
@@ -199,18 +393,22 @@ function findSessionDir(id: string): string {
 	throw new Error(`session not found: ${id}`);
 }
 
-function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): ClioSessionWriter {
+function createWriter(
+	meta: ClioSessionMeta,
+	initialTree: SessionTreeNode[],
+	initialFileEntries: ReadonlyArray<unknown>,
+	headerOptions: { parentSession?: string; parentTurnId?: string } = {},
+): ClioSessionWriter {
 	const paths = sessionPaths(meta);
-	let fd: number | null = openSync(paths.current, "a");
 	const tree: SessionTreeNode[] = [...initialTree];
+	const fileEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
 	let closed = false;
 
 	return {
 		append(turn: ClioTurnRecord): void {
-			if (closed || fd === null) throw new Error("session writer closed");
-			const line = `${JSON.stringify(turn)}\n`;
-			writeSync(fd, line);
-			fsyncSync(fd);
+			if (closed) throw new Error("session writer closed");
+			fileEntries.push(recordFromTurn(turn));
+			writeJsonlFileAtomic(paths.current, fileEntries);
 			tree.push({
 				id: turn.id,
 				parentId: turn.parentId,
@@ -219,10 +417,9 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 			});
 		},
 		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
-			if (closed || fd === null) throw new Error("session writer closed");
-			const line = `${JSON.stringify(entry)}\n`;
-			writeSync(fd, line);
-			fsyncSync(fd);
+			if (closed) throw new Error("session writer closed");
+			fileEntries.push(entry);
+			writeJsonlFileAtomic(paths.current, fileEntries);
 			if (opts?.treeNode) tree.push(opts.treeNode);
 		},
 		async persistTree(): Promise<void> {
@@ -231,14 +428,7 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 		async close(): Promise<void> {
 			if (closed) return;
 			closed = true;
-			if (fd !== null) {
-				try {
-					fsyncSync(fd);
-				} finally {
-					closeSync(fd);
-					fd = null;
-				}
-			}
+			writeJsonlFileAtomic(paths.current, fileEntries);
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
@@ -247,17 +437,29 @@ function createWriter(meta: ClioSessionMeta, initialTree: SessionTreeNode[]): Cl
 	};
 }
 
-export function createSession(input: { cwd: string; model?: string | null; endpoint?: string | null }): {
+export function createSession(input: {
+	cwd: string;
+	model?: string | null;
+	endpoint?: string | null;
+	initialEntries?: ReadonlyArray<unknown>;
+	initialTree?: ReadonlyArray<SessionTreeNode>;
+	parentSession?: string;
+	parentTurnId?: string;
+}): {
 	meta: ClioSessionMeta;
 	writer: ClioSessionWriter;
 } {
 	const meta = buildMeta(input);
 	const paths = sessionPaths(meta);
 	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));
-	// touch current.jsonl so the file exists even if no turns land before crash
-	closeSync(openSync(paths.current, "a"));
-	atomicWrite(paths.tree, "[]");
-	const writer = createWriter(meta, []);
+	const headerOptions: { parentSession?: string; parentTurnId?: string } = {};
+	if (input.parentSession !== undefined) headerOptions.parentSession = input.parentSession;
+	if (input.parentTurnId !== undefined) headerOptions.parentTurnId = input.parentTurnId;
+	const initialEntries = ensureSessionHeader(meta, input.initialEntries ?? [], headerOptions);
+	const initialTree = [...(input.initialTree ?? [])];
+	writeJsonlFileAtomic(paths.current, initialEntries);
+	atomicWrite(paths.tree, JSON.stringify(initialTree, null, 2));
+	const writer = createWriter(meta, initialTree, initialEntries, headerOptions);
 	return { meta, writer };
 }
 
@@ -265,14 +467,23 @@ export function openSession(id: string): ClioSessionReader {
 	const dir = findSessionDir(id);
 	const metaPath = join(dir, "meta.json");
 	const meta = readMetaFile(metaPath);
-	const turns = readTurnsFile(join(dir, "current.jsonl"));
-	const tree = readTreeFile(join(dir, "tree.json"));
+	const currentPath = join(dir, "current.jsonl");
+	const fileEntries = readSessionFileEntries(currentPath);
+	const turns = fileEntries.filter((entry) => !isSessionJsonlHeader(entry));
+	const header = fileEntries.find(isSessionJsonlHeader) ?? null;
+	const tree = recoverTreeFromJsonl(readTreeFile(join(dir, "tree.json")), fileEntries);
 	return {
 		meta(): ClioSessionMeta {
 			return meta;
 		},
-		turns(): ReadonlyArray<ClioTurnRecord> {
+		turns(): ReadonlyArray<unknown> {
 			return turns;
+		},
+		fileEntries(): ReadonlyArray<unknown> {
+			return fileEntries;
+		},
+		header(): ClioSessionJsonlHeader | null {
+			return header;
 		},
 		tree(): ReadonlyArray<SessionTreeNode> {
 			return tree;
@@ -289,7 +500,8 @@ export function resumeSession(id: string): { meta: ClioSessionMeta; writer: Clio
 		meta.endedAt = null;
 		atomicWrite(metaPath, JSON.stringify(meta, null, 2));
 	}
-	const existingTree = readTreeFile(join(dir, "tree.json"));
-	const writer = createWriter(meta, existingTree);
+	const existingFileEntries = readSessionFileEntries(join(dir, "current.jsonl"));
+	const existingTree = recoverTreeFromJsonl(readTreeFile(join(dir, "tree.json")), existingFileEntries);
+	const writer = createWriter(meta, existingTree, existingFileEntries);
 	return { meta, writer };
 }

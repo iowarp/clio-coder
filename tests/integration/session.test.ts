@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -8,8 +8,10 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	fromLegacyTurn,
 	isSessionEntry,
+	isSessionHeader,
 	SESSION_ENTRY_KINDS,
 	type SessionEntry,
+	type TaskLedgerEntry,
 } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";
@@ -18,7 +20,14 @@ import { migrateV1ToV2 } from "../../src/domains/session/migrations/v1-to-v2.js"
 import { protectedArtifactStateFromSessionEntries } from "../../src/domains/session/protected-artifacts.js";
 import { resolveLabelMap } from "../../src/domains/session/tree/manager.js";
 import { buildTreeSnapshot, computeLeafId } from "../../src/domains/session/tree/navigator.js";
-import { type ClioTurnRecord, type SessionTreeNode, sessionPaths } from "../../src/engine/session.js";
+import {
+	type ClioTurnRecord,
+	openSession,
+	readSessionFileEntries,
+	type SessionTreeNode,
+	sessionPaths,
+	writeJsonlFileAtomic,
+} from "../../src/engine/session.js";
 
 function buildMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
 	return {
@@ -53,10 +62,63 @@ describe("session/entries union", () => {
 				"branchSummary",
 				"compactionSummary",
 				"sessionInfo",
+				"label",
 				"protectedArtifact",
+				"taskLedger",
 			],
 		);
 	});
+
+	function validEntry(kind: (typeof SESSION_ENTRY_KINDS)[number]): SessionEntry {
+		const base = {
+			turnId: `t-${kind}`,
+			parentTurnId: null,
+			timestamp: "2026-04-17T00:00:00.000Z",
+		};
+		switch (kind) {
+			case "message":
+				return { ...base, kind, role: "user", payload: { text: "hi" } };
+			case "bashExecution":
+				return { ...base, kind, command: "npm test", output: "ok", exitCode: 0, cancelled: false, truncated: false };
+			case "custom":
+				return { ...base, kind, customType: "fixture", data: { ok: true } };
+			case "modelChange":
+				return { ...base, kind, provider: "local", modelId: "mini" };
+			case "thinkingLevelChange":
+				return { ...base, kind, thinkingLevel: "high" };
+			case "fileEntry":
+				return { ...base, kind, path: "README.md", operation: "read" };
+			case "branchSummary":
+				return { ...base, kind, fromTurnId: "t-parent", summary: "branched" };
+			case "compactionSummary":
+				return { ...base, kind, summary: "summary", tokensBefore: 10, firstKeptTurnId: "t-1" };
+			case "sessionInfo":
+				return { ...base, kind, name: "fixture" };
+			case "label":
+				return { ...base, kind, targetTurnId: "t-1", label: "pin" };
+			case "protectedArtifact":
+				return {
+					...base,
+					kind,
+					action: "protect",
+					artifact: {
+						path: "README.md",
+						protectedAt: "2026-04-17T00:00:00.000Z",
+						reason: "validated",
+						source: "validation",
+					},
+				};
+			case "taskLedger":
+				return {
+					...base,
+					kind,
+					goals: [{ id: "g1", title: "goal", status: "active" }],
+					subgoals: [{ id: "sg1", title: "subgoal", status: "pending", parentGoalId: "g1" }],
+					activeRunIds: ["run-1"],
+					requiredValidationEvidence: [{ id: "ev1", description: "npm test", status: "required" }],
+				};
+		}
+	}
 
 	it("isSessionEntry accepts a well-formed MessageEntry", () => {
 		const entry: SessionEntry = {
@@ -72,13 +134,7 @@ describe("session/entries union", () => {
 
 	it("isSessionEntry accepts each kind in SESSION_ENTRY_KINDS", () => {
 		for (const kind of SESSION_ENTRY_KINDS) {
-			const entry = {
-				kind,
-				turnId: `t-${kind}`,
-				parentTurnId: null,
-				timestamp: "2026-04-17T00:00:00.000Z",
-			} as unknown as SessionEntry;
-			strictEqual(isSessionEntry(entry), true, `kind ${kind} should be recognized`);
+			strictEqual(isSessionEntry(validEntry(kind)), true, `kind ${kind} should be recognized`);
 		}
 	});
 
@@ -96,8 +152,25 @@ describe("session/entries union", () => {
 	it("isSessionEntry rejects unknown kinds and missing fields", () => {
 		strictEqual(isSessionEntry({ kind: "bogus", turnId: "x" }), false);
 		strictEqual(isSessionEntry({ kind: "message" }), false);
+		strictEqual(isSessionEntry({ kind: "bashExecution", turnId: "x", parentTurnId: null, timestamp: "now" }), false);
 		strictEqual(isSessionEntry(null), false);
 		strictEqual(isSessionEntry("string"), false);
+	});
+
+	it("isSessionHeader accepts the standard JSONL header shape", () => {
+		strictEqual(
+			isSessionHeader({
+				type: "session",
+				version: 2,
+				id: "s1",
+				timestamp: "2026-04-17T00:00:00.000Z",
+				cwd: "/tmp/project",
+				parentSession: "/tmp/parent/current.jsonl",
+				parentTurnId: "t1",
+			}),
+			true,
+		);
+		strictEqual(isSessionHeader({ type: "session", id: "s1" }), false);
 	});
 
 	it("fromLegacyTurn maps id/at/kind to turnId/timestamp/role", () => {
@@ -432,6 +505,89 @@ describe("session/contract tree + switchBranch + editLabel + deleteSession", () 
 		strictEqual(persisted.workspace?.cwd, scratch);
 		strictEqual(persisted.workspace?.isGit, false);
 		strictEqual(persisted.workspace?.projectType, "unknown");
+	});
+
+	it("writes a standard session header as the first JSONL record", () => {
+		const meta = contract.create({ cwd: scratch });
+		const header = openSession(meta.id).header();
+		ok(header, "session header should be present");
+		strictEqual(header.type, "session");
+		strictEqual(header.id, meta.id);
+		strictEqual(header.cwd, scratch);
+		strictEqual(header.version, 2);
+	});
+
+	it("writeJsonlFileAtomic leaves the original JSONL intact if interrupted before rename", () => {
+		const path = join(scratch, "atomic.jsonl");
+		writeJsonlFileAtomic(path, [{ ok: "original" }]);
+		const original = readFileSync(path, "utf8");
+
+		throws(
+			() =>
+				writeJsonlFileAtomic(path, [{ ok: "replacement" }], {
+					beforeRename: () => {
+						throw new Error("simulated interruption");
+					},
+				}),
+			/simulated interruption/,
+		);
+
+		strictEqual(readFileSync(path, "utf8"), original);
+	});
+
+	it("skips a corrupt trailing JSONL record with an explicit warning", () => {
+		const meta = contract.create({ cwd: scratch });
+		contract.append({ parentId: null, kind: "user", payload: { text: "first" } });
+		contract.append({ parentId: null, kind: "assistant", payload: { text: "second" } });
+		const current = sessionPaths(meta).current;
+		appendFileSync(current, "{not-json");
+		const warnings: string[] = [];
+
+		const entries = readSessionFileEntries(current, {
+			onWarning: (warning) => warnings.push(`${warning.line}:${warning.message}`),
+		});
+
+		strictEqual(entries.length, 3, "header plus two valid records should survive");
+		ok(
+			warnings.some((warning) => warning.includes("invalid JSON skipped")),
+			warnings.join("\n"),
+		);
+		strictEqual(openSession(meta.id).turns().length, 2, "openSession loads up to the last valid line");
+	});
+
+	it("recovers tree state from JSONL if tree.json is stale", () => {
+		const meta = contract.create({ cwd: scratch });
+		const turn = contract.append({ parentId: null, kind: "user", payload: { text: "survives" } });
+		writeFileSync(sessionPaths(meta).tree, "[]", "utf8");
+
+		const tree = openSession(meta.id).tree();
+		strictEqual(tree.length, 1);
+		strictEqual(tree[0]?.id, turn.id);
+		strictEqual(tree[0]?.kind, "user");
+	});
+
+	it("persists taskLedger entries in the session JSONL stream", () => {
+		const meta = contract.create({ cwd: scratch });
+		const user = contract.append({ parentId: null, kind: "user", payload: { text: "ship the goal" } });
+
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: user.id,
+			goals: [{ id: "goal-1", title: "Build session manager", status: "active" }],
+			subgoals: [{ id: "subgoal-1", title: "Validate JSONL replay", status: "pending", parentGoalId: "goal-1" }],
+			activeRunIds: ["run-1"],
+			requiredValidationEvidence: [{ id: "evidence-1", description: "npm run test", status: "required" }],
+		});
+
+		const ledger = readSessionFileEntries(sessionPaths(meta).current).find(
+			(entry): entry is TaskLedgerEntry =>
+				typeof entry === "object" && entry !== null && (entry as { kind?: unknown }).kind === "taskLedger",
+		);
+		ok(ledger, "taskLedger line should be present");
+		ok(isSessionEntry(ledger), "taskLedger line should satisfy the schema guard");
+		strictEqual(ledger.parentTurnId, user.id);
+		strictEqual(ledger.goals[0]?.title, "Build session manager");
+		strictEqual(ledger.requiredValidationEvidence[0]?.description, "npm run test");
 	});
 
 	it("switchBranch() makes the target session current", () => {

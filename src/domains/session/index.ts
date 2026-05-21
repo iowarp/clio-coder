@@ -22,6 +22,7 @@ export type {
 	CompactionSummaryEntry,
 	CustomEntry,
 	FileEntryEntry,
+	LabelEntry,
 	MessageEntry,
 	MessageRole,
 	ModelChangeEntry,
@@ -30,12 +31,21 @@ export type {
 	ProtectedArtifactEntrySource,
 	SessionEntry,
 	SessionEntryKind,
+	SessionFileEntry,
+	SessionHeader,
 	SessionInfoEntry,
+	TaskLedgerEntry,
+	TaskLedgerEvidenceStatus,
+	TaskLedgerGoal,
+	TaskLedgerStatus,
+	TaskLedgerValidationEvidence,
 	ThinkingLevelChangeEntry,
 } from "./entries.js";
 export {
 	fromLegacyTurn,
 	isSessionEntry,
+	isSessionFileEntry,
+	isSessionHeader,
 	SESSION_ENTRY_KINDS,
 } from "./entries.js";
 export { SessionManifest } from "./manifest.js";

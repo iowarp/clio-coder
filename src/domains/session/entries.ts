@@ -17,6 +17,16 @@
 
 import type { ClioTurnRecord } from "../../engine/session.js";
 
+export interface SessionHeader {
+	type: "session";
+	version: number;
+	id: string;
+	timestamp: string;
+	cwd: string;
+	parentSession?: string;
+	parentTurnId?: string;
+}
+
 export interface BaseSessionEntry {
 	kind: string;
 	turnId: string;
@@ -117,6 +127,12 @@ export interface SessionInfoEntry extends BaseSessionEntry {
 	label?: string;
 }
 
+export interface LabelEntry extends BaseSessionEntry {
+	kind: "label";
+	targetTurnId: string;
+	label?: string;
+}
+
 export type ProtectedArtifactEntrySource = "validation" | "middleware" | "user" | "session";
 
 export interface ProtectedArtifactEntryArtifact {
@@ -138,6 +154,35 @@ export interface ProtectedArtifactEntry extends BaseSessionEntry {
 	correlationId?: string;
 }
 
+export type TaskLedgerStatus = "pending" | "active" | "completed" | "blocked" | "cancelled";
+export type TaskLedgerEvidenceStatus = "required" | "pending" | "passed" | "failed" | "missing";
+
+export interface TaskLedgerGoal {
+	id: string;
+	title: string;
+	status: TaskLedgerStatus;
+	parentGoalId?: string | null;
+	description?: string;
+}
+
+export interface TaskLedgerValidationEvidence {
+	id: string;
+	description: string;
+	status: TaskLedgerEvidenceStatus;
+	command?: string;
+	artifactPath?: string;
+	observedAt?: string;
+	notes?: string;
+}
+
+export interface TaskLedgerEntry extends BaseSessionEntry {
+	kind: "taskLedger";
+	goals: TaskLedgerGoal[];
+	subgoals: TaskLedgerGoal[];
+	activeRunIds: string[];
+	requiredValidationEvidence: TaskLedgerValidationEvidence[];
+}
+
 export type SessionEntry =
 	| MessageEntry
 	| BashExecutionEntry
@@ -148,7 +193,11 @@ export type SessionEntry =
 	| BranchSummaryEntry
 	| CompactionSummaryEntry
 	| SessionInfoEntry
-	| ProtectedArtifactEntry;
+	| LabelEntry
+	| ProtectedArtifactEntry
+	| TaskLedgerEntry;
+
+export type SessionFileEntry = SessionHeader | SessionEntry;
 
 /**
  * Canonical list of entry kinds. Exposed so consumers that switch on
@@ -166,7 +215,9 @@ export const SESSION_ENTRY_KINDS = [
 	"branchSummary",
 	"compactionSummary",
 	"sessionInfo",
+	"label",
 	"protectedArtifact",
+	"taskLedger",
 ] as const;
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
@@ -177,12 +228,178 @@ export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
  * `id`/`at` and fail this check, so reader code can dispatch via:
  *   if (isSessionEntry(raw)) { ...rich... } else { ...legacy... }
  */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object";
+}
+
+function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isOptionalString(value: unknown): boolean {
+	return value === undefined || typeof value === "string";
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+	return value === undefined || typeof value === "boolean";
+}
+
+function isNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value);
+}
+
+function isOptionalNumber(value: unknown): boolean {
+	return value === undefined || isNumber(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+	return value === null || typeof value === "string";
+}
+
+function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+	return typeof value === "string" && (allowed as readonly string[]).includes(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function hasBaseSessionEntryFields(v: Record<string, unknown>): boolean {
+	return isString(v.turnId) && isNullableString(v.parentTurnId) && isString(v.timestamp);
+}
+
+const MESSAGE_ROLES = ["user", "assistant", "tool_call", "tool_result", "system", "checkpoint"] as const;
+const FILE_OPERATIONS = ["read", "write", "edit", "create", "delete"] as const;
+const COMPACTION_TRIGGERS: readonly CompactionTrigger[] = ["auto", "force", "overflow"];
+const PROTECTED_ARTIFACT_SOURCES: readonly ProtectedArtifactEntrySource[] = [
+	"validation",
+	"middleware",
+	"user",
+	"session",
+];
+const TASK_LEDGER_STATUSES: readonly TaskLedgerStatus[] = ["pending", "active", "completed", "blocked", "cancelled"];
+const TASK_LEDGER_EVIDENCE_STATUSES: readonly TaskLedgerEvidenceStatus[] = [
+	"required",
+	"pending",
+	"passed",
+	"failed",
+	"missing",
+];
+
+function isTaskLedgerGoal(value: unknown): value is TaskLedgerGoal {
+	if (!isRecord(value)) return false;
+	if (!isString(value.id) || !isString(value.title)) return false;
+	if (!isOneOf(value.status, TASK_LEDGER_STATUSES)) return false;
+	if (value.parentGoalId !== undefined && !isNullableString(value.parentGoalId)) return false;
+	return isOptionalString(value.description);
+}
+
+function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvidence {
+	if (!isRecord(value)) return false;
+	if (!isString(value.id) || !isString(value.description)) return false;
+	if (!isOneOf(value.status, TASK_LEDGER_EVIDENCE_STATUSES)) return false;
+	return (
+		isOptionalString(value.command) &&
+		isOptionalString(value.artifactPath) &&
+		isOptionalString(value.observedAt) &&
+		isOptionalString(value.notes)
+	);
+}
+
+function isProtectedArtifact(value: unknown): value is ProtectedArtifactEntryArtifact {
+	if (!isRecord(value)) return false;
+	return (
+		isString(value.path) &&
+		isString(value.protectedAt) &&
+		isString(value.reason) &&
+		isOneOf(value.source, PROTECTED_ARTIFACT_SOURCES) &&
+		isOptionalString(value.validationCommand) &&
+		isOptionalNumber(value.validationExitCode)
+	);
+}
+
+export function isSessionHeader(value: unknown): value is SessionHeader {
+	if (!isRecord(value)) return false;
+	return (
+		value.type === "session" &&
+		isNumber(value.version) &&
+		isString(value.id) &&
+		isString(value.timestamp) &&
+		isString(value.cwd) &&
+		isOptionalString(value.parentSession) &&
+		isOptionalString(value.parentTurnId)
+	);
+}
+
 export function isSessionEntry(value: unknown): value is SessionEntry {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
-	if (typeof v.turnId !== "string") return false;
-	if (typeof v.kind !== "string") return false;
-	return (SESSION_ENTRY_KINDS as readonly string[]).includes(v.kind);
+	if (!hasBaseSessionEntryFields(v)) return false;
+	if (!isOneOf(v.kind, SESSION_ENTRY_KINDS)) return false;
+	switch (v.kind) {
+		case "message":
+			return isOneOf(v.role, MESSAGE_ROLES);
+		case "bashExecution":
+			return (
+				isString(v.command) &&
+				isString(v.output) &&
+				(v.exitCode === null || isNumber(v.exitCode)) &&
+				typeof v.cancelled === "boolean" &&
+				typeof v.truncated === "boolean" &&
+				isOptionalString(v.fullOutputPath) &&
+				isOptionalBoolean(v.excludeFromContext)
+			);
+		case "custom":
+			return isString(v.customType) && isOptionalBoolean(v.display);
+		case "modelChange":
+			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.endpoint);
+		case "thinkingLevelChange":
+			return isString(v.thinkingLevel);
+		case "fileEntry":
+			return (
+				isString(v.path) && isOneOf(v.operation, FILE_OPERATIONS) && isOptionalNumber(v.bytes) && isOptionalString(v.hash)
+			);
+		case "branchSummary":
+			return isString(v.fromTurnId) && isString(v.summary);
+		case "compactionSummary":
+			return (
+				isString(v.summary) &&
+				isNumber(v.tokensBefore) &&
+				isString(v.firstKeptTurnId) &&
+				(v.trigger === undefined || isOneOf(v.trigger, COMPACTION_TRIGGERS)) &&
+				isOptionalNumber(v.tokensAfter) &&
+				isOptionalNumber(v.messagesSummarized) &&
+				isOptionalBoolean(v.isSplitTurn)
+			);
+		case "sessionInfo":
+			return isOptionalString(v.name) && isOptionalString(v.targetTurnId) && isOptionalString(v.label);
+		case "label":
+			return isString(v.targetTurnId) && isOptionalString(v.label);
+		case "protectedArtifact":
+			return (
+				v.action === "protect" &&
+				isProtectedArtifact(v.artifact) &&
+				isOptionalString(v.toolName) &&
+				isOptionalString(v.toolCallId) &&
+				isOptionalString(v.runId) &&
+				isOptionalString(v.correlationId)
+			);
+		case "taskLedger":
+			return (
+				Array.isArray(v.goals) &&
+				v.goals.every(isTaskLedgerGoal) &&
+				Array.isArray(v.subgoals) &&
+				v.subgoals.every(isTaskLedgerGoal) &&
+				isStringArray(v.activeRunIds) &&
+				Array.isArray(v.requiredValidationEvidence) &&
+				v.requiredValidationEvidence.every(isTaskLedgerEvidence)
+			);
+	}
+	return false;
+}
+
+export function isSessionFileEntry(value: unknown): value is SessionFileEntry {
+	return isSessionHeader(value) || isSessionEntry(value);
 }
 
 /**

@@ -10,7 +10,7 @@
  * and chat-loop's in-memory lastTurnId + agent.state.messages still carried
  * pre-fork context so the next submit behaved like nothing had changed.
  */
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import type { SessionContract } from "../../src/domains/session/index.js";
-import { openSession } from "../../src/engine/session.js";
+import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 
@@ -33,6 +33,14 @@ function stubContext(): DomainContext {
 		bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
 		getContract: () => undefined,
 	};
+}
+
+function persistedId(entry: unknown): string | undefined {
+	if (!entry || typeof entry !== "object") return undefined;
+	const record = entry as { id?: unknown; turnId?: unknown };
+	if (typeof record.turnId === "string") return record.turnId;
+	if (typeof record.id === "string") return record.id;
+	return undefined;
 }
 
 const ORIGINAL_ENV = { ...process.env };
@@ -152,5 +160,65 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		ok(serialized.includes('"type":"toolCall"'), serialized);
 		ok(serialized.includes('"role":"toolResult"'), serialized);
 		ok(serialized.includes("tests passed"), serialized);
+	});
+
+	it("fork writes a clean linear JSONL branch without alternative sibling records", () => {
+		const parent = contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "root" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "root reply" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "selected path" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "selected reply" } });
+		const altUser = contract.append({ parentId: a1.id, kind: "user", payload: { text: "alternative path" } });
+		contract.append({ parentId: altUser.id, kind: "assistant", payload: { text: "alternative reply" } });
+
+		const forked = contract.fork(a2.id);
+		const reader = openSession(forked.id);
+		const header = reader.header();
+		ok(header, "forked current.jsonl should start with a session header");
+		strictEqual(header.parentSession, sessionPaths(parent).current);
+		strictEqual(header.parentTurnId, a2.id);
+
+		const turns = reader.turns();
+		deepStrictEqual(turns.map(persistedId), [u1.id, a1.id, u2.id, a2.id]);
+		const serialized = JSON.stringify(turns);
+		ok(!serialized.includes("alternative path"), serialized);
+		ok(!serialized.includes("alternative reply"), serialized);
+
+		const tree = contract.tree(forked.id);
+		strictEqual(tree.leafId, a2.id);
+		deepStrictEqual(tree.rootIds, [u1.id]);
+		deepStrictEqual(tree.nodesById[a1.id]?.children, [u2.id]);
+	});
+
+	it("fork carries taskLedger sidecars attached to the selected path", () => {
+		contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "root" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "root reply" } });
+		const ledger = contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: a1.id,
+			goals: [{ id: "goal-1", title: "Session durability", status: "active" }],
+			subgoals: [],
+			activeRunIds: ["run-1"],
+			requiredValidationEvidence: [{ id: "ev-1", description: "npm run test", status: "required" }],
+		});
+		const altUser = contract.append({ parentId: a1.id, kind: "user", payload: { text: "alternative path" } });
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: altUser.id,
+			goals: [{ id: "goal-alt", title: "Alternative-only goal", status: "active" }],
+			subgoals: [],
+			activeRunIds: ["run-alt"],
+			requiredValidationEvidence: [],
+		});
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "selected path" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "selected reply" } });
+
+		const forked = contract.fork(a2.id);
+		const turns = openSession(forked.id).turns();
+		deepStrictEqual(turns.map(persistedId), [u1.id, a1.id, ledger.turnId, u2.id, a2.id]);
+		const serialized = JSON.stringify(turns);
+		ok(serialized.includes("Session durability"), serialized);
+		ok(!serialized.includes("Alternative-only goal"), serialized);
 	});
 });
