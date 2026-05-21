@@ -1,28 +1,11 @@
 import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
-import {
-	Box,
-	type OverlayHandle,
-	type SelectItem,
-	SelectList,
-	type SelectListTheme,
-	type TUI,
-} from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { matchesKey, type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { modelsForEndpoint } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
 const VISIBLE_ROWS = 12;
-
-const IDENTITY = (s: string): string => s;
-
-const SCOPED_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
 
 export interface ScopedItemsInput {
 	providers: ProvidersContract;
@@ -68,58 +51,41 @@ export interface OpenScopedOverlayDeps {
 	onClose: () => void;
 }
 
-/**
- * pi-tui's SelectList exposes selectedIndex privately; we intercept handleInput
- * to own the multi-select toggle without reaching into the private API.
- */
-class ScopedOverlayBox extends Box {
-	constructor(
-		private readonly list: SelectList,
-		private readonly items: SelectItem[],
-		private readonly selected: Set<string>,
-		private readonly deps: OpenScopedOverlayDeps,
-	) {
-		super(1, 0);
-	}
-
-	private rebuildLabels(): void {
-		for (const item of this.items) {
-			const sel = this.selected.has(item.value);
-			const rest = item.label.replace(/^\[(x| )\]\s+/, "");
-			item.label = `${sel ? "[x]" : "[ ]"} ${rest}`;
-		}
-	}
-
-	handleInput(data: string): void {
-		if (data === " ") {
-			const current = this.list.getSelectedItem();
-			if (!current) return;
-			if (this.selected.has(current.value)) this.selected.delete(current.value);
-			else this.selected.add(current.value);
-			this.rebuildLabels();
-			this.list.invalidate();
-			return;
-		}
-		if (data === "\r") {
-			const next = this.items.filter((i) => this.selected.has(i.value)).map((i) => i.value);
-			this.deps.onCommit(next);
-			this.deps.onClose();
-			return;
-		}
-		this.list.handleInput(data);
-	}
-}
-
 export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): OverlayHandle {
 	const items = buildScopedModelItems({ providers: deps.providers, currentScope: deps.currentScope });
 	const selected = new Set<string>(deps.currentScope);
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
-	const list = new SelectList(items, visible, SCOPED_THEME);
+	const list = new SelectList(items, visible, DEFAULT_SELECT_THEME);
 	list.onCancel = (): void => {
 		deps.onClose();
 	};
-	const box = new ScopedOverlayBox(list, items, selected, deps);
-	box.addChild(list);
+	const rebuildLabels = (): void => {
+		for (const item of items) {
+			const sel = selected.has(item.value);
+			const rest = item.label.replace(/^\[(x| )\]\s+/, "");
+			item.label = `${sel ? "[x]" : "[ ]"} ${rest}`;
+		}
+	};
+	const box = new FocusBox(list, {
+		onInput: (data) => {
+			if (data === " ") {
+				const current = list.getSelectedItem();
+				if (!current) return;
+				if (selected.has(current.value)) selected.delete(current.value);
+				else selected.add(current.value);
+				rebuildLabels();
+				list.invalidate();
+				return;
+			}
+			if (matchesKey(data, "enter") || data === "\n") {
+				const next = items.filter((i) => selected.has(i.value)).map((i) => i.value);
+				deps.onCommit(next);
+				deps.onClose();
+				return;
+			}
+			list.handleInput(data);
+		},
+	});
 	return showClioOverlayFrame(tui, box, { anchor: "center", width: SCOPED_OVERLAY_WIDTH, title: "Scoped models" });
 }
 

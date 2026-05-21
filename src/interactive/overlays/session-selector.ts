@@ -1,31 +1,20 @@
 import { basename } from "node:path";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import {
-	Box,
 	Input,
+	matchesKey,
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
-	type SelectListTheme,
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
 const VISIBLE_ROWS = 12;
-
-const IDENTITY = (s: string): string => s;
-
-const SESSION_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
 
 /**
  * SelectList allocates the primary column to the label and uses any
@@ -111,105 +100,92 @@ export interface OpenSessionOverlayDeps {
 	onClose: () => void;
 }
 
-const ARROW_UP = "\x1b[A";
-const ARROW_DOWN = "\x1b[B";
-const ENTER = "\r";
-const ENTER_LF = "\n";
-const ESCAPE = "\x1b";
-
 /**
  * SelectList navigation keys (arrows + Enter) route to the list; everything
- * else feeds the search Input which live-filters the candidate set. Bare
- * `Esc` closes the overlay; an `Esc` followed by `[` is the lead-in for an
- * arrow code so the Input has to ignore that prefix.
+ * else feeds the search Input which live-filters the candidate set. pi-tui key
+ * matching avoids treating fragmented arrow escape sequences as overlay close.
  */
-class SessionOverlayBox extends Box {
-	private readonly input = new Input();
-	private readonly noMatchView = new Text("");
-	private list: SelectList;
-	private allSessions: SessionMeta[];
-	private filtered: SessionMeta[];
+function createSessionOverlayBox(
+	sessions: ReadonlyArray<SessionMeta>,
+	onSelect: (sessionId: string) => void,
+	onClose: () => void,
+): FocusBox {
+	const input = new Input();
+	const noMatchView = new Text("");
+	const allSessions = [...sessions];
+	let filtered = [...sessions];
+	let lastQuery = "";
+	let list = buildList(filtered);
+	const box = new FocusBox([], { onInput: handleInput });
+	input.setValue("");
+	input.onSubmit = () => commitSelection();
+	rebuildChildren();
+	return box;
 
-	private lastQuery = "";
-
-	constructor(
-		sessions: ReadonlyArray<SessionMeta>,
-		private readonly onSelect: (sessionId: string) => void,
-		private readonly onClose: () => void,
-	) {
-		super(1, 0);
-		this.allSessions = [...sessions];
-		this.filtered = [...sessions];
-		this.input.setValue("");
-		this.input.onSubmit = () => this.commitSelection();
-		this.list = this.buildList(this.filtered);
-		this.rebuildChildren();
-	}
-
-	private buildList(sessions: ReadonlyArray<SessionMeta>): SelectList {
+	function buildList(sessions: ReadonlyArray<SessionMeta>): SelectList {
 		const items = buildSessionItems(sessions);
 		const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length || 1));
-		const list = new SelectList(items, visible, SESSION_THEME, SESSION_LAYOUT);
+		const list = new SelectList(items, visible, DEFAULT_SELECT_THEME, SESSION_LAYOUT);
 		list.onSelect = (item: SelectItem): void => {
-			this.onSelect(item.value);
-			this.onClose();
+			onSelect(item.value);
+			onClose();
 		};
 		list.onCancel = (): void => {
-			this.onClose();
+			onClose();
 		};
 		return list;
 	}
 
-	private rebuildChildren(): void {
-		this.clear();
-		this.addChild(this.input);
-		if (this.filtered.length === 0) {
-			this.noMatchView.setText("(no matching sessions)");
-			this.addChild(this.noMatchView);
+	function rebuildChildren(): void {
+		box.clear();
+		box.addChild(input);
+		if (filtered.length === 0) {
+			noMatchView.setText("(no matching sessions)");
+			box.addChild(noMatchView);
 		} else {
-			this.addChild(this.list);
+			box.addChild(list);
 		}
-		this.invalidate();
+		box.invalidate();
 	}
 
-	private applyFilter(): void {
-		this.filtered = filterSessions(this.allSessions, this.lastQuery);
-		this.list = this.buildList(this.filtered);
-		this.rebuildChildren();
+	function applyFilter(): void {
+		filtered = filterSessions(allSessions, lastQuery);
+		list = buildList(filtered);
+		rebuildChildren();
 	}
 
-	private commitSelection(): void {
-		const first = this.filtered[0];
+	function commitSelection(): void {
+		const first = filtered[0];
 		if (!first) return;
-		this.onSelect(first.id);
-		this.onClose();
+		onSelect(first.id);
+		onClose();
 	}
 
-	handleInput(data: string): void {
-		if (data === ESCAPE) {
-			this.onClose();
+	function handleInput(data: string): void {
+		if (matchesKey(data, "esc")) {
+			onClose();
 			return;
 		}
-		if (data === ARROW_UP || data === ARROW_DOWN) {
-			this.list.handleInput(data);
+		if (matchesKey(data, "up") || matchesKey(data, "down")) {
+			list.handleInput(data);
 			return;
 		}
-		if (data === ENTER || data === ENTER_LF) {
-			this.list.handleInput(data);
+		if (matchesKey(data, "enter") || data === "\n") {
+			list.handleInput(data);
 			return;
 		}
-		this.input.handleInput(data);
-		const next = this.input.getValue();
-		if (next !== this.lastQuery) {
-			this.lastQuery = next;
-			this.applyFilter();
+		input.handleInput(data);
+		const next = input.getValue();
+		if (next !== lastQuery) {
+			lastQuery = next;
+			applyFilter();
 		}
 	}
 }
 
 export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): OverlayHandle {
 	const sessions = deps.session.history();
-	const box = new SessionOverlayBox(
+	const box = createSessionOverlayBox(
 		sessions,
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),

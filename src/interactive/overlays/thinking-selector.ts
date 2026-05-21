@@ -7,27 +7,10 @@ import {
 	thinkingLevelChoiceLabel,
 } from "../../domains/providers/index.js";
 import { extractLocalModelQuirks, type ThinkingMechanism } from "../../domains/providers/types/local-model-quirks.js";
-import {
-	Box,
-	type OverlayHandle,
-	type SelectItem,
-	SelectList,
-	type SelectListTheme,
-	type TUI,
-} from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const THINKING_OVERLAY_WIDTH = 44;
-
-const IDENTITY = (s: string): string => s;
-
-const THINKING_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
 
 const DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "no reasoning tokens",
@@ -44,16 +27,6 @@ export interface OpenThinkingOverlayDeps {
 	labelFor?: (level: ThinkingLevel) => string;
 	onSelect: (next: ThinkingLevel) => void;
 	onClose: () => void;
-}
-
-class ThinkingOverlayBox extends Box {
-	constructor(private readonly list: SelectList) {
-		super(1, 0);
-	}
-
-	handleInput(data: string): void {
-		this.list.handleInput(data);
-	}
 }
 
 export function buildThinkingItems(
@@ -73,7 +46,7 @@ export function buildThinkingItems(
 
 export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): OverlayHandle {
 	const items = buildThinkingItems(deps.current, deps.available, deps.labelFor);
-	const list = new SelectList(items, deps.available.length, THINKING_THEME);
+	const list = new SelectList(items, deps.available.length, DEFAULT_SELECT_THEME);
 	const initialIndex = Math.max(0, deps.available.indexOf(deps.current));
 	list.setSelectedIndex(initialIndex);
 	list.onSelect = (item: SelectItem): void => {
@@ -83,8 +56,7 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 	list.onCancel = (): void => {
 		deps.onClose();
 	};
-	const box = new ThinkingOverlayBox(list);
-	box.addChild(list);
+	const box = new FocusBox(list);
 	return showClioOverlayFrame(tui, box, { anchor: "center", width: THINKING_OVERLAY_WIDTH, title: "Thinking" });
 }
 

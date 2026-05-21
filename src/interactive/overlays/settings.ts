@@ -5,29 +5,12 @@ import {
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
-import {
-	Box,
-	type OverlayHandle,
-	type SettingItem,
-	SettingsList,
-	type SettingsListTheme,
-	type TUI,
-} from "../../engine/tui.js";
+import { type OverlayHandle, type SettingItem, SettingsList, type TUI } from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { DEFAULT_SETTINGS_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const SETTINGS_OVERLAY_WIDTH = 84;
 const VISIBLE_ROWS = 12;
-
-const IDENTITY = (s: string): string => s;
-
-const SETTINGS_THEME: SettingsListTheme = {
-	label: IDENTITY,
-	value: IDENTITY,
-	description: IDENTITY,
-	cursor: "▸",
-	hint: IDENTITY,
-};
 
 /**
  * Surface the endpoint-schema settings that are safe to inspect or cycle
@@ -267,16 +250,6 @@ export interface OpenSettingsOverlayDeps {
 	onClose: () => void;
 }
 
-class SettingsOverlayBox extends Box {
-	constructor(private readonly list: SettingsList) {
-		super(1, 0);
-	}
-
-	handleInput(data: string): void {
-		this.list.handleInput(data);
-	}
-}
-
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): OverlayHandle {
 	const buildOptions: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager } = {};
 	if (deps.providers) buildOptions.providers = deps.providers;
@@ -286,7 +259,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 	const list = new SettingsList(
 		items,
 		visible,
-		SETTINGS_THEME,
+		DEFAULT_SETTINGS_THEME,
 		(id: string, value: string) => {
 			const current = structuredClone(deps.getSettings());
 			applySettingChange(current, id, value);
@@ -295,7 +268,6 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 		},
 		() => deps.onClose(),
 	);
-	const box = new SettingsOverlayBox(list);
-	box.addChild(list);
+	const box = new FocusBox(list);
 	return showClioOverlayFrame(tui, box, { anchor: "center", width: SETTINGS_OVERLAY_WIDTH, title: "Settings" });
 }

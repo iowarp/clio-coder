@@ -11,27 +11,10 @@
  * and fancy styling are out of scope for 12d.
  */
 
-import {
-	Box,
-	type OverlayHandle,
-	type SelectItem,
-	SelectList,
-	type SelectListTheme,
-	type TUI,
-} from "../../engine/tui.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
-
-const IDENTITY = (s: string): string => s;
-
-const CWD_FALLBACK_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
 
 /** Reasons surfaced by resolveSessionCwd. Overlay maps each to a description line. */
 export type CwdFallbackReason = "no-cwd" | "missing" | "not-a-directory";
@@ -84,22 +67,13 @@ export function buildCwdFallbackItems(args: {
 	];
 }
 
-class CwdFallbackOverlayBox extends Box {
-	constructor(private readonly list: SelectList) {
-		super(1, 0);
-	}
-	handleInput(data: string): void {
-		this.list.handleInput(data);
-	}
-}
-
 export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDeps): OverlayHandle {
 	const items = buildCwdFallbackItems({
 		currentCwd: deps.currentCwd,
 		sessionCwd: deps.sessionCwd,
 		reason: deps.reason,
 	});
-	const list = new SelectList(items, items.length, CWD_FALLBACK_THEME);
+	const list = new SelectList(items, items.length, DEFAULT_SELECT_THEME);
 	list.onSelect = (item: SelectItem): void => {
 		if (item.value === "continue") {
 			deps.onContinue();
@@ -112,7 +86,6 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		deps.onCancel();
 		deps.onClose();
 	};
-	const box = new CwdFallbackOverlayBox(list);
-	box.addChild(list);
+	const box = new FocusBox(list);
 	return showClioOverlayFrame(tui, box, { anchor: "center", width: CWD_FALLBACK_OVERLAY_WIDTH, title: "Session cwd" });
 }

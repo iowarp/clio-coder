@@ -1,5 +1,5 @@
 import { truncateToWidth } from "../../engine/tui.js";
-import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "../overlay-frame.js";
+import { brandedBottomBorder, brandedTextRow, brandedTopBorder } from "../overlay-frame.js";
 
 export const KEYBINDING_DETAIL_OVERLAY_WIDTH = 74;
 
@@ -11,14 +11,14 @@ export interface KeybindingDetailEntry {
 	warnings?: ReadonlyArray<string>;
 }
 
-function pad(text: string, width: number): string {
+function fitCell(text: string, width: number): string {
 	if (text.length >= width) return truncateToWidth(text, width, "", true);
 	return text.padEnd(width);
 }
 
 function row(label: string, value: string, width: number): string[] {
 	const labelWidth = 10;
-	const prefix = `${label.padEnd(labelWidth)} `;
+	const prefix = `${fitCell(label, labelWidth)} `;
 	const available = Math.max(8, width - prefix.length);
 	const lines: string[] = [];
 	const words = value.split(/\s+/g).filter(Boolean);
@@ -34,7 +34,7 @@ function row(label: string, value: string, width: number): string[] {
 	}
 	if (current.length > 0) lines.push(`${prefix}${current}`);
 	if (lines.length === 0) lines.push(prefix.trimEnd());
-	return lines.map((line) => pad(line, width));
+	return lines.map((line) => truncateToWidth(line, width, "", true));
 }
 
 export function formatKeybindingDetailLines(
@@ -43,26 +43,26 @@ export function formatKeybindingDetailLines(
 ): string[] {
 	const lines: string[] = [];
 	lines.push(brandedTopBorder(" Keybinding ", contentWidth + 2));
-	lines.push(brandedContentRow(pad(`Action    ${entry.action}`, contentWidth), contentWidth));
-	lines.push(brandedContentRow(pad(`Id        ${entry.id}`, contentWidth), contentWidth));
-	lines.push(brandedContentRow(pad(`Keys      ${entry.keys}`, contentWidth), contentWidth));
-	lines.push(brandedContentRow(pad(`Source    ${entry.source ?? "static"}`, contentWidth), contentWidth));
-	lines.push(brandedContentRow(pad("", contentWidth), contentWidth));
+	lines.push(brandedTextRow(`Action    ${entry.action}`, contentWidth));
+	lines.push(brandedTextRow(`Id        ${entry.id}`, contentWidth));
+	lines.push(brandedTextRow(`Keys      ${entry.keys}`, contentWidth));
+	lines.push(brandedTextRow(`Source    ${entry.source ?? "static"}`, contentWidth));
+	lines.push(brandedTextRow("", contentWidth));
 	for (const detail of row(
 		"Change",
 		"Edit settings.yaml > keybindings, then restart Clio or reopen the TUI.",
 		contentWidth,
 	)) {
-		lines.push(brandedContentRow(detail, contentWidth));
+		lines.push(brandedTextRow(detail, contentWidth));
 	}
 	if (entry.id.startsWith("clio.")) {
 		const example = `${entry.id}: "alt+<key>"`;
-		lines.push(brandedContentRow(pad(`Example   ${example}`, contentWidth), contentWidth));
+		lines.push(brandedTextRow(`Example   ${example}`, contentWidth));
 	}
 	for (const warning of entry.warnings ?? []) {
-		lines.push(brandedContentRow(pad(`Warning   ${warning}`, contentWidth), contentWidth));
+		lines.push(brandedTextRow(`Warning   ${warning}`, contentWidth));
 	}
-	lines.push(brandedContentRow(pad("[Esc] close", contentWidth), contentWidth));
+	lines.push(brandedTextRow("[Esc] close", contentWidth));
 	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }

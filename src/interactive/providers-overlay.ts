@@ -1,8 +1,15 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../domains/providers/index.js";
-import { Box, type Component, Loader, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
-import { brandedBottomBorder, brandedContentRow, brandedTopBorder } from "./overlay-frame.js";
+import { type Component, Loader, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import {
+	brandedBottomBorder,
+	brandedErrorRow,
+	brandedTextRow,
+	brandedTopBorder,
+	FocusBox,
+	IDENTITY,
+} from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
 const TITLE = "─ Targets ";
@@ -10,12 +17,6 @@ const HINT = "[r] probe selected  [R] probe all  [Esc] close";
 
 export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 export const PROVIDERS_OVERLAY_DISCOVERED_PREVIEW = 4;
-
-const IDENTITY = (s: string): string => s;
-
-function padContent(text: string, contentWidth: number): string {
-	return brandedContentRow(text, contentWidth);
-}
 
 function topBorder(contentWidth: number): string {
 	const innerWidth = contentWidth + 2;
@@ -104,7 +105,7 @@ function resolveContentWidth(contentWidth?: number): number {
 	return Math.max(1, contentWidth ?? DEFAULT_CONTENT_WIDTH);
 }
 
-export function formatProvidersOverlayLines(
+function formatProvidersOverlayLines(
 	statuses: ReadonlyArray<EndpointStatus>,
 	options?: {
 		error?: string | null;
@@ -116,25 +117,25 @@ export function formatProvidersOverlayLines(
 	const contentWidth = resolveContentWidth(options?.contentWidth);
 	const lines: string[] = [topBorder(contentWidth)];
 	if (options?.error) {
-		lines.push(padContent(`probe error: ${options.error}`, contentWidth));
-		lines.push(padContent("", contentWidth));
+		lines.push(brandedErrorRow(`probe error: ${options.error}`, contentWidth));
+		lines.push(brandedTextRow("", contentWidth));
 	}
 	if (statuses.length === 0) {
-		lines.push(padContent("no targets configured (run clio configure)", contentWidth));
+		lines.push(brandedTextRow("no targets configured (run clio configure)", contentWidth));
 	} else {
 		for (const status of statuses) {
 			const marker = options?.selectedId === status.endpoint.id ? "▸" : " ";
-			lines.push(padContent(`${marker}${formatHeaderRow(status)}`, contentWidth));
-			lines.push(padContent(formatLocationRow(status), contentWidth));
-			lines.push(padContent(formatHealthRow(status), contentWidth));
-			lines.push(padContent(formatAuthRow(options?.authByEndpoint?.get(status.endpoint.id) ?? "-"), contentWidth));
-			lines.push(padContent(formatCapabilitiesRow(status.capabilities), contentWidth));
-			lines.push(padContent(formatReasonRow(status), contentWidth));
-			lines.push(padContent(formatDiscoveredRow(status), contentWidth));
-			lines.push(padContent("", contentWidth));
+			lines.push(brandedTextRow(`${marker}${formatHeaderRow(status)}`, contentWidth));
+			lines.push(brandedTextRow(formatLocationRow(status), contentWidth));
+			lines.push(brandedTextRow(formatHealthRow(status), contentWidth));
+			lines.push(brandedTextRow(formatAuthRow(options?.authByEndpoint?.get(status.endpoint.id) ?? "-"), contentWidth));
+			lines.push(brandedTextRow(formatCapabilitiesRow(status.capabilities), contentWidth));
+			lines.push(brandedTextRow(formatReasonRow(status), contentWidth));
+			lines.push(brandedTextRow(formatDiscoveredRow(status), contentWidth));
+			lines.push(brandedTextRow("", contentWidth));
 		}
 	}
-	lines.push(padContent(HINT, contentWidth));
+	lines.push(brandedTextRow(HINT, contentWidth));
 	lines.push(bottomBorder(contentWidth));
 	return lines;
 }
@@ -211,7 +212,7 @@ export function openProvidersOverlay(
 	let authByEndpoint = buildAuthMap();
 
 	const view = new ProvidersOverlayView(() => ({ statuses, error, selectedId, authByEndpoint }));
-	const box = new ProvidersOverlayOverlay(view, {
+	const keys: ProvidersOverlayKeys = {
 		nextSelection: (direction) => {
 			if (statuses.length === 0) return;
 			const idx = statuses.findIndex((s) => s.endpoint.id === selectedId);
@@ -249,8 +250,31 @@ export function openProvidersOverlay(
 				tui.requestRender();
 			})();
 		},
+	};
+	const box = new FocusBox(view, {
+		x: 0,
+		onInput: (data) => {
+			if (data === "j" || matchesKey(data, "down")) {
+				keys.nextSelection("down");
+				view.invalidate();
+				return;
+			}
+			if (data === "k" || matchesKey(data, "up")) {
+				keys.nextSelection("up");
+				view.invalidate();
+				return;
+			}
+			if (data === "r") {
+				keys.probeSelected();
+				return;
+			}
+			if (data === "R") {
+				keys.probeAll();
+			}
+		},
 	});
 	const loader = new Loader(tui, IDENTITY, IDENTITY, "Probing targets...");
+	box.clear();
 	box.addChild(loader);
 	const handle = tui.showOverlay(box, {
 		anchor: "center",
@@ -307,34 +331,4 @@ interface ProvidersOverlayKeys {
 	nextSelection(direction: "up" | "down"): void;
 	probeSelected(): void;
 	probeAll(): void;
-}
-
-class ProvidersOverlayOverlay extends Box {
-	constructor(
-		private readonly view: ProvidersOverlayView,
-		private readonly keys: ProvidersOverlayKeys,
-	) {
-		super(0, 0);
-	}
-
-	handleInput(data: string): void {
-		if (data === "j" || data === "\x1b[B") {
-			this.keys.nextSelection("down");
-			this.view.invalidate();
-			return;
-		}
-		if (data === "k" || data === "\x1b[A") {
-			this.keys.nextSelection("up");
-			this.view.invalidate();
-			return;
-		}
-		if (data === "r") {
-			this.keys.probeSelected();
-			return;
-		}
-		if (data === "R") {
-			this.keys.probeAll();
-			return;
-		}
-	}
 }

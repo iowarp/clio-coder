@@ -57,6 +57,7 @@ import { buildFooter } from "./footer-panel.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { editorBorderColorForMode } from "./mode-theme.js";
+import { DEFAULT_SELECT_THEME, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
@@ -90,7 +91,7 @@ import {
 	spinnerFrame,
 	type TurnSummary,
 } from "./status/index.js";
-import { renderSuperOverlayLinesForOrigin } from "./super-overlay.js";
+import { createSuperOverlayBody, SUPER_OVERLAY_WIDTH, superOverlayTitleForOrigin } from "./super-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -707,8 +708,6 @@ export function routeOverlayKey(
 	return true;
 }
 
-const IDENTITY = (s: string): string => s;
-
 function isToolApprovalBusRequest(value: unknown): value is { request: ToolApprovalRequestPayload } {
 	if (!value || typeof value !== "object") return false;
 	const request = (value as { request?: unknown }).request;
@@ -790,13 +789,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 	const editor = new Editor(tui, {
 		borderColor: IDENTITY,
-		selectList: {
-			selectedPrefix: IDENTITY,
-			selectedText: IDENTITY,
-			description: IDENTITY,
-			scrollInfo: IDENTITY,
-			noMatch: IDENTITY,
-		},
+		selectList: DEFAULT_SELECT_THEME,
 	});
 	editor.focused = true;
 	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider());
@@ -805,9 +798,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	applyEditorModeTheme();
 
-	// The super-confirm overlay is rebuilt per open because its body and width
-	// depend on the origin (keybind vs tool). The `renderSuperOverlayLinesForOrigin`
-	// helper produces both variants from `super-overlay.ts`.
+	// The super-confirm overlay is rebuilt per open because its body and title
+	// depend on the origin (keybind vs tool).
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const taskIsland = new Text("", 0, 0);
@@ -1647,13 +1639,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				at: Date.now(),
 			});
 		}
-		const overlayLines = renderSuperOverlayLinesForOrigin(origin);
-		const overlay = new Text(overlayLines.join("\n"), 0, 0);
-		const width = overlayLines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 		overlayState = "super-confirm";
-		overlayHandle = tui.showOverlay(overlay, {
+		overlayHandle = showClioOverlayFrame(tui, createSuperOverlayBody(origin), {
 			anchor: "center",
-			width,
+			width: SUPER_OVERLAY_WIDTH,
+			title: superOverlayTitleForOrigin(origin),
 		});
 		tui.requestRender();
 	};
