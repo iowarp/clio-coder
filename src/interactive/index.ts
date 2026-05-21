@@ -1927,9 +1927,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					if (forkedSessionId) {
 						try {
 							const forkedTurns = openSession(forkedSessionId).turns();
-							rehydrateChatPanelFromTurns(chatPanel, forkedTurns, { uptoTurnId: parentTurnId });
-							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns, { uptoTurnId: parentTurnId });
-							deps.chat.resetForSession(parentTurnId, replayMessages);
+							rehydrateChatPanelFromTurns(chatPanel, forkedTurns);
+							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns);
+							const leafTurnId = sessionContract.tree(forkedSessionId).leafId ?? parentTurnId;
+							deps.chat.resetForSession(leafTurnId, replayMessages);
 						} catch (err) {
 							const msg = err instanceof Error ? err.message : String(err);
 							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);

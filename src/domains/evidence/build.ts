@@ -465,14 +465,26 @@ async function readSessionEntriesForId(dataDir: string, sessionId: string): Prom
 	for (const cwdHash of cwdHashes.sort(compareStrings)) {
 		const currentPath = join(root, cwdHash, sessionId, "current.jsonl");
 		let raw: string;
+		let source = currentPath;
 		try {
 			raw = await readFile(currentPath, "utf8");
 		} catch (error) {
 			const err = error as NodeJS.ErrnoException;
-			if (err.code === "ENOENT" || err.code === "ENOTDIR") continue;
-			return { entries: [], missing: false, errors: [`${currentPath}: ${err.message ?? String(err)}`] };
+			if (err.code === "ENOENT") {
+				const tmpPath = `${currentPath}.tmp`;
+				try {
+					raw = await readFile(tmpPath, "utf8");
+					source = tmpPath;
+				} catch {
+					continue;
+				}
+			} else if (err.code === "ENOTDIR") {
+				continue;
+			} else {
+				return { entries: [], missing: false, errors: [`${currentPath}: ${err.message ?? String(err)}`] };
+			}
 		}
-		return parseSessionEntries(raw, currentPath);
+		return parseSessionEntries(raw, source);
 	}
 	return { entries: [], missing: true, errors: [] };
 }
@@ -483,7 +495,7 @@ function parseSessionEntries(raw: string, source: string): SessionReadResult {
 	const lines = raw.split("\n");
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = lines[index];
-		if (line === undefined || line.length === 0) continue;
+		if (line === undefined || line.trim().length === 0) continue;
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(line) as unknown;
@@ -505,7 +517,9 @@ function parseSessionEntryLine(value: unknown): SessionEntry | null {
 	const parentId = readOptionalNullableString(value.parentId);
 	const at = readOptionalString(value.at);
 	const kind = readOptionalMessageRole(value.kind);
-	if (id === null || parentId === undefined || at === null || kind === null) return null;
+	if (id === null || parentId === undefined || at === null || kind === null || !Object.hasOwn(value, "payload")) {
+		return null;
+	}
 	const entry: MessageEntry = {
 		kind: "message",
 		turnId: id,

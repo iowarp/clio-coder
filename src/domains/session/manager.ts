@@ -9,7 +9,7 @@ import {
 	sessionPaths,
 } from "../../engine/session.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import type { SessionEntry } from "./entries.js";
+import { isSessionEntry, type SessionEntry } from "./entries.js";
 import { runMigrations } from "./migrations/index.js";
 
 /**
@@ -95,6 +95,7 @@ export function appendEntry(state: SessionManagerState, input: SessionEntryInput
 	// kind-specific fields pass through via the spread; the union's structural
 	// shape is preserved because `input` is SessionEntryInput (distributed).
 	const entry = { ...input, turnId, timestamp } as SessionEntry;
+	if (!isSessionEntry(entry)) throw new Error(`session.appendEntry: invalid ${String(input.kind)} entry`);
 	state.writer.appendEntry(entry);
 	return entry;
 }

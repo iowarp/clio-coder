@@ -20,10 +20,26 @@
 import type { ClioTurnRecord } from "../../../engine/session.js";
 import { fromLegacyTurn, isSessionEntry, type SessionEntry } from "../entries.js";
 
+const LEGACY_TURN_KINDS: readonly ClioTurnRecord["kind"][] = [
+	"user",
+	"assistant",
+	"tool_call",
+	"tool_result",
+	"system",
+	"checkpoint",
+];
+
 function hasLegacyTurnShape(value: unknown): value is ClioTurnRecord {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
-	return typeof v.id === "string" && typeof v.at === "string" && typeof v.kind === "string";
+	return (
+		typeof v.id === "string" &&
+		(v.parentId === null || typeof v.parentId === "string") &&
+		typeof v.at === "string" &&
+		typeof v.kind === "string" &&
+		(LEGACY_TURN_KINDS as readonly string[]).includes(v.kind) &&
+		Object.hasOwn(v, "payload")
+	);
 }
 
 export function collectSessionEntries(turns: ReadonlyArray<unknown>): SessionEntry[] {

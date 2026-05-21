@@ -86,11 +86,17 @@ function buildMessagePickerRows(turns: ReadonlyArray<unknown>): MessagePickerRow
 	return rows;
 }
 
+function formatTimestampForRow(timestamp: string): string {
+	const millis = Date.parse(timestamp);
+	if (!Number.isFinite(millis)) return "";
+	return new Date(millis).toISOString().slice(0, 16).replace("T", " ");
+}
+
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
 		label: `● ${row.shortId}  ${row.preview}`,
-		description: row.at ? new Date(row.at).toISOString().slice(0, 16).replace("T", " ") : "",
+		description: formatTimestampForRow(row.at),
 	}));
 }
 
