@@ -55,6 +55,7 @@ export type StatusInputEvent =
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
+const OVERLAY_PRECEDENCE: readonly OverlayPhase[] = ["stuck", "tool_blocked", "retrying", "compacting", "dispatching"];
 
 function isOverlayPhase(phase: StatusPhase): phase is OverlayPhase {
 	return OVERLAY_PHASES.has(phase);
@@ -102,24 +103,73 @@ function overlayFrame(status: AgentStatus): OverlayFrame {
 	};
 }
 
+function overlayFrames(prev: AgentStatus): Map<OverlayPhase, OverlayFrame> {
+	const frames = new Map<OverlayPhase, OverlayFrame>();
+	for (const frame of prev.overlayStack ?? []) frames.set(frame.phase, frame);
+	if (isOverlayPhase(prev.phase)) frames.set(prev.phase, overlayFrame(prev));
+	return frames;
+}
+
+function baseResumePhase(prev: AgentStatus): StatusPhase {
+	if (isOverlayPhase(prev.phase)) return prev.resumePhase ?? "preparing";
+	return prev.phase;
+}
+
+function visibleOverlay(frames: ReadonlyMap<OverlayPhase, OverlayFrame>): OverlayFrame | undefined {
+	for (const phase of OVERLAY_PRECEDENCE) {
+		const frame = frames.get(phase);
+		if (frame) return frame;
+	}
+	return undefined;
+}
+
+function overlayStackWithoutVisible(
+	frames: ReadonlyMap<OverlayPhase, OverlayFrame>,
+	visible: OverlayFrame,
+): OverlayFrame[] {
+	return OVERLAY_PRECEDENCE.flatMap((phase) => {
+		if (phase === visible.phase) return [];
+		const frame = frames.get(phase);
+		return frame ? [frame] : [];
+	});
+}
+
+function statusForVisibleOverlay(
+	prev: AgentStatus,
+	visible: OverlayFrame,
+	frames: ReadonlyMap<OverlayPhase, OverlayFrame>,
+): AgentStatus {
+	const base = visible.resumePhase;
+	return {
+		...prev,
+		phase: visible.phase,
+		resumePhase: base,
+		retry: visible.retry,
+		tool: visible.tool,
+		dispatch: visible.dispatch,
+		overlayStack: overlayStackWithoutVisible(frames, visible),
+	};
+}
+
 function pushOverlay(prev: AgentStatus, phase: OverlayPhase, ctx: ReduceContext, data?: unknown): AgentStatus {
 	if (!isActive(prev.phase)) return prev;
-	if (prev.phase === phase) {
-		return overlayData({ ...refreshMeaningful(prev, ctx), phase }, phase, data);
-	}
-	const stack = prev.overlayStack ? [...prev.overlayStack] : [];
-	if (isOverlayPhase(prev.phase)) stack.push(overlayFrame(prev));
-	const resumePhase = isOverlayPhase(prev.phase) ? (prev.resumePhase ?? "preparing") : prev.phase;
-	return overlayData(
-		{
-			...refreshMeaningful(prev, ctx),
+	const frames = overlayFrames(prev);
+	const resumePhase = baseResumePhase(prev);
+	const nextFrame = overlayFrame(
+		overlayData(
+			{
+				...prev,
+				phase,
+				resumePhase,
+			},
 			phase,
-			resumePhase,
-			overlayStack: stack,
-		},
-		phase,
-		data,
+			data,
+		),
 	);
+	frames.set(phase, nextFrame);
+	const nextVisible = visibleOverlay(frames);
+	if (!nextVisible) return refreshMeaningful(prev, ctx);
+	return statusForVisibleOverlay(refreshMeaningful(prev, ctx), nextVisible, frames);
 }
 
 function overlayData(status: AgentStatus, phase: OverlayPhase, data?: unknown): AgentStatus {
@@ -143,28 +193,18 @@ function overlayData(status: AgentStatus, phase: OverlayPhase, data?: unknown): 
 }
 
 function popOverlay(prev: AgentStatus, overlay: OverlayPhase, ctx: ReduceContext): AgentStatus {
-	if (prev.phase !== overlay) return refreshMeaningful(prev, ctx);
-	const stack = prev.overlayStack ? [...prev.overlayStack] : [];
-	const frame = stack.pop();
-	if (frame) {
-		return {
-			...refreshMeaningful(prev, ctx),
-			phase: frame.phase,
-			resumePhase: frame.resumePhase,
-			retry: frame.retry,
-			tool: frame.tool,
-			dispatch: frame.dispatch,
-			overlayStack: stack,
-		};
-	}
-	const restore = prev.resumePhase ?? "writing";
+	const frames = overlayFrames(prev);
+	const restore = baseResumePhase(prev);
+	frames.delete(overlay);
+	const nextVisible = visibleOverlay(frames);
+	if (nextVisible) return statusForVisibleOverlay(refreshMeaningful(prev, ctx), nextVisible, frames);
 	return {
 		...refreshMeaningful(prev, ctx),
 		phase: restore,
 		resumePhase: undefined,
 		overlayStack: [],
-		...(overlay === "retrying" ? { retry: undefined } : {}),
-		...(overlay === "dispatching" ? { dispatch: undefined } : {}),
+		retry: undefined,
+		dispatch: undefined,
 	};
 }
 
