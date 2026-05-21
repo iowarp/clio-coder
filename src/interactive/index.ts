@@ -83,7 +83,13 @@ import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
-import { dispatchSlashCommand, parseSlashCommand, type RunIo, type SlashCommandContext } from "./slash-commands.js";
+import {
+	dispatchSlashCommand,
+	type InitCommandOptions,
+	parseSlashCommand,
+	type RunIo,
+	type SlashCommandContext,
+} from "./slash-commands.js";
 import {
 	createStatusController,
 	formatStatusElapsed,
@@ -103,6 +109,7 @@ export {
 	dispatchSlashCommand,
 	type HandleRunDeps,
 	handleRun,
+	type InitCommandOptions,
 	parseSlashCommand,
 	type RunIo,
 	type SlashCommand,
@@ -178,7 +185,7 @@ export interface InteractiveDeps {
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	/** Run /init for the current working directory. */
-	onInit?: () => Promise<void>;
+	onInit?: (options: InitCommandOptions) => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -1059,13 +1066,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				io.stderr(`[/compact] ${msg}\n`);
 			});
 		},
-		runInit: () => {
+		runInit: (options) => {
 			if (!deps.onInit) {
 				io.stderr("[/init] init not wired; pass onInit to startInteractive\n");
 				return;
 			}
 			void deps
-				.onInit()
+				.onInit(options)
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/init] ${msg}\n`);

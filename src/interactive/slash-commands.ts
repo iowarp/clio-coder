@@ -19,7 +19,7 @@ import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
-	| { kind: "init" }
+	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "skills"; query?: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
@@ -52,6 +52,12 @@ export type SlashCommandKind = SlashCommand["kind"];
 export interface RunIo {
 	stdout: (s: string) => void;
 	stderr: (s: string) => void;
+}
+
+export interface InitCommandOptions {
+	preview?: boolean;
+	adopt?: boolean;
+	includeGlobalImports?: boolean;
 }
 
 export interface RunCommandOptions {
@@ -139,6 +145,18 @@ export async function handleRun(
 
 const VALID_RUN_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
+function parseInitCommand(rest: string): SlashCommand {
+	const options: InitCommandOptions = {};
+	const parts = rest.split(/\s+/).filter(Boolean);
+	for (const part of parts) {
+		if (part === "--preview") options.preview = true;
+		else if (part === "--adopt") options.adopt = true;
+		else if (part === "--global" || part === "--include-global") options.includeGlobalImports = true;
+		else return { kind: "unknown", text: `/init ${rest}`.trim() };
+	}
+	return { kind: "init", options };
+}
+
 function parseRunCommand(rest: string): SlashCommand {
 	const parts = rest.split(/\s+/).filter(Boolean);
 	const options: RunCommandOptions = {};
@@ -210,7 +228,7 @@ export interface SlashCommandContext {
 	workerDefault: () => { endpoint?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
-	runInit: () => void;
+	runInit: (options: InitCommandOptions) => void;
 	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
@@ -300,13 +318,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "init",
-		description: "Bootstrap or refresh CLIO.md",
+		description: "Bootstrap, preview, or adopt agent configs into CLIO.md",
+		argumentHint: "[--preview] [--adopt] [--global]",
 		kinds: ["init"],
 		match(trimmed) {
-			return trimmed === "/init" ? { kind: "init" } : null;
+			if (trimmed === "/init") return { kind: "init", options: {} };
+			return trimmed.startsWith("/init ") ? parseInitCommand(trimmed.slice("/init ".length).trim()) : null;
 		},
-		handle(_command, ctx) {
-			ctx.runInit();
+		handle(command, ctx) {
+			if (command.kind !== "init") return;
+			ctx.runInit(command.options);
 		},
 	},
 	{

@@ -51,7 +51,7 @@ Usage:
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
   clio share export|import  export or import Clio project/resource archives
-  clio init [--yes]         bootstrap or refresh CLIO.md for this project
+  clio init [--yes] [--preview|--adopt]  bootstrap or adopt agent configs into CLIO.md
   clio --help, -h           this message
 `;
 

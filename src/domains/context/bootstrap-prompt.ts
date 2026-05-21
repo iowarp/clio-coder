@@ -2,10 +2,10 @@ export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your jo
 
 You will be given:
 - The detected project type.
-- The contents of any sibling agent-context files present at <cwd>: CLAUDE.md, AGENTS.md, GEMINI.md, CODEX.md.
-- The contents of global rules files if they exist.
+- A sanitized adoption scan of project-local agent configs, including Claude Code (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), and GitHub Copilot (.github/copilot-instructions.md).
+- Global user preferences only when the user explicitly opted in.
 
-Produce a CLIO.md with exactly three possible sections:
+Produce a CLIO.md with these possible sections:
 
 1. Identity. One paragraph, at most four sentences and at most 600 characters. The project name as H1, then a paragraph naming the stack, role, and what the project is. Do not list project files. Do not state language-generic conventions. Do not include build commands.
 
@@ -13,6 +13,8 @@ Produce a CLIO.md with exactly three possible sections:
 
 3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
 
-Total CLIO.md size target: 800-2000 bytes. Always under 3000 bytes.
+4. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
 
-Do not include a project map, file tree, commands list, language-idiom list, preferences, or communication style content.`;
+Total CLIO.md size target: 800-2000 bytes without adoption, or compact and provenance-rich with adoption.
+
+Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.`;

@@ -26,6 +26,15 @@ describe("interactive slash commands", () => {
 		ok(stdout.includes("/hotkeys"), stdout);
 	});
 
+	it("parses /init adoption flags", () => {
+		const command = parseSlashCommand("/init --preview --adopt --global");
+		strictEqual(command.kind, "init");
+		if (command.kind !== "init") throw new Error("expected init command");
+		strictEqual(command.options.preview, true);
+		strictEqual(command.options.adopt, true);
+		strictEqual(command.options.includeGlobalImports, true);
+	});
+
 	it("parses /run tool profiles", () => {
 		const command = parseSlashCommand("/run --tool-profile science-local worker run tests");
 		strictEqual(command.kind, "run");

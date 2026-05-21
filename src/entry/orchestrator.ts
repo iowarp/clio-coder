@@ -611,7 +611,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {
-					onInit: async () => {
+					onInit: async (options: { preview?: boolean; adopt?: boolean; includeGlobalImports?: boolean }) => {
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),
 							io: {
@@ -619,6 +619,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								stderr: (s) => process.stderr.write(s),
 							},
 							confirmGitignore: () => true,
+							...(options.preview === undefined ? {} : { preview: options.preview }),
+							...(options.adopt === undefined ? {} : { adopt: options.adopt }),
+							...(options.includeGlobalImports === undefined ? {} : { includeGlobalImports: options.includeGlobalImports }),
 						});
 					},
 				}

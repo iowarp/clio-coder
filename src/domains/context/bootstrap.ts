@@ -1,19 +1,25 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, parse, resolve } from "node:path";
-import { loadProjectContextFiles } from "../resources/context-files/loader.js";
+import { dirname, join, parse } from "node:path";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
+import {
+	type AdoptionScanResult,
+	adoptionSnapshotsHash,
+	renderImportedAgentContext,
+	scanAgentConfigs,
+} from "./adoption.js";
 import { type ClioMdFingerprintFooter, parseClioMd, serializeClioMd } from "./clio-md.js";
 import { buildCodewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
-import { loadSiblingContextFiles, type SiblingContextFile } from "./sibling-files.js";
-import { readClioState, writeClioState } from "./state.js";
+import type { SiblingContextFile } from "./sibling-files.js";
+import { readClioState, statePath as resolveStatePath, writeClioState } from "./state.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
 	identity: string;
 	conventions: string[];
 	invariants: string[];
+	importedAgentContext?: string;
 }
 
 export interface BootstrapIo {
@@ -27,10 +33,15 @@ export interface RunBootstrapInput {
 	modelId?: string;
 	now?: () => Date;
 	confirmGitignore?: () => boolean | Promise<boolean>;
+	preview?: boolean;
+	adopt?: boolean;
+	includeGlobalImports?: boolean;
+	homeDir?: string;
 	generate?: (input: {
 		cwd: string;
 		projectType: ProjectType;
 		siblingFiles: ReadonlyArray<SiblingContextFile>;
+		adoption: AdoptionScanResult;
 	}) => BootstrapStructuredOutput;
 }
 
@@ -41,17 +52,28 @@ export interface RunBootstrapResult {
 	output: BootstrapStructuredOutput;
 	projectType: ProjectType;
 	summary: RunBootstrapSummary;
+	adoption: AdoptionScanResult;
 }
 
 export interface RunBootstrapSummary {
-	action: "wrote" | "refreshed";
+	action: "wrote" | "refreshed" | "previewed";
 	contextFileCount: number;
 	contextFileNames: string[];
 	codewikiEntries: number;
 	dirtyFiles: number;
+	adoption: RunBootstrapAdoptionSummary;
 }
 
-const BOOTSTRAP_CONTEXT_FILE_NAMES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md"] as const;
+export interface RunBootstrapAdoptionSummary {
+	mode: "scan" | "adopt" | "preview";
+	sourceCount: number;
+	projectSourceCount: number;
+	globalSourceCount: number;
+	importedRuleCount: number;
+	conflictCount: number;
+	rejectedCount: number;
+	includeGlobal: boolean;
+}
 
 function out(io: BootstrapIo | undefined, message: string): void {
 	io?.stdout(message);
@@ -239,6 +261,7 @@ function defaultGenerate(input: {
 	cwd: string;
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
+	adoption: AdoptionScanResult;
 }): BootstrapStructuredOutput {
 	return {
 		projectName: projectName(input.cwd),
@@ -248,17 +271,12 @@ function defaultGenerate(input: {
 	};
 }
 
-function loadBootstrapSiblingFiles(cwd: string): SiblingContextFile[] {
-	const fromPromptLoader = loadProjectContextFiles({ cwd, fileNames: BOOTSTRAP_CONTEXT_FILE_NAMES }).map((file) => ({
-		source: "project",
-		path: file.path,
-		content: file.content,
+function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContextFile[] {
+	return adoption.sources.map((source) => ({
+		source: source.scope,
+		path: source.path,
+		content: source.content,
 	}));
-	const direct = loadSiblingContextFiles(cwd, { includeGlobal: false });
-	const byPath = new Map<string, SiblingContextFile>();
-	for (const file of [...fromPromptLoader, ...direct])
-		byPath.set(resolve(file.path), { ...file, path: resolve(file.path) });
-	return [...byPath.values()];
 }
 
 function gitStatus(cwd: string): string {
@@ -287,6 +305,20 @@ function basenameList(paths: ReadonlyArray<string>): string {
 	return `${names.slice(0, 3).join(", ")} +${names.length - 3}`;
 }
 
+function formatAdoptionLine(summary: RunBootstrapSummary): string | null {
+	const adoption = summary.adoption;
+	const shouldRender =
+		summary.action === "previewed" ||
+		adoption.mode === "adopt" ||
+		adoption.globalSourceCount > 0 ||
+		adoption.conflictCount > 0 ||
+		adoption.rejectedCount > 0;
+	if (!shouldRender) return null;
+	const global = adoption.includeGlobal ? `${adoption.globalSourceCount} global` : "global off";
+	const verb = adoption.mode === "adopt" ? "imported" : "scanned";
+	return `  adoption ${verb} ${adoption.sourceCount} source${adoption.sourceCount === 1 ? "" : "s"} (${adoption.projectSourceCount} project, ${global}); ${adoption.importedRuleCount} candidate rule${adoption.importedRuleCount === 1 ? "" : "s"}; ${adoption.conflictCount} conflict${adoption.conflictCount === 1 ? "" : "s"}; ${adoption.rejectedCount} rejected`;
+}
+
 function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	const contextLine =
 		summary.contextFileCount > 0
@@ -296,9 +328,20 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		summary.dirtyFiles === 0
 			? "workspace clean"
 			: `workspace has ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}`;
+	if (summary.action === "previewed") {
+		const adoptionLine = formatAdoptionLine(summary);
+		return [
+			"clio init preview",
+			`  ${contextLine}; codewiki would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
+			...(adoptionLine ? [adoptionLine] : []),
+			"",
+		].join("\n");
+	}
+	const adoptionLine = formatAdoptionLine(summary);
 	return [
 		`clio init ${summary.action} CLIO.md`,
 		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; fingerprint updated; ${dirtyLine}`,
+		...(adoptionLine ? [adoptionLine] : []),
 		"",
 	].join("\n");
 }
@@ -327,6 +370,7 @@ function writeArtifacts(
 	modelId: string,
 	now: Date,
 	output: BootstrapStructuredOutput,
+	adoption: AdoptionScanResult,
 ): { clioMdPath: string; statePath: string } {
 	const clioMdPath = join(cwd, "CLIO.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
@@ -348,7 +392,8 @@ function writeArtifacts(
 		fingerprint = next;
 	}
 	const finalFingerprint = computeFingerprint(cwd);
-	const statePath = join(cwd, ".clio", "state.json");
+	const statePath = resolveStatePath(cwd);
+	const contextSources = adoption.sourceSnapshots;
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
@@ -356,33 +401,88 @@ function writeArtifacts(
 		bootstrapFingerprint: finalFingerprint,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
+		...(contextSources.length > 0 ? { contextSources, contextSourceHash: adoptionSnapshotsHash(contextSources) } : {}),
 	});
 	return { clioMdPath, statePath };
+}
+
+function summarizeAdoption(
+	adoption: AdoptionScanResult,
+	mode: RunBootstrapAdoptionSummary["mode"],
+): RunBootstrapAdoptionSummary {
+	let projectSourceCount = 0;
+	let globalSourceCount = 0;
+	for (const source of adoption.sources) {
+		if (source.scope === "global") globalSourceCount += 1;
+		else projectSourceCount += 1;
+	}
+	return {
+		mode,
+		sourceCount: adoption.sources.length,
+		projectSourceCount,
+		globalSourceCount,
+		importedRuleCount: adoption.importedRules.length,
+		conflictCount: adoption.conflicts.length,
+		rejectedCount: adoption.rejected.length,
+		includeGlobal: adoption.includeGlobal,
+	};
 }
 
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
 	const cwd = input.cwd ?? process.cwd();
 	const projectType = detectProjectType(cwd);
-	const siblingFiles = loadBootstrapSiblingFiles(cwd);
-	const output = (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles });
-	await ensureGitignore(cwd, input);
+	const adoption = scanAgentConfigs({
+		cwd,
+		...(input.homeDir ? { homeDir: input.homeDir } : {}),
+		includeGlobal: input.includeGlobalImports === true,
+	});
+	const siblingFiles = loadBootstrapSiblingFiles(adoption);
+	let output = (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles, adoption });
+	if (input.adopt === true) {
+		const importedAgentContext = renderImportedAgentContext(adoption);
+		if (importedAgentContext.length > 0) output = { ...output, importedAgentContext };
+	}
 	const now = input.now?.() ?? new Date();
-	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
-	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output);
 	const indexedAt = now.toISOString();
 	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
+	const previewStatus = gitStatus(cwd);
+	if (input.preview === true) {
+		const summary: RunBootstrapSummary = {
+			action: "previewed",
+			contextFileCount: readNames.length,
+			contextFileNames: readNames,
+			codewikiEntries: codewiki.entries.length,
+			dirtyFiles: countStatusLines(previewStatus),
+			adoption: summarizeAdoption(adoption, "preview"),
+		};
+		out(input.io, formatBootstrapSummary(summary));
+		return {
+			clioMdPath: join(cwd, "CLIO.md"),
+			statePath: resolveStatePath(cwd),
+			siblingFiles,
+			output,
+			projectType,
+			summary,
+			adoption,
+		};
+	}
+
+	await ensureGitignore(cwd, input);
+	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
+	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output, adoption);
 	writeCodewiki(cwd, codewiki);
 	const state = readClioState(cwd);
 	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
 
-	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
-	const status = gitStatus(cwd);
+	const postStatus = gitStatus(cwd);
 	const summary: RunBootstrapSummary = {
 		action: hadClioMd ? "refreshed" : "wrote",
 		contextFileCount: readNames.length,
 		contextFileNames: readNames,
 		codewikiEntries: codewiki.entries.length,
-		dirtyFiles: countStatusLines(status),
+		dirtyFiles: countStatusLines(postStatus),
+		adoption: summarizeAdoption(adoption, input.adopt === true ? "adopt" : "scan"),
 	};
 	out(input.io, formatBootstrapSummary(summary));
 	return {
@@ -391,5 +491,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		output,
 		projectType,
 		summary,
+		adoption,
 	};
 }

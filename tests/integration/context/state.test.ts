@@ -13,11 +13,23 @@ describe("context/state", () => {
 				version: 1,
 				projectType: "typescript",
 				fingerprint: { treeHash: "1".repeat(64), gitHead: null, loc: 10 },
+				contextSources: [
+					{
+						path: join(dir, "CLAUDE.md"),
+						scope: "project",
+						provider: "claude-code",
+						kind: "instructions",
+						sha256: "2".repeat(64),
+					},
+				],
+				contextSourceHash: "3".repeat(64),
 				lastInitAt: "2026-05-01T00:00:00.000Z",
 			});
 			const state = readClioState(dir);
 			strictEqual(state?.projectType, "typescript");
 			strictEqual(state?.fingerprint.treeHash, "1".repeat(64));
+			strictEqual(state?.contextSources?.[0]?.provider, "claude-code");
+			strictEqual(state?.contextSourceHash, "3".repeat(64));
 			strictEqual(statePath(dir), join(dir, ".clio", "state.json"));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
