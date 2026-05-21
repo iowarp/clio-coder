@@ -8,14 +8,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
-import {
-	brandedBottomBorder,
-	brandedContentRow,
-	brandedDividerRow,
-	brandedErrorRow,
-	brandedTopBorder,
-	FocusBox,
-} from "../overlay-frame.js";
+import { clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -197,35 +190,34 @@ class TreeOverlayView implements Component {
 	}
 
 	render(width: number): string[] {
-		const contentWidth = Math.max(1, width - 4);
+		const contentWidth = Math.max(1, width);
 		const lines: string[] = [];
-		lines.push(brandedTopBorder(" /tree ", contentWidth + 2));
 		if (this.rows.length === 0) {
-			lines.push(brandedContentRow("(no sessions yet)", contentWidth));
+			lines.push("(no sessions yet)");
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
 				const row = this.rows[i];
 				if (!row) continue;
-				const body = formatTreeRow(row, { showTimestamps: this.showTimestamps, width: Math.max(1, contentWidth - 2) });
 				const prefix = i === this.highlight ? "▸ " : "  ";
+				const body = formatTreeRow(row, {
+					showTimestamps: this.showTimestamps,
+					width: Math.max(1, contentWidth - visibleWidth(prefix)),
+				});
 				const full = `${prefix}${body}`;
-				lines.push(brandedContentRow(full, contentWidth));
+				lines.push(truncateToWidth(full, contentWidth, "", true));
 			}
 			for (let i = end - this.scrollTop; i < VISIBLE_ROWS; i++) {
-				lines.push(brandedContentRow(" ".repeat(contentWidth), contentWidth));
+				lines.push("");
 			}
 		}
-		lines.push(brandedDividerRow(contentWidth));
+		lines.push("─".repeat(contentWidth));
 		const footer = this.footerText();
-		lines.push(brandedContentRow(truncateToWidth(footer, contentWidth, "", true), contentWidth));
+		lines.push(truncateToWidth(footer, contentWidth, "", true));
 		if (this.status) {
 			const status = truncateToWidth(this.status, contentWidth, "", true);
-			lines.push(
-				this.statusKind === "error" ? brandedErrorRow(status, contentWidth) : brandedContentRow(status, contentWidth),
-			);
+			lines.push(this.statusKind === "error" ? clioError(status) : status);
 		}
-		lines.push(brandedBottomBorder(contentWidth + 2));
 		return lines;
 	}
 
@@ -423,7 +415,7 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 	const initial = loadInitialSnapshot(deps.session);
 	const view = new TreeOverlayView(deps, initial);
 	const box = new FocusBox(view);
-	return tui.showOverlay(box, { anchor: "center", width: TREE_OVERLAY_WIDTH });
+	return showClioOverlayFrame(tui, box, { anchor: "center", width: TREE_OVERLAY_WIDTH, title: "Tree" });
 }
 
 /** @internal Construct the overlay view without mounting a TUI. Testing hook only. */

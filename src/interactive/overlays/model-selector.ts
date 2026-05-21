@@ -152,6 +152,7 @@ export interface ModelRow {
 	favorite?: boolean;
 	recent?: boolean;
 	defaultModel?: boolean;
+	focusPinned?: boolean;
 	visibleByDefault?: boolean;
 	selectable: boolean;
 }
@@ -334,6 +335,7 @@ export function buildModelItems(deps: {
 		const candidates = modelCandidatesForEndpoint(status);
 		const authText = authLabel({ providers: deps.providers, status });
 		const bucket = modelBucket(status);
+		const singleEndpoint = list.length === 1;
 		if (candidates.length === 0) {
 			const rowCaps = status.capabilities;
 			const row: ModelRow = {
@@ -388,6 +390,7 @@ export function buildModelItems(deps: {
 			const recent = recentSet.has(rowRef);
 			const defaultModel = wireModel === endpoint.defaultModel;
 			const endpointScopedFocus = endpointScopeHit && (active || defaultModel);
+			const focusPinned = singleEndpoint && candidate.source === "configured";
 			const row: ModelRow = {
 				value: rowRef,
 				endpoint: endpoint.id,
@@ -412,7 +415,8 @@ export function buildModelItems(deps: {
 				favorite,
 				recent,
 				defaultModel,
-				visibleByDefault: active || favorite || recent || defaultModel || endpointScopedFocus,
+				focusPinned,
+				visibleByDefault: active || favorite || recent || defaultModel || endpointScopedFocus || focusPinned,
 				selectable: true,
 			};
 			items.push({
@@ -764,7 +768,12 @@ class ModelOverlayView implements Component {
 		if (!row?.selectable || !this.onToggleFavorite) return;
 		row.favorite = !row.favorite;
 		row.visibleByDefault =
-			row.active || row.favorite === true || row.recent === true || row.scoped === true || row.defaultModel === true;
+			row.focusPinned === true ||
+			row.active ||
+			row.favorite === true ||
+			row.recent === true ||
+			row.scoped === true ||
+			row.defaultModel === true;
 		this.onToggleFavorite({ endpoint: row.endpoint, model: row.model }, row.favorite === true);
 	}
 

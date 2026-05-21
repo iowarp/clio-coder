@@ -15,6 +15,8 @@ import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
 const VISIBLE_ROWS = 12;
+export const SESSION_ESCAPE_GRACE_MS = 75;
+const ESC = String.fromCharCode(27);
 
 /**
  * SelectList allocates the primary column to the label and uses any
@@ -105,10 +107,32 @@ export interface OpenSessionOverlayDeps {
  * else feeds the search Input which live-filters the candidate set. pi-tui key
  * matching avoids treating fragmented arrow escape sequences as overlay close.
  */
-function createSessionOverlayBox(
+function isLikelyCompleteEscapeSequence(data: string): boolean {
+	if (!data.startsWith(ESC)) return false;
+	const rest = data.slice(1);
+	if (/^\[[0-9;:?]*[A-Za-z~]$/.test(rest)) return true;
+	return /^O.$/.test(rest);
+}
+
+function isPotentialEscapeSequence(data: string): boolean {
+	if (isBareEscape(data)) return true;
+	if (!data.startsWith(ESC)) return false;
+	if (`${ESC}[`.startsWith(data) || `${ESC}O`.startsWith(data)) return true;
+	if (data.startsWith(`${ESC}[`)) return !isLikelyCompleteEscapeSequence(data);
+	if (data.startsWith(`${ESC}O`)) return data.length < 3;
+	return false;
+}
+
+function isBareEscape(data: string): boolean {
+	return data.length === 1 && matchesKey(data, "esc");
+}
+
+/** @internal */
+export function createSessionOverlayBox(
 	sessions: ReadonlyArray<SessionMeta>,
 	onSelect: (sessionId: string) => void,
 	onClose: () => void,
+	options: { escapeGraceMs?: number } = {},
 ): FocusBox {
 	const input = new Input();
 	const noMatchView = new Text("");
@@ -116,6 +140,8 @@ function createSessionOverlayBox(
 	let filtered = [...sessions];
 	let lastQuery = "";
 	let list = buildList(filtered);
+	let pendingEscape = "";
+	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
 	const box = new FocusBox([], { onInput: handleInput });
 	input.setValue("");
 	input.onSubmit = () => commitSelection();
@@ -128,10 +154,10 @@ function createSessionOverlayBox(
 		const list = new SelectList(items, visible, DEFAULT_SELECT_THEME, SESSION_LAYOUT);
 		list.onSelect = (item: SelectItem): void => {
 			onSelect(item.value);
-			onClose();
+			closeOverlay();
 		};
 		list.onCancel = (): void => {
-			onClose();
+			closeOverlay();
 		};
 		return list;
 	}
@@ -158,14 +184,31 @@ function createSessionOverlayBox(
 		const first = filtered[0];
 		if (!first) return;
 		onSelect(first.id);
+		closeOverlay();
+	}
+
+	function closeOverlay(): void {
+		clearPendingEscape();
 		onClose();
 	}
 
-	function handleInput(data: string): void {
-		if (matchesKey(data, "esc")) {
+	function clearPendingEscape(): void {
+		if (pendingEscapeTimer) clearTimeout(pendingEscapeTimer);
+		pendingEscapeTimer = null;
+		pendingEscape = "";
+	}
+
+	function armPendingEscape(data: string): void {
+		if (pendingEscapeTimer) clearTimeout(pendingEscapeTimer);
+		pendingEscape = data;
+		pendingEscapeTimer = setTimeout(() => {
+			pendingEscapeTimer = null;
+			pendingEscape = "";
 			onClose();
-			return;
-		}
+		}, options.escapeGraceMs ?? SESSION_ESCAPE_GRACE_MS);
+	}
+
+	function dispatchResolvedInput(data: string): void {
 		if (matchesKey(data, "up") || matchesKey(data, "down")) {
 			list.handleInput(data);
 			return;
@@ -180,6 +223,32 @@ function createSessionOverlayBox(
 			lastQuery = next;
 			applyFilter();
 		}
+	}
+
+	function handleInput(data: string): void {
+		if (pendingEscape) {
+			const combined = `${pendingEscape}${data}`;
+			if (isLikelyCompleteEscapeSequence(combined)) {
+				clearPendingEscape();
+				dispatchResolvedInput(combined);
+				return;
+			}
+			if (isPotentialEscapeSequence(combined)) {
+				armPendingEscape(combined);
+				return;
+			}
+			closeOverlay();
+			return;
+		}
+		if (isBareEscape(data)) {
+			armPendingEscape(data);
+			return;
+		}
+		if (matchesKey(data, "esc")) {
+			closeOverlay();
+			return;
+		}
+		dispatchResolvedInput(data);
 	}
 }
 

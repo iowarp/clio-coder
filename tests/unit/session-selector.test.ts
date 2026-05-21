@@ -1,7 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionMeta } from "../../src/domains/session/index.js";
-import { buildSessionItems, formatRelativeTime } from "../../src/interactive/overlays/session-selector.js";
+import {
+	buildSessionItems,
+	createSessionOverlayBox,
+	formatRelativeTime,
+} from "../../src/interactive/overlays/session-selector.js";
 import { filterSessions } from "../../src/interactive/overlays/session-selector-search.js";
 
 function meta(id: string, overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -93,6 +97,47 @@ describe("session selector metadata", () => {
 		const items = buildSessionItems([meta("solo", { messageCount: 1 })], Date.parse("2026-04-25T12:00:00.000Z"));
 		ok(items[0]?.label.includes("1 msg"), items[0]?.label);
 		ok(!items[0]?.label.includes("1 msgs"), items[0]?.label);
+	});
+});
+
+describe("session selector input routing", () => {
+	it("keeps latency-split arrow escape bytes inside the selector", () => {
+		let selected = "";
+		let closed = 0;
+		const box = createSessionOverlayBox(
+			[meta("s1", { firstMessagePreview: "first" }), meta("s2", { firstMessagePreview: "second" })],
+			(id) => {
+				selected = id;
+			},
+			() => {
+				closed += 1;
+			},
+		);
+
+		box.handleInput("\x1b");
+		box.handleInput("[");
+		box.handleInput("B");
+		box.handleInput("\r");
+
+		strictEqual(selected, "s2");
+		strictEqual(closed, 1);
+	});
+
+	it("closes on a bare Escape after the disambiguation grace", async () => {
+		let closed = 0;
+		const box = createSessionOverlayBox(
+			[meta("s1")],
+			() => {},
+			() => {
+				closed += 1;
+			},
+			{ escapeGraceMs: 1 },
+		);
+
+		box.handleInput("\x1b");
+		strictEqual(closed, 0);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		strictEqual(closed, 1);
 	});
 });
 
