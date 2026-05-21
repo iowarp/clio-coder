@@ -151,6 +151,19 @@ describe("interactive slash commands", () => {
 		ok(stdout.includes("[/model] active: mini/qwen thinking=high"), stdout);
 	});
 
+	it("opens model selector for /models alias", () => {
+		let opened = 0;
+		const ctx = {
+			openModel: () => {
+				opened += 1;
+			},
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/models"), ctx);
+
+		strictEqual(opened, 1);
+	});
+
 	it("reports /model pattern resolution errors", () => {
 		let stderr = "";
 		const ctx = {

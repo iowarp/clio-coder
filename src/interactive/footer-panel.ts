@@ -3,9 +3,9 @@ import type { ModesContract } from "../domains/modes/index.js";
 import type { UsageBreakdown } from "../domains/observability/index.js";
 import {
 	type ProvidersContract,
-	type ResolvedModelRuntimeCapabilities,
+	type ResolvedRuntimeTarget,
 	type ResolvedThinkingCapability,
-	resolveModelRuntimeCapabilitiesForProviders,
+	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import { Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
@@ -137,7 +137,7 @@ interface OrchestratorTarget {
 	endpointId: string;
 	wireModelId: string;
 	healthStatus: "healthy" | "degraded" | "unknown" | "down";
-	resolved: ResolvedModelRuntimeCapabilities | null;
+	resolved: ResolvedRuntimeTarget | null;
 }
 
 function resolveOrchestratorTarget(
@@ -148,16 +148,17 @@ function resolveOrchestratorTarget(
 	const wireModelId = settings.orchestrator?.model?.trim();
 	if (!endpointId || !wireModelId) return null;
 	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
+	const resolved = resolveRuntimeTarget(providers, {
+		endpointId,
+		wireModelId,
+		requestedThinkingLevel: settings.orchestrator?.thinkingLevel ?? "off",
+		use: "orchestrator",
+	});
 	return {
 		endpointId,
 		wireModelId,
 		healthStatus: status?.health.status ?? "unknown",
-		resolved: resolveModelRuntimeCapabilitiesForProviders(
-			providers,
-			endpointId,
-			wireModelId,
-			settings.orchestrator?.thinkingLevel ?? "off",
-		),
+		resolved: resolved.ok ? resolved.target : null,
 	};
 }
 
@@ -260,7 +261,7 @@ export function buildFooter(deps: FooterDeps): FooterPanel {
 
 		let suffix = "";
 		if (target?.resolved) {
-			suffix = thinkingSuffixForFooter(target.resolved.thinking);
+			suffix = thinkingSuffixForFooter(target.resolved.modelRuntime.thinking);
 		}
 
 		const status = deps.getAgentStatus?.();

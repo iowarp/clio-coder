@@ -113,6 +113,9 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 	if (receipt.reproducibility !== undefined) {
 		draft.reproducibility = receipt.reproducibility;
 	}
+	if (receipt.runtimeResolution !== undefined) {
+		draft.runtimeResolution = receipt.runtimeResolution;
+	}
 	return draft;
 }
 

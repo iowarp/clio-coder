@@ -29,10 +29,13 @@ import { MODE_MATRIX, type ModeName } from "../modes/matrix.js";
 import {
 	type CapabilityFlags,
 	type EndpointDescriptor,
+	firstRuntimeResolutionError,
 	type ProvidersContract,
+	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
-	resolveEndpointRuntimeCapabilities,
 	resolveModelCapabilities,
+	resolveRuntimeTarget,
+	runtimeTargetSnapshot,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
@@ -215,6 +218,7 @@ interface ResolvedTarget {
 	thinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags | null;
 	modelCapabilities: CapabilityFlags | null;
+	runtimeResolution: ResolvedRuntimeTarget;
 }
 
 interface WorkerTargetConfig {
@@ -401,6 +405,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
 	if (input.approval.autoApprove !== undefined) spec.autoApprove = input.approval.autoApprove;
+	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	return spec;
@@ -530,24 +535,27 @@ function resolveDispatchTarget(
 		recipe?.thinkingLevel ??
 		fallbackWorkerTarget?.thinkingLevel ??
 		"off") as ThinkingLevel;
-	const modelCapabilities = capabilityInfoForModel(providers, endpoint.id, wireModelId);
-	const effectiveThinkingLevel = modelCapabilities
-		? resolveEndpointRuntimeCapabilities(
-				endpoint,
-				runtime,
-				wireModelId,
-				modelCapabilities,
-				providers.knowledgeBase,
-				thinkingLevel,
-			).thinking.effectiveLevel
-		: thinkingLevel;
+	const resolved = resolveRuntimeTarget(providers, {
+		endpointId,
+		wireModelId,
+		requestedThinkingLevel: thinkingLevel,
+		use: "dispatch",
+		requireOutputBudget: true,
+	});
+	if (!resolved.ok) {
+		throw new Error(
+			`dispatch: target resolution failed: ${firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics.map((entry) => entry.message).join("; ")}`,
+		);
+	}
+	const modelCapabilities = resolved.target.capabilities;
 	return {
 		endpoint,
 		runtime,
 		wireModelId,
-		thinkingLevel: effectiveThinkingLevel,
+		thinkingLevel: resolved.target.effectiveThinkingLevel,
 		capabilities: capabilityInfoForEndpoint(providers, endpoint.id),
 		modelCapabilities,
+		runtimeResolution: resolved.target,
 	};
 }
 
@@ -961,6 +969,7 @@ export function createDispatchBundle(
 					runtimeLimitations: lifecycle.approval.runtimeLimitations,
 				},
 				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
+				runtimeResolution: runtimeTargetSnapshot(lifecycle.target.runtimeResolution),
 				sessionId: null,
 			};
 		};

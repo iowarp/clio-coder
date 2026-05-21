@@ -69,7 +69,7 @@ describe("interactive/slash-autocomplete", () => {
 
 	it("parses canonical command names without duplicate aliases", () => {
 		deepStrictEqual(parseSlashCommand("/model"), { kind: "model" });
-		deepStrictEqual(parseSlashCommand("/models"), { kind: "unknown", text: "/models" });
+		deepStrictEqual(parseSlashCommand("/models"), { kind: "model" });
 		deepStrictEqual(parseSlashCommand("/quit"), { kind: "quit" });
 		deepStrictEqual(parseSlashCommand("/exit"), { kind: "unknown", text: "/exit" });
 		deepStrictEqual(parseSlashCommand("/skills"), { kind: "skills" });

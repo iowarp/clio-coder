@@ -394,6 +394,10 @@ describe("dispatch concurrency gate", () => {
 				[...BUILTIN_MIDDLEWARE_RULE_IDS],
 			);
 			strictEqual(spec.thinkingLevel, "off");
+			strictEqual(spec.runtimeResolution?.targetId, "claude-cli");
+			strictEqual(spec.runtimeResolution?.runtimeId, "claude-code-cli");
+			strictEqual(spec.runtimeResolution?.wireModelId, "claude-sonnet-4-6");
+			strictEqual(spec.runtimeResolution?.effectiveThinkingLevel, "off");
 			strictEqual(captured.opts?.cwd, dataDir);
 			strictEqual(run?.runtimeKind, "subprocess");
 			strictEqual(run?.pid, 1005);
@@ -401,6 +405,9 @@ describe("dispatch concurrency gate", () => {
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 0);
+			strictEqual(receipt.runtimeResolution?.targetId, spec.runtimeResolution?.targetId);
+			strictEqual(receipt.runtimeResolution?.runtimeId, spec.runtimeResolution?.runtimeId);
+			strictEqual(receipt.runtimeResolution?.wireModelId, spec.runtimeResolution?.wireModelId);
 		} finally {
 			await bundle.extension.stop?.();
 		}

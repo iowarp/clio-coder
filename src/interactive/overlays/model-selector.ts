@@ -28,6 +28,7 @@ const SELECTED_PREFIX_WIDTH = 6;
 const BACKSPACE = "\x7f";
 const BACKSPACE_ALT = "\b";
 const CTRL_U = "\x15";
+const TAB = "\t";
 const ENTER = "\r";
 const ENTER_LF = "\n";
 
@@ -49,6 +50,7 @@ export interface OpenModelOverlayDeps {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	onSelect: (ref: ModelSelection) => void;
+	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
 }
 
@@ -142,6 +144,10 @@ export interface ModelRow {
 	maxTokens: string;
 	active: boolean;
 	scoped: boolean;
+	favorite?: boolean;
+	recent?: boolean;
+	defaultModel?: boolean;
+	visibleByDefault?: boolean;
 	selectable: boolean;
 }
 
@@ -152,6 +158,7 @@ export interface ModelOverlaySummary {
 	cloudModels: number;
 	cliModels: number;
 	activeRef: string;
+	focusedModels?: number;
 }
 
 /**
@@ -271,6 +278,7 @@ function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef:
 		cloudModels,
 		cliModels,
 		activeRef,
+		focusedModels: rows.filter((row) => row.selectable && row.visibleByDefault !== false).length,
 	};
 }
 
@@ -289,6 +297,8 @@ export function buildModelItems(deps: {
 	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim() ?? "";
 	const activeModel = deps.settings.orchestrator?.model?.trim() ?? "";
 	const activeRef = activeEndpoint && activeModel ? `${activeEndpoint}/${activeModel}` : activeEndpoint;
+	const favoriteSet = new Set(deps.settings.modelSelector?.favorites ?? []);
+	const recentSet = new Set(deps.settings.state?.recentModels ?? []);
 	const list = [...deps.providers.list()].sort((a, b) => {
 		const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
 		const bActive = b.endpoint.id === activeEndpoint ? 0 : 1;
@@ -333,6 +343,10 @@ export function buildModelItems(deps: {
 				maxTokens: maxTokensLabel(rowCaps),
 				active: endpoint.id === activeEndpoint,
 				scoped: scopeSet.has(endpoint.id),
+				favorite: false,
+				recent: false,
+				defaultModel: false,
+				visibleByDefault: endpoint.id === activeEndpoint || scopeSet.has(endpoint.id),
 				selectable: false,
 			};
 			items.push({
@@ -346,15 +360,22 @@ export function buildModelItems(deps: {
 		}
 		for (const candidate of candidates) {
 			const wireModel = candidate.id;
+			const rowRef = `${endpoint.id}/${wireModel}`;
 			const detectedReasoning = deps.providers.getDetectedReasoning(endpoint.id, wireModel);
 			const rowCaps = resolveModelCapabilities(status, wireModel, deps.providers.knowledgeBase, {
 				detectedReasoning,
 			});
 			const badges = capabilityBadges(rowCaps);
-			const scopeHit = scopeSet.has(endpoint.id) || scopeSet.has(`${endpoint.id}/${wireModel}`);
+			const exactScopeHit = scopeSet.has(rowRef);
+			const endpointScopeHit = scopeSet.has(endpoint.id);
+			const scopeHit = exactScopeHit || endpointScopeHit;
 			const active = endpoint.id === activeEndpoint && wireModel === activeModel;
+			const favorite = favoriteSet.has(rowRef) || exactScopeHit;
+			const recent = recentSet.has(rowRef);
+			const defaultModel = wireModel === endpoint.defaultModel;
+			const endpointScopedFocus = endpointScopeHit && (active || defaultModel);
 			const row: ModelRow = {
-				value: `${endpoint.id}/${wireModel}`,
+				value: rowRef,
 				endpoint: endpoint.id,
 				model: wireModel,
 				runtimeName,
@@ -374,11 +395,15 @@ export function buildModelItems(deps: {
 				maxTokens: maxTokensLabel(rowCaps),
 				active,
 				scoped: scopeHit,
+				favorite,
+				recent,
+				defaultModel,
+				visibleByDefault: active || favorite || recent || defaultModel || endpointScopedFocus,
 				selectable: true,
 			};
 			items.push({
-				value: `${endpoint.id}/${wireModel}`,
-				label: `${row.healthGlyph}${scopeHit ? "★" : active ? "◆" : " "} ${wireModel}`,
+				value: rowRef,
+				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? "◇" : active ? "◆" : " "} ${wireModel}`,
 				description: `${row.context}  ${badges}  ${runtimeShortName}  endpoint=${endpoint.id}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: wireModel });
@@ -439,7 +464,10 @@ function fitLine(text: string, width: number): string {
 
 function activeMark(row: ModelRow): string {
 	if (row.active) return clioTitle("◆");
-	if (row.scoped) return clioFrame("★");
+	if (row.favorite) return clioFrame("★");
+	if (row.recent) return clioFrame("↺");
+	if (row.scoped) return clioFrame("◇");
+	if (row.defaultModel) return clioFrame("d");
 	return "·";
 }
 
@@ -499,7 +527,13 @@ function sourceLabel(source: ModelSource): string {
 
 function formatModelDetail(row: ModelRow, width: number): string[] {
 	const ref = row.model.length > 0 ? `${row.endpoint}/${row.model}` : row.endpoint;
-	const state = row.active ? "current" : row.scoped ? "in scope" : row.selectable ? "candidate" : "not selectable";
+	const tags: string[] = [];
+	if (row.active) tags.push("current");
+	if (row.favorite) tags.push("favorite");
+	if (row.recent) tags.push("recent");
+	if (row.scoped) tags.push("scoped");
+	if (row.defaultModel) tags.push("default");
+	const state = tags.length > 0 ? tags.join("+") : row.selectable ? "candidate" : "not selectable";
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
 	return [
 		fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width),
@@ -552,23 +586,33 @@ export function renderModelOverlayLines(input: {
 	selectedIndex: number;
 	query: string;
 	width: number;
+	showAll?: boolean;
 }): string[] {
 	const width = Math.max(1, input.width);
-	const filtered = input.rows.filter((row) => matchesQuery(row, input.query));
+	const query = input.query.trim();
+	const searching = query.length > 0;
+	const allMatches = input.rows.filter((row) => matchesQuery(row, input.query));
+	const focusedMatches = allMatches.filter((row) => row.visibleByDefault !== false);
+	const filtered = searching || input.showAll ? allMatches : focusedMatches;
 	const selectedIndex = Math.max(0, Math.min(input.selectedIndex, Math.max(0, filtered.length - 1)));
 	const selected = filtered[selectedIndex] ?? null;
 	const active = input.summary.activeRef || "not configured";
-	const queryLabel = input.query.trim().length > 0 ? `filter "${input.query.trim()}" · ${filtered.length}/` : "";
+	const modeLabel = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
 	const lines = [
 		fitLine(
-			`${queryLabel}${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud  ${input.summary.cliModels} cli`,
+			`${modeLabel} · ${filtered.length}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud  ${input.summary.cliModels} cli`,
 			width,
 		),
-		fitLine(`current ${active}`, width),
+		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),
 		formatModelHeader(width),
 	];
 	if (filtered.length === 0) {
-		lines.push(fitLine("  no models match the current filter", width));
+		lines.push(
+			fitLine(
+				searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
+				width,
+			),
+		);
 	} else {
 		const { start, rows } = visibleSlice(filtered, selectedIndex, VISIBLE_ROWS);
 		for (let i = 0; i < rows.length; i++) {
@@ -583,18 +627,20 @@ export function renderModelOverlayLines(input: {
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
 	else lines.push(fitLine("no selected model", width), "");
-	lines.push(clioFrame(fitLine("[type] filter  [Up/Down] select  [Enter] use  [Esc] close", width)));
+	lines.push(clioFrame(fitLine("[type] search all  [Tab] focus/all  [*] favorite  [Enter] use  [Esc] close", width)));
 	return lines.map((line) => fitLine(line, width));
 }
 
 class ModelOverlayView implements Component {
 	private selectedIndex = 0;
 	private query = "";
+	private showAll = false;
 
 	constructor(
 		private readonly rows: ReadonlyArray<ModelRow>,
 		private readonly summary: ModelOverlaySummary,
 		private readonly onSelect: (ref: ModelSelection) => void,
+		private readonly onToggleFavorite: ((ref: ModelSelection, favorite: boolean) => void) | undefined,
 		private readonly onClose: () => void,
 	) {}
 
@@ -604,7 +650,9 @@ class ModelOverlayView implements Component {
 	}
 
 	private filteredRows(): ModelRow[] {
-		return this.rows.filter((row) => matchesQuery(row, this.query));
+		const matches = this.rows.filter((row) => matchesQuery(row, this.query));
+		if (this.query.trim().length > 0 || this.showAll) return matches;
+		return matches.filter((row) => row.visibleByDefault !== false);
 	}
 
 	private selectedRow(): ModelRow | null {
@@ -637,6 +685,19 @@ class ModelOverlayView implements Component {
 		this.selectedIndex = 0;
 	}
 
+	private toggleShowAll(): void {
+		this.showAll = !this.showAll;
+		this.selectedIndex = 0;
+	}
+
+	private toggleFavorite(): void {
+		const row = this.selectedRow();
+		if (!row?.selectable || !this.onToggleFavorite) return;
+		row.favorite = !row.favorite;
+		row.visibleByDefault = row.active || row.favorite === true || row.recent === true || row.defaultModel === true;
+		this.onToggleFavorite({ endpoint: row.endpoint, model: row.model }, row.favorite === true);
+	}
+
 	render(width: number): string[] {
 		return renderModelOverlayLines({
 			rows: this.rows,
@@ -644,6 +705,7 @@ class ModelOverlayView implements Component {
 			selectedIndex: this.selectedIndex,
 			query: this.query,
 			width,
+			showAll: this.showAll,
 		});
 	}
 
@@ -677,6 +739,14 @@ class ModelOverlayView implements Component {
 			this.clearQuery();
 			return;
 		}
+		if (data === TAB) {
+			this.toggleShowAll();
+			return;
+		}
+		if (data === "*" && this.query.length === 0) {
+			this.toggleFavorite();
+			return;
+		}
 		if (data.length === 1 && data >= " " && data !== "\x7f") this.appendQuery(data);
 	}
 }
@@ -690,6 +760,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		rows,
 		summary,
 		(ref) => deps.onSelect(ref),
+		deps.onToggleFavorite ? (ref, favorite) => deps.onToggleFavorite?.(ref, favorite) : undefined,
 		() => deps.onClose(),
 	);
 	if (activeEndpoint && activeModel) {

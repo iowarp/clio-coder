@@ -16,6 +16,7 @@ import type {
 	CapabilityFlags,
 	EndpointDescriptor,
 	RuntimeDescriptor,
+	RuntimeTargetSnapshot,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
@@ -52,6 +53,8 @@ export interface WorkerRunInput {
 	modelCapabilities?: Partial<CapabilityFlags>;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
+	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
+	runtimeResolution?: RuntimeTargetSnapshot;
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
 	/** Mode matrix the worker runs under. Defaults to "default". */
@@ -248,7 +251,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			`[worker] warning: no tools resolved for mode=${mode} allowed=[${input.allowedTools.join(",")}]\n`,
 		);
 	}
-	const effectiveThinkingLevel = clampThinkingLevelForModel(model, input.thinkingLevel);
+	const effectiveThinkingLevel = clampThinkingLevelForModel(
+		model,
+		input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel,
+	);
 
 	const options: AgentOptions = {
 		initialState: {
