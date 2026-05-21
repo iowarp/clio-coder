@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
@@ -43,6 +43,25 @@ describe("interactive/model-selector", () => {
 		const models = modelsForEndpoint(status);
 		ok(models.includes("gpt-5.4"));
 		ok(models.includes("gpt-5.4-mini"));
+	});
+
+	it("keeps configured models first and appends live probe discoveries", () => {
+		const status = {
+			endpoint: {
+				id: "lab",
+				runtime: "openai-compat",
+				defaultModel: "configured-a",
+				wireModels: ["configured-a"],
+			},
+			runtime: null,
+			available: true,
+			reason: "ready",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 10 },
+			capabilities: EMPTY_CAPABILITIES,
+			discoveredModels: ["configured-a", "new-live-b"],
+		} satisfies EndpointStatus;
+
+		deepStrictEqual(modelsForEndpoint(status), ["configured-a", "new-live-b"]);
 	});
 
 	it("builds runtime-oriented labels and preserves endpoint/model refs", () => {
@@ -376,6 +395,33 @@ describe("interactive/model-selector", () => {
 		ok(
 			search.some((line) => line.includes("local-bulk-001")),
 			search.join("\n"),
+		);
+	});
+
+	it("renders refresh affordances and progress status", () => {
+		const lines = __modelSelectorTest.renderModelOverlayLines({
+			rows: [],
+			summary: {
+				totalModels: 0,
+				targets: 0,
+				localModels: 0,
+				cloudModels: 0,
+				cliModels: 0,
+				activeRef: "",
+			},
+			selectedIndex: 0,
+			query: "",
+			width: 104,
+			refreshing: "all",
+		});
+
+		ok(
+			lines.some((line) => line.includes("refreshing all targets")),
+			lines.join("\n"),
+		);
+		ok(
+			lines.some((line) => line.includes("[r] refresh target")),
+			lines.join("\n"),
 		);
 	});
 

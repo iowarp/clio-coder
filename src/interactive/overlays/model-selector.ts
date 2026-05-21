@@ -1,4 +1,6 @@
+import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
+import type { SafeEventBus } from "../../core/event-bus.js";
 import type { CapabilityFlags, EndpointStatus, ProvidersContract } from "../../domains/providers/index.js";
 import { listKnownModelsForRuntime, resolveModelCapabilities } from "../../domains/providers/index.js";
 import {
@@ -48,7 +50,10 @@ export interface ModelSelection {
 
 export interface OpenModelOverlayDeps {
 	settings: Readonly<ClioSettings>;
+	/** Optional live settings resolver so refreshes pick up target/config edits made while the overlay is open. */
+	getSettings?: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
+	bus?: SafeEventBus;
 	onSelect: (ref: ModelSelection) => void;
 	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
@@ -117,6 +122,7 @@ function truncateMiddle(text: string, maxWidth: number): string {
 
 type ModelSource = "configured" | "live" | "catalog" | "default" | "missing";
 type ModelBucket = "local" | "cloud" | "cli";
+type ModelRefreshScope = "selected" | "all";
 
 interface ModelCandidate {
 	id: string;
@@ -162,13 +168,12 @@ export interface ModelOverlaySummary {
 }
 
 /**
- * Enumerate the wire model ids to present for an endpoint. The order of
- * preference below keeps the overlay predictable across live probes:
- *   1. An explicit `endpoint.wireModels` list always wins.
- *   2. Otherwise, if the probe discovered models, show each.
- *   3. Otherwise fall back to `endpoint.defaultModel`, then the first
- *      discovered model, then an empty list for endpoints that have no
- *      resolvable wire model id.
+ * Enumerate the wire model ids to present for an endpoint. Configured
+ * `endpoint.wireModels` remain first so operator-curated choices keep their
+ * muscle memory, but live probe discoveries are appended so a runtime refresh
+ * can surface newly installed or newly entitled models without restarting
+ * Clio. If neither config nor a live probe has model ids, fall back to the
+ * provider/runtime catalog and finally the target default.
  */
 export function modelsForEndpoint(status: EndpointStatus): string[] {
 	return modelCandidatesForEndpoint(status).map((candidate) => candidate.id);
@@ -183,25 +188,35 @@ export interface ModelItemsResult {
 }
 
 function modelCandidatesForEndpoint(status: EndpointStatus): ModelCandidate[] {
-	const wireModels = uniqueModels(status.endpoint.wireModels ?? []);
-	if (wireModels.length > 0) return wireModels.map((id) => ({ id, source: "configured" }));
-	if (status.discoveredModels.length > 0) {
-		const discovered = uniqueModels(status.discoveredModels);
+	const configured = uniqueModels(status.endpoint.wireModels ?? []);
+	const discovered = uniqueModels(status.discoveredModels);
+	const defaultModel = status.endpoint.defaultModel?.trim() ?? "";
+	const out: ModelCandidate[] = [];
+	const seen = new Set<string>();
+	const add = (id: string, source: ModelSource): void => {
+		const trimmed = id.trim();
+		if (trimmed.length === 0 || seen.has(trimmed)) return;
+		seen.add(trimmed);
+		out.push({ id: trimmed, source });
+	};
+
+	if (configured.length > 0 || discovered.length > 0) {
 		const discoveredSet = new Set(discovered);
-		return uniqueModels([status.endpoint.defaultModel ?? "", ...discovered]).map((id) => ({
-			id,
-			source: discoveredSet.has(id) ? "live" : "default",
-		}));
+		for (const id of configured) add(id, "configured");
+		if (defaultModel) add(defaultModel, discoveredSet.has(defaultModel) ? "live" : "default");
+		for (const id of discovered) add(id, "live");
+		return out;
 	}
+
 	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
 	if (knownModels.length > 0) {
 		const knownSet = new Set(knownModels);
-		return uniqueModels([status.endpoint.defaultModel ?? "", ...knownModels]).map((id) => ({
-			id,
-			source: knownSet.has(id) ? "catalog" : "default",
-		}));
+		for (const id of uniqueModels([defaultModel, ...knownModels])) {
+			add(id, knownSet.has(id) ? "catalog" : "default");
+		}
+		return out;
 	}
-	if (status.endpoint.defaultModel) return [{ id: status.endpoint.defaultModel, source: "default" }];
+	if (defaultModel) return [{ id: defaultModel, source: "default" }];
 	return [];
 }
 
@@ -580,6 +595,15 @@ function visibleSlice<T>(
 	return { start, rows: items.slice(start, start + maxVisible) };
 }
 
+function refreshStatusLine(
+	refreshing: ModelRefreshScope | null | undefined,
+	error: string | null | undefined,
+): string | null {
+	if (refreshing)
+		return refreshing === "all" ? "refreshing all targets and model catalogs…" : "refreshing selected target models…";
+	return error ? `refresh error: ${error}` : null;
+}
+
 export function renderModelOverlayLines(input: {
 	rows: ReadonlyArray<ModelRow>;
 	summary: ModelOverlaySummary;
@@ -587,6 +611,8 @@ export function renderModelOverlayLines(input: {
 	query: string;
 	width: number;
 	showAll?: boolean;
+	refreshing?: ModelRefreshScope | null;
+	refreshError?: string | null;
 }): string[] {
 	const width = Math.max(1, input.width);
 	const query = input.query.trim();
@@ -604,8 +630,10 @@ export function renderModelOverlayLines(input: {
 			width,
 		),
 		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),
-		formatModelHeader(width),
 	];
+	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
+	if (refreshLine) lines.push(clioFrame(fitLine(refreshLine, width)));
+	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
 			fitLine(
@@ -627,26 +655,68 @@ export function renderModelOverlayLines(input: {
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
 	else lines.push(fitLine("no selected model", width), "");
-	lines.push(clioFrame(fitLine("[type] search all  [Tab] focus/all  [*] favorite  [Enter] use  [Esc] close", width)));
+	lines.push(
+		clioFrame(
+			fitLine(
+				"[type] search  [Tab] focus/all  [r] refresh target  [R] refresh all  [*] fav  [Enter] use  [Esc] close",
+				width,
+			),
+		),
+	);
 	return lines.map((line) => fitLine(line, width));
+}
+
+interface ModelRefreshActions {
+	selected?: (endpointId: string) => Promise<ModelItemsResult>;
+	all?: () => Promise<ModelItemsResult>;
+	requestRender?: () => void;
 }
 
 class ModelOverlayView implements Component {
 	private selectedIndex = 0;
 	private query = "";
 	private showAll = false;
+	private rows: ModelRow[];
+	private summary: ModelOverlaySummary;
+	private refreshing: ModelRefreshScope | null = null;
+	private refreshError: string | null = null;
 
 	constructor(
-		private readonly rows: ReadonlyArray<ModelRow>,
-		private readonly summary: ModelOverlaySummary,
+		rows: ReadonlyArray<ModelRow>,
+		summary: ModelOverlaySummary,
 		private readonly onSelect: (ref: ModelSelection) => void,
 		private readonly onToggleFavorite: ((ref: ModelSelection, favorite: boolean) => void) | undefined,
 		private readonly onClose: () => void,
-	) {}
+		private readonly refreshActions: ModelRefreshActions = {},
+	) {
+		this.rows = [...rows];
+		this.summary = summary;
+	}
 
-	setSelectedIndex(index: number): void {
+	selectedValue(): string | null {
+		return this.selectedRow()?.value ?? null;
+	}
+
+	setSelectedValue(value: string): void {
+		this.restoreSelection(value);
+	}
+
+	replaceItems(result: ModelItemsResult, preferredValue: string | null = this.selectedValue()): void {
+		this.rows = [...result.rows];
+		this.summary = result.summary;
+		this.restoreSelection(preferredValue);
+	}
+
+	private restoreSelection(preferredValue: string | null): void {
 		const filtered = this.filteredRows();
-		this.selectedIndex = Math.max(0, Math.min(index, Math.max(0, filtered.length - 1)));
+		if (preferredValue) {
+			const idx = filtered.findIndex((row) => row.value === preferredValue);
+			if (idx >= 0) {
+				this.selectedIndex = idx;
+				return;
+			}
+		}
+		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, filtered.length - 1)));
 	}
 
 	private filteredRows(): ModelRow[] {
@@ -694,8 +764,32 @@ class ModelOverlayView implements Component {
 		const row = this.selectedRow();
 		if (!row?.selectable || !this.onToggleFavorite) return;
 		row.favorite = !row.favorite;
-		row.visibleByDefault = row.active || row.favorite === true || row.recent === true || row.defaultModel === true;
+		row.visibleByDefault =
+			row.active || row.favorite === true || row.recent === true || row.scoped === true || row.defaultModel === true;
 		this.onToggleFavorite({ endpoint: row.endpoint, model: row.model }, row.favorite === true);
+	}
+
+	private async refresh(scope: ModelRefreshScope): Promise<void> {
+		if (this.refreshing) return;
+		const selected = this.selectedRow();
+		const preferredValue = selected?.value ?? null;
+		if (scope === "all" && !this.refreshActions.all) return;
+		if (scope === "selected" && (!this.refreshActions.selected || !selected?.endpoint)) return;
+		this.refreshing = scope;
+		this.refreshError = null;
+		this.refreshActions.requestRender?.();
+		try {
+			const next =
+				scope === "all"
+					? await this.refreshActions.all?.()
+					: await this.refreshActions.selected?.(selected?.endpoint ?? "");
+			if (next) this.replaceItems(next, preferredValue);
+		} catch (err) {
+			this.refreshError = err instanceof Error ? err.message : String(err);
+		} finally {
+			this.refreshing = null;
+			this.refreshActions.requestRender?.();
+		}
 	}
 
 	render(width: number): string[] {
@@ -706,6 +800,8 @@ class ModelOverlayView implements Component {
 			query: this.query,
 			width,
 			showAll: this.showAll,
+			refreshing: this.refreshing,
+			refreshError: this.refreshError,
 		});
 	}
 
@@ -743,6 +839,14 @@ class ModelOverlayView implements Component {
 			this.toggleShowAll();
 			return;
 		}
+		if (data === "r" && this.query.length === 0) {
+			void this.refresh("selected");
+			return;
+		}
+		if (data === "R" && this.query.length === 0) {
+			void this.refresh("all");
+			return;
+		}
 		if (data === "*" && this.query.length === 0) {
 			this.toggleFavorite();
 			return;
@@ -751,23 +855,53 @@ class ModelOverlayView implements Component {
 	}
 }
 
+function reloadKnowledgeBaseIfSupported(providers: ProvidersContract): void {
+	const knowledgeBase = providers.knowledgeBase;
+	const reload = (knowledgeBase as { reload?: unknown } | null)?.reload;
+	if (typeof reload === "function") reload.call(knowledgeBase);
+}
+
 export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayHandle {
-	const { rows, summary } = buildModelItems({ settings: deps.settings, providers: deps.providers });
+	const currentSettings = (): Readonly<ClioSettings> => deps.getSettings?.() ?? deps.settings;
+	const build = (options?: { reloadCatalog?: boolean }): ModelItemsResult => {
+		if (options?.reloadCatalog) reloadKnowledgeBaseIfSupported(deps.providers);
+		return buildModelItems({ settings: currentSettings(), providers: deps.providers });
+	};
+	const initial = build();
 	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
-	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim();
-	const activeModel = deps.settings.orchestrator?.model?.trim();
+	const activeEndpoint = currentSettings().orchestrator?.endpoint?.trim();
+	const activeModel = currentSettings().orchestrator?.model?.trim();
 	const view = new ModelOverlayView(
-		rows,
-		summary,
+		initial.rows,
+		initial.summary,
 		(ref) => deps.onSelect(ref),
 		deps.onToggleFavorite ? (ref, favorite) => deps.onToggleFavorite?.(ref, favorite) : undefined,
 		() => deps.onClose(),
+		{
+			selected: async (endpointId) => {
+				await deps.providers.probeEndpoint(endpointId);
+				return build({ reloadCatalog: true });
+			},
+			all: async () => {
+				await deps.providers.probeAllLive();
+				return build({ reloadCatalog: true });
+			},
+			requestRender: () => tui.requestRender(),
+		},
 	);
-	if (activeEndpoint && activeModel) {
-		const idx = rows.findIndex((r) => r.endpoint === activeEndpoint && r.model === activeModel);
-		if (idx >= 0) view.setSelectedIndex(idx);
-	}
-	return showClioOverlayFrame(tui, view, { anchor: "center", width: overlayWidth, title: "Models" });
+	if (activeEndpoint && activeModel) view.setSelectedValue(`${activeEndpoint}/${activeModel}`);
+	const unsubscribeHealth = deps.bus?.on(BusChannels.ProviderHealth, () => {
+		view.replaceItems(build());
+		tui.requestRender();
+	});
+	const handle = showClioOverlayFrame(tui, view, { anchor: "center", width: overlayWidth, title: "Models" });
+	return {
+		...handle,
+		hide(): void {
+			unsubscribeHealth?.();
+			handle.hide();
+		},
+	};
 }
 
 export const __modelSelectorTest = {

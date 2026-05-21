@@ -309,6 +309,10 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	async function probeAllLive(): Promise<void> {
 		const settings = readConfig();
+		const activeIds = new Set(settings.endpoints.map((ep) => ep.id));
+		for (const id of Array.from(statuses.keys())) {
+			if (!activeIds.has(id)) statuses.delete(id);
+		}
 		await Promise.all(settings.endpoints.map((ep) => probeEndpointInternal(ep, true)));
 	}
 

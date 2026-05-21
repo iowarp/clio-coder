@@ -84,22 +84,29 @@ function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 }
 
 function modelsForStatus(status: EndpointStatus): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	const add = (id: string | undefined): void => {
+		const trimmed = id?.trim() ?? "";
+		if (trimmed.length === 0 || seen.has(trimmed)) return;
+		seen.add(trimmed);
+		out.push(trimmed);
+	};
 	const wireModels = status.endpoint.wireModels ?? [];
-	if (wireModels.length > 0) return [...wireModels];
-	if (status.discoveredModels.length > 0) {
-		const dedup = new Set<string>();
-		if (status.endpoint.defaultModel) dedup.add(status.endpoint.defaultModel);
-		for (const m of status.discoveredModels) dedup.add(m);
-		return [...dedup];
+	if (wireModels.length > 0 || status.discoveredModels.length > 0) {
+		for (const model of wireModels) add(model);
+		add(status.endpoint.defaultModel);
+		for (const model of status.discoveredModels) add(model);
+		return out;
 	}
 	const known = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
 	if (known.length > 0) {
-		const dedup = new Set<string>();
-		if (status.endpoint.defaultModel) dedup.add(status.endpoint.defaultModel);
-		for (const m of known) dedup.add(m);
-		return [...dedup];
+		add(status.endpoint.defaultModel);
+		for (const model of known) add(model);
+		return out;
 	}
-	return status.endpoint.defaultModel ? [status.endpoint.defaultModel] : [];
+	add(status.endpoint.defaultModel);
+	return out;
 }
 
 function pickFirst(candidates: CandidateRef[]): { ref: CandidateRef; ambiguous: boolean } | null {

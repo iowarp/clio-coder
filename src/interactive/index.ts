@@ -1755,7 +1755,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "model";
 		overlayHandle = openModelOverlay(tui, {
 			settings,
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 			providers: deps.providers,
+			bus: deps.bus,
 			onSelect: (ref) => {
 				deps.onSelectModel?.(ref);
 				footer.refresh();
