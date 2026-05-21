@@ -65,6 +65,7 @@ export interface AgentStatus {
 	localRuntime: boolean;
 	runId?: string | null | undefined;
 	resumePhase?: StatusPhase | undefined;
+	activePhases?: ReadonlySet<OverlayPhase> | undefined;
 	overlayStack?: OverlayFrame[] | undefined;
 	tool?: ToolOverlay | undefined;
 	retry?: RetryOverlay | undefined;

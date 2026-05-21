@@ -107,6 +107,9 @@ function overlayFrames(prev: AgentStatus): Map<OverlayPhase, OverlayFrame> {
 	const frames = new Map<OverlayPhase, OverlayFrame>();
 	for (const frame of prev.overlayStack ?? []) frames.set(frame.phase, frame);
 	if (isOverlayPhase(prev.phase)) frames.set(prev.phase, overlayFrame(prev));
+	for (const phase of prev.activePhases ?? []) {
+		if (!frames.has(phase)) frames.set(phase, { phase, resumePhase: baseResumePhase(prev) });
+	}
 	return frames;
 }
 
@@ -147,6 +150,7 @@ function statusForVisibleOverlay(
 		retry: visible.retry,
 		tool: visible.tool,
 		dispatch: visible.dispatch,
+		activePhases: new Set(frames.keys()),
 		overlayStack: overlayStackWithoutVisible(frames, visible),
 	};
 }
@@ -202,6 +206,7 @@ function popOverlay(prev: AgentStatus, overlay: OverlayPhase, ctx: ReduceContext
 		...refreshMeaningful(prev, ctx),
 		phase: restore,
 		resumePhase: undefined,
+		activePhases: undefined,
 		overlayStack: [],
 		retry: undefined,
 		dispatch: undefined,
@@ -311,6 +316,9 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
 				summary: cancelledSummary(prev, ctx, phase === "cancelled" ? "cancelled" : "error"),
+				resumePhase: undefined,
+				activePhases: undefined,
+				overlayStack: [],
 			};
 		}
 		case "agent_end": {
@@ -331,6 +339,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 					truncated,
 				}),
 				resumePhase: undefined,
+				activePhases: undefined,
 				overlayStack: [],
 			};
 		}
@@ -345,6 +354,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				phase: "ended",
 				summary: cancelledSummary(prev, ctx, "cancelled"),
 				resumePhase: undefined,
+				activePhases: undefined,
 				overlayStack: [],
 			};
 		case "force_cancelled":
@@ -353,6 +363,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				phase: "ended",
 				summary: cancelledSummary(prev, ctx, "cancelled", true),
 				resumePhase: undefined,
+				activePhases: undefined,
 				overlayStack: [],
 			};
 		case "watchdog_tick": {
