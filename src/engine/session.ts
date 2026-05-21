@@ -8,7 +8,7 @@
  *     tree.json      [{id, parentId, at, kind}, ...]
  *
  * Atomicity:
- *   - current.jsonl is opened in "a" mode; each append fsyncs the fd.
+ *   - current.jsonl is rewritten via `writeJsonlFileAtomic` (`.tmp` + fsync + rename).
  *   - tree.json and meta.json are written via `atomicWrite` (tmp + fsync + rename).
  *
  * This module sits in `src/engine/` because it is the engine's artifact
@@ -144,6 +144,7 @@ export function atomicWrite(targetPath: string, contents: string | Uint8Array): 
 		closeSync(fd);
 	}
 	renameSync(tmp, targetPath);
+	fsyncDirectory(dir);
 }
 
 export interface SessionJsonlWarning {
@@ -181,13 +182,20 @@ function fsyncDirectory(path: string): void {
 
 function serializeJsonl(entries: ReadonlyArray<unknown>): string {
 	if (entries.length === 0) return "";
-	return `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+	const lines = entries.map((entry, index) => {
+		const serialized = JSON.stringify(entry);
+		if (serialized === undefined) {
+			throw new Error(`session JSONL entry ${index + 1} is not serializable`);
+		}
+		return serialized;
+	});
+	return `${lines.join("\n")}\n`;
 }
 
 /**
  * Rewrite a JSONL file through `<target>.tmp` and rename over the target.
  * A crash or interruption before the rename leaves the original target
- * untouched; recovery readers ignore leftover tmp files.
+ * untouched; when no target exists yet, recovery readers can promote the tmp.
  */
 export function writeJsonlFileAtomic(
 	targetPath: string,
@@ -196,10 +204,11 @@ export function writeJsonlFileAtomic(
 ): void {
 	const dir = dirname(targetPath);
 	mkdirSync(dir, { recursive: true });
+	const body = serializeJsonl(entries);
 	const tmp = `${targetPath}.tmp`;
 	const fd = openSync(tmp, "w");
 	try {
-		writeSync(fd, serializeJsonl(entries));
+		writeSync(fd, body);
 		fsyncSync(fd);
 	} finally {
 		closeSync(fd);
@@ -209,9 +218,23 @@ export function writeJsonlFileAtomic(
 	fsyncDirectory(dir);
 }
 
+function recoverJsonlTargetIfMissing(targetPath: string): string | null {
+	if (existsSync(targetPath)) return targetPath;
+	const tmp = `${targetPath}.tmp`;
+	try {
+		if (!statSync(tmp).isFile()) return null;
+		renameSync(tmp, targetPath);
+		fsyncDirectory(dirname(targetPath));
+		return targetPath;
+	} catch {
+		return existsSync(targetPath) ? targetPath : existsSync(tmp) ? tmp : null;
+	}
+}
+
 export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
-	if (!existsSync(path)) return [];
-	const raw = readFileSync(path, "utf8");
+	const readPath = recoverJsonlTargetIfMissing(path);
+	if (readPath === null) return [];
+	const raw = readFileSync(readPath, "utf8");
 	const entries: unknown[] = [];
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
 	const lines = raw.split("\n");
@@ -222,17 +245,31 @@ export function readSessionFileEntries(path: string, options: SessionJsonlReadOp
 			entries.push(JSON.parse(line) as unknown);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			warn({ path, line: index + 1, message: `invalid JSON skipped: ${message}` });
+			warn({ path: readPath, line: index + 1, message: `invalid JSON skipped: ${message}` });
 		}
 	}
 	return entries;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isOptionalString(value: unknown): boolean {
+	return value === undefined || typeof value === "string";
 }
 
 function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	return (
-		v.type === "session" && typeof v.id === "string" && typeof v.timestamp === "string" && typeof v.cwd === "string"
+		v.type === "session" &&
+		isPositiveInteger(v.version) &&
+		typeof v.id === "string" &&
+		typeof v.timestamp === "string" &&
+		typeof v.cwd === "string" &&
+		isOptionalString(v.parentSession) &&
+		isOptionalString(v.parentTurnId)
 	);
 }
 
@@ -308,13 +345,6 @@ function readMetaFile(path: string): ClioSessionMeta {
 	return JSON.parse(raw) as ClioSessionMeta;
 }
 
-function readTreeFile(path: string): SessionTreeNode[] {
-	if (!existsSync(path)) return [];
-	const raw = readFileSync(path, "utf8");
-	if (raw.trim().length === 0) return [];
-	return JSON.parse(raw) as SessionTreeNode[];
-}
-
 const TURN_KINDS: readonly ClioTurnRecord["kind"][] = [
 	"user",
 	"assistant",
@@ -332,6 +362,27 @@ function nullableString(value: unknown): value is string | null {
 	return value === null || typeof value === "string";
 }
 
+function isSessionTreeNode(value: unknown): value is SessionTreeNode {
+	if (!value || typeof value !== "object") return false;
+	const node = value as Record<string, unknown>;
+	return (
+		typeof node.id === "string" && nullableString(node.parentId) && typeof node.at === "string" && isTurnKind(node.kind)
+	);
+}
+
+function readTreeFile(path: string): SessionTreeNode[] {
+	if (!existsSync(path)) return [];
+	try {
+		const raw = readFileSync(path, "utf8");
+		if (raw.trim().length === 0) return [];
+		const parsed = JSON.parse(raw) as unknown;
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter(isSessionTreeNode);
+	} catch {
+		return [];
+	}
+}
+
 function treeNodeFromFileEntry(entry: unknown): SessionTreeNode | null {
 	if (!entry || typeof entry !== "object" || isSessionJsonlHeader(entry)) return null;
 	const value = entry as Record<string, unknown>;
@@ -339,7 +390,8 @@ function treeNodeFromFileEntry(entry: unknown): SessionTreeNode | null {
 		typeof value.id === "string" &&
 		nullableString(value.parentId) &&
 		typeof value.at === "string" &&
-		isTurnKind(value.kind)
+		isTurnKind(value.kind) &&
+		Object.hasOwn(value, "payload")
 	) {
 		return { id: value.id, parentId: value.parentId, at: value.at, kind: value.kind };
 	}
@@ -348,7 +400,8 @@ function treeNodeFromFileEntry(entry: unknown): SessionTreeNode | null {
 		typeof value.turnId === "string" &&
 		nullableString(value.parentTurnId) &&
 		typeof value.timestamp === "string" &&
-		isTurnKind(value.role)
+		isTurnKind(value.role) &&
+		Object.hasOwn(value, "payload")
 	) {
 		return { id: value.turnId, parentId: value.parentTurnId, at: value.timestamp, kind: value.role };
 	}
@@ -365,17 +418,23 @@ function treeFromFileEntries(fileEntries: ReadonlyArray<unknown>): SessionTreeNo
 }
 
 function sameTreeNode(a: SessionTreeNode | undefined, b: SessionTreeNode): boolean {
-	return !!a && a.parentId === b.parentId && a.at === b.at && a.kind === b.kind;
+	return !!a && a.id === b.id && a.parentId === b.parentId && a.at === b.at && a.kind === b.kind;
+}
+
+function sameTree(a: ReadonlyArray<SessionTreeNode>, b: ReadonlyArray<SessionTreeNode>): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i += 1) {
+		const left = a[i];
+		const right = b[i];
+		if (!left || !right || !sameTreeNode(left, right)) return false;
+	}
+	return true;
 }
 
 function recoverTreeFromJsonl(diskTree: SessionTreeNode[], fileEntries: ReadonlyArray<unknown>): SessionTreeNode[] {
 	const recovered = treeFromFileEntries(fileEntries);
 	if (recovered.length === 0) return diskTree;
-	const byId = new Map(diskTree.map((node) => [node.id, node]));
-	for (const node of recovered) {
-		if (!sameTreeNode(byId.get(node.id), node)) return recovered;
-	}
-	return diskTree;
+	return sameTree(diskTree, recovered) ? diskTree : recovered;
 }
 
 function findSessionDir(id: string): string {
@@ -407,8 +466,10 @@ function createWriter(
 	return {
 		append(turn: ClioTurnRecord): void {
 			if (closed) throw new Error("session writer closed");
-			fileEntries.push(recordFromTurn(turn));
-			writeJsonlFileAtomic(paths.current, fileEntries);
+			const record = recordFromTurn(turn);
+			const nextEntries = [...fileEntries, record];
+			writeJsonlFileAtomic(paths.current, nextEntries);
+			fileEntries.push(record);
 			tree.push({
 				id: turn.id,
 				parentId: turn.parentId,
@@ -418,8 +479,9 @@ function createWriter(
 		},
 		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
 			if (closed) throw new Error("session writer closed");
+			const nextEntries = [...fileEntries, entry];
+			writeJsonlFileAtomic(paths.current, nextEntries);
 			fileEntries.push(entry);
-			writeJsonlFileAtomic(paths.current, fileEntries);
 			if (opts?.treeNode) tree.push(opts.treeNode);
 		},
 		async persistTree(): Promise<void> {
@@ -427,12 +489,12 @@ function createWriter(
 		},
 		async close(): Promise<void> {
 			if (closed) return;
-			closed = true;
 			writeJsonlFileAtomic(paths.current, fileEntries);
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;
+			closed = true;
 		},
 	};
 }

@@ -248,6 +248,10 @@ function isNumber(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value);
 }
 
+function isPositiveInteger(value: unknown): value is number {
+	return isNumber(value) && Number.isInteger(value) && value > 0;
+}
+
 function isOptionalNumber(value: unknown): boolean {
 	return value === undefined || isNumber(value);
 }
@@ -322,7 +326,7 @@ export function isSessionHeader(value: unknown): value is SessionHeader {
 	if (!isRecord(value)) return false;
 	return (
 		value.type === "session" &&
-		isNumber(value.version) &&
+		isPositiveInteger(value.version) &&
 		isString(value.id) &&
 		isString(value.timestamp) &&
 		isString(value.cwd) &&
@@ -338,7 +342,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 	if (!isOneOf(v.kind, SESSION_ENTRY_KINDS)) return false;
 	switch (v.kind) {
 		case "message":
-			return isOneOf(v.role, MESSAGE_ROLES);
+			return Object.hasOwn(v, "payload") && isOneOf(v.role, MESSAGE_ROLES);
 		case "bashExecution":
 			return (
 				isString(v.command) &&

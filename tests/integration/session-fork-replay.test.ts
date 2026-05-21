@@ -221,4 +221,83 @@ describe("fork navigator switches to new branch and replays pre-fork turns", () 
 		ok(serialized.includes("Session durability"), serialized);
 		ok(!serialized.includes("Alternative-only goal"), serialized);
 	});
+
+	it("fork carries path-anchored branch summaries, labels, and bash sidecars", () => {
+		contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "root" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "root reply" } });
+		const summary = contract.appendEntry({
+			kind: "branchSummary",
+			parentTurnId: a1.id,
+			fromTurnId: "abandoned-turn",
+			summary: "The abandoned branch edited src/app.ts.",
+		});
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "selected path" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "selected reply" } });
+		const bash = contract.appendEntry({
+			kind: "bashExecution",
+			parentTurnId: a2.id,
+			command: "npm test",
+			output: "tests passed",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		});
+		const label = contract.appendEntry({
+			kind: "label",
+			parentTurnId: null,
+			targetTurnId: a2.id,
+			label: "fork point",
+		});
+		const altUser = contract.append({ parentId: a1.id, kind: "user", payload: { text: "alternative path" } });
+		contract.appendEntry({
+			kind: "label",
+			parentTurnId: null,
+			targetTurnId: altUser.id,
+			label: "alternative-only label",
+		});
+
+		const forked = contract.fork(a2.id);
+		const turns = openSession(forked.id).turns();
+		deepStrictEqual(turns.map(persistedId), [u1.id, a1.id, summary.turnId, u2.id, a2.id, bash.turnId, label.turnId]);
+		const serialized = JSON.stringify(turns);
+		ok(serialized.includes("The abandoned branch edited src/app.ts."), serialized);
+		ok(serialized.includes("tests passed"), serialized);
+		ok(serialized.includes("fork point"), serialized);
+		ok(!serialized.includes("alternative-only label"), serialized);
+
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, turns);
+		const text = strip(panel.render(96).join("\n"));
+		ok(text.includes("[branch summary]"), text);
+		ok(text.includes("bash: $ npm test"), text);
+		ok(text.includes("tests passed"), text);
+	});
+
+	it("fork carries compaction summaries so replay keeps compacted context", () => {
+		contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "old context" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "old answer" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "kept question" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "kept answer" } });
+		const summary = contract.appendEntry({
+			kind: "compactionSummary",
+			parentTurnId: u2.id,
+			summary: "Old context and answer were summarized.",
+			tokensBefore: 4096,
+			firstKeptTurnId: u2.id,
+		});
+
+		const forked = contract.fork(a2.id);
+		const turns = openSession(forked.id).turns();
+		deepStrictEqual(turns.map(persistedId), [u1.id, a1.id, u2.id, a2.id, summary.turnId]);
+
+		const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+		const serialized = JSON.stringify(replayMessages);
+		ok(serialized.includes("Old context and answer were summarized."), serialized);
+		ok(serialized.includes("kept question"), serialized);
+		ok(serialized.includes("kept answer"), serialized);
+		ok(!serialized.includes("old context"), serialized);
+		ok(!serialized.includes("old answer"), serialized);
+	});
 });

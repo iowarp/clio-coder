@@ -5,7 +5,7 @@ import {
 	sessionPaths,
 } from "../../../engine/session.js";
 import type { SessionMeta } from "../contract.js";
-import { isSessionEntry, isSessionHeader } from "../entries.js";
+import { isSessionEntry, isSessionHeader, type SessionEntry } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 
@@ -62,7 +62,8 @@ function isLegacyTurnRecord(value: unknown): value is ClioTurnRecord {
 		typeof v.id === "string" &&
 		(v.parentId === null || typeof v.parentId === "string") &&
 		typeof v.at === "string" &&
-		isLegacyTurnKind(v.kind)
+		isLegacyTurnKind(v.kind) &&
+		Object.hasOwn(v, "payload")
 	);
 }
 
@@ -119,12 +120,24 @@ function treeFromLinearPath(path: ReadonlyArray<LinkedRecord>): SessionTreeNode[
 		}));
 }
 
-function sidecarBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>): boolean {
-	if (!isSessionEntry(entry)) return false;
-	if (entry.kind === "taskLedger") return entry.parentTurnId === null || pathIds.has(entry.parentTurnId);
+function sessionEntryBelongsToPath(entry: SessionEntry, pathIds: ReadonlySet<string>): boolean {
+	if (entry.kind === "message") return pathIds.has(entry.turnId);
 	if (entry.kind === "label") return pathIds.has(entry.targetTurnId);
-	if (entry.kind === "sessionInfo" && entry.targetTurnId) return pathIds.has(entry.targetTurnId);
-	return false;
+	if (entry.kind === "sessionInfo") return entry.targetTurnId ? pathIds.has(entry.targetTurnId) : false;
+	if (entry.kind === "compactionSummary") {
+		return (
+			(entry.firstKeptTurnId.length > 0 && pathIds.has(entry.firstKeptTurnId)) ||
+			entry.parentTurnId === null ||
+			pathIds.has(entry.parentTurnId)
+		);
+	}
+	return entry.parentTurnId === null || pathIds.has(entry.parentTurnId);
+}
+
+function entryBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>): boolean {
+	if (isSessionEntry(entry)) return sessionEntryBelongsToPath(entry, pathIds);
+	const linked = linkedRecordFromEntry(entry);
+	return linked !== null && pathIds.has(linked.id);
 }
 
 function branchEntriesFromParent(
@@ -140,13 +153,9 @@ function branchEntriesFromParent(
 	const linked = parsed.map(linkedRecordFromEntry).filter((entry): entry is LinkedRecord => entry !== null);
 	const path = traceAncestry(linked, leafTurnId);
 	const pathIds = new Set(path.map((record) => record.id));
-	const leafIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry)?.id === leafTurnId);
-	const entries = parsed.filter((entry, index) => {
+	const entries = parsed.filter((entry) => {
 		if (isSessionHeader(entry)) return false;
-		const linkedEntry = linkedRecordFromEntry(entry);
-		if (linkedEntry && pathIds.has(linkedEntry.id)) return true;
-		if (leafIndex >= 0 && index > leafIndex) return false;
-		return sidecarBelongsToPath(entry, pathIds);
+		return entryBelongsToPath(entry, pathIds);
 	});
 	return {
 		parentCurrentPath,

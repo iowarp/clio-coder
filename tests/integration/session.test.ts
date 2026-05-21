@@ -152,6 +152,10 @@ describe("session/entries union", () => {
 	it("isSessionEntry rejects unknown kinds and missing fields", () => {
 		strictEqual(isSessionEntry({ kind: "bogus", turnId: "x" }), false);
 		strictEqual(isSessionEntry({ kind: "message" }), false);
+		strictEqual(
+			isSessionEntry({ kind: "message", turnId: "x", parentTurnId: null, timestamp: "now", role: "user" }),
+			false,
+		);
 		strictEqual(isSessionEntry({ kind: "bashExecution", turnId: "x", parentTurnId: null, timestamp: "now" }), false);
 		strictEqual(isSessionEntry(null), false);
 		strictEqual(isSessionEntry("string"), false);
@@ -171,6 +175,16 @@ describe("session/entries union", () => {
 			true,
 		);
 		strictEqual(isSessionHeader({ type: "session", id: "s1" }), false);
+		strictEqual(
+			isSessionHeader({
+				type: "session",
+				version: 2.5,
+				id: "s1",
+				timestamp: "2026-04-17T00:00:00.000Z",
+				cwd: "/tmp/project",
+			}),
+			false,
+		);
 	});
 
 	it("fromLegacyTurn maps id/at/kind to turnId/timestamp/role", () => {
@@ -535,6 +549,23 @@ describe("session/contract tree + switchBranch + editLabel + deleteSession", () 
 		strictEqual(readFileSync(path, "utf8"), original);
 	});
 
+	it("recovers current.jsonl from its temp file when the canonical file is missing", () => {
+		const meta = contract.create({ cwd: scratch });
+		contract.append({ parentId: null, kind: "user", payload: { text: "recover me" } });
+		const current = sessionPaths(meta).current;
+		const tmp = `${current}.tmp`;
+		const original = readFileSync(current, "utf8");
+		rmSync(current, { force: true });
+		writeFileSync(tmp, original, "utf8");
+
+		const entries = readSessionFileEntries(current);
+
+		strictEqual(existsSync(current), true, "temp file should be promoted to current.jsonl");
+		strictEqual(existsSync(tmp), false, "temp file should be consumed");
+		strictEqual(entries.length, 2, "header plus user turn should recover");
+		strictEqual(openSession(meta.id).turns().length, 1);
+	});
+
 	it("skips a corrupt trailing JSONL record with an explicit warning", () => {
 		const meta = contract.create({ cwd: scratch });
 		contract.append({ parentId: null, kind: "user", payload: { text: "first" } });
@@ -564,6 +595,33 @@ describe("session/contract tree + switchBranch + editLabel + deleteSession", () 
 		strictEqual(tree.length, 1);
 		strictEqual(tree[0]?.id, turn.id);
 		strictEqual(tree[0]?.kind, "user");
+	});
+
+	it("drops stale extra tree nodes that are not present in current.jsonl", () => {
+		const meta = contract.create({ cwd: scratch });
+		const turn = contract.append({ parentId: null, kind: "user", payload: { text: "only valid node" } });
+		writeFileSync(
+			sessionPaths(meta).tree,
+			JSON.stringify([
+				{ id: turn.id, parentId: null, at: turn.at, kind: "user" },
+				{ id: "stale-extra", parentId: turn.id, at: "2026-04-17T00:00:10.000Z", kind: "assistant" },
+			]),
+			"utf8",
+		);
+
+		const tree = openSession(meta.id).tree();
+		strictEqual(tree.length, 1);
+		strictEqual(tree[0]?.id, turn.id);
+	});
+
+	it("rebuilds tree state from JSONL when tree.json is malformed", () => {
+		const meta = contract.create({ cwd: scratch });
+		const turn = contract.append({ parentId: null, kind: "user", payload: { text: "malformed tree" } });
+		writeFileSync(sessionPaths(meta).tree, "{not-json", "utf8");
+
+		const tree = openSession(meta.id).tree();
+		strictEqual(tree.length, 1);
+		strictEqual(tree[0]?.id, turn.id);
 	});
 
 	it("persists taskLedger entries in the session JSONL stream", () => {
