@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { loadProjectContextFiles } from "../resources/context-files/loader.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { type ClioMdFingerprintFooter, parseClioMd, serializeClioMd } from "./clio-md.js";
@@ -40,6 +40,15 @@ export interface RunBootstrapResult {
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	output: BootstrapStructuredOutput;
 	projectType: ProjectType;
+	summary: RunBootstrapSummary;
+}
+
+export interface RunBootstrapSummary {
+	action: "wrote" | "refreshed";
+	contextFileCount: number;
+	contextFileNames: string[];
+	codewikiEntries: number;
+	dirtyFiles: number;
 }
 
 const BOOTSTRAP_CONTEXT_FILE_NAMES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md"] as const;
@@ -245,9 +254,10 @@ function loadBootstrapSiblingFiles(cwd: string): SiblingContextFile[] {
 		path: file.path,
 		content: file.content,
 	}));
-	const direct = loadSiblingContextFiles(cwd);
+	const direct = loadSiblingContextFiles(cwd, { includeGlobal: false });
 	const byPath = new Map<string, SiblingContextFile>();
-	for (const file of [...fromPromptLoader, ...direct]) byPath.set(file.path, file);
+	for (const file of [...fromPromptLoader, ...direct])
+		byPath.set(resolve(file.path), { ...file, path: resolve(file.path) });
 	return [...byPath.values()];
 }
 
@@ -261,6 +271,36 @@ function gitStatus(cwd: string): string {
 	} catch {
 		return "";
 	}
+}
+
+function countStatusLines(status: string): number {
+	return status
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean).length;
+}
+
+function basenameList(paths: ReadonlyArray<string>): string {
+	const names = paths.map((path) => parse(path).base).sort((a, b) => a.localeCompare(b));
+	if (names.length === 0) return "";
+	if (names.length <= 3) return names.join(", ");
+	return `${names.slice(0, 3).join(", ")} +${names.length - 3}`;
+}
+
+function formatBootstrapSummary(summary: RunBootstrapSummary): string {
+	const contextLine =
+		summary.contextFileCount > 0
+			? `folded ${summary.contextFileCount} context file${summary.contextFileCount === 1 ? "" : "s"} (${basenameList(summary.contextFileNames)})`
+			: "no sibling context files found";
+	const dirtyLine =
+		summary.dirtyFiles === 0
+			? "workspace clean"
+			: `workspace has ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}`;
+	return [
+		`clio init ${summary.action} CLIO.md`,
+		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; fingerprint updated; ${dirtyLine}`,
+		"",
+	].join("\n");
 }
 
 async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<void> {
@@ -327,24 +367,29 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	const output = (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles });
 	await ensureGitignore(cwd, input);
 	const now = input.now?.() ?? new Date();
+	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
 	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output);
 	const indexedAt = now.toISOString();
-	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
+	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	writeCodewiki(cwd, codewiki);
 	const state = readClioState(cwd);
 	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
 
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
-	const summary =
-		readNames.length > 0
-			? `clio init: folded ${readNames.length} context file(s) into CLIO.md. Clio will not read them again unless you re-run /init.\n`
-			: "clio init: wrote CLIO.md. No sibling context files were found.\n";
-	out(input.io, summary);
 	const status = gitStatus(cwd);
-	out(input.io, status.length > 0 ? `git status --short:\n${status}` : "git status --short: clean\n");
+	const summary: RunBootstrapSummary = {
+		action: hadClioMd ? "refreshed" : "wrote",
+		contextFileCount: readNames.length,
+		contextFileNames: readNames,
+		codewikiEntries: codewiki.entries.length,
+		dirtyFiles: countStatusLines(status),
+	};
+	out(input.io, formatBootstrapSummary(summary));
 	return {
 		...paths,
 		siblingFiles,
 		output,
 		projectType,
+		summary,
 	};
 }
