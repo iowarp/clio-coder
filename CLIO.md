@@ -9,10 +9,10 @@ Clio Coder is a TypeScript/Node.js project. Coding agent for HPC and scientific-
 
 <!-- clio:fingerprint v1
 {
-  "initAt": "2026-05-21T17:11:07.095Z",
+  "initAt": "2026-05-21T18:15:42.955Z",
   "model": "local-bootstrap",
-  "gitHead": "8cea10d8ff85d9cff1d2050fb5f6ac4d3084eded",
-  "treeHash": "b1e2ab29f46403fcc13e1a8aaf11b3720a267636917d9be3c8921c8a0ae34485",
-  "loc": 102556
+  "gitHead": "694b829b14a9dca46a353be49f6792e36bd76ccc",
+  "treeHash": "4370b8226c679cddf5175daa5265330548cbc50f6de581295b810b114f0f88bf",
+  "loc": 102752
 }
 -->
