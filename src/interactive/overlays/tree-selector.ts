@@ -1,7 +1,21 @@
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { TreeSnapshot, TreeSnapshotNode } from "../../domains/session/tree/navigator.js";
-import { Box, type Component, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
-import { brandedBottomBorder, brandedContentRow, brandedDividerRow, brandedTopBorder } from "../overlay-frame.js";
+import {
+	type Component,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "../../engine/tui.js";
+import {
+	brandedBottomBorder,
+	brandedContentRow,
+	brandedDividerRow,
+	brandedErrorRow,
+	brandedTopBorder,
+	FocusBox,
+} from "../overlay-frame.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -51,6 +65,7 @@ function shortTurnId(id: string): string {
  * into the TUI. Strip it down to a plain sentence; surface anything else
  * verbatim so genuine disk errors still reach the user.
  */
+/** @internal */
 export function formatTreeDeleteError(err: unknown): string {
 	const message = err instanceof Error ? err.message : String(err);
 	if (message.includes("refusing to delete the currently open session")) {
@@ -92,7 +107,7 @@ function isLeaf(node: TreeSnapshotNode): boolean {
 	return node.children.length === 0;
 }
 
-export function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
+function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	const rows: TreeRow[] = [];
 	const walk = (id: string, depth: number): void => {
 		const node = snapshot.nodesById[id];
@@ -108,17 +123,24 @@ export function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
  * role marker, and short turn id still fit on an 88-column overlay. */
 const ROW_PREVIEW_BUDGET = 55;
 
+/** @internal */
 export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
 	const indent = "  ".repeat(row.depth);
 	const glyph = isLeaf(row.node) ? "●" : "○";
 	const turnId = shortTurnId(row.node.id);
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
-	const preview = clampPreview(rawPreview, ROW_PREVIEW_BUDGET);
 	const labelSuffix = row.node.label ? ` · label:"${row.node.label}"` : "";
-	const main = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  ${preview}${labelSuffix}`;
+	const prefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
+	const previewBudget = Math.min(
+		ROW_PREVIEW_BUDGET,
+		Math.max(1, opts.width - visibleWidth(prefix) - visibleWidth(labelSuffix)),
+	);
+	const preview = clampPreview(rawPreview, previewBudget);
+	const main = `${prefix}${preview}${labelSuffix}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
 	const ts = row.node.at.slice(0, 19).replace("T", " ");
-	const budget = Math.max(10, opts.width - ts.length - 2);
+	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
+	const budget = Math.max(1, opts.width - ts.length - 2);
 	const primary = truncateToWidth(main, budget, "", true);
 	const pad = " ".repeat(Math.max(1, opts.width - primary.length - ts.length));
 	return `${primary}${pad}${ts}`;
@@ -132,8 +154,10 @@ class TreeOverlayView implements Component {
 	private showTimestamps = false;
 	private submode: Submode = "browse";
 	private labelBuffer = "";
+	private deleteConfirmBuffer = "";
 	private deleteContext: DeleteContext | null = null;
 	private status = "";
+	private statusKind: "info" | "error" = "info";
 
 	constructor(
 		private readonly deps: OpenTreeOverlayDeps,
@@ -173,20 +197,20 @@ class TreeOverlayView implements Component {
 	}
 
 	render(width: number): string[] {
-		const contentWidth = Math.max(10, width - 4);
+		const contentWidth = Math.max(1, width - 4);
 		const lines: string[] = [];
 		lines.push(brandedTopBorder(" /tree ", contentWidth + 2));
 		if (this.rows.length === 0) {
-			lines.push(brandedContentRow("(no sessions yet)".padEnd(contentWidth), contentWidth));
+			lines.push(brandedContentRow("(no sessions yet)", contentWidth));
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
 				const row = this.rows[i];
 				if (!row) continue;
-				const body = formatTreeRow(row, { showTimestamps: this.showTimestamps, width: contentWidth - 2 });
+				const body = formatTreeRow(row, { showTimestamps: this.showTimestamps, width: Math.max(1, contentWidth - 2) });
 				const prefix = i === this.highlight ? "▸ " : "  ";
 				const full = `${prefix}${body}`;
-				lines.push(brandedContentRow(full.padEnd(contentWidth), contentWidth));
+				lines.push(brandedContentRow(full, contentWidth));
 			}
 			for (let i = end - this.scrollTop; i < VISIBLE_ROWS; i++) {
 				lines.push(brandedContentRow(" ".repeat(contentWidth), contentWidth));
@@ -194,10 +218,11 @@ class TreeOverlayView implements Component {
 		}
 		lines.push(brandedDividerRow(contentWidth));
 		const footer = this.footerText();
-		lines.push(brandedContentRow(truncateToWidth(footer, contentWidth, "", true).padEnd(contentWidth), contentWidth));
+		lines.push(brandedContentRow(truncateToWidth(footer, contentWidth, "", true), contentWidth));
 		if (this.status) {
+			const status = truncateToWidth(this.status, contentWidth, "", true);
 			lines.push(
-				brandedContentRow(truncateToWidth(this.status, contentWidth, "", true).padEnd(contentWidth), contentWidth),
+				this.statusKind === "error" ? brandedErrorRow(status, contentWidth) : brandedContentRow(status, contentWidth),
 			);
 		}
 		lines.push(brandedBottomBorder(contentWidth + 2));
@@ -210,7 +235,8 @@ class TreeOverlayView implements Component {
 		}
 		if (this.submode === "confirm-delete") {
 			const scope = this.deleteContext?.keepFiles ? "tombstone" : "delete with files";
-			return `Delete session (${scope})? [y] confirm  [n] cancel`;
+			const typed = this.deleteConfirmBuffer ? ` typed:${this.deleteConfirmBuffer}` : "";
+			return `Delete session (${scope})? confirm: y + Enter  [n/Esc] cancel${typed}`;
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
 		return `[↑/↓] move  [Enter] switch  [e] label  [d/Shift+D] delete  [Shift+T] ts:${tsLabel}  [Esc] close`;
@@ -233,22 +259,22 @@ class TreeOverlayView implements Component {
 	private handleBrowseInput(data: string): void {
 		// Esc in browse closes the overlay. In submodes it cancels the submode
 		// first (handled by the submode input handlers).
-		if (data === "\x1b") {
+		if (matchesKey(data, "esc")) {
 			this.deps.onClose();
 			return;
 		}
 		// Empty snapshot: only Esc is meaningful; swallow everything else.
 		if (this.rows.length === 0) return;
 		// Arrows: CSI A/B for up/down.
-		if (data === "\x1b[A") {
+		if (matchesKey(data, "up")) {
 			this.moveHighlight(-1);
 			return;
 		}
-		if (data === "\x1b[B") {
+		if (matchesKey(data, "down")) {
 			this.moveHighlight(1);
 			return;
 		}
-		if (data === "\r" || data === "\n") {
+		if (matchesKey(data, "enter") || data === "\n") {
 			const row = this.currentRow();
 			if (!row) return;
 			this.deps.onSwitchBranch(row.sessionId);
@@ -262,31 +288,33 @@ class TreeOverlayView implements Component {
 		if (data === "e") {
 			this.submode = "edit-label";
 			this.labelBuffer = this.currentRow()?.node.label ?? "";
-			this.status = "";
+			this.setStatus("");
 			return;
 		}
 		if (data === "d") {
 			this.submode = "confirm-delete";
 			this.deleteContext = { keepFiles: false };
-			this.status = "";
+			this.deleteConfirmBuffer = "";
+			this.setStatus("");
 			return;
 		}
 		if (data === "D") {
 			this.submode = "confirm-delete";
 			this.deleteContext = { keepFiles: true };
-			this.status = "";
+			this.deleteConfirmBuffer = "";
+			this.setStatus("");
 			return;
 		}
 	}
 
 	private handleLabelInput(data: string): void {
-		if (data === "\x1b") {
+		if (matchesKey(data, "esc")) {
 			this.submode = "browse";
 			this.labelBuffer = "";
-			this.status = "";
+			this.setStatus("");
 			return;
 		}
-		if (data === "\r" || data === "\n") {
+		if (matchesKey(data, "enter") || data === "\n") {
 			const row = this.currentRow();
 			if (!row) {
 				this.submode = "browse";
@@ -295,10 +323,10 @@ class TreeOverlayView implements Component {
 			}
 			try {
 				this.deps.session.editLabel(row.node.id, this.labelBuffer, row.sessionId);
-				this.status = `[tree] label updated on ${shortTurnId(row.node.id)}`;
+				this.setStatus(`[tree] label updated on ${shortTurnId(row.node.id)}`);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.status = `[tree] editLabel failed: ${msg}`;
+				this.setStatus(`[tree] editLabel failed: ${msg}`, "error");
 			}
 			this.submode = "browse";
 			this.labelBuffer = "";
@@ -312,35 +340,67 @@ class TreeOverlayView implements Component {
 		}
 		// Swallow other control sequences (arrows, etc.) so they do not end up
 		// in the label buffer.
-		if (data.startsWith("\x1b") || data.length === 0) return;
+		if (data.length === 0) return;
 		// Accept printable chars (including multi-byte UTF-8 runs).
 		if (data.charCodeAt(0) < 0x20) return;
 		this.labelBuffer += data;
 	}
 
 	private handleDeleteConfirmInput(data: string): void {
-		if (data === "y" || data === "Y") {
-			const row = this.currentRow();
-			const ctx = this.deleteContext;
-			if (!row || !ctx) {
-				this.submode = "browse";
-				this.deleteContext = null;
-				return;
-			}
-			try {
-				this.deps.session.deleteSession(row.sessionId, { keepFiles: ctx.keepFiles });
-				this.status = `[tree] session ${shortTurnId(row.sessionId)} ${ctx.keepFiles ? "tombstoned" : "deleted"}`;
-			} catch (err) {
-				this.status = formatTreeDeleteError(err);
-			}
-			this.submode = "browse";
-			this.deleteContext = null;
-			this.refresh();
+		if (matchesKey(data, "esc") || data === "n" || data === "N") {
+			this.cancelDeleteConfirm();
 			return;
 		}
-		// Any other key cancels the confirm prompt.
+		if (data === "\x7f" || data === "\b") {
+			this.deleteConfirmBuffer = this.deleteConfirmBuffer.slice(0, -1);
+			return;
+		}
+		if (matchesKey(data, "enter") || data === "\n") {
+			const normalized = this.deleteConfirmBuffer.trim().toLowerCase();
+			if (normalized === "y" || normalized === "yes") this.confirmDelete();
+			else this.cancelDeleteConfirm();
+			return;
+		}
+		if (data.length === 0) return;
+		if (data.charCodeAt(0) < 0x20) return;
+		const next = `${this.deleteConfirmBuffer}${data}`.slice(0, 3);
+		if ("yes".startsWith(next.toLowerCase())) {
+			this.deleteConfirmBuffer = next;
+			return;
+		}
+		this.cancelDeleteConfirm();
+	}
+
+	private cancelDeleteConfirm(): void {
 		this.submode = "browse";
 		this.deleteContext = null;
+		this.deleteConfirmBuffer = "";
+	}
+
+	private confirmDelete(): void {
+		const row = this.currentRow();
+		const ctx = this.deleteContext;
+		if (!row || !ctx) {
+			this.submode = "browse";
+			this.deleteContext = null;
+			this.deleteConfirmBuffer = "";
+			return;
+		}
+		try {
+			this.deps.session.deleteSession(row.sessionId, { keepFiles: ctx.keepFiles });
+			this.setStatus(`[tree] session ${shortTurnId(row.sessionId)} ${ctx.keepFiles ? "tombstoned" : "deleted"}`);
+		} catch (err) {
+			this.setStatus(formatTreeDeleteError(err), "error");
+		}
+		this.submode = "browse";
+		this.deleteContext = null;
+		this.deleteConfirmBuffer = "";
+		this.refresh();
+	}
+
+	private setStatus(status: string, kind: "info" | "error" = "info"): void {
+		this.status = status;
+		this.statusKind = kind;
 	}
 
 	private moveHighlight(delta: number): void {
@@ -348,16 +408,6 @@ class TreeOverlayView implements Component {
 		if (next < 0 || next >= this.rows.length) return;
 		this.highlight = next;
 		this.invalidateLayout();
-	}
-}
-
-class TreeOverlayBox extends Box {
-	constructor(private readonly view: TreeOverlayView) {
-		super(1, 0);
-	}
-
-	handleInput(data: string): void {
-		this.view.handleInput(data);
 	}
 }
 
@@ -372,12 +422,11 @@ function loadInitialSnapshot(session: SessionContract): TreeSnapshot | null {
 export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHandle {
 	const initial = loadInitialSnapshot(deps.session);
 	const view = new TreeOverlayView(deps, initial);
-	const box = new TreeOverlayBox(view);
-	box.addChild(view);
+	const box = new FocusBox(view);
 	return tui.showOverlay(box, { anchor: "center", width: TREE_OVERLAY_WIDTH });
 }
 
-/** Construct the overlay view without mounting a TUI. Testing hook only. */
+/** @internal Construct the overlay view without mounting a TUI. Testing hook only. */
 export function createTreeOverlayViewForTesting(
 	deps: OpenTreeOverlayDeps,
 	initial: TreeSnapshot | null,

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
 import { buildTurnPreview, TURN_PREVIEW_MAX_CHARS } from "../../src/domains/session/tree/preview.js";
+import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	createTreeOverlayViewForTesting,
 	formatTreeRow,
@@ -172,6 +173,15 @@ describe("formatTreeRow renders payload-driven previews", () => {
 		const line = formatTreeRow({ depth: 0, node, sessionId: "s1" }, { showTimestamps: false, width: 80 });
 		ok(line.includes("(no text)"), `expected fallback marker, got: ${line}`);
 	});
+
+	it("shrinks previews and drops timestamps under narrow widths", () => {
+		const snap = baseSnapshot("a very long user prompt that should shrink before clipping layout");
+		const node = snap.nodesById.n1;
+		ok(node, "test snapshot must define n1");
+		const line = formatTreeRow({ depth: 0, node, sessionId: "s1" }, { showTimestamps: true, width: 18 });
+		ok(visibleWidth(line) <= 18, `row exceeded width: ${line}`);
+		ok(!line.includes("2024-01-01"), `timestamp should be omitted in narrow rows: ${line}`);
+	});
 });
 
 describe("tree overlay end-to-end render", () => {
@@ -241,5 +251,44 @@ describe("tree overlay end-to-end render", () => {
 		// And the bug we are fixing: rows must not all read the same generic
 		// `[role]` cell anymore.
 		ok(!/\[user\]\s+\[assistant\]\s+\[tool_call\]/.test(rendered), "old [role] placeholders should be gone");
+	});
+
+	it("keeps every painted line within very narrow render widths", () => {
+		const snapshot: TreeSnapshot = {
+			sessionId: "s1",
+			meta: {
+				id: "s1",
+				cwd: "/tmp",
+				createdAt: "2024-01-01T00:00:00.000Z",
+				endedAt: null,
+				model: null,
+				endpoint: null,
+			},
+			leafId: "n1",
+			nodesById: {
+				n1: {
+					id: "u1aaaa",
+					parentId: null,
+					at: "2024-01-01T00:00:00.000Z",
+					kind: "user",
+					preview: "long preview text",
+					children: [],
+				},
+			},
+			rootIds: ["n1"],
+		};
+		const session: Partial<SessionContract> = { tree: () => snapshot };
+		const view = createTreeOverlayViewForTesting(
+			{
+				session: session as SessionContract,
+				onSwitchBranch: () => {},
+				onClose: () => {},
+			},
+			snapshot,
+		);
+		const rendered = view.render(8);
+		for (const line of rendered) {
+			ok(visibleWidth(line) <= 8, `line exceeded narrow overlay width: ${line}`);
+		}
 	});
 });
