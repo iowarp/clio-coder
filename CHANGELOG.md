@@ -3,6 +3,80 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## 0.2.0 - 2026-06-02
+
+Clio Coder 0.2.0 is an alpha-readiness release for users building from
+source. It hardens durable session storage and fork replay, makes `CLIO.md`
+the explicit project-context path, centralizes runtime/model target
+resolution, and polishes the interactive terminal UI enough for broader
+testing with local and cloud targets.
+
+### Added
+
+- Added JIT skills as a loaded resource type, including skill cataloging,
+  slash-command access, prompt injection, tool bootstrap wiring, and tests for
+  skill resource loading.
+- Added stronger prompt compaction behavior for populated sessions, including
+  session-entry aware compaction and tests for compacting older turns without
+  dropping the current working context.
+- Added `clio init` / `/init` adoption support for project-local agent
+  instruction files. The scanner can import supported Claude, Codex, Gemini,
+  Cursor, Copilot, and related project context into `CLIO.md` with provenance
+  and conflict reporting.
+- Added centralized runtime target resolution so orchestrator chat, fleet
+  dispatch, prompt runtime text, receipts, worker specs, and model selectors
+  resolve target/model/capability state through one path.
+- Added runtime diagnostics in model, scoped-model, thinking, provider, and
+  overlay surfaces so operators can see target resolution and capability
+  issues without leaving the TUI.
+- Added command-output routing for interactive shell replay so `!!command`
+  output is rendered through the TUI and excluded from model context.
+- Added durable session JSONL entry coverage for labels, task ledgers, display
+  activity, evidence linking, corrupt-tail recovery, stale tree metadata, and
+  fork replay.
+- Added documentation pages for architecture, built-in agents, evidence and
+  memory, eval runner, middleware/components, model catalog, safety model, and
+  scientific validation.
+
+### Changed
+
+- Reworked the default damage-control path policy and project policy handling
+  so no-access, read-only, no-delete, wildcard, tilde, and relative paths are
+  applied consistently.
+- Unified headless `clio run` behavior around the orchestrator path, argument
+  parsing, JSONL/non-interactive output, dispatch memory injection, and test
+  coverage.
+- Stabilized prompt cache and worker runtime boundaries so workers receive
+  explicit runtime descriptors and prompt context remains coherent across hot
+  swaps, retries, dispatches, and memory injection.
+- Refactored overlay focus and framing into shared rendering paths for auth,
+  cost, hotkeys, keybinding, model, provider, scoped-model, settings,
+  thinking, session, tree, and super-mode overlays.
+- Replaced the old `docs/specs/*` layout with user-facing docs under `docs/`
+  and refreshed the README to describe the current target-first product
+  surface.
+- Made `clio init` output more compact while still reporting context sources,
+  codewiki indexing, fingerprint updates, and workspace dirtiness.
+
+### Fixed
+
+- Fixed damage-control wildcard escaping and formatting so path policies match
+  intended files without sibling-prefix leaks.
+- Fixed interactive startup and Bash replay so context warnings and command
+  output do not corrupt the chat transcript.
+- Fixed receipt overlay rendering at narrow widths and added focused coverage
+  for compact rows.
+- Fixed tree overlay rendering, payload-driven previews, and delete
+  confirmation so narrow terminals and destructive actions are clearer.
+- Fixed status overlay precedence and active-overlay tracking so retry,
+  stuck, cancelled, and ended phases do not mask one another incorrectly.
+- Fixed assistant summary metadata truncation in the chat panel.
+- Fixed overlay key routing for delayed escape sequences in model, session,
+  and tree selectors.
+- Fixed session persistence and fork hardening gaps, including atomic JSONL
+  writes, selected-path replay, task-ledger preservation, missing/stale tree
+  recovery, corrupt-tail handling, and evidence reconstruction.
+
 ## 0.1.9 - 2026-05-17
 
 Clio Coder 0.1.9 is a broad hardening release on top of the v0.1.6
