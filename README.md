@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.1.9-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.0-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,33 +30,33 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.1.9**.
+Clio Coder is currently in **alpha**. The current release is **v0.2.0**.
 
-## What's new in v0.1.9
+## What's new in v0.2.0
 
-A hardening release on top of the v0.1.6 print-mode baseline. v0.1.9 combines safer fleet dispatch, local-model capability resolution, frontend validation, TUI cancellation fixes, stronger release evidence, and removal of the retired internal dev harness.
+v0.2.0 is the first release intended for broader alpha testing from a cloned source tree. It focuses on durable sessions, clearer project context through `CLIO.md`, target-first runtime routing, and a more predictable terminal UI.
 
-- **Fleet-agent dispatch.** `dispatch` is now a first-class tool for bounded agent handoffs. The default handoff is `implementer`, the prompt includes the Agent Fleet catalog, duplicate dispatches are guarded, and successful dispatch receipts count as completion evidence.
-- **Local thinking surfaces.** Clio centralizes local model family/capability resolution so `/thinking`, `/settings`, the dashboard, footer, prompt runtime block, payload construction, stream parsing, receipts, and agent dispatch agree on the effective thinking level.
-- **GPT-OSS/Harmony support.** GPT-OSS models use the OpenAI-compatible chat-completions path with Harmony reasoning effort passed through the request payload, and constrained-final Harmony frames are surfaced as visible assistant text.
-- **Frontend validation without shell access.** `validate_frontend` checks HTML tag balance, local script and stylesheet references, JavaScript syntax, CSS brace/comment/string balance, and optional headless browser loading for changed frontend artifacts.
-- **TUI active-run control.** Plain follow-up text entered while a response is running queues as the next turn; `Esc` cancels the active response and emits an explicit cancellation line instead of leaving the UI ambiguous.
-- **Cleaner safety and release posture.** Typed execution tools, package-script validation, dispatch receipts, frontend validation, and protected artifacts all feed the finish-contract advisory path. The retired internal dev harness is gone from the runtime surface.
+- **Durable session history.** Sessions now use hardened JSONL persistence, atomic writes, corrupt-tail recovery, task-ledger entries, and fork replay coverage.
+- **Project-aware initialization.** `clio init` and `/init` can refresh `CLIO.md`, preserve compact project guidance, and adopt supported local agent instruction files with provenance.
+- **Target-first runtime routing.** Runtime/model resolution is centralized so chat, dispatch, prompts, receipts, model selectors, and worker rehydration agree on the active target.
+- **More reliable TUI overlays.** Model, target, settings, tree, receipt, status, and approval overlays have tighter key routing, framing, diagnostics, and narrow-width behavior.
+- **Safer execution defaults.** The damage-control policy, path matching, typed validation evidence, prompt cache boundaries, and worker runtime contracts are stricter.
+- **Release-grade local checks.** The repository gate now runs typecheck, Biome, unit/integration/boundary tests, build, and CLI/TUI e2e through `npm run ci`.
 
-Since v0.1.6, Clio Coder also gained JSONL non-interactive mode, typed safe execution tools, default-deny Bash, project path policy, Claude Code SDK approval routing, extension packages, share archives, component snapshots, deterministic evidence corpora, local evals, scoped memory, and the current fleet-agent recipe catalog.
+v0.2.0 builds on the v0.1.x fleet dispatch, typed validation, frontend validation, local-runtime, extension, share archive, evidence, eval, and memory work. See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full entry.
+It is still alpha software: expect sharp edges around first-run configuration, local runtime availability, and model-specific behavior. The core source install, CLI, and TUI paths are now testable enough for early users who can report issues with receipts and logs.
 
 ## Use it if
 
 - you want AI assistance inside a real repository from the terminal;
 - you run local models (Ollama, LM Studio, llama.cpp, vLLM, SGLang) or have cloud API keys;
 - you care about supervised execution, receipts, and audit trails;
-- you can tolerate alpha rough edges and report them.
+- you can run source builds, `clio doctor`, `clio targets --probe`, and report reproducible failures.
 
 ## Skip it if
 
-- you need a fully stable production coding assistant with a mature plugin ecosystem.
+- you need a fully stable production coding assistant with managed upgrades and a mature plugin ecosystem.
 
 ---
 
@@ -95,18 +95,18 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.1.9
+git checkout v0.2.0
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.1.9` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.2.0` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
-The package is planned for npm distribution.
+The package is planned for npm distribution. Until it is published, use the source install path above.
 
 ```bash
 npm install -g @iowarp/clio-coder
@@ -419,7 +419,11 @@ Use these files to tell Clio Coder and other AI agents how to work in your repos
 Example `CLIO.md`:
 
 ```markdown
-# Agent instructions
+# Example Project
+
+Example Project is a TypeScript service with a Node.js CLI. It expects agents to keep source, tests, and public docs synchronized.
+
+## Conventions
 
 - Use `npm run ci` before claiming the repo is healthy.
 - Prefer small, reviewable changes.
@@ -427,6 +431,11 @@ Example `CLIO.md`:
 - Do not change public APIs without an explicit plan.
 - Keep documentation examples synchronized with CLI behavior.
 - When uncertain, inspect the source instead of guessing.
+
+## Hard invariants
+
+1. Runtime code must not import test helpers.
+2. Public CLI behavior must be covered by an e2e or integration test.
 ```
 
 This is the best place to encode repository-specific rules, test commands, style constraints, forbidden paths, review requirements, and release procedures.
@@ -696,7 +705,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 ## Roadmap
 
-Current release: **v0.1.9** alpha (fleet dispatch, typed validation, frontend validation, TUI hardening, and local model thinking / GPT-OSS-Harmony hardening). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
+Current release: **v0.2.0** alpha (durable sessions, CLIO.md adoption, target-first runtime routing, TUI overlay hardening, and full local CI/e2e release checks). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
 
 Near-term:
 
