@@ -11,8 +11,18 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, truncateToWidth } from "../engine/tui.js";
-import { abbreviateModelId, collapseHomePath } from "./theme/index.js";
+import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import {
+	abbreviateModelId,
+	type ClioTheme,
+	type ClioToken,
+	clioTheme,
+	GLYPH,
+	joinChips,
+	keyHint,
+	rule,
+	sectionTag,
+} from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	modes: ModesContract;
@@ -30,9 +40,13 @@ export interface WelcomeDashboardStats {
 	targetLabel: string;
 	modelLabel: string;
 	thinkingLevel: string;
+	modeLabel: string;
+	cwd: string;
 	workspace: WorkspaceSnapshot | null;
 	currentAvailable: boolean;
+	targetHealthLabel: string | null;
 	activeCapabilities: string[];
+	extensions: { active: number; installed: number } | null;
 }
 
 function stripAnsi(text: string): string {
@@ -92,6 +106,28 @@ function selectedModelCapabilities(
 	return resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning });
 }
 
+function healthReadout(status: EndpointStatus | null): string | null {
+	// Health is only worth a chip once a probe has produced a real verdict.
+	// Unprobed ("unknown") and unconfigured targets render nothing rather than
+	// noise like "unknown" or "not configured".
+	if (!status || status.health.status === "unknown") return null;
+	const latency =
+		typeof status.health.latencyMs === "number" && Number.isFinite(status.health.latencyMs)
+			? ` ${Math.round(status.health.latencyMs)}ms`
+			: "";
+	if (activeStatus(status)) return `${status.health.status}${latency}`;
+	const reason = status.health.lastError ?? status.reason;
+	return reason && reason !== status.health.status ? `${status.health.status}: ${reason}` : status.health.status;
+}
+
+function modeReadout(modes: ModesContract): string {
+	try {
+		return modes.current().toLowerCase();
+	} catch {
+		return "default";
+	}
+}
+
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
@@ -99,6 +135,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const targetLabel = current?.endpoint.id ?? settings?.orchestrator?.endpoint ?? "not configured";
 	const modelLabel = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? "not configured";
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
+	const cwd = workspace?.cwd ?? process.cwd();
 	const currentAvailable = current ? activeStatus(current) : false;
 	const activeCapabilities = capabilityLabels(selectedModelCapabilities(current, settings, deps.providers));
 	const thinkingLevel =
@@ -116,27 +153,106 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		targetLabel,
 		modelLabel,
 		thinkingLevel,
+		modeLabel: modeReadout(deps.modes),
+		cwd,
 		workspace,
 		currentAvailable,
+		targetHealthLabel: healthReadout(current),
 		activeCapabilities,
+		extensions: deps.getExtensionStats?.() ?? null,
 	};
 }
 
-function gitReadout(workspace: WorkspaceSnapshot | null): string {
-	if (!workspace?.isGit) return "git none";
-	const branch = workspace.branch ?? "detached";
-	const clean = workspace.dirty === false ? "✓" : workspace.dirty === true ? "!" : "?";
-	return `git ${branch} ${clean}`;
+/** Welcome header responsive bands. */
+const WIDE_MIN = 90;
+const MID_MIN = 64;
+
+function joinColumns(left: string, right: string, width: number): string {
+	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+	return truncateToWidth(`${left}${" ".repeat(gap)}${right}`, Math.max(1, width), "", true);
+}
+
+function capabilityChips(theme: ClioTheme, stats: WelcomeDashboardStats, limit: number): string[] {
+	return stats.activeCapabilities
+		.filter((label) => !label.endsWith(" ctx"))
+		.slice(0, Math.max(0, limit))
+		.map((cap) => theme.fg("accentDeep", cap));
+}
+
+function extensionChip(theme: ClioTheme, stats: WelcomeDashboardStats): string | null {
+	// Hide entirely when nothing is installed; "ext 0/0" is pure noise.
+	if (!stats.extensions || stats.extensions.installed <= 0) return null;
+	return theme.fg("muted", `ext ${stats.extensions.active}/${stats.extensions.installed}`);
+}
+
+function healthChip(theme: ClioTheme, label: string | null): string | null {
+	if (!label) return null;
+	const token: ClioToken = label.startsWith("healthy") ? "success" : label.startsWith("down") ? "error" : "warning";
+	return theme.fg(token, label);
+}
+
+function thinkingChip(theme: ClioTheme, level: string): string {
+	const active = level !== "off" && level !== "none";
+	const glyph = theme.fg(active ? "reason" : "dim", active ? GLYPH.thinkOn : GLYPH.thinkOff);
+	return `think ${glyph} ${theme.fg("muted", level)}`;
+}
+
+function onlineChip(theme: ClioTheme, stats: WelcomeDashboardStats): string {
+	const allOnline = stats.totalTargets > 0 && stats.activeTargets >= stats.totalTargets;
+	const dot = theme.fg(allOnline ? "success" : "warning", GLYPH.running);
+	return `${dot} ${theme.fg("muted", `${stats.activeTargets}/${stats.totalTargets} online`)}`;
+}
+
+function section(theme: ClioTheme, token: ClioToken, label: string, content: string): string {
+	return ` ${sectionTag(theme, token, label, 6)} ${content}`;
 }
 
 export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: number): string[] {
-	const cwd = collapseHomePath(stats.workspace?.cwd ?? process.cwd());
-	const lines = [
-		`◈ Clio Coder  v${readClioVersion()}`,
-		`  ${stats.targetLabel} · ${abbreviateModelId(stats.modelLabel)} · think ${stats.thinkingLevel} · ${contextCapability(stats.activeCapabilities)}`,
-		`  ${cwd} · ${gitReadout(stats.workspace)} · ${stats.activeTargets}/${stats.totalTargets} targets online`,
-	];
-	return lines.map((line) => truncateToWidth(line, Math.max(1, width), "", true));
+	const theme = clioTheme();
+	const safeWidth = Math.max(1, width);
+
+	const title = theme.style("title", `${GLYPH.agent} Clio Coder`, { bold: true });
+	const versionTag = theme.fg("dim", `v${readClioVersion()}`);
+	const mode = theme.fg("muted", stats.modeLabel);
+	const endpoint = theme.fg("accent", stats.targetLabel);
+	const model = abbreviateModelId(stats.modelLabel);
+	const think = thinkingChip(theme, stats.thinkingLevel);
+	const context = theme.fg("info", contextCapability(stats.activeCapabilities));
+	const health = healthChip(theme, stats.targetHealthLabel);
+	const ext = extensionChip(theme, stats);
+	// Dashboard toggle is Alt+U; the live workspace/git ownership moved to the
+	// footer so the branch is never duplicated between header and footer.
+	const affordance = keyHint(theme, "Alt+U", "dashboard");
+	const identity = joinColumns(
+		joinChips(theme, [title, versionTag]),
+		joinChips(theme, [mode, onlineChip(theme, stats)]),
+		safeWidth,
+	);
+
+	let lines: string[];
+	if (safeWidth >= WIDE_MIN) {
+		const caps = joinChips(theme, [...capabilityChips(theme, stats, 4), ext]);
+		lines = [
+			identity,
+			rule(theme, safeWidth),
+			section(theme, "accent", "target", joinChips(theme, [endpoint, model, think, context, health])),
+			joinColumns(section(theme, "reason", "caps", caps), affordance, safeWidth),
+		];
+	} else if (safeWidth >= MID_MIN) {
+		const caps = joinChips(theme, [...capabilityChips(theme, stats, 3), ext]);
+		lines = [
+			identity,
+			section(theme, "accent", "target", joinChips(theme, [endpoint, model, think, context])),
+			joinColumns(section(theme, "reason", "caps", caps), affordance, safeWidth),
+		];
+	} else {
+		lines = [
+			joinChips(theme, [title, versionTag, mode]),
+			joinChips(theme, [endpoint, model, think]),
+			joinChips(theme, [...capabilityChips(theme, stats, 2), theme.fg("accentDeep", "Alt+U")]),
+		];
+	}
+	return lines.map((line) => truncateToWidth(line, safeWidth, "", true));
 }
 
 export class WelcomeDashboard implements Component {

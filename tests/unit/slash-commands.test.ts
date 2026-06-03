@@ -173,6 +173,19 @@ describe("interactive slash commands", () => {
 		strictEqual(opened, 1);
 	});
 
+	it("routes /status to the same footer dashboard toggle as Ctrl+U", () => {
+		let toggled = 0;
+		const ctx = {
+			openStatus: () => {
+				toggled += 1;
+			},
+		} as Partial<SlashCommandContext> as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/status"), ctx);
+
+		strictEqual(toggled, 1);
+	});
+
 	it("reports /model pattern resolution errors", () => {
 		let stderr = "";
 		const ctx = {

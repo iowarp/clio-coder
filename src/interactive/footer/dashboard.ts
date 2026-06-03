@@ -2,24 +2,51 @@ import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ModesContract } from "../../domains/modes/index.js";
 import type { UsageBreakdown } from "../../domains/observability/index.js";
-import { type ProvidersContract, resolveRuntimeTarget } from "../../domains/providers/index.js";
+import type { ProvidersContract } from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
-import { Text } from "../../engine/tui.js";
+import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import { Text, visibleWidth } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import { contextSegment, type FooterPanel, formatFooterTokens, tokensSegment } from "../footer-panel.js";
+import {
+	contextSegment,
+	dispatchSegment,
+	type FooterPanel,
+	formatFooterTokens,
+	tokensSegment,
+} from "../footer-panel.js";
 import type { AgentStatus } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
-import { abbreviateModelId, collapseHomePath } from "../theme/index.js";
+import { barSep, clioTheme, collapseHomePath, GLYPH, rule } from "../theme/index.js";
 import {
-	dispatchRows,
-	dispatchSeparator,
+	formatNotificationBadge,
+	formatNotificationPanel,
+	type Notification,
+	type NotificationCenter,
+} from "./notifications.js";
+import {
+	type AgentWorkFacts,
+	agentQuadrant,
+	type ContextEngineFacts,
+	compactPrimaryLine,
+	compactSecondaryLine,
+	contextQuadrant,
+	EXPANDED_MID,
+	EXPANDED_WIDE,
 	fitDashboardLine,
 	formatToolTally,
-	identityLine,
-	loopCluster,
+	formatUsd,
+	type SessionFacts,
+	sessionQuadrant,
 	type ToolTallySnapshot,
+	type WorkspaceFacts,
+	workspaceQuadrant,
+	zipColumns,
 } from "./widgets.js";
+
+export type { ToolTallySnapshot } from "./widgets.js";
+
+export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
 	modes: ModesContract;
@@ -28,49 +55,25 @@ export interface FooterDashboardDeps {
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
 	getSessionTokens?: () => UsageBreakdown;
+	getSessionCost?: () => number;
 	getContextUsage?: () => ContextUsageSnapshot;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	getToolCounts?: () => ToolTallySnapshot;
+	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
+	getSessionInfo?: () => { id: string | null; name: string | null; turns: number | null };
+	getExtensionStats?: () => { active: number; installed: number };
+	getContextState?: () => { clioMd: string | null; memory: string | null };
+	getNotifications?: () => ReadonlyArray<Notification>;
+	dismissKeyLabel?: string;
 	now?: () => number;
 }
 
 export interface FooterDashboardRenderState {
-	mode: string;
-	cwd: string;
-	branch: string | null;
-	targetLabel: string;
-	thinkingLabel: string;
-	context: string | null;
-	tokens: string | null;
-	statusText: string | null;
-	toolTally: string;
-	dispatchRows: ReadonlyArray<DispatchBoardRow>;
-	version: string;
-}
-
-function targetState(deps: FooterDashboardDeps): {
-	targetLabel: string;
-	thinkingLabel: string;
-} {
-	const settings = deps.getSettings?.();
-	const endpointId = settings?.orchestrator?.endpoint?.trim();
-	const wireModelId = settings?.orchestrator?.model?.trim();
-	if (!settings || !endpointId || !wireModelId) {
-		return { targetLabel: "no-endpoint", thinkingLabel: "off" };
-	}
-	const resolved = resolveRuntimeTarget(deps.providers, {
-		endpointId,
-		wireModelId,
-		requestedThinkingLevel: settings.orchestrator?.thinkingLevel ?? "off",
-		use: "orchestrator",
-	});
-	const thinking = resolved.ok
-		? resolved.target.modelRuntime.thinking.display
-		: (settings.orchestrator?.thinkingLevel ?? "off");
-	return {
-		targetLabel: `${endpointId}·${abbreviateModelId(wireModelId)}`,
-		thinkingLabel: thinking,
-	};
+	workspace: WorkspaceFacts;
+	session: SessionFacts;
+	context: ContextEngineFacts;
+	agent: AgentWorkFacts;
+	notices: ReadonlyArray<Notification>;
 }
 
 function statusText(status: AgentStatus | undefined, now: number, width: number, frame: number): string | null {
@@ -80,81 +83,194 @@ function statusText(status: AgentStatus | undefined, now: number, width: number,
 	return status.phase === "ended" ? verb.text : `${spinnerFrame(frame)} ${verb.text}`;
 }
 
-export function renderFooterDashboardLines(state: FooterDashboardRenderState, width: number): string[] {
-	const safeWidth = Math.max(1, Math.floor(width));
-	return [
-		identityLine({
-			width: safeWidth,
-			mode: state.mode,
-			branch: state.branch,
-			targetLabel: state.targetLabel,
-			thinkingLabel: state.thinkingLabel,
-			context: state.context,
-			version: state.version,
-		}),
-	];
+function costSegment(value: number | undefined): string | null {
+	return typeof value === "number" && Number.isFinite(value) ? `cost ${formatUsd(value)}` : null;
 }
 
-export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
+/** Compact footer: two always-on lines, deliberately free of model/mode/thinking (the editor rail owns those). */
+export function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const lines = loopCluster(
-		{
-			mode: state.mode,
-			cwd: state.cwd,
-			branch: state.branch,
-			targetLabel: state.targetLabel,
-			thinkingLabel: state.thinkingLabel,
-			context: state.context,
-			tokens: state.tokens,
-			statusText: state.statusText,
-			toolTally: state.toolTally,
-		},
-		safeWidth,
-	);
-	if (state.dispatchRows.length > 0) {
-		lines.push(dispatchSeparator(safeWidth));
-		lines.push(...dispatchRows(state.dispatchRows, safeWidth));
+	return [
+		compactPrimaryLine(state.workspace, state.session, safeWidth),
+		compactSecondaryLine(state.context, state.agent, safeWidth),
+	].map((line) => fitDashboardLine(line, safeWidth));
+}
+
+/** Notice surface, composed by the view below the grid: compact badge or expanded panel. */
+export function renderFooterNotices(
+	notices: ReadonlyArray<Notification>,
+	width: number,
+	mode: FooterDashboardMode,
+	dismissKeyLabel?: string,
+): string[] {
+	const safeWidth = Math.max(1, Math.floor(width));
+	if (mode === "expanded") {
+		return formatNotificationPanel(notices, safeWidth, dismissKeyLabel ? { dismissKeyLabel } : {});
 	}
-	return lines.map((line) => fitDashboardLine(line, safeWidth));
+	const badge = formatNotificationBadge(notices, safeWidth, dismissKeyLabel ? { dismissKeyLabel } : {});
+	return badge ? [badge] : [];
+}
+
+export function renderFooterDashboardLines(
+	state: FooterDashboardRenderState,
+	width: number,
+	mode: FooterDashboardMode = "compact",
+): string[] {
+	return mode === "expanded" ? renderFooterStatusLines(state, width) : renderFooterCompactLines(state, width);
+}
+
+/**
+ * Expanded footer: a responsive 2×2 quadrant dashboard.
+ *   - >=120: true 2×2 columns (Workspace | Session over Context | Agent).
+ *   - 80-119: stacked full-width quadrants, top-to-bottom.
+ *   - <80:    single column with the lowest-priority quadrant (Session) dropped.
+ */
+export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
+	const theme = clioTheme();
+	const safeWidth = Math.max(1, Math.floor(width));
+	const header = headerLine(state.session, safeWidth);
+
+	if (safeWidth >= EXPANDED_WIDE) {
+		const sep = barSep(theme);
+		const sepWidth = 3;
+		const leftWidth = Math.floor((safeWidth - sepWidth) / 2);
+		const rightWidth = safeWidth - sepWidth - leftWidth;
+		const top = zipColumns(
+			workspaceQuadrant(state.workspace),
+			sessionQuadrant(state.session),
+			leftWidth,
+			rightWidth,
+			sep,
+		);
+		const bottom = zipColumns(
+			contextQuadrant(state.context),
+			agentQuadrant(state.agent, { maxWorkers: 4 }),
+			leftWidth,
+			rightWidth,
+			sep,
+		);
+		return [header, rule(theme, safeWidth), ...top, "", ...bottom].map((line) => fitDashboardLine(line, safeWidth));
+	}
+
+	if (safeWidth >= EXPANDED_MID) {
+		const blocks = [
+			workspaceQuadrant(state.workspace),
+			sessionQuadrant(state.session),
+			contextQuadrant(state.context),
+			agentQuadrant(state.agent, { maxWorkers: 3 }),
+		];
+		return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
+			fitDashboardLine(line, safeWidth),
+		);
+	}
+
+	// Narrow: drop the lowest-priority quadrant (Session). Keep where-am-I,
+	// how-full-is-context, and what-is-happening-now.
+	const blocks = [
+		workspaceQuadrant(state.workspace),
+		contextQuadrant(state.context),
+		agentQuadrant(state.agent, { maxWorkers: 2 }),
+	];
+	return [header, ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
+		fitDashboardLine(line, safeWidth),
+	);
+}
+
+function headerLine(session: SessionFacts, width: number): string {
+	const theme = clioTheme();
+	const left = theme.style("title", `${GLYPH.agent} CLIO DASHBOARD`, { bold: true });
+	const right = `${theme.fg("muted", session.mode)}${theme.fg("dim", " · ")}${theme.fg("dim", `v${session.version}`)}`;
+	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+	return fitDashboardLine(`${left}${" ".repeat(gap)}${right}`, width);
 }
 
 export interface FooterDashboardPanel extends FooterPanel {
 	statusLines(width: number): string[];
+	mode(): FooterDashboardMode;
+	isExpanded(): boolean;
+	setExpanded(expanded: boolean): void;
+	toggleExpanded(): FooterDashboardMode;
+}
+
+function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): WorkspaceFacts {
+	const snapshot = deps.getWorkspaceSnapshot?.() ?? null;
+	if (snapshot) {
+		return {
+			cwd: collapseHomePath(snapshot.cwd),
+			branch: snapshot.branch,
+			dirty: snapshot.dirty,
+			projectType: snapshot.projectType && snapshot.projectType !== "unknown" ? snapshot.projectType : null,
+			remote: snapshot.remoteUrl,
+		};
+	}
+	return {
+		cwd: collapseHomePath(process.cwd()),
+		branch: branchSlot,
+		dirty: null,
+		projectType: null,
+		remote: null,
+	};
 }
 
 export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboardPanel {
 	const view = new Text("", 0, 0);
 	let branchSlot: string | null = null;
 	let frame = 0;
+	let dashboardMode: FooterDashboardMode = "compact";
 	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
 		const dispatch = deps.getDispatchRows?.() ?? [];
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
-		const target = targetState(deps);
 		const usage = deps.getSessionTokens?.();
 		const tokens = tokensSegment(usage);
-		const context = contextSegment(deps.getContextUsage?.());
+		const contextUsage = deps.getContextUsage?.();
+		const settings = deps.getSettings?.();
+		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
+		const contextState = deps.getContextState?.() ?? { clioMd: null, memory: null };
+		const tokensLabel = tokens ?? (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 		return {
-			mode: deps.modes.current().toLowerCase(),
-			cwd: collapseHomePath(process.cwd()),
-			branch: branchSlot,
-			targetLabel: target.targetLabel,
-			thinkingLabel: target.thinkingLabel,
-			context,
-			tokens: tokens ? `tok ${tokens}` : usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null,
-			statusText: statusText(status, now(), width, frame),
-			toolTally: formatToolTally(tools),
-			dispatchRows: dispatch,
-			version: readClioVersion(),
+			workspace: workspaceFacts(deps, branchSlot),
+			session: {
+				name: sessionInfo.name,
+				id: sessionInfo.id,
+				mode: deps.modes.current().toLowerCase(),
+				version: readClioVersion(),
+				turns: sessionInfo.turns,
+				tokens: tokensLabel,
+				cost: costSegment(deps.getSessionCost?.()),
+			},
+			context: {
+				label: contextSegment(contextUsage),
+				used: contextUsage?.tokens ?? null,
+				contextWindow: contextUsage?.contextWindow ?? null,
+				compactionThreshold: settings?.compaction?.threshold ?? null,
+				compactionAuto: settings?.compaction?.auto ?? null,
+				clioMd: contextState.clioMd,
+				memory: contextState.memory,
+				extensions: deps.getExtensionStats?.() ?? null,
+			},
+			agent: {
+				statusText: statusText(status, now(), width, frame),
+				dispatchSummary: dispatchSegment(dispatch),
+				toolTally: formatToolTally(tools),
+				dispatchRows: dispatch,
+			},
+			notices: deps.getNotifications?.() ?? [],
 		};
 	};
 	const refresh = (): void => {
 		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
 		const current = state(width);
-		if (current.statusText) frame = (frame + 1) % 10;
-		view.setText(renderFooterDashboardLines(current, width).join("\n"));
+		if (current.agent.statusText) frame = (frame + 1) % 10;
+		const grid = renderFooterDashboardLines(current, width, dashboardMode);
+		const notices = renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
+		view.setText([...grid, ...notices].join("\n"));
 		view.invalidate();
+	};
+	const setExpanded = (expanded: boolean): void => {
+		dashboardMode = expanded ? "expanded" : "compact";
+		refresh();
 	};
 	refresh();
 	void getCurrentBranch(process.cwd()).then((name) => {
@@ -168,5 +284,18 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		statusLines(width: number) {
 			return renderFooterStatusLines(state(width), width);
 		},
+		mode() {
+			return dashboardMode;
+		},
+		isExpanded() {
+			return dashboardMode === "expanded";
+		},
+		setExpanded,
+		toggleExpanded() {
+			setExpanded(dashboardMode !== "expanded");
+			return dashboardMode;
+		},
 	};
 }
+
+export type { NotificationCenter };

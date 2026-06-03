@@ -18,8 +18,21 @@ function hasScrollIndicator(line: string): boolean {
 }
 
 export interface EditorChrome {
+	/** Target+model identity, e.g. `mini·Qwen3.6-35B`. */
 	getModelLabel: () => string;
+	/** Effective thinking level, e.g. `high` / `off`. */
+	getThinkingLabel: () => string;
 	getMode: () => string;
+}
+
+/**
+ * Compose the single editor rail label. The editor rail is the one place that
+ * owns model identity (target/provider · model · thinking · mode); the footer
+ * deliberately does not repeat any of these.
+ */
+export function composeRailLabel(chrome: EditorChrome): string {
+	const think = chrome.getThinkingLabel();
+	return `${chrome.getModelLabel()} · think ${think} · ${chrome.getMode()}`;
 }
 
 export class ClioEditor extends Editor {
@@ -38,7 +51,7 @@ export class ClioEditor extends Editor {
 
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			lines[0] = rule(theme, safeWidth, {
-				right: `${this.chrome.getModelLabel()} · ${this.chrome.getMode()}`,
+				right: composeRailLabel(this.chrome),
 			});
 		}
 

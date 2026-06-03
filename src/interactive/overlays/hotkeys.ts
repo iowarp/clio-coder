@@ -29,7 +29,7 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/hotkeys", action: "Show this reference", scope: "editor" },
 	{ keys: "/thinking", action: "Open thinking selector", scope: "editor" },
 	{ keys: "/model [pattern[:thinking]]", action: "Open or set model", scope: "editor" },
-	{ keys: "/scoped-models", action: "Edit Ctrl+P cycle set", scope: "editor" },
+	{ keys: "/scoped-models", action: "Edit the Alt+J / Alt+K cycle set", scope: "editor" },
 	{ keys: "/settings", action: "Open settings", scope: "editor" },
 	{ keys: "/resume", action: "Open session picker", scope: "editor" },
 	{ keys: "/new", action: "Start a new session", scope: "editor" },
@@ -40,7 +40,7 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/connect [target]", action: "Connect to a target", scope: "editor" },
 	{ keys: "/disconnect [target]", action: "Disconnect a target", scope: "editor" },
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
-	{ keys: "/status", action: "Open status overlay", scope: "editor" },
+	{ keys: "/status", action: "Toggle footer dashboard", scope: "editor" },
 	{ keys: "/receipts [verify <runId>]", action: "Browse or verify receipts", scope: "editor" },
 	{
 		keys: "/run [--agent-profile <profile>|--runtime <id>|--tool-profile <profile>] <agent> <task>",

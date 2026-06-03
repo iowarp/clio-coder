@@ -169,7 +169,10 @@ describe("interactive/welcome-dashboard", () => {
 		strictEqual(stats.totalTargets, 3);
 		strictEqual(stats.targetLabel, "mini");
 		strictEqual(stats.modelLabel, "qwen");
+		strictEqual(stats.modeLabel, "default");
+		strictEqual(stats.cwd, "/repo");
 		strictEqual(stats.currentAvailable, true);
+		strictEqual(stats.targetHealthLabel, "healthy 120ms");
 		strictEqual(stats.workspace?.branch, "main");
 		ok(stats.activeCapabilities.includes("tools"), stats.activeCapabilities.join(", "));
 		ok(stats.activeCapabilities.includes("reasoning"), stats.activeCapabilities.join(", "));
@@ -220,30 +223,84 @@ describe("interactive/welcome-dashboard", () => {
 		ok(!stats.activeCapabilities.includes("1049k ctx"), stats.activeCapabilities.join(", "));
 	});
 
-	it("renders the locked three-line welcome banner safely", () => {
-		const stats: WelcomeDashboardStats = {
+	function richStats(overrides: Partial<WelcomeDashboardStats> = {}): WelcomeDashboardStats {
+		return {
 			activeTargets: 2,
 			totalTargets: 3,
 			targetLabel: "mini",
 			modelLabel: "Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL",
 			thinkingLevel: "high",
+			modeLabel: "default",
+			cwd: "/repo",
 			workspace: workspace(),
 			currentAvailable: true,
-			activeCapabilities: ["tools", "reasoning", "262k ctx"],
+			targetHealthLabel: "healthy 120ms",
+			activeCapabilities: ["tools", "reasoning", "vision", "262k ctx"],
+			extensions: { active: 1, installed: 2 },
+			...overrides,
 		};
-		const lines = buildWelcomeDashboardLines(stats, 72);
+	}
+
+	it("renders a sectionized static welcome dashboard on a wide terminal", () => {
+		const lines = buildWelcomeDashboardLines(richStats(), 100);
 		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
 
-		strictEqual(lines.length, 3);
+		ok(lines.length >= 4, `expected dashboard detail, got ${lines.length} lines`);
+		// Identity / version / mode / availability.
 		ok(text.includes("Clio Coder"), text);
-		ok(text.includes("mini · Qwen3.6-35B · think high · 262k ctx"), text);
-		ok(text.includes("/repo · git main ✓ · 2/3 targets online"), text);
+		ok(text.includes("v0.2.0"), text);
+		ok(text.includes("default"), text);
+		ok(text.includes("2/3"), text);
+		ok(text.includes("online"), text);
+		// Target / model / thinking / context.
+		ok(text.includes("mini"), text);
+		ok(text.includes("Qwen3.6-35B"), text);
+		ok(text.includes("think"), text);
+		ok(text.includes("high"), text);
+		ok(text.includes("262k ctx"), text);
+		ok(text.includes("healthy 120ms"), text);
+		// Workspace/git ownership moved to the footer; the boot header must not
+		// repeat the branch (the C-problem was the branch showing twice).
+		ok(!text.includes("git main"), `welcome header should no longer carry the branch: ${text}`);
+		// Capability chips and a real extension count.
+		ok(text.includes("tools"), text);
+		ok(text.includes("reasoning"), text);
+		ok(text.includes("ext 1/2"), text);
+		// Subtle expand affordance retargeted to Alt+U, not an awkward caps-row label.
+		ok(text.includes("Alt+U"), text);
+		ok(!text.includes("Ctrl+U dashboard"), text);
+		// The long wire model id must be abbreviated.
 		ok(!text.includes("Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL"), text);
 		for (const forbidden of ["familiarity", "confidence", "Infrastructure", "Context usage"]) {
 			ok(!text.includes(forbidden), text);
 		}
 		for (const line of lines) {
-			ok(visibleWidth(line) <= 72, `line too wide: ${visibleWidth(line)} ${line}`);
+			ok(visibleWidth(line) <= 100, `line too wide: ${visibleWidth(line)} ${line}`);
+		}
+	});
+
+	it("hides low-signal fields: zero extension counts and unknown health", () => {
+		const lines = buildWelcomeDashboardLines(
+			richStats({ extensions: { active: 0, installed: 0 }, targetHealthLabel: null }),
+			100,
+		);
+		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+		ok(!text.includes("ext 0/0"), text);
+		ok(!/\bext\b/.test(text), `extension chip should be hidden when nothing is installed: ${text}`);
+		ok(!text.includes("unknown"), text);
+		// Real capabilities still render.
+		ok(text.includes("tools"), text);
+	});
+
+	it("degrades gracefully and stays width-safe across narrow, medium, and wide terminals", () => {
+		for (const width of [40, 52, 72, 100, 140]) {
+			const lines = buildWelcomeDashboardLines(richStats(), width);
+			ok(lines.length >= 3, `expected at least 3 lines at width ${width}, got ${lines.length}`);
+			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+			ok(text.includes("Clio"), `identity must survive at width ${width}: ${text}`);
+			for (const line of lines) {
+				ok(visibleWidth(line) <= width, `line too wide at ${width}: ${visibleWidth(line)} ${line}`);
+			}
 		}
 	});
 

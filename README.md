@@ -593,20 +593,28 @@ Audit entries cover classified tool calls, mode transitions, run aborts, and ses
 
 ## Keybindings
 
+Clio's app bindings use one scheme: `Alt + <key>` (plus `Shift+Tab` and `Ctrl+D`, which every terminal already expects). `Alt + <letter>` decodes from the legacy `ESC <letter>` sequence on any terminal, so none of these depend on kitty-protocol CSI-u and none collide with the readline/terminal line-editing reserves.
+
 | Binding | Action |
 | --- | --- |
 | `Shift+Tab` | Cycle thinking level. |
 | `Alt+M` | Cycle mode: `default` / `advise`. |
 | `Alt+S` | Open the super-mode confirmation overlay. |
 | `Alt+T` | Open the session tree navigator. |
-| `Ctrl+L` | Open the model selector. |
-| `Ctrl+P` | Cycle the scoped model set forward. |
-| `Shift+Ctrl+P` | Cycle the scoped model set backward. |
-| `Ctrl+B` | Toggle the dispatch-board overlay. |
-| `Ctrl+O` | Toggle the most recent tool segment between collapsed subline and full body. |
+| `Alt+U` | Toggle the footer dashboard (compact / expanded). |
+| `Alt+L` | Open the model + targets selector. |
+| `Alt+J` | Cycle the scoped model set forward. |
+| `Alt+K` | Cycle the scoped model set backward. |
+| `Alt+W` | Toggle the dispatch (workers) board overlay. |
+| `Alt+O` | Toggle the most recent tool segment between collapsed subline and full body. |
+| `Alt+R` | Toggle thinking blocks between hidden marker and full body. |
+| `Alt+G` | Open the current input in an external editor. |
+| `Alt+X` | Dismiss footer notifications. |
+| `Alt+Enter` | Queue the current input as a follow-up message. |
+| `Alt+Up` | Restore queued follow-up messages to the editor. |
 | `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
 | `Ctrl+D` | Exit. |
-| `Esc` | Cancel a stream or close the active overlay. |
+| `Esc` | Cancel a stream, close the active overlay, or collapse the dashboard. |
 
 Run this inside the TUI for the resolved binding table:
 

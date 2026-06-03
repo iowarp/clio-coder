@@ -91,16 +91,22 @@ Inside the interactive terminal UI, you can issue autocomplete-supported **slash
 
 ### Keyboard Bindings
 
+All app bindings use the `Alt + <key>` scheme (plus `Shift+Tab` and `Ctrl+D`). They decode from the legacy `ESC <key>` sequence, so none require kitty-protocol CSI-u and none shadow the terminal's line-editing reserves.
+
 | Keybinding | Action Enforced |
 | :--- | :--- |
 | `Alt+M` | Cycle safety enforcement mode: `default` ⟷ `advise`. |
 | `Alt+S` | Trigger the Super Mode elevation overlay (one-shot privileges). |
 | `Shift+Tab` | Cycle target reasoning thinking levels (`off`, `low`, `medium`, `high`). |
-| `Ctrl+L` | Open the interactive orchestrator model selector. |
-| `Ctrl+P` / `Shift+Ctrl+P` | Cycle forward/backward through the scoped target model set. |
-| `Ctrl+B` | Open/close the Dispatch Board overlay (visual fleet tracker). |
-| `Ctrl+O` | Expand or collapse the details pane of the most recent tool execution. |
-| `Esc` / `Ctrl+C` | Cancel an active streaming assistant run or close an active overlay. |
+| `Alt+U` | Toggle the footer dashboard between compact and the expanded 2×2 quadrant view. |
+| `Alt+L` | Open the interactive orchestrator model + targets selector. |
+| `Alt+J` / `Alt+K` | Cycle forward/backward through the scoped target model set. |
+| `Alt+W` | Open/close the Dispatch (workers) Board overlay (visual fleet tracker). |
+| `Alt+O` | Expand or collapse the details pane of the most recent tool execution. |
+| `Alt+R` | Expand or collapse the most recent thinking block. |
+| `Alt+G` | Open the current input in an external editor. |
+| `Alt+X` | Dismiss footer notifications. |
+| `Esc` / `Ctrl+C` | Cancel an active streaming run, close an active overlay, or collapse the dashboard. |
 
 ---
 
