@@ -4,6 +4,7 @@ import { visibleWidth } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
+import { USER_GLYPH } from "../../src/interactive/palette.js";
 
 // Strip ANSI sequences. Biome bans literal control chars in regex source,
 // so build the pattern from a constructor with the ESC byte injected.
@@ -23,7 +24,7 @@ describe("chat-panel active entry update", () => {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "he", partialText: "he" });
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "llo", partialText: "hello" });
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> hi"), `expected user line, got: ${text}`);
+		ok(text.includes(`${USER_GLYPH} hi`), `expected user line, got: ${text}`);
 		ok(text.includes("◈ hello"), `expected accumulated assistant line, got: ${text}`);
 	});
 
@@ -503,9 +504,9 @@ describe("chat-panel active entry update", () => {
 		panel.appendUser("second");
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "reply-2", partialText: "reply-2" });
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> first"), text);
+		ok(text.includes(`${USER_GLYPH} first`), text);
 		ok(text.includes("◈ reply-1"), text);
-		ok(text.includes("> second"), text);
+		ok(text.includes(`${USER_GLYPH} second`), text);
 		ok(text.includes("◈ reply-2"), text);
 	});
 
@@ -556,6 +557,30 @@ describe("chat-panel active entry update", () => {
 			`fence close missing: ${JSON.stringify(lines)}`,
 		);
 		ok(joined.includes("Done."), `trailing narration missing: ${joined}`);
+	});
+
+	it("syntax-highlights finalized fenced code blocks", () => {
+		const panel = createChatPanel();
+		const source = '```ts\nconst answer = "yes";\n```';
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: source }] } as never,
+		});
+		const raw = panel.render(80).join("\n");
+		ok(raw.includes(String.fromCharCode(27)), raw);
+		ok(strip(raw).includes('const answer = "yes";'), strip(raw));
+	});
+
+	it("pretty-renders finalized json fences", () => {
+		const panel = createChatPanel();
+		const source = '```json\n{"name":"clio","ok":true}\n```';
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: source }] } as never,
+		});
+		const text = strip(panel.render(80).join("\n"));
+		ok(text.includes('"name": "clio"'), text);
+		ok(text.includes('"ok": true'), text);
 	});
 
 	it("renders bulleted lists with bullet glyphs, not the raw `*` source", () => {

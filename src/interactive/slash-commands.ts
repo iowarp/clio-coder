@@ -30,6 +30,7 @@ export type SlashCommand =
 	| { kind: "connect"; target?: string }
 	| { kind: "disconnect"; target?: string }
 	| { kind: "cost" }
+	| { kind: "status" }
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
 	| { kind: "receipt-usage" }
@@ -238,6 +239,7 @@ export interface SlashCommandContext {
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
 	openCost: () => void;
+	openStatus: () => void;
 	openReceipts: () => void;
 	openThinking: () => void;
 	openModel: () => void;
@@ -562,6 +564,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openCost();
+		},
+	},
+	{
+		name: "status",
+		description: "Show the status dashboard",
+		kinds: ["status"],
+		match(trimmed) {
+			return trimmed === "/status" ? { kind: "status" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openStatus();
 		},
 	},
 	{

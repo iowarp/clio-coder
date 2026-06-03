@@ -12,6 +12,7 @@
  */
 import { structuredPatch } from "diff";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { clioTheme } from "../theme/index.js";
 
 export interface DiffRenderInput {
 	oldText: string;
@@ -21,20 +22,11 @@ export interface DiffRenderInput {
 	context?: number;
 }
 
-// Raw ANSI escape constants. Mirrors the sibling renderer
-// (`tool-execution.ts`) so the diff renderer stays free of the `chalk`
-// dependency. Visible widths are computed against the un-escaped content
-// because `wrapTextWithAnsi` is ANSI-aware.
-const ANSI_RESET = "[0m";
-const ANSI_DIM = "[2m";
-const ANSI_RED = "[31m";
-const ANSI_GREEN = "[32m";
-const ANSI_CYAN = "[36m";
-
-const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
-const red = (text: string): string => `${ANSI_RED}${text}${ANSI_RESET}`;
-const green = (text: string): string => `${ANSI_GREEN}${text}${ANSI_RESET}`;
-const cyan = (text: string): string => `${ANSI_CYAN}${text}${ANSI_RESET}`;
+const theme = clioTheme();
+const dim = (text: string): string => theme.fg("dim", text);
+const red = (text: string): string => theme.fg("error", text);
+const green = (text: string): string => theme.fg("success", text);
+const cyan = (text: string): string => theme.fg("accent", text);
 
 const DEFAULT_FILENAME = "file";
 const DEFAULT_CONTEXT = 3;

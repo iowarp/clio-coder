@@ -1,3 +1,4 @@
+import { spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 import type { AgentStatus } from "./types.js";
 
 export interface VerbRender {
@@ -5,10 +6,8 @@ export interface VerbRender {
 	toneHint: "normal" | "warn" | "ok" | "error" | "muted";
 }
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
-
 export function spinnerFrame(frameIndex: number): string {
-	return SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length] ?? "⠋";
+	return themeSpinnerFrame(frameIndex);
 }
 
 export function formatStatusElapsed(elapsedMs: number): string {

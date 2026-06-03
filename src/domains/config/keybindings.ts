@@ -22,6 +22,7 @@ export interface ClioAppKeybindings {
 	"clio.mode.cycle": true;
 	"clio.exit": true;
 	"clio.super.request": true;
+	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
 	"clio.model.select": true;
@@ -71,6 +72,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.super.request": {
 		defaultKeys: "alt+s",
 		description: "Request super mode (requires confirmation)",
+	},
+	"clio.status.toggle": {
+		defaultKeys: "ctrl+u",
+		description: "Toggle the status overlay",
 	},
 	"clio.session.tree": {
 		defaultKeys: "alt+t",

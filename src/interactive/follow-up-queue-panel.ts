@@ -1,7 +1,5 @@
 import { type Component, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
-
-const ANSI_DIM = "\u001b[2m";
-const ANSI_RESET = "\u001b[0m";
+import { clioTheme } from "./theme/index.js";
 
 export interface FollowUpQueuePanel extends Component {
 	setMessages(messages: ReadonlyArray<string>): void;
@@ -12,7 +10,7 @@ export interface FollowUpQueuePanelOptions {
 }
 
 function dim(text: string): string {
-	return `${ANSI_DIM}${text}${ANSI_RESET}`;
+	return clioTheme().fg("dim", text);
 }
 
 export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}): FollowUpQueuePanel {

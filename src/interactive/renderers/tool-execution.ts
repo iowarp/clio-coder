@@ -13,26 +13,17 @@
  */
 
 import { wrapTextWithAnsi } from "../../engine/tui.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
+import { tryRenderJson, tryRenderXml } from "./structured.js";
 
-// Raw ANSI escape constants. Mirrors the sibling renderers
-// (`branch-summary.ts`, `compaction-summary.ts`) so the tool-execution
-// renderer stays free of the `chalk` dependency. Visible widths are computed
-// against the un-escaped content because `wrapTextWithAnsi` is ANSI-aware.
-const ANSI_RESET = "\u001b[0m";
-const ANSI_BOLD = "\u001b[1m";
-const ANSI_DIM = "\u001b[2m";
-const ANSI_RED = "\u001b[31m";
-const ANSI_GREEN = "\u001b[32m";
-const ANSI_YELLOW = "\u001b[33m";
-const ANSI_CYAN = "\u001b[36m";
-
-const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
-const red = (text: string): string => `${ANSI_RED}${text}${ANSI_RESET}`;
-const green = (text: string): string => `${ANSI_GREEN}${text}${ANSI_RESET}`;
-const yellow = (text: string): string => `${ANSI_YELLOW}${text}${ANSI_RESET}`;
-const cyan = (text: string): string => `${ANSI_CYAN}${text}${ANSI_RESET}`;
-const cyanBold = (text: string): string => `${ANSI_BOLD}${ANSI_CYAN}${text}${ANSI_RESET}`;
+const theme = clioTheme();
+const dim = (text: string): string => theme.fg("dim", text);
+const red = (text: string): string => theme.fg("error", text);
+const green = (text: string): string => theme.fg("success", text);
+const yellow = (text: string): string => theme.fg("warning", text);
+const cyan = (text: string): string => theme.fg("accent", text);
+const cyanBold = (text: string): string => theme.style("accent", text, { bold: true });
 
 // Visible width of the rail prefix is 2 columns (`│ `). Width budgets and
 // diff renderers compute against the visible length, not the styled length,
@@ -46,8 +37,8 @@ const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
 const STREAMING_RESULT_ROW_LIMIT = 20;
 const ARGS_BODY_LINE_LIMIT = 24;
-const STATUS_OK_GLYPH = "✓";
-const STATUS_ERROR_GLYPH = "✗";
+const STATUS_OK_GLYPH = GLYPH.ok;
+const STATUS_ERROR_GLYPH = GLYPH.error;
 
 // Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
 // styled strings per rendered line; by precomputing the dim and error variants
@@ -307,23 +298,12 @@ function indentAndWrap(line: string, width: number, isError: boolean): string[] 
  */
 function renderArgsBody(args: unknown, width: number, isError: boolean): string[] {
 	if (isEmptyArgs(args)) return [];
-	let pretty: string;
-	try {
-		const text = JSON.stringify(args, null, 2);
-		if (typeof text !== "string") return [];
-		pretty = text;
-	} catch {
-		return [];
-	}
-	const lines = pretty.split("\n");
-	const visible: string[] =
-		lines.length > ARGS_BODY_LINE_LIMIT
-			? [...lines.slice(0, ARGS_BODY_LINE_LIMIT), `... ${lines.length - ARGS_BODY_LINE_LIMIT} more lines hidden`]
-			: lines;
 	const out: string[] = [];
-	for (const raw of visible) {
-		const styled = raw.startsWith("... ") && raw.endsWith(" hidden") ? dim(raw) : raw;
-		out.push(...indentAndWrap(styled, width, isError));
+	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
+	const lines = tryRenderJson(args, bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
+	if (!lines) return [];
+	for (const raw of lines) {
+		out.push(...indentAndWrap(raw, width, isError));
 	}
 	return out;
 }
@@ -389,6 +369,25 @@ function renderOutputRows(text: string, width: number, isError: boolean, rowLimi
 		rows.push(...indentAndWrap(raw, width, isError));
 	}
 	return truncateRowsMiddle(rows, rowLimit, isError);
+}
+
+function renderStructuredOutputRows(
+	value: unknown,
+	width: number,
+	isError: boolean,
+	rowLimit: number,
+): string[] | null {
+	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
+	const unwrapped = unwrapResultEnvelope(value);
+	const structured =
+		typeof unwrapped === "string"
+			? (tryRenderJson(unwrapped, bodyWidth, { lineLimit: rowLimit }) ??
+				tryRenderXml(unwrapped, bodyWidth, { lineLimit: rowLimit }))
+			: tryRenderJson(unwrapped, bodyWidth, { lineLimit: rowLimit });
+	if (!structured) return null;
+	const out: string[] = [];
+	for (const row of structured) out.push(...indentAndWrap(row, width, isError));
+	return out;
 }
 
 function highlightBashCommand(command: string): string {
@@ -479,6 +478,8 @@ function renderResultBlock(result: unknown, isError: boolean, width: number): st
 	if (isEmptyResult(unwrapped)) {
 		return indentAndWrap(dim("(no output)"), width, isError);
 	}
+	const structured = renderStructuredOutputRows(unwrapped, width, isError, FULL_RESULT_ROW_LIMIT);
+	if (structured) return structured;
 	return renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT);
 }
 

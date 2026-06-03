@@ -1,46 +1,10 @@
-import type { ClioSettings } from "../core/config.js";
-import type { ModesContract } from "../domains/modes/index.js";
 import type { UsageBreakdown } from "../domains/observability/index.js";
-import {
-	type ProvidersContract,
-	type ResolvedRuntimeTarget,
-	type ResolvedThinkingCapability,
-	resolveRuntimeTarget,
-} from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
-import { Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { getCurrentBranch } from "../utils/git.js";
+import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
-import { DIM, RESET } from "./palette.js";
-import type { AgentStatus } from "./status/index.js";
-import { resolveFooterVerb, spinnerFrame } from "./status/index.js";
 
-const SEP = " \u00b7 ";
-const GLYPH = "\u25c6";
-const GLYPH_OPEN = "\u25c7";
 const ARROW_UP = "\u2191";
 const ARROW_DOWN = "\u2193";
-
-export interface FooterDeps {
-	modes: ModesContract;
-	providers: ProvidersContract;
-	getSettings?: () => Readonly<ClioSettings>;
-	getStreaming?: () => boolean;
-	getAgentStatus?: () => AgentStatus;
-	getTerminalColumns?: () => number;
-	/**
-	 * Running session-level token totals. Drives the input/output footer
-	 * segment. Invoked on every refresh so late-arriving `message_end` usage
-	 * is picked up without state plumbing inside the footer. Omitted in
-	 * tests and degraded boots where observability is unavailable; the
-	 * footer then hides the token segment entirely.
-	 */
-	getSessionTokens?: () => UsageBreakdown;
-	/** Current chat-loop context estimate. Drives the CTX footer segment. */
-	getContextUsage?: () => ContextUsageSnapshot;
-	/** Current dispatch-board rows. Drives a compact dispatch metadata segment. */
-	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
-}
 
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
@@ -92,8 +56,7 @@ export function contextSegment(usage: ContextUsageSnapshot | null | undefined): 
 	if (!usage || usage.contextWindow <= 0) return null;
 	const percent = usage.percent;
 	const percentLabel = typeof percent === "number" && Number.isFinite(percent) ? `${Math.round(percent)}%` : "?%";
-	const tokenLabel = usage.tokens !== null && usage.tokens > 0 ? formatFooterTokens(usage.tokens) : "?";
-	return `CTX ${percentLabel} ${tokenLabel}/${formatFooterTokens(usage.contextWindow)} ${buildCtxBar(percent)}`;
+	return `ctx ${percentLabel}`;
 }
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {
@@ -133,179 +96,7 @@ export interface FooterPanel {
 	refresh(): void;
 }
 
-interface OrchestratorTarget {
-	endpointId: string;
-	wireModelId: string;
-	healthStatus: "healthy" | "degraded" | "unknown" | "down";
-	resolved: ResolvedRuntimeTarget | null;
-}
-
-function resolveOrchestratorTarget(
-	providers: ProvidersContract,
-	settings: Readonly<ClioSettings>,
-): OrchestratorTarget | null {
-	const endpointId = settings.orchestrator?.endpoint?.trim();
-	const wireModelId = settings.orchestrator?.model?.trim();
-	if (!endpointId || !wireModelId) return null;
-	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
-	const resolved = resolveRuntimeTarget(providers, {
-		endpointId,
-		wireModelId,
-		requestedThinkingLevel: settings.orchestrator?.thinkingLevel ?? "off",
-		use: "orchestrator",
-	});
-	return {
-		endpointId,
-		wireModelId,
-		healthStatus: status?.health.status ?? "unknown",
-		resolved: resolved.ok ? resolved.target : null,
-	};
-}
-
-/**
- * Build the thinking-segment suffix for the footer. Mechanism-aware:
- *   - effort-levels and budget-tokens render the level glyph as today.
- *   - on-off renders `◆ on` or `◆ off` (no level word).
- *   - always-on renders `◆ forced`.
- *   - none renders a dim `◇ off` so the operator sees the model has no
- *     thinking surface.
- *   - absent mechanism falls back to the legacy level glyph.
- *
- * Returns the empty string when the segment is suppressed (e.g. providers
- * report only the `off` level for the active model).
- */
-export function thinkingSuffixForFooter(thinking: ResolvedThinkingCapability | null): string {
-	if (!thinking) return "";
-	const word = thinking.display;
-	if (thinking.mechanism === "none") {
-		return `${SEP}${DIM}${GLYPH_OPEN} off${RESET}`;
-	}
-	if (thinking.mechanism === "always-on") {
-		return `${SEP}${GLYPH} ${word}`;
-	}
-	if (thinking.mechanism === "on-off") {
-		const piece = `${SEP}${GLYPH} ${word}`;
-		return word === "off" ? `${DIM}${piece}${RESET}` : piece;
-	}
-	if (thinking.supportedLevels.length > 1) {
-		const piece = `${SEP}${GLYPH} ${word}`;
-		return word === "off" ? `${DIM}${piece}${RESET}` : piece;
-	}
-	return "";
-}
-
-/**
- * Build the `scoped:N/M` segment for the branded footer. M is the length of
- * `settings.scope`; N is the 1-based index of the active
- * `{endpoint, model}` ref within that set (matching either `endpointId` or
- * `endpointId/wireModelId` entries), or `-` when the active target is not
- * in scope. Returns `null` when scope is empty so the segment is omitted
- * entirely per the footer contract.
- */
-export function scopedSegment(settings: Readonly<ClioSettings>): string | null {
-	const scope = settings.scope ?? [];
-	if (scope.length === 0) return null;
-	const endpointId = settings.orchestrator?.endpoint ?? "";
-	const wireModelId = settings.orchestrator?.model ?? "";
-	const combinedRef = endpointId.length > 0 && wireModelId.length > 0 ? `${endpointId}/${wireModelId}` : "";
-	const idx = scope.findIndex((entry) => entry === endpointId || entry === combinedRef);
-	const n = idx === -1 ? "-" : String(idx + 1);
-	return `scoped:${n}/${scope.length}`;
-}
-
-const STREAMING_FRAMES = ["|", "/", "-", "\\"] as const;
-
-function modeBadge(mode: string): string {
-	return `[${mode.toUpperCase()}]`;
-}
-
-function statusLabel(status: AgentStatus | undefined): string | null {
-	if (!status) return null;
-	if (status.phase === "ended") {
-		const stopReason = status.summary?.stopReason;
-		if (stopReason === "error" || stopReason === "aborted" || stopReason === "cancelled") return `status:${stopReason}`;
-		return null;
-	}
-	if (status.phase === "idle") return null;
-	if (status.phase === "tool_blocked") return "status:blocked";
-	if (status.phase === "tool_running" && status.tool?.toolName) return `status:tool:${status.tool.toolName}`;
-	if (status.phase === "stuck") return "status:stuck";
-	return `status:${status.phase.replace(/_/g, "-")}`;
-}
-
 export function fitFooterText(text: string, width: number): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	return visibleWidth(text) > safeWidth ? truncateToWidth(text, safeWidth, "", true) : text;
-}
-
-export function buildFooter(deps: FooterDeps): FooterPanel {
-	const view = new Text("");
-	let streamingFrame = 0;
-	let branchSlot: string | null = null;
-	const refresh = (): void => {
-		const mode = deps.modes.current().toLowerCase();
-		const branchPart = branchSlot ? `${SEP}${branchSlot}` : "";
-		const settings = deps.getSettings?.();
-		const target = settings ? resolveOrchestratorTarget(deps.providers, settings) : null;
-		let targetLabel: string;
-		if (target) {
-			const dim = target.healthStatus === "down" ? DIM : "";
-			const reset = dim.length > 0 ? RESET : "";
-			targetLabel = `${dim}${target.endpointId}${SEP}${target.wireModelId}${reset}`;
-		} else {
-			targetLabel = "no-endpoint";
-		}
-
-		const scoped = settings ? scopedSegment(settings) : null;
-		const scopedPart = scoped ? `${SEP}${scoped}` : "";
-
-		let suffix = "";
-		if (target?.resolved) {
-			suffix = thinkingSuffixForFooter(target.resolved.modelRuntime.thinking);
-		}
-
-		const status = deps.getAgentStatus?.();
-		const statusVerb = status
-			? resolveFooterVerb(status, Date.now(), deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80)
-			: null;
-		const legacyStreaming = statusVerb === null && (deps.getStreaming?.() ?? false);
-		const streamingPart =
-			statusVerb && status
-				? `${SEP}${status.phase === "ended" ? "" : `${spinnerFrame(streamingFrame)} `}${statusVerb.text}`
-				: legacyStreaming
-					? `${SEP}${STREAMING_FRAMES[streamingFrame % STREAMING_FRAMES.length]} responding`
-					: "";
-		if (statusVerb !== null && status?.phase !== "ended") {
-			streamingFrame = (streamingFrame + 1) % 10;
-		} else if (legacyStreaming) {
-			streamingFrame = (streamingFrame + 1) % STREAMING_FRAMES.length;
-		} else {
-			streamingFrame = 0;
-		}
-
-		// Token counters (input/output/reasoning). Rendered right of the thinking-level
-		// segment and left of the streaming indicator so the running totals
-		// stay visible while a response is in flight. The segment disappears
-		// entirely when no usage has landed yet (first boot / fresh session).
-		const tokens = deps.getSessionTokens ? tokensSegment(deps.getSessionTokens()) : null;
-		const tokensPart = tokens ? `${SEP}tok ${tokens}` : "";
-		const ctx = deps.getContextUsage ? contextSegment(deps.getContextUsage()) : null;
-		const ctxPart = ctx ? `${SEP}${ctx}` : "";
-		const dispatch = deps.getDispatchRows ? dispatchSegment(deps.getDispatchRows()) : null;
-		const dispatchPart = dispatch ? `${SEP}${dispatch}` : "";
-		const state = statusLabel(status);
-		const statePart = state ? `${SEP}${state}` : "";
-
-		const text = `Clio Coder${SEP}${modeBadge(mode)}${branchPart}${SEP}${targetLabel}${scopedPart}${suffix}${tokensPart}${ctxPart}${dispatchPart}${statePart}${streamingPart}`;
-		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
-		view.setText(fitFooterText(text, width));
-		view.invalidate();
-	};
-	refresh();
-	void getCurrentBranch(process.cwd()).then((name) => {
-		if (name === null) return;
-		branchSlot = `${DIM}branch:${name}${RESET}`;
-		refresh();
-	});
-	return { view, refresh };
 }

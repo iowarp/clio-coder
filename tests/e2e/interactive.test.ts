@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, spawnClioPty } from "../harness/pty.js";
 import { runCli } from "../harness/spawn.js";
+import { createVt } from "../harness/vt.js";
 
 const PNG_1X1 = Buffer.from(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
@@ -160,6 +161,51 @@ function writeOpenAICompatFixture(configDir: string, url: string): void {
 	);
 }
 
+async function startScrollbackFixture(): Promise<{
+	server: Server;
+	url: string;
+	requests: Array<Record<string, unknown>>;
+}> {
+	const requests: Array<Record<string, unknown>> = [];
+	const writeChunk = (res: ServerResponse, content: string, finish = false): void => {
+		res.write(
+			`data: ${JSON.stringify({
+				id: "chatcmpl-clio-scrollback",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "mock-model",
+				choices: finish ? [{ index: 0, delta: {}, finish_reason: "stop" }] : [{ index: 0, delta: { content } }],
+				...(finish ? { usage: { prompt_tokens: 5, completion_tokens: 50, total_tokens: 55 } } : {}),
+			})}\n\n`,
+		);
+	};
+	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+		if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+			res.writeHead(404);
+			res.end("not found");
+			return;
+		}
+		const raw = await readRequestBody(req);
+		const body = JSON.parse(raw) as Record<string, unknown>;
+		requests.push(body);
+		const turn = lastUserMessageText(body).match(/scrollback prompt (\d+)/)?.[1] ?? String(requests.length);
+		res.writeHead(200, {
+			"content-type": "text/event-stream",
+			"cache-control": "no-cache",
+			connection: "keep-alive",
+		});
+		for (let i = 1; i <= 40; i += 1) {
+			writeChunk(res, `SCROLLBACK-T${turn}-LINE-${String(i).padStart(2, "0")} stable vt regression text\n`);
+			await new Promise((resolve) => setTimeout(resolve, 2));
+		}
+		writeChunk(res, "", true);
+		res.end("data: [DONE]\n\n");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const addr = server.address() as AddressInfo;
+	return { server, url: `http://127.0.0.1:${addr.port}`, requests };
+}
+
 async function startFollowUpFixture(): Promise<{
 	server: Server;
 	url: string;
@@ -269,6 +315,39 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			strictEqual(exit.code, 0, `expected clean exit after /help, got code=${exit.code} signal=${exit.signal}`);
 		} finally {
 			p.kill();
+		}
+	});
+
+	it("keeps tmux-like scrollback free of duplicated replies and live chrome", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR;
+		ok(configDir);
+		const fixture = await startScrollbackFixture();
+		writeOpenAICompatFixture(configDir, fixture.url);
+		const p = spawnClioPty({ cols: 100, rows: 24, env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" } });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			for (let turn = 1; turn <= 4; turn += 1) {
+				p.send(`scrollback prompt ${turn}\r`);
+				await p.expect(new RegExp(`SCROLLBACK-T${turn}-LINE-40`), 20_000);
+				await new Promise((resolve) => setTimeout(resolve, 350));
+			}
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit after scrollback drill, got code=${exit.code} signal=${exit.signal}`);
+
+			const vt = createVt(100, 24, { honorScrollbackClear: false });
+			vt.write(p.output());
+			const scrollback = vt.scrollback().join("\n");
+			for (let turn = 1; turn <= 4; turn += 1) {
+				const marker = `SCROLLBACK-T${turn}-LINE-20`;
+				strictEqual(scrollback.split(marker).length - 1, 1, `${marker} duplicated or missing in scrollback`);
+			}
+			for (const chrome of ["CLIO CODER STATUS", "PERCEIVE", "REASON", "REMEMBER", "⏎ send", "⌃L model", "compose", "❯"]) {
+				strictEqual(scrollback.includes(chrome), false, `chrome marker leaked into scrollback: ${chrome}`);
+			}
+		} finally {
+			p.kill();
+			await closeServer(fixture.server);
 		}
 	});
 

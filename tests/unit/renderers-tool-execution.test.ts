@@ -8,6 +8,7 @@ import {
 	renderToolSubline,
 	stripShellWrapperForDisplay,
 } from "../../src/interactive/renderers/tool-execution.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 
 // Strip ANSI sequences. Biome bans literal control chars in regex source,
 // so build the pattern from a constructor with the ESC byte injected.
@@ -382,10 +383,7 @@ describe("renderers/tool-execution", () => {
 		);
 		const railLine = lines.find((line) => stripAnsi(line).startsWith(`${RAIL}boom`));
 		ok(railLine !== undefined, `expected a rail line carrying 'boom', got: ${JSON.stringify(lines.map(stripAnsi))}`);
-		ok(
-			railLine.includes(`${String.fromCharCode(27)}[31m`),
-			`expected red ANSI sequence on rail line, got: ${JSON.stringify(railLine)}`,
-		);
+		ok(railLine.includes(clioTheme().fg("error", RAIL)), `expected error-themed rail, got: ${JSON.stringify(railLine)}`);
 		strictEqual(stripAnsi(railLine).startsWith(RAIL), true);
 	});
 
