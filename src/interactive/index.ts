@@ -6,6 +6,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
+import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { SuperModeConfirmation } from "../domains/modes/contract.js";
@@ -22,13 +23,14 @@ import {
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
-import { probeWorkspace } from "../domains/session/workspace/index.js";
+import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
 	isKeyRelease,
+	type KeyId,
 	matchesKey,
 	ProcessTerminal,
 	type SelectItem,
@@ -158,6 +160,8 @@ export interface InteractiveDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
+	/** Live CLIO.md and memory state for the footer Context quadrant. */
+	getContextState?: (cwd?: string) => ContextState;
 	/** Persist a thinking level chosen in the /thinking overlay. */
 	onSetThinkingLevel?: (level: ThinkingLevel) => void;
 	/** Persist the next thinking level when Shift+Tab is pressed. */
@@ -279,7 +283,36 @@ export interface KeyBindingDeps {
 	openTree: () => void;
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
+	dismissNotifications: () => void;
+	toggleToolExpansion: () => void;
+	toggleThinkingExpansion: () => void;
+	openExternalEditor: () => void;
+	queueFollowUp: () => void;
+	restoreQueuedFollowUps: () => void;
 }
+
+export interface LeaderTarget {
+	key: string;
+	id: ClioKeybinding;
+}
+
+export type LeaderKeyState = { status: "idle" } | { status: "pending"; expiresAt: number };
+
+export interface LeaderKeyDeps extends KeyBindingDeps {
+	matchesLeader: (data: string) => boolean;
+	leaderTargets: ReadonlyArray<LeaderTarget>;
+	now: number;
+	timeoutMs?: number;
+	isRelease?: (data: string) => boolean;
+}
+
+export interface LeaderKeyRouteResult {
+	state: LeaderKeyState;
+	consumed: boolean;
+}
+
+export const LEADER_TIMEOUT_MS = 1500;
+export const IDLE_LEADER_STATE: LeaderKeyState = { status: "idle" };
 
 export interface SuperOverlayKeyDeps {
 	cancelSuper: () => void;
@@ -404,52 +437,114 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	return "arm-shutdown";
 }
 
+function baseLetterFromInput(data: string): string | null {
+	if (data.length === 1) {
+		const lower = data.toLowerCase();
+		return lower >= "a" && lower <= "z" ? lower : null;
+	}
+	for (let code = 97; code <= 122; code += 1) {
+		const key = String.fromCharCode(code) as KeyId;
+		if (matchesKey(data, key) || matchesKey(data, `shift+${key}` as KeyId)) return key;
+	}
+	return null;
+}
+
+export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
+	switch (id) {
+		case "clio.notifications.dismiss":
+			deps.dismissNotifications();
+			return true;
+		case "clio.tool.expand":
+			deps.toggleToolExpansion();
+			return true;
+		case "clio.editor.external":
+			deps.openExternalEditor();
+			return true;
+		case "clio.message.followUp":
+			deps.queueFollowUp();
+			return true;
+		case "clio.message.dequeue":
+			deps.restoreQueuedFollowUps();
+			return true;
+		case "clio.thinking.expand":
+			deps.toggleThinkingExpansion();
+			return true;
+		case "clio.super.request":
+			deps.requestSuper();
+			return true;
+		case "clio.status.toggle":
+			deps.toggleStatus();
+			return true;
+		case "clio.thinking.cycle":
+			deps.cycleThinking();
+			return true;
+		case "clio.mode.cycle":
+			deps.cycleMode();
+			return true;
+		case "clio.session.tree":
+			deps.openTree();
+			return true;
+		case "clio.dispatchBoard.toggle":
+			deps.toggleDispatchBoard();
+			return true;
+		case "clio.model.select":
+			deps.openModelSelector();
+			return true;
+		case "clio.model.cycleBackward":
+			deps.cycleScopedModelBackward();
+			return true;
+		case "clio.model.cycleForward":
+			deps.cycleScopedModelForward();
+			return true;
+		case "clio.exit":
+			deps.requestShutdown();
+			return true;
+		case "clio.leader":
+			return false;
+	}
+}
+
 /** Pure key router: returns true when the input was consumed. */
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
-	if (deps.matches(data, "clio.super.request")) {
-		deps.requestSuper();
-		return true;
-	}
-	if (deps.matches(data, "clio.status.toggle")) {
-		deps.toggleStatus();
-		return true;
-	}
-	if (deps.matches(data, "clio.thinking.cycle")) {
-		deps.cycleThinking();
-		return true;
-	}
-	if (deps.matches(data, "clio.mode.cycle")) {
-		deps.cycleMode();
-		return true;
-	}
-	if (deps.matches(data, "clio.session.tree")) {
-		deps.openTree();
-		return true;
-	}
-	if (deps.matches(data, "clio.dispatchBoard.toggle")) {
-		deps.toggleDispatchBoard();
-		return true;
-	}
-	if (deps.matches(data, "clio.model.select")) {
-		deps.openModelSelector();
-		return true;
-	}
-	// Match cycleBackward before cycleForward so a user rebind where one key
-	// is a prefix of the other resolves to the more specific binding first.
-	// The defaults (alt+k / alt+j) do not prefix-match each other.
-	if (deps.matches(data, "clio.model.cycleBackward")) {
-		deps.cycleScopedModelBackward();
-		return true;
-	}
-	if (deps.matches(data, "clio.model.cycleForward")) {
-		deps.cycleScopedModelForward();
-		return true;
-	}
-	if (deps.matches(data, "clio.exit")) {
-		deps.requestShutdown();
-		return true;
+	const order: ClioKeybinding[] = [
+		"clio.super.request",
+		"clio.status.toggle",
+		"clio.thinking.cycle",
+		"clio.mode.cycle",
+		"clio.session.tree",
+		"clio.dispatchBoard.toggle",
+		"clio.model.select",
+		// Match cycleBackward before cycleForward so a user rebind where one key
+		// is a prefix of the other resolves to the more specific binding first.
+		// The defaults (alt+k / alt+j) do not prefix-match each other.
+		"clio.model.cycleBackward",
+		"clio.model.cycleForward",
+		"clio.exit",
+	];
+	for (const id of order) {
+		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);
 	}
 	return false;
+}
+
+/** Pure leader-key router: returns the next leader state and whether input was swallowed. */
+export function routeLeaderKey(data: string, state: LeaderKeyState, deps: LeaderKeyDeps): LeaderKeyRouteResult {
+	const timeoutMs = deps.timeoutMs ?? LEADER_TIMEOUT_MS;
+	if (state.status === "pending") {
+		if (deps.now > state.expiresAt) return { state: IDLE_LEADER_STATE, consumed: true };
+		if (deps.isRelease?.(data) ?? false) return { state, consumed: true };
+		if (matchesKey(data, "escape")) return { state: IDLE_LEADER_STATE, consumed: true };
+		const base = baseLetterFromInput(data);
+		const target = base ? deps.leaderTargets.find((entry) => entry.key === base) : undefined;
+		if (target) {
+			dispatchInteractiveAction(target.id, deps);
+			return { state: IDLE_LEADER_STATE, consumed: true };
+		}
+		return { state: IDLE_LEADER_STATE, consumed: true };
+	}
+	if (deps.isRelease?.(data) ?? false) return { state, consumed: false };
+	if (!deps.matchesLeader(data)) return { state, consumed: false };
+	return { state: { status: "pending", expiresAt: deps.now + timeoutMs }, consumed: true };
 }
 
 /** Pure overlay key router: returns true when the input was consumed. */
@@ -766,6 +861,60 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
 
 	const bootWorkspace = probeWorkspace(process.cwd());
+	let liveWorkspaceSnapshot: ReturnType<typeof probeWorkspace> = deps.session?.current()?.workspace ?? bootWorkspace;
+	let lastWorkspaceProbeAt = 0;
+	const refreshLiveWorkspaceGit = (force = false): void => {
+		const base = deps.session?.current()?.workspace ?? bootWorkspace;
+		if (!force && Date.now() - lastWorkspaceProbeAt < 5_000) return;
+		lastWorkspaceProbeAt = Date.now();
+		if (!base.isGit) {
+			liveWorkspaceSnapshot = base;
+			return;
+		}
+		const git = probeGit(base.cwd);
+		liveWorkspaceSnapshot = {
+			...base,
+			branch: git.branch,
+			dirty: git.dirty,
+			ahead: git.ahead,
+			behind: git.behind,
+			recentCommits: git.recentCommits,
+		};
+	};
+	const getLiveWorkspaceSnapshot = (): typeof liveWorkspaceSnapshot => {
+		const base = deps.session?.current()?.workspace ?? bootWorkspace;
+		if (liveWorkspaceSnapshot.cwd !== base.cwd || liveWorkspaceSnapshot.capturedAt !== base.capturedAt) {
+			liveWorkspaceSnapshot = base;
+			refreshLiveWorkspaceGit(true);
+		}
+		return liveWorkspaceSnapshot;
+	};
+	refreshLiveWorkspaceGit(true);
+
+	let sessionCounter = {
+		id: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
+		baseTurns: deps.session?.current()?.messageCount ?? 0,
+		submittedTurns: 0,
+	};
+	const syncSessionCounter = (): void => {
+		const meta = deps.session?.current();
+		const id = meta?.id ?? deps.getSessionId?.() ?? null;
+		if (id === sessionCounter.id) return;
+		const baseTurns = meta?.messageCount ?? 0;
+		const previousProjected = sessionCounter.baseTurns + sessionCounter.submittedTurns;
+		const carryPending = sessionCounter.id === null ? Math.max(0, previousProjected - baseTurns) : 0;
+		sessionCounter = { id, baseTurns, submittedTurns: carryPending };
+	};
+	const recordSubmittedTurn = (): void => {
+		syncSessionCounter();
+		sessionCounter = { ...sessionCounter, submittedTurns: sessionCounter.submittedTurns + 1 };
+	};
+	const liveSessionTurns = (): number | null => {
+		syncSessionCounter();
+		const metaTurns = deps.session?.current()?.messageCount;
+		const projected = sessionCounter.baseTurns + sessionCounter.submittedTurns;
+		return typeof metaTurns === "number" ? Math.max(metaTurns, projected) : projected > 0 ? projected : null;
+	};
 
 	const banner = createWelcomeDashboard({
 		modes: deps.modes,
@@ -834,7 +983,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getContextUsage: () => deps.chat.contextUsage(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		getToolCounts: () => ({ tools: Object.fromEntries(footerToolCounts), errors: footerToolErrors }),
-		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
+		...(deps.getContextState
+			? { getContextState: () => deps.getContextState?.(process.cwd()) ?? { clioMd: "none", memoryCount: 0 } }
+			: {}),
+		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		getExtensionStats: () => {
 			const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
 			return {
@@ -847,7 +999,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return {
 				id: meta?.id ?? deps.getSessionId?.() ?? null,
 				name: meta?.name ?? null,
-				turns: typeof meta?.messageCount === "number" ? meta.messageCount : null,
+				turns: liveSessionTurns(),
 			};
 		},
 		getNotifications: () => notifications.list(),
@@ -901,7 +1053,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	for (const notice of deps.initialNotices ?? []) {
 		const text = notice.trim();
 		if (text.length === 0) continue;
-		notify(classifyNoticeLevel(text), text, text);
+		const key = text.toLowerCase().includes("keybinding notice") ? "startup:keybinding-notice" : text;
+		notify(classifyNoticeLevel(text), text, key);
 	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
 		if (event.type === "queue_update") {
@@ -991,6 +1144,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// final frame after a turn ends would otherwise be stale.
 	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
 		if (event.type !== "message_end" && event.type !== "agent_end") return;
+		if (event.type === "agent_end") refreshLiveWorkspaceGit(true);
 		footer.refresh();
 		tui.requestRender();
 	});
@@ -1179,6 +1333,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			void (async () => {
 				try {
 					const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
+					recordSubmittedTurn();
+					footer.refresh();
 					chatPanel.appendUser(submitted.text);
 					tui.requestRender();
 					await deps.chat.submit(submitted.text, submitted.images.length > 0 ? { images: submitted.images } : undefined);
@@ -1263,6 +1419,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	}, 120);
 	footerTicker.unref?.();
 
+	let workspaceTicker: NodeJS.Timeout | null = null;
+	workspaceTicker = setInterval(() => {
+		refreshLiveWorkspaceGit(true);
+		footer.refresh();
+		tui.requestRender();
+	}, 5_000);
+	workspaceTicker.unref?.();
+
 	let resolveRun: (code: number) => void = () => {};
 	const run = new Promise<number>((resolve) => {
 		resolveRun = resolve;
@@ -1280,6 +1444,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
+	let leaderState: LeaderKeyState = IDLE_LEADER_STATE;
+	let leaderTimer: ReturnType<typeof setTimeout> | null = null;
+	const setLeaderState = (next: LeaderKeyState): void => {
+		leaderState = next;
+		if (leaderTimer) {
+			clearTimeout(leaderTimer);
+			leaderTimer = null;
+		}
+		if (next.status !== "pending") return;
+		leaderTimer = setTimeout(
+			() => {
+				leaderState = IDLE_LEADER_STATE;
+				leaderTimer = null;
+			},
+			Math.max(0, next.expiresAt - Date.now()),
+		);
+		leaderTimer.unref?.();
+	};
 	// Tracks how the super-confirm overlay was opened so the confirm handler
 	// can choose the correct lifecycle. `keybind` (Alt+S) flips the persistent
 	// mode to super; `tool` (parked admission) issues a one-shot grant that
@@ -2155,6 +2337,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		process.off("SIGINT", handleCtrlC);
 		clearInterval(keepAlive);
 		if (footerTicker) clearInterval(footerTicker);
+		if (workspaceTicker) clearInterval(workspaceTicker);
+		if (leaderTimer) clearTimeout(leaderTimer);
 		stopDispatchBoardTicker();
 		taskIslandHandle.hide();
 		dispatchBoardStore.unsubscribe();
@@ -2212,6 +2396,73 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	process.on("SIGINT", handleCtrlC);
 
+	const keyActionDeps = (): KeyBindingDeps => ({
+		matches: (input, id) => keybindings.matches(input, id),
+		cycleMode: () => {
+			deps.modes.cycleNormal();
+			footer.refresh();
+			tui.requestRender();
+		},
+		cycleThinking: () => {
+			const settings = deps.getSettings?.();
+			const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
+			if (available.length === 1 && available[0] === "off") {
+				footer.refresh();
+				tui.requestRender();
+				return;
+			}
+			deps.onCycleThinking?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		requestShutdown: () => {
+			void shutdown();
+		},
+		requestSuper: () => {
+			openSuperOverlay();
+		},
+		toggleStatus: () => {
+			toggleFooterDashboardState();
+		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardOverlay();
+		},
+		openModelSelector: () => {
+			openModelOverlayState();
+		},
+		openTree: () => {
+			openTreeOverlayState();
+		},
+		cycleScopedModelForward: () => {
+			deps.onCycleScopedModelForward?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		cycleScopedModelBackward: () => {
+			deps.onCycleScopedModelBackward?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		dismissNotifications: () => {
+			notifications.dismissAll();
+		},
+		toggleToolExpansion: () => {
+			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
+		},
+		toggleThinkingExpansion: () => {
+			if (chatPanel.toggleLastThinking()) tui.requestRender();
+		},
+		openExternalEditor: () => {
+			openExternalEditorForInput();
+		},
+		queueFollowUp: () => {
+			queueFollowUpFromEditor();
+		},
+		restoreQueuedFollowUps: () => {
+			restoreQueuedFollowUpsToEditor();
+		},
+	});
+
 	const dispatchBoardRenderUnsubscribers = [
 		deps.bus.on(BusChannels.DispatchEnqueued, () => {
 			footer.refresh();
@@ -2256,6 +2507,18 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	];
 
 	tui.addInputListener((data: string) => {
+		if (leaderState.status === "pending") {
+			const leader = routeLeaderKey(data, leaderState, {
+				...keyActionDeps(),
+				matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
+				leaderTargets: keybindings.leaderTargets(),
+				now: Date.now(),
+				isRelease: isKeyRelease,
+			});
+			if (leader.state !== leaderState) setLeaderState(leader.state);
+			if (leader.consumed) return { consume: true };
+		}
+
 		if (isCtrlCKey(data)) {
 			handleCtrlC();
 			return { consume: true };
@@ -2295,6 +2558,18 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
+		if (overlayState === "closed") {
+			const leader = routeLeaderKey(data, leaderState, {
+				...keyActionDeps(),
+				matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
+				leaderTargets: keybindings.leaderTargets(),
+				now: Date.now(),
+				isRelease: isKeyRelease,
+			});
+			if (leader.state !== leaderState) setLeaderState(leader.state);
+			if (leader.consumed) return { consume: true };
+		}
+
 		// No overlay consumed the input. Esc collapses the expanded footer dashboard
 		// before it falls through to stream/bash cancellation, so Ctrl+U and Esc are
 		// symmetric density controls when the live dashboard is open.
@@ -2318,86 +2593,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
-		if (overlayState === "closed" && keybindings.matches(data, "clio.notifications.dismiss") && !isKeyRelease(data)) {
-			notifications.dismissAll();
-			return { consume: true };
-		}
-
-		if (overlayState === "closed" && keybindings.matches(data, "clio.tool.expand") && !isKeyRelease(data)) {
-			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
-			return { consume: true };
-		}
-
-		if (overlayState === "closed" && keybindings.matches(data, "clio.editor.external") && !isKeyRelease(data)) {
-			openExternalEditorForInput();
-			return { consume: true };
-		}
-
-		if (overlayState === "closed" && keybindings.matches(data, "clio.message.followUp") && !isKeyRelease(data)) {
-			queueFollowUpFromEditor();
-			return { consume: true };
-		}
-
-		if (overlayState === "closed" && keybindings.matches(data, "clio.message.dequeue") && !isKeyRelease(data)) {
-			restoreQueuedFollowUpsToEditor();
-			return { consume: true };
-		}
-
-		if (overlayState === "closed" && keybindings.matches(data, "clio.thinking.expand") && !isKeyRelease(data)) {
-			if (chatPanel.toggleLastThinking()) tui.requestRender();
-			return { consume: true };
-		}
-
-		const consumed = routeInteractiveKey(data, {
-			matches: (input, id) => keybindings.matches(input, id),
-			cycleMode: () => {
-				deps.modes.cycleNormal();
-				footer.refresh();
-				tui.requestRender();
-			},
-			cycleThinking: () => {
-				const settings = deps.getSettings?.();
-				const available = settings
-					? resolveAvailableThinkingLevels(deps.providers, settings)
-					: (["off"] as ThinkingLevel[]);
-				if (available.length === 1 && available[0] === "off") {
-					footer.refresh();
-					tui.requestRender();
-					return;
+		if (overlayState === "closed" && !isKeyRelease(data)) {
+			for (const id of [
+				"clio.notifications.dismiss",
+				"clio.tool.expand",
+				"clio.editor.external",
+				"clio.message.followUp",
+				"clio.message.dequeue",
+				"clio.thinking.expand",
+			] as const) {
+				if (keybindings.matches(data, id)) {
+					dispatchInteractiveAction(id, keyActionDeps());
+					return { consume: true };
 				}
-				deps.onCycleThinking?.();
-				footer.refresh();
-				tui.requestRender();
-			},
-			requestShutdown: () => {
-				void shutdown();
-			},
-			requestSuper: () => {
-				openSuperOverlay();
-			},
-			toggleStatus: () => {
-				toggleFooterDashboardState();
-			},
-			toggleDispatchBoard: () => {
-				toggleDispatchBoardOverlay();
-			},
-			openModelSelector: () => {
-				openModelOverlayState();
-			},
-			openTree: () => {
-				openTreeOverlayState();
-			},
-			cycleScopedModelForward: () => {
-				deps.onCycleScopedModelForward?.();
-				footer.refresh();
-				tui.requestRender();
-			},
-			cycleScopedModelBackward: () => {
-				deps.onCycleScopedModelBackward?.();
-				footer.refresh();
-				tui.requestRender();
-			},
-		});
+			}
+		}
+
+		const consumed = routeInteractiveKey(data, keyActionDeps());
 		return consumed ? { consume: true } : undefined;
 	});
 

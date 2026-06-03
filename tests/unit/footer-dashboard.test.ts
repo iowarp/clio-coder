@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { visibleWidth } from "../../src/engine/tui.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import {
+	buildFooterDashboard,
 	type FooterDashboardRenderState,
 	renderFooterCompactLines,
 	renderFooterDashboardLines,
@@ -182,6 +183,50 @@ describe("footer dashboard", () => {
 		ok(text.includes("AGENT"), text);
 		ok(!text.includes("SESSION"), `Session quadrant should be dropped when narrow: ${text}`);
 		assertWidthSafe(lines, 70);
+	});
+
+	it("renders CLIO.md and memory facts in the Context quadrant", () => {
+		const lines = renderFooterStatusLines(state({ context: { clioMd: "CLIO.md stale", memory: "mem 5" } }), 120);
+		const text = stripAnsi(lines.join("\n"));
+		ok(text.includes("CLIO.md stale"), text);
+		ok(text.includes("mem 5"), text);
+	});
+
+	it("shows active compaction in the Context quadrant", () => {
+		const lines = renderFooterStatusLines(state({ context: { compactionActive: true } }), 120);
+		const text = stripAnsi(lines.join("\n"));
+		ok(text.includes("compacting auto @80%"), text);
+	});
+
+	it("builds Context and live Session facts from footer deps", () => {
+		let turns = 4;
+		const panel = buildFooterDashboard({
+			modes: { current: () => "default" } as never,
+			providers: {} as never,
+			getTerminalColumns: () => 120,
+			getWorkspaceSnapshot: () => ({
+				cwd: process.cwd(),
+				isGit: false,
+				branch: null,
+				dirty: null,
+				ahead: null,
+				behind: null,
+				recentCommits: [],
+				remoteUrl: null,
+				projectType: "typescript",
+				capturedAt: "2026-01-01T00:00:00.000Z",
+			}),
+			getSessionInfo: () => ({ id: "s1", name: "live", turns }),
+			getContextState: () => ({ clioMd: "ok", memoryCount: 2 }),
+		});
+		let text = stripAnsi(panel.statusLines(120).join("\n"));
+		ok(text.includes("turns 4"), text);
+		ok(text.includes("CLIO.md ok"), text);
+		ok(text.includes("mem 2"), text);
+
+		turns = 5;
+		text = stripAnsi(panel.statusLines(120).join("\n"));
+		ok(text.includes("turns 5"), text);
 	});
 
 	it("integrates dispatch worker rows into the Agent quadrant", () => {

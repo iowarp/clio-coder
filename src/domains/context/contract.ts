@@ -8,8 +8,14 @@ export interface ProjectPromptContext {
 	warnings: string[];
 }
 
+export interface ContextState {
+	clioMd: "ok" | "stale" | "none" | "malformed" | "no-fingerprint";
+	memoryCount: number;
+}
+
 export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
+	contextState(cwd?: string): ContextState;
 	startupHints(): string[];
 }

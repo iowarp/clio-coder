@@ -35,8 +35,8 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 16 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 16);
+	it("app id list is exactly 17 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 17);
 	});
 
 	it("registers clio.thinking.expand with default alt+r", () => {
@@ -46,12 +46,11 @@ describe("domains/config/keybindings schema", () => {
 		strictEqual(def.description, "Toggle thinking blocks between hidden marker and full body");
 	});
 
-	it("ships only alt+<key>, shift+tab, and ctrl+d as app defaults (no CSI-u, no readline reserves)", () => {
+	it("ships only alt+<key>, shift+tab, ctrl+d, and ctrl+g as app defaults (no CSI-u)", () => {
 		// shift+ctrl+* needs kitty-protocol CSI-u, which most terminals do not
-		// report; ctrl+u/l/p/t/o/g/k/w/a/e shadow line-editing reserves. The
-		// app baseline must avoid both so the boot keybinding notice stays quiet
-		// on a normal terminal.
-		const allowedNonAlt = new Set(["shift+tab", "ctrl+d", "alt+enter", "alt+up"]);
+		// report. Ctrl+G is the portable leader prefix and every terminal sends
+		// it as BEL, so the boot keybinding notice stays quiet on normal terminals.
+		const allowedNonAlt = new Set(["shift+tab", "ctrl+d", "ctrl+g", "alt+enter", "alt+up"]);
 		for (const id of CLIO_APP_KEYBINDING_IDS) {
 			const def = CLIO_APP_KEYBINDINGS[id];
 			const keys = Array.isArray(def.defaultKeys) ? def.defaultKeys : [def.defaultKeys];
@@ -129,6 +128,10 @@ describe("interactive/keybinding-manager defaults", () => {
 		strictEqual(manager.matches("\x1bx", "clio.notifications.dismiss"), true);
 	});
 
+	it("matches Ctrl+G against clio.leader", () => {
+		strictEqual(manager.matches("\x07", "clio.leader"), true);
+	});
+
 	it("matches Alt+Enter against clio.message.followUp", () => {
 		strictEqual(manager.matches("\x1b\r", "clio.message.followUp"), true);
 		strictEqual(manager.matches("\x1b[13;3u", "clio.message.followUp"), true);
@@ -152,6 +155,21 @@ describe("interactive/keybinding-manager defaults", () => {
 		strictEqual(thinking.keys, "shift+tab");
 		strictEqual(thinking.description, "Cycle orchestrator thinking level");
 		strictEqual(thinking.source, "default");
+	});
+
+	it("derives leader targets from resolved Alt-letter bindings", () => {
+		const targets = manager.leaderTargets();
+		ok(targets.some((entry) => entry.key === "u" && entry.id === "clio.status.toggle"));
+		ok(targets.some((entry) => entry.key === "m" && entry.id === "clio.mode.cycle"));
+		ok(!targets.some((entry) => entry.id === "clio.message.followUp"), "Alt+Enter is not a leader target");
+		ok(!targets.some((entry) => entry.id === "clio.leader"), "leader prefix must not target itself");
+	});
+
+	it("leader targets track user rebinds", () => {
+		const rebound = createKeybindingManagerForTesting({ "clio.status.toggle": "alt+y" });
+		const targets = rebound.leaderTargets();
+		ok(targets.some((entry) => entry.key === "y" && entry.id === "clio.status.toggle"));
+		ok(!targets.some((entry) => entry.key === "u" && entry.id === "clio.status.toggle"));
 	});
 
 	it("reports zero overrides when no user keybindings are configured", () => {
@@ -198,16 +216,23 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		strictEqual(vscodeWarnings.length, 0, JSON.stringify(vscodeWarnings));
 	});
 
-	it("still warns when macOS Terminal would treat Option-letter as text", () => {
-		// macOS Terminal.app inserts accented characters for Option-letter unless
-		// "Use Option as Meta" is enabled. The detector keeps surfacing this so
-		// the user knows to rebind or flip the setting, but it is platform-specific
-		// and does not fire on a normal meta-capable terminal.
+	it("consolidates macOS Terminal Option-letter defaults into one actionable warning", () => {
+		// Terminal.app inserts composed characters for Option-letter unless
+		// "Use Option as Meta" is enabled. The detector surfaces one notice for
+		// the default Alt-letter scheme rather than one warning per app binding.
 		const macWarnings = detectPlatformKeybindingWarnings(
 			{},
 			detectTerminalKeySupport({ TERM_PROGRAM: "Apple_Terminal" }),
 		);
-		ok(macWarnings.some((warning) => warning.id === "clio.mode.cycle" && warning.reason.includes("Option-letter")));
+		strictEqual(macWarnings.length, 1, JSON.stringify(macWarnings));
+		strictEqual(macWarnings[0]?.source, "default");
+		ok(macWarnings[0]?.reason.includes("Option-letter"));
+		ok(macWarnings[0]?.keys.includes("alt+u"));
+		const notice = formatPlatformKeybindingNotice(macWarnings);
+		ok(notice.includes("Use Option as Meta key"), notice);
+		ok(notice.includes("Ctrl+G"), notice);
+		ok(notice.includes("slash commands"), notice);
+		ok(notice.includes("/hotkeys"), notice);
 	});
 
 	it("warns for user bindings that choose terminal-reserved flow-control keys", () => {
@@ -216,7 +241,7 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		ok(warnings.some((warning) => warning.id === "clio.session.tree" && warning.reason.includes("flow control")));
 	});
 
-	it("does not warn on CSI-u capable terminals", () => {
+	it("does not warn on CSI-u capable or meta-capable modern terminals", () => {
 		const manager = createKeybindingManagerForTesting(
 			{ "clio.model.cycleBackward": "shift+ctrl+p" },
 			{ KITTY_WINDOW_ID: "1" },
@@ -224,6 +249,7 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		strictEqual(manager.platformWarnings().length, 0);
 		const entry = manager.hotkeyEntries().find((row) => row.id === "clio.model.cycleBackward");
 		strictEqual(entry?.source, "user");
+		strictEqual(detectPlatformKeybindingWarnings({}, detectTerminalKeySupport({ TERM_PROGRAM: "iTerm.app" })).length, 0);
 	});
 
 	it("formats platform warnings as one boot diagnostic", () => {

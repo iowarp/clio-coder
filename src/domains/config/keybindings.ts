@@ -34,6 +34,7 @@ export interface ClioAppKeybindings {
 	"clio.message.followUp": true;
 	"clio.message.dequeue": true;
 	"clio.notifications.dismiss": true;
+	"clio.leader": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -52,14 +53,14 @@ declare module "@earendil-works/pi-tui" {
  * Built-in defaults. Users override via `settings.yaml.keybindings`; the
  * manager reads those and patches this table before the TUI starts.
  *
- * Clio's app bindings follow one scheme: `Alt + <key>` (with `shift+tab` and
- * `ctrl+d` retained because pi-tui and every terminal already expect them).
- * `Alt + <letter>` decodes from the legacy `ESC <letter>` sequence on any
- * terminal, so none of these defaults need kitty-protocol CSI-u. The chosen
- * letters avoid pi-tui's editor reserves (`alt+b/f/d/y`, and the
- * `ESC n`/`ESC p` aliases for `alt+down`/`alt+up`) and the readline/terminal
- * line-editing reserves (`ctrl+u/l/p/t/o/g/k/w/a/e`). The CSI-u/reserved-key
- * detector in `keybinding-manager.ts` stays as a safety net for user rebinds.
+ * Clio's app bindings follow one scheme: `Alt + <key>` (with `shift+tab`,
+ * `ctrl+d`, and the portable `ctrl+g` leader retained because every terminal
+ * already transmits them). `Alt + <letter>` decodes from the legacy
+ * `ESC <letter>` sequence on meta-capable terminals. The chosen letters avoid
+ * pi-tui's editor reserves (`alt+b/f/d/y`, and the `ESC n`/`ESC p` aliases for
+ * `alt+down`/`alt+up`) and the readline/terminal line-editing reserves the
+ * router relies on for editor behavior. The CSI-u/reserved-key detector in
+ * `keybinding-manager.ts` stays as a safety net for user rebinds.
  */
 export const CLIO_APP_KEYBINDINGS = {
 	"clio.thinking.cycle": {
@@ -125,6 +126,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.notifications.dismiss": {
 		defaultKeys: "alt+x",
 		description: "Dismiss footer notifications",
+	},
+	"clio.leader": {
+		defaultKeys: "ctrl+g",
+		description: "Start portable leader-key fallback for Alt shortcuts",
 	},
 } as const satisfies KeybindingDefinitions;
 

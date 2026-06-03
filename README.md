@@ -34,7 +34,7 @@ Clio Coder is currently in **alpha**. The current release is **v0.2.0**.
 
 ## What's new in v0.2.0
 
-v0.2.0 is the first release intended for broader alpha testing from a cloned source tree. It focuses on durable sessions, clearer project context through `CLIO.md`, target-first runtime routing, and a more predictable terminal UI.
+v0.2.0 is the first community alpha release intended for broader testing from a cloned source tree. It is experimental software for early adopters. The release focuses on durable sessions, clearer project context through `CLIO.md`, target-first runtime routing, and a more predictable terminal UI.
 
 - **Durable session history.** Sessions now use hardened JSONL persistence, atomic writes, corrupt-tail recovery, task-ledger entries, and fork replay coverage.
 - **Project-aware initialization.** `clio init` and `/init` can refresh `CLIO.md`, preserve compact project guidance, and adopt supported local agent instruction files with provenance.
@@ -593,7 +593,7 @@ Audit entries cover classified tool calls, mode transitions, run aborts, and ses
 
 ## Keybindings
 
-Clio's app bindings use one scheme: `Alt + <key>` (plus `Shift+Tab` and `Ctrl+D`, which every terminal already expects). `Alt + <letter>` decodes from the legacy `ESC <letter>` sequence on any terminal, so none of these depend on kitty-protocol CSI-u and none collide with the readline/terminal line-editing reserves.
+Clio's app bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`, `Ctrl+D`, and a portable `Ctrl+G` leader. Modern terminals and Linux/meta setups send Alt directly. Stock macOS Terminal.app sends composed Option characters unless you enable **Use Option as Meta key** in Settings ▸ Profiles ▸ Keyboard. If Alt is unavailable, press `Ctrl+G` then the Alt binding's letter, for example `Ctrl+G` then `u` for the dashboard or `Ctrl+G` then `l` for the model selector. Slash commands remain available, and `/hotkeys` shows your resolved bindings.
 
 | Binding | Action |
 | --- | --- |
@@ -610,6 +610,7 @@ Clio's app bindings use one scheme: `Alt + <key>` (plus `Shift+Tab` and `Ctrl+D`
 | `Alt+R` | Toggle thinking blocks between hidden marker and full body. |
 | `Alt+G` | Open the current input in an external editor. |
 | `Alt+X` | Dismiss footer notifications. |
+| `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
 | `Alt+Enter` | Queue the current input as a follow-up message. |
 | `Alt+Up` | Restore queued follow-up messages to the editor. |
 | `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |

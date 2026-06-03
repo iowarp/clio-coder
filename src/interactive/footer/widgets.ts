@@ -44,6 +44,7 @@ export interface ContextEngineFacts {
 	contextWindow: number | null;
 	compactionThreshold: number | null;
 	compactionAuto: boolean | null;
+	compactionActive?: boolean;
 	clioMd: string | null;
 	memory: string | null;
 	extensions: { active: number; installed: number } | null;
@@ -196,7 +197,7 @@ export function contextQuadrant(facts: ContextEngineFacts): string[] {
 			: null;
 	const compaction =
 		facts.compactionThreshold !== null
-			? `compact ${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`
+			? `${facts.compactionActive ? "compacting" : "compact"} ${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`
 			: null;
 	return quadrantBlock(theme, "reason", "Context", [
 		facts.label ? theme.fg("info", facts.label) : theme.fg("dim", "ctx idle"),

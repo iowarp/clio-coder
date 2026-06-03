@@ -1,7 +1,9 @@
 # Contributing to Clio Coder
 
 Clio Coder is an IOWarp AI coding harness for supervised repository work.
-The project is pre-release.
+The project is an experimental community alpha. Treat public behavior,
+installation paths, and release process as moving until a stable release is
+announced.
 
 This repo is optimized for human reviewers and coding agents. Keep changes
 small, explicit, and easy to verify from git history.
@@ -13,7 +15,7 @@ Requirements:
 
 - Node.js `>=22`
 - npm
-- Linux or macOS for full parity. Windows is best effort until release.
+- Linux or macOS for full parity. Windows is best effort until a stable release.
 
 Bootstrap:
 
