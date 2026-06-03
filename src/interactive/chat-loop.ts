@@ -1041,7 +1041,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			lastSessionShellHash: null,
 		};
 
+		let streamStartedAt: number | null = null;
+		let firstAssistantDeltaAt: number | null = null;
+
 		handle.agent.subscribe(async (event) => {
+			const eventAt = Date.now();
 			const publicEvent =
 				event.type === "message_start" || event.type === "message_end"
 					? isInternalPromptContextMessage(event.message)
@@ -1050,6 +1054,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					: event.type === "agent_end"
 						? { ...event, messages: event.messages.filter((message) => !isInternalPromptContextMessage(message)) }
 						: event;
+			if (publicEvent?.type === "agent_start") {
+				streamStartedAt = eventAt;
+				firstAssistantDeltaAt = null;
+			}
+			if (publicEvent?.type === "message_update") {
+				const assistantEvent = publicEvent.assistantMessageEvent as { type?: string; delta?: unknown };
+				const hasDelta =
+					assistantEvent.type === "text_delta" ||
+					assistantEvent.type === "thinking_delta" ||
+					assistantEvent.type === "toolcall_start" ||
+					assistantEvent.type === "toolcall_delta";
+				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventAt;
+			}
 			if (publicEvent?.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(publicEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
@@ -1068,6 +1085,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							apiCalls: summary.apiCalls,
 						},
 					);
+				}
+				if (summary.output > 0 && firstAssistantDeltaAt !== null) {
+					const durationMs = Math.max(1, eventAt - firstAssistantDeltaAt);
+					deps.observability.recordTokenThroughput({
+						tokensPerSecond: summary.output / (durationMs / 1000),
+						outputTokens: summary.output,
+						durationMs,
+						...(streamStartedAt !== null ? { ttftMs: firstAssistantDeltaAt - streamStartedAt } : {}),
+						providerId: localRuntime.endpointId,
+						modelId: localRuntime.wireModelId,
+						recordedAt: eventAt,
+					});
 				}
 			}
 			if (publicEvent) emit(publicEvent);

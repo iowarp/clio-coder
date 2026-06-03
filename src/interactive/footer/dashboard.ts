@@ -2,7 +2,7 @@ import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { ModesContract } from "../../domains/modes/index.js";
-import type { UsageBreakdown } from "../../domains/observability/index.js";
+import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
@@ -14,6 +14,8 @@ import {
 	dispatchSegment,
 	type FooterPanel,
 	formatFooterTokens,
+	throughputDetailSegment,
+	throughputSegment,
 	tokensSegment,
 } from "../footer-panel.js";
 import type { AgentStatus } from "../status/index.js";
@@ -33,6 +35,7 @@ import {
 	compactSecondaryLine,
 	contextQuadrant,
 	EXPANDED_MID,
+	EXPANDED_ULTRAWIDE,
 	EXPANDED_WIDE,
 	fitDashboardLine,
 	formatToolTally,
@@ -42,6 +45,7 @@ import {
 	type ToolTallySnapshot,
 	type WorkspaceFacts,
 	workspaceQuadrant,
+	zipColumnBlocks,
 	zipColumns,
 } from "./widgets.js";
 
@@ -56,6 +60,7 @@ export interface FooterDashboardDeps {
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
 	getSessionTokens?: () => UsageBreakdown;
+	getTokenThroughput?: () => TokenThroughputSnapshot | null;
 	getSessionCost?: () => number;
 	getContextUsage?: () => ContextUsageSnapshot;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
@@ -121,15 +126,32 @@ export function renderFooterDashboardLines(
 }
 
 /**
- * Expanded footer: a responsive 2×2 quadrant dashboard.
- *   - >=120: true 2×2 columns (Workspace | Session over Context | Agent).
- *   - 80-119: stacked full-width quadrants, top-to-bottom.
- *   - <80:    single column with the lowest-priority quadrant (Session) dropped.
+ * Expanded footer: responsive quadrants.
+ *   - >=100: four horizontal sections.
+ *   - 80-99: 2x2 sections.
+ *   - <80: vertical stack with all sections retained.
  */
 export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, Math.floor(width));
 	const header = headerLine(state.session, safeWidth);
+
+	if (safeWidth >= EXPANDED_ULTRAWIDE) {
+		const sep = barSep(theme);
+		const sepWidth = visibleWidth(sep) * 3;
+		const available = safeWidth - sepWidth;
+		const baseWidth = Math.floor(available / 4);
+		const widths = [baseWidth, baseWidth, baseWidth, available - baseWidth * 3];
+		const blocks = [
+			workspaceQuadrant(state.workspace),
+			sessionQuadrant(state.session),
+			contextQuadrant(state.context),
+			agentQuadrant(state.agent, { maxWorkers: 4 }),
+		];
+		return [header, rule(theme, safeWidth), ...zipColumnBlocks(blocks, widths, sep)].map((line) =>
+			fitDashboardLine(line, safeWidth),
+		);
+	}
 
 	if (safeWidth >= EXPANDED_WIDE) {
 		const sep = barSep(theme);
@@ -153,26 +175,13 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 		return [header, rule(theme, safeWidth), ...top, "", ...bottom].map((line) => fitDashboardLine(line, safeWidth));
 	}
 
-	if (safeWidth >= EXPANDED_MID) {
-		const blocks = [
-			workspaceQuadrant(state.workspace),
-			sessionQuadrant(state.session),
-			contextQuadrant(state.context),
-			agentQuadrant(state.agent, { maxWorkers: 3 }),
-		];
-		return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
-			fitDashboardLine(line, safeWidth),
-		);
-	}
-
-	// Narrow: drop the lowest-priority quadrant (Session). Keep where-am-I,
-	// how-full-is-context, and what-is-happening-now.
 	const blocks = [
 		workspaceQuadrant(state.workspace),
+		sessionQuadrant(state.session),
 		contextQuadrant(state.context),
-		agentQuadrant(state.agent, { maxWorkers: 2 }),
+		agentQuadrant(state.agent, { maxWorkers: safeWidth >= EXPANDED_MID ? 3 : 2 }),
 	];
-	return [header, ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
+	return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
 		fitDashboardLine(line, safeWidth),
 	);
 }
@@ -234,11 +243,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const compactionActive = status?.phase === "compacting" || (status?.activePhases?.has("compacting") ?? false);
 		const usage = deps.getSessionTokens?.();
 		const tokens = tokensSegment(usage);
+		const throughputMetric = deps.getTokenThroughput?.();
+		const throughput = throughputSegment(throughputMetric);
+		const throughputDetail = throughputDetailSegment(throughputMetric);
 		const contextUsage = deps.getContextUsage?.();
 		const settings = deps.getSettings?.();
 		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
 		const contextState = deps.getContextState?.() ?? null;
-		const tokensLabel = tokens ?? (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
+		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 		return {
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
@@ -248,6 +260,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				version: readClioVersion(),
 				turns: sessionInfo.turns,
 				tokens: tokensLabel,
+				throughput,
+				throughputDetail,
 				cost: costSegment(deps.getSessionCost?.()),
 			},
 			context: {

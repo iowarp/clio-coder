@@ -239,7 +239,7 @@ export interface SlashCommandContext {
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
 	openCost: () => void;
-	/** Toggle the inline footer dashboard density used by Ctrl+U and /status. */
+	/** Legacy /status hook. The live dashboard itself is toggled only by Alt+U. */
 	openStatus: () => void;
 	openReceipts: () => void;
 	openThinking: () => void;
@@ -569,13 +569,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "status",
-		description: "Toggle the footer dashboard",
+		description: "Show the footer dashboard key",
 		kinds: ["status"],
 		match(trimmed) {
 			return trimmed === "/status" ? { kind: "status" } : null;
 		},
 		handle(_command, ctx) {
-			ctx.openStatus();
+			ctx.io.stdout("[status] Press Alt+U to toggle the footer dashboard.\n");
 		},
 	},
 	{

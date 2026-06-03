@@ -2,7 +2,7 @@
 
 This document outlines the design principles, structural conventions, and direct codebase mappings of the **Clio Coder Developer Documentation Suite**. 
 
-Clio Coder is built for high-performance and scientific engineering teams where correctness, safety boundaries, and reproducible traces are critical. The current `v0.2.0` line is an experimental community alpha, so contributors must keep developer documentation explicit about moving surfaces, verification receipts, and release-state changes.
+Clio Coder is built for high-performance and scientific engineering teams where correctness, safety boundaries, and reproducible traces are critical. The current `v0.2.1` line is an experimental community alpha with focused local harness telemetry and dashboard improvements, so contributors must keep developer documentation explicit about moving surfaces, verification receipts, and release-state changes.
 
 ---
 

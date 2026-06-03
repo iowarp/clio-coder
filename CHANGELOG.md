@@ -3,6 +3,40 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## 0.2.1 - 2026-06-03
+
+Clio Coder 0.2.1 is a focused patch for local llama.cpp operators running
+Gemma 4 12B-class coding models on modest GPUs. It improves the harness
+feedback loop for smaller local models, including setups that fit under 16GB
+of VRAM with quantized weights, while keeping Clio's target-first routing and
+supervised execution model intact.
+
+### Added
+
+- Added live and final token-throughput telemetry for completed assistant
+  streams. The footer and expanded dashboard can now show compact `Tk/s`
+  feedback, generation span, TTFT, and output-token counts when usage data is
+  available.
+- Added a larger dynamic context fill bar in the footer so long-context local
+  runs, including 262k-context Gemma 4 12B llama.cpp targets, are easier to
+  monitor during real sessions.
+
+### Changed
+
+- Retuned the expanded footer dashboard for smaller terminals: it now uses
+  four horizontal sections at 100 columns and above, 2x2 at 80-99 columns, and
+  vertical stacking only below 80 columns.
+- Restricted dashboard toggling to Alt+U / the leader fallback. Esc is reserved
+  for popups, slash-command UI, and active-run cancellation, and `/status`
+  prints the dashboard key hint instead of toggling state.
+- Compact speed details now use the existing output-token glyph (`↓`) so the
+  Gemma 4 12B local harness dashboard stays readable in tight columns.
+
+### Fixed
+
+- Fixed the expanded dashboard's narrow-terminal behavior so all four sections
+  remain available instead of dropping the session section.
+
 ## 0.2.0 - 2026-06-03
 
 Clio Coder 0.2.0 is the first community alpha release for users building from

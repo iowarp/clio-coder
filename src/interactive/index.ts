@@ -979,6 +979,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => deps.observability.sessionTokens(),
+		getTokenThroughput: () => deps.observability.latestTokenThroughput(),
 		getSessionCost: () => deps.observability.sessionCost(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
@@ -2570,17 +2571,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (leader.consumed) return { consume: true };
 		}
 
-		// No overlay consumed the input. Esc collapses the expanded footer dashboard
-		// before it falls through to stream/bash cancellation, so Ctrl+U and Esc are
-		// symmetric density controls when the live dashboard is open.
-		if (data === ESC && footer.isExpanded()) {
-			footer.setExpanded(false);
-			renderTaskIsland();
-			tui.requestRender();
-			return { consume: true };
-		}
-
-		// Esc then falls through to cancel an active run when one is in flight; before
+		// Esc falls through to cancel an active run when one is in flight; before
 		// this fall-through Esc was short-circuited above the overlay router and stole
 		// the keystroke from any open modal, forcing the user to press Esc twice to
 		// dismiss modals that opened mid-stream.

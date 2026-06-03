@@ -475,10 +475,12 @@ describe("interactive/chat-loop tool persistence", () => {
 			sessionCost: () => 0,
 			sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 			costEntries: () => [],
+			latestTokenThroughput: () => null,
 			resetSession: () => {},
 			recordTokens: () => {
 				recordCalls += 1;
 			},
+			recordTokenThroughput: () => {},
 		};
 
 		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;

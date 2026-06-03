@@ -233,6 +233,29 @@ describe("observability sessionTokens / sessionCost / cost overlay", () => {
 		}
 	});
 
+	it("records and resets latest token throughput", async () => {
+		const context = stubDomainContext();
+		const bundle = createObservabilityBundle(context);
+		await bundle.extension.start();
+		try {
+			bundle.contract.recordTokenThroughput({
+				tokensPerSecond: 42,
+				outputTokens: 84,
+				durationMs: 2000,
+				ttftMs: 250,
+				providerId: "mini",
+				modelId: "gemma-4-12b-q4-code-256k",
+				recordedAt: 123,
+			});
+			strictEqual(bundle.contract.latestTokenThroughput()?.tokensPerSecond, 42);
+
+			bundle.contract.resetSession();
+			strictEqual(bundle.contract.latestTokenThroughput(), null);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("formats the overlay with a total header and per-row cells", () => {
 		const lines = formatCostOverlayLines(
 			0.02,

@@ -510,7 +510,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("Alt-U and Ctrl-G u toggle the inline footer dashboard and Esc collapses it", async () => {
+	it("Alt-U and Ctrl-G u toggle the inline footer dashboard while Esc leaves it open", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
 			await p.expect(/Clio Coder/, 15_000);
@@ -523,7 +523,13 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			let vt = createVt(120, 40);
 			vt.write(p.output());
 			let screen = vt.screen().join("\n");
-			strictEqual(screen.includes("CLIO DASHBOARD"), false, "expanded dashboard should collapse from the live screen");
+			strictEqual(screen.includes("CLIO DASHBOARD"), true, "Esc should not collapse the footer dashboard");
+			p.send("\x1bu");
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			vt = createVt(120, 40);
+			vt.write(p.output());
+			screen = vt.screen().join("\n");
+			strictEqual(screen.includes("CLIO DASHBOARD"), false, "Alt+U should collapse the footer dashboard");
 
 			// Portable leader fallback: Ctrl+G followed by the Alt binding's base letter.
 			p.send("\x07u");
@@ -533,11 +539,13 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			vt = createVt(120, 40);
 			vt.write(p.output());
 			screen = vt.screen().join("\n");
-			strictEqual(
-				screen.includes("CLIO DASHBOARD"),
-				false,
-				"leader-opened dashboard should collapse from the live screen",
-			);
+			strictEqual(screen.includes("CLIO DASHBOARD"), true, "Esc should not collapse the leader-opened dashboard");
+			p.send("\x07u");
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			vt = createVt(120, 40);
+			vt.write(p.output());
+			screen = vt.screen().join("\n");
+			strictEqual(screen.includes("CLIO DASHBOARD"), false, "leader toggle should collapse the footer dashboard");
 
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);

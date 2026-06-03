@@ -7,6 +7,8 @@ import {
 	dispatchSegment,
 	fitFooterText,
 	formatFooterTokens,
+	throughputDetailSegment,
+	throughputSegment,
 	tokensSegment,
 } from "../../src/interactive/footer-panel.js";
 
@@ -86,16 +88,60 @@ describe("tokensSegment", () => {
 	});
 });
 
+describe("throughputSegment", () => {
+	it("renders final token throughput compactly", () => {
+		strictEqual(
+			throughputSegment({
+				tokensPerSecond: 42.4,
+				outputTokens: 120,
+				durationMs: 2830,
+				providerId: "mini",
+				modelId: "gemma-4-12b-q4-code-256k",
+				recordedAt: 1,
+			}),
+			"⚡42 Tk/s",
+		);
+		strictEqual(
+			throughputSegment({
+				tokensPerSecond: 7.26,
+				outputTokens: 4,
+				durationMs: 551,
+				providerId: "mini",
+				modelId: "gemma-4-12b-q4-code-256k",
+				recordedAt: 1,
+			}),
+			"⚡7.3 Tk/s",
+		);
+		strictEqual(throughputSegment(null), null);
+	});
+
+	it("renders final token throughput details for the expanded dashboard", () => {
+		strictEqual(
+			throughputDetailSegment({
+				tokensPerSecond: 42.4,
+				outputTokens: 1200,
+				durationMs: 2830,
+				ttftMs: 640,
+				providerId: "mini",
+				modelId: "gemma-4-12b-q4-code-256k",
+				recordedAt: 1,
+			}),
+			"gen 2.8s · ttft 640ms · ↓1.2k",
+		);
+		strictEqual(throughputDetailSegment(null), null);
+	});
+});
+
 describe("contextSegment", () => {
 	it("formats context usage as a compact percent label", () => {
 		strictEqual(buildCtxBar(50), "████░░░░");
 		const segment = contextSegment({ tokens: 32_000, contextWindow: 128_000, percent: 25 });
-		strictEqual(segment, "ctx 25%");
+		strictEqual(segment, "ctx ███░░░░░░░ 25%");
 	});
 
 	it("keeps unknown usage visible when the context window is known", () => {
 		const segment = contextSegment({ tokens: null, contextWindow: 8192, percent: null });
-		strictEqual(segment, "ctx ?%");
+		strictEqual(segment, "ctx ░░░░░░░░░░ ?%");
 	});
 
 	it("suppresses context when no context window is available", () => {

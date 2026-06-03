@@ -1,10 +1,11 @@
-import type { UsageBreakdown } from "../domains/observability/index.js";
+import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 
 const ARROW_UP = "\u2191";
 const ARROW_DOWN = "\u2193";
+const SPEED_ICON = "\u26A1";
 
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
@@ -45,6 +46,29 @@ export function tokensSegment(usage: UsageBreakdown | null | undefined): string 
 	return `${ARROW_UP}${formatFooterTokens(input)} ${ARROW_DOWN}${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
 }
 
+export function throughputSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
+	const tps = metric?.tokensPerSecond;
+	if (typeof tps !== "number" || !Number.isFinite(tps) || tps <= 0) return null;
+	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
+	return `${SPEED_ICON}${rounded} Tk/s`;
+}
+
+function formatDurationMs(ms: number): string {
+	const safe = Math.max(0, Math.round(ms));
+	if (safe < 1000) return `${safe}ms`;
+	const seconds = safe / 1000;
+	return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+}
+
+export function throughputDetailSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
+	if (!throughputSegment(metric) || !metric) return null;
+	const parts = [`gen ${formatDurationMs(metric.durationMs)}`];
+	if (typeof metric.ttftMs === "number" && Number.isFinite(metric.ttftMs))
+		parts.push(`ttft ${formatDurationMs(metric.ttftMs)}`);
+	parts.push(`↓${formatFooterTokens(metric.outputTokens)}`);
+	return parts.join(" · ");
+}
+
 export function buildCtxBar(percent: number | null | undefined, width = 8): string {
 	const cells = Math.max(1, Math.floor(width));
 	if (typeof percent !== "number" || !Number.isFinite(percent)) return "░".repeat(cells);
@@ -56,7 +80,7 @@ export function contextSegment(usage: ContextUsageSnapshot | null | undefined): 
 	if (!usage || usage.contextWindow <= 0) return null;
 	const percent = usage.percent;
 	const percentLabel = typeof percent === "number" && Number.isFinite(percent) ? `${Math.round(percent)}%` : "?%";
-	return `ctx ${percentLabel}`;
+	return `ctx ${buildCtxBar(percent, 10)} ${percentLabel}`;
 }
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {

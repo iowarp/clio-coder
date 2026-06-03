@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.0-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.1-00d4db?style=flat-square" /></a>
   <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
@@ -30,20 +30,18 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, pa
 
 It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
 
-Clio Coder is currently in **alpha**. The current release is **v0.2.0**.
+Clio Coder is currently in **alpha**. The current release is **v0.2.1**.
 
-## What's new in v0.2.0
+## What's new in v0.2.1
 
-v0.2.0 is the first community alpha release intended for broader testing from a cloned source tree. It is experimental software for early adopters. The release focuses on durable sessions, clearer project context through `CLIO.md`, target-first runtime routing, and a more predictable terminal UI.
+v0.2.1 is a focused patch for local model operators. It improves Clio's harness feedback loop with live throughput telemetry, clearer context pressure, and a dashboard layout that works better in ordinary terminal sizes while preserving the v0.2.0 alpha release foundations.
 
-- **Durable session history.** Sessions now use hardened JSONL persistence, atomic writes, corrupt-tail recovery, task-ledger entries, and fork replay coverage.
-- **Project-aware initialization.** `clio init` and `/init` can refresh `CLIO.md`, preserve compact project guidance, and adopt supported local agent instruction files with provenance.
-- **Target-first runtime routing.** Runtime/model resolution is centralized so chat, dispatch, prompts, receipts, model selectors, and worker rehydration agree on the active target.
-- **More reliable TUI overlays.** Model, target, settings, tree, receipt, status, and approval overlays have tighter key routing, framing, diagnostics, and narrow-width behavior.
-- **Safer execution defaults.** The damage-control policy, path matching, typed validation evidence, prompt cache boundaries, and worker runtime contracts are stricter.
-- **Release-grade local checks.** The repository gate now runs typecheck, Biome, unit/integration/boundary tests, build, and CLI/TUI e2e through `npm run ci`.
+- **Local harness feedback.** Clio now records final assistant-stream throughput from its own streaming timestamps and usage data, so local targets can show compact `Tk/s`, TTFT, generation span, and output-token metrics.
+- **Context visibility for long local runs.** The footer context bucket is now a dynamic block bar, making long-context sessions easier to monitor while chatting or dispatching work.
+- **Smaller-terminal dashboard.** The expanded dashboard now reaches four horizontal sections at 100 columns, falls back to 2x2 at 80-99 columns, and uses vertical stacking only for genuinely narrow terminals.
+- **Cleaner dashboard controls.** Alt+U is the dashboard on/off control; Esc remains reserved for popups, slash-command UI, and active-run cancellation.
 
-v0.2.0 builds on the v0.1.x fleet dispatch, typed validation, frontend validation, local-runtime, extension, share archive, evidence, eval, and memory work. See [CHANGELOG.md](CHANGELOG.md) for the full entry.
+v0.2.1 builds on the v0.2.0 community alpha: durable sessions, `CLIO.md` adoption, target-first runtime routing, fleet dispatch, typed validation, and local-runtime support. See [CHANGELOG.md](CHANGELOG.md) for the full entry.
 
 It is still alpha software: expect sharp edges around first-run configuration, local runtime availability, and model-specific behavior. The core source install, CLI, and TUI paths are now testable enough for early users who can report issues with receipts and logs.
 
@@ -95,14 +93,14 @@ This is the recommended alpha path.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.2.0
+git checkout v0.2.1
 npm install
 npm run build
 npm link
 clio
 ```
 
-`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.2.0` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
+`npm link` exposes the `clio` binary from the built output. Use the latest GitHub release tag for reproducible installs, or omit `git checkout v0.2.1` if you intentionally want the current development branch. If you change the TypeScript source, run `npm run build` again before testing the linked command.
 
 ### Install from npm
 
@@ -714,7 +712,7 @@ This keeps provider-specific code contained and the system easier to reason abou
 
 ## Roadmap
 
-Current release: **v0.2.0** alpha (durable sessions, CLIO.md adoption, target-first runtime routing, TUI overlay hardening, and full local CI/e2e release checks). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
+Current release: **v0.2.1** alpha (local harness throughput telemetry, compact context/speed dashboard metrics, and smaller-terminal TUI controls on top of the v0.2.0 alpha foundations). See [CHANGELOG.md](CHANGELOG.md) for prior releases.
 
 Near-term:
 

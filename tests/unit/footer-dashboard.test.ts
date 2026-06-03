@@ -61,10 +61,12 @@ function state(overrides: DeepPartial = {}): FooterDashboardRenderState {
 			version: "0.2.0",
 			turns: 4,
 			tokens: "↑1k ↓2k Σ3k",
+			throughput: "⚡22 Tk/s",
+			throughputDetail: "gen 4.1s · ttft 700ms · ↓2k",
 			cost: "cost $0.05",
 		},
 		context: {
-			label: "ctx 12%",
+			label: "ctx █░░░░░░░░░ 12%",
 			used: 31_000,
 			contextWindow: 262_000,
 			compactionThreshold: 0.8,
@@ -113,8 +115,10 @@ describe("footer dashboard", () => {
 		ok(text.includes("~/iowarp/clio-coder"), text);
 		ok(text.includes("git main"), text);
 		ok(text.includes("Σ3k"), text);
+		ok(text.includes("22 Tk/s"), text);
+		ok(text.includes("⚡"), text);
 		ok(text.includes("$0.05"), text);
-		ok(text.includes("ctx 12%"), text);
+		ok(text.includes("ctx █░░░░░░░░░ 12%"), text);
 		ok(text.includes("run idle"), text);
 		ok(text.includes("Read 7"), text);
 		// The editor rail owns model identity; the footer must not repeat it.
@@ -150,39 +154,64 @@ describe("footer dashboard", () => {
 		strictEqual(defaulted.join("\n"), direct.join("\n"));
 	});
 
-	it("renders a 2×2 quadrant dashboard on a wide terminal", () => {
+	it("renders four horizontal quadrants at the normal wide dashboard breakpoint", () => {
 		const lines = renderFooterDashboardLines(
 			state({ agent: { statusText: "writing response · 4.2s" } }),
-			130,
+			100,
 			"expanded",
 		);
 		const text = stripAnsi(lines.join("\n"));
 		ok(text.includes("CLIO DASHBOARD"), text);
+		ok(text.includes("WORKSPACE"), text);
+		ok(text.includes("SESSION"), text);
+		ok(text.includes("CONTEXT"), text);
+		ok(text.includes("AGENT"), text);
+		ok(
+			lines
+				.map(stripAnsi)
+				.some(
+					(line) =>
+						line.includes("WORKSPACE") && line.includes("SESSION") && line.includes("CONTEXT") && line.includes("AGENT"),
+				),
+			text,
+		);
+		ok(text.includes("ctx █░░░░░░░░░ 12%"), text);
+		ok(text.includes("speed"), text);
+		ok(text.includes("writing response"), text);
+		assertWidthSafe(lines, 100);
+	});
+
+	it("renders a 2×2 quadrant dashboard below the four-column breakpoint", () => {
+		const lines = renderFooterDashboardLines(state({ agent: { statusText: "writing response · 4.2s" } }), 90, "expanded");
+		const text = stripAnsi(lines.join("\n"));
+		ok(text.includes("CLIO DASHBOARD"), text);
 		for (const quadrant of ["WORKSPACE", "SESSION", "CONTEXT", "AGENT"]) ok(text.includes(quadrant), text);
 		ok(text.includes("git main"), text);
-		ok(text.includes("ctx 12%"), text);
+		ok(text.includes("ctx █░░░░░░░░░ 12%"), text);
+		ok(text.includes("speed"), text);
+		ok(text.includes("gen 4.1s"), text);
 		ok(text.includes("compact auto @80%"), text);
 		ok(text.includes("akougkas/clio-coder"), text);
 		ok(text.includes("writing response"), text);
 		ok(text.includes("Read 7"), text);
-		assertWidthSafe(lines, 130);
+		assertWidthSafe(lines, 90);
 	});
 
-	it("stacks all four quadrants on a medium terminal", () => {
-		const lines = renderFooterStatusLines(state(), 96);
-		const text = stripAnsi(lines.join("\n"));
-		for (const quadrant of ["WORKSPACE", "SESSION", "CONTEXT", "AGENT"]) ok(text.includes(quadrant), text);
-		assertWidthSafe(lines, 96);
-	});
-
-	it("drops the lowest-priority quadrant (Session) on a narrow terminal", () => {
+	it("stacks all four quadrants vertically below the 2x2 breakpoint", () => {
 		const lines = renderFooterStatusLines(state(), 70);
 		const text = stripAnsi(lines.join("\n"));
+		for (const quadrant of ["WORKSPACE", "SESSION", "CONTEXT", "AGENT"]) ok(text.includes(quadrant), text);
+		assertWidthSafe(lines, 70);
+	});
+
+	it("keeps all four quadrants on a narrow terminal", () => {
+		const lines = renderFooterStatusLines(state(), 60);
+		const text = stripAnsi(lines.join("\n"));
 		ok(text.includes("WORKSPACE"), text);
+		ok(text.includes("SESSION"), text);
 		ok(text.includes("CONTEXT"), text);
 		ok(text.includes("AGENT"), text);
-		ok(!text.includes("SESSION"), `Session quadrant should be dropped when narrow: ${text}`);
-		assertWidthSafe(lines, 70);
+		assertWidthSafe(lines, 60);
 	});
 
 	it("renders CLIO.md and memory facts in the Context quadrant", () => {
@@ -227,6 +256,36 @@ describe("footer dashboard", () => {
 		turns = 5;
 		text = stripAnsi(panel.statusLines(120).join("\n"));
 		ok(text.includes("turns 5"), text);
+	});
+
+	it("includes latest token throughput in Session facts", () => {
+		const panel = buildFooterDashboard({
+			modes: { current: () => "default" } as never,
+			providers: {} as never,
+			getTerminalColumns: () => 120,
+			getSessionTokens: () => ({
+				input: 5500,
+				output: 120,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoningTokens: 80,
+				totalTokens: 5700,
+			}),
+			getTokenThroughput: () => ({
+				tokensPerSecond: 42,
+				outputTokens: 120,
+				durationMs: 2857,
+				ttftMs: 640,
+				providerId: "mini",
+				modelId: "gemma-4-12b-q4-code-256k",
+				recordedAt: 1,
+			}),
+		});
+		const text = stripAnsi(panel.statusLines(120).join("\n"));
+		ok(text.includes("42 Tk/s"), text);
+		ok(text.includes("gen 2.9s"), text);
+		ok(text.includes("ttft 640ms"), text);
+		ok(text.includes("↓120"), text);
 	});
 
 	it("integrates dispatch worker rows into the Agent quadrant", () => {
