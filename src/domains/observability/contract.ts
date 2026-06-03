@@ -2,6 +2,16 @@ import type { CostEntry, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
 
+export interface TokenThroughputSnapshot {
+	tokensPerSecond: number;
+	outputTokens: number;
+	durationMs: number;
+	ttftMs?: number;
+	providerId: string;
+	modelId: string;
+	recordedAt: number;
+}
+
 export interface ObservabilityContract {
 	/** Raw counter + histogram view. */
 	telemetry(): TelemetrySnapshot;
@@ -13,6 +23,8 @@ export interface ObservabilityContract {
 	sessionTokens(): UsageBreakdown;
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
+	/** Latest completed assistant stream throughput for compact footer display. */
+	latestTokenThroughput(): TokenThroughputSnapshot | null;
 	/** Reset the running session token and cost totals. */
 	resetSession(): void;
 	/**
@@ -29,4 +41,6 @@ export interface ObservabilityContract {
 		costUsd?: number,
 		breakdown?: Partial<UsageBreakdown>,
 	): void;
+	/** Record final output token throughput for one completed assistant stream. */
+	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
 }

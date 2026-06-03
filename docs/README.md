@@ -2,7 +2,7 @@
 
 Welcome to the developer-facing documentation for **Clio Coder**, the specialized coding agent in IOWarp's CLIO ecosystem of agentic science.
 
-Clio Coder is an **experimental community alpha**. These docs describe the current `v0.2.0` source-build release for early adopters, not a production-stable assistant with managed upgrades.
+Clio Coder is an **experimental community alpha**. These docs describe the current `v0.2.1` source-build release for early adopters, including local harness telemetry and dashboard improvements, not a production-stable assistant with managed upgrades.
 
 Clio Coder is a **TUI-first, supervised AI coding harness** designed for research, High-Performance Computing (HPC), and scientific-software engineering teams. It routes, gates, and audits AI model activity directly inside active software repositories while keeping human operators in complete control.
 

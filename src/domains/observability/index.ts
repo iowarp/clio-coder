@@ -7,7 +7,7 @@ export const ObservabilityDomainModule: DomainModule = {
 	createExtension: createObservabilityBundle,
 };
 
-export type { ObservabilityContract } from "./contract.js";
+export type { ObservabilityContract, TokenThroughputSnapshot } from "./contract.js";
 export type { CostEntry, UsageBreakdown } from "./cost.js";
 export { ObservabilityManifest } from "./manifest.js";
 export type { MetricsView } from "./metrics.js";

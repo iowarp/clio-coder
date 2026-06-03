@@ -173,9 +173,15 @@ describe("interactive slash commands", () => {
 		strictEqual(opened, 1);
 	});
 
-	it("routes /status to the same footer dashboard toggle as Ctrl+U", () => {
+	it("routes /status to a dashboard key hint without toggling the footer", () => {
 		let toggled = 0;
+		let stdout = "";
 		const ctx = {
+			io: {
+				stdout: (message: string) => {
+					stdout += message;
+				},
+			},
 			openStatus: () => {
 				toggled += 1;
 			},
@@ -183,7 +189,8 @@ describe("interactive slash commands", () => {
 
 		dispatchSlashCommand(parseSlashCommand("/status"), ctx);
 
-		strictEqual(toggled, 1);
+		strictEqual(toggled, 0);
+		ok(stdout.includes("Alt+U"), stdout);
 	});
 
 	it("reports /model pattern resolution errors", () => {

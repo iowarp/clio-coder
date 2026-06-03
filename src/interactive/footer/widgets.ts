@@ -34,6 +34,8 @@ export interface SessionFacts {
 	version: string;
 	turns: number | null;
 	tokens: string | null;
+	throughput: string | null;
+	throughputDetail: string | null;
 	cost: string | null;
 }
 
@@ -59,8 +61,9 @@ export interface AgentWorkFacts {
 }
 
 /** Expanded-footer responsive bands. */
-export const EXPANDED_WIDE = 120;
-export const EXPANDED_MID = 80;
+export const EXPANDED_WIDE = 80;
+export const EXPANDED_MID = 70;
+export const EXPANDED_ULTRAWIDE = 100;
 
 /** Compact footer shows the git section only when there is room for it. */
 const COMPACT_GIT_MIN_WIDTH = 72;
@@ -134,6 +137,7 @@ export function compactPrimaryLine(workspace: WorkspaceFacts, session: SessionFa
 	const left = joinSections(theme, [cwd, git]);
 	const right = joinChips(theme, [
 		session.tokens ? theme.fg("muted", session.tokens) : null,
+		session.throughput ? theme.fg("success", session.throughput) : null,
 		session.cost ? theme.fg("muted", session.cost) : null,
 	]);
 	return joinColumns(left, right || theme.fg("dim", "tokens idle"), width);
@@ -185,6 +189,8 @@ export function sessionQuadrant(facts: SessionFacts): string[] {
 		`${labeledChip(theme, "mode", facts.mode, "muted")} ${theme.fg("dim", `v${facts.version}`)}`,
 		facts.turns !== null ? labeledChip(theme, "turns", String(facts.turns), "muted") : null,
 		facts.tokens ? labeledChip(theme, "tok", facts.tokens.replace(/^tok\s+/, ""), "muted") : null,
+		facts.throughput ? labeledChip(theme, "speed", facts.throughput, "success") : null,
+		facts.throughputDetail ? theme.fg("muted", facts.throughputDetail) : null,
 		facts.cost ? labeledChip(theme, "cost", facts.cost.replace(/^cost\s+/, ""), "muted") : null,
 	]);
 }
@@ -271,6 +277,16 @@ export function zipColumns(
 	const lines: string[] = [];
 	for (let i = 0; i < rowCount; i += 1) {
 		lines.push(`${cell(left[i] ?? "", leftWidth)}${sep}${cell(right[i] ?? "", rightWidth)}`);
+	}
+	return lines;
+}
+
+export function zipColumnBlocks(blocks: ReadonlyArray<string[]>, widths: ReadonlyArray<number>, sep: string): string[] {
+	const rowCount = blocks.reduce((max, block) => Math.max(max, block.length), 0);
+	const lines: string[] = [];
+	for (let row = 0; row < rowCount; row += 1) {
+		const cells = blocks.map((block, index) => cell(block[row] ?? "", widths[index] ?? 0));
+		lines.push(cells.join(sep));
 	}
 	return lines;
 }

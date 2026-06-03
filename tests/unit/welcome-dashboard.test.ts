@@ -248,7 +248,7 @@ describe("interactive/welcome-dashboard", () => {
 		ok(lines.length >= 4, `expected dashboard detail, got ${lines.length} lines`);
 		// Identity / version / mode / availability.
 		ok(text.includes("Clio Coder"), text);
-		ok(text.includes("v0.2.0"), text);
+		ok(text.includes("v0.2.1"), text);
 		ok(text.includes("default"), text);
 		ok(text.includes("2/3"), text);
 		ok(text.includes("online"), text);

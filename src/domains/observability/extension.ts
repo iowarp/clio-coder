@@ -6,7 +6,7 @@
 
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import type { ObservabilityContract } from "./contract.js";
+import type { ObservabilityContract, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
 import { aggregateMetrics } from "./metrics.js";
 import { createTelemetry } from "./telemetry.js";
@@ -44,6 +44,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 	const telemetry = createTelemetry();
 	const cost = createCostTracker();
 	const unsubscribes: Array<() => void> = [];
+	let latestThroughput: TokenThroughputSnapshot | null = null;
 
 	const extension: DomainExtension = {
 		async start() {
@@ -85,10 +86,19 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		sessionCost: () => cost.sessionTotal(),
 		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
-		resetSession: () => cost.reset(),
+		latestTokenThroughput: () => latestThroughput,
+		resetSession() {
+			cost.reset();
+			latestThroughput = null;
+		},
 		recordTokens(providerId, modelId, tokens, costUsd, breakdown) {
 			telemetry.record("counter", "tokens.total", tokens);
 			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown);
+		},
+		recordTokenThroughput(snapshot) {
+			latestThroughput = snapshot;
+			telemetry.record("histogram", "tokens.output_per_second", snapshot.tokensPerSecond);
+			telemetry.record("histogram", "tokens.ttft_ms", snapshot.ttftMs ?? 0);
 		},
 	};
 
