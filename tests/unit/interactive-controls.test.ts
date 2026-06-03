@@ -6,10 +6,14 @@ import type { EndpointStatus, ProvidersContract } from "../../src/domains/provid
 import {
 	CTRL_C_DOUBLE_TAP_MS,
 	type CtrlCAction,
+	IDLE_LEADER_STATE,
 	type KeyBindingDeps,
+	LEADER_TIMEOUT_MS,
+	type LeaderKeyState,
 	type OverlayKeyDeps,
 	resolveCtrlCAction,
 	routeInteractiveKey,
+	routeLeaderKey,
 	routeOverlayKey,
 	routeResumeOverlayKey,
 } from "../../src/interactive/index.js";
@@ -165,6 +169,12 @@ describe("routeInteractiveKey footer dashboard toggle", () => {
 			openTree: () => {},
 			cycleScopedModelForward: () => {},
 			cycleScopedModelBackward: () => {},
+			dismissNotifications: () => {},
+			toggleToolExpansion: () => {},
+			toggleThinkingExpansion: () => {},
+			openExternalEditor: () => {},
+			queueFollowUp: () => {},
+			restoreQueuedFollowUps: () => {},
 			...overrides,
 		};
 	}
@@ -183,6 +193,97 @@ describe("routeInteractiveKey footer dashboard toggle", () => {
 
 		strictEqual(consumed, true);
 		strictEqual(toggled, 1);
+	});
+});
+
+describe("routeLeaderKey", () => {
+	function keyDeps(overrides: Partial<KeyBindingDeps> = {}): KeyBindingDeps {
+		return {
+			matches: (_data, _id) => false,
+			cycleMode: () => {},
+			cycleThinking: () => {},
+			requestShutdown: () => {},
+			requestSuper: () => {},
+			toggleStatus: () => {},
+			toggleDispatchBoard: () => {},
+			openModelSelector: () => {},
+			openTree: () => {},
+			cycleScopedModelForward: () => {},
+			cycleScopedModelBackward: () => {},
+			dismissNotifications: () => {},
+			toggleToolExpansion: () => {},
+			toggleThinkingExpansion: () => {},
+			openExternalEditor: () => {},
+			queueFollowUp: () => {},
+			restoreQueuedFollowUps: () => {},
+			...overrides,
+		};
+	}
+
+	function route(data: string, state: LeaderKeyState, overrides: Partial<KeyBindingDeps> = {}, now = 1_000) {
+		return routeLeaderKey(data, state, {
+			...keyDeps(overrides),
+			matchesLeader: (input) => input === "\x07",
+			leaderTargets: [{ key: "u", id: "clio.status.toggle" }],
+			now,
+		});
+	}
+
+	it("arms on the leader prefix and dispatches a mapped second key", () => {
+		let toggled = 0;
+		const armed = route("\x07", IDLE_LEADER_STATE);
+		strictEqual(armed.consumed, true);
+		strictEqual(armed.state.status, "pending");
+		if (armed.state.status !== "pending") throw new Error("expected pending leader state");
+		strictEqual(armed.state.expiresAt, 1_000 + LEADER_TIMEOUT_MS);
+
+		const dispatched = route(
+			"u",
+			armed.state,
+			{
+				toggleStatus: () => {
+					toggled += 1;
+				},
+			},
+			1_100,
+		);
+		strictEqual(dispatched.consumed, true);
+		strictEqual(dispatched.state.status, "idle");
+		strictEqual(toggled, 1);
+	});
+
+	it("cancels on timeout and swallows the stale second key", () => {
+		const pending: LeaderKeyState = { status: "pending", expiresAt: 2_500 };
+		const result = route("u", pending, {}, 2_501);
+		strictEqual(result.consumed, true);
+		strictEqual(result.state.status, "idle");
+	});
+
+	it("ignores key-release events while pending", () => {
+		const pending: LeaderKeyState = { status: "pending", expiresAt: 2_500 };
+		const result = routeLeaderKey("release", pending, {
+			...keyDeps(),
+			matchesLeader: () => false,
+			leaderTargets: [{ key: "u", id: "clio.status.toggle" }],
+			now: 1_500,
+			isRelease: () => true,
+		});
+		strictEqual(result.consumed, true);
+		strictEqual(result.state, pending);
+	});
+
+	it("cancels and swallows Escape while pending", () => {
+		const pending: LeaderKeyState = { status: "pending", expiresAt: 2_500 };
+		const result = route("\x1b", pending, {}, 1_500);
+		strictEqual(result.consumed, true);
+		strictEqual(result.state.status, "idle");
+	});
+
+	it("cancels and swallows an unmapped key while pending", () => {
+		const pending: LeaderKeyState = { status: "pending", expiresAt: 2_500 };
+		const result = route("z", pending, {}, 1_500);
+		strictEqual(result.consumed, true);
+		strictEqual(result.state.status, "idle");
 	});
 });
 

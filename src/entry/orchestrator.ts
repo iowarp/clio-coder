@@ -611,6 +611,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {
+					getContextState: (cwd?: string) => contextDomain.contextState(cwd),
 					onInit: async (options: { preview?: boolean; adopt?: boolean; includeGlobalImports?: boolean }) => {
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),

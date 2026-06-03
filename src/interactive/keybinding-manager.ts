@@ -62,6 +62,11 @@ export interface PlatformKeybindingWarning {
 	source: "default" | "user";
 }
 
+export interface LeaderTarget {
+	key: string;
+	id: ClioKeybinding;
+}
+
 export interface ClioKeybindingManager {
 	matches(data: string, id: ClioKeybinding): boolean;
 	getKeys(id: ClioKeybinding): ReadonlyArray<KeyId>;
@@ -71,6 +76,7 @@ export interface ClioKeybindingManager {
 	invalidCount(): number;
 	invalidBindings(): ReadonlyArray<InvalidKeybinding>;
 	platformWarnings(): ReadonlyArray<PlatformKeybindingWarning>;
+	leaderTargets(): ReadonlyArray<LeaderTarget>;
 	hotkeyEntries(): ReadonlyArray<{ id: ClioKeybinding; keys: string; description: string; source: "default" | "user" }>;
 }
 
@@ -247,12 +253,20 @@ export function detectTerminalKeySupport(
 			altLetterMode: "meta",
 		};
 	}
-	if (termProgram === "Apple_Terminal" || termProgram === "iTerm.app") {
+	if (termProgram === "Apple_Terminal") {
 		return {
 			name: termProgram,
 			supportsCsiU: false,
-			reason: "macOS terminal may treat Option-letter as text input",
+			reason: "Terminal.app sends Option-letter as composed text unless Use Option as Meta key is enabled",
 			altLetterMode: "text",
+		};
+	}
+	if (termProgram === "iTerm.app") {
+		return {
+			name: termProgram,
+			supportsCsiU: true,
+			reason: "iTerm2 reports modified keys as Meta or CSI-u",
+			altLetterMode: "meta",
 		};
 	}
 	if (termProgram.toLowerCase() === "vscode") {
@@ -302,11 +316,15 @@ function normalizeKeyForRisk(keyId: string): string {
 	return keyId.toLowerCase().replace(/^ctrl\+shift\+/, "shift+ctrl+");
 }
 
-function keyUsesAltLetter(keyId: string): boolean {
+function altLetterBase(keyId: string): string | null {
 	const parts = keyId.toLowerCase().split("+");
-	if (parts.length !== 2 || parts[0] !== "alt") return false;
+	if (parts.length !== 2 || parts[0] !== "alt") return null;
 	const base = parts[1] ?? "";
-	return base.length === 1 && base >= "a" && base <= "z";
+	return base.length === 1 && base >= "a" && base <= "z" ? base : null;
+}
+
+function keyUsesAltLetter(keyId: string): boolean {
+	return altLetterBase(keyId) !== null;
 }
 
 function terminalReservedReason(keyId: string): string | null {
@@ -324,11 +342,14 @@ function keyRiskReason(keyId: string, support: TerminalKeySupport): string | nul
 	return terminalReservedReason(key);
 }
 
+const MACOS_OPTION_DEFAULT_WARNING_ID = "clio.macos.option-letter.defaults";
+
 export function detectPlatformKeybindingWarnings(
 	userBindings: Readonly<KeybindingsConfig>,
 	support: TerminalKeySupport = detectTerminalKeySupport(),
 ): ReadonlyArray<PlatformKeybindingWarning> {
 	const warnings: PlatformKeybindingWarning[] = [];
+	const macosDefaultAltKeys: string[] = [];
 	for (const id of CLIO_APP_KEYBINDING_IDS) {
 		const userValue = userBindings[id];
 		const source = userValue === undefined ? "default" : "user";
@@ -336,12 +357,39 @@ export function detectPlatformKeybindingWarnings(
 		const risky = keys.filter((key) => keyRiskReason(key, support) !== null);
 		if (risky.length === 0) continue;
 		const firstReason = keyRiskReason(risky[0] ?? "", support) ?? support.reason;
+		if (source === "default" && support.name === "Apple_Terminal" && risky.every(keyUsesAltLetter)) {
+			macosDefaultAltKeys.push(...risky);
+			continue;
+		}
 		warnings.push({ id, keys: risky, terminal: support.name, reason: firstReason, source });
+	}
+	if (macosDefaultAltKeys.length > 0) {
+		warnings.unshift({
+			id: MACOS_OPTION_DEFAULT_WARNING_ID,
+			keys: [...new Set(macosDefaultAltKeys)],
+			terminal: support.name,
+			reason: support.reason,
+			source: "default",
+		});
 	}
 	return warnings;
 }
 
+function isMacosOptionDefaultWarning(warning: PlatformKeybindingWarning): boolean {
+	return warning.id === MACOS_OPTION_DEFAULT_WARNING_ID;
+}
+
 export function formatPlatformKeybindingNotice(warnings: ReadonlyArray<PlatformKeybindingWarning>): string {
+	const macosOption = warnings.find(isMacosOptionDefaultWarning);
+	if (macosOption && warnings.length === 1) {
+		const keys = macosOption.keys
+			.map((key) => {
+				const base = altLetterBase(key);
+				return base ? `Alt+${base.toUpperCase()}` : key;
+			})
+			.join(", ");
+		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt, or use Ctrl+G then the shortcut letter, slash commands (/help lists commands), and /hotkeys.\n`;
+	}
 	const count = warnings.reduce((sum, entry) => sum + entry.keys.length, 0);
 	const detail = warnings
 		.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}" (${entry.source}, ${entry.reason})`))
@@ -353,6 +401,17 @@ function joinKeys(keys: ReadonlyArray<KeyId>): string {
 	if (keys.length === 0) return "(unbound)";
 	if (keys.length === 1) return String(keys[0]);
 	return keys.join(" / ");
+}
+
+function deriveLeaderTargets(inner: KeybindingsManager): LeaderTarget[] {
+	const targets: LeaderTarget[] = [];
+	for (const id of CLIO_APP_KEYBINDING_IDS) {
+		for (const key of inner.getKeys(id as Keybinding)) {
+			const base = altLetterBase(String(key));
+			if (base) targets.push({ key: base, id });
+		}
+	}
+	return targets;
 }
 
 function buildManager(
@@ -368,6 +427,7 @@ function buildManager(
 		reason: entry.reason,
 		source: entry.source,
 	}));
+	const frozenLeaderTargets = deriveLeaderTargets(inner).map((entry) => ({ ...entry }));
 	return {
 		matches(data, id) {
 			return inner.matches(data, id as Keybinding);
@@ -392,6 +452,9 @@ function buildManager(
 		},
 		platformWarnings() {
 			return frozenPlatformWarnings;
+		},
+		leaderTargets() {
+			return frozenLeaderTargets;
 		},
 		hotkeyEntries() {
 			const userBindings = inner.getUserBindings();

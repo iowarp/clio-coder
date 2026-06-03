@@ -1,6 +1,13 @@
 # Security Policy
 
-Clio Coder is pre-release. Security reports should still be handled privately.
+Clio Coder is experimental alpha software. Until the project reaches a stable
+release, only the latest tagged alpha minor version receives security fixes.
+
+| Version  | Supported          |
+| -------- | ------------------ |
+| `0.2.x`  | Latest alpha patch |
+| `0.1.x`  | No                 |
+| `< 0.1`  | No                 |
 
 ## Report
 

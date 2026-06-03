@@ -3,13 +3,15 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## 0.2.0 - 2026-06-02
+## 0.2.0 - 2026-06-03
 
-Clio Coder 0.2.0 is an alpha-readiness release for users building from
-source. It hardens durable session storage and fork replay, makes `CLIO.md`
-the explicit project-context path, centralizes runtime/model target
-resolution, and polishes the interactive terminal UI enough for broader
-testing with local and cloud targets.
+Clio Coder 0.2.0 is the first community alpha release for users building from
+source. It is experimental software for early adopters who can test from a
+tagged checkout, report reproducible issues, and stay close to the release
+notes. It hardens durable session storage and fork replay, makes `CLIO.md` the
+explicit project-context path, centralizes runtime/model target resolution,
+and polishes the interactive terminal UI enough for broader testing with local
+and cloud targets.
 
 ### Added
 
@@ -37,6 +39,9 @@ testing with local and cloud targets.
 - Added documentation pages for architecture, built-in agents, evidence and
   memory, eval runner, middleware/components, model catalog, safety model, and
   scientific validation.
+- Added a portable `Ctrl+G` leader-key fallback for Alt-letter TUI actions so
+  stock macOS Terminal.app users can reach the dashboard, model selector, and
+  other controls without terminal reconfiguration.
 
 ### Changed
 
@@ -57,6 +62,9 @@ testing with local and cloud targets.
   surface.
 - Made `clio init` output more compact while still reporting context sources,
   codewiki indexing, fingerprint updates, and workspace dirtiness.
+- Consolidated macOS Terminal.app Option-key guidance into one dismissible
+  footer notification with both remediation paths: enable Option-as-Meta or
+  use the `Ctrl+G` leader and slash commands.
 
 ### Fixed
 
@@ -64,6 +72,9 @@ testing with local and cloud targets.
   intended files without sibling-prefix leaks.
 - Fixed interactive startup and Bash replay so context warnings and command
   output do not corrupt the chat transcript.
+- Fixed footer dashboard context/workspace/session freshness so CLIO.md,
+  memory count, git branch/dirty state, and live submitted turns update during
+  the TUI session.
 - Fixed receipt overlay rendering at narrow widths and added focused coverage
   for compact rows.
 - Fixed tree overlay rendering, payload-driven previews, and delete

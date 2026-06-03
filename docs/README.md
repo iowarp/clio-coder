@@ -1,8 +1,10 @@
 # Clio Coder Developer Documentation Hub
 
-Welcome to the developer-facing documentation for **Clio Coder**, the specialized coding agent in IOWarp's CLIO ecosystem of agentic science. 
+Welcome to the developer-facing documentation for **Clio Coder**, the specialized coding agent in IOWarp's CLIO ecosystem of agentic science.
 
-Clio Coder is a **TUI-first, supervised AI coding harness** designed for research, High-Performance Computing (HPC), and scientific-software engineering teams. It routes, gates, and audits AI model activity directly inside your production or scientific software repositories while keeping human operators in complete control.
+Clio Coder is an **experimental community alpha**. These docs describe the current `v0.2.0` source-build release for early adopters, not a production-stable assistant with managed upgrades.
+
+Clio Coder is a **TUI-first, supervised AI coding harness** designed for research, High-Performance Computing (HPC), and scientific-software engineering teams. It routes, gates, and audits AI model activity directly inside active software repositories while keeping human operators in complete control.
 
 ---
 
@@ -41,7 +43,7 @@ npm install
 npm run build
 npm link
 ```
-The `npm link` registers the `clio` binary pointing at the local production bundle.
+The `npm link` registers the `clio` binary pointing at the local built alpha bundle.
 > [!WARNING]
 > Clio Coder's linked CLI executes from the built `dist/` directory. If you make changes to TypeScript files in `src/`, you **must run `npm run build`** (or have `npm run dev` running in the background) for your changes to take effect.
 
@@ -91,7 +93,7 @@ Inside the interactive terminal UI, you can issue autocomplete-supported **slash
 
 ### Keyboard Bindings
 
-All app bindings use the `Alt + <key>` scheme (plus `Shift+Tab` and `Ctrl+D`). They decode from the legacy `ESC <key>` sequence, so none require kitty-protocol CSI-u and none shadow the terminal's line-editing reserves.
+App bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`, `Ctrl+D`, and the portable `Ctrl+G` leader. Modern terminals and Linux/meta setups send Alt directly. Stock macOS Terminal.app needs **Use Option as Meta key** enabled in Settings ▸ Profiles ▸ Keyboard for native Alt; otherwise use `Ctrl+G` then the Alt binding's letter, or slash commands. `/hotkeys` shows the resolved table.
 
 | Keybinding | Action Enforced |
 | :--- | :--- |
@@ -106,6 +108,7 @@ All app bindings use the `Alt + <key>` scheme (plus `Shift+Tab` and `Ctrl+D`). T
 | `Alt+R` | Expand or collapse the most recent thinking block. |
 | `Alt+G` | Open the current input in an external editor. |
 | `Alt+X` | Dismiss footer notifications. |
+| `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions, such as `Ctrl+G` then `u` for the dashboard. |
 | `Esc` / `Ctrl+C` | Cancel an active streaming run, close an active overlay, or collapse the dashboard. |
 
 ---

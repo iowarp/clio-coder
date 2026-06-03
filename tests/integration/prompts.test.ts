@@ -227,6 +227,7 @@ describe("prompts/compiler context files", () => {
 				async runBootstrap() {
 					throw new Error("not used");
 				},
+				contextState: () => ({ clioMd: "none", memoryCount: 0 }),
 				startupHints: () => [],
 				renderPromptContext(cwd) {
 					strictEqual(cwd, scratch);
@@ -269,6 +270,7 @@ describe("prompts/compiler context files", () => {
 				async runBootstrap() {
 					throw new Error("not used");
 				},
+				contextState: () => ({ clioMd: "none", memoryCount: 0 }),
 				startupHints: () => [],
 				renderPromptContext() {
 					return {

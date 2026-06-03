@@ -363,6 +363,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 				"Alt+X dismiss",
 				// Harness notices route to the footer surface, never the transcript.
 				"keybinding notice",
+				"Use Option as Meta key",
 				"fingerprint differs",
 			]) {
 				strictEqual(scrollback.includes(chrome), false, `chrome marker leaked into scrollback: ${chrome}`);
@@ -509,7 +510,7 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("Alt-U toggles the inline footer dashboard and Esc collapses it", async () => {
+	it("Alt-U and Ctrl-G u toggle the inline footer dashboard and Esc collapses it", async () => {
 		const p = spawnClioPty({ env: scratch.env });
 		try {
 			await p.expect(/Clio Coder/, 15_000);
@@ -519,10 +520,25 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 			p.send("\x1b");
 			await new Promise((resolve) => setTimeout(resolve, 250));
 
-			const vt = createVt(120, 40);
+			let vt = createVt(120, 40);
 			vt.write(p.output());
-			const screen = vt.screen().join("\n");
+			let screen = vt.screen().join("\n");
 			strictEqual(screen.includes("CLIO DASHBOARD"), false, "expanded dashboard should collapse from the live screen");
+
+			// Portable leader fallback: Ctrl+G followed by the Alt binding's base letter.
+			p.send("\x07u");
+			await p.expect(/CLIO DASHBOARD/, 10_000);
+			p.send("\x1b");
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			vt = createVt(120, 40);
+			vt.write(p.output());
+			screen = vt.screen().join("\n");
+			strictEqual(
+				screen.includes("CLIO DASHBOARD"),
+				false,
+				"leader-opened dashboard should collapse from the live screen",
+			);
+
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);

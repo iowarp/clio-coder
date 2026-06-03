@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
+import type { ContextState } from "../../domains/context/index.js";
 import type { ModesContract } from "../../domains/modes/index.js";
 import type { UsageBreakdown } from "../../domains/observability/index.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
@@ -62,7 +63,7 @@ export interface FooterDashboardDeps {
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getSessionInfo?: () => { id: string | null; name: string | null; turns: number | null };
 	getExtensionStats?: () => { active: number; installed: number };
-	getContextState?: () => { clioMd: string | null; memory: string | null };
+	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
 	dismissKeyLabel?: string;
 	now?: () => number;
@@ -192,6 +193,14 @@ export interface FooterDashboardPanel extends FooterPanel {
 	toggleExpanded(): FooterDashboardMode;
 }
 
+function formatClioMdState(value: ContextState["clioMd"] | null | undefined): string | null {
+	return value ? `CLIO.md ${value}` : null;
+}
+
+function formatMemoryState(count: number | null | undefined): string | null {
+	return typeof count === "number" && count > 0 ? `mem ${count}` : null;
+}
+
 function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): WorkspaceFacts {
 	const snapshot = deps.getWorkspaceSnapshot?.() ?? null;
 	if (snapshot) {
@@ -222,12 +231,13 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const dispatch = deps.getDispatchRows?.() ?? [];
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
+		const compactionActive = status?.phase === "compacting" || (status?.activePhases?.has("compacting") ?? false);
 		const usage = deps.getSessionTokens?.();
 		const tokens = tokensSegment(usage);
 		const contextUsage = deps.getContextUsage?.();
 		const settings = deps.getSettings?.();
 		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
-		const contextState = deps.getContextState?.() ?? { clioMd: null, memory: null };
+		const contextState = deps.getContextState?.() ?? null;
 		const tokensLabel = tokens ?? (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 		return {
 			workspace: workspaceFacts(deps, branchSlot),
@@ -246,8 +256,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				contextWindow: contextUsage?.contextWindow ?? null,
 				compactionThreshold: settings?.compaction?.threshold ?? null,
 				compactionAuto: settings?.compaction?.auto ?? null,
-				clioMd: contextState.clioMd,
-				memory: contextState.memory,
+				compactionActive,
+				clioMd: formatClioMdState(contextState?.clioMd),
+				memory: formatMemoryState(contextState?.memoryCount),
 				extensions: deps.getExtensionStats?.() ?? null,
 			},
 			agent: {

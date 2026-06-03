@@ -121,6 +121,14 @@ describe("interactive/footer/notification-center rendering", () => {
 		strictEqual(formatNotificationPanel([], 80).length, 0);
 	});
 
+	it("uses the resolved dismiss key label in badge and panel", () => {
+		const badge = formatNotificationBadge([entry()], 80, { dismissKeyLabel: "Ctrl+Q" });
+		ok(badge);
+		ok(stripAnsi(badge).includes("Ctrl+Q dismiss"), stripAnsi(badge));
+		const panel = formatNotificationPanel([entry()], 80, { dismissKeyLabel: "Ctrl+Q" });
+		ok(stripAnsi(panel.join("\n")).includes("Ctrl+Q dismiss"), stripAnsi(panel.join("\n")));
+	});
+
 	it("renders an expanded panel header, rows, and a dismiss hint", () => {
 		const lines = formatNotificationPanel([entry({ text: "first" }), entry({ id: "notice-2", text: "second" })], 60);
 		const text = stripAnsi(lines.join("\n"));

@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { clioDataDir } from "../../core/xdg.js";
+import { loadMemoryRecordsSync } from "../memory/index.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
@@ -11,7 +13,7 @@ import {
 	tryReadClioMd,
 } from "./clio-md.js";
 import { buildCodewiki, codewikiPath, writeCodewiki } from "./codewiki/indexer.js";
-import type { ContextContract, ProjectPromptContext } from "./contract.js";
+import type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
 import { computeFingerprint, isStale } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
 
@@ -33,6 +35,38 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 		pieces.push(`<codewiki>available${suffix}; use find_symbol, entry_points, where_is</codewiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
+}
+
+const CONTEXT_STATE_CACHE_TTL_MS = 1500;
+
+function memoryCount(): number {
+	try {
+		return loadMemoryRecordsSync(clioDataDir()).length;
+	} catch {
+		return 0;
+	}
+}
+
+function resolveClioMdState(cwd: string): ContextState["clioMd"] {
+	const clio = tryReadClioMd(cwd);
+	if (!clio) return "none";
+	if (!clio.ok) return "malformed";
+	if (clio.value.firstInit || !clio.value.fingerprint) return "no-fingerprint";
+	const state = readClioState(cwd);
+	const reference = state?.bootstrapFingerprint ?? state?.fingerprint ?? clio.value.fingerprint;
+	const current = computeFingerprint(cwd);
+	return isStale(reference, current) ? "stale" : "ok";
+}
+
+function createContextStateReader(): (cwd?: string) => ContextState {
+	let cached: { cwd: string; at: number; state: ContextState } | null = null;
+	return (cwd = process.cwd()): ContextState => {
+		const now = Date.now();
+		if (cached && cached.cwd === cwd && now - cached.at < CONTEXT_STATE_CACHE_TTL_MS) return cached.state;
+		const state: ContextState = { clioMd: resolveClioMdState(cwd), memoryCount: memoryCount() };
+		cached = { cwd, at: now, state };
+		return state;
+	};
 }
 
 function collectStartupHints(cwd: string): string[] {
@@ -69,6 +103,7 @@ function collectStartupHints(cwd: string): string[] {
 export function createContextBundle(_context: DomainContext): DomainBundle<ContextContract> {
 	let lastCwd = process.cwd();
 	let startupHints: string[] = [];
+	const contextState = createContextStateReader();
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		startupHints = collectStartupHints(lastCwd);
@@ -106,6 +141,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 	const contract: ContextContract = {
 		runBootstrap,
 		renderPromptContext,
+		contextState,
 		startupHints: () => [...startupHints],
 	};
 
