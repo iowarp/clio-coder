@@ -33,6 +33,7 @@ export interface ClioAppKeybindings {
 	"clio.editor.external": true;
 	"clio.message.followUp": true;
 	"clio.message.dequeue": true;
+	"clio.notifications.dismiss": true;
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
@@ -51,10 +52,14 @@ declare module "@earendil-works/pi-tui" {
  * Built-in defaults. Users override via `settings.yaml.keybindings`; the
  * manager reads those and patches this table before the TUI starts.
  *
- * Default key strings follow pi-tui's `KeyId` format (`modifier+modifier+key`,
- * lowercase). `shift+ctrl+p` uses kitty-protocol CSI-u; terminals without
- * CSI-u cannot fire it by design. Users can rebind to an alt combo or use
- * `/scoped-models` instead.
+ * Clio's app bindings follow one scheme: `Alt + <key>` (with `shift+tab` and
+ * `ctrl+d` retained because pi-tui and every terminal already expect them).
+ * `Alt + <letter>` decodes from the legacy `ESC <letter>` sequence on any
+ * terminal, so none of these defaults need kitty-protocol CSI-u. The chosen
+ * letters avoid pi-tui's editor reserves (`alt+b/f/d/y`, and the
+ * `ESC n`/`ESC p` aliases for `alt+down`/`alt+up`) and the readline/terminal
+ * line-editing reserves (`ctrl+u/l/p/t/o/g/k/w/a/e`). The CSI-u/reserved-key
+ * detector in `keybinding-manager.ts` stays as a safety net for user rebinds.
  */
 export const CLIO_APP_KEYBINDINGS = {
 	"clio.thinking.cycle": {
@@ -74,39 +79,39 @@ export const CLIO_APP_KEYBINDINGS = {
 		description: "Request super mode (requires confirmation)",
 	},
 	"clio.status.toggle": {
-		defaultKeys: "ctrl+u",
-		description: "Toggle the status overlay",
+		defaultKeys: "alt+u",
+		description: "Toggle the footer dashboard (compact / expanded)",
 	},
 	"clio.session.tree": {
 		defaultKeys: "alt+t",
 		description: "Open the /tree navigator",
 	},
 	"clio.dispatchBoard.toggle": {
-		defaultKeys: "ctrl+b",
-		description: "Toggle the dispatch board overlay",
+		defaultKeys: "alt+w",
+		description: "Toggle the dispatch (workers) board overlay",
 	},
 	"clio.model.select": {
-		defaultKeys: "ctrl+l",
-		description: "Open the model selector",
+		defaultKeys: "alt+l",
+		description: "Open the model + targets selector",
 	},
 	"clio.model.cycleForward": {
-		defaultKeys: "ctrl+p",
+		defaultKeys: "alt+j",
 		description: "Cycle to next scoped model",
 	},
 	"clio.model.cycleBackward": {
-		defaultKeys: "shift+ctrl+p",
+		defaultKeys: "alt+k",
 		description: "Cycle to previous scoped model",
 	},
 	"clio.tool.expand": {
-		defaultKeys: "ctrl+o",
+		defaultKeys: "alt+o",
 		description: "Toggle the most recent tool segment between collapsed subline and full body",
 	},
 	"clio.thinking.expand": {
-		defaultKeys: "ctrl+t",
+		defaultKeys: "alt+r",
 		description: "Toggle thinking blocks between hidden marker and full body",
 	},
 	"clio.editor.external": {
-		defaultKeys: "ctrl+g",
+		defaultKeys: "alt+g",
 		description: "Open the current input in an external editor",
 	},
 	"clio.message.followUp": {
@@ -116,6 +121,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.message.dequeue": {
 		defaultKeys: "alt+up",
 		description: "Restore queued follow-up messages to the editor",
+	},
+	"clio.notifications.dismiss": {
+		defaultKeys: "alt+x",
+		description: "Dismiss footer notifications",
 	},
 } as const satisfies KeybindingDefinitions;
 

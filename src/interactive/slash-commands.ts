@@ -239,6 +239,7 @@ export interface SlashCommandContext {
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
 	openCost: () => void;
+	/** Toggle the inline footer dashboard density used by Ctrl+U and /status. */
 	openStatus: () => void;
 	openReceipts: () => void;
 	openThinking: () => void;
@@ -568,7 +569,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "status",
-		description: "Show the status dashboard",
+		description: "Toggle the footer dashboard",
 		kinds: ["status"],
 		match(trimmed) {
 			return trimmed === "/status" ? { kind: "status" } : null;

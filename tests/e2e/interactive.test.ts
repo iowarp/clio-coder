@@ -342,7 +342,29 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 				const marker = `SCROLLBACK-T${turn}-LINE-20`;
 				strictEqual(scrollback.split(marker).length - 1, 1, `${marker} duplicated or missing in scrollback`);
 			}
-			for (const chrome of ["CLIO CODER STATUS", "PERCEIVE", "REASON", "REMEMBER", "⏎ send", "⌃L model", "compose", "❯"]) {
+			for (const chrome of [
+				// Legacy chrome markers, kept guarded so they can never reappear.
+				"CLIO CODER STATUS",
+				"CLIO DASHBOARD",
+				"PERCEIVE",
+				"REASON",
+				"REMEMBER",
+				"run idle",
+				"⏎ send",
+				"⌃L model",
+				"compose",
+				"❯",
+				// New live-only quadrant + notification chrome must also stay out of scrollback.
+				"WORKSPACE",
+				"SESSION",
+				"CONTEXT",
+				"AGENT",
+				"notices",
+				"Alt+X dismiss",
+				// Harness notices route to the footer surface, never the transcript.
+				"keybinding notice",
+				"fingerprint differs",
+			]) {
 				strictEqual(scrollback.includes(chrome), false, `chrome marker leaked into scrollback: ${chrome}`);
 			}
 		} finally {
@@ -368,14 +390,15 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("Ctrl-G edits the current input through VISUAL", async () => {
+	it("Alt-G edits the current input through VISUAL", async () => {
 		const script = "require('fs').writeFileSync(process.argv[1], 'external-edited')";
 		const visual = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
 		const p = spawnClioPty({ env: { ...scratch.env, VISUAL: visual } });
 		try {
 			await p.expect(/Clio Coder/, 15_000);
 			p.send("draft");
-			p.send("\x07");
+			// Alt+G (ESC g) opens the external editor.
+			p.send("\x1bg");
 			await p.expect(/external-edited/, 10_000);
 			p.send("\x03");
 			await new Promise((r) => setTimeout(r, 100));
@@ -483,6 +506,28 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		} finally {
 			p.kill();
 			await closeServer(fixture.server);
+		}
+	});
+
+	it("Alt-U toggles the inline footer dashboard and Esc collapses it", async () => {
+		const p = spawnClioPty({ env: scratch.env });
+		try {
+			await p.expect(/Clio Coder/, 15_000);
+			// Alt+U (ESC u) toggles the expanded quadrant dashboard.
+			p.send("\x1bu");
+			await p.expect(/CLIO DASHBOARD/, 10_000);
+			p.send("\x1b");
+			await new Promise((resolve) => setTimeout(resolve, 250));
+
+			const vt = createVt(120, 40);
+			vt.write(p.output());
+			const screen = vt.screen().join("\n");
+			strictEqual(screen.includes("CLIO DASHBOARD"), false, "expanded dashboard should collapse from the live screen");
+			p.send("/quit\r");
+			const exit = await p.wait(10_000);
+			strictEqual(exit.code, 0, `expected clean exit, got code=${exit.code} signal=${exit.signal}`);
+		} finally {
+			p.kill();
 		}
 	});
 
@@ -659,15 +704,15 @@ describe("clio interactive tui e2e", { concurrency: false }, () => {
 		}
 	});
 
-	it("Ctrl+L opens the /model picker and Esc closes it", async () => {
+	it("Alt+L opens the /model picker and Esc closes it", async () => {
 		const configDir = scratch.env.CLIO_CONFIG_DIR;
 		ok(configDir);
 		writeEndpointFixture(configDir);
 		const p = spawnClioPty({ env: scratch.env });
 		try {
 			await p.expect(/Clio Coder/, 15_000);
-			// Ctrl+L is \x0c (form feed).
-			p.send("\x0c");
+			// Alt+L (ESC l) opens the model + targets selector.
+			p.send("\x1bl");
 			await p.expect(/anthropic-prod/, 10_000);
 			p.send("\x1b");
 			// Give the TUI a tick to process the close and restore editor focus before

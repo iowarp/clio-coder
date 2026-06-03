@@ -13,6 +13,8 @@ export const GLYPH = {
 	rail: "│",
 	barFull: "█",
 	barEmpty: "░",
+	info: "ℹ",
+	warn: "⚠",
 } as const;
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;

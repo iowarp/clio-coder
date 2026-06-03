@@ -6,8 +6,10 @@ import type { EndpointStatus, ProvidersContract } from "../../src/domains/provid
 import {
 	CTRL_C_DOUBLE_TAP_MS,
 	type CtrlCAction,
+	type KeyBindingDeps,
 	type OverlayKeyDeps,
 	resolveCtrlCAction,
+	routeInteractiveKey,
 	routeOverlayKey,
 	routeResumeOverlayKey,
 } from "../../src/interactive/index.js";
@@ -149,8 +151,43 @@ describe("interactive ctrl+c controls", () => {
 	});
 });
 
+describe("routeInteractiveKey footer dashboard toggle", () => {
+	function keyDeps(overrides: Partial<KeyBindingDeps> = {}): KeyBindingDeps {
+		return {
+			matches: (_data, _id) => false,
+			cycleMode: () => {},
+			cycleThinking: () => {},
+			requestShutdown: () => {},
+			requestSuper: () => {},
+			toggleStatus: () => {},
+			toggleDispatchBoard: () => {},
+			openModelSelector: () => {},
+			openTree: () => {},
+			cycleScopedModelForward: () => {},
+			cycleScopedModelBackward: () => {},
+			...overrides,
+		};
+	}
+
+	it("routes Alt+U to the inline footer dashboard toggle", () => {
+		let toggled = 0;
+		const consumed = routeInteractiveKey(
+			"\x1bu",
+			keyDeps({
+				matches: (_data, id) => id === "clio.status.toggle",
+				toggleStatus: () => {
+					toggled += 1;
+				},
+			}),
+		);
+
+		strictEqual(consumed, true);
+		strictEqual(toggled, 1);
+	});
+});
+
 describe("routeOverlayKey dispatch-board toggle", () => {
-	const DISPATCH_TOGGLE = "\x02"; // ctrl+b
+	const DISPATCH_TOGGLE = "\x1bw"; // alt+w
 
 	function buildDeps(): { deps: OverlayKeyDeps; closed: { count: number }; shutdown: { count: number } } {
 		const closed = { count: 0 };

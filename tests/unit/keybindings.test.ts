@@ -35,15 +35,38 @@ describe("domains/config/keybindings schema", () => {
 		}
 	});
 
-	it("app id list is exactly 15 entries (matches the routed set in interactive/index.ts)", () => {
-		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 15);
+	it("app id list is exactly 16 entries (matches the routed set in interactive/index.ts)", () => {
+		strictEqual(CLIO_APP_KEYBINDING_IDS.length, 16);
 	});
 
-	it("registers clio.thinking.expand with default ctrl+t", () => {
+	it("registers clio.thinking.expand with default alt+r", () => {
 		ok("clio.thinking.expand" in CLIO_APP_KEYBINDINGS);
 		const def = CLIO_APP_KEYBINDINGS["clio.thinking.expand"];
-		strictEqual(def.defaultKeys, "ctrl+t");
+		strictEqual(def.defaultKeys, "alt+r");
 		strictEqual(def.description, "Toggle thinking blocks between hidden marker and full body");
+	});
+
+	it("ships only alt+<key>, shift+tab, and ctrl+d as app defaults (no CSI-u, no readline reserves)", () => {
+		// shift+ctrl+* needs kitty-protocol CSI-u, which most terminals do not
+		// report; ctrl+u/l/p/t/o/g/k/w/a/e shadow line-editing reserves. The
+		// app baseline must avoid both so the boot keybinding notice stays quiet
+		// on a normal terminal.
+		const allowedNonAlt = new Set(["shift+tab", "ctrl+d", "alt+enter", "alt+up"]);
+		for (const id of CLIO_APP_KEYBINDING_IDS) {
+			const def = CLIO_APP_KEYBINDINGS[id];
+			const keys = Array.isArray(def.defaultKeys) ? def.defaultKeys : [def.defaultKeys];
+			for (const key of keys) {
+				strictEqual(keyRequiresCsiU(key), false, `${id} default ${key} must not require CSI-u`);
+				ok(key.startsWith("alt+") || allowedNonAlt.has(key), `${id} default ${key} is not part of the Alt+<key> baseline`);
+			}
+		}
+	});
+
+	it("emits zero platform warnings for the shipped defaults on a legacy terminal", () => {
+		// The core acceptance criterion: a normal (non-CSI-u, meta-alt) terminal
+		// must not trip the boot keybinding notice with the default bindings.
+		const warnings = detectPlatformKeybindingWarnings({}, detectTerminalKeySupport({ TERM: "xterm-256color" }));
+		strictEqual(warnings.length, 0, JSON.stringify(warnings));
 	});
 });
 
@@ -58,12 +81,16 @@ describe("interactive/keybinding-manager defaults", () => {
 		strictEqual(manager.matches("\x04", "clio.exit"), true);
 	});
 
-	it("matches Ctrl+L against clio.model.select", () => {
-		strictEqual(manager.matches("\x0c", "clio.model.select"), true);
+	it("matches Alt+L against clio.model.select", () => {
+		strictEqual(manager.matches("\x1bl", "clio.model.select"), true);
 	});
 
-	it("matches Ctrl+P against clio.model.cycleForward", () => {
-		strictEqual(manager.matches("\x10", "clio.model.cycleForward"), true);
+	it("matches Alt+J against clio.model.cycleForward", () => {
+		strictEqual(manager.matches("\x1bj", "clio.model.cycleForward"), true);
+	});
+
+	it("matches Alt+K against clio.model.cycleBackward", () => {
+		strictEqual(manager.matches("\x1bk", "clio.model.cycleBackward"), true);
 	});
 
 	it("matches Alt+M against clio.mode.cycle", () => {
@@ -78,20 +105,28 @@ describe("interactive/keybinding-manager defaults", () => {
 		strictEqual(manager.matches("\x1bt", "clio.session.tree"), true);
 	});
 
-	it("matches Ctrl+B against clio.dispatchBoard.toggle", () => {
-		strictEqual(manager.matches("\x02", "clio.dispatchBoard.toggle"), true);
+	it("matches Alt+W against clio.dispatchBoard.toggle", () => {
+		strictEqual(manager.matches("\x1bw", "clio.dispatchBoard.toggle"), true);
 	});
 
-	it("matches Ctrl+U against clio.status.toggle", () => {
-		strictEqual(manager.matches("\x15", "clio.status.toggle"), true);
+	it("matches Alt+U against clio.status.toggle", () => {
+		strictEqual(manager.matches("\x1bu", "clio.status.toggle"), true);
 	});
 
-	it("matches Ctrl+T against clio.thinking.expand", () => {
-		strictEqual(manager.matches("\x14", "clio.thinking.expand"), true);
+	it("matches Alt+R against clio.thinking.expand", () => {
+		strictEqual(manager.matches("\x1br", "clio.thinking.expand"), true);
 	});
 
-	it("matches Ctrl+G against clio.editor.external", () => {
-		strictEqual(manager.matches("\x07", "clio.editor.external"), true);
+	it("matches Alt+O against clio.tool.expand", () => {
+		strictEqual(manager.matches("\x1bo", "clio.tool.expand"), true);
+	});
+
+	it("matches Alt+G against clio.editor.external", () => {
+		strictEqual(manager.matches("\x1bg", "clio.editor.external"), true);
+	});
+
+	it("matches Alt+X against clio.notifications.dismiss", () => {
+		strictEqual(manager.matches("\x1bx", "clio.notifications.dismiss"), true);
 	});
 
 	it("matches Alt+Enter against clio.message.followUp", () => {
@@ -156,11 +191,18 @@ describe("interactive/keybinding-manager platform warnings", () => {
 		deepStrictEqual([...(warnings[0]?.keys ?? [])], ["shift+ctrl+p"]);
 	});
 
-	it("warns for default IDE and macOS terminal shortcut risks", () => {
+	it("default Alt bindings dodge VS Code's reserved chords", () => {
+		// The old ctrl+p / ctrl+l / shift+ctrl+p defaults collided with VS Code's
+		// quick-open chords; the Alt+<key> baseline must not warn on vscode.
 		const vscodeWarnings = detectPlatformKeybindingWarnings({}, detectTerminalKeySupport({ TERM_PROGRAM: "vscode" }));
-		ok(vscodeWarnings.some((warning) => warning.id === "clio.model.cycleForward" && warning.source === "default"));
-		ok(vscodeWarnings.some((warning) => warning.id === "clio.model.select" && warning.source === "default"));
+		strictEqual(vscodeWarnings.length, 0, JSON.stringify(vscodeWarnings));
+	});
 
+	it("still warns when macOS Terminal would treat Option-letter as text", () => {
+		// macOS Terminal.app inserts accented characters for Option-letter unless
+		// "Use Option as Meta" is enabled. The detector keeps surfacing this so
+		// the user knows to rebind or flip the setting, but it is platform-specific
+		// and does not fire on a normal meta-capable terminal.
 		const macWarnings = detectPlatformKeybindingWarnings(
 			{},
 			detectTerminalKeySupport({ TERM_PROGRAM: "Apple_Terminal" }),

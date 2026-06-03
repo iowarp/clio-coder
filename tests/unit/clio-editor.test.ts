@@ -17,7 +17,8 @@ function fakeTui(rows = 24): TUI {
 describe("interactive/ClioEditor", () => {
 	it("renders minimal chrome without decorating typed content", () => {
 		const editor = new ClioEditor(fakeTui(), {
-			getModelLabel: () => "llama3.3:70b",
+			getModelLabel: () => "mini·llama3.3:70b",
+			getThinkingLabel: () => "high",
 			getMode: () => "advise",
 		});
 		editor.setText("draft prompt");
@@ -26,7 +27,10 @@ describe("interactive/ClioEditor", () => {
 		const text = plain.join("\n");
 
 		strictEqual(visibleWidth(lines[0] ?? ""), 80);
-		ok(plain[0]?.includes("llama3.3:70b · advise"), plain[0]);
+		// The editor rail owns the full model identity: target·model · think · mode.
+		ok(plain[0]?.includes("mini·llama3.3:70b"), plain[0]);
+		ok(plain[0]?.includes("think high"), plain[0]);
+		ok(plain[0]?.includes("advise"), plain[0]);
 		ok(!plain[0]?.includes("compose"), plain[0]);
 		ok(text.includes("draft prompt"), text);
 		ok(!text.includes("⏎ send"), text);
@@ -37,7 +41,8 @@ describe("interactive/ClioEditor", () => {
 
 	it("preserves scroll rails instead of replacing them with the model label", () => {
 		const editor = new ClioEditor(fakeTui(5), {
-			getModelLabel: () => "qwen",
+			getModelLabel: () => "mini·qwen",
+			getThinkingLabel: () => "off",
 			getMode: () => "default",
 		});
 		editor.setText(Array.from({ length: 20 }, (_, i) => `line-${i}`).join("\n"));
@@ -48,7 +53,7 @@ describe("interactive/ClioEditor", () => {
 		const plain = editor.render(64).map(stripAnsi);
 
 		ok(plain[0]?.includes("↑"), plain.join("\n"));
-		ok(!plain[0]?.includes("qwen · default"), plain[0]);
+		ok(!plain[0]?.includes("mini·qwen"), plain[0]);
 	});
 
 	it("recognizes rail rows structurally", () => {

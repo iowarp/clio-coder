@@ -14,6 +14,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	getRuntimeRegistry,
 	type ProvidersContract,
+	resolveModelRuntimeCapabilitiesForProviders,
 	resolveProviderReference,
 	type ThinkingLevel,
 	targetRequiresAuth,
@@ -53,7 +54,8 @@ import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLin
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
-import { buildFooterDashboard } from "./footer/dashboard.js";
+import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
+import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
@@ -244,7 +246,6 @@ export function expandInteractiveSubmitText(
 export type OverlayState =
 	| "closed"
 	| "super-confirm"
-	| "status"
 	| "dispatch-board"
 	| "providers"
 	| "auth"
@@ -352,7 +353,6 @@ export interface HotkeysOverlayKeyDeps {
 
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
-		StatusOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
 		AuthOverlayKeyDeps,
@@ -383,6 +383,15 @@ export interface CtrlCActionDeps {
 
 export function isCtrlCKey(data: string): boolean {
 	return matchesKey(data, "ctrl+c") && !isKeyRelease(data);
+}
+
+/** Title-case a KeyId for display, e.g. `alt+x` → `Alt+X`. Falls back to `Alt+X`. */
+function formatKeyLabel(keyId: string | undefined): string {
+	if (!keyId || keyId.length === 0) return "Alt+X";
+	return keyId
+		.split("+")
+		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
+		.join("+");
 }
 
 export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
@@ -425,11 +434,9 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		deps.openModelSelector();
 		return true;
 	}
-	// Match shift+ctrl+p before ctrl+p so the longer sequence wins. In the
-	// default bindings these do not prefix-match each other anyway (the
-	// first starts with \x1b via CSI-u, the second is a single \x10 byte),
-	// but the order still matters if a user rebinds ctrl+p to an escape
-	// sequence that shift+ctrl+p shares a prefix with.
+	// Match cycleBackward before cycleForward so a user rebind where one key
+	// is a prefix of the other resolves to the more specific binding first.
+	// The defaults (alt+k / alt+j) do not prefix-match each other.
 	if (deps.matches(data, "clio.model.cycleBackward")) {
 		deps.cycleScopedModelBackward();
 		return true;
@@ -470,7 +477,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Pure overlay key router for the status dashboard. */
+/** Legacy pure router for the retired status overlay shape. Runtime /status now toggles the footer dashboard. */
 export function routeStatusOverlayKey(data: string, deps: StatusOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
@@ -720,14 +727,6 @@ export function routeOverlayKey(
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
 	}
-	if (overlayState === "status") {
-		if (matches(data, "clio.status.toggle")) {
-			deps.closeOverlay();
-			return true;
-		}
-		routeStatusOverlayKey(data, deps);
-		return true;
-	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
 	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
 	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
@@ -810,19 +809,72 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const footerToolCounts = new Map<string, number>();
 	let footerToolErrors = 0;
-	const footer = buildFooterDashboard({
+	// Dedicated harness→user surface. Boot hints and live connect/probe notices
+	// route here (anchored in the footer region) instead of into the transcript,
+	// so they never leak into VT scrollback.
+	let footer: FooterDashboardPanel;
+	const dismissKeyLabel = formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]);
+	const notifications = createNotificationCenter({
+		onChange: () => {
+			footer?.refresh();
+			tui.requestRender();
+		},
+	});
+	const notify = (level: "info" | "warning" | "error", text: string, key?: string): void => {
+		notifications.add(key ? { level, text, key } : { level, text });
+	};
+	footer = buildFooterDashboard({
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => deps.observability.sessionTokens(),
+		getSessionCost: () => deps.observability.sessionCost(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		getToolCounts: () => ({ tools: Object.fromEntries(footerToolCounts), errors: footerToolErrors }),
+		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
+		getExtensionStats: () => {
+			const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
+			return {
+				active: items.filter((entry) => entry.enabled && entry.effective).length,
+				installed: items.length,
+			};
+		},
+		getSessionInfo: () => {
+			const meta = deps.session?.current();
+			return {
+				id: meta?.id ?? deps.getSessionId?.() ?? null,
+				name: meta?.name ?? null,
+				turns: typeof meta?.messageCount === "number" ? meta.messageCount : null,
+			};
+		},
+		getNotifications: () => notifications.list(),
+		dismissKeyLabel,
 	});
 	const editor = new ClioEditor(tui, {
-		getModelLabel: () => abbreviateModelId(deps.getSettings?.()?.orchestrator?.model?.trim() || "no model"),
+		getModelLabel: () => {
+			const settings = deps.getSettings?.();
+			const model = settings?.orchestrator?.model?.trim();
+			if (!model) return "no model";
+			const endpoint = settings?.orchestrator?.endpoint?.trim();
+			const abbreviated = abbreviateModelId(model);
+			return endpoint ? `${endpoint}·${abbreviated}` : abbreviated;
+		},
+		getThinkingLabel: () => {
+			const settings = deps.getSettings?.();
+			return (
+				resolveModelRuntimeCapabilitiesForProviders(
+					deps.providers,
+					settings?.orchestrator?.endpoint,
+					settings?.orchestrator?.model,
+					settings?.orchestrator?.thinkingLevel ?? "off",
+				)?.thinking.display ??
+				settings?.orchestrator?.thinkingLevel ??
+				"off"
+			);
+		},
 		getMode: () => deps.modes.current().toLowerCase(),
 	});
 	editor.focused = true;
@@ -832,8 +884,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// depend on the origin (keybind vs tool).
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-	const statusOverlay = new Text("", 0, 0);
-	const statusOverlayWidth = 96;
 	const taskIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
@@ -846,8 +896,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	});
+	// Boot hints (CLIO.md state, keybinding diagnostics) route into the
+	// NotificationCenter, not the transcript, so they stay out of scrollback.
 	for (const notice of deps.initialNotices ?? []) {
-		io.stderr(notice.endsWith("\n") ? notice : `${notice}\n`);
+		const text = notice.trim();
+		if (text.length === 0) continue;
+		notify(classifyNoticeLevel(text), text, text);
 	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
 		if (event.type === "queue_update") {
@@ -1079,7 +1133,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
-		openStatus: () => openStatusOverlayState(),
+		openStatus: () => toggleStatusFooterState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
@@ -1203,7 +1257,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let footerTicker: NodeJS.Timeout | null = null;
 	footerTicker = setInterval(() => {
 		const statusActive = statusController.current().phase !== "idle";
-		if (!deps.chat.isStreaming() && !statusActive) return;
+		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
 		footer.refresh();
 		tui.requestRender();
 	}, 120);
@@ -1253,14 +1307,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		dispatchBoard.invalidate();
 	};
 
-	const renderStatusOverlay = (): void => {
-		statusOverlay.setText(footer.statusLines(statusOverlayWidth).join("\n"));
-		statusOverlay.invalidate();
-	};
-
 	const renderTaskIsland = (): void => {
 		const rows = dispatchBoardStore.rows();
-		taskIslandHandle.setHidden(overlayState !== "closed" || rows.length === 0);
+		taskIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || rows.length === 0);
 		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
 		taskIsland.invalidate();
 	};
@@ -1400,15 +1449,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const performDisconnect = (target: string): void => {
 		const resolved = resolveConnectionReference(target);
 		if (!resolved?.endpoint) {
-			io.stderr(`[/disconnect] unknown target: ${target}\n`);
+			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
 			return;
 		}
 		const status = deps.providers.disconnectEndpoint(resolved.endpoint.id);
 		if (!status) {
-			io.stderr(`[/disconnect] unknown target: ${target}\n`);
+			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
 			return;
 		}
-		io.stderr(`[/disconnect] disconnected target ${status.endpoint.id}; credentials unchanged\n`);
+		notify("info", `disconnected ${status.endpoint.id}; credentials unchanged`, `connect:${status.endpoint.id}`);
 		footer.refresh();
 		tui.requestRender();
 	};
@@ -1417,7 +1466,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		const resolved = resolveConnectionReference(target);
 		if (!resolved?.endpoint) {
-			io.stderr(`[/connect] unknown target: ${target}. Configure a target first with clio targets add.\n`);
+			notify("warning", `connect: unknown target ${target}. Add it with clio targets add.`, `connect:${target}`);
 			return;
 		}
 		const endpointId = resolved.endpoint.id;
@@ -1427,6 +1476,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			const status = await deps.providers.probeEndpoint(endpointId);
 			if (!status) {
 				dialog.controller.setLines([`Target: ${endpointId}`, "Connection failed: target is not configured."]);
+				notify("error", `connect: ${endpointId} is not configured`, `connect:${endpointId}`);
 				return;
 			}
 			const health = status.health.status;
@@ -1440,6 +1490,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				status.available ? `Connected (${health})` : `Connection failed (${health})`,
 				detail,
 			]);
+			notify(
+				status.available ? "info" : "warning",
+				status.available ? `connected ${endpointId} (${health})` : `connect ${endpointId} failed (${health})`,
+				`connect:${endpointId}`,
+			);
 			footer.refresh();
 			tui.requestRender();
 		};
@@ -1568,7 +1623,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message !== "dismissed" && message !== "cancelled") {
-					io.stderr(`[/connect] ${message}\n`);
+					notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
 				}
 				authDialogDismiss = null;
 				closeOverlay();
@@ -1610,7 +1665,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			};
 		});
 		if (targetItems.length === 0) {
-			io.stderr("[/connect] no targets configured. Run clio configure or clio targets add.\n");
+			notify("warning", "connect: no targets configured. Run clio configure or clio targets add.", "connect:none");
 			return;
 		}
 		overlayState = "auth";
@@ -1648,7 +1703,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			};
 		});
 		if (items.length === 0) {
-			io.stderr("[/disconnect] no targets configured. Run clio configure or clio targets add.\n");
+			notify("warning", "disconnect: no targets configured. Run clio configure or clio targets add.", "connect:none");
 			return;
 		}
 		overlayState = "auth";
@@ -1735,23 +1790,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const toggleStatusOverlay = (): void => {
-		if (overlayState === "status") {
-			closeOverlay();
-			return;
-		}
+	const toggleFooterDashboardState = (): void => {
 		if (overlayState !== "closed") return;
-		renderStatusOverlay();
-		overlayState = "status";
-		overlayHandle = tui.showOverlay(statusOverlay, {
-			anchor: "center",
-			width: statusOverlayWidth,
-		});
+		footer.toggleExpanded();
+		renderTaskIsland();
 		tui.requestRender();
 	};
 
-	const openStatusOverlayState = (): void => {
-		toggleStatusOverlay();
+	const toggleStatusFooterState = (): void => {
+		toggleFooterDashboardState();
 	};
 
 	const openReceiptsOverlayState = (): void => {
@@ -2248,17 +2295,31 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return { consume: true };
 		}
 
-		// No overlay consumed the input. Esc now falls through to cancel an
-		// active run when one is in flight; before this fall-through Esc was
-		// short-circuited above the overlay router and stole the keystroke
-		// from any open modal, forcing the user to press Esc twice to dismiss
-		// modals that opened mid-stream.
+		// No overlay consumed the input. Esc collapses the expanded footer dashboard
+		// before it falls through to stream/bash cancellation, so Ctrl+U and Esc are
+		// symmetric density controls when the live dashboard is open.
+		if (data === ESC && footer.isExpanded()) {
+			footer.setExpanded(false);
+			renderTaskIsland();
+			tui.requestRender();
+			return { consume: true };
+		}
+
+		// Esc then falls through to cancel an active run when one is in flight; before
+		// this fall-through Esc was short-circuited above the overlay router and stole
+		// the keystroke from any open modal, forcing the user to press Esc twice to
+		// dismiss modals that opened mid-stream.
 		if (data === ESC && activeEditorBash) {
 			activeEditorBash.abort();
 			return { consume: true };
 		}
 		if (data === ESC && deps.chat.isStreaming()) {
 			cancelActiveRun();
+			return { consume: true };
+		}
+
+		if (overlayState === "closed" && keybindings.matches(data, "clio.notifications.dismiss") && !isKeyRelease(data)) {
+			notifications.dismissAll();
 			return { consume: true };
 		}
 
@@ -2315,7 +2376,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				openSuperOverlay();
 			},
 			toggleStatus: () => {
-				toggleStatusOverlay();
+				toggleFooterDashboardState();
 			},
 			toggleDispatchBoard: () => {
 				toggleDispatchBoardOverlay();
