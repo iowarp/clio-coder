@@ -1,15 +1,17 @@
-export const RESET = "\u001b[0m";
-export const BOLD = "\u001b[1m";
-export const DIM = "\u001b[2m";
-export const ITALIC = "\u001b[3m";
-export const UNDERLINE = "\u001b[4m";
+import { fgSequence, GLYPH, SGR_BOLD, SGR_DIM, SGR_ITALIC, SGR_RESET, SGR_UNDERLINE } from "./theme/index.js";
 
-export const TEAL = "\u001b[38;5;80m";
-export const BLUE_REASON = "\u001b[38;5;110m";
-export const GREEN_OK = "\u001b[38;5;114m";
-export const AMBER = "\u001b[38;5;221m";
-export const RED_CRIT = "\u001b[38;5;203m";
-export const DIM_GRAY = "\u001b[38;5;59m";
+export const RESET = SGR_RESET;
+export const BOLD = SGR_BOLD;
+export const DIM = SGR_DIM;
+export const ITALIC = SGR_ITALIC;
+export const UNDERLINE = SGR_UNDERLINE;
 
-export const AGENT_GLYPH = "◈";
-export const USER_GLYPH = ">";
+export const TEAL = fgSequence("accent");
+export const BLUE_REASON = fgSequence("reason");
+export const GREEN_OK = fgSequence("success");
+export const AMBER = fgSequence("warning");
+export const RED_CRIT = fgSequence("error");
+export const DIM_GRAY = fgSequence("dim");
+
+export const AGENT_GLYPH = GLYPH.agent;
+export const USER_GLYPH = GLYPH.user;

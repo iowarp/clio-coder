@@ -86,7 +86,7 @@ describe("interactive tool-approval overlay", () => {
 					CLIO_CLAUDE_SDK_FAUX_ASK: "1",
 				},
 			});
-			await p.expect(/CLIO::CODER/, 15_000);
+			await p.expect(/Clio Coder/, 15_000);
 			p.send("/run worker trigger ask\r");
 			await p.expect(/Tool approval/, 20_000);
 			p.send("a");

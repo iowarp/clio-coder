@@ -27,7 +27,6 @@ import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import { openSession } from "../engine/session.js";
 import {
 	createAgentProgress,
-	Editor,
 	isKeyRelease,
 	matchesKey,
 	ProcessTerminal,
@@ -47,17 +46,17 @@ import {
 	rehydrateChatPanelFromTurns,
 	renderBashExecutionEntry,
 } from "./chat-renderer.js";
+import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
-import { buildFooter } from "./footer-panel.js";
+import { buildFooterDashboard } from "./footer/dashboard.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
-import { editorBorderColorForMode } from "./mode-theme.js";
-import { DEFAULT_SELECT_THEME, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
+import { showClioOverlayFrame } from "./overlay-frame.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
@@ -98,6 +97,7 @@ import {
 	type TurnSummary,
 } from "./status/index.js";
 import { createSuperOverlayBody, SUPER_OVERLAY_WIDTH, superOverlayTitleForOrigin } from "./super-overlay.js";
+import { abbreviateModelId } from "./theme/index.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -244,6 +244,7 @@ export function expandInteractiveSubmitText(
 export type OverlayState =
 	| "closed"
 	| "super-confirm"
+	| "status"
 	| "dispatch-board"
 	| "providers"
 	| "auth"
@@ -271,6 +272,7 @@ export interface KeyBindingDeps {
 	cycleThinking: () => void;
 	requestShutdown: () => void;
 	requestSuper: () => void;
+	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
@@ -285,6 +287,10 @@ export interface SuperOverlayKeyDeps {
 }
 
 export interface DispatchBoardOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
+export interface StatusOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
@@ -346,6 +352,7 @@ export interface HotkeysOverlayKeyDeps {
 
 export interface OverlayKeyDeps
 	extends SuperOverlayKeyDeps,
+		StatusOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
 		AuthOverlayKeyDeps,
@@ -392,6 +399,10 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
 	if (deps.matches(data, "clio.super.request")) {
 		deps.requestSuper();
+		return true;
+	}
+	if (deps.matches(data, "clio.status.toggle")) {
+		deps.toggleStatus();
 		return true;
 	}
 	if (deps.matches(data, "clio.thinking.cycle")) {
@@ -452,6 +463,15 @@ export function routeSuperOverlayKey(data: string, deps: SuperOverlayKeyDeps): b
 
 /** Pure overlay key router for the dispatch board. */
 export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.closeOverlay();
+		return true;
+	}
+	return false;
+}
+
+/** Pure overlay key router for the status dashboard. */
+export function routeStatusOverlayKey(data: string, deps: StatusOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
 		return true;
@@ -700,6 +720,14 @@ export function routeOverlayKey(
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
 	}
+	if (overlayState === "status") {
+		if (matches(data, "clio.status.toggle")) {
+			deps.closeOverlay();
+			return true;
+		}
+		routeStatusOverlayKey(data, deps);
+		return true;
+	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
 	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
 	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
@@ -780,32 +808,32 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
-	const footer = buildFooter({
+	const footerToolCounts = new Map<string, number>();
+	let footerToolErrors = 0;
+	const footer = buildFooterDashboard({
 		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		getStreaming: () => deps.chat.isStreaming(),
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => deps.observability.sessionTokens(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
+		getToolCounts: () => ({ tools: Object.fromEntries(footerToolCounts), errors: footerToolErrors }),
 	});
-	const editor = new Editor(tui, {
-		borderColor: IDENTITY,
-		selectList: DEFAULT_SELECT_THEME,
+	const editor = new ClioEditor(tui, {
+		getModelLabel: () => abbreviateModelId(deps.getSettings?.()?.orchestrator?.model?.trim() || "no model"),
+		getMode: () => deps.modes.current().toLowerCase(),
 	});
 	editor.focused = true;
 	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider());
-	const applyEditorModeTheme = (): void => {
-		editor.borderColor = editorBorderColorForMode(deps.modes.current());
-	};
-	applyEditorModeTheme();
 
 	// The super-confirm overlay is rebuilt per open because its body and title
 	// depend on the origin (keybind vs tool).
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
+	const statusOverlay = new Text("", 0, 0);
+	const statusOverlayWidth = 96;
 	const taskIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
@@ -826,6 +854,22 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			followUpQueuePanel.setMessages(event.followUp);
 			tui.requestRender();
 			return;
+		}
+		if (event.type === "tool_execution_start") {
+			if (event.toolName.toLowerCase() === "dispatch") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
+			const current = footerToolCounts.get(event.toolName) ?? 0;
+			footerToolCounts.set(event.toolName, current + 1);
+			footer.refresh();
+		} else if (event.type === "tool_execution_end" && event.isError) {
+			if (event.toolName.toLowerCase() === "dispatch") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
+			footerToolErrors += 1;
+			footer.refresh();
 		}
 		chatRenderer.applyEvent(event);
 	});
@@ -850,7 +894,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				: "";
 		const model =
 			summary.endpointId.length > 0 || summary.modelId.length > 0
-				? `${summary.endpointId || "endpoint"}/${summary.modelId || "model"}`
+				? `${summary.endpointId || "endpoint"}/${abbreviateModelId(summary.modelId || "model")}`
 				: "unknown-model";
 		return `${formatStatusElapsed(summary.elapsedMs)} · ${model} · ↑${summary.inputTokens} ↓${summary.outputTokens}${reasoning}${tools} ${stopGlyph}${slow}`;
 	};
@@ -897,7 +941,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	});
 	const unsubscribeModeTheme = deps.bus.on(BusChannels.ModeChanged, () => {
-		applyEditorModeTheme();
 		tui.requestRender();
 	});
 
@@ -1036,6 +1079,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
+		openStatus: () => openStatusOverlayState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
@@ -1207,6 +1251,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const renderDispatchBoard = (): void => {
 		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"));
 		dispatchBoard.invalidate();
+	};
+
+	const renderStatusOverlay = (): void => {
+		statusOverlay.setText(footer.statusLines(statusOverlayWidth).join("\n"));
+		statusOverlay.invalidate();
 	};
 
 	const renderTaskIsland = (): void => {
@@ -1686,6 +1735,25 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	const toggleStatusOverlay = (): void => {
+		if (overlayState === "status") {
+			closeOverlay();
+			return;
+		}
+		if (overlayState !== "closed") return;
+		renderStatusOverlay();
+		overlayState = "status";
+		overlayHandle = tui.showOverlay(statusOverlay, {
+			anchor: "center",
+			width: statusOverlayWidth,
+		});
+		tui.requestRender();
+	};
+
+	const openStatusOverlayState = (): void => {
+		toggleStatusOverlay();
+	};
+
 	const openReceiptsOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "receipts";
@@ -1957,6 +2025,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		deps.onNewSession();
 		deps.observability.resetSession();
+		footerToolCounts.clear();
+		footerToolErrors = 0;
 		chatPanel.reset();
 		// Same pre-switch cleanup as /resume and /fork: without this, the
 		// chat-loop closure keeps the prior session's lastTurnId and the
@@ -2243,6 +2313,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			requestSuper: () => {
 				openSuperOverlay();
+			},
+			toggleStatus: () => {
+				toggleStatusOverlay();
 			},
 			toggleDispatchBoard: () => {
 				toggleDispatchBoardOverlay();

@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ModesContract } from "../../src/domains/modes/index.js";
@@ -11,10 +11,12 @@ import {
 	__welcomeDashboardTest,
 	buildWelcomeDashboardLines,
 	deriveWelcomeDashboardStats,
+	WelcomeDashboard,
 	type WelcomeDashboardDeps,
+	type WelcomeDashboardStats,
 } from "../../src/interactive/welcome-dashboard.js";
 
-function status(args: { id: string; runtimeId: string; model: string }): EndpointStatus {
+function status(args: { id: string; runtimeId: string; model: string; available?: boolean }): EndpointStatus {
 	const endpoint: EndpointStatus["endpoint"] = {
 		id: args.id,
 		runtime: args.runtimeId,
@@ -38,8 +40,8 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 			embeddings: false,
 			rerank: false,
 			fim: false,
-			contextWindow: 1000,
-			maxTokens: 1000,
+			contextWindow: 262_144,
+			maxTokens: 8192,
 		},
 		synthesizeModel: () => {
 			throw new Error("not used");
@@ -48,21 +50,10 @@ function status(args: { id: string; runtimeId: string; model: string }): Endpoin
 	return {
 		endpoint,
 		runtime,
-		available: true,
-		reason: "ready",
-		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 120 },
-		capabilities: {
-			chat: true,
-			tools: true,
-			reasoning: true,
-			vision: false,
-			audio: false,
-			embeddings: false,
-			rerank: false,
-			fim: false,
-			contextWindow: 1000,
-			maxTokens: 1000,
-		},
+		available: args.available ?? true,
+		reason: args.available === false ? "down" : "ready",
+		health: { status: args.available === false ? "down" : "healthy", lastCheckAt: null, lastError: null, latencyMs: 120 },
+		capabilities: runtime.defaultCapabilities,
 		discoveredModels: [],
 	} as EndpointStatus;
 }
@@ -133,15 +124,31 @@ const qwenKnowledgeBase = {
 	entries: () => [],
 } as ProvidersContract["knowledgeBase"];
 
+function workspace(overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot {
+	return {
+		cwd: "/repo",
+		isGit: true,
+		branch: "main",
+		dirty: false,
+		ahead: 0,
+		behind: 0,
+		recentCommits: [{ sha: "abc1234", subject: "x" }],
+		remoteUrl: "https://github.com/akougkas/clio-coder",
+		projectType: "typescript",
+		capturedAt: "2026-04-30T00:00:00Z",
+		...overrides,
+	};
+}
+
 function deps(
-	options: { contextTokens?: number | null; workspace?: WorkspaceSnapshot | null } = {},
+	options: { statuses?: EndpointStatus[]; workspace?: WorkspaceSnapshot | null } = {},
 ): WelcomeDashboardDeps {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.orchestrator.endpoint = "mini";
 	settings.orchestrator.model = "qwen";
 	settings.workers.default.endpoint = "mini";
 	settings.workers.profiles.reviewer = { endpoint: "codex", model: "gpt", thinkingLevel: "off" };
-	const statuses = [
+	const statuses = options.statuses ?? [
 		status({ id: "mini", runtimeId: "openai-compat", model: "qwen" }),
 		status({ id: "cloud", runtimeId: "openai", model: "gpt" }),
 		status({ id: "codex", runtimeId: "codex-cli", model: "gpt" }),
@@ -149,84 +156,58 @@ function deps(
 	return {
 		modes: { current: () => "default" } as ModesContract,
 		providers: { list: () => statuses, knowledgeBase: null } as unknown as ProvidersContract,
-		observability: {
-			sessionTokens: () => ({ input: 200, output: 50, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 250 }),
-			metrics: () => ({
-				dispatchesCompleted: 0,
-				dispatchesFailed: 0,
-				safetyClassifications: 0,
-				totalTokens: 0,
-				histograms: {},
-			}),
-			telemetry: () => ({ counters: {}, histograms: {} }),
-			sessionCost: () => 0,
-			costEntries: () => [],
-			resetSession: () => {},
-			recordTokens: () => {},
-		} as ObservabilityContract,
-		getContextUsage: () =>
-			options.contextTokens === undefined
-				? { tokens: null, contextWindow: 1000, percent: null }
-				: options.contextTokens === null
-					? { tokens: null, contextWindow: 1000, percent: null }
-					: { tokens: options.contextTokens, contextWindow: 1000, percent: (options.contextTokens / 1000) * 100 },
+		observability: {} as ObservabilityContract,
 		getSettings: () => settings,
 		...(options.workspace !== undefined ? { getWorkspaceSnapshot: () => options.workspace ?? null } : {}),
 	};
 }
 
 describe("interactive/welcome-dashboard", () => {
-	it("derives target, model, and context stats from live contracts", () => {
-		const stats = deriveWelcomeDashboardStats(deps({ contextTokens: 250 }));
+	it("derives the static banner stats from provider/settings/workspace state", () => {
+		const stats = deriveWelcomeDashboardStats(deps({ workspace: workspace() }));
 		strictEqual(stats.activeTargets, 3);
 		strictEqual(stats.totalTargets, 3);
-		strictEqual(stats.fleetProfiles, 2);
-		strictEqual(stats.contextPercent, 25);
-		strictEqual(stats.localModels, 1);
-		strictEqual(stats.cloudModels, 1);
-		strictEqual(stats.cliModels, 1);
+		strictEqual(stats.targetLabel, "mini");
+		strictEqual(stats.modelLabel, "qwen");
+		strictEqual(stats.currentAvailable, true);
+		strictEqual(stats.workspace?.branch, "main");
+		ok(stats.activeCapabilities.includes("tools"), stats.activeCapabilities.join(", "));
+		ok(stats.activeCapabilities.includes("reasoning"), stats.activeCapabilities.join(", "));
+		ok(stats.activeCapabilities.includes("262k ctx"), stats.activeCapabilities.join(", "));
 	});
 
-	it("shows the effective thinking level when settings contain an unavailable one", () => {
+	it("shows the effective thinking semantics for reasoning runtimes", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.orchestrator.endpoint = "dynamo";
 		settings.orchestrator.model = "openai/gpt-oss-20b";
 		settings.orchestrator.thinkingLevel = "off";
-		const localDeps = deps({ contextTokens: 250 });
-		const stats = deriveWelcomeDashboardStats({
-			...localDeps,
-			providers: { list: () => [harmonyStatus()], knowledgeBase: null } as unknown as ProvidersContract,
-			getSettings: () => settings,
-		});
+		strictEqual(
+			deriveWelcomeDashboardStats({
+				...deps(),
+				providers: { list: () => [harmonyStatus()], knowledgeBase: null } as unknown as ProvidersContract,
+				getSettings: () => settings,
+			}).thinkingLevel,
+			"low",
+		);
 
-		strictEqual(stats.thinkingLevel, "low");
-	});
-
-	it("shows on/off thinking semantics instead of raw configured levels", () => {
-		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.orchestrator.endpoint = "dynamo";
 		settings.orchestrator.model = "nemotron-cascade-2-30b-a3b-i1";
 		settings.orchestrator.thinkingLevel = "high";
-		const localDeps = deps({ contextTokens: 250 });
-		const stats = deriveWelcomeDashboardStats({
-			...localDeps,
-			providers: {
-				list: () => [cascadeStatus()],
-				knowledgeBase: cascadeKnowledgeBase,
-			} as unknown as ProvidersContract,
-			getSettings: () => settings,
-		});
-
-		strictEqual(stats.thinkingLevel, "on");
+		strictEqual(
+			deriveWelcomeDashboardStats({
+				...deps(),
+				providers: { list: () => [cascadeStatus()], knowledgeBase: cascadeKnowledgeBase } as unknown as ProvidersContract,
+				getSettings: () => settings,
+			}).thinkingLevel,
+			"on",
+		);
 	});
 
 	it("shows selected model capabilities instead of endpoint-default capabilities", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.orchestrator.endpoint = "dynamo";
 		settings.orchestrator.model = "qwen3.6-27b";
-		const localDeps = deps({ contextTokens: 250 });
 		const stats = deriveWelcomeDashboardStats({
-			...localDeps,
+			...deps(),
 			providers: {
 				list: () => [qwenSelectedStatus()],
 				knowledgeBase: qwenKnowledgeBase,
@@ -239,82 +220,49 @@ describe("interactive/welcome-dashboard", () => {
 		ok(!stats.activeCapabilities.includes("1049k ctx"), stats.activeCapabilities.join(", "));
 	});
 
-	it("renders a wide dashboard without exceeding the viewport", () => {
-		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ contextTokens: 250 })), 112);
+	it("renders the locked three-line welcome banner safely", () => {
+		const stats: WelcomeDashboardStats = {
+			activeTargets: 2,
+			totalTargets: 3,
+			targetLabel: "mini",
+			modelLabel: "Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL",
+			thinkingLevel: "high",
+			workspace: workspace(),
+			currentAvailable: true,
+			activeCapabilities: ["tools", "reasoning", "262k ctx"],
+		};
+		const lines = buildWelcomeDashboardLines(stats, 72);
 		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
+
+		strictEqual(lines.length, 3);
 		ok(text.includes("Clio Coder"), text);
-		ok(!text.includes("Welcome Dashboard"), text);
-		ok(!text.includes("v0.1.2 · supervised repository work · ready"), text);
-		ok(text.includes("Context usage: 25%"), text);
-		ok(text.includes("Alt+M modes"), text);
-		ok(!text.includes("Shift+Tab modes"), text);
+		ok(text.includes("mini · Qwen3.6-35B · think high · 262k ctx"), text);
+		ok(text.includes("/repo · git main ✓ · 2/3 targets online"), text);
+		ok(!text.includes("Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL"), text);
+		for (const forbidden of ["familiarity", "confidence", "Infrastructure", "Context usage"]) {
+			ok(!text.includes(forbidden), text);
+		}
 		for (const line of lines) {
-			ok(visibleWidth(line) <= 112, `line too wide: ${visibleWidth(line)} ${line}`);
+			ok(visibleWidth(line) <= 72, `line too wide: ${visibleWidth(line)} ${line}`);
 		}
 	});
 
-	it("does not derive context usage from cumulative session token billing", () => {
-		const stats = deriveWelcomeDashboardStats(deps());
-		strictEqual(stats.contextPercent, null);
-		const lines = buildWelcomeDashboardLines(stats, 112);
-		const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
-		ok(text.includes("Context usage: idle"), text);
-	});
-
-	it("renders a compact banner on narrow terminals", () => {
-		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps()), 72);
-		strictEqual(lines.length, 1);
-		ok(__welcomeDashboardTest.stripAnsi(lines[0] ?? "").includes("Clio Coder"));
-	});
-
-	describe("workspace panel", () => {
-		const baseSnapshot = (overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot => ({
-			cwd: "/repo",
-			isGit: true,
-			branch: "main",
-			dirty: false,
-			ahead: 0,
-			behind: 0,
-			recentCommits: [{ sha: "abc1234", subject: "x" }],
-			remoteUrl: "https://github.com/akougkas/clio-coder",
-			projectType: "typescript",
-			capturedAt: "2026-04-30T00:00:00Z",
-			...overrides,
+	it("snapshots stats at construction so later dependency changes do not rewrite scrollback", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.orchestrator.endpoint = "mini";
+		settings.orchestrator.model = "model-one";
+		const statuses = [status({ id: "mini", runtimeId: "openai-compat", model: "model-one" })];
+		const dashboard = new WelcomeDashboard({
+			...deps(),
+			providers: { list: () => statuses, knowledgeBase: null } as unknown as ProvidersContract,
+			getSettings: () => settings,
+			getWorkspaceSnapshot: () => workspace(),
 		});
 
-		it("renders branch, remote, and project type for a git repo", () => {
-			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: baseSnapshot() })), 112);
-			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
-			ok(/Workspace/.test(text), text);
-			ok(/main/.test(text), text);
-			ok(/akougkas\/clio-coder/.test(text), text);
-			ok(/typescript/.test(text), text);
-			ok(/commit: abc1234 x/.test(text), text);
-		});
-
-		it("omits the panel when snapshot is null", () => {
-			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: null })), 112);
-			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
-			ok(!/Workspace/.test(text), text);
-		});
-
-		it("shows project type only when cwd is not a git repo", () => {
-			const snap = baseSnapshot({
-				isGit: false,
-				branch: null,
-				dirty: null,
-				ahead: null,
-				behind: null,
-				recentCommits: [],
-				remoteUrl: null,
-				cwd: "/some/dir",
-				projectType: "python",
-			});
-			const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(deps({ workspace: snap })), 112);
-			const text = __welcomeDashboardTest.stripAnsi(lines.join("\n"));
-			ok(/Workspace/.test(text), text);
-			ok(/python/.test(text), text);
-			ok(!/main/.test(text), text);
-		});
+		const first = dashboard.render(96);
+		settings.orchestrator.endpoint = "changed";
+		settings.orchestrator.model = "model-two";
+		statuses.splice(0, statuses.length, status({ id: "changed", runtimeId: "openai-compat", model: "model-two" }));
+		deepStrictEqual(dashboard.render(96), first);
 	});
 });

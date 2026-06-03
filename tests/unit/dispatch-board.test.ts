@@ -104,7 +104,7 @@ describe("dispatch task island", () => {
 			strictEqual(visibleWidth(line), width, JSON.stringify(lines));
 		}
 		const text = lines.join("\n").replace(ANSI, "");
-		ok(text.includes("> coder"), text);
+		ok(text.includes("● coder"), text);
 		ok(text.includes("✗ review"), text);
 	});
 

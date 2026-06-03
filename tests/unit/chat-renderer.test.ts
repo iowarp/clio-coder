@@ -36,11 +36,11 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> hi"), `missing first user line:\n${text}`);
+		ok(text.includes("› hi"), `missing first user line:\n${text}`);
 		ok(text.includes("◈ hello"), `missing first assistant:\n${text}`);
-		ok(text.includes("> next"), `missing second user:\n${text}`);
+		ok(text.includes("› next"), `missing second user:\n${text}`);
 		ok(text.includes("◈ response"), `missing second assistant:\n${text}`);
-		ok(text.indexOf("> hi") < text.indexOf("◈ response"), "turn order preserved");
+		ok(text.indexOf("› hi") < text.indexOf("◈ response"), "turn order preserved");
 	});
 
 	it("stops after uptoTurnId inclusive so fork replay drops the post-fork tail", () => {
@@ -53,7 +53,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns, { uptoTurnId: "a1" });
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> first"), text);
+		ok(text.includes("› first"), text);
 		ok(text.includes("◈ reply1"), text);
 		ok(!text.includes("second"), `post-fork content leaked: ${text}`);
 		ok(!text.includes("reply2"), `post-fork content leaked: ${text}`);
@@ -71,7 +71,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> hi"), text);
+		ok(text.includes("› hi"), text);
 		ok(text.includes("◈ done"), text);
 		ok(text.includes("system: system boot"), text);
 		ok(text.includes("▸ ls(.)"), text);
@@ -91,7 +91,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> raw-string-user"), text);
+		ok(text.includes("› raw-string-user"), text);
 		ok(text.includes("◈ structured-assistant"), text);
 	});
 
@@ -130,8 +130,8 @@ describe("rehydrateChatPanelFromTurns", () => {
 		];
 		rehydrateChatPanelFromTurns(panel, turns);
 		const text = strip(panel.render(80).join("\n"));
-		ok(text.includes("> real"), text);
-		strictEqual((text.match(/^>/gm) ?? []).length, 1, `extra user lines in:\n${text}`);
+		ok(text.includes("› real"), text);
+		strictEqual((text.match(/^›/gm) ?? []).length, 1, `extra user lines in:\n${text}`);
 	});
 
 	it("renders branch and compaction summary entries and keeps the compacted suffix", () => {
@@ -191,11 +191,11 @@ describe("rehydrateChatPanelFromTurns", () => {
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("[compaction summary]"), text);
 		ok(text.includes("Old prompt and answer were compacted."), text);
-		ok(text.includes("> kept prompt"), text);
+		ok(text.includes("› kept prompt"), text);
 		ok(text.includes("[branch summary]"), text);
 		ok(text.includes("Inherited branch work."), text);
 		ok(text.includes("◈ after compaction"), text);
-		ok(!text.includes("> old prompt"), `pre-compaction prefix leaked:\n${text}`);
+		ok(!text.includes("› old prompt"), `pre-compaction prefix leaked:\n${text}`);
 
 		const selected = selectReplayEntries(entries).map((entry) => entry.turnId);
 		strictEqual(selected.join(","), "c1,u2,b1,a2");
@@ -559,7 +559,7 @@ describe("rehydrateChatPanelFromTurns", () => {
 		rehydrateChatPanelFromTurns(panel, entries);
 		const text = strip(panel.render(96).join("\n"));
 		ok(text.includes("[protected] dist/report.txt after npm test exit 0: validation passed"), text);
-		ok(text.includes("> continue"), text);
+		ok(text.includes("› continue"), text);
 
 		const serialized = JSON.stringify(buildReplayAgentMessagesFromTurns(entries));
 		ok(!serialized.includes("dist/report.txt"), serialized);

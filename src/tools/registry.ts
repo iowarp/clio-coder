@@ -436,7 +436,7 @@ function dispatchDuplicateBlock(
 	if (fingerprint === null) return null;
 	const seen = successfulDispatchesByTurn.get(options.turnId);
 	if (!seen?.has(fingerprint)) return null;
-	const summary = dispatchSummary(call.args);
+	const summary = formatDispatchDuplicateSummary(call.args);
 	return `dispatch duplicate blocked: ${summary} already completed successfully in this user turn. Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`;
 }
 
@@ -492,7 +492,7 @@ function dispatchFingerprint(args: unknown): string | null {
 	return stableJson(normalized);
 }
 
-function dispatchSummary(args: unknown): string {
+function formatDispatchDuplicateSummary(args: unknown): string {
 	const record = asRecord(args);
 	if (record === null) return "that dispatch";
 	const agentId =

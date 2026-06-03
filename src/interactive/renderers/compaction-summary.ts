@@ -19,37 +19,13 @@
 
 import type { CompactionSummaryEntry } from "../../domains/session/entries.js";
 import { Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../../engine/tui.js";
-
-const ANSI_RESET = "\u001b[0m";
-const ANSI_BOLD = "\u001b[1m";
-const ANSI_DIM = "\u001b[2m";
-const ANSI_ITALIC = "\u001b[3m";
-const ANSI_UNDERLINE = "\u001b[4m";
+import { clioTheme, markdownTheme } from "../theme/index.js";
 
 const LABEL = "compaction summary";
 const BODY_INDENT = "  ";
 
-/**
- * Markdown theme for the framed summary body. Matches the chat-panel theme
- * (bold headings, dim code/quotes) so a compacted block sits in the same
- * visual register as the surrounding chat, just indented by `BODY_INDENT`.
- */
-const COMPACTION_SUMMARY_THEME: MarkdownTheme = {
-	heading: (text) => `${ANSI_BOLD}${text}${ANSI_RESET}`,
-	link: (text) => text,
-	linkUrl: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	code: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	codeBlock: (text) => text,
-	codeBlockBorder: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	quote: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	quoteBorder: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	hr: (text) => `${ANSI_DIM}${text}${ANSI_RESET}`,
-	listBullet: (text) => text,
-	bold: (text) => `${ANSI_BOLD}${text}${ANSI_RESET}`,
-	italic: (text) => `${ANSI_ITALIC}${text}${ANSI_RESET}`,
-	strikethrough: (text) => text,
-	underline: (text) => `${ANSI_UNDERLINE}${text}${ANSI_RESET}`,
-};
+const theme = clioTheme();
+const COMPACTION_SUMMARY_THEME: MarkdownTheme = markdownTheme(theme);
 
 export interface CompactionSummaryLineInput {
 	/** How many entries the summarization prompt consumed. */
@@ -87,11 +63,10 @@ export interface RenderCompactionSummaryOptions {
  * `renderCompactionSummaryEntry` when the body is included too.
  */
 export function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: number): string[] {
-	const dim = (text: string): string => `${ANSI_DIM}${text}${ANSI_RESET}`;
-	const label = `${ANSI_BOLD}[${LABEL}]${ANSI_RESET}`;
+	const label = theme.style("title", `[${LABEL}]`, { bold: true });
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
 	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
-	const meta = dim(`~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
+	const meta = theme.fg("dim", `~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }
 

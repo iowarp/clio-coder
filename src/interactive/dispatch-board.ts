@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { RunKind, RunStatus } from "../domains/dispatch/types.js";
-import { brandedAsciiBottomBorder, brandedAsciiContentRow, brandedAsciiTopBorder } from "./overlay-frame.js";
+import { clioTheme, frame, GLYPH } from "./theme/index.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -135,17 +135,6 @@ const HEADER_LINE = buildHeaderLine();
 const SEPARATOR_LINE = buildSeparatorLine();
 const CONTENT_WIDTH = Math.max(HEADER_LINE.length, EMPTY_MESSAGE.length, HINT_MESSAGE.length);
 
-function frameLine(content: string): string {
-	return brandedAsciiContentRow(content.padEnd(CONTENT_WIDTH), CONTENT_WIDTH);
-}
-
-function borderLine(title?: string): string {
-	const innerWidth = CONTENT_WIDTH + 2;
-	if (!title) return brandedAsciiBottomBorder(innerWidth);
-	const label = ` ${title} `;
-	return brandedAsciiTopBorder(label, innerWidth);
-}
-
 function formatElapsedMs(value: number): string {
 	return `${Math.max(0, Math.round(value))}ms`;
 }
@@ -175,12 +164,12 @@ function renderRowContent(row: DispatchBoardRow): string {
 }
 
 function statusGlyph(status: DispatchBoardStatus): string {
-	if (status === "running") return ">";
+	if (status === "running") return GLYPH.running;
 	if (status === "stale") return "!";
 	if (status === "enqueued") return "+";
-	if (status === "completed") return "✓";
-	if (status === "aborted") return "⊘";
-	return "✗";
+	if (status === "completed") return GLYPH.ok;
+	if (status === "aborted") return GLYPH.cancelled;
+	return GLYPH.error;
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow): string {
@@ -288,14 +277,7 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 
 export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>): string[] {
 	const body = rows.length > 0 ? rows.map(renderRowContent) : [EMPTY_MESSAGE];
-	return [
-		borderLine("Dispatch Board"),
-		frameLine(HEADER_LINE),
-		frameLine(SEPARATOR_LINE),
-		...body.map((line) => frameLine(line)),
-		frameLine(HINT_MESSAGE),
-		borderLine(),
-	];
+	return frame(clioTheme(), "Dispatch Board", [HEADER_LINE, SEPARATOR_LINE, ...body, HINT_MESSAGE], CONTENT_WIDTH + 4);
 }
 
 export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
@@ -304,11 +286,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 	const hidden = rows.length - visibleRows.length;
 	if (hidden > 0) body.push(`+ ${hidden} more`);
 	const content = body.map((line) => leftCell(line, TASK_ISLAND_WIDTH));
-	return [
-		brandedAsciiTopBorder(" Tasks ", TASK_ISLAND_WIDTH + 2),
-		...content.map((line) => brandedAsciiContentRow(line, TASK_ISLAND_WIDTH)),
-		brandedAsciiBottomBorder(TASK_ISLAND_WIDTH + 2),
-	];
+	return frame(clioTheme(), "Tasks", content, TASK_ISLAND_WIDTH + 4);
 }
 
 export function createDispatchBoardStore(bus: SafeEventBus): {

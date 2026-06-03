@@ -10,29 +10,13 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-
-const ANSI_RESET = "\u001b[0m";
-const CLIO_TEAL = "\u001b[38;5;80m";
-const CLIO_ORANGE = "\u001b[38;5;214m";
-const CLIO_ERROR = "\u001b[38;5;196m";
+import { clioTheme, selectListTheme, settingsListTheme } from "./theme/index.js";
 
 export const IDENTITY = (text: string): string => text;
 
-export const DEFAULT_SELECT_THEME: SelectListTheme = {
-	selectedPrefix: IDENTITY,
-	selectedText: IDENTITY,
-	description: IDENTITY,
-	scrollInfo: IDENTITY,
-	noMatch: IDENTITY,
-};
+export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
 
-export const DEFAULT_SETTINGS_THEME: SettingsListTheme = {
-	label: IDENTITY,
-	value: IDENTITY,
-	description: IDENTITY,
-	cursor: "▸",
-	hint: IDENTITY,
-};
+export const DEFAULT_SETTINGS_THEME: SettingsListTheme = settingsListTheme(clioTheme());
 
 interface InputTarget {
 	handleInput?: (data: string) => void;
@@ -67,15 +51,15 @@ export class FocusBox extends Box {
 }
 
 export function clioFrame(text: string): string {
-	return `${CLIO_TEAL}${text}${ANSI_RESET}`;
+	return clioTheme().fg("frame", text);
 }
 
 export function clioTitle(text: string): string {
-	return `${CLIO_ORANGE}${text}${ANSI_RESET}`;
+	return clioTheme().style("title", text, { bold: true });
 }
 
 export function clioError(text: string): string {
-	return `${CLIO_ERROR}${text}${ANSI_RESET}`;
+	return clioTheme().fg("error", text);
 }
 
 function padAnsi(text: string, width: number): string {
@@ -126,20 +110,6 @@ export function brandedRuntimeResolutionDiagnosticRow(
 
 function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
 	return padAnsi(formatRuntimeResolutionDiagnostic(diagnostic), Math.max(1, width));
-}
-
-export function brandedAsciiTopBorder(label: string, innerWidth: number): string {
-	const clipped = visibleWidth(label) > innerWidth ? truncateToWidth(label, innerWidth, "...", true) : label;
-	const fill = "-".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
-	return `${clioFrame("+")}${clioTitle(clipped)}${clioFrame(fill)}${clioFrame("+")}`;
-}
-
-export function brandedAsciiBottomBorder(innerWidth: number): string {
-	return `${clioFrame("+")}${clioFrame("-".repeat(innerWidth))}${clioFrame("+")}`;
-}
-
-export function brandedAsciiContentRow(text: string, contentWidth: number): string {
-	return `${clioFrame("|")} ${padAnsi(text, contentWidth)} ${clioFrame("|")}`;
 }
 
 export class ClioOverlayFrame implements Component {

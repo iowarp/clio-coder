@@ -1,19 +1,7 @@
-import { type Component, Markdown, type MarkdownTheme, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
-import {
-	AGENT_GLYPH,
-	AMBER,
-	BLUE_REASON,
-	BOLD,
-	DIM,
-	GREEN_OK,
-	ITALIC,
-	RED_CRIT,
-	RESET,
-	TEAL,
-	UNDERLINE,
-	USER_GLYPH,
-} from "./palette.js";
+import { AGENT_GLYPH, AMBER, BLUE_REASON, DIM, GREEN_OK, RED_CRIT, RESET, TEAL, USER_GLYPH } from "./palette.js";
+import { highlightCode } from "./renderers/highlight.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	previewResult,
@@ -24,33 +12,9 @@ import {
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
 import type { StatusPhase, VerbRender } from "./status/index.js";
+import { clioTheme, markdownTheme } from "./theme/index.js";
 
-/**
- * Markdown theme for the assistant stream. pi-tui's Markdown renderer calls
- * every theme function exactly once per matched span; identity functions are
- * valid but leave the output indistinguishable from the raw source (which is
- * what Row 43 of the TUI rubric flagged). The ANSI wrappers below keep the
- * chat pane visually minimal (bold headings + emphasis, dim inline code /
- * fences / quotes) and stay safe under Clio's ANSI-stripped test assertions:
- * the structural markers callers rely on (list bullets, fence markers, code
- * block indent) survive stripping.
- */
-const CHAT_MARKDOWN_THEME: MarkdownTheme = {
-	heading: (text) => `${BOLD}${text}${RESET}`,
-	link: (text) => text,
-	linkUrl: (text) => `${DIM}${text}${RESET}`,
-	code: (text) => `${DIM}${text}${RESET}`,
-	codeBlock: (text) => text,
-	codeBlockBorder: (text) => `${DIM}${text}${RESET}`,
-	quote: (text) => `${DIM}${text}${RESET}`,
-	quoteBorder: (text) => `${DIM}${text}${RESET}`,
-	hr: (text) => `${DIM}${text}${RESET}`,
-	listBullet: (text) => text,
-	bold: (text) => `${BOLD}${text}${RESET}`,
-	italic: (text) => `${ITALIC}${text}${RESET}`,
-	strikethrough: (text) => text,
-	underline: (text) => `${UNDERLINE}${text}${RESET}`,
-};
+const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), highlightCode);
 
 /**
  * An assistant turn is a sequence of text and tool segments interleaved in
@@ -225,7 +189,12 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	if (!seg.md) {
 		seg.md = new Markdown(seg.text, 0, 0, CHAT_MARKDOWN_THEME);
 	}
-	return seg.md.render(width);
+	// pi-tui Markdown right-pads lines to the render width. If a long streaming
+	// reply has already scrolled, flipping the finalized segment from unpadded
+	// plain text to padded Markdown changes historical rows and forces a full
+	// redraw on terminals that cannot clear scrollback. Trim only that render
+	// padding so finalized prose remains byte-stable with the streamed shape.
+	return seg.md.render(width).map((line) => line.replace(/ +$/, ""));
 }
 
 const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
