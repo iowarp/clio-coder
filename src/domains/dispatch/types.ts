@@ -43,6 +43,8 @@ export interface RunEnvelope {
 	staticShellHash?: string | null;
 	sessionShellHash?: string | null;
 	dynamicHash?: string | null;
+	promptSignature?: string | null;
+	toolSignature?: string | null;
 	costUsd: number;
 }
 
@@ -134,6 +136,8 @@ export interface RunReceipt {
 	staticShellHash?: string | null;
 	sessionShellHash?: string | null;
 	dynamicHash?: string | null;
+	promptSignature?: string | null;
+	toolSignature?: string | null;
 	clioVersion: string;
 	piMonoVersion: string;
 	platform: string;

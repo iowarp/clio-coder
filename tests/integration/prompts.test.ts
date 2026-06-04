@@ -220,7 +220,7 @@ describe("prompts/compiler context files", () => {
 		notStrictEqual(withContext.renderedPromptHash, noContext.renderedPromptHash);
 	});
 
-	it("prompt extension loads project context from the context domain", async () => {
+	it("prompt extension injects a compact first-turn project synopsis from the context domain", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-extension-"));
 		try {
 			const contextContract: ContextContract = {
@@ -255,8 +255,11 @@ describe("prompts/compiler context files", () => {
 				},
 				overrideMode: "default",
 				safetyLevel: "auto-edit",
+				contextPolicy: { userText: "hi", turnCount: 0, providerSupportsTools: true },
 			});
-			ok(result.text.includes("extension-loaded clio"), result.text);
+			ok(result.text.includes("<project-synopsis>"), result.text);
+			ok(result.text.includes("Reason: first-turn-synopsis"), result.text);
+			strictEqual(result.text.includes("extension-loaded clio"), false);
 			ok(result.text.includes("# Project"), result.text);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
@@ -462,14 +465,32 @@ describe("prompts/compiler one hash invariant", () => {
 
 		deepStrictEqual(
 			result.segmentManifest.map((segment) => segment.id),
-			["identity", "mode", "safety", "runtime", "skills-catalog", "memory", "project-context", "history-summary"],
+			[
+				"identity",
+				"mode",
+				"safety",
+				"runtime",
+				"tool-contract",
+				"skills-catalog",
+				"retrieval-hints",
+				"memory",
+				"project-context",
+				"history-summary",
+			],
 		);
 		ok(result.staticShellTokenEstimate > 0, JSON.stringify(result.segmentManifest));
 		ok(result.staticShellTokenEstimate < 1500, `static shell was ${result.staticShellTokenEstimate} tokens`);
 		ok(result.staticShellHash.length > 0);
 		ok(result.sessionShellHash.length > 0);
 		ok(result.dynamicHash.length > 0);
+		strictEqual(result.promptEnvelope.version, 1);
+		deepStrictEqual(
+			result.promptEnvelope.parts.map((part) => part.id),
+			["pinnedHarness", "pinnedRuntime", "pinnedToolContract", "sessionContext", "turnContext", "retrievalHints"],
+		);
 		ok(result.systemPrompt.includes("# Runtime"), result.systemPrompt);
+		ok(result.systemPrompt.includes("# Tool Contract"), result.systemPrompt);
+		ok(result.systemPrompt.includes("# Retrieval Hints"), result.systemPrompt);
 		ok(result.systemPrompt.includes("# Skills"), result.systemPrompt);
 		strictEqual(result.systemPrompt.includes("# Memory"), false);
 		ok(result.dynamicPromptFragments.some((fragment) => fragment.id === "memory"));

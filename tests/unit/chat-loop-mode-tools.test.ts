@@ -48,7 +48,7 @@ function fakeProviders(): ProvidersContract {
 		kind: "http",
 		apiFamily: "openai-responses",
 		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 		synthesizeModel: () => ({ id: "stub-model", provider: "stub-runtime" }) as never,
 	};
 	return {

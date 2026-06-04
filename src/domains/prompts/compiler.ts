@@ -14,6 +14,8 @@ export interface DynamicInputs {
 	provider?: string | null;
 	model?: string | null;
 	contextWindow?: number | null;
+	providerSupportsTools?: boolean | null;
+	sendPolicy?: PromptSendPolicy | null;
 	thinkingBudget?: string | null;
 	thinkingMechanism?: ThinkingMechanism | null;
 	thinkingApplied?: "applied" | "ignored-on-off" | "always-on" | "unsupported" | null;
@@ -45,6 +47,7 @@ export interface PromptSegmentManifestEntry {
 	contentHash: string;
 	dynamic: boolean;
 	tier: PromptTier;
+	envelopePart: PromptEnvelopePartId;
 	tokenEstimate: number;
 }
 
@@ -57,6 +60,32 @@ export interface RenderedPromptFragment {
 }
 
 export type PromptTier = "static-shell" | "session-shell" | "dynamic-turn";
+export type PromptSendPolicy = "prefix-cache-deterministic" | "reduced-repeated-envelope" | "no-tools-fallback";
+export type PromptEnvelopePartId =
+	| "pinnedHarness"
+	| "pinnedRuntime"
+	| "pinnedToolContract"
+	| "sessionContext"
+	| "turnContext"
+	| "retrievalHints";
+
+export interface PromptEnvelopePartSummary {
+	id: PromptEnvelopePartId;
+	tier: PromptTier;
+	contentHash: string;
+	tokenEstimate: number;
+	charLength: number;
+	included: boolean;
+}
+
+export interface PromptEnvelopeSignature {
+	version: 1;
+	promptSignature: string;
+	staticShellHash: string;
+	sessionShellHash: string;
+	dynamicHash: string;
+	parts: ReadonlyArray<PromptEnvelopePartSummary>;
+}
 
 export interface DynamicPromptFragment {
 	id: string;
@@ -78,6 +107,7 @@ export interface CompileResult {
 	staticShellHash: string;
 	sessionShellHash: string;
 	dynamicHash: string;
+	promptEnvelope: PromptEnvelopeSignature;
 	staticShellTokenEstimate: number;
 	dynamicInputs: Readonly<DynamicInputs>;
 }
@@ -118,6 +148,9 @@ function renderRuntimeBlock(inputs: DynamicInputs): string {
 	if (typeof inputs.contextWindow === "number" && inputs.contextWindow > 0) {
 		lines.push(`Context window: ${inputs.contextWindow}`);
 	}
+	if (typeof inputs.sendPolicy === "string" && inputs.sendPolicy.length > 0) {
+		lines.push(`Prompt send policy: ${inputs.sendPolicy}`);
+	}
 	if (typeof inputs.thinkingBudget === "string" && inputs.thinkingBudget.length > 0) {
 		lines.push(`Thinking level: ${inputs.thinkingBudget}`);
 	}
@@ -141,6 +174,42 @@ function renderRuntimeBlock(inputs: DynamicInputs): string {
 		lines.push(familyGuidance);
 	}
 	return lines.join("\n");
+}
+
+function renderToolContractBlock(inputs: DynamicInputs): string {
+	const toolSupport =
+		inputs.providerSupportsTools === true
+			? "available"
+			: inputs.providerSupportsTools === false
+				? "unavailable"
+				: "unknown";
+	const lines = [
+		"# Tool Contract",
+		`Provider tool calls: ${toolSupport}.`,
+		"Use tool calls only for concrete inspection or changes that the task requires.",
+		"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+		"Tool schemas are delivered by the provider layer; follow the schema exactly when calling a tool.",
+	];
+	if (inputs.providerSupportsTools === false) {
+		lines.push("This target cannot call tools; answer from the visible user request and compact context only.");
+	}
+	return lines.join("\n");
+}
+
+function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
+	if (inputs.providerSupportsTools === false) {
+		return [
+			"# Retrieval Hints",
+			"Repository details are intentionally compact because this target has no tool channel.",
+			"Use only facts present in the current turn and say what file-specific context would be needed for precise code work.",
+		].join("\n");
+	}
+	return [
+		"# Retrieval Hints",
+		"Repository structure and CLIO.md contents are not preloaded every turn.",
+		"Use workspace_context for a quick workspace snapshot, codewiki tools for indexed TypeScript structure, and grep/read for exact file evidence.",
+		"Do not infer mutable repo details from the pinned prompt envelope.",
+	].join("\n");
 }
 
 function renderProjectBlock(contextFiles: string | undefined, projectType: string | null | undefined): string {
@@ -214,6 +283,7 @@ function pushSegment(
 	body: string,
 	dynamic: boolean,
 	tier: PromptTier,
+	envelopePart: PromptEnvelopePartId,
 ): void {
 	const trimmed = body.trim();
 	if (trimmed.length === 0) return;
@@ -223,8 +293,53 @@ function pushSegment(
 		contentHash: sha256(trimmed),
 		dynamic,
 		tier,
+		envelopePart,
 		tokenEstimate: estimatePromptTokens(trimmed),
 	});
+}
+
+const ENVELOPE_PART_ORDER: readonly PromptEnvelopePartId[] = [
+	"pinnedHarness",
+	"pinnedRuntime",
+	"pinnedToolContract",
+	"sessionContext",
+	"turnContext",
+	"retrievalHints",
+];
+
+const ENVELOPE_PART_TIERS: Record<PromptEnvelopePartId, PromptTier> = {
+	pinnedHarness: "static-shell",
+	pinnedRuntime: "session-shell",
+	pinnedToolContract: "session-shell",
+	sessionContext: "dynamic-turn",
+	turnContext: "dynamic-turn",
+	retrievalHints: "session-shell",
+};
+
+function buildPromptEnvelope(
+	entries: ReadonlyArray<{ segment: PromptSegmentManifestEntry; body: string }>,
+	hashes: Pick<PromptEnvelopeSignature, "promptSignature" | "staticShellHash" | "sessionShellHash" | "dynamicHash">,
+): PromptEnvelopeSignature {
+	const parts = ENVELOPE_PART_ORDER.map((id): PromptEnvelopePartSummary => {
+		const body = entries
+			.filter((entry) => entry.segment.envelopePart === id)
+			.map((entry) => entry.body)
+			.join("\n\n")
+			.trim();
+		return {
+			id,
+			tier: ENVELOPE_PART_TIERS[id],
+			contentHash: sha256(body),
+			tokenEstimate: estimatePromptTokens(body),
+			charLength: body.length,
+			included: body.length > 0,
+		};
+	});
+	return {
+		version: 1,
+		...hashes,
+		parts,
+	};
 }
 
 /**
@@ -249,40 +364,80 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
 	const parts: string[] = [];
 	const segmentManifest: PromptSegmentManifestEntry[] = [];
-	pushSegment(segmentManifest, parts, "identity", identity.body, false, "static-shell");
-	pushSegment(segmentManifest, parts, "mode", mode.body, false, "static-shell");
-	pushSegment(segmentManifest, parts, "safety", renderSafetySection(safety, safetyLevel), false, "static-shell");
-	pushSegment(segmentManifest, parts, "runtime", renderRuntimeBlock(inputs.dynamicInputs), true, "session-shell");
+	pushSegment(segmentManifest, parts, "identity", identity.body, false, "static-shell", "pinnedHarness");
+	pushSegment(segmentManifest, parts, "mode", mode.body, false, "static-shell", "pinnedHarness");
+	pushSegment(
+		segmentManifest,
+		parts,
+		"safety",
+		renderSafetySection(safety, safetyLevel),
+		false,
+		"static-shell",
+		"pinnedHarness",
+	);
+	pushSegment(
+		segmentManifest,
+		parts,
+		"runtime",
+		renderRuntimeBlock(inputs.dynamicInputs),
+		true,
+		"session-shell",
+		"pinnedRuntime",
+	);
+	pushSegment(
+		segmentManifest,
+		parts,
+		"tool-contract",
+		renderToolContractBlock(inputs.dynamicInputs),
+		true,
+		"session-shell",
+		"pinnedToolContract",
+	);
 	const stableAgentCatalog = renderAgentCatalogStableBlock(
 		inputs.dynamicInputs.agentCatalogStable ?? inputs.dynamicInputs.agentCatalog,
 	);
-	pushSegment(segmentManifest, parts, "tools-and-agents", stableAgentCatalog, true, "session-shell");
+	pushSegment(
+		segmentManifest,
+		parts,
+		"tools-and-agents",
+		stableAgentCatalog,
+		true,
+		"session-shell",
+		"pinnedToolContract",
+	);
 	const volatileAgentCatalog = renderAgentCatalogDeltaBlock(inputs.dynamicInputs.agentCatalogDelta);
-	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn");
+	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn", "turnContext");
 	const skillsCatalog = renderSkillsCatalogBlock(inputs.dynamicInputs.skillsCatalog);
-	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell");
+	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell", "pinnedToolContract");
+	pushSegment(
+		segmentManifest,
+		parts,
+		"retrieval-hints",
+		renderRetrievalHintsBlock(inputs.dynamicInputs),
+		true,
+		"session-shell",
+		"retrievalHints",
+	);
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
-	pushSegment(segmentManifest, parts, "memory", memory, true, "dynamic-turn");
+	pushSegment(segmentManifest, parts, "memory", memory, true, "dynamic-turn", "sessionContext");
 	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
-	pushSegment(segmentManifest, parts, "project-context", project, true, "dynamic-turn");
+	pushSegment(segmentManifest, parts, "project-context", project, true, "dynamic-turn", "turnContext");
 	const session = renderSessionBlock(inputs.dynamicInputs);
-	pushSegment(segmentManifest, parts, "history-summary", session, true, "dynamic-turn");
+	pushSegment(segmentManifest, parts, "history-summary", session, true, "dynamic-turn", "sessionContext");
 	for (const fragment of inputs.additionalFragments ?? []) {
-		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic, "session-shell");
+		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic, "session-shell", "pinnedHarness");
 	}
 
 	const text = parts.join("\n\n");
 	const renderedPromptHash = sha256(text);
-	const staticShellParts = segmentManifest
-		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+	const segmentEntries = segmentManifest.map((segment, index) => ({ segment, body: parts[index] ?? "" }));
+	const staticShellParts = segmentEntries
 		.filter((entry) => entry.segment.tier === "static-shell")
 		.map((entry) => entry.body);
-	const sessionShellParts = segmentManifest
-		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+	const sessionShellParts = segmentEntries
 		.filter((entry) => entry.segment.tier === "static-shell" || entry.segment.tier === "session-shell")
 		.map((entry) => entry.body);
-	const dynamicFragments = segmentManifest
-		.map((segment, index) => ({ segment, body: parts[index] ?? "" }))
+	const dynamicFragments = segmentEntries
 		.filter((entry) => entry.segment.tier === "dynamic-turn")
 		.map(
 			({ segment, body }): DynamicPromptFragment => ({
@@ -299,6 +454,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 	const sessionShellHash = sha256(systemPrompt);
 	const dynamicHash = sha256(dynamicText);
 	const staticShellTokenEstimate = estimatePromptTokens(staticShellText);
+	const promptEnvelope = buildPromptEnvelope(segmentEntries, {
+		promptSignature: renderedPromptHash,
+		staticShellHash,
+		sessionShellHash,
+		dynamicHash,
+	});
 
 	const manifestFragments: LoadedFragment[] = [identity, mode, safety];
 	const fragmentManifest: FragmentManifestEntry[] = manifestFragments.map((f) => ({
@@ -326,6 +487,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		staticShellHash,
 		sessionShellHash,
 		dynamicHash,
+		promptEnvelope,
 		staticShellTokenEstimate,
 		dynamicInputs: { ...inputs.dynamicInputs },
 	};

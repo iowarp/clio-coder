@@ -251,6 +251,11 @@ describe("dispatch memory passthrough", () => {
 			strictEqual(receipt.sessionShellHash, receipt.staticCompositionHash);
 			strictEqual(receipt.dynamicHash, sha256(memorySection));
 			strictEqual(receipt.compiledPromptHash, sha256(`${captured.spec.systemPrompt}\n\n${memorySection}`));
+			strictEqual(captured.spec.promptSignature, receipt.compiledPromptHash);
+			strictEqual(captured.spec.toolSignature, sha256("[]"));
+			strictEqual(captured.spec.dynamicHash, receipt.dynamicHash);
+			strictEqual(receipt.promptSignature, receipt.compiledPromptHash);
+			strictEqual(receipt.toolSignature, sha256("[]"));
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -292,6 +297,9 @@ describe("dispatch memory passthrough", () => {
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.compiledPromptHash, sha256(captured.spec.systemPrompt));
 			strictEqual(receipt.dynamicHash, sha256(""));
+			strictEqual(captured.spec.promptSignature, receipt.compiledPromptHash);
+			strictEqual(receipt.promptSignature, receipt.compiledPromptHash);
+			strictEqual(receipt.toolSignature, sha256("[]"));
 		} finally {
 			await bundle.extension.stop?.();
 		}

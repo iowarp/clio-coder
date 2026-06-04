@@ -27,6 +27,9 @@ export interface WorkerSpec {
 	specVersion: typeof WORKER_SPEC_VERSION;
 	systemPrompt: string;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
+	promptSignature?: string;
+	toolSignature?: string;
+	dynamicHash?: string;
 	task: string;
 	endpoint: EndpointDescriptor;
 	runtime: SerializedWorkerRuntimeDescriptor;
@@ -355,6 +358,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readEnum(runtime.auth, "WorkerSpec.runtime.auth", RUNTIME_AUTHS);
 	readString(spec.systemPrompt, "WorkerSpec.systemPrompt", { allowEmpty: true });
 	readWorkerPromptMessages(spec.dynamicPromptMessages, "WorkerSpec.dynamicPromptMessages");
+	readOptionalString(spec, "promptSignature", "WorkerSpec");
+	readOptionalString(spec, "toolSignature", "WorkerSpec");
+	readOptionalString(spec, "dynamicHash", "WorkerSpec");
 	readString(spec.task, "WorkerSpec.task");
 	validateEndpoint(spec.endpoint, runtimeId);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");

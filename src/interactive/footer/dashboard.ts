@@ -268,6 +268,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				label: contextSegment(contextUsage),
 				used: contextUsage?.tokens ?? null,
 				contextWindow: contextUsage?.contextWindow ?? null,
+				toolSchemaTokens: contextUsage?.breakdown?.toolSchemaTokens ?? null,
 				compactionThreshold: settings?.compaction?.threshold ?? null,
 				compactionAuto: settings?.compaction?.auto ?? null,
 				compactionActive,

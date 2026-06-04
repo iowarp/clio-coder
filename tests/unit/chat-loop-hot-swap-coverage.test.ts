@@ -329,6 +329,14 @@ describe("interactive/chat-loop hot-swap coverage", () => {
 					staticShellHash: "static",
 					sessionShellHash: "session",
 					dynamicHash: "dynamic",
+					promptEnvelope: {
+						version: 1,
+						promptSignature: "rendered",
+						staticShellHash: "static",
+						sessionShellHash: "session",
+						dynamicHash: "dynamic",
+						parts: [],
+					},
 					staticShellTokenEstimate: 1,
 					dynamicInputs: input.dynamicInputs,
 				};

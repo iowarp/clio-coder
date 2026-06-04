@@ -8,12 +8,21 @@ export interface AgentContextEstimateInput {
 	messages: ReadonlyArray<AgentMessage>;
 	systemPrompt?: string;
 	pendingUserText?: string;
+	tools?: ReadonlyArray<unknown>;
 }
 
 export interface ContextUsageSnapshot {
 	tokens: number | null;
 	contextWindow: number;
 	percent: number | null;
+	breakdown?: ContextUsageBreakdown;
+}
+
+export interface ContextUsageBreakdown {
+	systemPromptTokens: number;
+	messageTokens: number;
+	pendingUserTokens: number;
+	toolSchemaTokens: number;
 }
 
 function ceilChars(chars: number): number {
@@ -72,6 +81,14 @@ function messageChars(message: unknown): number {
 	chars += typeof message.toolName === "string" ? message.toolName.length : 0;
 	chars += typeof message.errorMessage === "string" ? message.errorMessage.length : 0;
 	return chars;
+}
+
+function toolSchemaChars(tool: unknown): number {
+	if (!isRecord(tool)) return jsonLength(tool);
+	const name = typeof tool.name === "string" ? tool.name.length : 0;
+	const description = typeof tool.description === "string" ? tool.description.length : 0;
+	const parameters = jsonLength(tool.parameters);
+	return name + description + parameters;
 }
 
 function usageTotalTokens(usage: unknown): number | null {
@@ -135,26 +152,38 @@ export function estimateAgentMessageTokens(message: AgentMessage): number {
 	return ceilChars(messageChars(message)) + MESSAGE_OVERHEAD_TOKENS;
 }
 
+export function estimateAgentContextBreakdown(input: AgentContextEstimateInput): ContextUsageBreakdown {
+	return {
+		systemPromptTokens: input.systemPrompt ? ceilChars(input.systemPrompt.length) : 0,
+		messageTokens: input.messages.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0),
+		pendingUserTokens: input.pendingUserText ? ceilChars(input.pendingUserText.length) : 0,
+		toolSchemaTokens: (input.tools ?? []).reduce<number>((sum, tool) => sum + ceilChars(toolSchemaChars(tool)), 0),
+	};
+}
+
 export function estimateAgentContextTokens(input: AgentContextEstimateInput): number {
-	const systemTokens = input.systemPrompt ? ceilChars(input.systemPrompt.length) : 0;
-	const pendingTokens = input.pendingUserText ? ceilChars(input.pendingUserText.length) : 0;
-	const messageTokens = input.messages.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
-	const projection = systemTokens + messageTokens + pendingTokens;
+	const breakdown = estimateAgentContextBreakdown(input);
+	const projection =
+		breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 
 	const usage = latestUsableAssistantUsage(input.messages);
 	if (!usage) return projection;
 	const trailingTokens = input.messages
 		.slice(usage.index + 1)
 		.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
-	const anchored = usage.tokens + trailingTokens + pendingTokens;
+	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 	return Math.max(projection, anchored);
 }
 
 export function contextUsageSnapshot(
 	tokens: number | null,
 	contextWindow: number | null | undefined,
+	breakdown?: ContextUsageBreakdown,
 ): ContextUsageSnapshot {
 	const window = typeof contextWindow === "number" && Number.isFinite(contextWindow) ? Math.max(0, contextWindow) : 0;
-	if (tokens === null || tokens <= 0 || window <= 0) return { tokens, contextWindow: window, percent: null };
-	return { tokens, contextWindow: window, percent: Math.min(100, (tokens / window) * 100) };
+	const base =
+		tokens === null || tokens <= 0 || window <= 0
+			? { tokens, contextWindow: window, percent: null }
+			: { tokens, contextWindow: window, percent: Math.min(100, (tokens / window) * 100) };
+	return breakdown ? { ...base, breakdown } : base;
 }

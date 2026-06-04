@@ -112,6 +112,10 @@ function promptCompositionHash(parts: ReadonlyArray<string>): string | null {
 	return text.length > 0 ? sha256(text) : null;
 }
 
+function toolSignature(tools: ReadonlyArray<ToolName>): string {
+	return sha256(JSON.stringify([...tools].sort()));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -187,10 +191,7 @@ export function deriveRequestedActions(
 }
 
 export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
-	const guardedBase = buildStableSystemPrompt(req, recipe);
-	const memory = req.memorySection?.trim() ?? "";
-	if (memory.length === 0) return guardedBase;
-	return `${guardedBase}\n\n${memory}`;
+	return buildStableSystemPrompt(req, recipe);
 }
 
 export function buildStableSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
@@ -248,6 +249,9 @@ interface DispatchWorkerSpecInput {
 	admission: DispatchAdmissionStage;
 	systemPrompt: string;
 	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
+	promptSignature: string | null;
+	toolSignature: string;
+	dynamicHash: string | null;
 	apiKey: string | undefined;
 	approval: DispatchAutoApproveDerivation;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
@@ -265,6 +269,8 @@ interface DispatchLifecycleStage {
 	staticCompositionHash: string | null;
 	sessionShellHash: string | null;
 	dynamicHash: string | null;
+	promptSignature: string | null;
+	toolSignature: string;
 	apiKey: string | undefined;
 	runtimeKind: RunKind;
 	approval: DispatchAutoApproveDerivation;
@@ -394,6 +400,9 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 		specVersion: WORKER_SPEC_VERSION,
 		systemPrompt: input.systemPrompt,
 		dynamicPromptMessages: input.dynamicPromptMessages,
+		...(input.promptSignature !== null ? { promptSignature: input.promptSignature } : {}),
+		toolSignature: input.toolSignature,
+		...(input.dynamicHash !== null ? { dynamicHash: input.dynamicHash } : {}),
 		task: input.req.task,
 		endpoint: input.target.endpoint,
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
@@ -690,6 +699,7 @@ export function createDispatchBundle(
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
+		const currentToolSignature = toolSignature(admission.allowedTools);
 		const auth = targetRequiresAuth(target.endpoint, target.runtime)
 			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
 			: null;
@@ -713,6 +723,8 @@ export function createDispatchBundle(
 			staticCompositionHash,
 			sessionShellHash,
 			dynamicHash,
+			promptSignature: compiledPromptHash,
+			toolSignature: currentToolSignature,
 			apiKey,
 			runtimeKind,
 			approval,
@@ -766,6 +778,9 @@ export function createDispatchBundle(
 			admission: lifecycle.admission,
 			systemPrompt: lifecycle.systemPrompt,
 			dynamicPromptMessages: lifecycle.dynamicPromptMessages,
+			promptSignature: lifecycle.promptSignature,
+			toolSignature: lifecycle.toolSignature,
+			dynamicHash: lifecycle.dynamicHash,
 			middlewareSnapshot: middleware.snapshot(),
 			apiKey: lifecycle.apiKey,
 			approval: lifecycle.approval,
@@ -864,6 +879,8 @@ export function createDispatchBundle(
 			staticShellHash: lifecycle.staticCompositionHash,
 			sessionShellHash: lifecycle.sessionShellHash,
 			dynamicHash: lifecycle.dynamicHash,
+			promptSignature: lifecycle.promptSignature,
+			toolSignature: lifecycle.toolSignature,
 		});
 		ledgerRef.update(
 			envelope.id,
@@ -953,6 +970,8 @@ export function createDispatchBundle(
 				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
 				dynamicHash: lifecycle.dynamicHash,
+				promptSignature: lifecycle.promptSignature,
+				toolSignature: lifecycle.toolSignature,
 				clioVersion: readClioVersion(),
 				piMonoVersion: readPiMonoVersion(),
 				platform: process.platform,

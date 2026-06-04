@@ -69,6 +69,7 @@ function state(overrides: DeepPartial = {}): FooterDashboardRenderState {
 			label: "ctx █░░░░░░░░░ 12%",
 			used: 31_000,
 			contextWindow: 262_000,
+			toolSchemaTokens: 4200,
 			compactionThreshold: 0.8,
 			compactionAuto: true,
 			clioMd: "CLIO.md ok",

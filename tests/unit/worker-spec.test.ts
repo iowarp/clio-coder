@@ -98,6 +98,9 @@ describe("dispatch worker spec contract", () => {
 				diagnostics: [{ severity: "warning", code: "thinking-coerced", message: "coerced" }],
 			},
 			dynamicPromptMessages: [{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" }],
+			promptSignature: "prompt-hash",
+			toolSignature: "tool-hash",
+			dynamicHash: "dynamic-hash",
 			allowedTools: ["read", "bash"],
 			modelCapabilities: {
 				reasoning: true,
@@ -125,6 +128,9 @@ describe("dispatch worker spec contract", () => {
 		deepStrictEqual(parsed.dynamicPromptMessages, [
 			{ id: "dispatch-memory", body: "# Memory\n\nlesson", contentHash: "abc" },
 		]);
+		strictEqual(parsed.promptSignature, "prompt-hash");
+		strictEqual(parsed.toolSignature, "tool-hash");
+		strictEqual(parsed.dynamicHash, "dynamic-hash");
 		deepStrictEqual(parsed.allowedTools, ["read", "bash"]);
 		strictEqual(parsed.runtimeResolution?.runtimeId, "openai");
 		strictEqual(parsed.runtimeResolution?.effectiveThinkingLevel, "medium");

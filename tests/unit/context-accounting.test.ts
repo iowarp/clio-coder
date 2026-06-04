@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { calculateContextTokens } from "../../src/domains/session/compaction/tokens.js";
 import {
 	contextUsageSnapshot,
+	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
 	extractReasoningTokens,
@@ -104,6 +105,31 @@ describe("session/context-accounting", () => {
 		strictEqual(extractReasoningTokens({ outputDetails: { reasoningTokens: 42 } }), 42);
 		strictEqual(extractReasoningTokens({ completion_tokens_details: { reasoning_tokens: 13 } }), 13);
 		strictEqual(extractReasoningTokens({ input: 1, output: 2 }), null);
+	});
+
+	it("accounts for tool schemas separately from messages and system prompt", () => {
+		const tool = {
+			name: "read",
+			description: "Read a file",
+			parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+		};
+		const breakdown = estimateAgentContextBreakdown({
+			systemPrompt: "system",
+			messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 0 } as AgentMessage],
+			pendingUserText: "next",
+			tools: [tool],
+		});
+		ok(breakdown.systemPromptTokens > 0);
+		ok(breakdown.messageTokens > 0);
+		ok(breakdown.pendingUserTokens > 0);
+		ok(breakdown.toolSchemaTokens > 0);
+		const total = estimateAgentContextTokens({
+			systemPrompt: "system",
+			messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 0 } as AgentMessage],
+			pendingUserText: "next",
+			tools: [tool],
+		});
+		ok(total >= breakdown.toolSchemaTokens);
 	});
 });
 
