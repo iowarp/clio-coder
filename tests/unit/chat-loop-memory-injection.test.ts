@@ -1,6 +1,8 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { CompileResult } from "../../src/domains/prompts/compiler.js";
 import type { CompileForTurnInput, PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -59,6 +61,7 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 	const prompts: PromptsContract = {
 		async compileForTurn(input) {
 			calls.push(input);
+			const dynamicHash = input.dynamicInputs.memorySection ? "dynamic-memory" : "dynamic-empty";
 			const result: CompileResult = {
 				text: `system|memorySection=${input.dynamicInputs.memorySection ?? ""}`,
 				systemPrompt: "stable-system",
@@ -77,7 +80,15 @@ function createPromptsRecorder(): { prompts: PromptsContract; calls: CompileForT
 				segmentManifest: [],
 				staticShellHash: "static",
 				sessionShellHash: "session",
-				dynamicHash: input.dynamicInputs.memorySection ? "dynamic-memory" : "dynamic-empty",
+				dynamicHash,
+				promptEnvelope: {
+					version: 1,
+					promptSignature: "rendered",
+					staticShellHash: "static",
+					sessionShellHash: "session",
+					dynamicHash,
+					parts: [],
+				},
 				staticShellTokenEstimate: 1,
 				dynamicInputs: { ...input.dynamicInputs },
 			};
@@ -140,6 +151,36 @@ function noopAgent(captured?: { prompts: unknown[]; systemPrompts?: string[] }):
 		abort: () => {},
 	};
 	return { agent: agent as unknown as EngineAgentHandle["agent"], state: () => state } as unknown as EngineAgentHandle;
+}
+
+function defaultModes(): ModesContract {
+	return {
+		current: () => "default" as const,
+		setMode: () => "default" as const,
+		cycleNormal: () => "default" as const,
+		visibleTools: () => new Set(),
+		isToolVisible: () => false,
+		isActionAllowed: () => true,
+		requestSuper: () => {},
+		confirmSuper: () => "super" as const,
+		elevatedModeFor: () => null,
+	};
+}
+
+function createParityLoop(memorySection: string) {
+	const { settings, providers } = createProviders();
+	const { prompts, calls } = createPromptsRecorder();
+	const captured = { prompts: [] as unknown[] };
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		modes: defaultModes(),
+		providers,
+		knownEndpoints: () => new Set(["stub-endpoint"]),
+		prompts,
+		getMemorySection: () => memorySection,
+		createAgent: () => noopAgent(captured),
+	});
+	return { loop, calls, captured };
 }
 
 describe("chat-loop memory injection", () => {
@@ -333,5 +374,39 @@ describe("chat-loop memory injection", () => {
 		strictEqual(calls.length, 1);
 		strictEqual(calls[0]?.dynamicInputs.memorySection, undefined);
 		ok(noticeTexts.some((text) => text.includes("memory load failed")));
+	});
+
+	it("keeps direct interactive submit and headless run prompt bytes/signatures equivalent", async () => {
+		const originalNow = Date.now;
+		const originalStdoutWrite = process.stdout.write;
+		Date.now = () => 1_780_000_000_000;
+		process.stdout.write = ((
+			_chunk: string | Uint8Array,
+			encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+			callback?: (error?: Error | null) => void,
+		): boolean => {
+			const cb = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+			cb?.();
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			const task = "same task";
+			const memorySection = "# Memory\n\n- parity lesson";
+			const direct = createParityLoop(memorySection);
+			const headless = createParityLoop(memorySection);
+
+			await direct.loop.submit(task);
+			const exitCode = await runHeadlessMainAgent(headless.loop, { prompt: task });
+
+			strictEqual(exitCode, 0);
+			strictEqual(direct.calls.length, 1);
+			strictEqual(headless.calls.length, 1);
+			deepStrictEqual(headless.calls[0]?.dynamicInputs, direct.calls[0]?.dynamicInputs);
+			deepStrictEqual(headless.calls[0]?.contextPolicy, direct.calls[0]?.contextPolicy);
+			strictEqual(JSON.stringify(headless.captured.prompts[0]), JSON.stringify(direct.captured.prompts[0]));
+		} finally {
+			Date.now = originalNow;
+			process.stdout.write = originalStdoutWrite;
+		}
 	});
 });

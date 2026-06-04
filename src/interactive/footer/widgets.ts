@@ -44,6 +44,7 @@ export interface ContextEngineFacts {
 	label: string | null;
 	used: number | null;
 	contextWindow: number | null;
+	toolSchemaTokens: number | null;
 	compactionThreshold: number | null;
 	compactionAuto: boolean | null;
 	compactionActive?: boolean;
@@ -201,6 +202,10 @@ export function contextQuadrant(facts: ContextEngineFacts): string[] {
 		facts.used !== null && facts.contextWindow
 			? `${formatFooterTokens(facts.used)}/${formatFooterTokens(facts.contextWindow)}`
 			: null;
+	const schema =
+		facts.toolSchemaTokens !== null && facts.toolSchemaTokens > 0
+			? labeledChip(theme, "schemas", formatFooterTokens(facts.toolSchemaTokens), "muted")
+			: null;
 	const compaction =
 		facts.compactionThreshold !== null
 			? `${facts.compactionActive ? "compacting" : "compact"} ${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`
@@ -208,6 +213,7 @@ export function contextQuadrant(facts: ContextEngineFacts): string[] {
 	return quadrantBlock(theme, "reason", "Context", [
 		facts.label ? theme.fg("info", facts.label) : theme.fg("dim", "ctx idle"),
 		used ? labeledChip(theme, "used", used, "muted") : null,
+		schema,
 		compaction ? theme.fg("muted", compaction) : null,
 		joinChips(theme, [
 			facts.clioMd ? theme.fg("muted", facts.clioMd) : null,

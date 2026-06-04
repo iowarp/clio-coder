@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import { buildSystemPrompt } from "../../src/domains/dispatch/extension.js";
+import { buildDynamicPromptMessages, buildSystemPrompt } from "../../src/domains/dispatch/extension.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 
 describe("dispatch/validation memorySection", () => {
@@ -45,7 +45,7 @@ describe("dispatch/extension buildSystemPrompt", () => {
 		filepath: "/builtin/scout.md",
 	};
 
-	it("appends a non-empty memorySection after the stable dispatch contract and recipe body", () => {
+	it("keeps memorySection out of the stable dispatch prompt", () => {
 		const req: DispatchRequest = {
 			agentId: "scout",
 			task: "look",
@@ -53,11 +53,14 @@ describe("dispatch/extension buildSystemPrompt", () => {
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
 		ok(out.startsWith("# Dispatch Task Contract"));
-		ok(out.includes("\n\nRECIPE BODY\n\n# Memory\n\nlesson alpha"));
-		ok(out.indexOf("# Dispatch Task Contract") < out.indexOf("# Memory"), out);
+		ok(out.endsWith("\n\nRECIPE BODY"));
+		strictEqual(out.includes("lesson alpha"), false);
+		const dynamic = buildDynamicPromptMessages(req);
+		strictEqual(dynamic.length, 1);
+		ok(dynamic[0]?.body.includes("lesson alpha"));
 	});
 
-	it("appends memorySection to req.systemPrompt when both are set, ignoring recipe body", () => {
+	it("keeps memorySection dynamic when req.systemPrompt overrides recipe body", () => {
 		const req: DispatchRequest = {
 			agentId: "scout",
 			task: "look",
@@ -66,8 +69,10 @@ describe("dispatch/extension buildSystemPrompt", () => {
 		};
 		const out = buildSystemPrompt(req, baseRecipe);
 		ok(out.startsWith("# Dispatch Task Contract"));
-		ok(out.includes("\n\nOVERRIDE PROMPT\n\n# Memory\n\nlesson beta"));
+		ok(out.endsWith("\n\nOVERRIDE PROMPT"));
 		strictEqual(out.includes("RECIPE BODY"), false);
+		strictEqual(out.includes("lesson beta"), false);
+		strictEqual(buildDynamicPromptMessages(req)[0]?.id, "dispatch-memory");
 	});
 
 	it("wraps the base prompt with the dispatch task contract when memorySection is undefined", () => {

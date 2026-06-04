@@ -8,9 +8,12 @@ import type {
 	CompileResult,
 	DynamicInputs,
 	DynamicPromptFragment,
+	PromptEnvelopeSignature,
 	PromptSegmentManifestEntry,
+	PromptSendPolicy,
 } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
+import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
 	type EndpointDescriptor,
@@ -31,6 +34,7 @@ import type { CompactResult } from "../domains/session/compaction/compact.js";
 import {
 	type ContextUsageSnapshot,
 	contextUsageSnapshot,
+	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	extractReasoningTokens,
 } from "../domains/session/context-accounting.js";
@@ -222,10 +226,15 @@ interface AgentRuntime {
 
 interface PromptDiagnostics {
 	renderedPromptHash: string;
+	promptSignature: string;
 	staticShellHash: string;
 	sessionShellHash: string;
 	dynamicHash: string;
 	systemPromptReused: boolean;
+	promptEnvelope: PromptEnvelopeSignature;
+	toolSignature: string;
+	toolCount: number;
+	toolSchemaTokenEstimate: number;
 	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
 }
 
@@ -387,13 +396,45 @@ function promptMessagesForTurn(
 	return messages;
 }
 
-function promptDiagnostics(result: CompileResult, systemPromptReused: boolean): PromptDiagnostics {
+function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
+	toolSignature: string;
+	toolCount: number;
+	toolSchemaTokenEstimate: number;
+} {
+	const schemas: Array<{ name: string; description: string; parameters: unknown }> = [];
+	for (const tool of tools) {
+		if (!tool || typeof tool !== "object" || Array.isArray(tool)) continue;
+		const record = tool as Record<string, unknown>;
+		schemas.push({
+			name: typeof record.name === "string" ? record.name : "",
+			description: typeof record.description === "string" ? record.description : "",
+			parameters: record.parameters ?? null,
+		});
+	}
+	schemas.sort((a, b) => a.name.localeCompare(b.name));
+	const serialized = canonicalJson(schemas);
+	return {
+		toolSignature: sha256(serialized),
+		toolCount: schemas.length,
+		toolSchemaTokenEstimate: Math.ceil(serialized.length / 4),
+	};
+}
+
+function promptDiagnostics(
+	result: CompileResult,
+	systemPromptReused: boolean,
+	tools: ReadonlyArray<unknown>,
+): PromptDiagnostics {
+	const toolSignature = toolSignatureFromState(tools);
 	return {
 		renderedPromptHash: result.renderedPromptHash,
+		promptSignature: result.promptEnvelope.promptSignature,
 		staticShellHash: result.staticShellHash,
 		sessionShellHash: result.sessionShellHash,
 		dynamicHash: result.dynamicHash,
 		systemPromptReused,
+		promptEnvelope: result.promptEnvelope,
+		...toolSignature,
 		tiers: result.segmentManifest.map((segment) => ({
 			id: segment.id,
 			tier: segment.tier,
@@ -450,6 +491,36 @@ function resolveRuntimeTools(
 		mode: deps.modes.current(),
 	};
 	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
+}
+
+function runtimeSupportsTools(agentRuntime: AgentRuntime): boolean {
+	return agentRuntime.runtimeResolution.capabilityDecisions.tools === true;
+}
+
+function resolveSendPolicy(agentRuntime: AgentRuntime): PromptSendPolicy {
+	if (!runtimeSupportsTools(agentRuntime)) return "no-tools-fallback";
+	return agentRuntime.runtimeId === "llamacpp" ? "prefix-cache-deterministic" : "reduced-repeated-envelope";
+}
+
+function resolveToolsForRuntime(
+	agentRuntime: AgentRuntime,
+	deps: CreateChatLoopDeps,
+	invokeOptions?: () => Partial<ToolInvokeOptions>,
+): ReturnType<typeof resolveAgentTools> {
+	return runtimeSupportsTools(agentRuntime) ? resolveRuntimeTools(deps, invokeOptions) : [];
+}
+
+function userTurnCount(entries: ReadonlyArray<SessionEntry>): number {
+	return entries.filter((entry) => entry.kind === "message" && entry.role === "user").length;
+}
+
+function currentVisibleTurnCount(deps: CreateChatLoopDeps): number {
+	if (!deps.readSessionEntries) return 0;
+	try {
+		return userTurnCount(deps.readSessionEntries());
+	} catch {
+		return 0;
+	}
 }
 
 interface RunUsageSummary {
@@ -994,7 +1065,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		const model = synthesizeModel(target);
 		const initialThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
-		const tools = resolveRuntimeTools(deps, currentToolInvokeOptions);
+		const tools = target.runtimeResolution.capabilityDecisions.tools
+			? resolveRuntimeTools(deps, currentToolInvokeOptions)
+			: [];
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
@@ -1330,7 +1403,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * stays on `state.systemPrompt` from the previous compile (or from
 	 * `ensureRuntime`).
 	 */
-	const compilePromptForTurn = async (agentRuntime: AgentRuntime): Promise<CompileResult | null> => {
+	const compilePromptForTurn = async (agentRuntime: AgentRuntime, userText: string): Promise<CompileResult | null> => {
 		if (!deps.prompts) {
 			currentTurnHash = null;
 			currentPromptDiagnostics = null;
@@ -1356,6 +1429,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
+			providerSupportsTools: runtimeSupportsTools(agentRuntime),
+			sendPolicy: resolveSendPolicy(agentRuntime),
 			thinkingBudget: resolved?.thinking.display ?? effectiveLevel,
 			thinkingMechanism: applied?.mechanism ?? "none",
 			thinkingApplied: applied?.noticeKind ?? "applied",
@@ -1391,6 +1466,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				overrideMode: deps.modes.current(),
 				safetyLevel,
 				cwd: process.cwd(),
+				contextPolicy: {
+					userText,
+					turnCount: currentVisibleTurnCount(deps),
+					providerSupportsTools: runtimeSupportsTools(agentRuntime),
+					sendPolicy: resolveSendPolicy(agentRuntime),
+				},
 			});
 			const systemPromptReused = agentRuntime.lastSessionShellHash === result.sessionShellHash;
 			if (!systemPromptReused) {
@@ -1398,7 +1479,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				agentRuntime.lastSessionShellHash = result.sessionShellHash;
 			}
 			currentTurnHash = result.renderedPromptHash;
-			currentPromptDiagnostics = promptDiagnostics(result, systemPromptReused);
+			currentPromptDiagnostics = promptDiagnostics(result, systemPromptReused, agentRuntime.agent.state.tools);
 			return result;
 		} catch (err) {
 			currentTurnHash = null;
@@ -1442,6 +1523,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const estimateInput = {
 				systemPrompt: agentRuntime.agent.state.systemPrompt,
 				messages: agentRuntime.agent.state.messages,
+				tools: agentRuntime.agent.state.tools,
 				...(pendingUserText !== undefined ? { pendingUserText } : {}),
 			};
 			const tokens = estimateAgentContextTokens(estimateInput);
@@ -1572,7 +1654,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// safety level, provider, and model changes since the last turn
 			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
 			// side-effect so the user + assistant appends below stamp it.
-			const compileResult = await compilePromptForTurn(agentRuntime);
+			agentRuntime.agent.state.tools = resolveToolsForRuntime(agentRuntime, deps, currentToolInvokeOptions);
+			const compileResult = await compilePromptForTurn(agentRuntime, text);
 
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
 			// the threshold so /compact integration tests and live drills can
@@ -1588,7 +1671,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			appendSubmittedUserTurn(agentRuntime, text, images);
 
-			agentRuntime.agent.state.tools = resolveRuntimeTools(deps, currentToolInvokeOptions);
+			agentRuntime.agent.state.tools = resolveToolsForRuntime(agentRuntime, deps, currentToolInvokeOptions);
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 
@@ -1681,11 +1764,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (runtime.agent.state.messages.length <= replayedContextMessages.length) {
 				return contextUsageSnapshot(null, contextWindow);
 			}
-			const tokens = estimateAgentContextTokens({
+			const estimateInput = {
 				systemPrompt: runtime.agent.state.systemPrompt,
 				messages: runtime.agent.state.messages,
-			});
-			return contextUsageSnapshot(tokens > 0 ? tokens : null, contextWindow);
+				tools: runtime.agent.state.tools,
+			};
+			const tokens = estimateAgentContextTokens(estimateInput);
+			const breakdown = estimateAgentContextBreakdown(estimateInput);
+			return contextUsageSnapshot(tokens > 0 ? tokens : null, contextWindow, breakdown);
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (runtime) {

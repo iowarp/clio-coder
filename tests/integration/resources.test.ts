@@ -188,7 +188,7 @@ describe("resources domain", () => {
 		}
 	});
 
-	it("keeps CLIO.md-first prompt compilation while the resources domain is loaded", async () => {
+	it("keeps compact CLIO.md project synopsis while the resources domain is loaded", async () => {
 		const repo = join(scratch, "repo");
 		mkdirSync(repo, { recursive: true });
 		writeFileSync(
@@ -224,7 +224,9 @@ describe("resources domain", () => {
 				safetyLevel: "auto-edit",
 				dynamicInputs: {},
 			});
-			ok(compiled.text.includes("Use the CLIO project guide."), compiled.text);
+			ok(compiled.text.includes("<project-synopsis>"), compiled.text);
+			ok(compiled.text.includes("Project: Resource Test"), compiled.text);
+			strictEqual(compiled.text.includes("Use the CLIO project guide."), false);
 			strictEqual(compiled.text.includes("this sibling file must not be injected"), false);
 		} finally {
 			await loaded.stop();

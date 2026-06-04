@@ -275,6 +275,8 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				...(input.staticShellHash !== undefined ? { staticShellHash: input.staticShellHash } : {}),
 				...(input.sessionShellHash !== undefined ? { sessionShellHash: input.sessionShellHash } : {}),
 				...(input.dynamicHash !== undefined ? { dynamicHash: input.dynamicHash } : {}),
+				...(input.promptSignature !== undefined ? { promptSignature: input.promptSignature } : {}),
+				...(input.toolSignature !== undefined ? { toolSignature: input.toolSignature } : {}),
 				costUsd: 0,
 			};
 			runs.unshift(envelope);
