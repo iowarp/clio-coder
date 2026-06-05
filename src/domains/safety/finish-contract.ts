@@ -5,7 +5,11 @@ export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 
 const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 
-export type FinishContractEvidenceKind = "validation_command" | "protected_artifact" | "dispatch_receipt";
+export type FinishContractEvidenceKind =
+	| "validation_command"
+	| "protected_artifact"
+	| "dispatch_receipt"
+	| "requested_inspection";
 
 export interface FinishContractEvidence {
 	kind: FinishContractEvidenceKind;
@@ -44,6 +48,11 @@ const TYPED_VALIDATION_TOOL_SUMMARIES = new Map<string, string>([
 	["run_build", "run_build"],
 ]);
 const PACKAGE_VALIDATION_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
+const TYPED_INSPECTION_TOOL_SUMMARIES = new Map<string, string>([
+	["git_status", "git status"],
+	["git_diff", "git diff"],
+	["git_log", "git log"],
+]);
 
 const COMPLETION_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(?:done|finished|complete|completed|implemented|fixed|resolved|updated|added|changed|removed|wired|shipped)\b/i,
@@ -104,9 +113,11 @@ function collectRecentEvidence(
 	recentEntryLimit: number,
 ): FinishContractEvidence[] {
 	const recent = recentEntries(entries, assistantTurnId, recentEntryLimit);
+	const requestedInspectionTools = requestedInspectionToolNames(entries, assistantTurnId);
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
+	const inspectionCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
 	for (const entry of recent) {
@@ -128,6 +139,12 @@ function collectRecentEvidence(
 			continue;
 		}
 
+		const inspectionCall = requestedInspectionToolCall(entry, requestedInspectionTools);
+		if (inspectionCall !== null) {
+			inspectionCalls.set(inspectionCall.toolCallId, inspectionCall);
+			continue;
+		}
+
 		const dispatchCall = dispatchEvidenceCall(entry);
 		if (dispatchCall !== null) {
 			dispatchCalls.set(dispatchCall.toolCallId, dispatchCall);
@@ -145,6 +162,11 @@ function collectRecentEvidence(
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) {
 				pushEvidence(evidence, seen, validationEvidence(candidate));
+				continue;
+			}
+			const inspectionCandidate = inspectionCalls.get(resultId);
+			if (inspectionCandidate !== undefined) {
+				pushEvidence(evidence, seen, requestedInspectionEvidence(inspectionCandidate));
 			}
 			continue;
 		}
@@ -154,6 +176,30 @@ function collectRecentEvidence(
 	}
 
 	return evidence;
+}
+
+function requestedInspectionToolNames(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): Set<string> {
+	const userText = currentUserText(entries, assistantTurnId);
+	const requested = new Set<string>();
+	if (userText === null) return requested;
+	if (/\bgit\s+status\b/i.test(userText)) requested.add("git_status");
+	if (/\bgit\s+diff\b/i.test(userText)) requested.add("git_diff");
+	if (/\bgit\s+log\b/i.test(userText)) requested.add("git_log");
+	return requested;
+}
+
+function currentUserText(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): string | null {
+	const assistantIndex =
+		assistantTurnId === null ? entries.length : entries.findIndex((entry) => turnIdOf(entry) === assistantTurnId);
+	const endExclusive = assistantIndex >= 0 ? assistantIndex : entries.length;
+	for (let index = endExclusive - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (!isUserMessageEntry(entry)) continue;
+		const payload = asRecord(asRecord(entry)?.payload);
+		const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+		return text.length > 0 ? text : null;
+	}
+	return null;
 }
 
 function recentEntries(
@@ -229,6 +275,30 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	if (toolName === null) return null;
 	const summary = typedValidationSummary(toolName, payload);
 	if (summary === null) return null;
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	const candidate: ToolCallEvidenceCandidate = {
+		toolCallId,
+		command: summary,
+	};
+	const turnId = turnIdOf(entry);
+	if (turnId !== null) candidate.turnId = turnId;
+	return candidate;
+}
+
+function requestedInspectionToolCall(
+	entry: unknown,
+	requestedTools: ReadonlySet<string>,
+): ToolCallEvidenceCandidate | null {
+	if (requestedTools.size === 0) return null;
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (toolName === null || !requestedTools.has(toolName)) return null;
+	const summary = TYPED_INSPECTION_TOOL_SUMMARIES.get(toolName);
+	if (summary === undefined) return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const candidate: ToolCallEvidenceCandidate = {
@@ -332,6 +402,15 @@ function validationEvidence(candidate: ToolCallEvidenceCandidate): FinishContrac
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${candidate.command}`,
+	};
+	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
+	return evidence;
+}
+
+function requestedInspectionEvidence(candidate: ToolCallEvidenceCandidate): FinishContractEvidence {
+	const evidence: FinishContractEvidence = {
+		kind: "requested_inspection",
+		summary: `requested inspection passed: ${candidate.command}`,
 	};
 	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
 	return evidence;

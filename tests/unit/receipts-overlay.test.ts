@@ -43,6 +43,12 @@ function dispatchWithRuns(runs: ReadonlyArray<RunEnvelope>): DispatchContract {
 			events: (async function* events(): AsyncIterableIterator<unknown> {})(),
 			finalPromise: Promise.resolve({} as RunReceipt),
 		}),
+		dispatchBatch: async () => ({
+			batchId: "unused-batch",
+			runIds: [],
+			events: (async function* events(): AsyncIterableIterator<unknown> {})(),
+			finalPromise: Promise.resolve([]),
+		}),
 		listRuns: (_status?: RunStatus) => runs,
 		getRun: (runId: string) => runs.find((run) => run.id === runId) ?? null,
 		abort: () => {},

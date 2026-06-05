@@ -58,7 +58,7 @@ export const TOOL_GROUPS: Readonly<Record<ToolPaletteGroup, ReadonlyArray<ToolNa
 		ToolNames.PackageScript,
 		ToolNames.ValidateFrontend,
 	],
-	delegate: [ToolNames.Dispatch],
+	delegate: [ToolNames.Dispatch, ToolNames.DispatchBatch],
 	external: [ToolNames.WebFetch],
 	skills: [ToolNames.ReadSkill, ToolNames.CreateSkill],
 	advise: [ToolNames.WritePlan, ToolNames.WriteReview],

@@ -370,6 +370,105 @@ describe("dispatch concurrency gate", () => {
 		}
 	});
 
+	it("dispatches batches as grouped normal worker runs", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(2);
+		const context = stubContext(scheduling);
+		const exits = [
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+		];
+		const exitQueue = [...exits];
+		const spawnedTasks: string[] = [];
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				spawnedTasks.push(spec.task);
+				const exit = exitQueue.shift();
+				if (!exit) throw new Error("missing fake batch worker");
+				return {
+					pid: 2000 + spawnedTasks.length,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
+				};
+			},
+		});
+		await bundle.extension.start();
+
+		try {
+			const batch = await bundle.contract.dispatchBatch([
+				{ agentId: "coder", task: "batch one" },
+				{ agentId: "coder", task: "batch two" },
+			]);
+			strictEqual(batch.runIds.length, 2);
+			deepStrictEqual(spawnedTasks, ["batch one", "batch two"]);
+			strictEqual(scheduling.activeWorkers(), 2);
+			const drained: unknown[] = [];
+			for await (const event of batch.events) drained.push(event);
+			ok(drained.some((event) => (event as { type?: string }).type === "batch_started"));
+
+			for (const exit of exits) exit.resolve({ exitCode: 0, signal: null });
+			const receipts = await batch.finalPromise;
+			strictEqual(receipts.length, 2);
+			strictEqual(
+				receipts.every((receipt) => receipt.exitCode === 0),
+				true,
+			);
+			strictEqual(scheduling.activeWorkers(), 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("briefly cools down a failed target instead of immediately respawning into the same failure", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const firstExit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const secondExit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let spawnCount = 0;
+		let now = 1000;
+		const bundle = createDispatchBundle(context, {
+			now: () => now,
+			resilienceCooldownMs: 500,
+			spawnWorker: () => ({
+				pid: 3001 + spawnCount,
+				promise: (spawnCount++ === 0 ? firstExit : secondExit).promise,
+				events: emptyEvents(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				...approvalNoops(),
+			}),
+		});
+		await bundle.extension.start();
+
+		try {
+			const first = await bundle.contract.dispatch({ agentId: "coder", task: "fails" });
+			firstExit.resolve({ exitCode: 1, signal: null });
+			await first.finalPromise;
+
+			await rejects(bundle.contract.dispatch({ agentId: "coder", task: "retry too soon" }), /cooling down/);
+			now += 501;
+			const second = await bundle.contract.dispatch({ agentId: "coder", task: "retry after cooldown" });
+			secondExit.resolve({ exitCode: 0, signal: null });
+			const receipt = await second.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(spawnCount, 2);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("routes subprocess runtimes through the native worker entry", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
 		tempDirs.push(dataDir);

@@ -116,6 +116,9 @@ function fakeDispatch(): DispatchContract {
 		dispatch: async () => {
 			throw new Error("not used");
 		},
+		dispatchBatch: async () => {
+			throw new Error("not used");
+		},
 		listRuns: () => [],
 		getRun: () => null,
 		abort: () => {},
