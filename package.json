@@ -69,11 +69,14 @@
 		"format": "biome format --write .",
 		"lint": "biome check .",
 		"check:boundaries": "node --import tsx --test 'tests/boundaries/**/*.test.ts'",
-		"test": "node --import tsx --test 'tests/unit/**/*.test.ts' 'tests/integration/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
-		"test:e2e": "npm run build && node --import tsx --test 'tests/e2e/**/*.test.ts'",
-		"ci": "npm run typecheck && npm run lint && npm run test && npm run build && node --import tsx --test 'tests/e2e/**/*.test.ts'",
+		"test:smoke": "node --import tsx --test 'tests/smoke/**/*.test.ts'",
+		"test:contracts": "node --import tsx --test 'tests/contracts/**/*.test.ts'",
+		"test": "node --import tsx --test 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
+		"ci": "npm run typecheck && npm run lint && npm run build && npm run test",
+		"ci:release": "npm run ci && node scripts/check-dist.mjs",
+		"test:live": "node scripts/live-smoke.mjs",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"prepublishOnly": "npm run typecheck && npm run lint && npm run build && node scripts/check-dist.mjs"
+		"prepublishOnly": "npm run ci:release"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.2.120",

@@ -139,7 +139,7 @@ function readInstallMetadata(path: string): InstallMetadata | null {
  * wrong sandbox.
  *
  * Enable by setting CLIO_REQUIRE_HOME_PREFIX=1 in the test env. The test
- * harness in tests/harness/spawn.ts and tests/harness/pty.ts opt in by
+ * harness in tests/harness/spawn.ts opt in by
  * default. We deliberately do not enable this in production because dev
  * installs may legitimately point individual dirs outside CLIO_HOME.
  */

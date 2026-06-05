@@ -1,0 +1,54 @@
+name: live-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Live target ID'
+        required: false
+        default: 'anthropic'
+      runtime:
+        description: 'Clio runtime ID'
+        required: false
+        default: 'anthropic'
+      model:
+        description: 'Model name override'
+        required: false
+        default: 'claude-3-5-sonnet-latest'
+      base_url:
+        description: 'Base URL (for openai-compat)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install fd-find and ripgrep
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run build
+      - name: Run live smoke test
+        env:
+          CLIO_LIVE_SMOKE: "1"
+          CLIO_LIVE_TARGET: ${{ github.event.inputs.target }}
+          CLIO_LIVE_RUNTIME: ${{ github.event.inputs.runtime }}
+          CLIO_LIVE_MODEL: ${{ github.event.inputs.model }}
+          CLIO_LIVE_BASE_URL: ${{ github.event.inputs.base_url }}
+          CLIO_LIVE_API_KEY: ${{ secrets.CLIO_LIVE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run test:live

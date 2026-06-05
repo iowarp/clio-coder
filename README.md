@@ -667,15 +667,14 @@ The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not i
 
 Most users do not need this section. It is for contributors. Deeper source-aligned guides live in [docs/README.md](docs/README.md).
 
-| Script | Purpose |
-| --- | --- |
-| `npm run ci` | Local and GitHub gate: typecheck, lint, tests, build, and e2e. |
+| `npm run ci` | Local and GitHub PR gate (fast, deterministic): typecheck, lint, build, tests. |
+| `npm run ci:release` | Release gate for maintainers: runs ci, then verifies packaging shebangs. |
+| `npm run test:live` | Live LLM smoke validation (opt-in, costs tokens/money): runs a validation prompt against a real model. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run format` | Biome formatting pass. |
 | `npm run lint` | Biome checks. |
-| `npm run test` | Unit, integration, and boundary tests. |
+| `npm run test` | Run all contract, smoke, and boundary tests. |
 | `npm run check:boundaries` | Boundary invariants only. |
-| `npm run test:e2e` | Build first, then run end-to-end tests. |
 | `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |
@@ -689,7 +688,7 @@ src/interactive/   terminal UI
 src/engine/        model/provider engine boundary
 src/worker/        internal worker runtime rehydration
 src/domains/       domain logic and built-in agent specs
-tests/             unit, integration, boundary, and e2e tests
+tests/             smoke, contracts, and boundary tests
 ```
 
 Contributor rules live in:
@@ -698,6 +697,43 @@ Contributor rules live in:
 CONTRIBUTING.md
 CLIO.md
 ```
+
+## Verification Lanes
+
+Clio Coder uses a three-lane verification strategy to ensure high quality and prevent regressions without bloating standard CI:
+
+1. **Fast Deterministic PR CI (`npm run ci`):** Runs on push and pull requests. Contains only fast, deterministic checks (typecheck, linting, build verification, and contract/smoke/boundary tests). Does not execute real LLM calls, run PTY/TUI tests, or depend on external providers.
+2. **Deterministic Release Gate (`npm run ci:release`):** For maintainers before tagging/publishing. Runs the standard CI checks, followed by verifying packaging targets and shebangs.
+3. **Live LLM Validation (`npm run test:live`):** Explicitly manual and opt-in. Validates the built `clio` binary against a real model target. Requires setting `CLIO_LIVE_SMOKE=1` and credentials/endpoints.
+
+### Running Live LLM Validation
+
+To run live smoke tests locally:
+```bash
+# OpenAI example
+CLIO_LIVE_SMOKE=1 \
+CLIO_LIVE_TARGET=openai \
+CLIO_LIVE_MODEL=gpt-4o-mini \
+OPENAI_API_KEY=your_key \
+npm run test:live
+
+# Anthropic example
+CLIO_LIVE_SMOKE=1 \
+CLIO_LIVE_TARGET=anthropic \
+CLIO_LIVE_MODEL=claude-3-5-sonnet-latest \
+ANTHROPIC_API_KEY=your_key \
+npm run test:live
+
+# OpenAI-Compatible example
+CLIO_LIVE_SMOKE=1 \
+CLIO_LIVE_TARGET=openai-compat \
+CLIO_LIVE_RUNTIME=openai-compat \
+CLIO_LIVE_MODEL=your-model \
+CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
+CLIO_LIVE_API_KEY=your_key \
+npm run test:live
+```
+These live checks are also available manually on GitHub Actions via the `live-smoke` workflow (`workflow_dispatch`). They cost tokens and will skip/fail clearly if the required secrets are missing.
 
 ---
 
