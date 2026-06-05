@@ -266,6 +266,52 @@ describe("prompts/compiler context files", () => {
 		}
 	});
 
+	it("prompt extension omits first-turn project synopsis for no-active-tool small talk", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-context-no-tools-"));
+		try {
+			const contextContract: ContextContract = {
+				async runBootstrap() {
+					throw new Error("not used");
+				},
+				contextState: () => ({ clioMd: "none", memoryCount: 0 }),
+				startupHints: () => [],
+				renderPromptContext() {
+					return {
+						text: "<project-type>typescript</project-type>\n\n<project-context>\nshould-not-load\n</project-context>",
+						clioMd: null,
+						warnings: [],
+					};
+				},
+			};
+			const bundle = createPromptsBundle({
+				bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
+				getContract: <T extends object>(name: string): T | undefined =>
+					name === "context" ? (contextContract as T) : undefined,
+			});
+			await bundle.extension.start?.();
+			const result = await bundle.contract.compileForTurn({
+				cwd: scratch,
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					contextWindow: 1024,
+					thinkingBudget: "off",
+					activeToolNames: [],
+					toolPaletteIntent: "small_talk",
+					turnCount: 1,
+				},
+				overrideMode: "default",
+				safetyLevel: "auto-edit",
+				contextPolicy: { userText: "hi", turnCount: 0, providerSupportsTools: true, activeToolCount: 0 },
+			});
+			strictEqual(result.text.includes("<project-synopsis>"), false, result.text);
+			strictEqual(result.text.includes("should-not-load"), false, result.text);
+			strictEqual(result.text.includes("# Project"), false, result.text);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("prompt extension suppresses the project block when noContextFiles is set", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-context-suppress-"));
 		try {
@@ -595,6 +641,49 @@ describe("prompts/compiler one hash invariant", () => {
 		strictEqual(changedDynamic.sessionShellHash, base.sessionShellHash);
 		notStrictEqual(changedDynamic.dynamicHash, base.dynamicHash);
 		notStrictEqual(changedFleet.sessionShellHash, base.sessionShellHash);
+	});
+
+	it("trims session-shell tool guidance when no tools are active", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: [],
+				toolPaletteIntent: "small_talk",
+				toolPalettePhase: "initial",
+				agentCatalogStable: "Clio manages a fleet.\n\nAvailable agents:\n- scout (advise, builtin) - inspect",
+				skillsCatalog: "# Skills\n\n- clio-testing",
+			},
+		});
+
+		ok(result.systemPrompt.includes("Active tools this turn: none."), result.systemPrompt);
+		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false, result.systemPrompt);
+		strictEqual(result.systemPrompt.includes("# Skills"), false, result.systemPrompt);
+		strictEqual(result.systemPrompt.includes("# Retrieval Hints"), false, result.systemPrompt);
+	});
+
+	it("keeps fleet and skill catalogs only when matching tools are active", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["dispatch", "read_skill"],
+				agentCatalogStable: "Clio manages a fleet.\n\nAvailable agents:\n- scout (advise, builtin) - inspect",
+				skillsCatalog: "# Skills\n\n- clio-testing",
+			},
+		});
+
+		ok(result.systemPrompt.includes("# Agent Fleet"), result.systemPrompt);
+		ok(result.systemPrompt.includes("# Skills"), result.systemPrompt);
+		ok(result.systemPrompt.includes("Active tools this turn: dispatch, read_skill."), result.systemPrompt);
 	});
 
 	it("produces the same renderedPromptHash for byte-identical inputs", () => {

@@ -119,7 +119,10 @@ describe("bash tool environment", () => {
 		});
 
 		strictEqual(result.kind, "error");
-		if (result.kind === "error") strictEqual(result.message, "bash: command output exceeded 2000000 bytes");
+		if (result.kind !== "error") return;
+		ok(result.message.includes("hello"), result.message);
+		ok(result.message.includes("[output truncated]"), result.message);
+		ok(result.message.includes("bash: command output exceeded 2000000 bytes"), result.message);
 	});
 
 	it("preserves partial output when a command times out", async () => {

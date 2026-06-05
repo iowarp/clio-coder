@@ -100,6 +100,10 @@ function assertWidthSafe(lines: readonly string[], width: number): void {
 describe("footer dashboard", () => {
 	it("formats tool tally counts by frequency and includes errors", () => {
 		strictEqual(formatToolTally({ tools: { Bash: 3, Read: 7, Edit: 2 }, errors: 1 }), "Read 7 · Bash 3 · Edit 2 · 1✗");
+		strictEqual(
+			formatToolTally({ tools: { Read: 2 }, active: 1, truncatedResults: 1, errors: 0 }),
+			"Read 2 · active 1 · trunc 1 · 0✗",
+		);
 		strictEqual(formatToolTally({ tools: {}, errors: 0 }), "no tools · 0✗");
 	});
 

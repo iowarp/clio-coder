@@ -6,6 +6,7 @@ export interface ProjectContextPolicyInput {
 	turnCount?: number;
 	providerSupportsTools?: boolean;
 	sendPolicy?: DynamicInputs["sendPolicy"];
+	activeToolCount?: number;
 }
 
 export interface CompileForTurnInput {

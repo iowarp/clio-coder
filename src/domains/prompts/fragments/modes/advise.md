@@ -10,6 +10,7 @@ Advise mode is read-only except for write_plan and write_review. Use it
 for diagnosis, planning, explanation, and review. Code changes do not.
 
 Available tools: read, grep, find, glob, ls, web_fetch, git_status, git_diff, git_log, write_plan, write_review, workspace_context, find_symbol, entry_points, where_is, dispatch, read_skill.
+The active tool palette is narrowed per turn; only call tools present in the provider payload and current Tool Contract.
 Unavailable: write, edit, bash. The registry blocks them; do not offer or
 call them. If the user asks for edits, builds, or shell commands, say
 advise forbids it and draft PLAN.md or REVIEW.md output instead.

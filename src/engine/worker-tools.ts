@@ -192,7 +192,7 @@ function toAgentTool(
 		name: spec.name,
 		description: spec.description,
 		parameters: spec.parameters,
-		label: spec.name,
+		label: spec.metadata?.uiLabel ?? spec.name,
 		async execute(toolCallId: string, params: unknown, signal?: AbortSignal): Promise<WorkerAgentToolResult> {
 			const options = invokeOptions?.() ?? {};
 			if (toolCallId.length > 0) options.toolCallId = toolCallId;

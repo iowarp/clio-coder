@@ -22,6 +22,11 @@ export interface DynamicInputs {
 	thinkingNotice?: string | null;
 	thinkingGuidance?: string | null;
 	familyGuidance?: string | null;
+	activeToolNames?: ReadonlyArray<string>;
+	toolPaletteIntent?: string | null;
+	toolPalettePhase?: string | null;
+	toolPaletteGroups?: ReadonlyArray<string>;
+	omittedToolCount?: number | null;
 	sessionNotes?: string;
 	contextFiles?: string;
 	projectType?: string | null;
@@ -183,20 +188,40 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 			: inputs.providerSupportsTools === false
 				? "unavailable"
 				: "unknown";
+	const activeToolNames = normalizeToolNames(inputs.activeToolNames);
 	const lines = [
 		"# Tool Contract",
 		`Provider tool calls: ${toolSupport}.`,
-		"Use tool calls only for concrete inspection or changes that the task requires.",
-		"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 		"Tool schemas are delivered by the provider layer; follow the schema exactly when calling a tool.",
 	];
 	if (inputs.providerSupportsTools === false) {
 		lines.push("This target cannot call tools; answer from the visible user request and compact context only.");
+	} else if (activeToolNames && activeToolNames.length === 0) {
+		lines.push("Active tools this turn: none.");
+		lines.push("Answer directly. Do not claim repository facts that require inspection.");
+	} else if (activeToolNames) {
+		lines.push(`Active tools this turn: ${activeToolNames.join(", ")}.`);
+		const intent = inputs.toolPaletteIntent?.trim();
+		const phase = inputs.toolPalettePhase?.trim();
+		if (intent || phase) {
+			lines.push(`Palette: ${intent || "unknown"}${phase ? ` / ${phase}` : ""}.`);
+		}
+		lines.push("Only call tools in the active list, and only for concrete inspection or changes that the task requires.");
+		lines.push(
+			"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+		);
+	} else {
+		lines.push("Use tool calls only for concrete inspection or changes that the task requires.");
+		lines.push(
+			"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+		);
 	}
 	return lines.join("\n");
 }
 
 function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
+	const activeToolNames = normalizeToolNames(inputs.activeToolNames);
+	if (activeToolNames && activeToolNames.length === 0) return "";
 	if (inputs.providerSupportsTools === false) {
 		return [
 			"# Retrieval Hints",
@@ -210,6 +235,24 @@ function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
 		"Use workspace_context for a quick workspace snapshot, codewiki tools for indexed TypeScript structure, and grep/read for exact file evidence.",
 		"Do not infer mutable repo details from the pinned prompt envelope.",
 	].join("\n");
+}
+
+function normalizeToolNames(tools: ReadonlyArray<string> | undefined): string[] | null {
+	if (!tools) return null;
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const tool of tools) {
+		const trimmed = tool.trim();
+		if (!trimmed || seen.has(trimmed)) continue;
+		seen.add(trimmed);
+		out.push(trimmed);
+	}
+	return out;
+}
+
+function toolIsActive(inputs: DynamicInputs, name: string): boolean {
+	const active = normalizeToolNames(inputs.activeToolNames);
+	return !active || active.includes(name);
 }
 
 function renderProjectBlock(contextFiles: string | undefined, projectType: string | null | undefined): string {
@@ -394,7 +437,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		"pinnedToolContract",
 	);
 	const stableAgentCatalog = renderAgentCatalogStableBlock(
-		inputs.dynamicInputs.agentCatalogStable ?? inputs.dynamicInputs.agentCatalog,
+		toolIsActive(inputs.dynamicInputs, "dispatch")
+			? (inputs.dynamicInputs.agentCatalogStable ?? inputs.dynamicInputs.agentCatalog)
+			: undefined,
 	);
 	pushSegment(
 		segmentManifest,
@@ -405,9 +450,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		"session-shell",
 		"pinnedToolContract",
 	);
-	const volatileAgentCatalog = renderAgentCatalogDeltaBlock(inputs.dynamicInputs.agentCatalogDelta);
+	const volatileAgentCatalog = renderAgentCatalogDeltaBlock(
+		toolIsActive(inputs.dynamicInputs, "dispatch") ? inputs.dynamicInputs.agentCatalogDelta : undefined,
+	);
 	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn", "turnContext");
-	const skillsCatalog = renderSkillsCatalogBlock(inputs.dynamicInputs.skillsCatalog);
+	const skillsCatalog = renderSkillsCatalogBlock(
+		toolIsActive(inputs.dynamicInputs, "read_skill") || toolIsActive(inputs.dynamicInputs, "create_skill")
+			? inputs.dynamicInputs.skillsCatalog
+			: undefined,
+	);
 	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell", "pinnedToolContract");
 	pushSegment(
 		segmentManifest,

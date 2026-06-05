@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
@@ -10,7 +11,7 @@ import { classify as classifyAction } from "../../src/domains/safety/action-clas
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import type { EngineAgentHandle } from "../../src/engine/agent.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoop, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry } from "../../src/tools/registry.js";
 
@@ -40,7 +41,26 @@ function liveModesAt(mode: ModeName): ModesContract {
 	};
 }
 
-function fakeProviders(): ProvidersContract {
+function liveMutableModes(initial: ModeName): ModesContract & { __set: (m: ModeName) => void } {
+	let current: ModeName = initial;
+	return {
+		...liveModesAt(initial),
+		__set: (m) => {
+			current = m;
+		},
+		current: () => current,
+		setMode: (next) => {
+			current = next;
+			return current;
+		},
+		visibleTools: () => MODE_MATRIX[current].tools,
+		isToolVisible: (t) => MODE_MATRIX[current].tools.has(t),
+		isActionAllowed: (a) => MODE_MATRIX[current].allowedActions.has(a),
+		confirmSuper: () => current,
+	};
+}
+
+function fakeProviders(tools = true): ProvidersContract {
 	const endpoint = { id: "stub-endpoint", runtime: "stub-runtime", defaultModel: "stub-model" };
 	const runtime: RuntimeDescriptor = {
 		id: "stub-runtime",
@@ -48,7 +68,7 @@ function fakeProviders(): ProvidersContract {
 		kind: "http",
 		apiFamily: "openai-responses",
 		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools },
 		synthesizeModel: () => ({ id: "stub-model", provider: "stub-runtime" }) as never,
 	};
 	return {
@@ -103,253 +123,173 @@ function fakeDispatch(): DispatchContract {
 	};
 }
 
-const MATRIX_TOOLS_BY_MODE: Readonly<Record<ModeName, ReadonlyArray<string>>> = {
-	default: [
-		"bash",
-		"create_skill",
-		"dispatch",
-		"edit",
-		"entry_points",
-		"find",
-		"find_symbol",
-		"git_diff",
-		"git_log",
-		"git_status",
-		"glob",
-		"grep",
-		"ls",
-		"package_script",
-		"read",
-		"read_skill",
-		"run_build",
-		"run_lint",
-		"run_tests",
-		"validate_frontend",
-		"web_fetch",
-		"where_is",
-		"write",
-	],
-	advise: [
-		"dispatch",
-		"entry_points",
-		"find",
-		"find_symbol",
-		"git_diff",
-		"git_log",
-		"git_status",
-		"glob",
-		"grep",
-		"ls",
-		"read",
-		"read_skill",
-		"web_fetch",
-		"where_is",
-		"write_plan",
-		"write_review",
-	],
-	super: [
-		"bash",
-		"create_skill",
-		"dispatch",
-		"edit",
-		"entry_points",
-		"find",
-		"find_symbol",
-		"git_diff",
-		"git_log",
-		"git_status",
-		"glob",
-		"grep",
-		"ls",
-		"package_script",
-		"read",
-		"read_skill",
-		"run_build",
-		"run_lint",
-		"run_tests",
-		"validate_frontend",
-		"web_fetch",
-		"where_is",
-		"write",
-	],
-};
+const REPO_INSPECTION_TOOLS = [
+	"entry_points",
+	"find",
+	"find_symbol",
+	"git_diff",
+	"git_log",
+	"git_status",
+	"glob",
+	"grep",
+	"ls",
+	"read",
+	"where_is",
+];
 
-function liveMutableModes(initial: ModeName): ModesContract & { __set: (m: ModeName) => void } {
-	let current: ModeName = initial;
-	return {
-		__set: (m) => {
-			current = m;
-		},
-		current: () => current,
-		setMode: (next) => {
-			current = next;
-			return current;
-		},
-		cycleNormal: () => current,
-		visibleTools: () => MODE_MATRIX[current].tools,
-		isToolVisible: (t) => MODE_MATRIX[current].tools.has(t),
-		isActionAllowed: (a) => MODE_MATRIX[current].allowedActions.has(a),
-		requestSuper: () => {},
-		confirmSuper: () => current,
-		elevatedModeFor: () => null,
-	};
+const CODING_TOOLS = [...REPO_INSPECTION_TOOLS, "edit", "write"];
+const ADVISE_TOOLS = [...REPO_INSPECTION_TOOLS, "write_plan", "write_review"];
+
+interface CaptureLoop {
+	loop: ChatLoop;
+	snapshots: string[][];
 }
 
-describe("interactive/chat-loop mode-aware tool resolution", () => {
-	for (const mode of ["default", "advise", "super"] as const) {
-		it(`exposes exactly the matrix tool set for mode=${mode}`, async () => {
-			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.orchestrator.endpoint = "stub-endpoint";
-			settings.orchestrator.model = "stub-model";
+function createCaptureLoop(options: { mode?: ModeName; modes?: ModesContract; providerTools?: boolean }): CaptureLoop {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.orchestrator.endpoint = "stub-endpoint";
+	settings.orchestrator.model = "stub-model";
 
-			const modes = liveModesAt(mode);
-			const toolRegistry = createRegistry({ safety: fakeSafety(), modes });
-			registerAllTools(toolRegistry, { dispatch: fakeDispatch() });
+	const modes = options.modes ?? liveModesAt(options.mode ?? "default");
+	const toolRegistry = createRegistry({ safety: fakeSafety(), modes });
+	registerAllTools(toolRegistry, { dispatch: fakeDispatch() });
 
-			let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
-			const agentState: {
-				systemPrompt: string;
-				model: never;
-				thinkingLevel: "off";
-				tools: Array<{ name: string }>;
-				messages: AgentMessage[];
-				isStreaming: boolean;
-				pendingToolCalls: Set<string>;
-				errorMessage: string | undefined;
-			} = {
-				systemPrompt: "",
-				model: {} as never,
-				thinkingLevel: "off",
-				tools: [],
-				messages: [] as AgentMessage[],
-				isStreaming: false,
-				pendingToolCalls: new Set<string>(),
-				errorMessage: undefined,
-			};
+	let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
+	const snapshots: string[][] = [];
+	const agentState: {
+		systemPrompt: string;
+		model: never;
+		thinkingLevel: "off";
+		tools: Array<{ name: string }>;
+		messages: AgentMessage[];
+		isStreaming: boolean;
+		pendingToolCalls: Set<string>;
+		errorMessage: string | undefined;
+	} = {
+		systemPrompt: "",
+		model: {} as never,
+		thinkingLevel: "off",
+		tools: [],
+		messages: [],
+		isStreaming: false,
+		pendingToolCalls: new Set<string>(),
+		errorMessage: undefined,
+	};
 
-			let toolsAtPrompt: ReadonlyArray<string> = [];
-			const loop = createChatLoop({
-				getSettings: () => settings,
-				modes,
-				providers: fakeProviders(),
-				knownEndpoints: () => new Set(["stub-endpoint"]),
-				toolRegistry,
-				createAgent: () => {
-					const agent = {
-						state: agentState,
-						sessionId: undefined as string | undefined,
-						subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
-							subscribeCb = cb;
-							return () => {
-								subscribeCb = null;
-							};
-						},
-						prompt: async () => {
-							toolsAtPrompt = agentState.tools.map((t) => t.name);
-							const reply: AgentMessage = {
-								role: "assistant",
-								content: [{ type: "text", text: "ok" }],
-								stopReason: "stop",
-								timestamp: 0,
-							} as AgentMessage;
-							await subscribeCb?.({ type: "message_end", message: reply });
-							await subscribeCb?.({ type: "agent_end", messages: [reply] });
-						},
-						abort: () => {},
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		modes,
+		providers: fakeProviders(options.providerTools ?? true),
+		knownEndpoints: () => new Set(["stub-endpoint"]),
+		toolRegistry,
+		createAgent: () => {
+			const agent = {
+				state: agentState,
+				sessionId: undefined as string | undefined,
+				subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
+					subscribeCb = cb;
+					return () => {
+						subscribeCb = null;
 					};
-					return {
-						agent: agent as unknown as EngineAgentHandle["agent"],
-						state: () => agent.state,
-					} as unknown as EngineAgentHandle;
 				},
-			});
+				prompt: async () => {
+					snapshots.push(agentState.tools.map((t) => t.name));
+					const reply: AgentMessage = {
+						role: "assistant",
+						content: [{ type: "text", text: "ok" }],
+						stopReason: "stop",
+						timestamp: 0,
+					} as AgentMessage;
+					await subscribeCb?.({ type: "message_end", message: reply });
+					await subscribeCb?.({ type: "agent_end", messages: [reply] });
+				},
+				abort: () => {},
+			};
+			return {
+				agent: agent as unknown as EngineAgentHandle["agent"],
+				state: () => agent.state,
+			} as unknown as EngineAgentHandle;
+		},
+	});
 
-			await loop.submit("list tools");
+	return { loop, snapshots };
+}
 
-			deepStrictEqual([...toolsAtPrompt].sort(), [...MATRIX_TOOLS_BY_MODE[mode]].sort());
-			strictEqual(toolsAtPrompt.length, MATRIX_TOOLS_BY_MODE[mode].length);
-		});
-	}
+describe("interactive/chat-loop tool palette resolution", () => {
+	it("exposes a repo-inspection palette instead of the full default matrix", async () => {
+		const capture = createCaptureLoop({ mode: "default" });
 
-	it("re-resolves tools after a mode toggle between agent construction and submit", async () => {
-		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.orchestrator.endpoint = "stub-endpoint";
-		settings.orchestrator.model = "stub-model";
+		await capture.loop.submit("inspect the repository and explain the entry points");
 
-		// Boot in default. Toggle to advise just before submitting. The runtime
-		// is built lazily on first submit, so state.tools must reflect the
-		// post-toggle mode rather than the boot-time mode.
+		deepStrictEqual([...(capture.snapshots[0] ?? [])].sort(), [...REPO_INSPECTION_TOOLS].sort());
+		strictEqual(capture.snapshots[0]?.includes("bash"), false);
+		strictEqual(capture.snapshots[0]?.includes("edit"), false);
+		strictEqual(capture.snapshots[0]?.includes("dispatch"), false);
+	});
+
+	it("adds mutate tools for edit requests", async () => {
+		const capture = createCaptureLoop({ mode: "default" });
+
+		await capture.loop.submit("fix the parser implementation");
+
+		deepStrictEqual([...(capture.snapshots[0] ?? [])].sort(), [...CODING_TOOLS].sort());
+	});
+
+	it("uses advise writers in advise mode without mutable/default escape tools", async () => {
+		const capture = createCaptureLoop({ mode: "advise" });
+
+		await capture.loop.submit("review this change");
+
+		deepStrictEqual([...(capture.snapshots[0] ?? [])].sort(), [...ADVISE_TOOLS].sort());
+		strictEqual(capture.snapshots[0]?.includes("bash"), false);
+		strictEqual(capture.snapshots[0]?.includes("edit"), false);
+		strictEqual(capture.snapshots[0]?.includes("write"), false);
+	});
+
+	it("re-resolves tools after a mode toggle between turns", async () => {
 		const modes = liveMutableModes("default");
-		const toolRegistry = createRegistry({ safety: fakeSafety(), modes });
-		registerAllTools(toolRegistry, { dispatch: fakeDispatch() });
+		const capture = createCaptureLoop({ modes });
 
-		let subscribeCb: ((event: AgentEvent) => void | Promise<void>) | null = null;
-		const agentState: {
-			systemPrompt: string;
-			model: never;
-			thinkingLevel: "off";
-			tools: Array<{ name: string }>;
-			messages: AgentMessage[];
-			isStreaming: boolean;
-			pendingToolCalls: Set<string>;
-			errorMessage: string | undefined;
-		} = {
-			systemPrompt: "",
-			model: {} as never,
-			thinkingLevel: "off",
-			tools: [],
-			messages: [] as AgentMessage[],
-			isStreaming: false,
-			pendingToolCalls: new Set<string>(),
-			errorMessage: undefined,
-		};
-		const promptToolSnapshots: Array<ReadonlyArray<string>> = [];
-
-		const loop = createChatLoop({
-			getSettings: () => settings,
-			modes,
-			providers: fakeProviders(),
-			knownEndpoints: () => new Set(["stub-endpoint"]),
-			toolRegistry,
-			createAgent: () => {
-				const agent = {
-					state: agentState,
-					sessionId: undefined as string | undefined,
-					subscribe: (cb: (event: AgentEvent) => void | Promise<void>) => {
-						subscribeCb = cb;
-						return () => {
-							subscribeCb = null;
-						};
-					},
-					prompt: async () => {
-						promptToolSnapshots.push(agentState.tools.map((t) => t.name));
-						const reply: AgentMessage = {
-							role: "assistant",
-							content: [{ type: "text", text: "ok" }],
-							stopReason: "stop",
-							timestamp: 0,
-						} as AgentMessage;
-						await subscribeCb?.({ type: "message_end", message: reply });
-						await subscribeCb?.({ type: "agent_end", messages: [reply] });
-					},
-					abort: () => {},
-				};
-				return {
-					agent: agent as unknown as EngineAgentHandle["agent"],
-					state: () => agent.state,
-				} as unknown as EngineAgentHandle;
-			},
-		});
-
-		// First submit: still default. State.tools must be the default tool set.
-		await loop.submit("first turn");
-		// Toggle.
+		await capture.loop.submit("inspect the repository");
 		modes.__set("advise");
-		// Second submit: must reflect advise's tool set.
-		await loop.submit("second turn");
+		await capture.loop.submit("review this change");
 
-		strictEqual(promptToolSnapshots.length, 2);
-		deepStrictEqual([...(promptToolSnapshots[0] ?? [])].sort(), [...MATRIX_TOOLS_BY_MODE.default].sort());
-		deepStrictEqual([...(promptToolSnapshots[1] ?? [])].sort(), [...MATRIX_TOOLS_BY_MODE.advise].sort());
+		strictEqual(capture.snapshots.length, 2);
+		deepStrictEqual([...(capture.snapshots[0] ?? [])].sort(), [...REPO_INSPECTION_TOOLS].sort());
+		deepStrictEqual([...(capture.snapshots[1] ?? [])].sort(), [...ADVISE_TOOLS].sort());
+	});
+
+	it("exposes zero tools when the resolved provider target has no tool support", async () => {
+		const capture = createCaptureLoop({ mode: "default", providerTools: false });
+
+		await capture.loop.submit("fix the parser implementation");
+
+		deepStrictEqual(capture.snapshots[0], []);
+	});
+
+	it("keeps direct interactive submit and headless run tool palettes equivalent", async () => {
+		const originalStdoutWrite = process.stdout.write;
+		process.stdout.write = ((
+			_chunk: string | Uint8Array,
+			encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+			callback?: (error?: Error | null) => void,
+		): boolean => {
+			const cb = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+			cb?.();
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			const task = "fix the parser implementation";
+			const direct = createCaptureLoop({ mode: "default" });
+			const headless = createCaptureLoop({ mode: "default" });
+
+			await direct.loop.submit(task);
+			const exitCode = await runHeadlessMainAgent(headless.loop, { prompt: task });
+
+			strictEqual(exitCode, 0);
+			deepStrictEqual(headless.snapshots[0], direct.snapshots[0]);
+		} finally {
+			process.stdout.write = originalStdoutWrite;
+		}
 	});
 });

@@ -15,6 +15,8 @@ import {
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
 	errors: number;
+	active?: number;
+	truncatedResults?: number;
 }
 
 /** Live workspace facts. Owned by the footer (the welcome header no longer repeats the branch). */
@@ -93,7 +95,13 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined):
 		.slice(0, 4)
 		.map(([name, count]) => `${name} ${formatFooterTokens(count)}`);
 	const prefix = entries.length > 0 ? entries.join(" · ") : "no tools";
-	return `${prefix} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
+	const active =
+		typeof snapshot.active === "number" && snapshot.active > 0 ? ` · active ${formatFooterTokens(snapshot.active)}` : "";
+	const truncated =
+		typeof snapshot.truncatedResults === "number" && snapshot.truncatedResults > 0
+			? ` · trunc ${formatFooterTokens(snapshot.truncatedResults)}`
+			: "";
+	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
 }
 
 export function formatUsd(value: number): string {

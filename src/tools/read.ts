@@ -4,6 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
@@ -29,7 +30,10 @@ export const readTool: ToolSpec = {
 			const stat = statSync(filePath);
 			if (!stat.isFile()) return { kind: "error", message: `read: not a file: ${filePath}` };
 			if (stat.size > 20_000_000) {
-				return { kind: "error", message: `read: file too large (${stat.size}B > 20MB); use bash with sed/head` };
+				return {
+					kind: "error",
+					message: `read: file too large (${stat.size}B > 20MB). Use grep/find to locate the relevant section or read a smaller generated/source file; use shell access only when byte-level inspection is explicitly needed.`,
+				};
 			}
 			const content = readFileSync(filePath, "utf8");
 			const allLines = content.split("\n");
@@ -46,7 +50,8 @@ export const readTool: ToolSpec = {
 			let output: string;
 			if (truncation.firstLineExceedsLimit) {
 				const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
-				output = `[Line ${startIndex + 1} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startIndex + 1}p' ${pathArg} | head -c ${DEFAULT_MAX_BYTES}]`;
+				const linePrefix = truncateUtf8(allLines[startIndex] ?? "", DEFAULT_MAX_BYTES, "\n[line truncated]");
+				output = `${linePrefix}\n\n[Line ${startIndex + 1} is ${firstLineSize}, exceeding the ${formatSize(DEFAULT_MAX_BYTES)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
 			} else if (truncation.truncated) {
 				const endDisplay = startIndex + truncation.outputLines;
 				const nextOffset = endDisplay + 1;

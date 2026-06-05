@@ -26,6 +26,7 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import { resolveToolPalette } from "../tools/palette.js";
 import type { WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
@@ -153,6 +154,13 @@ function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	return messages;
 }
 
+function workerProviderSupportsTools(input: WorkerRunInput): boolean {
+	const runtimeDecision = input.runtimeResolution?.capabilities.tools;
+	if (runtimeDecision !== undefined) return runtimeDecision === true;
+	if (typeof input.modelCapabilities?.tools === "boolean") return input.modelCapabilities.tools;
+	return input.runtime.defaultCapabilities.tools === true;
+}
+
 function taskWithDynamicPromptContext(input: WorkerRunInput): string {
 	const dynamic = input.dynamicPromptMessages ?? [];
 	if (dynamic.length === 0) return input.task;
@@ -175,6 +183,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// runtime (lmstudio-native, ollama-native).
 	registerClioApiProviders();
 	const fauxModel = registerFauxFromEnv();
+	const mode: ModeName = input.mode ?? "default";
+	const workerPalette = resolveToolPalette({
+		mode,
+		providerSupportsTools: workerProviderSupportsTools(input),
+		userText: input.task,
+		workerAllowedTools: input.allowedTools,
+	});
+	const activeWorkerTools = workerPalette.activeTools;
 
 	if (input.runtime.kind === "subprocess") {
 		const subprocessInput: Parameters<typeof startSubprocessWorkerRun>[0] = {
@@ -187,8 +203,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (input.apiKey !== undefined) subprocessInput.apiKey = input.apiKey;
 		if (input.signal !== undefined) subprocessInput.signal = input.signal;
 		if (input.sessionId !== undefined) subprocessInput.sessionId = input.sessionId;
-		if (input.mode !== undefined) subprocessInput.mode = input.mode;
-		subprocessInput.allowedTools = input.allowedTools;
+		subprocessInput.mode = mode;
+		subprocessInput.allowedTools = activeWorkerTools;
 		return startSubprocessWorkerRun(subprocessInput, emit);
 	}
 
@@ -205,9 +221,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			sdkInput.threadId = input.sessionId;
 			sdkInput.resumeSessionId = input.sessionId;
 		}
-		if (input.mode !== undefined) sdkInput.mode = input.mode;
+		sdkInput.mode = mode;
 		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
-		sdkInput.allowedTools = input.allowedTools;
+		sdkInput.allowedTools = activeWorkerTools;
 		if (input.signal !== undefined) sdkInput.signal = input.signal;
 		const sdkSafety = createWorkerSafety({ cwd: process.cwd() });
 		sdkInput.safety = sdkSafety;
@@ -224,7 +240,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.modelCapabilities,
 	);
 
-	const mode: ModeName = input.mode ?? "default";
 	// Build the per-run safety contract once so the registry's admission path
 	// and the agent-loop guard share the same loop-detector state. Without this,
 	// the registry would create its own state and the beforeToolCall hook would
@@ -244,11 +259,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry,
 		mode,
 		telemetry,
-		allowedTools: input.allowedTools,
+		allowedTools: activeWorkerTools,
 	});
-	if (tools.length === 0 && input.allowedTools.length > 0) {
+	if (tools.length === 0 && input.allowedTools.length > 0 && workerPalette.groups.length > 0) {
 		process.stderr.write(
-			`[worker] warning: no tools resolved for mode=${mode} allowed=[${input.allowedTools.join(",")}]\n`,
+			`[worker] warning: no tools resolved for mode=${mode} allowed=[${activeWorkerTools.join(",")}]\n`,
 		);
 	}
 	const effectiveThinkingLevel = clampThinkingLevelForModel(

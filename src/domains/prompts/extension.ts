@@ -193,6 +193,7 @@ function selectProjectContextReason(
 	lastProjectContextHashByCwd: Map<string, string>,
 ): string | null {
 	if (policy?.providerSupportsTools === false) return "no-tools-fallback";
+	if (policy?.activeToolCount === 0 && !userTextLooksRepoAware(policy.userText)) return null;
 	if ((policy?.turnCount ?? 0) <= 0) return "first-turn-synopsis";
 	const previousHash = lastProjectContextHashByCwd.get(cwd);
 	if (previousHash !== undefined && previousHash !== contextHash) return "context-fingerprint-changed";
