@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { admit } from "../../src/domains/dispatch/admission.js";
 import { createBackoff, nextDelay, reset } from "../../src/domains/dispatch/backoff.js";
+import { createBatch, isBatchDone, onRunComplete, snapshotBatch } from "../../src/domains/dispatch/batch-tracker.js";
 import { deriveRequestedActions, pickOrchestratorScope } from "../../src/domains/dispatch/extension.js";
 import { classifyHeartbeat } from "../../src/domains/dispatch/heartbeat.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
@@ -217,6 +218,21 @@ describe("dispatch/backoff", () => {
 		const state = reset({ baseMs: 50 });
 		strictEqual(state.attempts, 0);
 		strictEqual(state.nextDelayMs, 50);
+	});
+});
+
+describe("dispatch/batch-tracker", () => {
+	it("tracks completed and failed runs without mutating prior state", () => {
+		const initial = createBatch(["run-a", "run-b"]);
+		const afterA = onRunComplete(initial, "run-a", false);
+		const afterB = onRunComplete(afterA, "run-b", true);
+
+		strictEqual(isBatchDone(initial), false);
+		strictEqual(isBatchDone(afterA), false);
+		strictEqual(isBatchDone(afterB), true);
+		deepStrictEqual(snapshotBatch(afterB).completed, ["run-a"]);
+		deepStrictEqual(snapshotBatch(afterB).failed, ["run-b"]);
+		deepStrictEqual(snapshotBatch(initial).completed, []);
 	});
 });
 

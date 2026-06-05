@@ -8,7 +8,7 @@ import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
 import { whereIsTool } from "./codewiki/where-is.js";
-import { createDispatchTool } from "./dispatch.js";
+import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { globTool } from "./glob.js";
@@ -260,6 +260,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "agent",
 	},
+	[ToolNames.DispatchBatch]: {
+		objective: "Dispatch several bounded tasks to configured Clio workers as one grouped batch.",
+		uiLabel: "Dispatch Batch",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "summary",
+			maxBytes: 80_000,
+			followUpHint: "Use the batch run ids or receipts for omitted worker details.",
+		},
+		costLatency: "agent",
+	},
 	[ToolNames.WorkspaceContext]: {
 		objective: "Return structured workspace/git/project facts.",
 		uiLabel: "Workspace",
@@ -395,6 +406,13 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };
 		registry.register({
 			...builtin(createDispatchTool(dispatchToolDeps), {
+				path: "src/tools/dispatch.ts",
+				scope: "core",
+			}),
+			allowedModes: everyMode,
+		});
+		registry.register({
+			...builtin(createDispatchBatchTool(dispatchToolDeps), {
 				path: "src/tools/dispatch.ts",
 				scope: "core",
 			}),

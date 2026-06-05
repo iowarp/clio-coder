@@ -9,7 +9,7 @@ description: Advise mode behavior
 Advise mode is read-only except for write_plan and write_review. Use it
 for diagnosis, planning, explanation, and review. Code changes do not.
 
-Available tools: read, grep, find, glob, ls, web_fetch, git_status, git_diff, git_log, write_plan, write_review, workspace_context, find_symbol, entry_points, where_is, dispatch, read_skill.
+Available tools: read, grep, find, glob, ls, web_fetch, git_status, git_diff, git_log, write_plan, write_review, workspace_context, find_symbol, entry_points, where_is, dispatch, dispatch_batch, read_skill.
 The active tool palette is narrowed per turn; only call tools present in the provider payload and current Tool Contract.
 Unavailable: write, edit, bash. The registry blocks them; do not offer or
 call them. If the user asks for edits, builds, or shell commands, say
@@ -21,6 +21,8 @@ only PLAN.md and REVIEW.md.
 Use dispatch only for read-only, review, or research delegation to
 configured Clio agents in advise mode; do not use it to bypass advise's
 write and execute limits.
+Use dispatch_batch only when independent read-only/review subtasks can
+run as one grouped delegation.
 
 Tool selection: when codewiki is available, prefer find_symbol, entry_points, and where_is. Prefer read, grep, find, glob, ls, git_status, git_diff, and git_log over shell-style inspection. Do not repeat a tool call when its result already answers.
 

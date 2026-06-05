@@ -112,6 +112,26 @@ function dispatchRequestFromArgs(
 	return { ok: true, request };
 }
 
+function dispatchBatchRequestsFromArgs(
+	args: Record<string, unknown>,
+): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
+	const tasks = args.tasks;
+	if (!Array.isArray(tasks) || tasks.length === 0) {
+		return { ok: false, message: "dispatch_batch: tasks must be a non-empty array" };
+	}
+	const shared = { ...args };
+	Reflect.deleteProperty(shared, "tasks");
+	const requests: DispatchRequest[] = [];
+	for (let index = 0; index < tasks.length; index += 1) {
+		const item = tasks[index];
+		const itemArgs = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const parsed = dispatchRequestFromArgs(itemArgs);
+		if (!parsed.ok) return { ok: false, message: `dispatch_batch: task ${index + 1}: ${parsed.message}` };
+		requests.push(parsed.request);
+	}
+	return { ok: true, requests };
+}
+
 function textFromContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -270,6 +290,115 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 				return { kind: "ok", output, details };
 			} catch (err) {
 				return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+			} finally {
+				if (timer) clearTimeout(timer);
+				options?.signal?.removeEventListener("abort", abort);
+			}
+		},
+	};
+}
+
+function formatBatchOutput(
+	batchId: string,
+	runIds: ReadonlyArray<string>,
+	receipts: ReadonlyArray<RunReceipt>,
+	maxOutputBytes: number,
+): string {
+	const failed = receipts.filter((receipt) => receipt.exitCode !== 0);
+	const lines = [
+		`dispatch batch ${batchId} completed`,
+		`runs=${runIds.join(", ")} total=${receipts.length} failed=${failed.length}`,
+		"",
+		...receipts.map(
+			(receipt) =>
+				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount}`,
+		),
+	];
+	return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
+}
+
+export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
+	return {
+		name: ToolNames.DispatchBatch,
+		description:
+			"Dispatch multiple bounded tasks to configured Clio fleet agents as one batch. Each item may be a task string or an object with task plus the same targeting fields as dispatch. Returns run ids and receipt summaries.",
+		parameters: Type.Object({
+			tasks: Type.Array(
+				Type.Union([
+					Type.String(),
+					Type.Object({
+						task: Type.String(),
+						agent_id: Type.Optional(Type.String()),
+						target: Type.Optional(Type.String()),
+						model: Type.Optional(Type.String()),
+						agent_profile: Type.Optional(Type.String()),
+						agent_runtime: Type.Optional(Type.String()),
+						tool_profile: Type.Optional(
+							Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
+						),
+						thinking_level: Type.Optional(
+							Type.Union([
+								Type.Literal("off"),
+								Type.Literal("minimal"),
+								Type.Literal("low"),
+								Type.Literal("medium"),
+								Type.Literal("high"),
+								Type.Literal("xhigh"),
+							]),
+						),
+					}),
+				]),
+			),
+			agent_id: Type.Optional(Type.String({ description: "Default agent recipe for string tasks." })),
+			target: Type.Optional(Type.String({ description: "Default target id for every task." })),
+			model: Type.Optional(Type.String({ description: "Default model override for every task." })),
+			agent_profile: Type.Optional(Type.String({ description: "Default fleet profile." })),
+			agent_runtime: Type.Optional(Type.String({ description: "Default worker runtime selector." })),
+			tool_profile: Type.Optional(
+				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
+			),
+			auto_approve: Type.Optional(Type.Union([Type.Literal("allow"), Type.Literal("deny")])),
+			timeout_ms: Type.Optional(Type.Number({ description: "Abort all active batch runs after this many milliseconds." })),
+			max_output_bytes: Type.Optional(Type.Number({ description: "Maximum summary bytes returned to the main agent." })),
+		}),
+		baseActionClass: "dispatch",
+		executionMode: "sequential",
+		async run(args, options): Promise<ToolResult> {
+			const parsed = dispatchBatchRequestsFromArgs(args);
+			if (!parsed.ok) return { kind: "error", message: parsed.message };
+			if (options?.signal?.aborted) return { kind: "error", message: "dispatch_batch: aborted" };
+			let handle: Awaited<ReturnType<DispatchContract["dispatchBatch"]>>;
+			try {
+				handle = await deps.dispatch.dispatchBatch(parsed.requests);
+			} catch (err) {
+				return { kind: "error", message: `dispatch_batch: ${err instanceof Error ? err.message : String(err)}` };
+			}
+			const abort = (): void => {
+				for (const runId of handle.runIds) deps.dispatch.abort(runId);
+			};
+			const timeoutMs = timeoutMsArg(args);
+			const timer = timeoutMs !== undefined ? setTimeout(abort, timeoutMs) : null;
+			timer?.unref?.();
+			options?.signal?.addEventListener("abort", abort, { once: true });
+			try {
+				for await (const event of handle.events) {
+					if (isRecord(event) && event.type !== "batch_run_event") continue;
+					const runId = isRecord(event) && typeof event.runId === "string" ? event.runId : handle.batchId;
+					deps.bus?.emit(BusChannels.DispatchProgress, { runId, agentId: "batch", event });
+				}
+				const receipts = await handle.finalPromise;
+				const output = formatBatchOutput(handle.batchId, handle.runIds, receipts, maxOutputBytesArg(args));
+				const failed = receipts.filter((receipt) => receipt.exitCode !== 0);
+				const details: ToolResultDetails = {
+					batchId: handle.batchId,
+					runIds: handle.runIds,
+					receiptCount: receipts.length,
+					failedCount: failed.length,
+				};
+				if (failed.length > 0) return { kind: "error", message: output, details };
+				return { kind: "ok", output, details };
+			} catch (err) {
+				return { kind: "error", message: `dispatch_batch: ${err instanceof Error ? err.message : String(err)}` };
 			} finally {
 				if (timer) clearTimeout(timer);
 				options?.signal?.removeEventListener("abort", abort);

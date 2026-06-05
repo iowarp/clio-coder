@@ -291,6 +291,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 
 export function createDispatchBoardStore(bus: SafeEventBus): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
+	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	unsubscribe(): void;
 } {
 	const entries = new Map<string, DispatchBoardEntry>();
@@ -398,6 +399,13 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		rows() {
 			const now = Date.now();
 			return [...entries.values()].sort(sortEntries).map((entry) => toRow(entry, now));
+		},
+		activeRows() {
+			const now = Date.now();
+			return [...entries.values()]
+				.filter((entry) => !isTerminalStatus(entry.status))
+				.sort(sortEntries)
+				.map((entry) => toRow(entry, now));
 		},
 		unsubscribe() {
 			if (closed) return;

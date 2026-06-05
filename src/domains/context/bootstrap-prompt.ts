@@ -1,3 +1,8 @@
+import type { ProjectType } from "../session/workspace/project-type.js";
+import type { AdoptionScanResult } from "./adoption.js";
+import type { BootstrapStructuredOutput } from "./bootstrap.js";
+import type { SiblingContextFile } from "./sibling-files.js";
+
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to produce a single CLIO.md file for the project at <cwd>. CLIO.md is a lean, project-specific context file that the clio-coder coding agent loads on every session.
 
 You will be given:
@@ -17,4 +22,92 @@ Produce a CLIO.md with these possible sections:
 
 Total CLIO.md size target: 800-2000 bytes without adoption, or compact and provenance-rich with adoption.
 
-Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.`;
+Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
+
+Return only compact JSON with this exact shape:
+{
+  "projectName": "string",
+  "identity": "string",
+  "conventions": ["string"],
+  "invariants": ["string"]
+}`;
+
+export interface BootstrapPromptInput {
+	cwd: string;
+	projectType: ProjectType;
+	siblingFiles: ReadonlyArray<SiblingContextFile>;
+	adoption: AdoptionScanResult;
+}
+
+function truncate(value: string, max: number): string {
+	return value.length <= max ? value : `${value.slice(0, max)}\n[truncated]`;
+}
+
+function sourceSummary(file: SiblingContextFile): Record<string, unknown> {
+	return {
+		scope: file.source,
+		path: file.path,
+		content: truncate(file.content, 4000),
+	};
+}
+
+export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
+	const payload = {
+		cwd: input.cwd,
+		projectType: input.projectType,
+		siblingFiles: input.siblingFiles.map(sourceSummary),
+		adoption: {
+			includeGlobal: input.adoption.includeGlobal,
+			sourceCount: input.adoption.sources.length,
+			importedRules: input.adoption.importedRules,
+			conflicts: input.adoption.conflicts,
+			rejected: input.adoption.rejected,
+		},
+	};
+	return `${BOOTSTRAP_PROMPT}\n\n<bootstrap-input>\n${JSON.stringify(payload, null, 2)}\n</bootstrap-input>`;
+}
+
+function extractJsonObject(text: string): unknown {
+	const trimmed = text.trim();
+	if (trimmed.startsWith("{") && trimmed.endsWith("}")) return JSON.parse(trimmed);
+	const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)?.[1]?.trim();
+	if (fenced?.startsWith("{")) return JSON.parse(fenced);
+	const start = trimmed.indexOf("{");
+	const end = trimmed.lastIndexOf("}");
+	if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
+	throw new Error("bootstrap model output did not contain a JSON object");
+}
+
+function stringArray(value: unknown, key: string, maxItems: number, maxChars: number): string[] {
+	if (!Array.isArray(value)) throw new Error(`bootstrap model output '${key}' must be an array`);
+	return value
+		.map((item, index) => {
+			if (typeof item !== "string") throw new Error(`bootstrap model output '${key}[${index}]' must be a string`);
+			return item.replace(/\s+/g, " ").trim();
+		})
+		.filter((item) => item.length > 0)
+		.slice(0, maxItems)
+		.map((item) => item.slice(0, maxChars));
+}
+
+function stringField(record: Record<string, unknown>, key: string, maxChars: number): string {
+	const value = record[key];
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new Error(`bootstrap model output '${key}' must be a non-empty string`);
+	}
+	return value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+
+export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutput {
+	const parsed = extractJsonObject(text);
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error("bootstrap model output must be a JSON object");
+	}
+	const record = parsed as Record<string, unknown>;
+	return {
+		projectName: stringField(record, "projectName", 80),
+		identity: stringField(record, "identity", 600),
+		conventions: stringArray(record.conventions, "conventions", 6, 200),
+		invariants: stringArray(record.invariants, "invariants", 3, 280),
+	};
+}

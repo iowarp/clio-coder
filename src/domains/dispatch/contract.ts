@@ -13,6 +13,14 @@ export interface DispatchContract {
 		finalPromise: Promise<RunReceipt>;
 	}>;
 
+	/** Spawn a group of dispatches and expose one merged batch event stream. */
+	dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
+		batchId: string;
+		runIds: ReadonlyArray<string>;
+		events: AsyncIterableIterator<unknown>;
+		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
+	}>;
+
 	/** List runs from the ledger. */
 	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
 

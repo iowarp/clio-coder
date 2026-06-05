@@ -58,6 +58,15 @@ function makeDispatch(events: ReadonlyArray<unknown> = []): {
 				),
 			};
 		},
+		async dispatchBatch(reqs) {
+			const handles = await Promise.all(reqs.map((req) => this.dispatch(req)));
+			return {
+				batchId: "batch-1",
+				runIds: handles.map((handle) => handle.runId),
+				events: (async function* () {})(),
+				finalPromise: Promise.all(handles.map((handle) => handle.finalPromise)),
+			};
+		},
 		listRuns: () => [],
 		getRun: (runId) =>
 			runId === "run-1"
@@ -129,5 +138,28 @@ describe("tools/dispatch", () => {
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") ok(result.message.includes("thinking_level"));
 		deepStrictEqual(requests, []);
+	});
+
+	it("dispatches a batch and reports grouped receipt summaries", async () => {
+		const { dispatch, requests } = makeDispatch();
+		const batchTool = (await import("../../src/tools/dispatch.js")).createDispatchBatchTool({ dispatch });
+
+		const result = await batchTool.run({
+			agent_id: "reviewer",
+			target: "dynamo",
+			tasks: ["review parser", { task: "review renderer", agent_id: "researcher" }],
+		});
+
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		deepStrictEqual(
+			requests.map((request) => ({ agentId: request.agentId, task: request.task, endpoint: request.endpoint })),
+			[
+				{ agentId: "reviewer", task: "review parser", endpoint: "dynamo" },
+				{ agentId: "researcher", task: "review renderer", endpoint: "dynamo" },
+			],
+		);
+		ok(result.output.includes("dispatch batch batch-1 completed"), result.output);
+		ok(result.output.includes("total=2 failed=0"), result.output);
 	});
 });

@@ -4,7 +4,7 @@ import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([ToolNames.WorkspaceContext]);
-const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch]);
+const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.DispatchBatch]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;

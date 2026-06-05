@@ -1502,7 +1502,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const renderTaskIsland = (): void => {
-		const rows = dispatchBoardStore.rows();
+		const rows = dispatchBoardStore.activeRows();
 		taskIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || rows.length === 0);
 		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
 		taskIsland.invalidate();

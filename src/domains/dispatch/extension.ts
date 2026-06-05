@@ -44,6 +44,7 @@ import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
+import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -90,11 +91,13 @@ export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
+	resilienceCooldownMs?: number;
 	now?: () => number;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS = 60000;
+const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -610,11 +613,13 @@ export function createDispatchBundle(
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+	const resilienceCooldownMs = options?.resilienceCooldownMs ?? DEFAULT_RESILIENCE_COOLDOWN_MS;
 	const now = options?.now ?? (() => Date.now());
 
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
+	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 
 	function requireLedger(): Ledger {
 		if (!ledger) throw new Error("dispatch: ledger not initialised");
@@ -683,6 +688,40 @@ export function createDispatchBundle(
 		heartbeatTimer = null;
 	}
 
+	function cooldownKey(endpointId: string, runtimeId: string, wireModelId: string): string {
+		return `${endpointId}\0${runtimeId}\0${wireModelId}`;
+	}
+
+	function assertTargetNotCoolingDown(endpointId: string, runtimeId: string, wireModelId: string): void {
+		const key = cooldownKey(endpointId, runtimeId, wireModelId);
+		const cooldown = targetCooldowns.get(key);
+		if (!cooldown) return;
+		const remaining = cooldown.until - now();
+		if (remaining <= 0) {
+			targetCooldowns.delete(key);
+			return;
+		}
+		throw new Error(
+			`dispatch: target '${endpointId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`,
+		);
+	}
+
+	function recordTargetOutcome(
+		endpointId: string,
+		runtimeId: string,
+		wireModelId: string,
+		status: RunStatus,
+		exitCode: number,
+	): void {
+		const key = cooldownKey(endpointId, runtimeId, wireModelId);
+		if (status === "completed" && exitCode === 0) {
+			targetCooldowns.delete(key);
+			return;
+		}
+		if (resilienceCooldownMs <= 0) return;
+		targetCooldowns.set(key, { until: now() + resilienceCooldownMs, reason: status });
+	}
+
 	async function resolveLifecycle(req: DispatchRequest): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) {
@@ -746,6 +785,7 @@ export function createDispatchBundle(
 		}
 
 		const lifecycle = await resolveLifecycle(req);
+		assertTargetNotCoolingDown(lifecycle.target.endpoint.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
@@ -1058,6 +1098,13 @@ export function createDispatchBundle(
 				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
+				recordTargetOutcome(
+					lifecycle.target.endpoint.id,
+					lifecycle.target.runtime.id,
+					lifecycle.target.wireModelId,
+					status,
+					receipt.exitCode,
+				);
 				emitTerminalDispatchEvent(receipt, status);
 				return receipt;
 			} finally {
@@ -1071,6 +1118,95 @@ export function createDispatchBundle(
 		return {
 			runId: envelope.id,
 			events: enrichedEvents,
+			finalPromise,
+		};
+	}
+
+	function mergeBatchEvents(
+		batchId: string,
+		handles: ReadonlyArray<{
+			runId: string;
+			agentId: string;
+			events: AsyncIterableIterator<unknown>;
+			finalPromise: Promise<RunReceipt>;
+		}>,
+		batchRef: { current: BatchState },
+	): AsyncIterableIterator<unknown> {
+		return (async function* batchEvents(): AsyncIterableIterator<unknown> {
+			yield { type: "batch_started", batch: snapshotBatch(batchRef.current) };
+			const readers = new Map<
+				string,
+				{
+					handle: (typeof handles)[number];
+					next: Promise<IteratorResult<unknown>>;
+				}
+			>();
+			for (const handle of handles) {
+				readers.set(handle.runId, { handle, next: handle.events.next() });
+			}
+			while (readers.size > 0) {
+				const race = [...readers.entries()].map(async ([runId, reader]) => ({
+					runId,
+					result: await reader.next,
+				}));
+				const { runId, result } = await Promise.race(race);
+				const reader = readers.get(runId);
+				if (!reader) continue;
+				if (result.done) {
+					readers.delete(runId);
+					continue;
+				}
+				reader.next = reader.handle.events.next();
+				yield {
+					type: "batch_run_event",
+					batchId,
+					runId,
+					agentId: reader.handle.agentId,
+					event: result.value,
+				};
+			}
+			yield { type: "batch_events_drained", batch: snapshotBatch(batchRef.current) };
+		})();
+	}
+
+	async function dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
+		batchId: string;
+		runIds: ReadonlyArray<string>;
+		events: AsyncIterableIterator<unknown>;
+		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
+	}> {
+		if (reqs.length === 0) throw new Error("dispatch: batch requires at least one request");
+		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
+		try {
+			const admitted = await Promise.all(
+				reqs.map(async (req) => {
+					const handle = await dispatch(req);
+					return { ...handle, agentId: req.agentId };
+				}),
+			);
+			handles.push(...admitted);
+		} catch (err) {
+			for (const handle of handles) {
+				try {
+					contract.abort(handle.runId);
+				} catch {
+					// best-effort cleanup for partially admitted batches
+				}
+			}
+			throw err;
+		}
+		const batchRef = { current: createBatch(handles.map((handle) => handle.runId)) };
+		const finalPromise = Promise.all(
+			handles.map(async (handle) => {
+				const receipt = await handle.finalPromise;
+				batchRef.current = onRunComplete(batchRef.current, handle.runId, receipt.exitCode !== 0);
+				return receipt;
+			}),
+		).then((receipts) => receipts as ReadonlyArray<RunReceipt>);
+		return {
+			batchId: batchRef.current.id,
+			runIds: batchRef.current.runIds,
+			events: mergeBatchEvents(batchRef.current.id, handles, batchRef),
 			finalPromise,
 		};
 	}
@@ -1116,6 +1252,7 @@ export function createDispatchBundle(
 
 	const contract: DispatchContract = {
 		dispatch,
+		dispatchBatch,
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();

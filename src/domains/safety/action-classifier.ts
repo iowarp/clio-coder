@@ -81,6 +81,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.ValidateFrontend:
 			return "execute";
 		case ToolNames.Dispatch:
+		case ToolNames.DispatchBatch:
 			return "dispatch";
 		default:
 			return null;

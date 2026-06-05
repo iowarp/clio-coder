@@ -26,6 +26,15 @@ export function createBatch(runIds: ReadonlyArray<string>): BatchState {
 	};
 }
 
+export interface BatchSnapshot {
+	id: string;
+	runIds: ReadonlyArray<string>;
+	completed: ReadonlyArray<string>;
+	failed: ReadonlyArray<string>;
+	startedAt: string;
+	done: boolean;
+}
+
 export function onRunComplete(batch: BatchState, runId: string, failed: boolean): BatchState {
 	if (!batch.runIds.includes(runId)) return batch;
 	const completed = new Set(batch.completed);
@@ -43,4 +52,15 @@ export function onRunComplete(batch: BatchState, runId: string, failed: boolean)
 
 export function isBatchDone(batch: BatchState): boolean {
 	return batch.runIds.every((id) => batch.completed.has(id) || batch.failed.has(id));
+}
+
+export function snapshotBatch(batch: BatchState): BatchSnapshot {
+	return {
+		id: batch.id,
+		runIds: batch.runIds,
+		completed: [...batch.completed],
+		failed: [...batch.failed],
+		startedAt: batch.startedAt,
+		done: isBatchDone(batch),
+	};
 }

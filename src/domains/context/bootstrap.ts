@@ -42,7 +42,7 @@ export interface RunBootstrapInput {
 		projectType: ProjectType;
 		siblingFiles: ReadonlyArray<SiblingContextFile>;
 		adoption: AdoptionScanResult;
-	}) => BootstrapStructuredOutput;
+	}) => BootstrapStructuredOutput | Promise<BootstrapStructuredOutput>;
 }
 
 export interface RunBootstrapResult {
@@ -437,7 +437,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		includeGlobal: input.includeGlobalImports === true,
 	});
 	const siblingFiles = loadBootstrapSiblingFiles(adoption);
-	let output = (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles, adoption });
+	let output = await (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles, adoption });
 	if (input.adopt === true) {
 		const importedAgentContext = renderImportedAgentContext(adoption);
 		if (importedAgentContext.length > 0) output = { ...output, importedAgentContext };

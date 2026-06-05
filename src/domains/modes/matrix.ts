@@ -44,6 +44,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
 			ToolNames.Dispatch,
+			ToolNames.DispatchBatch,
 			ToolNames.ReadSkill,
 			ToolNames.CreateSkill,
 		]),
@@ -68,6 +69,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
 			ToolNames.Dispatch,
+			ToolNames.DispatchBatch,
 			ToolNames.ReadSkill,
 		]),
 		// write_plan/write_review are the only "write" tools in advise, so the
@@ -101,6 +103,7 @@ export const MODE_MATRIX: Readonly<Record<ModeName, ModeProfile>> = {
 			ToolNames.EntryPoints,
 			ToolNames.WhereIs,
 			ToolNames.Dispatch,
+			ToolNames.DispatchBatch,
 			ToolNames.ReadSkill,
 			ToolNames.CreateSkill,
 		]),
