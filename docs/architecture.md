@@ -41,7 +41,7 @@ Important domain directories include:
 
 ## Boundary invariants
 
-`npm run check:boundaries` executes `tests/boundaries/check-boundaries.ts`. Treat that test as the executable specification.
+`npm run check:boundaries` executes the boundaries test suite under `tests/boundaries/boundaries.test.ts`. Treat these checks as the executable specification.
 
 ### Rule 1: pi SDK value imports stay in `src/engine/**`
 
