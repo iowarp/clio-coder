@@ -51,7 +51,9 @@ export const bashTool: ToolSpec = {
 				return { kind: "error", message: output.length > 0 ? `${output}\n\n${status}` : status };
 			}
 			if (outputCapped) {
-				return { kind: "error", message: `bash: command output exceeded ${BASH_MAX_OUTPUT_BYTES * 2} bytes` };
+				const output = truncate(combineBashOutput(result)).trim();
+				const status = `bash: command output exceeded ${BASH_MAX_OUTPUT_BYTES * 2} bytes`;
+				return { kind: "error", message: output.length > 0 ? `${output}\n\n${status}` : status };
 			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;

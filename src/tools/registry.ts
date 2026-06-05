@@ -14,6 +14,7 @@ import {
 	type ProtectedArtifactState,
 	protectArtifact,
 } from "../domains/safety/protected-artifacts.js";
+import { shapeToolResult } from "./result-shaping.js";
 
 /**
  * Tool registry. Admission point for every tool call. Filters visible tools
@@ -32,16 +33,38 @@ import {
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 export type ToolSourceScope = "core" | "domain";
+export type ToolRetrySafety = "idempotent" | "retry_safe" | "not_retry_safe" | "unknown";
+export type ToolCostLatencyClass = "local_fast" | "local_medium" | "local_slow" | "network" | "agent";
 
 export interface ToolSourceInfo {
 	path: string;
 	scope: ToolSourceScope;
 }
 
+export interface ToolResultSizePolicy {
+	kind: "exact" | "bounded" | "summary" | "truncate";
+	maxBytes?: number;
+	followUpHint?: string;
+}
+
+export interface ToolMetadata {
+	/** Short statement of the tool's purpose for audit/UI surfaces. */
+	objective: string;
+	/** Stable UI label shown in compact renderers. */
+	uiLabel: string;
+	/** Whether automatic recovery may safely retry an unfinished call. */
+	retrySafety: ToolRetrySafety;
+	/** Expected result-size behavior at the registry boundary. */
+	resultSizePolicy: ToolResultSizePolicy;
+	/** Coarse cost/latency bucket for palette and dashboard diagnostics. */
+	costLatency: ToolCostLatencyClass;
+}
+
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
 	sourceInfo?: ToolSourceInfo;
+	metadata?: ToolMetadata;
 	/**
 	 * TypeBox schema advertised to the model so it knows which named
 	 * parameters the tool accepts. Must be a Type.Object(...). Runtime
@@ -223,18 +246,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (duplicateDispatchAfterHooks !== null) return { kind: "blocked", reason: duplicateDispatchAfterHooks, decision };
 		if (protectedBlock) return { kind: "blocked", reason: protectedBlock, decision };
 		try {
-			const result = await spec.run(call.args ?? {}, options);
+			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options));
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
-			const finalResult = applyToolResultEffects(result, afterEffects);
+			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects));
 			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			const result: ToolResult = { kind: "error", message };
+			const result = shapeToolResult(spec, { kind: "error", message });
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
-			return { kind: "ok", result: applyToolResultEffects(result, afterEffects), decision };
+			return { kind: "ok", result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects)), decision };
 		}
 	};
 

@@ -95,7 +95,7 @@ function walk(root: string, out: WalkEntry[]): void {
 export const globTool: ToolSpec = {
 	name: ToolNames.Glob,
 	description:
-		"Find files and directories matching a glob (supports *, **, ?, [abc]). Returns absolute paths sorted by mtime descending.",
+		"Find files and directories matching a glob (supports *, **, ?, [abc]). Returns paths relative to the search root, sorted by mtime descending.",
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
 		path: Type.Optional(Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." })),
@@ -160,9 +160,10 @@ export const globTool: ToolSpec = {
 		const rawOutput = matches
 			.slice(0, limit)
 			.map((entry) => entry.absPath)
+			.map((absPath) => normalizeGlobInput(path.relative(root, absPath)))
 			.join("\n");
 		const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
-		const details: Record<string, unknown> = {};
+		const details: Record<string, unknown> = { root };
 		const notices: string[] = [];
 		if (resultLimitReached) {
 			notices.push(`${limit} results limit reached. Use limit=${limit * 2} for more, or refine pattern`);

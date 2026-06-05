@@ -109,7 +109,8 @@ describe("ported basic coding tools", () => {
 
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
-		strictEqual(result.output, join(root, "note.md"));
+		strictEqual(result.output, "note.md");
+		strictEqual(result.details?.root, root);
 	});
 
 	it("glob reports when its result limit is reached", async () => {

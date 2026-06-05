@@ -63,9 +63,19 @@ async function runVectorTool(
 		const output = truncateUtf8(combineSafeOutput(result), maxOutputArg(args), TRUNCATION_MARKER);
 		const details = resultDetails(result, action);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
-		if (result.timedOut) return { kind: "error", message: `${action}: timed out after ${timeoutArg(args)}ms`, details };
+		if (result.timedOut) {
+			const status = `${action}: timed out after ${timeoutArg(args)}ms`;
+			return { kind: "error", message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status, details };
+		}
 		if (result.outputCapped)
-			return { kind: "error", message: `${action}: output exceeded ${maxOutputArg(args)} bytes`, details };
+			return {
+				kind: "error",
+				message:
+					output.trim().length > 0
+						? `${action}: output exceeded ${maxOutputArg(args)} bytes\n\n${output.trim()}`
+						: `${action}: output exceeded ${maxOutputArg(args)} bytes`,
+				details,
+			};
 		if (result.exitCode !== 0) {
 			return {
 				kind: "error",

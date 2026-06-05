@@ -54,6 +54,7 @@ import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
+import { resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
@@ -235,6 +236,15 @@ interface PromptDiagnostics {
 	toolSignature: string;
 	toolCount: number;
 	toolSchemaTokenEstimate: number;
+	toolPalette: {
+		intent: ToolPaletteResult["intent"];
+		phase: ToolPaletteResult["phase"];
+		groups: ReadonlyArray<string>;
+		activeTools: ReadonlyArray<string>;
+		omittedToolCount: number;
+		providerSupportsTools: boolean;
+		mode: string;
+	};
 	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
 }
 
@@ -424,8 +434,20 @@ function promptDiagnostics(
 	result: CompileResult,
 	systemPromptReused: boolean,
 	tools: ReadonlyArray<unknown>,
+	toolPalette: ToolPaletteResult | null,
 ): PromptDiagnostics {
 	const toolSignature = toolSignatureFromState(tools);
+	const palette =
+		toolPalette ??
+		({
+			intent: "repo_inspection",
+			phase: "inspection",
+			groups: [],
+			activeTools: [],
+			omittedToolCount: 0,
+			providerSupportsTools: tools.length > 0,
+			mode: "default",
+		} satisfies ToolPaletteResult);
 	return {
 		renderedPromptHash: result.renderedPromptHash,
 		promptSignature: result.promptEnvelope.promptSignature,
@@ -435,6 +457,15 @@ function promptDiagnostics(
 		systemPromptReused,
 		promptEnvelope: result.promptEnvelope,
 		...toolSignature,
+		toolPalette: {
+			intent: palette.intent,
+			phase: palette.phase,
+			groups: [...palette.groups],
+			activeTools: palette.activeTools.map((tool) => String(tool)),
+			omittedToolCount: palette.omittedToolCount,
+			providerSupportsTools: palette.providerSupportsTools,
+			mode: palette.mode,
+		},
 		tiers: result.segmentManifest.map((segment) => ({
 			id: segment.id,
 			tier: segment.tier,
@@ -476,21 +507,31 @@ function fallbackIdentityPrompt(): string {
 	].join(" ");
 }
 
-function visibleToolSnapshot(modes: ModesContract): ToolName[] {
-	return Array.from(modes.visibleTools());
-}
-
 function resolveRuntimeTools(
+	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
+	userText: string,
+	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
-): ReturnType<typeof resolveAgentTools> {
-	if (!deps.toolRegistry) return [];
+): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
+	if (!deps.toolRegistry) return { tools: [], palette: null };
+	const mode = deps.modes.current();
+	const palette = resolveToolPalette({
+		mode,
+		providerSupportsTools: runtimeSupportsTools(agentRuntime),
+		userText,
+		availableTools: deps.toolRegistry.listForMode(mode),
+		recentToolNames,
+	});
 	const input = {
 		registry: deps.toolRegistry,
-		allowedTools: visibleToolSnapshot(deps.modes),
-		mode: deps.modes.current(),
+		allowedTools: palette.activeTools,
+		mode,
 	};
-	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
+	return {
+		tools: resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input),
+		palette,
+	};
 }
 
 function runtimeSupportsTools(agentRuntime: AgentRuntime): boolean {
@@ -505,9 +546,11 @@ function resolveSendPolicy(agentRuntime: AgentRuntime): PromptSendPolicy {
 function resolveToolsForRuntime(
 	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
+	userText: string,
+	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
-): ReturnType<typeof resolveAgentTools> {
-	return runtimeSupportsTools(agentRuntime) ? resolveRuntimeTools(deps, invokeOptions) : [];
+): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
+	return resolveRuntimeTools(agentRuntime, deps, userText, recentToolNames, invokeOptions);
 }
 
 function userTurnCount(entries: ReadonlyArray<SessionEntry>): number {
@@ -637,6 +680,38 @@ function hasPersistableAssistantContent(
 	return false;
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function textFromToolResultContent(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => {
+			const item = recordValue(block);
+			if (!item || item.type !== "text" || typeof item.text !== "string") return "";
+			return item.text;
+		})
+		.join("");
+}
+
+function toolResultSummary(result: unknown): Record<string, unknown> {
+	const obj = recordValue(result);
+	const text = textFromToolResultContent(obj?.content) || (typeof result === "string" ? result : "");
+	const bytes = Buffer.byteLength(text, "utf8");
+	const details = recordValue(obj?.details);
+	const size = recordValue(details?.resultSize);
+	const truncation = recordValue(details?.truncation);
+	return {
+		bytes,
+		truncated: size?.truncated === true || truncation?.truncated === true || text.includes("[tool result truncated]"),
+		...(typeof size?.policy === "string" ? { policy: size.policy } : {}),
+		...(typeof size?.followUpHint === "string" ? { followUpHint: size.followUpHint } : {}),
+	};
+}
+
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
@@ -653,9 +728,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// analysis can reproduce exactly which fragments the model saw.
 	let currentTurnHash: string | null = null;
 	let currentPromptDiagnostics: PromptDiagnostics | null = null;
+	let currentToolPalette: ToolPaletteResult | null = null;
 	let activeUserTurnId: string | null = null;
 	const queuedFollowUps: string[] = [];
 	const persistedUserEchoes: string[] = [];
+	const recentToolNames: ToolName[] = [];
+	const toolStartTimes = new Map<string, number>();
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -691,6 +769,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const turnId = activeUserTurnId ?? lastTurnId;
 		if (turnId) options.turnId = turnId;
 		return options;
+	};
+
+	const rememberRecentToolName = (toolName: string): void => {
+		recentToolNames.push(toolName as ToolName);
+		while (recentToolNames.length > 16) recentToolNames.shift();
 	};
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
@@ -759,17 +842,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		lastTurnId = turn.id;
 	};
 
-	const appendToolResultTurn = (event: Extract<AgentEvent, { type: "tool_execution_end" }>): void => {
+	const appendToolResultTurn = (
+		event: Extract<AgentEvent, { type: "tool_execution_end" }> & {
+			durationMs?: number;
+			resultSummary?: Record<string, unknown>;
+		},
+	): void => {
 		if (!deps.session) return;
+		const payload: Record<string, unknown> = {
+			toolCallId: event.toolCallId,
+			toolName: event.toolName,
+			result: event.result,
+			isError: event.isError,
+			resultSummary: event.resultSummary ?? toolResultSummary(event.result),
+		};
+		if (event.durationMs !== undefined) payload.durationMs = event.durationMs;
 		const turn = deps.session.append({
 			kind: "tool_result",
 			parentId: lastTurnId,
-			payload: {
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				result: event.result,
-				isError: event.isError,
-			},
+			payload,
 		});
 		lastTurnId = turn.id;
 	};
@@ -905,7 +996,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			wireModelId,
 			requestedThinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
 			use: "orchestrator",
-			requireTools: deps.modes.visibleTools().size > 0,
+			requireTools: false,
 			requireOutputBudget: true,
 		});
 		if (!resolved.ok) {
@@ -948,7 +1039,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						wireModelId: target.wireModelId,
 						requestedThinkingLevel: deps.getSettings().orchestrator.thinkingLevel ?? "off",
 						use: "orchestrator",
-						requireTools: deps.modes.visibleTools().size > 0,
+						requireTools: false,
 						requireOutputBudget: true,
 					});
 					if (!refreshed.ok) return;
@@ -1065,9 +1156,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		const model = synthesizeModel(target);
 		const initialThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
-		const tools = target.runtimeResolution.capabilityDecisions.tools
-			? resolveRuntimeTools(deps, currentToolInvokeOptions)
-			: [];
+		const tools: ReturnType<typeof resolveAgentTools> = [];
 		// Seed the system prompt with the fallback identity text. `submit` then
 		// runs `compilePromptForTurn` before every `agent.prompt` call and
 		// overwrites this in place, so the fallback only shows up when the
@@ -1119,14 +1208,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
+			let enrichedEvent = event;
+			if (event.type === "tool_execution_start") {
+				toolStartTimes.set(event.toolCallId, eventAt);
+			} else if (event.type === "tool_execution_end") {
+				const startedAt = toolStartTimes.get(event.toolCallId);
+				toolStartTimes.delete(event.toolCallId);
+				rememberRecentToolName(event.toolName);
+				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
+				enrichedEvent = {
+					...event,
+					...(durationMs !== undefined ? { durationMs } : {}),
+					resultSummary: toolResultSummary(event.result),
+				} as typeof event;
+			}
 			const publicEvent =
-				event.type === "message_start" || event.type === "message_end"
-					? isInternalPromptContextMessage(event.message)
+				enrichedEvent.type === "message_start" || enrichedEvent.type === "message_end"
+					? isInternalPromptContextMessage(enrichedEvent.message)
 						? null
-						: event
-					: event.type === "agent_end"
-						? { ...event, messages: event.messages.filter((message) => !isInternalPromptContextMessage(message)) }
-						: event;
+						: enrichedEvent
+					: enrichedEvent.type === "agent_end"
+						? {
+								...enrichedEvent,
+								messages: enrichedEvent.messages.filter((message) => !isInternalPromptContextMessage(message)),
+							}
+						: enrichedEvent;
 			if (publicEvent?.type === "agent_start") {
 				streamStartedAt = eventAt;
 				firstAssistantDeltaAt = null;
@@ -1197,18 +1303,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 				}
 			}
-			if (event.type === "message_end") {
-				appendQueuedUserTurn(event.message);
-				appendAssistantTurn(event.message);
+			if (enrichedEvent.type === "message_end") {
+				appendQueuedUserTurn(enrichedEvent.message);
+				appendAssistantTurn(enrichedEvent.message);
 			}
-			if (event.type === "tool_execution_start") {
-				appendToolCallTurn(event);
+			if (enrichedEvent.type === "tool_execution_start") {
+				appendToolCallTurn(enrichedEvent);
 			}
-			if (event.type === "tool_execution_end") {
-				appendToolResultTurn(event);
+			if (enrichedEvent.type === "tool_execution_end") {
+				appendToolResultTurn(enrichedEvent);
 			}
-			if (event.type === "agent_end") {
-				emitFinishContractAdvisory(publicEvent?.type === "agent_end" ? publicEvent.messages : event.messages);
+			if (enrichedEvent.type === "agent_end") {
+				emitFinishContractAdvisory(publicEvent?.type === "agent_end" ? publicEvent.messages : enrichedEvent.messages);
 			}
 		});
 
@@ -1225,7 +1331,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Inspect the agent's state after `agent.prompt` resolves. pi-agent-core
-	 * 0.74.0's `handleRunFailure` records the upstream error on the assistant
+	 * pi-agent-core's `handleRunFailure` records the upstream error on the assistant
 	 * message (stopReason="error", errorMessage="<text>") and on
 	 * `state.errorMessage`, then resolves the prompt() Promise normally.
 	 * Returns a ContextOverflowError when either surface matches the heuristic
@@ -1407,6 +1513,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!deps.prompts) {
 			currentTurnHash = null;
 			currentPromptDiagnostics = null;
+			currentToolPalette = null;
 			return null;
 		}
 		const settings = deps.getSettings();
@@ -1425,6 +1532,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const applied = resolved?.thinking;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 		const workspaceProjectType = deps.session?.current()?.workspace?.projectType;
+		const activeToolNames = currentToolPalette?.activeTools.map((tool) => String(tool));
+		const activeToolCount = activeToolNames?.length ?? agentRuntime.agent.state.tools.length;
 		const dynamicInputs: DynamicInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
@@ -1436,6 +1545,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			thinkingApplied: applied?.noticeKind ?? "applied",
 			thinkingNotice: applied?.notice ?? "",
 			...(guidance ? { thinkingGuidance: guidance } : {}),
+			...(currentToolPalette && activeToolNames
+				? {
+						activeToolNames,
+						toolPaletteIntent: currentToolPalette.intent,
+						toolPalettePhase: currentToolPalette.phase,
+						toolPaletteGroups: currentToolPalette.groups.map((group) => String(group)),
+						omittedToolCount: currentToolPalette.omittedToolCount,
+					}
+				: {}),
 			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
 			turnCount: 0,
 		};
@@ -1471,6 +1589,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					turnCount: currentVisibleTurnCount(deps),
 					providerSupportsTools: runtimeSupportsTools(agentRuntime),
 					sendPolicy: resolveSendPolicy(agentRuntime),
+					activeToolCount,
 				},
 			});
 			const systemPromptReused = agentRuntime.lastSessionShellHash === result.sessionShellHash;
@@ -1479,11 +1598,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				agentRuntime.lastSessionShellHash = result.sessionShellHash;
 			}
 			currentTurnHash = result.renderedPromptHash;
-			currentPromptDiagnostics = promptDiagnostics(result, systemPromptReused, agentRuntime.agent.state.tools);
+			currentPromptDiagnostics = promptDiagnostics(
+				result,
+				systemPromptReused,
+				agentRuntime.agent.state.tools,
+				currentToolPalette,
+			);
 			return result;
 		} catch (err) {
 			currentTurnHash = null;
 			currentPromptDiagnostics = null;
+			currentToolPalette = null;
 			emitNotice(
 				`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 			);
@@ -1654,7 +1779,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// safety level, provider, and model changes since the last turn
 			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
 			// side-effect so the user + assistant appends below stamp it.
-			agentRuntime.agent.state.tools = resolveToolsForRuntime(agentRuntime, deps, currentToolInvokeOptions);
+			const resolvedTools = resolveToolsForRuntime(agentRuntime, deps, text, recentToolNames, currentToolInvokeOptions);
+			agentRuntime.agent.state.tools = resolvedTools.tools;
+			currentToolPalette = resolvedTools.palette;
 			const compileResult = await compilePromptForTurn(agentRuntime, text);
 
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
@@ -1671,7 +1798,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			appendSubmittedUserTurn(agentRuntime, text, images);
 
-			agentRuntime.agent.state.tools = resolveToolsForRuntime(agentRuntime, deps, currentToolInvokeOptions);
+			const finalResolvedTools = resolveToolsForRuntime(
+				agentRuntime,
+				deps,
+				text,
+				recentToolNames,
+				currentToolInvokeOptions,
+			);
+			agentRuntime.agent.state.tools = finalResolvedTools.tools;
+			currentToolPalette = finalResolvedTools.palette;
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 
@@ -1679,7 +1814,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				const promptMessages = promptMessagesForTurn(compileResult, text, images);
 				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
-				// pi-agent-core 0.74.0 does NOT throw on provider failures:
+				// pi-agent-core does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
 				// state.errorMessage, emits agent_end, and resolves normally.
@@ -1725,6 +1860,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				streaming = false;
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
+				currentToolPalette = null;
 			}
 		},
 		cancel(): void {

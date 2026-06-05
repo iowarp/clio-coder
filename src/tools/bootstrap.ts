@@ -1,4 +1,5 @@
 import type { SafeEventBus } from "../core/event-bus.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -15,7 +16,7 @@ import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
-import type { ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
+import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import {
 	gitDiffTool,
 	gitLogTool,
@@ -43,6 +44,240 @@ function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo)
 	return { ...spec, sourceInfo };
 }
 
+function withMetadata<T extends ToolSpec>(spec: T, metadata: ToolMetadata): T {
+	return { ...spec, metadata };
+}
+
+const boundedReadPolicy = {
+	kind: "bounded",
+	maxBytes: 60_000,
+	followUpHint: "Use offset/limit or a narrower locate/search tool call to inspect omitted content.",
+} satisfies ToolMetadata["resultSizePolicy"];
+
+const boundedSearchPolicy = {
+	kind: "bounded",
+	maxBytes: 60_000,
+	followUpHint: "Refine the pattern, path, glob, context, or limit to inspect omitted matches.",
+} satisfies ToolMetadata["resultSizePolicy"];
+
+const boundedValidationPolicy = {
+	kind: "summary",
+	maxBytes: 80_000,
+	followUpHint: "Rerun the validation with a narrower script or inspect the named failing file/test directly.",
+} satisfies ToolMetadata["resultSizePolicy"];
+
+const exactMutationPolicy = {
+	kind: "exact",
+	maxBytes: 60_000,
+	followUpHint: "Inspect the changed file or git diff for exact follow-up context.",
+} satisfies ToolMetadata["resultSizePolicy"];
+
+const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
+	[ToolNames.Read]: {
+		objective: "Read exact UTF-8 file content with line and byte bounds.",
+		uiLabel: "Read",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedReadPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.Write]: {
+		objective: "Write a complete UTF-8 file.",
+		uiLabel: "Write",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: exactMutationPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.Edit]: {
+		objective: "Apply exact text replacements to one file.",
+		uiLabel: "Edit",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: exactMutationPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.Bash]: {
+		objective: "Execute an explicit shell command when narrower tools are insufficient.",
+		uiLabel: "Shell",
+		retrySafety: "unknown",
+		resultSizePolicy: {
+			kind: "summary",
+			maxBytes: 80_000,
+			followUpHint: "Use a narrower command or a dedicated validation/read/search tool to inspect omitted output.",
+		},
+		costLatency: "local_slow",
+	},
+	[ToolNames.Grep]: {
+		objective: "Search file contents and return line-referenced matches.",
+		uiLabel: "Grep",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_medium",
+	},
+	[ToolNames.Find]: {
+		objective: "Find paths by glob-like file pattern.",
+		uiLabel: "Find",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_medium",
+	},
+	[ToolNames.Glob]: {
+		objective: "Find paths by glob pattern with recency ordering.",
+		uiLabel: "Glob",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_medium",
+	},
+	[ToolNames.Ls]: {
+		objective: "List directory entries.",
+		uiLabel: "List",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.WebFetch]: {
+		objective: "Fetch HTTP(S) text for explicit external research.",
+		uiLabel: "Fetch",
+		retrySafety: "retry_safe",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 80_000,
+			followUpHint: "Fetch a narrower URL or lower max_bytes to inspect a specific section.",
+		},
+		costLatency: "network",
+	},
+	[ToolNames.GitStatus]: {
+		objective: "Inspect git status with a fixed command vector.",
+		uiLabel: "Git Status",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.GitDiff]: {
+		objective: "Inspect bounded git diffs.",
+		uiLabel: "Git Diff",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_medium",
+	},
+	[ToolNames.GitLog]: {
+		objective: "Inspect recent git history.",
+		uiLabel: "Git Log",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.RunTests]: {
+		objective: "Run the standard project test script.",
+		uiLabel: "Tests",
+		retrySafety: "retry_safe",
+		resultSizePolicy: boundedValidationPolicy,
+		costLatency: "local_slow",
+	},
+	[ToolNames.RunLint]: {
+		objective: "Run the standard project lint script.",
+		uiLabel: "Lint",
+		retrySafety: "retry_safe",
+		resultSizePolicy: boundedValidationPolicy,
+		costLatency: "local_slow",
+	},
+	[ToolNames.RunBuild]: {
+		objective: "Run the standard project build script.",
+		uiLabel: "Build",
+		retrySafety: "retry_safe",
+		resultSizePolicy: boundedValidationPolicy,
+		costLatency: "local_slow",
+	},
+	[ToolNames.PackageScript]: {
+		objective: "Run one allowlisted package.json validation script.",
+		uiLabel: "Script",
+		retrySafety: "retry_safe",
+		resultSizePolicy: boundedValidationPolicy,
+		costLatency: "local_slow",
+	},
+	[ToolNames.ValidateFrontend]: {
+		objective: "Validate frontend artifacts without shell access.",
+		uiLabel: "Frontend",
+		retrySafety: "retry_safe",
+		resultSizePolicy: boundedValidationPolicy,
+		costLatency: "local_slow",
+	},
+	[ToolNames.WritePlan]: {
+		objective: "Write a terminal advise-mode plan artifact.",
+		uiLabel: "Plan",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: exactMutationPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.WriteReview]: {
+		objective: "Write a terminal advise-mode review artifact.",
+		uiLabel: "Review",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: exactMutationPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.FindSymbol]: {
+		objective: "Find codewiki entries exporting a symbol.",
+		uiLabel: "Symbol",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.EntryPoints]: {
+		objective: "Return likely project entry points from codewiki.",
+		uiLabel: "Entries",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.WhereIs]: {
+		objective: "Locate codewiki entries by path pattern.",
+		uiLabel: "Where",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.ReadSkill]: {
+		objective: "Read an available coding skill body.",
+		uiLabel: "Skill",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedReadPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.CreateSkill]: {
+		objective: "Create a reusable coding skill file.",
+		uiLabel: "Create Skill",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: exactMutationPolicy,
+		costLatency: "local_fast",
+	},
+	[ToolNames.Dispatch]: {
+		objective: "Dispatch a bounded task to a configured Clio worker.",
+		uiLabel: "Dispatch",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "summary",
+			maxBytes: 80_000,
+			followUpHint: "Use the dispatch receipt path or ask a narrower worker follow-up for omitted output.",
+		},
+		costLatency: "agent",
+	},
+	[ToolNames.WorkspaceContext]: {
+		objective: "Return structured workspace/git/project facts.",
+		uiLabel: "Workspace",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedReadPolicy,
+		costLatency: "local_fast",
+	},
+};
+
+function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
+	const metadata = TOOL_METADATA[spec.name];
+	return metadata ? withMetadata(spec, metadata) : spec;
+}
+
+function builtin<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
+	return withBuiltinMetadata(withSourceInfo(spec, sourceInfo));
+}
+
 /**
  * Registers every tool on the supplied registry with its admissible mode set.
  * The mode matrix (domains/modes/matrix.ts) remains authoritative for visibility;
@@ -58,108 +293,108 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const adviseOnly: ReadonlyArray<ModeName> = ["advise"];
 
 	registry.register({
-		...withSourceInfo(readTool, { path: "src/tools/read.ts", scope: "core" }),
+		...builtin(readTool, { path: "src/tools/read.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(writeTool, { path: "src/tools/write.ts", scope: "core" }),
+		...builtin(writeTool, { path: "src/tools/write.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(editTool, { path: "src/tools/edit.ts", scope: "core" }),
+		...builtin(editTool, { path: "src/tools/edit.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
+		...builtin(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
+		...builtin(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(findTool, { path: "src/tools/find.ts", scope: "core" }),
+		...builtin(findTool, { path: "src/tools/find.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(globTool, { path: "src/tools/glob.ts", scope: "core" }),
+		...builtin(globTool, { path: "src/tools/glob.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
+		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
+		...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(gitStatusTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(gitStatusTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(gitDiffTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(gitDiffTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(gitLogTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(gitLogTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(runTestsTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(runTestsTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(runLintTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(runLintTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(runBuildTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(runBuildTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
+		...builtin(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	registry.register({
-		...withSourceInfo(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
+		...builtin(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
 		allowedModes: adviseOnly,
 	});
 	registry.register({
-		...withSourceInfo(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
+		...builtin(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
 		allowedModes: adviseOnly,
 	});
 	registry.register({
-		...withSourceInfo(findSymbolTool, { path: "src/tools/codewiki/find-symbol.ts", scope: "core" }),
+		...builtin(findSymbolTool, { path: "src/tools/codewiki/find-symbol.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(entryPointsTool, { path: "src/tools/codewiki/entry-points.ts", scope: "core" }),
+		...builtin(entryPointsTool, { path: "src/tools/codewiki/entry-points.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
+		...builtin(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 	};
 	registry.register({
-		...withSourceInfo(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 		allowedModes: everyMode,
 	});
 	registry.register({
-		...withSourceInfo(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		...builtin(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 		allowedModes: defaultAndSuper,
 	});
 	if (deps.dispatch) {
 		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };
 		registry.register({
-			...withSourceInfo(createDispatchTool(dispatchToolDeps), {
+			...builtin(createDispatchTool(dispatchToolDeps), {
 				path: "src/tools/dispatch.ts",
 				scope: "core",
 			}),
@@ -170,15 +405,17 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const session = deps.session;
 	if (session) {
 		registry.register({
-			...workspaceContextTool({
-				hasSession: () => session.current() !== null,
-				getSnapshot: () => session.current()?.workspace ?? null,
-				probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
-				saveSnapshot: (snap) => {
-					const meta = session.current();
-					if (meta) meta.workspace = snap;
-				},
-			}),
+			...withBuiltinMetadata(
+				workspaceContextTool({
+					hasSession: () => session.current() !== null,
+					getSnapshot: () => session.current()?.workspace ?? null,
+					probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
+					saveSnapshot: (snap) => {
+						const meta = session.current();
+						if (meta) meta.workspace = snap;
+					},
+				}),
+			),
 			sourceInfo: { path: "src/tools/workspace-context.ts", scope: "core" },
 			allowedModes: everyMode,
 		});

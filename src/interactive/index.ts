@@ -957,7 +957,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
 	const footerToolCounts = new Map<string, number>();
+	const footerActiveTools = new Set<string>();
 	let footerToolErrors = 0;
+	let footerToolTruncatedResults = 0;
 	// Dedicated harness→user surface. Boot hints and live connect/probe notices
 	// route here (anchored in the footer region) instead of into the transcript,
 	// so they never leak into VT scrollback.
@@ -983,7 +985,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getSessionCost: () => deps.observability.sessionCost(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
-		getToolCounts: () => ({ tools: Object.fromEntries(footerToolCounts), errors: footerToolErrors }),
+		getToolCounts: () => ({
+			tools: Object.fromEntries(footerToolCounts),
+			errors: footerToolErrors,
+			active: footerActiveTools.size,
+			truncatedResults: footerToolTruncatedResults,
+		}),
 		...(deps.getContextState
 			? { getContextState: () => deps.getContextState?.(process.cwd()) ?? { clioMd: "none", memoryCount: 0 } }
 			: {}),
@@ -1068,15 +1075,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				chatRenderer.applyEvent(event);
 				return;
 			}
+			footerActiveTools.add(event.toolCallId);
 			const current = footerToolCounts.get(event.toolName) ?? 0;
 			footerToolCounts.set(event.toolName, current + 1);
 			footer.refresh();
-		} else if (event.type === "tool_execution_end" && event.isError) {
+		} else if (event.type === "tool_execution_end") {
 			if (event.toolName.toLowerCase() === "dispatch") {
 				chatRenderer.applyEvent(event);
 				return;
 			}
-			footerToolErrors += 1;
+			footerActiveTools.delete(event.toolCallId);
+			if (event.isError) footerToolErrors += 1;
+			const summary = (event as { resultSummary?: { truncated?: unknown } }).resultSummary;
+			if (summary?.truncated === true) footerToolTruncatedResults += 1;
 			footer.refresh();
 		}
 		chatRenderer.applyEvent(event);
@@ -2264,7 +2275,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		deps.onNewSession();
 		deps.observability.resetSession();
 		footerToolCounts.clear();
+		footerActiveTools.clear();
 		footerToolErrors = 0;
+		footerToolTruncatedResults = 0;
 		chatPanel.reset();
 		// Same pre-switch cleanup as /resume and /fork: without this, the
 		// chat-loop closure keeps the prior session's lastTurnId and the
