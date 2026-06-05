@@ -86,6 +86,33 @@ describe("tool palette resolver", () => {
 		ok(!tools.has(ToolNames.Bash));
 	});
 
+	it("keeps tools active when real work asks to report tool usage", () => {
+		const result = defaultPalette(
+			"Inspect package.json and src/math.js, then run npm test. Do not edit files. Report what tools you used and the final test result.",
+		);
+		const tools = new Set(result.activeTools);
+		strictEqual(result.intent, "coding");
+		strictEqual(result.phase, "validation");
+		ok(tools.has(ToolNames.Read));
+		ok(tools.has(ToolNames.RunTests));
+	});
+
+	it("does not treat no-tool-prose wording as a no-tool request", () => {
+		const result = defaultPalette("Use no tool prose. Read src/math.js and summarize it.");
+		const tools = new Set(result.activeTools);
+		strictEqual(result.intent, "repo_inspection");
+		ok(tools.has(ToolNames.Read));
+	});
+
+	it("does not expose bash when the user asks to avoid bash", () => {
+		const result = defaultPalette("Run npm test without using bash if possible; inspect failures and fix them.");
+		const tools = new Set(result.activeTools);
+		strictEqual(result.intent, "coding");
+		strictEqual(result.phase, "validation");
+		ok(tools.has(ToolNames.RunTests));
+		ok(!tools.has(ToolNames.Bash));
+	});
+
 	it("adds validation tools after recent edits", () => {
 		const result = defaultPalette("continue", { recentToolNames: [ToolNames.Edit] });
 		const tools = new Set(result.activeTools);
