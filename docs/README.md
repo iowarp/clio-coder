@@ -13,6 +13,7 @@ Recent git/source audit themes behind this docs pass:
 - hardening around default-deny Bash, project path policy, worker admission, and receipts;
 - durable sessions, fork/tree/compaction flows, and smaller-terminal TUI controls;
 - prompt-envelope delivery, provider tool contracts, and bounded tool outputs for long local runs.
+- live headless validation fixes for unknown fleet agents, open stdin, and streamed prompt diagnostics.
 
 ---
 

@@ -148,6 +148,16 @@ clio targets rename <old> <new>
 
 `clio targets use <id>` sets both the orchestrator and the default fleet target. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
 
+### Local reasoning-token budgets
+
+Some local reasoning models can spend most of a small output budget on hidden
+thinking before emitting visible text. Nemotron-Cascade-2-30B on Dynamo
+through LM Studio is one observed case: very small `max_tokens` smoke tests can
+finish with reasoning tokens and no visible answer. For those targets, keep the
+configured `maxTokens`/output budget high enough for both reasoning and final
+text, or set the orchestrator/fleet `thinkingLevel` to `off` when a terse
+visible answer matters more than reasoning traces.
+
 ---
 
 ## Model listing and refresh

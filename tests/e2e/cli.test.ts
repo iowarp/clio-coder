@@ -268,6 +268,14 @@ describe("clio cli e2e", { concurrency: false }, () => {
 				events.some((event) => event.type === "agent_start"),
 				"expected agent_start event",
 			);
+			const diagnostics = events.find((event) => event.type === "prompt_diagnostics");
+			ok(diagnostics, "expected prompt_diagnostics event");
+			ok(
+				diagnostics.promptDiagnostics &&
+					typeof diagnostics.promptDiagnostics === "object" &&
+					"toolPalette" in diagnostics.promptDiagnostics,
+				"expected prompt diagnostics to include toolPalette",
+			);
 			ok(
 				events.some((event) => event.type === "text_delta" && event.delta === "json ok"),
 				"expected text_delta event",
