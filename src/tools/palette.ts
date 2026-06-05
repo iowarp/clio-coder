@@ -91,7 +91,9 @@ const SKILL_RE = /\b(?:skill|skills|SKILL\.md)\b/i;
 const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold|install|update)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
 const SHELL_RE = /\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
 const TOOL_META_RE =
-	/\b(?:what|which)\s+(?:tools?|tool\s+calls?)\b|\b(?:list|show|describe)\s+(?:all\s+)?(?:the\s+)?tools?l?\b|\btools?\s+(?:do|can)\s+you\s+(?:have|use|access)\b|\btool\s+(?:access|surface|palette)\b/i;
+	/\b(?:what|which)\s+(?:tools?|tool\s+calls?)\b|\b(?:list|show|describe)\s+(?:all\s+)?(?:the\s+)?(?:tools?l?(?!-)|tool\s+calls?)\b|\btools?\s+(?:do|can)\s+you\s+(?:have|use|access)\b|\btool\s+(?:access|surface|palette)\b/i;
+const NO_TOOL_RE =
+	/\b(?:do\s+not|don't|without|no)\s+(?:use\s+)?(?:tools?|tool\s+calls?)\b|\b(?:no|without)\s+tool(?:s| calls?)\b/i;
 
 function unique(tools: Iterable<ToolName>): ToolName[] {
 	const seen = new Set<ToolName>();
@@ -108,6 +110,7 @@ function classifyIntent(text: string, mode: ModeName): ToolPaletteIntent {
 	const trimmed = text.trim();
 	if (mode === "advise") return "advise";
 	if (trimmed.length === 0 || GREETING_RE.test(trimmed)) return "small_talk";
+	if (NO_TOOL_RE.test(trimmed)) return "small_talk";
 	if (TOOL_META_RE.test(trimmed)) return "small_talk";
 	if (DISPATCH_RE.test(trimmed)) return "delegation";
 	if (SKILL_RE.test(trimmed)) return "skill_work";

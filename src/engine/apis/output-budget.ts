@@ -15,6 +15,7 @@ import type {
 const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
 const IMAGE_ESTIMATE_BYTES = 4800;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 2048;
 
 function byteLength(value: string): number {
 	return Buffer.byteLength(value, "utf8");
@@ -64,7 +65,7 @@ export function remainingContextMaxTokens(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens">,
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
-	limits?: { contextWindow?: number },
+	limits?: { contextWindow?: number; maxOutputTokens?: number },
 ): number {
 	const safety = CONTEXT_BUDGET_SAFETY_TOKENS;
 	const inputTokens = estimateInputTokensFromContext(context);
@@ -76,7 +77,9 @@ export function remainingContextMaxTokens(
 		? Math.max(1, contextWindow - inputTokens - safety)
 		: Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
-	const requested = options?.maxTokens ?? modelLimit;
+	const defaultLimit =
+		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0 ? limits.maxOutputTokens : modelLimit;
+	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = Math.min(requested, modelLimit, budget);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
 }

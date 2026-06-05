@@ -60,6 +60,7 @@ import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
 import type { AgentStatusEvent } from "./status/types.js";
+import { assessToolProseLoop } from "./tool-prose-loop.js";
 
 type AssistantDeltaEvent =
 	| {
@@ -96,11 +97,22 @@ export interface QueueUpdateEvent {
 	followUp: string[];
 }
 
+export interface PromptDiagnosticsEvent {
+	type: "prompt_diagnostics";
+	promptDiagnostics: PromptDiagnostics;
+}
+
 export interface QueuedMessagesSnapshot {
 	followUp: ReadonlyArray<string>;
 }
 
-export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | QueueUpdateEvent | AgentStatusEvent;
+export type ChatLoopEvent =
+	| AgentEvent
+	| AssistantDeltaEvent
+	| RetryStatusEvent
+	| QueueUpdateEvent
+	| PromptDiagnosticsEvent
+	| AgentStatusEvent;
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
@@ -225,7 +237,7 @@ interface AgentRuntime {
 	lastSessionShellHash: string | null;
 }
 
-interface PromptDiagnostics {
+export interface PromptDiagnostics {
 	renderedPromptHash: string;
 	promptSignature: string;
 	staticShellHash: string;
@@ -349,6 +361,22 @@ function finalAssistantStopMessage(messages: ReadonlyArray<AgentMessage>): Agent
 		return message;
 	}
 	return null;
+}
+
+function hasStructuredToolCall(message: AgentMessage | undefined): boolean {
+	if (!message || typeof message !== "object" || !("content" in message) || !Array.isArray(message.content))
+		return false;
+	return message.content.some((block) => block?.type === "toolCall");
+}
+
+function toolNamesFromAgentState(tools: ReadonlyArray<unknown>): string[] {
+	const names: string[] = [];
+	for (const tool of tools) {
+		if (!tool || typeof tool !== "object") continue;
+		const name = (tool as { name?: unknown }).name;
+		if (typeof name === "string" && name.trim().length > 0) names.push(name);
+	}
+	return names;
 }
 
 function noticeMessage(text: string): AgentMessage {
@@ -730,6 +758,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let currentPromptDiagnostics: PromptDiagnostics | null = null;
 	let currentToolPalette: ToolPaletteResult | null = null;
 	let activeUserTurnId: string | null = null;
+	let toolProseAbortReason: string | null = null;
 	const queuedFollowUps: string[] = [];
 	const persistedUserEchoes: string[] = [];
 	const recentToolNames: ToolName[] = [];
@@ -869,6 +898,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const message = noticeMessage(text);
 		emit({ type: "message_end", message });
 		emit({ type: "agent_end", messages: [message] });
+	};
+
+	const emitStreamingNotice = (text: string): void => {
+		emit({ type: "message_end", message: noticeMessage(text) });
 	};
 
 	const appendFinishContractAdvisory = (message: string): void => {
@@ -1287,12 +1320,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					partial?: AgentMessage;
 				};
 				if (assistantEvent.type === "text_delta") {
+					const partialText = extractText(assistantEvent.partial);
 					emit({
 						type: "text_delta",
 						contentIndex: assistantEvent.contentIndex ?? 0,
 						delta: assistantEvent.delta ?? "",
-						partialText: extractText(assistantEvent.partial),
+						partialText,
 					});
+					const activeToolNames = currentToolPalette
+						? currentToolPalette.activeTools.map((tool) => String(tool))
+						: toolNamesFromAgentState(localRuntime.agent.state.tools);
+					const localToolRuntime = localRuntime.runtimeId === "llamacpp" || localRuntime.runtimeId === "lmstudio-native";
+					if (localToolRuntime && toolProseAbortReason === null) {
+						const assessment = assessToolProseLoop({
+							text: partialText,
+							activeToolNames,
+							hasStructuredToolCall: hasStructuredToolCall(assistantEvent.partial),
+						});
+						if (assessment.kind === "loop") {
+							toolProseAbortReason = `[Clio Coder] aborted local model turn: ${assessment.reason}.`;
+							localRuntime.agent.abort();
+							emitStreamingNotice(toolProseAbortReason);
+						}
+					}
 				}
 				if (assistantEvent.type === "thinking_delta") {
 					emit({
@@ -1797,6 +1847,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			appendSubmittedUserTurn(agentRuntime, text, images);
+			if (currentPromptDiagnostics) {
+				emit({ type: "prompt_diagnostics", promptDiagnostics: currentPromptDiagnostics });
+			}
 
 			const finalResolvedTools = resolveToolsForRuntime(
 				agentRuntime,
@@ -1809,6 +1862,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			currentToolPalette = finalResolvedTools.palette;
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
+			toolProseAbortReason = null;
 
 			streaming = true;
 			try {
@@ -1826,6 +1880,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				} else {
 					const failure = detectTerminalFailureFromState(agentRuntime.agent);
 					if (failure) {
+						if (toolProseAbortReason && failure.message) {
+							(failure.message as { errorMessage?: string }).errorMessage = toolProseAbortReason;
+						}
 						ensureFailureVisibleAndPersisted(failure);
 						await runTransientRetryChain(agentRuntime, text, failure);
 					}
@@ -1836,7 +1893,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// an older pi-agent-core still routes through compact-retry.
 				const overflow = toContextOverflowError(err);
 				if (!overflow) {
-					const message = err instanceof Error ? err.message : String(err);
+					const message = toolProseAbortReason ?? (err instanceof Error ? err.message : String(err));
 					if (isRetryableErrorMessage(message)) {
 						const failureMessage = {
 							role: "assistant",
