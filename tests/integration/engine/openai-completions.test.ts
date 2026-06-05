@@ -9,6 +9,7 @@ import {
 	estimateInputTokensFromContext,
 	openAICompletionsApiProvider,
 } from "../../../src/engine/apis/openai-completions.js";
+import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS } from "../../../src/engine/apis/output-budget.js";
 
 function asRecord(value: unknown): Record<string, unknown> {
 	ok(value && typeof value === "object" && !Array.isArray(value), "expected a request body object");
@@ -94,6 +95,54 @@ describe("engine/openai-completions", () => {
 
 		const body = asRecord(capturedPayload);
 		strictEqual(body.max_tokens, 20480);
+	});
+
+	it("caps default output for local llama.cpp tool-enabled turns", async () => {
+		const model: Parameters<typeof openAICompletionsApiProvider.stream>[0] & {
+			clio: { targetId: string; runtimeId: string; lifecycle: "user-managed" };
+		} = {
+			id: "Qwen3.6-27B-MTP-UD-Q4_K_XL",
+			name: "Qwen3.6-27B-MTP-UD-Q4_K_XL",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1234/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 65536,
+			compat: { maxTokensField: "max_tokens" },
+			clio: { targetId: "mini", runtimeId: "llamacpp", lifecycle: "user-managed" },
+		};
+		const context = {
+			messages: [{ role: "user", content: "fix the bug", timestamp: 1 }],
+			tools: [
+				{
+					name: "edit",
+					description: "Edit a file",
+					parameters: Type.Object({
+						path: Type.String(),
+						edits: Type.Array(Type.Object({ oldText: Type.String(), newText: Type.String() })),
+					}),
+				},
+			],
+		} satisfies Parameters<typeof openAICompletionsApiProvider.stream>[1];
+
+		let capturedPayload: unknown;
+		const events = openAICompletionsApiProvider.stream(model, context, {
+			apiKey: "sk-test",
+			onPayload: (payload) => {
+				capturedPayload = payload;
+				throw new Error("captured request body");
+			},
+		});
+
+		for await (const _event of events) {
+			// The onPayload hook intentionally aborts before network I/O.
+		}
+
+		const body = asRecord(capturedPayload);
+		strictEqual(body.max_tokens, LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS);
 	});
 
 	it("turns empty required tool arguments into a target-specific error", async () => {

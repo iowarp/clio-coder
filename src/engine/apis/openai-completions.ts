@@ -25,7 +25,7 @@ import type { ThinkingLevel } from "../../domains/providers/types/capability-fla
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
-import { remainingContextMaxTokens } from "./output-budget.js";
+import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
 
 /**
  * Average characters-per-token for the English/code reasoning streams pi-ai
@@ -237,9 +237,21 @@ function withRemainingContextBudget<TOptions extends StreamOptions>(
 	context: Context,
 	options: TOptions | undefined,
 ): TOptions {
+	const metadata = runtimeMetadata(model);
+	const localToolOutputLimit =
+		options?.maxTokens === undefined &&
+		(context.tools?.length ?? 0) > 0 &&
+		(model.provider === "llamacpp" || metadata?.runtimeId === "llamacpp")
+			? LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS
+			: undefined;
 	return {
 		...(options ?? {}),
-		maxTokens: remainingContextMaxTokens(model, context, options),
+		maxTokens: remainingContextMaxTokens(
+			model,
+			context,
+			options,
+			localToolOutputLimit === undefined ? undefined : { maxOutputTokens: localToolOutputLimit },
+		),
 	} as TOptions;
 }
 

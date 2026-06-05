@@ -29,6 +29,18 @@ describe("tool palette resolver", () => {
 		}
 	});
 
+	it("exposes no tools for explicit no-tool replies", () => {
+		for (const text of [
+			"Do not use tools. Reply with exactly: ok",
+			"Answer without tool calls: ok",
+			"no tools, just say ok",
+		]) {
+			const result = defaultPalette(text);
+			strictEqual(result.intent, "small_talk");
+			deepStrictEqual(result.activeTools, []);
+		}
+	});
+
 	it("exposes orientation, locate, inspect, and codewiki tools for repo inspection", () => {
 		const result = defaultPalette("inspect this repo and explain the entry points");
 		const tools = new Set(result.activeTools);
@@ -57,6 +69,20 @@ describe("tool palette resolver", () => {
 		const tools = new Set(result.activeTools);
 		ok(tools.has(ToolNames.Edit));
 		ok(tools.has(ToolNames.Write));
+		ok(!tools.has(ToolNames.Bash));
+	});
+
+	it("keeps tools active when coding prompt says not to describe tool-call syntax", () => {
+		const result = defaultPalette(
+			"Fix src/math.js with the smallest targeted change. Run npm test first, edit only src/math.js, then run npm test again. Requirements: even-length medians average the two middle values, median must not mutate caller input, and summarize should pass. Do not describe tool-call syntax; call tools directly.",
+		);
+		const tools = new Set(result.activeTools);
+		strictEqual(result.intent, "coding");
+		strictEqual(result.phase, "validation");
+		ok(tools.has(ToolNames.Edit));
+		ok(tools.has(ToolNames.Write));
+		ok(tools.has(ToolNames.RunTests));
+		ok(tools.has(ToolNames.PackageScript));
 		ok(!tools.has(ToolNames.Bash));
 	});
 
