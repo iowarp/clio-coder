@@ -25,11 +25,13 @@ import {
 	openSync,
 	readdirSync,
 	readFileSync,
+	readSync,
 	renameSync,
 	statSync,
 	writeSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
 import { clioDataDir } from "../core/xdg.js";
 
@@ -231,22 +233,55 @@ function recoverJsonlTargetIfMissing(targetPath: string): string | null {
 	}
 }
 
+const SESSION_JSONL_READ_CHUNK_BYTES = 64 * 1024;
+
+function parseSessionJsonlLine(
+	line: string,
+	lineNumber: number,
+	readPath: string,
+	entries: unknown[],
+	warn: SessionJsonlWarningSink,
+): void {
+	if (line.trim().length === 0) return;
+	try {
+		entries.push(JSON.parse(line) as unknown);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		warn({ path: readPath, line: lineNumber, message: `invalid JSON skipped: ${message}` });
+	}
+}
+
 export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
 	const readPath = recoverJsonlTargetIfMissing(path);
 	if (readPath === null) return [];
-	const raw = readFileSync(readPath, "utf8");
 	const entries: unknown[] = [];
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
-	const lines = raw.split("\n");
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index] ?? "";
-		if (line.trim().length === 0) continue;
-		try {
-			entries.push(JSON.parse(line) as unknown);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			warn({ path: readPath, line: index + 1, message: `invalid JSON skipped: ${message}` });
+	const fd = openSync(readPath, "r");
+	const buffer = Buffer.allocUnsafe(SESSION_JSONL_READ_CHUNK_BYTES);
+	const decoder = new StringDecoder("utf8");
+	let pending = "";
+	let lineNumber = 0;
+	try {
+		for (;;) {
+			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+			if (bytesRead === 0) break;
+			pending += decoder.write(buffer.subarray(0, bytesRead));
+			for (;;) {
+				const newlineIndex = pending.indexOf("\n");
+				if (newlineIndex < 0) break;
+				const line = pending.slice(0, newlineIndex);
+				pending = pending.slice(newlineIndex + 1);
+				lineNumber += 1;
+				parseSessionJsonlLine(line, lineNumber, readPath, entries, warn);
+			}
 		}
+		pending += decoder.end();
+		if (pending.length > 0) {
+			lineNumber += 1;
+			parseSessionJsonlLine(pending, lineNumber, readPath, entries, warn);
+		}
+	} finally {
+		closeSync(fd);
 	}
 	return entries;
 }

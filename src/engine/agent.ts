@@ -1,5 +1,5 @@
 /**
- * Thin wrapper over @earendil-works/pi-agent-core 0.74.0's Agent class.
+ * Thin wrapper over @earendil-works/pi-agent-core 0.78.1's Agent class.
  *
  * pi-agent-core's Agent owns its own state (exposed via `agent.state`). There is no
  * separate state factory. AgentOptions drives the construction; the state is derived

@@ -164,7 +164,7 @@ describe("providers domain endpoint lifecycle", () => {
 			{
 				id: "or",
 				runtime: "openrouter",
-				defaultModel: "tencent/hy3-preview:free",
+				defaultModel: "moonshotai/kimi-k2.6",
 				auth: { apiKeyEnvVar: "OPENROUTER_API_KEY" },
 			},
 		];

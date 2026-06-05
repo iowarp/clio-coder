@@ -586,6 +586,17 @@ describe("session/contract tree + switchBranch + editLabel + deleteSession", () 
 		strictEqual(openSession(meta.id).turns().length, 2, "openSession loads up to the last valid line");
 	});
 
+	it("reads large JSONL records incrementally without corrupting multibyte text", () => {
+		const path = join(scratch, "large.jsonl");
+		const entries = [
+			{ kind: "message", text: `${"a".repeat(80_000)}π${"b".repeat(80_000)}` },
+			{ kind: "message", text: "after-large-record" },
+		];
+		writeFileSync(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+
+		deepStrictEqual(readSessionFileEntries(path), entries);
+	});
+
 	it("recovers tree state from JSONL if tree.json is stale", () => {
 		const meta = contract.create({ cwd: scratch });
 		const turn = contract.append({ parentId: null, kind: "user", payload: { text: "survives" } });

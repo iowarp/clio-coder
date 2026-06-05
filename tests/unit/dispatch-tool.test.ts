@@ -24,7 +24,7 @@ function makeReceipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		compiledPromptHash: "prompt-hash",
 		staticCompositionHash: null,
 		clioVersion: "0.1.9",
-		piMonoVersion: "0.74.0",
+		piMonoVersion: "0.78.1",
 		platform: "linux",
 		nodeVersion: "v24.0.0",
 		toolCalls: 0,

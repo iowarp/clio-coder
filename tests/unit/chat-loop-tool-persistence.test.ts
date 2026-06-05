@@ -439,7 +439,7 @@ describe("interactive/chat-loop tool persistence", () => {
 		});
 		loop.onEvent((event) => {
 			if (event.type !== "message_end") return;
-			const content = event.message.content;
+			const content = "content" in event.message ? event.message.content : [];
 			if (!Array.isArray(content)) return;
 			const text = content
 				.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")

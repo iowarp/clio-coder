@@ -357,7 +357,7 @@ async function createRunFixture(options: {
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		clioVersion: "0.1.3-test",
-		piMonoVersion: "0.74.0",
+		piMonoVersion: "0.78.1",
 		platform: "linux",
 		nodeVersion: "v22.0.0",
 		toolCalls,
