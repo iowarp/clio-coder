@@ -120,11 +120,9 @@ export async function handleRun(
 			supervised: true,
 		};
 		const handle = await dispatch.dispatch(request);
-		io.stdout(`\n[run] runId=${handle.runId}\n`);
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
 			if (!e.type || e.type === "heartbeat") continue;
-			io.stdout(`[run] ${e.type}\n`);
 			bus?.emit(BusChannels.DispatchProgress, {
 				runId: handle.runId,
 				agentId,
@@ -132,12 +130,10 @@ export async function handleRun(
 			});
 		}
 		const receipt = await handle.finalPromise;
-		const reasoning =
-			typeof receipt.reasoningTokenCount === "number" && receipt.reasoningTokenCount > 0
-				? ` reasoning=${receipt.reasoningTokenCount}`
-				: "";
-		const failure = receipt.failureMessage ? ` error=${receipt.failureMessage}` : "";
-		io.stdout(`[run] done exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning}${failure}\n`);
+		if (receipt.exitCode !== 0 || receipt.failureMessage) {
+			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
+			io.stderr(`[run] failed: exit=${receipt.exitCode}${failure}\n`);
+		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		io.stderr(`[run] failed: ${msg}\n`);

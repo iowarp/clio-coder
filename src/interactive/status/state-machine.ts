@@ -267,9 +267,22 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			const next = refreshMeaningful(prev, ctx);
 			const role = (event.message as { role?: unknown }).role;
 			if (role === "assistant" && prev.phase === "tool_running") return { ...next, phase: "writing" };
+			if (
+				role === "assistant" &&
+				(prev.phase === "preparing" || prev.phase === "waiting_model" || prev.phase === "thinking")
+			)
+				return { ...next, phase: "writing", resumePhase: undefined };
 			return next;
 		}
-		case "message_update":
+		case "message_update": {
+			const base = activePhaseAfterStuck(prev);
+			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
+			if (base === "preparing" || base === "waiting_model" || base === "thinking") {
+				return { ...next, phase: "writing", resumePhase: undefined };
+			}
+			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
+			return next;
+		}
 		case "tool_execution_update":
 		case "message_end":
 			return refreshMeaningful(prev, ctx);

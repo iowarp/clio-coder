@@ -90,7 +90,7 @@ describe("interactive tool-approval overlay", () => {
 			p.send("/run worker trigger ask\r");
 			await p.expect(/Tool approval/, 20_000);
 			p.send("a");
-			await p.expect(/\[run\] done exit=0/, 30_000);
+			await p.expect(/✓\s+worker/, 30_000);
 			p.send("/quit\r");
 			const exit = await p.wait(10_000);
 			strictEqual(exit.code, 0);

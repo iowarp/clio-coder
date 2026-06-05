@@ -90,10 +90,14 @@ const EXTERNAL_RE = /\b(?:web|http|https|url|fetch|browse|internet|online|extern
 const SKILL_RE = /\b(?:skill|skills|SKILL\.md)\b/i;
 const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold|install|update)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
 const SHELL_RE = /\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
+const AVOID_SHELL_RE =
+	/\b(?:(?:do\s+not|don't)\s+(?:use\s+)?|(?:without|no)\s+(?:using\s+)?)\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
 const TOOL_META_RE =
 	/\b(?:what|which)\s+(?:tools?|tool\s+calls?)\b|\b(?:list|show|describe)\s+(?:all\s+)?(?:the\s+)?(?:tools?l?(?!-)|tool\s+calls?)\b|\btools?\s+(?:do|can)\s+you\s+(?:have|use|access)\b|\btool\s+(?:access|surface|palette)\b/i;
 const NO_TOOL_RE =
-	/\b(?:do\s+not|don't|without|no)\s+(?:use\s+)?(?:tools?|tool\s+calls?)\b|\b(?:no|without)\s+tool(?:s| calls?)\b/i;
+	/\b(?:do\s+not|don't)\s+use\s+(?:tools?|tool\s+calls?)\b|\b(?:without|no)\s+(?:tools|tool\s+calls?)\b|\bno\s+tool\s+(?:use|calls?)\b/i;
+const WORK_CONTEXT_RE =
+	/\b(?:repo(?:sitory)?|workspace|project|code|source|files?|director(?:y|ies)|src\/|tests?\/|package\.json|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|c|cpp|h|hpp|toml|ya?ml))\b/i;
 
 function unique(tools: Iterable<ToolName>): ToolName[] {
 	const seen = new Set<ToolName>();
@@ -108,16 +112,31 @@ function unique(tools: Iterable<ToolName>): ToolName[] {
 
 function classifyIntent(text: string, mode: ModeName): ToolPaletteIntent {
 	const trimmed = text.trim();
+	const asksNoTools = NO_TOOL_RE.test(trimmed);
+	const asksToolMeta = TOOL_META_RE.test(trimmed);
+	const asksDispatch = DISPATCH_RE.test(trimmed);
+	const asksSkill = SKILL_RE.test(trimmed);
+	const asksExternal = EXTERNAL_RE.test(trimmed);
+	const asksEdit = EDIT_RE.test(trimmed);
+	const asksValidation = VALIDATE_RE.test(trimmed);
+	const asksInspection = INSPECT_RE.test(trimmed);
+	const hasWorkIntent =
+		asksDispatch ||
+		asksSkill ||
+		asksExternal ||
+		asksEdit ||
+		asksValidation ||
+		(asksInspection && (!asksToolMeta || WORK_CONTEXT_RE.test(trimmed)));
 	if (mode === "advise") return "advise";
 	if (trimmed.length === 0 || GREETING_RE.test(trimmed)) return "small_talk";
-	if (NO_TOOL_RE.test(trimmed)) return "small_talk";
-	if (TOOL_META_RE.test(trimmed)) return "small_talk";
-	if (DISPATCH_RE.test(trimmed)) return "delegation";
-	if (SKILL_RE.test(trimmed)) return "skill_work";
-	if (EXTERNAL_RE.test(trimmed)) return "external_research";
-	if (EDIT_RE.test(trimmed)) return "coding";
-	if (VALIDATE_RE.test(trimmed)) return "validation";
-	if (INSPECT_RE.test(trimmed)) return "repo_inspection";
+	if (asksNoTools) return "small_talk";
+	if (asksToolMeta && !hasWorkIntent) return "small_talk";
+	if (asksDispatch) return "delegation";
+	if (asksSkill) return "skill_work";
+	if (asksExternal) return "external_research";
+	if (asksEdit) return "coding";
+	if (asksValidation) return "validation";
+	if (asksInspection) return "repo_inspection";
 	return "repo_inspection";
 }
 
@@ -147,7 +166,7 @@ function requestedGroups(intent: ToolPaletteIntent, phase: ToolPalettePhase, tex
 	if (intent === "delegation" || DISPATCH_RE.test(text)) groups.push("delegate");
 	if (intent === "external_research" || EXTERNAL_RE.test(text)) groups.push("external");
 	if (intent === "skill_work" || SKILL_RE.test(text)) groups.push("skills");
-	if (SHELL_RE.test(text)) groups.push("escape_hatch");
+	if (SHELL_RE.test(text) && !AVOID_SHELL_RE.test(text)) groups.push("escape_hatch");
 	return uniqueGroups(groups);
 }
 
