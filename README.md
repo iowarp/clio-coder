@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.1-00d4db?style=flat-square" /></a>
-  <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522-147366?style=flat-square" /></a>
+  <a href="#install"><img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522.19-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-passing-147366?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/badge/npm-coming%20soon-lightgrey?style=flat-square" /></a>
@@ -26,9 +26,9 @@
 
 ## What is Clio Coder?
 
-Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, part of the NSF-funded IOWarp project at [iowarp.ai](https://iowarp.ai). It targets HPC and scientific-software developers across research-software domains and runs as a supervised AI coding harness inside their repositories.
+Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science, part of the NSF-funded IOWarp project at [iowarp.ai](https://iowarp.ai). It runs inside real repositories as a supervised terminal harness for HPC and scientific-software developers.
 
-It gives you an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and an audit trail. It is designed for developers and research teams who want AI to help inspect, plan, modify, and review code while keeping humans in control.
+It combines an interactive terminal UI, configurable local and cloud model targets, dispatchable coding agents, persistent sessions, cost receipts, and audit logs. The goal is not to make the model an unrestricted shell user; it is to let developers ask for inspection, plans, edits, reviews, and validation while Clio gates tool access and records what happened.
 
 Clio Coder is currently in **alpha**. The current release is **v0.2.1**.
 
@@ -50,7 +50,7 @@ It is still alpha software: expect sharp edges around first-run configuration, l
 - you want AI assistance inside a real repository from the terminal;
 - you run local models (Ollama, LM Studio, llama.cpp, vLLM, SGLang) or have cloud API keys;
 - you care about supervised execution, receipts, and audit trails;
-- you can run source builds, `clio doctor`, `clio targets --probe`, and report reproducible failures.
+- you can run source builds, `clio doctor --fix`, `clio targets --probe`, and report reproducible failures.
 
 ## Skip it if
 
@@ -78,7 +78,7 @@ It is still alpha software: expect sharp edges around first-run configuration, l
 
 ### Requirements
 
-- Node.js `>=22`
+- Node.js `>=22.19.0`
 - npm
 - A model target, such as:
   - a local OpenAI-compatible server;
@@ -120,7 +120,7 @@ Start Clio Coder from the repository you want to work on:
 
 ```bash
 cd /path/to/your/repo
-clio doctor
+clio doctor --fix
 clio configure
 clio targets --probe
 clio
@@ -140,12 +140,14 @@ clio configure --runtime sglang          --id sglang   --url http://127.0.0.1:30
 
 Migrate older `openai-compat` targets pointing at LM Studio or Ollama with `clio targets convert <id> --runtime <native>`.
 
-For OpenRouter free-model testing:
+For OpenRouter smoke testing with a current catalog model:
 
 ```bash
-clio configure --runtime openrouter --id openrouter-free --model tencent/hy3-preview:free --api-key-env OPENROUTER_API_KEY --set-orchestrator --set-fleet-default
-clio targets --probe --target openrouter-free
+clio configure --runtime openrouter --id openrouter --model moonshotai/kimi-k2.6 --api-key-env OPENROUTER_API_KEY --set-orchestrator --set-fleet-default
+clio targets --probe --target openrouter
 ```
+
+Use `clio models --target openrouter --probe` to pick a different live OpenRouter model for your account.
 
 Quick smoke test, non-interactive:
 
@@ -495,7 +497,7 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 ### Enforcement layers
 
 1. **Damage-control rules.** Base hard blocks for things like `rm -rf /`, `git push --force`, `dd` writes to block devices, fork bombs, and pipe-to-shell installers. Applied identically in the orchestrator and dispatched agents. See `damage-control-rules.yaml`.
-2. **Default-deny Bash.** Default mode denies arbitrary Bash. The allowlist covers common engineering commands (see [docs/specs/safety-model.md](docs/specs/safety-model.md) for the full list). Anything else needs an audited project policy entry or super elevation. Shell operators are denied unless a project policy entry explicitly opts in.
+2. **Default-deny Bash.** Default mode denies arbitrary Bash. The allowlist covers common engineering commands (see [docs/safety-model.md](docs/safety-model.md) for the current safety guide). Anything else needs an audited project policy entry or super elevation. Shell operators are denied unless a project policy entry explicitly opts in.
 3. **Typed execution tools.** `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script`, and `validate_frontend` use fixed argv vectors or in-process validators with bounded cwd, timeouts, and output caps. No `/bin/bash -lc`.
 4. **Project policy.** `.clio/safety.yaml` (schema v1) defines reviewed commands with `id`, `command`, optional relative `cwd`, `timeoutMs`, `maxOutputBytes`, `actionClass`, `shellOperators`, `env`, `requireConfirmation`, `rationale`, `owner`, `comment`. Strict validation: unknown keys, wrong types, absolute cwd, and `..`-escaping cwd reject the entire policy. Entries without `cwd` are bound to the policy root. Active runs use the snapshot the engine loaded at start, so an agent cannot edit and benefit from the new allowlist in the same run.
 5. **Dispatch admission.** Dispatched-agent scope must be a subset of orchestrator scope, and the agent's requested action classes must fit inside its scope. Unknown tools classify as `unknown` and fail closed.
@@ -503,7 +505,7 @@ Clio Coder is designed for supervised work. It does not treat the model as an un
 
 `validate_frontend` is the frontend-specific typed validator. It accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` files under the workspace root. HTML checks include tag balance, inline/local JavaScript syntax, local stylesheet existence and CSS balance, skipped external/root-relative references, and an optional browser load in `auto`, `required`, or `off` mode.
 
-The full spec lives in [docs/specs/safety-model.md](docs/specs/safety-model.md).
+The current safety guide lives in [docs/safety-model.md](docs/safety-model.md).
 
 ---
 
@@ -660,7 +662,7 @@ The product is **Clio Coder**, CLI binary `clio`. It is alpha software; do not i
 
 ## Development
 
-Most users do not need this section. It is for contributors.
+Most users do not need this section. It is for contributors. Deeper source-aligned guides live in [docs/README.md](docs/README.md).
 
 | Script | Purpose |
 | --- | --- |
@@ -702,9 +704,9 @@ Clio Coder keeps model execution, agent dispatch, interactive UI state, and doma
 
 Boundary tests enforce three rules at build time:
 
-1. **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`. Type-only imports are allowed anywhere.
-2. **Internal worker isolation.** `src/worker/**` never imports `src/domains/**` except `src/domains/providers`, which carries pure runtime descriptors the internal runtime rehydrates from stdin.
-3. **Domain independence.** `src/domains/<x>/**` never imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
+1. **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`. Outside the engine, type-only pi imports must be explicitly allowlisted by the boundary test.
+2. **Internal worker isolation.** `src/worker/**` does not value-import `src/domains/**` except the worker-safe provider runtime rehydration modules.
+3. **Domain independence.** `src/domains/<x>/**` never imports another domain's `extension.ts`. Cross-domain traffic flows through contracts, manifests, snapshots, or event buses.
 
 This keeps provider-specific code contained and the system easier to reason about as more runtimes and agents are added.
 

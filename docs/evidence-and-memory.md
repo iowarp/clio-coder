@@ -1,100 +1,149 @@
-# Clio Coder Evidence Corpus & Long-Term Memory
+# Evidence Corpus and Long-Term Memory
 
-Clio Coder treats AI agent lessons as verifiable assets. Lessons must be backed by **deterministic evidence** and are gated by **explicit human review** before being saved to long-term memory. This ensures that agent memory contains only operator-approved facts, preventing hallucinations or outdated instructions from leaking into active prompt windows.
+Clio Coder treats run claims and agent lessons as artifacts that should be inspectable. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Long-term memory records are local, evidence-linked, and only injected after explicit approval.
+
+Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, and `src/cli/memory.ts`.
 
 ---
 
-## 📂 The Deterministic Evidence Corpus
+## Evidence CLI
 
-Every execution run, session compile, or evaluation run gathers its output files, receipts, and audit rows into a single, sandboxed evidence directory identified by a unique **`evidenceId`**.
-
-### Evidence Corpus Layout:
-```text
-<dataDir>/evidence/<evidenceId>/
-├── overview.json           # stable overview of models, run status, and totals
-├── transcript.md          # clean Markdown transcript of the entire session
-├── trace.raw.jsonl        # raw sequence of internal execution events
-├── trace.cleaned.jsonl    # cleaned traces (omitting extremely large outputs)
-├── tool-events.jsonl      # isolated sequence of tool calls and exit codes
-├── audit-linked.jsonl     # safety audit rows mapped to their exact run IDs
-├── receipt.json           # deep copy of the original signed run receipt
-├── findings.json          # structured warnings and integrity failures
-└── findings.md            # human-readable report of warnings/failures
+```bash
+clio evidence build --run <runId>
+clio evidence build --session <sessionId>
+clio evidence build --eval <evalId>
+clio evidence inspect <evidenceId>
+clio evidence list
 ```
 
-### Deterministic Invariants:
-1. **Model-free extraction:** The evidence builder does not query any AI model to summarize logs. It parses files, aggregates counters, and extracts warnings in-process. Two builds from the same raw logs produce identical byte-for-byte evidence files.
-2. **Stable ID mapping:** The `evidenceId` is derived from the source type and its unique ID. Rebuilding a corpus overwrites the previous folder instead of creating duplicates.
-3. **Closed failure tags:** Run details are evaluated against a closed list of failure classifications (e.g., `timeout`, `context-overflow`, `wrong-runtime`, `destructive-cleanup`, `blocked-tool`, `auth-failure`, `protected-artifact`).
+Evidence IDs are deterministic:
+
+| Source | ID shape |
+| --- | --- |
+| Run | `run-<runId>` |
+| Session | `session-<sessionId>` |
+| Eval | `eval-<evalId>` |
+
+Rebuilding the same evidence ID rewrites the same directory under `<dataDir>/evidence/`.
 
 ---
 
-## 🧠 The Long-Term Memory Domain
+## Evidence directory layout
 
-Long-term memories are repository-wide lessons captured from successful or failed runs. Approved memories are injected dynamically into prompt templates.
+Run/session evidence files:
 
-### Data Layout:
-Memory records reside in a single JSON document:
+```text
+<dataDir>/evidence/<evidenceId>/
+├── overview.json
+├── transcript.md
+├── trace.raw.jsonl
+├── trace.cleaned.jsonl
+├── tool-events.jsonl
+├── audit-linked.jsonl
+├── receipt.json
+├── protected-artifacts.json
+├── findings.json
+└── findings.md
+```
+
+Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact placeholders when no linked receipts exist.
+
+### Core files
+
+| File | Purpose |
+| --- | --- |
+| `overview.json` | Stable summary: source, runs, sessions, statuses, tasks, models, totals, tags, and file list. |
+| `transcript.md` | Human-readable run/session/eval transcript. |
+| `trace.raw.jsonl` | Raw run ledger/receipt/eval rows. |
+| `trace.cleaned.jsonl` | Compact normalized rows plus findings. |
+| `tool-events.jsonl` | Tool summaries from session entries, audit rows, receipts, or eval commands. |
+| `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
+| `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`). |
+| `protected-artifacts.json` | Protected artifact state/events. |
+| `findings.json` / `findings.md` | Structured and readable findings. |
+
+---
+
+## Evidence tags
+
+The closed tag set includes:
+
+```text
+audit-linked | audit-missing | best-effort-link | timeout | context-overflow |
+provider-transient | missing-dependency | wrong-runtime | proxy-validation |
+no-validation | destructive-cleanup | blocked-tool | protected-artifact |
+tool-loop | test-failure | build-failure | cwd-missing | session-linked |
+session-missing | auth-failure | unknown
+```
+
+Findings are `info` or `warn`; the builder does not call a model to summarize evidence.
+
+---
+
+## Memory CLI
+
+```bash
+clio memory list
+clio memory propose --from-evidence <evidenceId>
+clio memory approve <memoryId>
+clio memory reject <memoryId>
+clio memory prune --stale
+```
+
+Memory records live in:
+
 ```text
 <dataDir>/memory/records.json
 ```
-The file is capped at `MEMORY_STORE_MAX_RECORDS = 500`. Records are sorted on write by `(scope, key, createdAt, id)` to keep the file format stable and git-merge friendly.
+
+The store is capped at `500` records and is sorted by scope, key, creation time, and id for stable writes.
 
 ---
 
-## 🔄 Memory Record Lifecycle
-
-The lifecycle of a memory record relies entirely on operator intervention:
+## Memory record lifecycle
 
 ```mermaid
 stateDiagram-v2
-    evidence: Deterministic Evidence Corpus
-    proposed: Proposed State (approved = false)
-    approved: Approved State (approved = true)
-    rejected: Rejected State (rejectedAt stamped)
-    deleted: Stale Pruned / Suppressed
-    
-    evidence --> proposed : clio memory propose --from-evidence
-    proposed --> approved : clio memory approve <id>
-    proposed --> rejected : clio memory reject <id>
-    approved --> rejected : clio memory reject <id>
-    
-    proposed --> deleted : clio memory prune (stale after 30 days)
-    approved --> deleted : clio memory prune (stale after 180 days)
-    rejected --> deleted : Soft delete (retains for audit)
+    evidence --> proposed: propose --from-evidence
+    proposed --> approved: approve <id>
+    proposed --> rejected: reject <id>
+    approved --> rejected: reject <id>
+    proposed --> pruned: prune --stale after 30 days
+    rejected --> pruned: prune --stale after 30 days
+    approved --> pruned: prune --stale after 180 days since lastVerifiedAt/createdAt
 ```
 
-### 1. Proposal (`proposed` status)
-Developers propose a memory record from a completed evidence run:
-```bash
-clio memory propose --from-evidence <evidenceId>
-```
-The builder analyzes the evidence findings and drafts a candidate record with `approved: false`. This step is idempotent; repeated calls update the existing proposal rather than creating duplicates.
-> [!IMPORTANT]
-> **Evidence Link Constraint:** A memory record must cite at least one valid `evidenceId` in its `evidenceRefs[]` list. Records without linked evidence references are filtered out and are never injected into prompts.
+Records must cite at least one evidence ID to be considered for prompt injection. Rejected records remain in the store until stale pruning so the same bad lesson is not immediately re-proposed from the same evidence.
 
-### 2. Operator Approval (`approved` status)
-An operator inspects the proposed record via `clio memory list` and promotes it to active:
-```bash
-clio memory approve <memoryId>
-```
-This flips `approved` to `true`, stamps `lastVerifiedAt`, and clears any previous rejection markers.
+---
 
-### 3. Rejection (`rejected` status)
-If a record is incorrect, the operator blocks it:
-```bash
-clio memory reject <memoryId>
-```
-This sets `approved` to `false` and stamps `rejectedAt`. Rejections are kept in-store to prevent the system from re-proposing the same bad lesson from the same evidence ID.
+## Prompt injection rules
 
-### 4. Dynamic Prompt Retrieval Constraints
-During a run, approved memories are queried and injected into the dynamic `memory.dynamic` prompt slot under strict resource constraints:
-- **Default Scopes:** The query retrieves records scoped to `["global", "repo"]`. Other scopes (e.g., `hpc-domain`, `runtime`, `language`) are opted into per call site.
-- **Hard Token Budget:** The total memory injection section is capped at **400 tokens**.
-- **Hard Count Cap:** A maximum of **5 memory records** can be injected in one turn.
-- **Suppression:** If a memory has any active entries in its `regressions[]` list, retrieval suppresses it.
+The chat loop loads memory synchronously from the bounded local store and calls `buildMemoryPromptSection()`.
 
-### 5. Staleness Pruning
-To prevent memory bloat, old records are pruned via `clio memory prune --stale`:
-- **Unapproved records:** Stale and pruned 30 days after `createdAt`.
-- **Approved records:** Stale and pruned 180 days after their `lastVerifiedAt` timestamp (meaning they must be verified or refreshed twice a year).
+Defaults:
+
+| Constraint | Default |
+| --- | --- |
+| Scopes | `global`, `repo` |
+| Token budget | `400` estimated tokens |
+| Max records | `5` |
+| Required status | `approved: true` |
+| Required provenance | At least one `evidenceRefs[]` entry |
+| Suppression | Records with active `regressions[]` entries are skipped |
+
+Rendered memory lines always cite record ID, scope, lesson, and evidence IDs. The prompt tells the model not to extrapolate beyond cited findings.
+
+---
+
+## Recommended workflow
+
+1. Build evidence from the run/session/eval that taught the lesson.
+2. Inspect the evidence and findings.
+3. Propose memory from the evidence.
+4. Review the proposed lesson for correctness and scope.
+5. Approve only if it is durable and useful.
+6. Reject incorrect or overbroad records.
+7. Prune stale records periodically.
+
+Memory is meant to reduce repeated mistakes, not to become an unreviewed second instruction system.
