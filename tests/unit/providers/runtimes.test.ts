@@ -234,7 +234,7 @@ describe("providers/runtimes built-in descriptors", () => {
 		ok(openrouter, "missing openrouter runtime");
 		strictEqual(openrouter.defaultCapabilities.thinkingFormat, "openrouter");
 
-		const model = openrouter.synthesizeModel({ id: "or", runtime: "openrouter" }, "tencent/hy3-preview:free", null);
+		const model = openrouter.synthesizeModel({ id: "or", runtime: "openrouter" }, "moonshotai/kimi-k2.6", null);
 		strictEqual(model.headers?.["HTTP-Referer"], "https://github.com/iowarp/clio-coder");
 		strictEqual(model.headers?.["X-OpenRouter-Title"], "Clio Coder");
 		strictEqual(model.reasoning, true);
@@ -249,16 +249,16 @@ describe("providers/runtimes built-in descriptors", () => {
 			capturedUrl = String(input);
 			const headers = init?.headers as Record<string, string> | undefined;
 			capturedAuthorization = headers?.authorization ?? "";
-			return new Response(JSON.stringify({ data: [{ id: "tencent/hy3-preview:free" }] }), { status: 200 });
+			return new Response(JSON.stringify({ data: [{ id: "moonshotai/kimi-k2.6" }] }), { status: 200 });
 		}) as typeof fetch;
 		process.env.OPENROUTER_API_KEY = "sk-or";
 		try {
 			const result = await openrouter.probe?.(
-				{ id: "or", runtime: "openrouter", defaultModel: "tencent/hy3-preview:free" },
+				{ id: "or", runtime: "openrouter", defaultModel: "moonshotai/kimi-k2.6" },
 				{ credentialsPresent: new Set(["OPENROUTER_API_KEY"]), httpTimeoutMs: 1000 },
 			);
 			strictEqual(result?.ok, true);
-			deepStrictEqual(result?.models, ["tencent/hy3-preview:free"]);
+			deepStrictEqual(result?.models, ["moonshotai/kimi-k2.6"]);
 			strictEqual(capturedUrl, "https://openrouter.ai/api/v1/models");
 			strictEqual(capturedAuthorization, "Bearer sk-or");
 		} finally {

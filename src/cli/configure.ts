@@ -491,6 +491,10 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 				if (instructions) process.stdout.write(`${instructions}\n`);
 				process.stdout.write("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
 			},
+			onDeviceCode: ({ verificationUri, userCode }) => {
+				process.stdout.write(`\nOpen: ${verificationUri}\n`);
+				process.stdout.write(`Enter code: ${userCode}\n`);
+			},
 			onPrompt: async (prompt) => {
 				const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
 				return prompt.allowEmpty ? answer : answer.trim();

@@ -37,7 +37,7 @@
 		"url": "git+https://github.com/iowarp/clio-coder.git"
 	},
 	"engines": {
-		"node": ">=22.0.0"
+		"node": ">=22.19.0"
 	},
 	"bin": {
 		"clio": "dist/cli/index.js"
@@ -77,20 +77,20 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.2.120",
-		"@earendil-works/pi-agent-core": "0.74.0",
-		"@earendil-works/pi-ai": "0.74.0",
-		"@earendil-works/pi-tui": "0.74.0",
+		"@earendil-works/pi-agent-core": "0.78.1",
+		"@earendil-works/pi-ai": "0.78.1",
+		"@earendil-works/pi-tui": "0.78.1",
 		"@lmstudio/sdk": "1.5.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "5.6.2",
 		"diff": "9.0.0",
 		"esbuild": "0.28.0",
 		"ollama": "0.6.3",
-		"typebox": "1.1.33",
+		"typebox": "1.1.38",
 		"typescript": "6.0.3",
-		"undici": "8.1.0",
+		"undici": "8.3.0",
 		"uuid": "14.0.0",
-		"yaml": "2.8.3"
+		"yaml": "2.9.0"
 	},
 	"overrides": {
 		"@anthropic-ai/sdk": "0.94.0",

@@ -1126,7 +1126,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.74.0
+	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.78.1
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
@@ -1782,6 +1782,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 							].filter(Boolean),
 						);
 						maybeOpenExternalUrl(url);
+					},
+					onDeviceCode: ({ verificationUri, userCode }) => {
+						dialog.controller.setLines([
+							`Open: ${verificationUri}`,
+							`Enter code: ${userCode}`,
+							"Waiting for authentication...",
+						]);
+						maybeOpenExternalUrl(verificationUri);
 					},
 					onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
 					onSelect: (prompt) =>

@@ -88,7 +88,7 @@ describe("subprocess-runtime startSubprocessWorkerRun", () => {
 			| { type: "message_end"; message: AgentMessage }
 			| undefined;
 		ok(end, "message_end event missing");
-		const content = end.message.content;
+		const content = "content" in end.message ? end.message.content : [];
 		const blocks = Array.isArray(content) ? content : [];
 		const text = blocks
 			.filter(
