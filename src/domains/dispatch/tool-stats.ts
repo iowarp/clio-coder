@@ -7,7 +7,7 @@
  * blocked admissions, and parallel-batch tool calls all flow through one
  * code path that unit tests can pin.
  *
- * Invariants (asserted by tests/unit/dispatch-tool-stats.test.ts):
+ * Invariants (asserted by tests/contracts/dispatch.test.ts):
  *   - count == ok + errors + blocked for every tool entry.
  *   - totalDurationMs accumulates only finite non-negative durations.
  *   - snapshot is sorted by tool name ascending so receipt digests stay

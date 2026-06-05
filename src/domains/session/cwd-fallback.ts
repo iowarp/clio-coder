@@ -9,8 +9,7 @@
  * clio's orchestrator or the TUI; the caller pops `cwd-fallback` overlay
  * on a negative answer.
  *
- * Injectable `fsProbe` so the unit tests under tests/unit/cwd-fallback.test.ts
- * can cover every branch without touching the real filesystem.
+ * Injectable `fsProbe` so that the resumption path can be verified.
  */
 
 import { existsSync, statSync } from "node:fs";

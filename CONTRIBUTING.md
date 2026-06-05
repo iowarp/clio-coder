@@ -27,10 +27,22 @@ npm run test
 npm run build
 ```
 
-Local and GitHub gate:
+Local and GitHub PR gate (fast, deterministic):
 
 ```bash
 npm run ci
+```
+
+Release gate (for maintainers):
+
+```bash
+npm run ci:release
+```
+
+Live LLM smoke validation (manual/opt-in):
+
+```bash
+CLIO_LIVE_SMOKE=1 CLIO_LIVE_TARGET=anthropic ANTHROPIC_API_KEY=your_key npm run test:live
 ```
 
 Optional hook:

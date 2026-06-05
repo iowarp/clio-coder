@@ -2005,7 +2005,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Session check runs BEFORE orchestrator-configuration so a fresh
 			// TUI with nothing configured still reports the actionable "no
 			// current session" message rather than the "not configured"
-			// banner. The e2e regex in tests/e2e/interactive.test.ts locks
+			// banner.
 			// this ordering.
 			if (!deps.session?.current()) {
 				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");

@@ -135,6 +135,6 @@ App bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`, `Ctrl+D`
 ## 🧪 Development Workflow Invariants
 
 Clio Coder enforces a high-standard contributor policy:
-1. **Always green:** Every commit on development branches must leave `npm run ci` green (typecheck, lint, unit/integration/boundary/e2e tests, and build).
+1. **Always green:** Every commit on development branches must leave `npm run ci` green (typecheck, lint, boundary/contract/smoke tests, and build).
 2. **Boundary safety:** Never bypass the 3 boundary rules (documented in [architecture.md](architecture.md)).
 3. **No raw shell bypass:** Avoid execution of raw shell operations in tools; use typed tool wrappers like `run_tests` and `validate_frontend` to preserve safety audits.
