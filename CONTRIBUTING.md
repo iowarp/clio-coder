@@ -13,7 +13,7 @@ small, explicit, and easy to verify from git history.
 
 Requirements:
 
-- Node.js `>=22`
+- Node.js `>=22.19.0`
 - npm
 - Linux or macOS for full parity. Windows is best effort until a stable release.
 
@@ -33,7 +33,7 @@ Local and GitHub PR gate (fast, deterministic):
 npm run ci
 ```
 
-Release gate (for maintainers):
+Release gate (for maintainers before tags or release artifacts):
 
 ```bash
 npm run ci:release

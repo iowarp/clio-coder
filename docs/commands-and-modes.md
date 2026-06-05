@@ -1,0 +1,242 @@
+# Commands and Modes
+
+Clio Coder is a terminal-first alpha harness. This page keeps the command
+reference, interaction modes, dispatch surface, verification lanes, and common
+operator guidance out of the README so the release entry point stays short.
+
+Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
+`src/domains/modes/**`, `src/domains/dispatch/**`, `src/tools/registry.ts`, and
+the current test suite.
+
+## CLI Commands
+
+| Command | Purpose |
+| --- | --- |
+| `clio` | Launch the interactive terminal UI. |
+| `clio run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
+| `clio run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
+| `clio --version` | Print the installed version. |
+| `clio --no-context-files` / `clio -nc` | Skip `CLIO.md` project-context injection for one invocation. |
+| `clio configure` | Run the configuration wizard. |
+| `clio configure --list` | List user-facing runtime ids. |
+| `clio targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
+| `clio targets add` | Add a target interactively or through configure flags. |
+| `clio targets use <id>` | Set chat and fleet defaults to one target. |
+| `clio targets profile <name> <id>` | Register a named fleet profile. |
+| `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
+| `clio targets remove <id>` | Remove a target. |
+| `clio targets rename <old> <new>` | Rename a target id. |
+| `clio models [search] [--target <id>] [--json] [--probe]` | List known or discovered models. |
+| `clio auth list` | Show known auth entries. |
+| `clio auth status [target-or-runtime]` | Inspect auth state. |
+| `clio auth login <target-or-runtime>` | Add credentials through the supported flow. |
+| `clio auth logout <target-or-runtime>` | Remove stored credentials. |
+| `clio doctor [--fix]` | Diagnose state; with `--fix`, repair or create missing state. |
+| `clio reset [--state\|--auth\|--config\|--all]` | Reset selected Clio Coder state. |
+| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print uninstall guidance. |
+| `clio upgrade` | Check for and apply runtime upgrades. |
+| `clio agents` | List discovered agent recipes. |
+| `clio components [--json]` | List behavior-affecting harness components. |
+| `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
+| `clio components diff --from <a> --to <b>` | Compare component snapshots. |
+| `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
+| `clio eval run\|report\|compare` | Run local eval task files and compare results. |
+| `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
+| `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
+| `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles. |
+| `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
+| `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
+| `clio init [--yes] [--preview|--adopt]` | Bootstrap or adopt agent configs into `CLIO.md`. |
+
+## Headless Run Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--target <id>` | One-run main-agent or dispatch target override. |
+| `--model <wireId>` | One-run model override. |
+| `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
+| `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
+| `--agent-profile <name>` | Use a named fleet profile for dispatch. |
+| `--agent-runtime <id>` | Pick the first fleet profile whose endpoint uses this runtime. |
+| `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
+| `--require <capability>` | Require a target capability for dispatch. Repeatable. |
+| `--auto-approve <mode>` | Approval behavior for SDK tool asks: `allow` or `deny`. |
+
+Example:
+
+```bash
+clio run \
+  "Find the test command and summarize the project structure." \
+  --target mini \
+  --model AgenticQwen-30B-A3B-i1-Q4_K_M
+```
+
+## Interactive Slash Commands
+
+Slash commands are available inside the TUI. Type `/` at the start of the
+prompt to open autocomplete.
+
+| Command | Purpose |
+| --- | --- |
+| `/run <agent> <task>` | Dispatch a fleet agent and stream events into the transcript. |
+| `/init` | Create or refresh the checked-in `CLIO.md` project guide. |
+| `/targets` | Show target health, auth, runtime, model, and capabilities. |
+| `/connect [target]` | Connect to a target or runtime. |
+| `/disconnect [target]` | Disconnect a target or runtime when Clio owns connection state. |
+| `/model [pattern[:thinking]]` | Open the model selector or set the orchestrator model. |
+| `/scoped-models` | Edit the model list used by model cycling. |
+| `/thinking` | Open the thinking-level selector. |
+| `/settings` | Open interactive settings controls. |
+| `/resume` | Resume an existing session. |
+| `/new` | Start a fresh session. |
+| `/tree` | Navigate the session tree. |
+| `/fork` | Branch from an earlier assistant turn. |
+| `/compact [instructions]` | Compact earlier session context. |
+| `/cost` | Show token and USD totals for completed runs in the session. |
+| `/receipts` | Browse saved run receipts. |
+| `/receipts verify <runId>` | Verify a receipt against the persisted run ledger. |
+| `/extensions` | List installed extension packages and active/shadowed/disabled state. |
+| `/share export <path>` | Export current project resources to a share archive. |
+| `/share import [--dry-run] [--force] <path>` | Preview or apply a share archive import. |
+| `/help` | Show the slash-command reference. |
+| `/hotkeys` | Show resolved keyboard bindings. |
+| `/quit` | Exit the TUI cleanly. |
+
+## Keybindings
+
+App bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`,
+`Ctrl+D`, and a portable `Ctrl+G` leader. Modern terminals and Linux/meta
+setups send Alt directly. Stock macOS Terminal.app needs **Use Option as Meta
+key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
+`Ctrl+G` then the Alt binding letter.
+
+| Binding | Action |
+| --- | --- |
+| `Shift+Tab` | Cycle thinking level. |
+| `Alt+M` | Cycle mode: `default` / `advise`. |
+| `Alt+S` | Open the super-mode confirmation overlay. |
+| `Alt+T` | Open the session tree navigator. |
+| `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
+| `Alt+L` | Open the model and targets selector. |
+| `Alt+J` / `Alt+K` | Cycle through the scoped model set. |
+| `Alt+W` | Toggle the dispatch board overlay. |
+| `Alt+O` | Toggle the most recent tool segment between collapsed and full body. |
+| `Alt+R` | Toggle thinking blocks between hidden marker and full body. |
+| `Alt+G` | Open the current input in an external editor. |
+| `Alt+X` | Dismiss footer notifications. |
+| `Alt+Enter` | Queue the current input as a follow-up message. |
+| `Alt+Up` | Restore queued follow-up messages to the editor. |
+| `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
+| `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
+| `Ctrl+D` | Exit. |
+| `Esc` | Cancel a stream, close an active overlay, or collapse the dashboard. |
+
+## Modes
+
+Clio Coder has three operator modes. See [safety-model.md](safety-model.md)
+for the detailed enforcement model.
+
+| Mode | Behavior |
+| --- | --- |
+| `default` | Read, write, edit, search, typed git/test/build tools, and default-deny Bash. Bash only admits the curated allowlist or audited project policy entries. |
+| `advise` | Read-oriented analysis, planning, and review. Dispatch admission is readonly. Recipes that need write or execute scope are rejected. |
+| `super` | Explicit operator elevation for one-shot privileged calls. Base hard blocks still apply. External CLI/SDK runtimes do not map to bypass/full-access unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`. |
+
+`safetyLevel` in settings shifts prompt posture, but enforcement still lives in
+the mode matrix, tool registry, safety policy engine, and dispatch admission.
+
+## Dispatch and Built-In Agents
+
+Fleet dispatch runs focused agent recipes through configured targets. Built-in
+recipes include:
+
+| Agent | Use it for |
+| --- | --- |
+| `scout` | Read-only repository exploration and context assembly. |
+| `planner` | Turning a goal into a reviewable implementation plan. |
+| `researcher` | Documentation, literature, and web-grounded investigation. |
+| `reviewer` | Reviewing work against a plan or coding standard. |
+| `delegate` | Decomposing work into clear handoffs. |
+| `context-builder` | Building focused context bundles for downstream agents. |
+| `implementer` | Bounded implementation and repair tasks. |
+| `memory-curator` | Proposing scoped memory records from evidence artifacts. |
+| `debugger` | Explaining a failing run, session, or evidence id. |
+| `regression-scout` | Finding likely regressions and targeted negative tests. |
+| `middleware-author` | Drafting declarative middleware rules for review. |
+| `attributor` | Mapping eval changes to keep, rollback, or inconclusive calls. |
+| `evolver` | Drafting change manifests and minimal implementation plans. |
+| `benchmark-runner` | Running eval suites and summarizing budget and failures. |
+| `scientific-validator` | Drafting validation contracts for scientific artifacts. |
+
+Examples:
+
+```bash
+clio run --agent scout "Find the main build, test, and lint commands."
+clio run --agent planner "Plan a minimal change to add JSON output to the CLI."
+clio run --agent reviewer "Review the current diff for correctness and regressions."
+```
+
+## Verification Lanes
+
+| Command | Purpose |
+| --- | --- |
+| `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, build, and deterministic tests. |
+| `npm run ci:release` | Maintainer release gate: `npm run ci`, then `check-dist` packaging verification. |
+| `npm run test:live` | Manual live-model smoke. Requires `CLIO_LIVE_SMOKE=1` and a configured real model target. |
+| `npm run typecheck` | Strict TypeScript pass. |
+| `npm run lint` | Biome checks; warnings are reported in the release gate output. |
+| `npm run test` | Contract, smoke, and boundary tests. |
+| `npm run check:boundaries` | Boundary invariants only. |
+| `npm run build` | Production bundle through `tsup`. |
+| `npm run dev` | `tsup --watch`. |
+| `npm run clean` | Remove `dist/`. |
+| `npm run hooks:install` | Install the optional pre-commit hook. |
+
+Live smoke example:
+
+```bash
+CLIO_LIVE_SMOKE=1 \
+CLIO_LIVE_TARGET=openai-compat \
+CLIO_LIVE_RUNTIME=openai-compat \
+CLIO_LIVE_MODEL=your-model \
+CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
+npm run test:live
+```
+
+Live checks cost tokens or local GPU time and are not deterministic CI. They
+are useful for OpenAI-compatible local gateways such as llama.cpp, LM Studio
+with Dynamo-backed workers, vLLM, and SGLang, plus cloud targets when
+credentials are available.
+
+## Project Context
+
+Clio uses the nearest checked-in `CLIO.md` as the canonical project guide. Run
+`/init` in the TUI or `clio init` from the shell to create or refresh it.
+During adoption, Clio can fold useful content from supported agent instruction
+files into `CLIO.md` with provenance.
+
+To skip project context for one invocation:
+
+```bash
+clio --no-context-files
+clio -nc run --agent scout "..."
+```
+
+## Troubleshooting
+
+| Problem | Try this |
+| --- | --- |
+| `clio: command not found` | Run `npm run build && npm link` from the source tree. |
+| No model target is available | Run `clio configure`, then `clio targets --probe`. |
+| Local model does not respond | Confirm the runtime is running and the target URL is correct. |
+| Cloud model auth fails | Check `clio auth status <target>` and verify the relevant API key or login flow. |
+| Source changes do not appear | Re-run `npm run build`; linked CLI points at `dist/`. |
+| Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
+| Doctor reports stale state metadata | Run `clio doctor --fix`; upgrades also refresh install metadata after reinstalling. |
+| You need a clean start | Use `clio reset --state`, `--auth`, `--config`, or `--all`. |
+
+For issue reports, include `clio --version`, `node --version`, `clio doctor`,
+`clio targets`, the command you ran, the target/model, expected behavior, and
+actual behavior. Redact secrets and private repository content.

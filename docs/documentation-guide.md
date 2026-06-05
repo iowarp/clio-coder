@@ -28,8 +28,9 @@ Classify claims clearly:
 
 | Guide | Primary source references | What it should cover |
 | --- | --- | --- |
-| [README.md](../README.md) | `src/cli/index.ts`, `src/interactive/slash-commands.ts`, `CHANGELOG.md` | Product overview, install, first run, user-facing commands, alpha framing. |
-| [docs/README.md](README.md) | This docs directory | Developer documentation hub. |
+| [README.md](../README.md) | `CHANGELOG.md`, package metadata, release receipts | Product overview, install, first run, alpha framing, and release status. |
+| [docs/README.md](README.md) | This docs directory | Documentation hub. |
+| [commands-and-modes.md](commands-and-modes.md) | `src/cli/index.ts`, `src/interactive/slash-commands.ts`, `src/domains/modes/**`, `src/domains/dispatch/**` | CLI commands, slash commands, keybindings, modes, dispatch, verification lanes, and troubleshooting. |
 | [architecture.md](architecture.md) | `tests/boundaries/check-boundaries.ts`, `src/core/domain-loader.ts`, `src/engine/**`, `src/worker/**` | Source layout, boundary invariants, runtime flow. |
 | [configuration-and-targets.md](configuration-and-targets.md) | `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, `src/cli/auth.ts` | Settings, targets, runtimes, model probing, auth. |
 | [safety-model.md](safety-model.md) | `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/validate-frontend.ts` | Modes, tool visibility, project policy, damage control, typed validation. |

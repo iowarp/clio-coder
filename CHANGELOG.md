@@ -10,8 +10,8 @@ running real CLI/TUI workflows through Mini, Dynamo, llama.cpp, LM Studio, and
 OpenAI-compatible gateways. It updates the Pi SDK stack to 0.78.1, ports the
 new prompt-envelope and session-boundary behavior from the Pi ecosystem, narrows
 per-turn tool exposure, and fixes live-validation issues found while preparing
-the GitHub v0.2.1 release. The package is not yet tagged or published to npm;
-use a source checkout until release artifacts exist.
+the GitHub v0.2.1 release. The package is not published to npm for this
+release; use a GitHub source checkout and built `clio` binary.
 
 ### Added
 
@@ -49,6 +49,9 @@ use a source checkout until release artifacts exist.
   offset hint instead of flooding the model context.
 - Refreshed README, developer docs, and project guidance around the current
   source-checkout alpha surface.
+- Shortened the public README into a release entry point and moved detailed
+  command, mode, dispatch, verification, and troubleshooting guidance into
+  `docs/commands-and-modes.md`.
 
 ### Fixed
 
@@ -62,6 +65,19 @@ use a source checkout until release artifacts exist.
   the task source when no positional task is supplied.
 - Fixed the headless JSON interface gap by streaming prompt diagnostics and the
   active tool palette for main-agent runs.
+
+### Release verification
+
+- Deterministic release gate: `npm run ci:release`, including typecheck,
+  Biome checks, build, deterministic tests, and `check-dist` packaging
+  verification.
+- Packaging sanity: `npm pack --dry-run --json` should show the v0.2.1 package
+  contents without publishing to the npm registry.
+- Optional live smoke: `npm run test:live` runs only when `CLIO_LIVE_SMOKE=1`
+  and a real target is configured. Manual prep evidence included a
+  Mini/llama.cpp live smoke returning `clio-live-ok`, interactive TUI coverage,
+  a `dispatch_batch` run with Dynamo-backed workers, and destructive-delete
+  refusal.
 
 ## 0.2.0 - 2026-06-03
 
