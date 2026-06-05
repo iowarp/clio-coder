@@ -1,106 +1,116 @@
-# Clio Coder Codebase Architecture & Boundaries
+# Clio Coder Architecture and Boundaries
 
-Clio Coder is architected to keep user interactive surfaces, provider integrations, worker subprocess sandboxes, and domain-level automation strictly decoupled. Decoupling ensures that as more targets, reasoning engines, and custom scientific validators are added, the codebase remains reliable and easy to audit.
+Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
+
+This page is source-code aligned for the current `v0.2.1` development line.
 
 ---
 
-## 🗺️ Codebase Directory Layout
-
-The codebase is organized into five major subsystem layers:
+## Source layout
 
 ```text
 src/
-├── cli/                 # CLI entrypoints, arg parsing, command wrappers
-├── interactive/         # TUI chat panels, dispatch boards, overlays, keybindings
-├── engine/              # Decoupled gateway to AI models & the pi SDK boundary
-├── worker/              # Independent, worker-safe runtime rehydration entrypoint
-└── domains/             # Modular feature domains (agents, safety, memory, evals)
-    ├── agents/          # Built-in agent specs and runtime dispatch
-    ├── safety/          # Path policy, damage-control rules, and auditing
-    ├── providers/       # Unified model configuration and native runtimes
-    └── ...              # Other discrete domain directories
+├── cli/             # clio subcommands, argument parsing, headless run modes
+├── core/            # config/state paths, event bus, defaults, shared primitives
+├── domains/         # feature domains loaded through manifests/contracts
+├── engine/          # pi SDK/provider boundary and runtime adapters
+├── entry/           # orchestrator bootstrap wiring
+├── interactive/     # TUI panels, overlays, key routing, dashboard, slash commands
+├── tools/           # built-in tool specs and registry admission boundary
+├── worker/          # subprocess worker entry/runtime rehydration
+└── utils/           # small support utilities
 ```
+
+Important domain directories include:
+
+| Domain | Primary source | Public surface |
+| --- | --- | --- |
+| agents | `src/domains/agents/**` | Built-in, user, and project agent recipes. |
+| components | `src/domains/components/**` | Component snapshots and diffs. |
+| config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
+| context/resources | `src/domains/context/**`, `src/domains/resources/**` | `CLIO.md`, prompts, skills, extension roots. |
+| dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning. |
+| eval/evidence/memory | `src/domains/eval/**`, `src/domains/evidence/**`, `src/domains/memory/**` | Local evals, evidence corpora, approved memory. |
+| providers | `src/domains/providers/**` | Target-first runtime registry, model probing, auth. |
+| prompts | `src/domains/prompts/**` | Prompt fragments, prompt envelope, hashes. |
+| safety/modes | `src/domains/safety/**`, `src/domains/modes/**` | Mode matrix, path policy, project policy, damage control. |
+| session | `src/domains/session/**` | JSONL sessions, resume/fork/tree/compaction. |
+| extensions/share | `src/domains/extensions/**`, `src/domains/share/**` | Extension packages and portable share archives. |
 
 ---
 
-## 🔒 The Three Compile-Time Boundary Invariants
+## Boundary invariants
 
-Clio Coder enforces **three strict architectural boundaries** verified by compile-time AST analysis. These boundaries prevent direct coupling, isolate provider SDK dependencies, and protect subprocess workers:
+`npm run check:boundaries` executes `tests/boundaries/check-boundaries.ts`. Treat that test as the executable specification.
+
+### Rule 1: pi SDK value imports stay in `src/engine/**`
+
+Only files under `src/engine/**` may value-import `@earendil-works/pi-*` packages. Outside `src/engine`, type-only imports are not generally open-ended; the current explicit allowlist is limited to provider runtime descriptor shapes from `@earendil-works/pi-ai`.
+
+Why: provider SDKs and pi runtime values should be swappable behind one engine boundary. Domains and the TUI should work against Clio contracts, not vendor/runtime implementations.
+
+### Rule 2: workers do not value-import domains except runtime rehydration
+
+`src/worker/**` may not value-import `src/domains/**` except the worker-safe provider runtime rehydration modules:
+
+- `src/domains/providers/plugins.ts`
+- `src/domains/providers/registry.ts`
+- `src/domains/providers/runtimes/builtins.ts`
+
+Type-only imports erase at compile time and are permitted. Workers receive a serializable `WorkerSpec` envelope, rehydrate only the target/runtime pieces they need, and avoid pulling interactive state or domain stores into the subprocess.
+
+### Rule 3: domains do not import each other's `extension.ts`
+
+A file under `src/domains/<x>/**` must not import `src/domains/<y>/extension.ts` for `y != x`. Cross-domain behavior flows through contracts exported from domain indexes, the domain loader, event buses, snapshots, or serialized manifests.
+
+---
+
+## Runtime flow
 
 ```mermaid
 graph TD
-    subgraph Engine Boundary
-        src/engine["src/engine/**"] -->|Imports value-symbols| piSDK["@earendil-works/pi-*"]
-    end
-
-    subgraph Domain Isolation
-        src/interactive["src/interactive/**"] -.->|Type-only imports ONLY| piSDK
-        src/domains["src/domains/**"] -.->|Type-only imports ONLY| piSDK
-        src/cli["src/cli/**"] -.->|Type-only imports ONLY| piSDK
-    end
-
-    subgraph Worker Boundary
-        src/worker["src/worker/**"] -->|No domains import except providers| src/domains/providers
-    end
-
-    subgraph Domain Independence
-        domainX["src/domains/X/**"] -->|No import of extension.ts| domainY["src/domains/Y/**"]
-        domainX -->|Communicates via| SafeEventBus["SafeEventBus"]
-        domainY -->|Communicates via| SafeEventBus
-    end
-    
-    style Engine Boundary fill:#147366,stroke:#00d4db,stroke-width:2px,color:#fff
-    style Domain Isolation fill:#241131,stroke:#666,stroke-width:1px,color:#fff
-    style Worker Boundary fill:#f39c12,stroke:#d35400,stroke-width:2px,color:#fff
-    style Domain Independence fill:#2c3e50,stroke:#34495e,stroke-width:1px,color:#fff
+    CLI[cli/index.ts] --> ORCH[entry/orchestrator.ts]
+    TUI[interactive/index.ts] --> LOOP[interactive/chat-loop.ts]
+    ORCH --> DOMAINS[domain-loader + domain contracts]
+    LOOP --> PROMPTS[prompts compiler]
+    LOOP --> TOOLS[tool registry]
+    LOOP --> ENGINE[engine runtime]
+    TOOLS --> SAFETY[safety + modes]
+    TOOLS --> MIDDLEWARE[middleware hook boundary]
+    ENGINE --> PROVIDERS[provider runtime descriptors]
+    DISPATCH[dispatch domain] --> WORKER[worker subprocess]
+    WORKER --> PROVIDERS
 ```
 
-### 1. The Engine Boundary
-- **Rule:** Only `src/engine/**` is allowed to import value symbols from the `@earendil-works/pi-*` packages.
-- **Why:** The pi SDK represents a vendored core engine interface. Restricting its value imports to the engine boundary guarantees that we can wrap, mock, or switch provider foundations (like Ollama, Harmony, LM Studio, or local CLI scripts) without changing any interactive TUI or domain logic.
-- **Exceptions:** Other folders may import types only (`import type { ... }`), but no runtime functions, classes, or values can escape `src/engine/`.
+Core data paths:
 
-### 2. Worker Subprocess Isolation
-- **Rule:** `src/worker/**` is never allowed to import modules from `src/domains/**`, with the sole exception of the unified `src/domains/providers` configuration models.
-- **Why:** Dispatched fleet agents run as isolated subprocess workers. They rehydrate their context from `stdin` via a serializable `WorkerSpec` envelope. Isolating the worker from domains prevents interactive state, memory stores, and TUI dependencies from leaking into the execution sandbox, keeping worker processes lightweight and secure.
-
-### 3. Domain Independence
-- **Rule:** Files in `src/domains/<x>/**` are strictly forbidden from importing the domain extension modules of another domain `src/domains/<y>/extension.ts` (where `y != x`).
-- **Why:** Modular domains must not have tight cyclic dependencies. Cross-domain interactions must flow through declarative contracts, deterministic change manifests, snapshots, or the centralized in-process `SafeEventBus`.
+1. CLI or TUI boot initializes config/data/cache directories through `src/core/init.ts`.
+2. The domain loader starts domains according to each `manifest.ts` dependency list.
+3. The chat loop resolves model/runtime state and visible tools for the current mode.
+4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
+5. Tool calls enter `src/tools/registry.ts`, which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
+6. Fleet dispatch writes run ledger entries and receipts; evidence/memory/eval domains consume those artifacts later.
 
 ---
 
-## 🔄 Event-Driven Data Flow
+## Event and audit model
 
-Clio Coder avoids hard-coded domain linkages. Decoupled sub-systems broadcast and react to events via `SafeEventBus` and `SharedEventBus`.
+Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
-```mermaid
-sequenceDiagram
-    participant TUI as Interactive TUI
-    participant SEB as SafeEventBus
-    participant DOM as Domains (Safety/Evidence)
-    participant ENG as Engine Boundary
-    
-    TUI->>SEB: Publish (user-input or slash command)
-    SEB->>DOM: Dispatch to listeners (e.g., compile prompts)
-    DOM->>ENG: Call Model target (orchestrated payload)
-    ENG-->>DOM: Stream response chunks & reasoning tokens
-    DOM->>DOM: Enforce safety policy on tool calls
-    DOM->>SEB: Publish (tool execution or findings event)
-    SEB-->>TUI: Update status, footer indicators, & overlays
-```
-
-### Decoupled Sub-Systems
-1. **Interactive Chat Loop:** Submits prompts, listens to model completion streams, and schedules follow-up turns.
-2. **Safety Policy Engine:** Intercepts outgoing tool calls, matches paths/patterns, blocks wildcards, and requests operator confirmation if high-risk.
-3. **Evidence Corpus Builder:** Subscribes to session events and run ledger updates, gathering files and traces into a deterministic `evidenceId` folder.
-4. **Memory Curator:** Proposes approved lessons, inserting them into dynamic prompt slots without direct coupling.
+- `src/domains/modes/matrix.ts` controls which tools/actions are visible by mode.
+- `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy.
+- `src/tools/registry.ts` is the admission point for every tool invocation.
+- `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
 
 ---
 
-## 🛠️ Verification
-Boundary constraints are actively tested at build time. To run the boundary validator:
+## Verification commands
+
 ```bash
 npm run check:boundaries
+npm run typecheck
+npm run test
+npm run build
 ```
-If any value import leaks outside its designated folder, the script exits with a non-zero code and reports the specific line violation.
+
+Run the focused boundary check before editing `src/engine/**`, `src/worker/**`, or cross-domain imports. Run the full test/build gate before release-facing documentation or behavior changes.

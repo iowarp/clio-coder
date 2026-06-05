@@ -1,46 +1,84 @@
-# Clio Coder Multi-Layered Safety Model
+# Clio Coder Safety Model
 
-In Clio Coder, **safety is code-enforced, not prompt-enforced**. While general coding agents rely on model prompts to avoid destructive behaviors, Clio Coder intercepts tool calls at the codebase level, validating arguments, matching path policies, and filtering shells through strict, deterministic validation pipelines.
+Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by the mode matrix, tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
+
+Source of truth: `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.
 
 ---
 
-## 🛡️ The Multi-Layered Enforcement Architecture
-
-Clio Coder applies six layers of defensive enforcement around all agent activities:
+## Enforcement path
 
 ```mermaid
 graph TD
-    userPrompt["User Prompt / Agent Task"] --> modeMatrix["1. Mode Matrix Gates"]
-    modeMatrix --> safetyPolicy["2. Safety Policy Engine"]
-    safetyPolicy --> pathPolicies["3. Path Policies Gating"]
-    pathPolicies --> cmdFilter["4. Command Allowlist / .clio/safety.yaml"]
-    cmdFilter --> typedTools["5. Typed Execution Tools"]
-    typedTools --> auditLogs["6. Receipts & Audit Logs"]
-    
-    style modeMatrix fill:#241131,stroke:#666,color:#fff
-    style safetyPolicy fill:#147366,stroke:#00d4db,color:#fff
-    style cmdFilter fill:#f39c12,stroke:#d35400,color:#fff
-    style typedTools fill:#2980b9,stroke:#3498db,color:#fff
+    user[User request] --> palette[Tool palette / provider capability]
+    palette --> mode[Mode matrix]
+    mode --> registry[Tool registry admission]
+    registry --> safety[Safety policy engine]
+    safety --> path[Path/project policy]
+    path --> middleware[Middleware + protected artifacts]
+    middleware --> run[Tool execution]
+    run --> shape[Result shaping]
+    shape --> receipt[Receipts, audit, evidence]
 ```
 
-### 1. Mode Matrix Gates
-The safety posture is tied to three operational modes that restrict tool classes:
-- **`advise` mode:** Purely read-only exploration and planning. dispatches are restricted to read-only environments. Writing or executing tools are completely invisible and failed closed.
-- **`default` mode:** Active repository editing. Commands must pass default-deny checks, and dangerous modifications are blocked or parked.
-- **`super` mode:** One-shot elevated authorization. The operator grants a specific tool or command one-time privilege. Base hard-blocks still apply.
-
-### 2. Safety Policy Engine
-Monitors outgoing parameters. It matches inputs against the parsed base rule-pack:
-- **L3 Sandboxing (Damage-Control rules):** Prevents destructive commands like `rm -rf /`, `git push --force`, `dd` device writes, fork bombs, and piping raw curl downloads to shell. These are hard-blocked across **all modes** (including `super`).
-- **L4 Command Filtering:** Default-mode Bash behaves as default-deny. Shell operators (e.g., `;`, `&&`, `|`, `>`) are rejected inside commands unless explicitly authorized.
+Key principle: a tool hidden by mode or target capability is not shown to the model; a tool that is shown still must pass registry and safety admission before it can run.
 
 ---
 
-## ⚙️ Project Command Policy (`.clio/safety.yaml`)
+## Modes and visible tools
 
-To run repository-specific build or script pipelines, developers declare reviewed commands inside `.clio/safety.yaml` (schema v1). Any script not matching this exact layout is rejected under default-deny.
+| Mode | Tool/action posture |
+| --- | --- |
+| `advise` | Read/search/web/git inspection, `write_plan`, `write_review`, `dispatch`, and `read_skill`. Dispatch scope is readonly. |
+| `default` | Read/write/edit/search/web/git inspection, typed validation tools, `bash`, `dispatch`, and skills. Allowed actions are read, write, execute, dispatch. |
+| `super` | Same visible tool set as default, plus `system_modify` action-class admission. Git-destructive actions remain hard-blocked unless a damage-control rule explicitly asks and is confirmed. |
 
-### Example `.clio/safety.yaml` configuration:
+Representative built-in tools:
+
+| Group | Tools |
+| --- | --- |
+| File/search | `read`, `write`, `edit`, `grep`, `find`, `glob`, `ls` |
+| Web/context/codewiki | `web_fetch`, `workspace_context`, `find_symbol`, `entry_points`, `where_is` |
+| Git/safe exec | `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script` |
+| Frontend | `validate_frontend` |
+| Advice artifacts | `write_plan`, `write_review` |
+| Skills/fleet | `read_skill`, `create_skill`, `dispatch` |
+| Escape hatch | `bash` |
+
+Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
+
+---
+
+## Damage-control rules
+
+`damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Some rules can require confirmation; hard-block rules remain blocked across modes.
+
+Examples of patterns the rules target include destructive filesystem operations, dangerous device writes, fork bombs, pipe-to-shell installers, and destructive git operations.
+
+Safety policy metadata records active rule IDs and hashes so receipts/evidence can explain which rule pack was active.
+
+---
+
+## Default-deny Bash
+
+In `default` mode, arbitrary Bash is denied. A Bash call can run when it matches one of these paths:
+
+1. a valid `.clio/safety.yaml` command entry;
+2. a narrow built-in allowlist such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`;
+3. super-mode elevation.
+
+Default mode denies shell operators such as `&&`, `||`, `;`, pipes, redirects, command substitution, and newlines unless an exact project-policy entry opts in.
+
+Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
+
+---
+
+## Project safety policy
+
+Clio searches upward from the current working directory for `.clio/safety.yaml`. The file is parsed once into a loaded policy. Invalid policy files fail closed for execution tools.
+
+Minimal schema v1:
+
 ```yaml
 version: 1
 zeroAccessPaths:
@@ -49,7 +87,7 @@ zeroAccessPaths:
 readOnlyPaths:
   - vendor/
 noDeletePaths:
-  - src/generated/
+  - out/validated/
 commands:
   - id: local-test
     command: npm test
@@ -58,56 +96,68 @@ commands:
     maxOutputBytes: 600000
     actionClass: execute
     shellOperators: deny
+    env:
+      mode: none
+      allow: []
     requireConfirmation: false
     rationale: Standard local test command.
     owner: maintainers
     comment: Keep exact and reviewed.
 ```
 
-### Strict Policy Invariants:
-1. **No directory escaping:** The `cwd` must be relative to the policy root and cannot escape it using parent folder paths (`..`). Absolute paths are rejected.
-2. **Invalid fails closed:** Any unknown keys, wrong types, duplicate command IDs, or unsupported action classes render the entire policy file invalid, completely blocking command execution.
-3. **No self-modification:** The policy is snapshotted when Clio starts. Dispatched agents cannot edit `.clio/safety.yaml` to dynamically grant themselves permissions during a run.
-4. **Path-policy constraints:**
-   - `zeroAccessPaths`: Blocks read, write, and delete.
-   - `readOnlyPaths`: Blocks write and delete.
-   - `noDeletePaths`: Blocks delete.
+Accepted root keys:
 
----
-
-## 🛠️ L5 Enforcement: Typed Execution Tools
-
-The production direction for Clio is **L5 safety**: replacing arbitrary Bash commands entirely with specialized, typed, and bounded tool interfaces.
-
-Clio ships with built-in typed validation tools:
-- `git_status`, `git_diff`, `git_log`
-- `run_tests`, `run_lint`, `run_build`
-- `package_script` (gated execution of package JSON routines)
-- `validate_frontend` (dedicated frontend static checker)
-
----
-
-## 🔍 In-Depth: The `validate_frontend` Tool
-
-To validate modified web UI and frontend components safely, Clio uses the dedicated `validate_frontend` tool. It validates HTML, CSS, and JS artifacts without granting terminal shell access:
-
-```mermaid
-graph TD
-    file["Frontend Artifact (.html, .css, .js)"] --> pathCheck["Workspace Escape & Path Checks"]
-    pathCheck --> htmlParser["HTML Structural tag-balance parsing"]
-    htmlParser --> jsScanner["Javascript Syntax parsing (node --check)"]
-    jsScanner --> cssScanner["CSS Brace & Comment balance checks"]
-    cssScanner --> browserValidation["Headless Browser loadability check (optional)"]
-    browserValidation --> structuredEvidence["Structured Evidence & Integrity Report"]
-    
-    style file fill:#241131,stroke:#666,color:#fff
-    style htmlParser fill:#147366,stroke:#00d4db,color:#fff
-    style browserValidation fill:#f39c12,stroke:#d35400,color:#fff
+```text
+version | commands | tasks | disableDefaultPathPolicy | zeroAccessPaths | readOnlyPaths | noDeletePaths
 ```
 
-### Validator Sub-checks:
-1. **HTML Validation:** Parses layout elements, checking tag balancing and traversing local script/stylesheet links.
-2. **CSS Validation:** Validates brace structural matching, comment closures, and string bounds.
-3. **JavaScript Validation:** Extracts inline and external JavaScript, executing in-process AST checks or `node --check` for module forms.
-4. **Headless Browser Loading:** Optionally boots a local headless browser instance (`browser=auto|required|off`) to verify that the generated interface loads without script crashes.
-5. **Path Sandboxing:** Bounded to the workspace. Malformed paths, external references, or `..` directory escapes fail instantly with structured evidence logged in the tool receipt.
+`tasks` is an alias for command policy entries. Unknown keys, wrong types, duplicate command IDs, absolute `cwd`, `..`-escaping `cwd`, and invalid path-policy entries make the policy invalid.
+
+Path-policy behavior:
+
+| Key | Effect |
+| --- | --- |
+| `zeroAccessPaths` | Blocks read, write, and delete. |
+| `readOnlyPaths` | Allows read, blocks write/delete. |
+| `noDeletePaths` | Blocks delete. |
+| `disableDefaultPathPolicy` | Uses only project path policy rather than merging default damage-control paths. |
+
+Command entry notes:
+
+| Field | Meaning |
+| --- | --- |
+| `shellOperators` | `deny` by default; `allow` only for exact reviewed commands. |
+| `env` | `mode: none` by default; `mode: allowlist` permits named environment variables. |
+| `requireConfirmation` | Parks the call for super confirmation instead of immediate allow. |
+
+---
+
+## Typed validation tools
+
+Prefer typed tools over Bash:
+
+- `git_status`, `git_diff`, `git_log` use fixed command vectors.
+- `run_tests`, `run_lint`, `run_build`, and `package_script` use bounded execution helpers.
+- `validate_frontend` validates frontend artifacts without granting arbitrary shell access.
+
+`validate_frontend` accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).
+
+---
+
+## Dispatch and external runtimes
+
+Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
+
+External CLI/SDK runtimes are delegated sandboxes. Clio maps them conservatively by default and requires explicit opt-in (`CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`) before mapping super-style requests to external full-access/bypass modes. Receipts record external runtime limitations.
+
+---
+
+## Receipts and evidence
+
+Safety decisions feed receipts, audit rows, and evidence artifacts. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:
+
+- mode and requested action class;
+- policy source and rule IDs;
+- project policy hash/path;
+- blocked/asked/allowed decision counts;
+- tool statistics and failure messages.

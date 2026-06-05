@@ -1,92 +1,123 @@
 # Documentation Standards and Codebase Alignment
 
-This document outlines the design principles, structural conventions, and direct codebase mappings of the **Clio Coder Developer Documentation Suite**. 
-
-Clio Coder is built for high-performance and scientific engineering teams where correctness, safety boundaries, and reproducible traces are critical. The current `v0.2.1` line is an experimental community alpha with focused local harness telemetry and dashboard improvements, so contributors must keep developer documentation explicit about moving surfaces, verification receipts, and release-state changes.
+Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 
 ---
 
-## 🗺️ Documentation to Codebase Mapping Matrix
+## Source-first documentation rule
 
-To ensure documentation remains accurate and actionable, the table below maps each public documentation guide directly to the subsystem layers and directories in `src/`:
+Before changing public docs, inspect the relevant implementation:
 
-| Documentation Guide | Primary Subsystem Directory | Key Source Code References | Core Concept Enforced |
-| :--- | :--- | :--- | :--- |
-| **[README.md](README.md)** | `src/cli/`, `src/interactive/` | [src/cli/index.ts](file:///home/akougkas/iowarp/clio-coder/src/cli/index.ts)<br>[src/interactive/TuiLoop.ts](file:///home/akougkas/iowarp/clio-coder/src/interactive/TuiLoop.ts) | Entrypoints, CLI commands, slash commands, TUI interactive panels, keyboard hotkeys. |
-| **[architecture.md](architecture.md)** | `src/engine/`, `src/worker/` | [src/engine/PiBoundary.ts](file:///home/akougkas/iowarp/clio-coder/src/engine/PiBoundary.ts)<br>[src/worker/WorkerEntry.ts](file:///home/akougkas/iowarp/clio-coder/src/worker/WorkerEntry.ts) | AST boundary checks, worker rehydration, event-driven decoupled event loops. |
-| **[safety-model.md](safety-model.md)** | `src/domains/safety/` | [src/domains/safety/PolicyEngine.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/safety/PolicyEngine.ts)<br>[src/tools/ValidateFrontend.ts](file:///home/akougkas/iowarp/clio-coder/src/tools/ValidateFrontend.ts) | Sandbox levels (L3/L4/L5), path/tool policies, validation of frontend HTML/JS/CSS. |
-| **[built-in-agents.md](built-in-agents.md)** | `src/domains/agents/` | [src/domains/agents/AgentRegistry.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/agents/AgentRegistry.ts)<br>[.agents/](file:///home/akougkas/iowarp/clio-coder/.agents/) | Fleet directory, frontmatter YAML specifications, agent capability maps. |
-| **[eval-runner.md](eval-runner.md)** | `src/domains/eval/` | [src/domains/eval/EvalRunner.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/eval/EvalRunner.ts)<br>[src/domains/eval/Compare.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/eval/Compare.ts) | YAML benchmark suites, taskId+repeatIndex matching, error taxonomies. |
-| **[evidence-and-memory.md](evidence-and-memory.md)** | `src/domains/evidence/`, `src/domains/memory/` | [src/domains/evidence/Builder.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/evidence/Builder.ts)<br>[src/domains/memory/Curator.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/memory/Curator.ts) | evidenceId logs, long-term memory lifecycle, token budget retrieval gates. |
-| **[scientific-validation.md](scientific-validation.md)** | `src/domains/scheduling/` | [src/domains/scheduling/ScientificContract.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/scheduling/ScientificContract.ts)<br>[src/domains/scheduling/SlurmRunner.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/scheduling/SlurmRunner.ts) | Scientific contracts, floating point ULP validation, Slurm/MPI schedules. |
-| **[middleware-and-components.md](middleware-and-components.md)** | `src/domains/middleware/`, `src/domains/components/` | [src/domains/components/Scanner.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/components/Scanner.ts)<br>[src/domains/middleware/Pipeline.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/middleware/Pipeline.ts) | Component scans, snapshot reloads, pure in-process declarative middleware hooks. |
-| **[evolution.md](evolution.md)** | `src/domains/evolution/` | [src/domains/evolution/ChangeManifest.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/evolution/ChangeManifest.ts)<br>[src/domains/evolution/Evolve.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/evolution/Evolve.ts) | ChangeManifest validation, regression risk mapping, progress tracking. |
+1. `git log --oneline -- <area>` for recent intent and release context.
+2. `src/**` for current behavior.
+3. `tests/**` for executable contracts and edge cases.
+4. `README.md`, `CHANGELOG.md`, and `docs/*.md` for existing public wording.
+
+Classify claims clearly:
+
+| Claim class | How to word it |
+| --- | --- |
+| Shipped and tested | State directly and link to source/tests. |
+| Implemented but experimental | Say alpha/experimental and name sharp edges. |
+| Typed contract exists, default runtime is inert | Say the schema exists but no public loader/rules are active. |
+| Planned/future | Put in roadmap language; do not present as available behavior. |
 
 ---
 
-## 🎨 Architectural Hierarchy of Documentation
+## Documentation map
 
-The document suite is structured in a **flat directory hierarchy** to maximize ease of discovery and avoid nested RFC specs:
+| Guide | Primary source references | What it should cover |
+| --- | --- | --- |
+| [README.md](../README.md) | `src/cli/index.ts`, `src/interactive/slash-commands.ts`, `CHANGELOG.md` | Product overview, install, first run, user-facing commands, alpha framing. |
+| [docs/README.md](README.md) | This docs directory | Developer documentation hub. |
+| [architecture.md](architecture.md) | `tests/boundaries/check-boundaries.ts`, `src/core/domain-loader.ts`, `src/engine/**`, `src/worker/**` | Source layout, boundary invariants, runtime flow. |
+| [configuration-and-targets.md](configuration-and-targets.md) | `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, `src/cli/auth.ts` | Settings, targets, runtimes, model probing, auth. |
+| [safety-model.md](safety-model.md) | `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/validate-frontend.ts` | Modes, tool visibility, project policy, damage control, typed validation. |
+| [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/registry.ts`, `src/engine/worker-tools.ts` | Prompt envelope, dynamic context, provider tool contracts, registry enforcement. |
+| [built-in-agents.md](built-in-agents.md) | `src/domains/agents/**`, `src/domains/agents/builtins/*.md`, `src/domains/dispatch/**` | Agent recipe schema, discovery roots, fleet dispatch. |
+| [extensions-and-sharing.md](extensions-and-sharing.md) | `src/domains/extensions/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, `src/cli/share.ts` | Extension manifests, prompts, skills, share archives. |
+| [model-catalog.md](model-catalog.md) | `src/domains/providers/catalog.ts`, `src/domains/providers/models/**`, `src/domains/providers/probe/**` | Model catalog, live probes, field-note promotion. |
+| [eval-runner.md](eval-runner.md) | `src/domains/eval/**`, `src/cli/eval.ts` | Local YAML eval tasks, artifact reports, comparisons. |
+| [evidence-and-memory.md](evidence-and-memory.md) | `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, `src/cli/memory.ts` | Evidence corpus layout, memory lifecycle and prompt injection. |
+| [middleware-and-components.md](middleware-and-components.md) | `src/domains/components/**`, `src/domains/middleware/**`, `src/cli/components.ts` | Component snapshots and experimental middleware hook contract. |
+| [evolution.md](evolution.md) | `src/domains/evolution/**`, `src/cli/evolve.ts` | Change manifest JSON schema and workflow. |
+| [scientific-validation.md](scientific-validation.md) | `src/domains/agents/builtins/scientific-validator.md`, `src/domains/scheduling/**` | Advisory scientific validation contracts and future scheduler integration. |
 
-```mermaid
-graph TD
-    hub["docs/README.md (Developer Hub)"] --> arch["architecture.md (Codebase Invariants)"]
-    hub --> safe["safety-model.md (Multi-Layered Sandbox)"]
-    hub --> fleet["built-in-agents.md (Agent Frontmatter Specs)"]
-    hub --> evals["eval-runner.md (Evaluation Benchmarking)"]
-    hub --> evidence["evidence-and-memory.md (Evidence Logs)"]
-    hub --> sci["scientific-validation.md (Scientific Contracts)"]
-    hub --> mid["middleware-and-components.md (Registry Hooks)"]
-    hub --> evol["evolution.md (Falsifiable Manifests)"]
-    hub --> docGuide["documentation-guide.md (Standards & Mapping)"]
-    
-    style hub fill:#147366,stroke:#00d4db,stroke-width:2px,color:#fff
-    style docGuide fill:#241131,stroke:#6c5ce7,stroke-width:2px,color:#fff
+---
+
+## Style conventions
+
+### Alpha framing
+
+Use direct, honest language:
+
+- "experimental community alpha"
+- "source-build path"
+- "current runtime is conservative/inert"
+- "advisory contract"
+- "planned/future milestone"
+
+Avoid phrases that imply managed production stability, full plugin maturity, or automatic scientific validation when the current code does not provide it.
+
+### Markdown structure
+
+- Prefer short sections with tables for command and schema references.
+- Use fenced examples that can be copied.
+- Keep links relative and repository-portable; do not use absolute `file:///home/...` links.
+- Mention source file paths in backticks instead of editor-specific absolute URLs.
+
+### GitHub alerts
+
+Use alerts sparingly:
+
+> [!NOTE]
+> Context or caveats that prevent misinterpretation.
+
+> [!WARNING]
+> Sharp edges, alpha limitations, or behavior that can surprise contributors.
+
+> [!CAUTION]
+> Safety, data loss, or security-sensitive constraints.
+
+---
+
+## Update checklist
+
+When a feature changes:
+
+1. Identify the source owner (`src/cli`, `src/interactive`, `src/tools`, or a domain).
+2. Check whether public CLI help changed.
+3. Update the mapped guide in the same PR.
+4. If behavior affects safety, sessions, receipts, prompts, targets, or dispatch, update both README-level user docs and the deeper guide.
+5. Run a lightweight link check for changed Markdown.
+6. For release docs, verify version badges/sections match `package.json` and `CHANGELOG.md`.
+
+Suggested local link check:
+
+```bash
+python3 - <<'PY'
+import pathlib, re
+for md in list(pathlib.Path('docs').glob('*.md')) + [pathlib.Path('README.md')]:
+    text = md.read_text()
+    for m in re.finditer(r'\[[^\]]+\]\(([^)]+)\)', text):
+        link = m.group(1)
+        if link.startswith(('http://', 'https://', 'mailto:', '#')):
+            continue
+        target = link.split('#')[0]
+        if target and not (md.parent / target).exists():
+            line = text.count('\n', 0, m.start()) + 1
+            print(f'{md}:{line}: missing {link}')
+PY
 ```
 
 ---
 
-## 📋 Markdown Structural & Style Conventions
+## Community documentation priorities
 
-All files in the `docs/` directory must be optimized for readability and adhere to the following stylistic tokens:
+Clio users tend to be early adopters running real repositories, local models, and scientific/HPC code. Good docs should therefore prioritize:
 
-### 1. The HSL Alert System
-Use standard GitHub alert cards rather than unformatted notes. Keep their use focused on high-priority contexts:
-> [!NOTE]
-> Used for architecture insights, background context, and minor implementation tips.
-
-> [!TIP]
-> Used for optimizing code, streamlining dev setups, or best practices.
-
-> [!WARNING]
-> Used to highlight compilation invariants, type check requirements, or things that might break tests.
-
-> [!CAUTION]
-> Used to highlight major safety violations, sandbox leaks, or directory-deletion rules.
-
-### 2. Tabular Data Representation
-Never present large option sets or commands as raw paragraph text. Always use Markdown tables with clean structural alignment:
-- Standard column styling: `| Column 1 | Column 2 |`
-- Separators: `| :--- | :--- |` (left-aligned) or `| :---: | :---: |` (center-aligned).
-
-### 3. Falsifiable Schema and JSON Definitions
-Whenever describing configuration files (`.clio/safety.yaml`, `ChangeManifest.json`, or YAML evaluation tasks):
-- Provide a full, copy-pasteable minimal example with comments.
-- Explicitly define the mandatory fields, types, and defaults.
-
-### 4. Interactive Mermaid Diagrams
-To visualize logic, routing, event flows, and sandbox lifecycles:
-- Use Mermaid diagram blocks (`mermaid` code identifier).
-- Standardize on layout flow direction (`graph TD` or `sequenceDiagram`).
-- Maintain visual harmony with styling tokens (e.g., custom node coloring).
-
----
-
-## 🚀 How to Write and Modify Documentation
-
-Whenever adding a feature, fixing a bug, or contributing to the codebase, follow these synchronization guidelines:
-
-1. **Check the Matrix First**: Identify which documentation guide corresponds to the file you are modifying (refer to the [🗺️ Mapping Matrix](#🗺️-documentation-to-codebase-mapping-matrix) above).
-2. **Synchronize Documentation in the Same PR**: Never let source code modifications drift from their associated documentation. Update code comments and documentation files in tandem.
-3. **Validate Hyperlinks**: Ensure all internal Markdown links use relative flat paths (e.g., `[architecture.md](architecture.md)`) and all codebase file links use absolute paths to help developer editors locate them (e.g., `[Scanner.ts](file:///home/akougkas/iowarp/clio-coder/src/domains/components/Scanner.ts)`).
-4. **Gitignore Internal planning documents**: Internal milestones, roadmaps, and scratchnotes belong in the `.superpowers/` internal directory which must always remain gitignored. The public `docs/` root is reserved exclusively for structured, developer-facing guidance.
+- reproducible first-run and target configuration;
+- local model/runtime field notes with exact versions and serving settings;
+- safety receipts and redaction guidance for issue reports;
+- small examples for project-local `CLIO.md`, `.clio/safety.yaml`, prompts, skills, and agents;
+- clear labels for experimental surfaces such as middleware and scientific validation contracts.

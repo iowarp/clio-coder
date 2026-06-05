@@ -1,93 +1,120 @@
 # Clio Coder Local Evaluation Runner
 
-The **Local Evaluation Runner** provides a deterministic, reproducible, and model-free environment to benchmark and compare agent performance across local task suites. It executes setup and validation pipelines, collects performance data, and prints regression/improvement comparisons, allowing developers to measure the impact of prompts, tools, and models objectively.
+The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.
+
+Source of truth: `src/domains/eval/**` and `src/cli/eval.ts`.
 
 ---
 
-## 📋 The Eval Task YAML Schema
+## CLI
 
-Evaluation suites are declared in a simple, declarative YAML task file. 
+```bash
+clio eval run --task-file tasks.yaml [--repeat <n>]
+clio eval report <evalId>
+clio eval compare <baselineEvalId> <candidateEvalId>
+```
+
+`clio eval run` writes an eval artifact under `<dataDir>/evals/` and also builds deterministic eval evidence under `<dataDir>/evidence/eval-<evalId>/`.
+
+Exit codes:
+
+| Command | Success | Failure |
+| --- | --- | --- |
+| `eval run` | `0` when all task repetitions pass | `1` when any task fails, `2` for invalid task files/args |
+| `eval report` | `0` when artifact loads | `1` if artifact cannot be read |
+| `eval compare` | `0` when both artifacts load and comparison renders | `1` if artifacts cannot be read |
+
+---
+
+## Task-file schema
+
+Task files are YAML with `version: 1` and a non-empty `tasks` array.
 
 ```yaml
 version: 1
 tasks:
-  - id: add-json-flag
-    prompt: "Implement a --json flag in the CLI command parser."
-    cwd: /path/to/repro/sandbox
+  - id: cli-json-smoke
+    prompt: "Verify the CLI JSON mode still starts."
+    cwd: fixtures/cli-json-smoke
     setup:
-      - git restore .
       - npm install
     verifier:
       - npm run build
-      - node dist/cli/index.js --json
+      - node dist/cli/index.js --help
     timeoutMs: 60000
     tags:
       - cli
-      - regression-priority
+      - smoke
 ```
 
-### Schema Rules:
-1. `version` must be `1`.
-2. `id` must be unique across the task file.
-3. `setup` (optional list of shell commands): Executed sequentially before verification. A non-zero exit code stops the run immediately.
-4. `verifier` (required list of shell commands): Runs sequentially. A non-zero exit code marks the task as failed.
-5. `timeoutMs` (required integer): Maximum wall time allowed per individual command.
-6. `cwd` (required string): Sandboxed directory where setup and verifier scripts execute.
+Rules enforced by `src/domains/eval/task-file.ts`:
+
+| Field | Requirement |
+| --- | --- |
+| `version` | Must equal `1`. |
+| `tasks` | Non-empty array. |
+| `id` | Non-empty; letters, numbers, dots, underscores, and hyphens only; unique. |
+| `prompt` | Non-empty string. Stored for traceability; the current runner does not send it to a model. |
+| `cwd` | Non-empty relative path under the task file directory. Absolute paths and escapes are rejected. |
+| `setup` | Optional string array; missing means `[]`. |
+| `verifier` | Required non-empty string array. |
+| `timeoutMs` | Positive integer applied per command. |
+| `tags` | Optional string array; missing means `[]`. |
+
+Unknown task fields are validation errors.
 
 ---
 
-## 🛠️ CLI Evaluation Surface
+## Execution model
 
-Developers trigger local evaluations using three subcommands:
+For each repeat and task:
 
-### 1. Run an Evaluation Suite
+1. Resolve `cwd` relative to the task file directory.
+2. If `cwd` does not exist, mark the result `cwd_missing`.
+3. Run each `setup` command sequentially using the platform shell.
+4. Stop on the first failed/timed-out setup command.
+5. Run each `verifier` command sequentially.
+6. Stop on the first failed/timed-out verifier command.
+7. Record stdout/stderr with a per-command output cap.
+
+The runner currently records `tokens: 0` and `costUsd: 0` because it does not invoke a model. Receipt-backed harness metrics exist in types for future/linked workflows, while local command runs populate validation evidence from passing verifier commands.
+
+---
+
+## Failure classes
+
+| Failure class | Meaning |
+| --- | --- |
+| `setup_failed` | A setup command exited non-zero. |
+| `verifier_failed` | A verifier command exited non-zero. |
+| `timeout` | A setup or verifier command timed out. |
+| `cwd_missing` | Resolved task cwd does not exist. |
+| `command_error` | Reserved class for command spawn/system errors. |
+
+---
+
+## Artifact and report fields
+
+Eval artifacts have `version: 1` and include:
+
+- `evalId`
+- `taskFile`
+- `taskFileHash`
+- `repeat`
+- `startedAt` / `endedAt`
+- `summary`
+- `results[]`
+
+Summary metrics include runs passed/failed, pass rate, token/cost totals, wall time, receipt-backed run count, tool calls, retries, safety blocks, correction latency, validation evidence count, and failure-class counts.
+
+---
+
+## Comparisons
+
 ```bash
-clio eval run --task-file tasks.yaml [--repeat 3]
+clio eval compare eval-baseline eval-candidate
 ```
-Loads and validates `tasks.yaml`, runs each task in declaration order (repeating `repeat` times if configured), writes a deterministic evidence corpus, and saves the result JSON at `<dataDir>/evals/eval-<startedAt>-<taskFileHash>.json`. The command exits `0` if all tests passed and `1` if any failed.
 
-### 2. Render an Evaluation Report
-```bash
-clio eval report eval-20260520-a1b2c3d4
-```
-Loads a previously persisted evaluation run and prints a formatted summary table to `stdout`.
+Comparisons match results by `taskId + repeatIndex`. They report pass-rate, wall-time, token, cost, and harness-metric deltas, plus missing/added result rows when task sets differ.
 
-### 3. Compare Baseline vs. Candidate
-```bash
-clio eval compare eval-baseline-hash eval-candidate-hash
-```
-Compares a baseline run against a candidate run, matching tasks by the deterministic rule **`taskId+repeatIndex`**. It prints deltas for pass rate, wall time, token usage, USD cost, and failure taxonomies.
-
----
-
-## 🚫 Failure Taxonomy Classification
-
-When a task fails, Clio Coder categorizes the failure into a closed taxonomy:
-
-| Failure Class | Root Cause |
-| :--- | :--- |
-| `setup_failed` | A command in the `setup[]` array exited with a non-zero code. |
-| `verifier_failed` | A command in the `verifier[]` array exited with a non-zero code. |
-| `timeout` | A setup or verifier command exceeded its `timeoutMs` window. |
-| `cwd_missing` | The specified `cwd` directory does not exist. |
-| `command_error` | Subprocess spawning failed due to a system or shell resolution issue. |
-
----
-
-## 📊 Harness-Level Metrics
-
-Clio Coder tracks detailed resource and behavior metrics to measure efficiency:
-
-- **`wallTimeMs`:** Total combined wall time of setup and verifier subprocess runs.
-- **`tokens`:** Model input and output token consumption during the task.
-- **`costUsd`:** Estimated monetary cost based on provider token rates.
-- **`toolCalls`:** Total number of tool executions triggered by the orchestrator.
-- **`safetyBlocks`:** Count of tool calls rejected by the safety engine or damage-control pack.
-- **`retries`:** Number of model-call or tool-call network retries triggered during runtime.
-- **`validationEvidence`:** Count of successfully completed verifier commands.
-
----
-
-## 🔒 Invariants
-1. **Model-free execution:** The evaluation runner itself does not execute any model prompts; it executes setup/verifier scripts as local subprocesses. Model metrics (tokens, costs, tools) are collected by parsing linked run receipts during execution.
-2. **Deterministic matching:** Comparing two evaluations validates that they share identical task content hashes. The comparison matches results strictly by `taskId+repeatIndex`. Unmatched results in baseline are flagged as `missing`; unmatched in candidate are flagged as `added`.
+For useful comparisons, run baseline and candidate from the same task file content and repeat count.
