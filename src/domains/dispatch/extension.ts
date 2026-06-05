@@ -358,13 +358,13 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 
 function resolveDispatchAdmissionStage(
 	req: DispatchRequest,
-	recipe: AgentRecipe | null,
+	recipe: AgentRecipe,
 	currentMode: ModeName,
 	visibleTools: ReadonlyArray<ToolName>,
 	safety: SafetyContract,
 ): DispatchAdmissionStage {
-	const workerMode = recipe?.mode ?? currentMode;
-	const recipeTools = recipe?.tools;
+	const workerMode = recipe.mode ?? currentMode;
+	const recipeTools = recipe.tools;
 	const candidateTools =
 		recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : Array.from(visibleTools);
 	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
@@ -495,7 +495,7 @@ function pickCapabilityMatchedWorker(
 
 function resolveDispatchTarget(
 	req: DispatchRequest,
-	recipe: AgentRecipe | null,
+	recipe: AgentRecipe,
 	workerDefault: WorkerTargetConfig | null,
 	workerProfiles: WorkerProfileMap,
 	providers: ProvidersContract,
@@ -509,7 +509,7 @@ function resolveDispatchTarget(
 		selectedWorkerTarget = profile;
 		endpointId = profile.endpoint;
 	}
-	if (!endpointId) endpointId = recipe?.endpoint ?? null;
+	if (!endpointId) endpointId = recipe.endpoint ?? null;
 	if (!endpointId) {
 		selectedWorkerTarget = pickCapabilityMatchedWorker(
 			req.requiredCapabilities,
@@ -536,12 +536,12 @@ function resolveDispatchTarget(
 	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
 	const matchingDefault = workerDefault?.endpoint === endpointId ? workerDefault : null;
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
-	const wireModelId = req.model ?? recipe?.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
+	const wireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
 	if (!wireModelId) {
 		throw new Error(`dispatch: no model for target '${endpointId}' (set a fleet profile model or target.defaultModel)`);
 	}
 	const thinkingLevel = (req.thinkingLevel ??
-		recipe?.thinkingLevel ??
+		recipe.thinkingLevel ??
 		fallbackWorkerTarget?.thinkingLevel ??
 		"off") as ThinkingLevel;
 	const resolved = resolveRuntimeTarget(providers, {
@@ -685,6 +685,9 @@ export function createDispatchBundle(
 
 	async function resolveLifecycle(req: DispatchRequest): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
+		if (!recipe) {
+			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
+		}
 		const currentMode = modes.current();
 		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
 		const targets = readWorkerTargets(config?.get());
@@ -742,6 +745,8 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 
+		const lifecycle = await resolveLifecycle(req);
+
 		if (scheduling) {
 			const preflight = scheduling.preflight();
 			if (preflight.verdict === "over" || preflight.verdict === "at") {
@@ -750,8 +755,6 @@ export function createDispatchBundle(
 				);
 			}
 		}
-
-		const lifecycle = await resolveLifecycle(req);
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {

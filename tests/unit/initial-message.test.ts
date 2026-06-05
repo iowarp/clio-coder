@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildInitialMessage } from "../../src/cli/initial-message.js";
+import { buildInitialMessage, shouldReadPipedStdin } from "../../src/cli/initial-message.js";
 
 describe("cli/initial-message", () => {
 	it("merges piped stdin with the first CLI message into one prompt", () => {
@@ -40,5 +40,10 @@ describe("cli/initial-message", () => {
 
 		strictEqual(result.initialMessage, '<file name="pixel.png"></file>\nDescribe it');
 		deepStrictEqual(result.initialImages, [image]);
+	});
+
+	it("only waits for piped stdin when no positional task was supplied", () => {
+		strictEqual(shouldReadPipedStdin([]), true);
+		strictEqual(shouldReadPipedStdin(["say ok"]), false);
 	});
 });

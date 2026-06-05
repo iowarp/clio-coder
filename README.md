@@ -34,9 +34,12 @@ Clio Coder is currently in **alpha**. The current release is **v0.2.1**.
 
 ## What's new in v0.2.1
 
-v0.2.1 is a focused patch for local model operators. It improves Clio's harness feedback loop with live throughput telemetry, clearer context pressure, and a dashboard layout that works better in ordinary terminal sizes while preserving the v0.2.0 alpha release foundations.
+v0.2.1 is a source-checkout alpha patch for local model operators. It improves Clio's harness feedback loop with live throughput telemetry, clearer context pressure, prompt-envelope reuse, narrower tool exposure, bounded tool results, and safer headless CLI behavior while preserving the v0.2.0 alpha release foundations.
 
 - **Local harness feedback.** Clio now records final assistant-stream throughput from its own streaming timestamps and usage data, so local targets can show compact `Tk/s`, TTFT, generation span, and output-token metrics.
+- **Prompt and tool discipline.** Clio splits stable prompt shells from dynamic turn fragments, narrows the active tool palette per turn, and bounds oversized tool outputs before they can flood local context windows.
+- **Headless validation fixes.** `clio run --agent <id>` now rejects unknown fleet agents instead of falling back to a generic worker, `clio run "<task>"` no longer blocks on open non-TTY stdin, and `--json` streams prompt diagnostics plus the active tool palette.
+- **Pi SDK refresh.** Clio is aligned with Pi SDK 0.78.1 and current Pi coding-agent session/prompt boundary behavior where it fits the Clio Coder source boundary.
 - **Context visibility for long local runs.** The footer context bucket is now a dynamic block bar, making long-context sessions easier to monitor while chatting or dispatching work.
 - **Smaller-terminal dashboard.** The expanded dashboard now reaches four horizontal sections at 100 columns, falls back to 2x2 at 80-99 columns, and uses vertical stacking only for genuinely narrow terminals.
 - **Cleaner dashboard controls.** Alt+U is the dashboard on/off control; Esc remains reserved for popups, slash-command UI, and active-run cancellation.

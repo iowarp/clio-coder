@@ -3,13 +3,15 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
-## 0.2.1 - 2026-06-03
+## 0.2.1 - 2026-06-05
 
-Clio Coder 0.2.1 is a focused patch for local llama.cpp operators running
-Gemma 4 12B-class coding models on modest GPUs. It improves the harness
-feedback loop for smaller local models, including setups that fit under 16GB
-of VRAM with quantized weights, while keeping Clio's target-first routing and
-supervised execution model intact.
+Clio Coder 0.2.1 is an alpha source-checkout patch for local model operators
+running real CLI/TUI workflows through Mini, Dynamo, llama.cpp, LM Studio, and
+OpenAI-compatible gateways. It updates the Pi SDK stack to 0.78.1, ports the
+new prompt-envelope and session-boundary behavior from the Pi ecosystem, narrows
+per-turn tool exposure, and fixes live-validation issues found while preparing
+the GitHub v0.2.1 release. The package is not yet tagged or published to npm;
+use a source checkout until release artifacts exist.
 
 ### Added
 
@@ -20,6 +22,12 @@ supervised execution model intact.
 - Added a larger dynamic context fill bar in the footer so long-context local
   runs, including 262k-context Gemma 4 12B llama.cpp targets, are easier to
   monitor during real sessions.
+- Added hashed prompt-envelope delivery split into stable static/session
+  shells and dynamic turn fragments, improving prompt-cache determinism for
+  local OpenAI-compatible and llama.cpp runs.
+- Added `clio run --json` prompt diagnostics events so headless consumers can
+  inspect prompt signatures, active tool palettes, omitted tools, and segment
+  hashes from the event stream instead of only from persisted session JSONL.
 
 ### Changed
 
@@ -31,11 +39,29 @@ supervised execution model intact.
   prints the dashboard key hint instead of toggling state.
 - Compact speed details now use the existing output-token glyph (`↓`) so the
   Gemma 4 12B local harness dashboard stays readable in tight columns.
+- Updated Pi SDK dependencies to 0.78.1 and aligned Clio's agent/session
+  internals with the current Pi coding-agent reference behavior where it fits
+  the Clio boundary.
+- Narrowed the active tool surface per turn. Small-talk and tool-meta turns can
+  run without tool schemas, repo-inspection turns stay read-only, and mutation
+  or dispatch tools appear only when the user's intent calls for them.
+- Bounded long tool outputs in the harness so large read/grep results carry an
+  offset hint instead of flooding the model context.
+- Refreshed README, developer docs, and project guidance around the current
+  source-checkout alpha surface.
 
 ### Fixed
 
 - Fixed the expanded dashboard's narrow-terminal behavior so all four sections
   remain available instead of dropping the session section.
+- Fixed `clio run --agent <unknown>` so typoed fleet-agent ids fail fast with
+  `unknown agent recipe: <id>` and exit 2 instead of silently spawning a generic
+  worker with the visible tool surface.
+- Fixed `clio run "<task>"` under headless wrappers that leave non-TTY stdin
+  open. Positional tasks no longer block waiting for stdin EOF; stdin remains
+  the task source when no positional task is supplied.
+- Fixed the headless JSON interface gap by streaming prompt diagnostics and the
+  active tool palette for main-agent runs.
 
 ## 0.2.0 - 2026-06-03
 

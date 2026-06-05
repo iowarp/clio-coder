@@ -28,6 +28,10 @@ export async function readPipedStdin(): Promise<string | undefined> {
 	});
 }
 
+export function shouldReadPipedStdin(messages: ReadonlyArray<string>): boolean {
+	return messages.length === 0;
+}
+
 export function buildInitialMessage(input: InitialMessageInput): InitialMessageResult {
 	const parts: string[] = [];
 	if (input.stdinContent !== undefined) parts.push(input.stdinContent);

@@ -9,6 +9,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -20,6 +21,17 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 
 const ORIGINAL_ENV = { ...process.env };
+
+function testRecipe(id: string): AgentRecipe {
+	return {
+		id,
+		name: id,
+		description: "test recipe",
+		source: "builtin",
+		filepath: `/test/${id}.md`,
+		body: "# Test Recipe",
+	};
+}
 
 describe("dispatch auth resolution", () => {
 	let dataDir: string;
@@ -135,9 +147,10 @@ describe("dispatch auth resolution", () => {
 			isSubset,
 			audit: { recordCount: () => 0 },
 		};
+		const recipes = [testRecipe("coder")];
 		const agents: AgentsContract = {
-			list: () => [],
-			get: () => null,
+			list: () => recipes,
+			get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
 			reload: () => {},
 			parseFleet: () => ({ steps: [] }),
 		};

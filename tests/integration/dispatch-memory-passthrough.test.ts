@@ -8,6 +8,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
@@ -42,6 +43,17 @@ function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprova
 	return {
 		onApprovalRequest: () => {},
 		sendApprovalResponse: () => {},
+	};
+}
+
+function testRecipe(id: string): AgentRecipe {
+	return {
+		id,
+		name: id,
+		description: "test recipe",
+		source: "builtin",
+		filepath: `/test/${id}.md`,
+		body: "# Test Recipe",
 	};
 }
 
@@ -137,9 +149,10 @@ function stubContext(): DomainContext & { bus: ReturnType<typeof createSafeEvent
 		audit: { recordCount: () => 0 },
 	};
 
+	const recipes = [testRecipe("scout")];
 	const agents: AgentsContract = {
-		list: () => [],
-		get: () => null,
+		list: () => recipes,
+		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
 		reload: () => {},
 		parseFleet: () => ({ steps: [] }),
 	};

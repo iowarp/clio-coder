@@ -22,7 +22,7 @@ import type { ImageContent } from "../engine/types.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
-import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
+import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 
 const USAGE =
@@ -59,14 +59,15 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 async function assemblePrompt(
 	parsed: RunCliArgs,
 ): Promise<{ prompt: string; images?: ReadonlyArray<ImageContent> } | null> {
-	const stdinContent = await readPipedStdin();
+	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
+	const stdinContent = shouldReadPipedStdin(messages) ? await readPipedStdin() : undefined;
 	const fileRefs = await readFileArgsAsync(parsed.fileArgs, { cwd: process.cwd(), missing: "error" });
 	for (const diagnostic of fileRefs.diagnostics) {
 		process.stderr.write(`error: ${diagnostic.message}\n`);
 	}
 	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return null;
 	const initial = buildInitialMessage({
-		messages: parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [],
+		messages,
 		...(stdinContent !== undefined ? { stdinContent } : {}),
 		...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
@@ -262,7 +263,13 @@ async function runDispatch(
 		process.stderr.write(`clio run failed: ${msg}\n`);
 		await loaded.stop();
 		if (/target '.+' not found/.test(msg)) return 2;
-		if (msg.includes("admission") || msg.includes("capability") || msg.includes("budget")) return 2;
+		if (
+			msg.includes("unknown agent recipe") ||
+			msg.includes("admission") ||
+			msg.includes("capability") ||
+			msg.includes("budget")
+		)
+			return 2;
 		return 1;
 	}
 }

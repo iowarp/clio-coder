@@ -10,6 +10,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
@@ -85,6 +86,17 @@ function createSchedulingStub(limit: number): SchedulingStub {
 			}
 		},
 		listNodes: () => [],
+	};
+}
+
+function testRecipe(id: string): AgentRecipe {
+	return {
+		id,
+		name: id,
+		description: "test recipe",
+		source: "builtin",
+		filepath: `/test/${id}.md`,
+		body: "# Test Recipe",
 	};
 }
 
@@ -187,9 +199,10 @@ function stubContext(
 		audit: { recordCount: () => 0 },
 	};
 
+	const recipes = [testRecipe("coder")];
 	const agents: AgentsContract = {
-		list: () => [],
-		get: () => null,
+		list: () => recipes,
+		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
 		reload: () => {},
 		parseFleet: () => ({ steps: [] }),
 	};
@@ -233,6 +246,30 @@ afterEach(() => {
 });
 
 describe("dispatch concurrency gate", () => {
+	it("rejects unknown agent recipes before acquiring a worker slot", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+		tempDirs.push(dataDir);
+		process.env.CLIO_DATA_DIR = dataDir;
+		resetXdgCache();
+
+		const scheduling = createSchedulingStub(1);
+		const context = stubContext(scheduling);
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => {
+				throw new Error("worker should not spawn for an unknown agent");
+			},
+		});
+		await bundle.extension.start();
+
+		try {
+			await rejects(bundle.contract.dispatch({ agentId: "nonesuch", task: "typo" }), /unknown agent recipe: nonesuch/);
+			strictEqual(scheduling.activeWorkers(), 0);
+			strictEqual(scheduling.stats.acquires, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("denies a second dispatch while the first worker holds the gate and releases on success", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
 		tempDirs.push(dataDir);
