@@ -14,6 +14,7 @@ import { findTool } from "../../src/tools/find.js";
 import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
+import { resolveToolPalette } from "../../src/tools/palette.js";
 import { readTool } from "../../src/tools/read.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
@@ -194,6 +195,52 @@ describe("contracts/tools basic happy paths", () => {
 		strictEqual(result.kind, "ok");
 		ok(result.output.includes("src/index.ts"));
 		ok(!result.output.includes(".clio/codewiki.json"));
+	});
+});
+
+describe("contracts/tools palette", () => {
+	it("keeps create_skill hidden for install/update skill requests", () => {
+		const install = resolveToolPalette({
+			mode: "default",
+			providerSupportsTools: true,
+			userText: "install a local skill folder for this project",
+		});
+		ok(install.activeTools.includes(ToolNames.ReadSkill));
+		strictEqual(install.activeTools.includes(ToolNames.CreateSkill), false);
+
+		const update = resolveToolPalette({
+			mode: "default",
+			providerSupportsTools: true,
+			userText: "update the skill catalog and tell me what exists",
+		});
+		ok(update.activeTools.includes(ToolNames.ReadSkill));
+		strictEqual(update.activeTools.includes(ToolNames.CreateSkill), false);
+	});
+
+	it("exposes create_skill only for authoring intent", () => {
+		const palette = resolveToolPalette({
+			mode: "default",
+			providerSupportsTools: true,
+			userText: "create a skill for reviewing MPI tests",
+		});
+		ok(palette.activeTools.includes(ToolNames.ReadSkill));
+		ok(palette.activeTools.includes(ToolNames.CreateSkill));
+	});
+
+	it("keeps bash out unless shell intent is explicit", () => {
+		const palette = resolveToolPalette({
+			mode: "default",
+			providerSupportsTools: true,
+			userText: "fix the TypeScript test failure",
+		});
+		strictEqual(palette.activeTools.includes(ToolNames.Bash), false);
+
+		const shell = resolveToolPalette({
+			mode: "default",
+			providerSupportsTools: true,
+			userText: "run this bash command after inspecting the repo",
+		});
+		ok(shell.activeTools.includes(ToolNames.Bash));
 	});
 });
 

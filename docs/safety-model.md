@@ -148,7 +148,7 @@ Prefer typed tools over Bash:
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-External CLI/SDK runtimes are delegated sandboxes. Clio maps them conservatively by default and requires explicit opt-in (`CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`) before mapping super-style requests to external full-access/bypass modes. Receipts record external runtime limitations.
+Worker-only subprocess runtimes (`codex-cli`, `opencode-cli`) are delegated sandboxes. Clio maps them conservatively by default and requires explicit opt-in (`CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`) before mapping super-style requests to external full-access/bypass modes. Receipts record subprocess runtime limitations.
 
 ---
 

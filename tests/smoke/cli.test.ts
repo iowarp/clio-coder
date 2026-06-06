@@ -97,6 +97,23 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
+function seedWorkerOnlyTarget(configDir: string): void {
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	const patched = yaml.replace(
+		/^targets:.*$/m,
+		[
+			"targets:",
+			"  - id: codex-worker",
+			"    runtime: codex-cli",
+			"    defaultModel: gpt-5.4",
+			"    wireModels:",
+			"      - gpt-5.4",
+		].join("\n"),
+	);
+	writeFileSync(p, patched, "utf8");
+}
+
 function writeSkill(dir: string, name: string, description: string, body = "Skill body."): string {
 	const skillDir = join(dir, name);
 	mkdirSync(skillDir, { recursive: true });
@@ -159,6 +176,16 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout) as unknown[];
 		ok(Array.isArray(parsed) && parsed.length > 0);
+	});
+
+	it("targets use rejects worker-only subprocess runtimes as orchestrator targets", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		seedWorkerOnlyTarget(join(scratch.dir, "config"));
+		const result = await runCli(["targets", "use", "codex-worker"], { env: scratch.env });
+		strictEqual(result.code, 1);
+		match(result.stderr, /worker-only/);
+		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
+		match(settings, /^ {2}target: null$/m);
 	});
 
 	it("skills list, inspect, validate, and create work in a scratch project", async () => {

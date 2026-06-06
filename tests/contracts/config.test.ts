@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { expandConfigPath, expandConfigValue, resolveConfigValue } from "../../src/core/resolve-config-value.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
 import { SettingsSchema } from "../../src/domains/config/schema.js";
+import { advanceScopedTarget } from "../../src/entry/orchestrator.js";
 
 describe("contracts/config", () => {
 	it("normalizes target config and default/fallback models", () => {
@@ -70,6 +71,21 @@ describe("contracts/config", () => {
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
 		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
+	});
+
+	it("skips worker-only targets in scoped orchestrator cycling", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.endpoints = [
+			{ id: "chat", runtime: "openai-compat", defaultModel: "chat-model" },
+			{ id: "codex-worker", runtime: "codex-cli", defaultModel: "gpt-5.4" },
+		];
+		settings.orchestrator.endpoint = "chat";
+		settings.orchestrator.model = "chat-model";
+		settings.scope = ["codex-worker", "chat"];
+
+		strictEqual(advanceScopedTarget(settings, "forward")?.endpoint, "chat");
+		settings.scope = ["codex-worker"];
+		strictEqual(advanceScopedTarget(settings, "forward"), null);
 	});
 
 	it("resolves environment variable references and literals", () => {

@@ -56,7 +56,7 @@ export interface WorkerPromptMessage {
 	contentHash: string;
 }
 
-const RUNTIME_KINDS = ["http", "subprocess", "sdk"] as const satisfies ReadonlyArray<RuntimeKind>;
+const RUNTIME_KINDS = ["http", "subprocess"] as const satisfies ReadonlyArray<RuntimeKind>;
 const RUNTIME_API_FAMILIES = [
 	"openai-completions",
 	"openai-responses",

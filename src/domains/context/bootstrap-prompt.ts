@@ -7,7 +7,7 @@ export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your jo
 
 You will be given:
 - The detected project type.
-- A sanitized adoption scan of project-local agent configs, including Claude Code (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), and GitHub Copilot (.github/copilot-instructions.md).
+- A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.
 
 Produce a CLIO.md with these possible sections:

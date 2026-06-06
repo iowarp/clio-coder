@@ -147,7 +147,7 @@ for the detailed enforcement model.
 | --- | --- |
 | `default` | Read, write, edit, search, typed git/test/build tools, and default-deny Bash. Bash only admits the curated allowlist or audited project policy entries. |
 | `advise` | Read-oriented analysis, planning, and review. Dispatch admission is readonly. Recipes that need write or execute scope are rejected. |
-| `super` | Explicit operator elevation for one-shot privileged calls. Base hard blocks still apply. External CLI/SDK runtimes do not map to bypass/full-access unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`. |
+| `super` | Explicit operator elevation for one-shot privileged calls. Base hard blocks still apply. Worker-only subprocess runtimes do not map to bypass/full-access unless `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`. |
 
 `safetyLevel` in settings shifts prompt posture, but enforcement still lives in
 the mode matrix, tool registry, safety policy engine, and dispatch admission.

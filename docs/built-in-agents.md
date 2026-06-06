@@ -1,6 +1,6 @@
 # Clio Coder Agent Fleet
 
-Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, mode, tools, and optional runtime hints; the Markdown body is the agent instruction text.
+Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, mode, tools, optional target/model hints, and thinking level; the Markdown body is the agent instruction text.
 
 The source of truth is `src/domains/agents/**`.
 
@@ -61,14 +61,14 @@ tools: [read, edit, run_tests]    # string array; filtered by mode and dispatch 
 model: null                       # string only when set; null is ignored
 endpoint: null                    # string only when set; target/endpoint hint
 thinkingLevel: off                # off | minimal | low | medium | high | xhigh
-runtime: native                   # native | sdk | cli
-skills: []                        # string array
+runtime: native                   # legacy recipe hint only; target/profile selection chooses the actual runtime
+skills: []                        # legacy recipe metadata; skills are loaded through the skills catalog and CLI flags
 ---
 
 Markdown body becomes the agent's system instructions.
 ```
 
-Current built-ins still carry a legacy `provider: null` field in some frontmatter. The loader does not read that field; use `endpoint`, target configuration, or dispatch flags instead.
+Current built-ins still carry legacy `provider: null`, `runtime: native`, and `skills: []` fields in some frontmatter. The loader does not use those fields to select a runtime or activate skills; use `endpoint`, target configuration, fleet profiles, dispatch flags, and the skills catalog instead.
 
 ---
 
@@ -109,8 +109,7 @@ name: My Agent
 description: Focused local review helper.
 mode: advise
 tools: [read, grep, glob, ls, git_diff, write_review]
-runtime: native
-skills: []
+# Optional: endpoint/model/thinkingLevel can hint dispatch defaults.
 ---
 
 You are My Agent. Inspect only the requested area. Never edit files. End by writing a concise review artifact with risks, evidence, and follow-up tests.

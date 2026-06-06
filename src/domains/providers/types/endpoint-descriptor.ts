@@ -16,6 +16,13 @@ export interface EndpointPricing {
 
 export type EndpointLifecycle = "user-managed" | "clio-managed";
 
+/**
+ * Persisted target specification from settings.yaml (`targets:` on disk,
+ * `endpoints` in normalized settings for historical compatibility). It binds a
+ * user-facing target id to a RuntimeDescriptor id, endpoint URL/auth metadata,
+ * model defaults, and capability overrides. Runtime resolution combines this
+ * spec with the registry/catalog to produce a ResolvedRuntimeTarget.
+ */
 export interface EndpointDescriptor {
 	id: string;
 	runtime: string;
@@ -28,3 +35,5 @@ export interface EndpointDescriptor {
 	gateway?: boolean;
 	pricing?: EndpointPricing;
 }
+
+export type TargetSpec = EndpointDescriptor;

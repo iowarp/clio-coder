@@ -1,6 +1,6 @@
 import { targetRequiresAuth } from "./auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "./contract.js";
-import { isWorkerOnlyRuntime } from "./eligibility.js";
+import { isOrchestratorTargetEligibleRuntime, isWorkerTargetEligibleRuntime } from "./eligibility.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
@@ -133,11 +133,10 @@ function requiredCapabilitySupported(capabilities: CapabilityFlags, name: string
 }
 
 function streamingDecision(runtime: RuntimeDescriptor): boolean {
-	// HTTP and SDK runtimes stream through pi-agent-core or their SDK bridge.
-	// Subprocess runtimes are line/event parsed by Clio when they are admitted
-	// as dispatch workers, but they are intentionally blocked for orchestrator
-	// chat unless explicitly allowed by the caller.
-	return runtime.kind === "http" || runtime.kind === "sdk" || runtime.kind === "subprocess";
+	// HTTP/native runtimes stream through pi-ai/pi-agent-core. Worker-only
+	// subprocess runtimes are line/event parsed by Clio when admitted as dispatch
+	// workers, but they are intentionally blocked for orchestrator and print use.
+	return runtime.kind === "http" || runtime.kind === "subprocess";
 }
 
 function capabilityDecisions(runtime: RuntimeDescriptor, capabilities: CapabilityFlags): RuntimeCapabilityDecision {
@@ -275,14 +274,27 @@ export function resolveRuntimeTarget(
 		};
 	}
 
-	if ((input.use === "orchestrator" || input.use === "print") && isWorkerOnlyRuntime(runtime)) {
+	if ((input.use === "orchestrator" || input.use === "print") && !isOrchestratorTargetEligibleRuntime(runtime)) {
 		return {
 			ok: false,
 			diagnostics: [
 				diagnostic(
 					"error",
 					"worker-only-target-unsupported",
-					`target '${endpointId}' uses a worker-only runtime (${runtime.id}); subprocess and sdk runtimes can only be used as worker targets, not as orchestrator or print targets`,
+					`target '${endpointId}' uses a worker-only runtime (${runtime.id}); subprocess runtimes can only be used as worker targets, not as orchestrator or print targets`,
+				),
+			],
+		};
+	}
+
+	if (input.use === "dispatch" && !isWorkerTargetEligibleRuntime(runtime)) {
+		return {
+			ok: false,
+			diagnostics: [
+				diagnostic(
+					"error",
+					"dispatch-runtime-unsupported",
+					`target '${endpointId}' uses runtime '${runtime.id}' (${runtime.kind}); dispatch supports HTTP/native targets plus codex-cli and opencode-cli worker-only subprocess targets`,
 				),
 			],
 		};

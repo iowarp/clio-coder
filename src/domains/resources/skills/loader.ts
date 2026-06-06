@@ -642,6 +642,10 @@ function escapeXmlText(value: string): string {
 	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function skillSourceOrigin(skill: Skill): string {
+	return skill.sourceInfo.source ?? `${skill.source}-${skill.scope}`;
+}
+
 export function formatSkillsCatalogForPrompt(skills: SkillList): string {
 	const visible = modelVisibleSkills(skills.items);
 	if (visible.length === 0) return "";
@@ -655,7 +659,7 @@ export function formatSkillsCatalogForPrompt(skills: SkillList): string {
 	];
 	for (const skill of visible) {
 		lines.push(
-			`  <skill name="${escapeXmlAttribute(skill.name)}" scope="${escapeXmlAttribute(skill.scope)}" source="${escapeXmlAttribute(skill.source)}" hash="${shortHash(skill.hash)}">`,
+			`  <skill name="${escapeXmlAttribute(skill.name)}" scope="${escapeXmlAttribute(skill.scope)}" source="${escapeXmlAttribute(skill.source)}" origin="${escapeXmlAttribute(skillSourceOrigin(skill))}" hash="${shortHash(skill.hash)}">`,
 		);
 		lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);
 		lines.push("  </skill>");

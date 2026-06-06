@@ -165,10 +165,10 @@ function readReadmeSummary(cwd: string): string | null {
 function defaultIdentity(cwd: string, projectType: ProjectType, files: ReadonlyArray<SiblingContextFile>): string {
 	const name = projectName(cwd);
 	const context = allContextText(files);
-	if (/Clio owns the agent loop/i.test(context) && /pi SDK/i.test(context)) {
+	if (/Clio owns the agent loop/i.test(context) && /pi-(?:ai|SDK)/i.test(context)) {
 		return [
 			"Clio Coder is IOWarp's orchestrator coding agent.",
-			"The pi SDK is a vendored engine accessed only through the engine boundary.",
+			"pi-ai is accessed through the engine boundary.",
 			"Clio owns the agent loop, TUI, session format, tool registry, and identity.",
 		].join(" ");
 	}

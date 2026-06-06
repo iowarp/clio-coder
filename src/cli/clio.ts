@@ -1,7 +1,7 @@
 import { readSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
-import { isWorkerOnlyRuntime } from "../domains/providers/index.js";
+import { isOrchestratorTargetEligibleRuntime } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { type BootOptions, bootOrchestrator } from "../entry/orchestrator.js";
@@ -17,7 +17,7 @@ function hasUsableDefaultTarget(): boolean {
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(target.runtime);
 	if (!runtime) return false;
-	if (isWorkerOnlyRuntime(runtime)) return false;
+	if (!isOrchestratorTargetEligibleRuntime(runtime)) return false;
 	if (!targetRequiresAuth(target, runtime)) return true;
 	return openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false }).available;
 }

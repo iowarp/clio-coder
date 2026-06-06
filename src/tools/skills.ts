@@ -62,11 +62,17 @@ function buildResourceTree(baseDir: string, maxEntries: number): string[] {
 	return out;
 }
 
+function skillSourceOrigin(skill: Skill): string {
+	return skill.sourceInfo.source ?? `${skill.source}-${skill.scope}`;
+}
+
 function renderReadSkillOutput(skill: Skill, tree: string[] | null): string {
+	const sourceOrigin = skillSourceOrigin(skill);
 	const lines = [
-		`<skill name="${skill.name}" scope="${skill.scope}" source="${skill.source}" hash="${skill.hash}">`,
+		`<skill name="${skill.name}" scope="${skill.scope}" source="${skill.source}" origin="${sourceOrigin}" hash="${skill.hash}">`,
 		`path: ${skill.filePath}`,
 		`base_dir: ${skill.baseDir}`,
+		`source_origin: ${sourceOrigin}`,
 		`disable_model_invocation: ${skill.disableModelInvocation}`,
 	];
 	if (skill.diagnostics.length > 0) {
@@ -126,6 +132,8 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 					baseDir: skill.baseDir,
 					hash: skill.hash,
 					source: skill.source,
+					sourceOrigin: skillSourceOrigin(skill),
+					sourceInfo: skill.sourceInfo,
 					scope: skill.scope,
 					disableModelInvocation: skill.disableModelInvocation,
 					diagnostics: skill.diagnostics.map((d) => d.message),

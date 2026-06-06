@@ -1245,8 +1245,8 @@ function readToolStats(record: Record<string, unknown>, source: string, field: s
 
 function readRunKind(record: Record<string, unknown>, source: string, field: string): RunKind {
 	const value = readString(record, source, field);
-	if (value !== "http" && value !== "subprocess" && value !== "sdk") {
-		throw new Error(`${source}.${field}: expected http, subprocess, or sdk`);
+	if (value !== "http" && value !== "subprocess") {
+		throw new Error(`${source}.${field}: expected http or subprocess`);
 	}
 	return value;
 }

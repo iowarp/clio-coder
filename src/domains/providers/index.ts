@@ -26,7 +26,12 @@ export {
 } from "./auth/index.js";
 export { mergeCapabilities } from "./capabilities.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
-export { isWorkerOnlyRuntime } from "./eligibility.js";
+export {
+	isOrchestratorTargetEligibleRuntime,
+	isWorkerOnlyRuntime,
+	isWorkerTargetEligibleRuntime,
+	WORKER_ONLY_RUNTIME_IDS,
+} from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";
 export { resolveModelCapabilities } from "./model-capabilities.js";
 export {
@@ -107,7 +112,7 @@ export {
 	EMPTY_CAPABILITIES,
 	VALID_THINKING_LEVELS,
 } from "./types/capability-flags.js";
-export type { EndpointAuth, EndpointDescriptor, EndpointPricing } from "./types/endpoint-descriptor.js";
+export type { EndpointAuth, EndpointDescriptor, EndpointPricing, TargetSpec } from "./types/endpoint-descriptor.js";
 export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export type {
 	ProbeContext,
