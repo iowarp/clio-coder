@@ -141,6 +141,33 @@ function findLatestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number
 	return -1;
 }
 
+function findLatestSkillActivationProtectionStart(
+	entries: ReadonlyArray<SessionEntry>,
+	startIndex: number,
+): number | null {
+	for (let i = entries.length - 1; i >= startIndex; i--) {
+		if (entries[i]?.kind !== "skillActivation") continue;
+		const turnStart = findTurnStartForProtection(entries, i, startIndex);
+		return turnStart === -1 ? i : turnStart;
+	}
+	return null;
+}
+
+function findTurnStartForProtection(
+	entries: ReadonlyArray<SessionEntry>,
+	entryIndex: number,
+	startIndex: number,
+): number {
+	for (let i = entryIndex; i >= startIndex; i--) {
+		const entry = entries[i];
+		if (!entry) continue;
+		if (entry.kind === "branchSummary") return i;
+		if (entry.kind === "bashExecution") return i;
+		if (entry.kind === "message" && entry.role === "user") return i;
+	}
+	return -1;
+}
+
 function buildUserText(conversationText: string, instructions?: string): string {
 	const focus = instructions?.trim();
 	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
@@ -291,11 +318,16 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// in compaction.ts:619-628.
 	const prevCompactionIndex = findLatestCompactionIndex(input.entries);
 	const boundaryStart = prevCompactionIndex + 1;
+	const protectedStart = findLatestSkillActivationProtectionStart(input.entries, boundaryStart);
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
 	const usageEntries = input.entries.slice(usageStart);
 	const lastUsage = getLastAssistantUsage(usageEntries);
 	const tokensBefore = calculateContextTokens(usageEntries, lastUsage);
-	const cut = findCutPoint(input.entries, keepRecentTokens, { startIndex: boundaryStart });
+	const rawCut = findCutPoint(input.entries, keepRecentTokens, { startIndex: boundaryStart });
+	const cut =
+		protectedStart !== null && rawCut.firstKeptEntryIndex > protectedStart
+			? { firstKeptEntryIndex: protectedStart, turnStartIndex: -1, isSplitTurn: false }
+			: rawCut;
 	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
 	const pre = input.entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
 	const turnPrefix = cut.isSplitTurn

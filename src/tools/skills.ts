@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { stringify as stringifyYaml } from "yaml";
 import { ToolNames } from "../core/tool-names.js";
 import { clioConfigDir } from "../core/xdg.js";
-import { loadSkills, modelVisibleSkills, type Skill } from "../domains/resources/index.js";
+import { type LoadSkillsInput, loadSkills, modelVisibleSkills, type Skill } from "../domains/resources/index.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -15,6 +15,10 @@ const SCAFFOLD_DIRS = ["scripts", "references", "assets"] as const;
 
 export interface SkillToolDeps {
 	getCwd?: () => string;
+	getSkillLoaderOptions?: () => Pick<
+		LoadSkillsInput,
+		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
+	>;
 }
 
 function cwdFromDeps(deps?: SkillToolDeps): string {
@@ -97,7 +101,7 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 		async run(args): Promise<ToolResult> {
 			const name = typeof args.name === "string" ? args.name.trim() : "";
 			if (name.length === 0) return { kind: "error", message: "read_skill: missing name" };
-			const list = loadSkills({ cwd: cwdFromDeps(deps) });
+			const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 			const visible = modelVisibleSkills(list.items);
 			const skill = visible.find((item) => item.name === name);
 			if (!skill) {

@@ -65,6 +65,10 @@ export interface ModelSelectorSettings {
 	recentLimit: number;
 }
 
+export interface SkillsSettings {
+	trustProjectCompatRoots: boolean;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -98,6 +102,9 @@ export const DEFAULT_SETTINGS = {
 	terminal: {
 		showTerminalProgress: false,
 	} as TerminalSettings,
+	skills: {
+		trustProjectCompatRoots: false,
+	} as SkillsSettings,
 	// User keybinding overrides. Each id maps to a single KeyId string or a
 	// list of KeyIds. The interactive keybinding manager reads this table
 	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
@@ -238,6 +245,13 @@ terminal:
   # OSC 9;4 terminal progress badges are opt-in; some terminals surface these
   # in taskbars/tabs and keep them visible for long-running agent work.
   showTerminalProgress: false
+
+# Skills are local prompt resources. Project-local compatibility roots such as
+# .agents/skills, .claude/skills, .codex/skills, .github/skills, and
+# .opencode/skills stay hidden from model invocation unless this is true or
+# CLIO_TRUST_PROJECT_SKILLS=1 is set for the process.
+skills:
+  trustProjectCompatRoots: false
 keybindings: {}
 
 # Transient session state. Clio Coder rewrites this block; do not hand-edit.

@@ -601,6 +601,12 @@ function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", t
 	out.push(makeTextMessage(role, truncateReplayText(trimmed), timestamp));
 }
 
+function skillActivationContextText(entry: Extract<SessionEntry, { kind: "skillActivation" }>): string {
+	const activation = entry.activation;
+	const turn = activation.turnId ? ` turn=${activation.turnId}` : "";
+	return `Active skill loaded: ${activation.name} source=${activation.source} hash=${activation.hash} path=${activation.filePath} triggeredBy=${activation.triggeredBy}${turn}. Continue honoring this skill unless the user changes direction.`;
+}
+
 export function buildReplayAgentMessagesFromTurns(
 	turns: ReadonlyArray<unknown>,
 	options: RehydrateChatPanelOptions = {},
@@ -640,6 +646,9 @@ export function buildReplayAgentMessagesFromTurns(
 				break;
 			case "compactionSummary":
 				appendContextMessage(out, "user", compactionContextText(entry), entry.timestamp);
+				break;
+			case "skillActivation":
+				appendContextMessage(out, "user", skillActivationContextText(entry), entry.timestamp);
 				break;
 			case "custom":
 			case "modelChange":
@@ -770,6 +779,9 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			case "protectedArtifact":
 				chatPanel.appendReplayBlock((width) => renderProtectedArtifactEntry(entry, width));
+				break;
+			case "skillActivation":
+				appendReplayLine(chatPanel, `[skill] ${entry.activation.name} ${entry.activation.triggeredBy}`);
 				break;
 			case "branchSummary":
 				if (entry.summary.trim().length > 0) {

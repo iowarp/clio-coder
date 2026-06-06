@@ -19,18 +19,18 @@ Prompts use the three-tier precedence:
 | 2 | project | `.clio/prompts` |
 | 3 | cli | reserved for call-site injected resources |
 
-Skills add Agent Skills compatibility roots so that skills installed by other agents (Codex, the `agents` convention, or `npx skills`) are usable without copying. The skill precedence, lowest to highest, is:
+Skills add Agent Skills compatibility roots so that skills installed by other agents are usable without copying. The skill precedence, lowest to highest, is:
 
 | Precedence | Scope | Source | Root |
 | --- | --- | --- | --- |
 | 10 | package | extension | enabled extension resource roots |
-| 20 | user | agents / codex | `~/.agents/skills`, `~/.codex/skills` |
+| 20 | user | agents / claude / codex / copilot / opencode | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.config/opencode/skills` |
 | 30 | user | clio | `<configDir>/skills` |
-| 40 | project | agents / codex | `.agents/skills`, `.codex/skills` (untrusted by default) |
+| 40 | project | agents / claude / codex / copilot / opencode | `.agents/skills`, `.claude/skills`, `.codex/skills`, `.github/skills`, `.opencode/skills` (untrusted by default) |
 | 50 | project | clio | `.clio/skills` |
 | 60 | cli | path | reserved for call-site injected resources |
 
-Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`.
+Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same skill name at the same precedence, Clio resolves the collision deterministically by file path and records a diagnostic. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic.
 
 ---
 
@@ -97,6 +97,8 @@ Use in the TUI:
 
 `/skills [query]` lists every discovered skill with its scope, source, and trust state. `/skill:name args` force-activates a skill by expanding its body into the submitted message. The same expansion runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
 
+Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
+
 ### Naming and validation
 
 The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should use lowercase letters, numbers, and single hyphens; format violations warn but do not block loading.
@@ -110,17 +112,28 @@ Recognized frontmatter fields:
 
 ### Trust and compatibility roots
 
-Shared user roots (`~/.agents/skills`, `~/.codex/skills`) are model-visible by default, like the Clio user root. Project-local compatibility roots (`.agents/skills`, `.codex/skills`) are discovered but **untrusted by default**: they appear in `/skills` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
+Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skills` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
-Opt in to model-visible project compatibility roots by setting `CLIO_TRUST_PROJECT_SKILLS=1`. `.clio/skills` is always trusted as the Clio-native project root.
+Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio/skills` is always trusted as the Clio-native project root.
 
 ### read_skill and create_skill
 
 `read_skill` loads a skill body after the model matches the catalog. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` (optionally with `max_tree_entries`) to list sibling files under the skill base directory. `read_skill` never executes bundled scripts and only resolves skills the model is allowed to see.
 
-`create_skill` writes a `SKILL.md` folder. It defaults to project scope, refuses to overwrite without `overwrite: true`, and warns when the destination is gitignored. Pass `with_scaffold: true` to also create `scripts/`, `references/`, and `assets/` folders, and supply `license`, `version`, `compatibility`, `allowed_tools`, or `metadata` to populate frontmatter.
+`create_skill` writes a `SKILL.md` folder. It defaults to project scope, refuses to overwrite without `overwrite: true`, and warns when the destination is gitignored. Pass `with_scaffold: true` to also create `scripts/`, `references`, and `assets` folders, and supply `license`, `version`, `compatibility`, `allowed_tools`, or `metadata` to populate frontmatter.
 
-### Skills.sh and Agent Skills compatibility
+### Skills CLI
+
+```bash
+clio skills list [--json] [--all]
+clio skills inspect <name> [--json]
+clio skills validate [path] [--json]
+clio skills create <name> [--user|--project]
+```
+
+Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
+
+### Agent Skills compatibility
 
 Clio is local-first. Skills run from disk and no chat turn depends on network access. Because the compatibility roots above use the standard `SKILL.md` shape, skills installed by the Skills.sh CLI for other agents are usable directly:
 
@@ -128,7 +141,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Remote search, audit, and install through Clio are designed but not enabled in this release.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Remote search, audit, and install through Clio are deferred and not enabled in this release.
 
 ### Prompt envelope and safety
 
@@ -179,6 +192,26 @@ Install locations:
 | project | `.clio/extensions/<id>` |
 
 Project extensions shadow user extensions with the same ID. Use `--all` to list shadowed/disabled entries.
+
+### Skill pack distribution
+
+Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as extension packages instead. A future `iowarp/clio-kit` bundle can carry `clio-extension.yaml` plus a `skills/` directory, and users can install it with `clio extensions install <path> --user` or `--project`.
+
+Recommended layout:
+
+```text
+clio-kit/
+  clio-extension.yaml
+  skills/
+    hpc-review/
+      SKILL.md
+      references/
+      scripts/
+    release-check/
+      SKILL.md
+```
+
+This keeps the runtime local-first and small. Clio Coder discovers enabled extension skill roots, records provenance as `source: extension`, and still requires normal tool safety gates for any script a skill asks the agent to run.
 
 ---
 

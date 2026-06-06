@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -112,7 +113,7 @@ describe("contracts/safety", () => {
 
 	it("supports super elevation and modes lifecycle", () => {
 		const bus = createSafeEventBus();
-		const mockContext = { bus, getContract: () => {} } as any;
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
 		const bundle = createModesBundle(mockContext);
 		const contract = bundle.contract;
 
@@ -123,7 +124,7 @@ describe("contracts/safety", () => {
 		strictEqual(contract.current(), "default"); // still default until confirmed
 
 		// Confirm elevation
-		const nextMode = contract.confirmSuper({ decision: "allow" } as any);
+		const nextMode = contract.confirmSuper({ requestedBy: "test-harness", acceptedAt: Date.now() });
 		strictEqual(nextMode, "super");
 		strictEqual(contract.current(), "super");
 

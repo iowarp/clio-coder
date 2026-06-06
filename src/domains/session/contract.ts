@@ -1,3 +1,4 @@
+import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
 import type { SessionEntry } from "./entries.js";
 import type { TreeSnapshot } from "./tree/navigator.js";
@@ -44,6 +45,8 @@ export type ClioSessionMetaExtension = {
 	 * pre-date this field; the workspace_context tool lazy-fills then.
 	 */
 	workspace?: WorkspaceSnapshot;
+	/** Ordered record of skills activated in this session. */
+	skillActivations?: SkillActivation[];
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;
@@ -85,6 +88,8 @@ export interface SessionContract {
 	 * branchSummary, modelChange, etc.). Old callers keep using `append`.
 	 */
 	appendEntry(entry: SessionEntryInput): SessionEntry;
+	/** Append a skill activation ledger entry and mirror it into meta.json. */
+	recordSkillActivation(activation: SkillActivation): SkillActivation;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Load an existing session and make it current. */

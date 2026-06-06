@@ -608,6 +608,12 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 		}
 	}
 
+	if (isPlainObject(raw.skills)) {
+		if (typeof raw.skills.trustProjectCompatRoots === "boolean") {
+			settings.skills.trustProjectCompatRoots = raw.skills.trustProjectCompatRoots;
+		}
+	}
+
 	if (isPlainObject(raw.keybindings)) {
 		// pi-tui's KeybindingsConfig accepts `KeyId | KeyId[]`. Legacy Clio
 		// settings persisted only strings; accept both shapes, drop empty or

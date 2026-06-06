@@ -15,7 +15,9 @@
  */
 
 import type { TSchema } from "typebox";
+import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
+import { ToolNames } from "../core/tool-names.js";
 import { createMiddlewareContractFromSnapshot, type MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
@@ -66,6 +68,7 @@ export interface ToolFinishEvent {
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
+	skillActivation?: SkillActivation;
 }
 
 export interface ResolveAgentToolsInput {
@@ -137,15 +140,24 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		throw new Error(verdict.result.message);
 	}
 	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
+	const skillActivation =
+		spec.name === ToolNames.ReadSkill ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
 	const result: AgentToolResult<WorkerToolOkDetails> = {
 		content: [{ type: "text", text: verdict.result.output }],
 		details: { ...toolDetails, kind: "ok" },
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok", { terminate: true, decision: verdict.decision });
+		emitFinish(telemetry, spec.name, mode, startedAt, "ok", {
+			terminate: true,
+			decision: verdict.decision,
+			...(skillActivation ? { skillActivation } : {}),
+		});
 	} else {
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok", { decision: verdict.decision });
+		emitFinish(telemetry, spec.name, mode, startedAt, "ok", {
+			decision: verdict.decision,
+			...(skillActivation ? { skillActivation } : {}),
+		});
 	}
 	return result;
 }
@@ -156,7 +168,7 @@ function emitFinish(
 	mode: ModeName,
 	startedAt: number,
 	outcome: ToolOutcome,
-	extra?: { reason?: string; terminate?: boolean; decision?: SafetyDecision },
+	extra?: { reason?: string; terminate?: boolean; decision?: SafetyDecision; skillActivation?: SkillActivation },
 ): void {
 	if (!telemetry?.onFinish) return;
 	const event: ToolFinishEvent = {
@@ -173,6 +185,9 @@ function emitFinish(
 		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
 		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
+	}
+	if (extra?.skillActivation !== undefined) {
+		event.skillActivation = extra.skillActivation;
 	}
 	telemetry.onFinish(event);
 }

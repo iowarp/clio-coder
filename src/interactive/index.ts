@@ -5,6 +5,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { type SkillActivation, skillActivationFromSource } from "../core/skill-activation.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -207,6 +208,7 @@ const EDITOR_BASH_TIMEOUT_MS = 300_000;
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
+	skillActivations: SkillActivation[];
 }
 
 export function expandInteractiveSubmit(
@@ -216,10 +218,13 @@ export function expandInteractiveSubmit(
 ): InteractiveSubmitExpansion {
 	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
 	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
+	const skillActivations = skillExpansion?.expanded
+		? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
+		: [];
 	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
 	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
-	return { text: fileExpansion.text, images: fileExpansion.images };
+	return { text: fileExpansion.text, images: fileExpansion.images, skillActivations };
 }
 
 export async function expandInteractiveSubmitAsync(
@@ -229,6 +234,9 @@ export async function expandInteractiveSubmitAsync(
 ): Promise<InteractiveSubmitExpansion> {
 	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
 	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
+	const skillActivations = skillExpansion?.expanded
+		? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
+		: [];
 	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
@@ -236,7 +244,7 @@ export async function expandInteractiveSubmitAsync(
 		includeImages: true,
 		missing: "leave",
 	});
-	return { text: fileExpansion.text, images: fileExpansion.images };
+	return { text: fileExpansion.text, images: fileExpansion.images, skillActivations };
 }
 
 export function expandInteractiveSubmitText(
@@ -1349,7 +1357,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					footer.refresh();
 					chatPanel.appendUser(submitted.text);
 					tui.requestRender();
-					await deps.chat.submit(submitted.text, submitted.images.length > 0 ? { images: submitted.images } : undefined);
+					await deps.chat.submit(submitted.text, {
+						...(submitted.images.length > 0 ? { images: submitted.images } : {}),
+						...(submitted.skillActivations.length > 0 ? { skillActivations: submitted.skillActivations } : {}),
+					});
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[interactive] chat failed: ${msg}\n`);

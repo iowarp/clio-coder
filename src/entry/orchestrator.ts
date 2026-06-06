@@ -6,6 +6,7 @@ import { type ClioSettings, readSettings, writeSettings } from "../core/config.j
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
+import { skillActivationFromSource } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
@@ -38,7 +39,7 @@ import {
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
-import { type ResourcesContract, ResourcesDomainModule } from "../domains/resources/index.js";
+import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
@@ -86,6 +87,8 @@ export interface BootOptions {
 		target?: string;
 		model?: string;
 		thinking?: ThinkingLevel;
+		noSkills?: boolean;
+		skillPaths?: ReadonlyArray<string>;
 	};
 }
 
@@ -246,6 +249,19 @@ function appendProtectedArtifactRegistryEvent(
 	}
 }
 
+function appendSkillActivationRegistryEvent(
+	session: SessionContract | undefined,
+	activation: Parameters<SessionContract["recordSkillActivation"]>[0],
+): void {
+	if (!session?.current()) return;
+	try {
+		session.recordSkillActivation(activation);
+	} catch {
+		// Activation metadata should never alter the result of a completed
+		// read_skill call. Missing ledger data is visible in diagnostics.
+	}
+}
+
 async function runCompactionFlow(
 	session: SessionContract,
 	settings: ClioSettings,
@@ -378,7 +394,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ExtensionsDomainModule,
-		ResourcesDomainModule,
+		createResourcesDomainModule({
+			skills: () => ({
+				disableDiscovery: options.headless?.noSkills === true,
+				...(options.headless?.skillPaths && options.headless.skillPaths.length > 0
+					? { explicitSkillPaths: options.headless.skillPaths }
+					: {}),
+			}),
+		}),
 		ShareDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
@@ -480,11 +503,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware,
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
+		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),
 	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		dispatch,
 		bus,
+		getSkillLoaderOptions: () => ({
+			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
+			disableDiscovery: options.headless?.noSkills === true,
+			...(options.headless?.skillPaths && options.headless.skillPaths.length > 0
+				? { explicitSkillPaths: options.headless.skillPaths }
+				: {}),
+		}),
 	});
 
 	const getCurrentSettings = (): ClioSettings =>
@@ -560,6 +591,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (options.headless) {
 		const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());
 		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.headless.prompt;
+		const skillActivations = skillExpansion?.expanded
+			? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
+			: [];
 		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
 		const fileExpansion = await expandInlineFileReferencesAsync(
 			promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
@@ -573,6 +607,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const code = await runHeadlessMainAgent(chat, {
 			prompt: fileExpansion.text,
 			...(images.length > 0 ? { images } : {}),
+			...(skillActivations.length > 0 ? { skillActivations } : {}),
 			mode: options.headless.mode ?? "text",
 			getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 		});

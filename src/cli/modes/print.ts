@@ -1,3 +1,4 @@
+import type { SkillActivation } from "../../core/skill-activation.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -6,6 +7,7 @@ import { serializeJsonLine } from "./jsonl.js";
 export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
+	skillActivations?: ReadonlyArray<SkillActivation>;
 	mode?: "text" | "json";
 	getSessionHeader?: () => unknown | null;
 }
@@ -71,7 +73,16 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	try {
 		await chat.submit(
 			options.prompt,
-			options.images && options.images.length > 0 ? { images: options.images } : undefined,
+			options.images && options.images.length > 0
+				? {
+						images: options.images,
+						...(options.skillActivations && options.skillActivations.length > 0
+							? { skillActivations: options.skillActivations }
+							: {}),
+					}
+				: options.skillActivations && options.skillActivations.length > 0
+					? { skillActivations: options.skillActivations }
+					: undefined,
 		);
 	} finally {
 		unsubscribe();

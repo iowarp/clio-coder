@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
-import { ToolNames } from "../../src/core/tool-names.js";
-import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -32,9 +33,9 @@ afterEach(() => {
 	}
 });
 
-function mockToolSpec(name: string, maxBytes: number): ToolSpec {
+function mockToolSpec(name: ToolName, maxBytes: number): ToolSpec {
 	return {
-		name: name as any,
+		name,
 		description: "test tool",
 		parameters: Type.Object({}),
 		baseActionClass: "read",
@@ -50,6 +51,68 @@ function mockToolSpec(name: string, maxBytes: number): ToolSpec {
 			},
 		},
 		run: async () => ({ kind: "ok", output: "" }),
+	};
+}
+
+function resultSize(value: unknown): { truncated?: boolean } | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const candidate = (value as Record<string, unknown>).resultSize;
+	if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+	const truncated = (candidate as Record<string, unknown>).truncated;
+	return typeof truncated === "boolean" ? { truncated } : {};
+}
+
+function runReceipt(runId: string, task: string): RunReceipt {
+	return {
+		runId,
+		agentId: "coder",
+		task,
+		endpointId: "e",
+		wireModelId: "m",
+		runtimeId: "r",
+		runtimeKind: "http",
+		startedAt: "",
+		endedAt: "",
+		exitCode: 0,
+		tokenCount: 0,
+		costUsd: 0,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		clioVersion: "0.0.0",
+		piMonoVersion: "0.0.0",
+		platform: "",
+		nodeVersion: "",
+		toolCalls: 0,
+		toolStats: [],
+		sessionId: null,
+		integrity: {
+			version: 1,
+			algorithm: "sha256",
+			digest: "0".repeat(64),
+		},
+	};
+}
+
+function runEnvelope(runId: string): RunEnvelope {
+	return {
+		id: runId,
+		agentId: "coder",
+		task: "do work",
+		endpointId: "e",
+		wireModelId: "m",
+		runtimeId: "r",
+		runtimeKind: "http",
+		startedAt: "",
+		endedAt: "",
+		status: "completed",
+		exitCode: 0,
+		pid: null,
+		heartbeatAt: null,
+		receiptPath: `/tmp/${runId}.json`,
+		sessionId: null,
+		cwd: "/tmp",
+		tokenCount: 0,
+		costUsd: 0,
 	};
 }
 
@@ -142,7 +205,7 @@ describe("contracts/tools result shaping and truncation", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("[tool result truncated]"));
 			ok(result.output.includes("narrow the request"));
-			strictEqual((result.details?.resultSize as any)?.truncated, true);
+			strictEqual(resultSize(result.details)?.truncated, true);
 		}
 	});
 
@@ -163,39 +226,23 @@ describe("contracts/tools result shaping and truncation", () => {
 describe("contracts/tools dispatch run paths", () => {
 	it("createDispatchTool triggers dispatch contract", async () => {
 		const mockDispatch: DispatchContract = {
-			dispatch: async (req: any) => {
+			dispatch: async (req: DispatchRequest) => {
 				strictEqual(req.agentId, "coder");
 				strictEqual(req.task, "do work");
 				return {
 					runId: "run-123",
 					events: (async function* () {})(),
-					finalPromise: Promise.resolve({
-						runId: "run-123",
-						agentId: "coder",
-						task: "do work",
-						endpointId: "e",
-						wireModelId: "m",
-						runtimeId: "r",
-						runtimeKind: "http" as const,
-						startedAt: "",
-						endedAt: "",
-						exitCode: 0,
-						tokenCount: 0,
-						costUsd: 0,
-						compiledPromptHash: null,
-						staticCompositionHash: null,
-						clioVersion: "0.0.0",
-						piMonoVersion: "0.0.0",
-						platform: "",
-						nodeVersion: "",
-						toolCalls: 0,
-						toolStats: [],
-						sessionId: null,
-					}),
+					finalPromise: Promise.resolve(runReceipt("run-123", "do work")),
 				};
 			},
-			getRun: () => ({ receiptPath: "/tmp/receipt.json" }) as any,
-		} as never;
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: () => ({ ...runEnvelope("run-123"), receiptPath: "/tmp/receipt.json" }),
+			abort: () => {},
+			drain: async () => {},
+		};
 
 		const tool = createDispatchTool({ dispatch: mockDispatch });
 		const result = await tool.run({ task: "do work", agent_id: "coder" });
@@ -209,7 +256,10 @@ describe("contracts/tools dispatch run paths", () => {
 
 	it("createDispatchBatchTool triggers batch dispatch contract", async () => {
 		const mockDispatch: DispatchContract = {
-			dispatchBatch: async (reqs: any) => {
+			dispatch: async () => {
+				throw new Error("dispatch not used");
+			},
+			dispatchBatch: async (reqs: ReadonlyArray<DispatchRequest>) => {
 				strictEqual(reqs.length, 2);
 				strictEqual(reqs[0]?.task, "task 1");
 				strictEqual(reqs[1]?.task, "task 2");
@@ -236,58 +286,14 @@ describe("contracts/tools dispatch run paths", () => {
 							},
 						};
 					})(),
-					finalPromise: Promise.resolve([
-						{
-							runId: "run-1",
-							agentId: "coder",
-							task: "task 1",
-							endpointId: "e",
-							wireModelId: "m",
-							runtimeId: "r",
-							runtimeKind: "http" as const,
-							startedAt: "",
-							endedAt: "",
-							exitCode: 0,
-							tokenCount: 0,
-							costUsd: 0,
-							compiledPromptHash: null,
-							staticCompositionHash: null,
-							clioVersion: "0.0.0",
-							piMonoVersion: "0.0.0",
-							platform: "",
-							nodeVersion: "",
-							toolCalls: 0,
-							toolStats: [],
-							sessionId: null,
-						},
-						{
-							runId: "run-2",
-							agentId: "coder",
-							task: "task 2",
-							endpointId: "e",
-							wireModelId: "m",
-							runtimeId: "r",
-							runtimeKind: "http" as const,
-							startedAt: "",
-							endedAt: "",
-							exitCode: 0,
-							tokenCount: 0,
-							costUsd: 0,
-							compiledPromptHash: null,
-							staticCompositionHash: null,
-							clioVersion: "0.0.0",
-							piMonoVersion: "0.0.0",
-							platform: "",
-							nodeVersion: "",
-							toolCalls: 0,
-							toolStats: [],
-							sessionId: null,
-						},
-					]),
+					finalPromise: Promise.resolve([runReceipt("run-1", "task 1"), runReceipt("run-2", "task 2")]),
 				};
 			},
-			getRun: (runId: string) => ({ receiptPath: `/tmp/${runId}.json` }) as ReturnType<DispatchContract["getRun"]>,
-		} as never;
+			listRuns: () => [],
+			getRun: (runId: string) => runEnvelope(runId),
+			abort: () => {},
+			drain: async () => {},
+		};
 
 		const tool = createDispatchBatchTool({ dispatch: mockDispatch });
 		const result = await tool.run({

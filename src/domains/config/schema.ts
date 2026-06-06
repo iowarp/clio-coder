@@ -124,6 +124,10 @@ const TerminalSchema = Type.Object({
 	showTerminalProgress: Type.Boolean(),
 });
 
+const SkillsSchema = Type.Object({
+	trustProjectCompatRoots: Type.Boolean(),
+});
+
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
@@ -143,6 +147,7 @@ export const SettingsSchema = Type.Object({
 	}),
 	theme: Type.String(),
 	terminal: TerminalSchema,
+	skills: SkillsSchema,
 	// User keybinding overrides mirror pi-tui's KeybindingsConfig: each id
 	// maps to a KeyId (string) or a KeyId[] (array of strings). The loader
 	// in core/config.ts normalizes legacy single-string entries on read.

@@ -1,4 +1,5 @@
 import type { TSchema } from "typebox";
+import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
@@ -115,6 +116,7 @@ export interface RegistryDeps {
 	middleware?: MiddlewareContract;
 	protectedArtifacts?: ProtectedArtifactState;
 	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
+	onSkillActivation?: (activation: SkillActivation) => void;
 }
 
 export interface ToolInvokeOptions {
@@ -250,6 +252,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
 			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects));
+			emitSkillActivation(deps, spec, finalResult, options);
 			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
@@ -562,6 +565,23 @@ function emitProtectedArtifactEvent(deps: RegistryDeps, event: ProtectedArtifact
 	} catch {
 		// Protection state is already live in memory. Persistence hooks are
 		// best-effort and must not change tool execution semantics.
+	}
+}
+
+function emitSkillActivation(
+	deps: RegistryDeps,
+	spec: ToolSpec,
+	result: ToolResult,
+	options?: ToolInvokeOptions,
+): void {
+	if (!deps.onSkillActivation || spec.name !== ToolNames.ReadSkill || result.kind !== "ok") return;
+	const activation = skillActivationFromToolDetails(result.details, options?.turnId);
+	if (!activation) return;
+	try {
+		deps.onSkillActivation(activation);
+	} catch {
+		// Activation writes are audit metadata. Tool execution has already
+		// succeeded and must not be changed by a failed ledger append.
 	}
 }
 

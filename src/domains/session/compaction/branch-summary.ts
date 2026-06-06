@@ -208,6 +208,13 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 		}
 		if (entry.kind === "compactionSummary") {
 			parts.push(`[Prior summary]: ${entry.summary}`);
+			continue;
+		}
+		if (entry.kind === "skillActivation") {
+			const activation = entry.activation;
+			parts.push(
+				`[Skill activation]: ${activation.name} source=${activation.source} hash=${activation.hash} path=${activation.filePath} triggeredBy=${activation.triggeredBy}`,
+			);
 		}
 		// custom, modelChange, thinkingLevelChange, fileEntry, sessionInfo,
 		// protectedArtifact do not project into the serialized conversation.

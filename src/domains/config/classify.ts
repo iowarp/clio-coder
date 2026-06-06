@@ -35,6 +35,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"scope",
 	"budget.sessionCeilingUsd",
 	"terminal",
+	"skills",
 	"compaction",
 	"retry",
 ]);

@@ -70,6 +70,8 @@ theme: default
 terminal:
   showTerminalProgress: false
 keybindings: {}
+skills:
+  trustProjectCompatRoots: false
 compaction:
   threshold: 0.8
   auto: true

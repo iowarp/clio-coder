@@ -101,6 +101,8 @@ export function estimateTokens(entry: SessionEntry): number {
 			return estimateBashExecution(entry);
 		case "custom":
 			return estimateCustom(entry);
+		case "skillActivation":
+			return Math.ceil(JSON.stringify(entry.activation).length / 4);
 		case "branchSummary":
 		case "compactionSummary":
 			return estimateSummary(entry);

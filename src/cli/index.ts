@@ -15,6 +15,7 @@ import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
 import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
 import { extractApiKeyFlag, extractNoContextFilesFlag, parseFlags, printError } from "./shared.js";
+import { runSkillsCommand } from "./skills.js";
 import { runTargetsCommand } from "./targets.js";
 import { runUninstallCommand } from "./uninstall.js";
 import { runUpgradeCommand } from "./upgrade.js";
@@ -50,6 +51,7 @@ Usage:
   clio memory               list, propose, approve, reject, or prune memory
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
+  clio skills               list, inspect, validate, or create skills
   clio share export|import  export or import Clio project/resource archives
   clio init [--yes] [--preview|--adopt]  bootstrap or adopt agent configs into CLIO.md
   clio --help, -h           this message
@@ -99,6 +101,8 @@ async function main(argv: string[]): Promise<number> {
 		case "extensions":
 		case "ext":
 			return runExtensionsCommand(subArgs);
+		case "skills":
+			return runSkillsCommand(subArgs);
 		case "share":
 			return runShareCommand(subArgs);
 		case "export":

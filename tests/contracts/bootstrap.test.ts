@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -86,6 +86,62 @@ describe("contracts/bootstrap", () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "CLAUDE.md"), "- Prefer pnpm for package management.\n", "utf8");
 		writeFileSync(join(scratch, "AGENTS.md"), "- Prefer npm for package management.\n", "utf8");
+		mkdirSync(join(scratch, ".claude", "skills", "claude-skill"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".claude", "skills", "claude-skill", "SKILL.md"),
+			[
+				"---",
+				"name: claude-skill",
+				"description: Use when reviewing Claude workflows.",
+				"---",
+				"",
+				"- Prefer project-local Claude workflows when asked about Claude automation.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		mkdirSync(join(scratch, ".agents", "skills", "review-skill"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".agents", "skills", "review-skill", "SKILL.md"),
+			[
+				"---",
+				"name: review-skill",
+				"description: Use when reviewing this project.",
+				"---",
+				"",
+				"- Always run the local verification command before summarizing.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		mkdirSync(join(scratch, ".opencode", "skills", "opencode-skill"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".opencode", "skills", "opencode-skill", "SKILL.md"),
+			[
+				"---",
+				"name: opencode-skill",
+				"description: Use when reviewing OpenCode workflows.",
+				"---",
+				"",
+				"- Keep OpenCode skill resources local to the repository.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		mkdirSync(join(scratch, ".github", "skills", "copilot-skill"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".github", "skills", "copilot-skill", "SKILL.md"),
+			[
+				"---",
+				"name: copilot-skill",
+				"description: Use when reviewing Copilot workflows.",
+				"---",
+				"",
+				"- Keep Copilot skill guidance review focused.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
 
 		const result = await runBootstrap({
 			cwd: scratch,
@@ -98,10 +154,18 @@ describe("contracts/bootstrap", () => {
 		const clio = readFileSync(join(scratch, "CLIO.md"), "utf8");
 		ok(clio.includes("## Imported agent context"), clio);
 		ok(clio.includes("Sources: `CLAUDE.md`"), clio);
+		ok(clio.includes("Claude Code skill (project): `.claude/skills/claude-skill/SKILL.md`"), clio);
+		ok(clio.includes("Agent Skills skill (project): `.agents/skills/review-skill/SKILL.md`"), clio);
+		ok(clio.includes("OpenCode skill (project): `.opencode/skills/opencode-skill/SKILL.md`"), clio);
+		ok(clio.includes("GitHub Copilot skill (project): `.github/skills/copilot-skill/SKILL.md`"), clio);
 		ok(clio.includes("Skipped conflicts"), clio);
 
 		const state = readClioState(scratch);
 		ok(state?.contextSources && state.contextSources.length >= 2);
+		ok(state.contextSources.some((source) => source.provider === "claude-code" && source.kind === "skill"));
+		ok(state.contextSources.some((source) => source.provider === "agents" && source.kind === "skill"));
+		ok(state.contextSources.some((source) => source.provider === "opencode" && source.kind === "skill"));
+		ok(state.contextSources.some((source) => source.provider === "copilot" && source.kind === "skill"));
 		ok(state?.contextSourceHash);
 		strictEqual(result.summary.adoption.mode, "adopt");
 	});

@@ -15,6 +15,7 @@ import {
 import {
 	expandSkillInvocationInput,
 	formatSkillsCatalogForPrompt,
+	type LoadSkillsInput,
 	loadSkills,
 	type Skill,
 	type SkillExpansion,
@@ -28,6 +29,7 @@ export interface ResourceList<T> {
 export interface ResourceLoaderOptions {
 	cwd?: string;
 	noContextFiles?: boolean;
+	skills?: () => Pick<LoadSkillsInput, "trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths">;
 }
 
 export interface ResourcesLoader {
@@ -46,6 +48,10 @@ export interface ResourcesLoader {
 export function createResourcesLoader(options: ResourceLoaderOptions = {}): ResourcesLoader {
 	const defaultCwd = options.cwd ?? process.cwd();
 	const noContextFiles = options.noContextFiles === true;
+	const skillOptions = (): Pick<
+		LoadSkillsInput,
+		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
+	> => options.skills?.() ?? {};
 	return {
 		contextFiles(cwd = defaultCwd, contextOptions = {}) {
 			if (noContextFiles) return [];
@@ -55,13 +61,13 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 			return renderProjectContextFiles(files, cwd);
 		},
 		skills(cwd = defaultCwd) {
-			return loadSkills({ cwd });
+			return loadSkills({ cwd, ...skillOptions() });
 		},
 		skillsCatalog(cwd = defaultCwd) {
-			return formatSkillsCatalogForPrompt(loadSkills({ cwd }));
+			return formatSkillsCatalogForPrompt(loadSkills({ cwd, ...skillOptions() }));
 		},
 		expandSkillInvocation(text, cwd = defaultCwd) {
-			return expandSkillInvocationInput(text, loadSkills({ cwd }));
+			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }));
 		},
 		prompts(cwd = defaultCwd) {
 			return loadPromptTemplates({ cwd });

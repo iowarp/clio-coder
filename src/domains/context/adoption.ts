@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { homedir } from "node:os";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 
-export type AdoptionProvider = "claude-code" | "codex" | "gemini" | "cursor" | "copilot";
+export type AdoptionProvider = "claude-code" | "agents" | "codex" | "gemini" | "cursor" | "copilot" | "opencode";
 export type AdoptionScope = "project" | "global";
 export type AdoptionSourceKind = "instructions" | "settings" | "command" | "agent" | "skill" | "rule";
 
@@ -92,10 +92,12 @@ const MAX_IMPORTED_RULES = 20;
 
 const PROVIDER_LABELS: Record<AdoptionProvider, string> = {
 	"claude-code": "Claude Code",
+	agents: "Agent Skills",
 	codex: "Codex",
 	gemini: "Gemini",
 	cursor: "Cursor",
 	copilot: "GitHub Copilot",
+	opencode: "OpenCode",
 };
 
 const KIND_LABELS: Record<AdoptionSourceKind, string> = {
@@ -273,11 +275,16 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 	addProject(join(".claude", "settings.json"), "claude-code", "settings");
 	addProjectDir(join(".claude", "commands"), "claude-code", "command", 3, markdownLike);
 	addProjectDir(join(".claude", "agents"), "claude-code", "agent", 2, markdownLike);
+	addProjectDir(join(".claude", "skills"), "claude-code", "skill", 4, markdownLike);
+
+	addProjectDir(join(".agents", "skills"), "agents", "skill", 4, markdownLike);
 
 	addProject("AGENTS.md", "codex", "instructions");
 	addProject("CODEX.md", "codex", "instructions");
 	addProject(join(".codex", "AGENTS.md"), "codex", "instructions");
 	addProjectDir(join(".codex", "skills"), "codex", "skill", 4, markdownLike);
+
+	addProjectDir(join(".opencode", "skills"), "opencode", "skill", 4, markdownLike);
 
 	addProject("GEMINI.md", "gemini", "instructions");
 	addProject(join(".gemini", "GEMINI.md"), "gemini", "instructions");
@@ -300,6 +307,7 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 
 	addProjectDir(join(".cursor", "rules"), "cursor", "rule", 0, markdownLike);
 	addProject(join(".github", "copilot-instructions.md"), "copilot", "instructions");
+	addProjectDir(join(".github", "skills"), "copilot", "skill", 4, markdownLike);
 
 	if (includeGlobal) add(join(home, ".codex", "AGENTS.md"), "global", "codex", "instructions");
 

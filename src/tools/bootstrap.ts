@@ -2,6 +2,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
+import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { bashTool } from "./bash.js";
@@ -38,6 +39,10 @@ export interface ToolBootstrapDeps {
 	session?: SessionContract;
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
+	getSkillLoaderOptions?: () => Pick<
+		LoadSkillsInput,
+		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
+	>;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
@@ -393,6 +398,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
+		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 	};
 	registry.register({
 		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),

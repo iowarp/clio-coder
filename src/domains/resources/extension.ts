@@ -1,9 +1,20 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import type { ConfigContract } from "../config/contract.js";
 import type { ResourcesContract } from "./contract.js";
-import { createResourcesLoader } from "./loader.js";
+import { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 
-export function createResourcesBundle(_context: DomainContext): DomainBundle<ResourcesContract> {
-	const loader = createResourcesLoader();
+export function createResourcesBundle(
+	context: DomainContext,
+	options: ResourceLoaderOptions = {},
+): DomainBundle<ResourcesContract> {
+	const config = (): ConfigContract | undefined => context.getContract<ConfigContract>("config");
+	const loader = createResourcesLoader({
+		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+		...(options.noContextFiles !== undefined ? { noContextFiles: options.noContextFiles } : {}),
+		skills: () => ({
+			...skillOptions(config()?.get().skills.trustProjectCompatRoots === true, options),
+		}),
+	});
 	const extension: DomainExtension = {
 		start() {
 			return undefined;
@@ -42,4 +53,16 @@ export function createResourcesBundle(_context: DomainContext): DomainBundle<Res
 		},
 	};
 	return { extension, contract };
+}
+
+function skillOptions(
+	trustProjectCompatRoots: boolean,
+	options: ResourceLoaderOptions,
+): ReturnType<NonNullable<ResourceLoaderOptions["skills"]>> {
+	const runtime = options.skills?.() ?? {};
+	return {
+		trustProjectCompatRoots: runtime.trustProjectCompatRoots ?? trustProjectCompatRoots,
+		...(runtime.disableDiscovery !== undefined ? { disableDiscovery: runtime.disableDiscovery } : {}),
+		...(runtime.explicitSkillPaths !== undefined ? { explicitSkillPaths: runtime.explicitSkillPaths } : {}),
+	};
 }

@@ -59,6 +59,7 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 			return entry.role !== "tool_result";
 		case "bashExecution":
 		case "custom":
+		case "skillActivation":
 		case "branchSummary":
 		case "compactionSummary":
 			return true;
@@ -150,6 +151,7 @@ export function findCutPoint(
 			prev.kind === "message" ||
 			prev.kind === "bashExecution" ||
 			prev.kind === "custom" ||
+			prev.kind === "skillActivation" ||
 			prev.kind === "branchSummary"
 		) {
 			break;
