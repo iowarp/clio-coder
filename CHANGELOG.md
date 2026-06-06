@@ -31,6 +31,15 @@ rather than hidden subprocess shims.
   loading, project/user compatibility roots for Agent Skills, Claude, Codex,
   OpenCode, and Copilot-style layouts, slash-command parity, runtime-option
   propagation to workers, and upgraded `read_skill` / `create_skill` tooling.
+- Added a curated skills marketplace under `skills/` with the first wave of
+  approved skills (`context-prime`, `context-handoff`, `clio-dev`, `clio-test`),
+  an `install.sh` bridge that links a catalog skill into a runtime discovery
+  root (`.clio/skills` or the user config skills dir), and a provenance
+  frontmatter convention (`registry-id`, `source-url`, `version`, `audit`) that
+  distinguishes maintainer-approved skills from local runtime skills. The
+  catalog is not a discovery root, so nothing auto-loads; skills activate only
+  on explicit install. `clio-test` documents the real v0.2.2 harness
+  (contracts/smoke/boundaries) and the build/config hot-reload loops.
 - Added custom-section support to `CLIO.md` parsing, serialization, bootstrap
   generation, and project-context rendering. `/init --generate` can now preserve
   compact architecture boundaries, workflow traps, retrieval strategy, generated
