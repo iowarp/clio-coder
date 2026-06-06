@@ -26,6 +26,7 @@ export {
 } from "./auth/index.js";
 export { mergeCapabilities } from "./capabilities.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
+export { isWorkerOnlyRuntime } from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";
 export { resolveModelCapabilities } from "./model-capabilities.js";
 export {

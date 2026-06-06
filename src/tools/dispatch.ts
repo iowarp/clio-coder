@@ -13,7 +13,6 @@ const DEFAULT_AGENT_ID = "implementer";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
 const VALID_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
-const VALID_AUTO_APPROVE = new Set(["allow", "deny"]);
 
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
@@ -72,7 +71,6 @@ function dispatchRequestFromArgs(
 	const request: DispatchRequest = {
 		agentId: stringArg(args, "agent_id", "agentId", "agent") ?? DEFAULT_AGENT_ID,
 		task,
-		supervised: true,
 	};
 
 	const endpoint = stringArg(args, "target", "endpoint");
@@ -106,13 +104,6 @@ function dispatchRequestFromArgs(
 
 	const requiredCapabilities = stringArrayArg(args, "required_capabilities", "requiredCapabilities");
 	if (requiredCapabilities && requiredCapabilities.length > 0) request.requiredCapabilities = requiredCapabilities;
-
-	const autoApprove = stringArg(args, "auto_approve", "autoApprove");
-	if (autoApprove) {
-		if (!VALID_AUTO_APPROVE.has(autoApprove))
-			return { ok: false, message: "dispatch: auto_approve must be allow or deny" };
-		request.autoApprove = autoApprove as "allow" | "deny";
-	}
 
 	return { ok: true, request };
 }
@@ -284,7 +275,6 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			memory_section: Type.Optional(
 				Type.String({ description: "Extra memory/context text to append to the dispatched agent prompt." }),
 			),
-			auto_approve: Type.Optional(Type.Union([Type.Literal("allow"), Type.Literal("deny")])),
 			timeout_ms: Type.Optional(Type.Number({ description: "Abort the agent run after this many milliseconds." })),
 			max_output_bytes: Type.Optional(
 				Type.Number({ description: "Maximum dispatched-agent text bytes returned to the main agent." }),
@@ -400,7 +390,6 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 			tool_profile: Type.Optional(
 				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
 			),
-			auto_approve: Type.Optional(Type.Union([Type.Literal("allow"), Type.Literal("deny")])),
 			timeout_ms: Type.Optional(Type.Number({ description: "Abort all active batch runs after this many milliseconds." })),
 			max_output_bytes: Type.Optional(Type.Number({ description: "Maximum summary bytes returned to the main agent." })),
 		}),

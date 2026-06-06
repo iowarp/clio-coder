@@ -6,7 +6,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
-import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -14,7 +14,6 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
-import type { ToolApprovalRequestPayload } from "../../src/engine/worker-events.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -34,17 +33,6 @@ function deferred<T>(): Deferred<T> {
 
 function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
-}
-
-function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprovalResponse"> {
-	return {
-		onApprovalRequest: () => {},
-		sendApprovalResponse: () => {},
-	};
-}
-
-function isTestResultEvent(value: unknown): value is { type: "test_result"; payload?: unknown } {
-	return !!value && typeof value === "object" && (value as { type?: unknown }).type === "test_result";
 }
 
 function stubContext(): DomainContext {
@@ -209,7 +197,6 @@ describe("contracts/dispatch", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
-					...approvalNoops(),
 				};
 			},
 		});
@@ -250,7 +237,6 @@ describe("contracts/dispatch", () => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
-					...approvalNoops(),
 				};
 			},
 		});
@@ -297,7 +283,6 @@ describe("contracts/dispatch", () => {
 				events: emptyEvents(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
-				...approvalNoops(),
 			}),
 		});
 		await bundle.extension.start();
@@ -326,7 +311,6 @@ describe("contracts/dispatch", () => {
 				events: emptyEvents(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
-				...approvalNoops(),
 			}),
 		});
 		await bundle.extension.start();
@@ -348,33 +332,26 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
-	it("delivers an approval response to the worker after receiving its request", async () => {
+	it("no longer intercepts approval IPC; the spawned worker exposes no approval handlers", async () => {
 		const { chmodSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");
 		const { join } = await import("node:path");
 		const { spawnNativeWorker } = await import("../../src/domains/dispatch/worker-spawn.js");
 		const { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } = await import("../../src/worker/spec-contract.js");
 
-		const scratch = mkdtempSync(join(tmpdir(), "clio-approval-"));
+		const scratch = mkdtempSync(join(tmpdir(), "clio-approval-absent-"));
 		const stubEntry = join(scratch, "stub-entry.js");
+		// Emits a legacy approval-request line then exits without waiting for any
+		// response. With the Claude Code SDK approval IPC removed, the orchestrator
+		// must not intercept or answer this; the line passes through as a plain event.
 		writeFileSync(
 			stubEntry,
 			`
 const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
-let gotSpec = false;
-let approvalRequestId = "abc";
-rl.on("line", (line) => {
-	if (!gotSpec) {
-		gotSpec = true;
-		process.stdout.write(JSON.stringify({ type: "clio_tool_approval_request", payload: { requestId: approvalRequestId, claudeToolName: "Bash", clioToolName: "bash", args: { command: "ls" }, classification: { actionClass: "execute", reasons: [] }, mode: "default" } }) + "\\n");
-		return;
-	}
-	const parsed = JSON.parse(line);
-	if (parsed.type === "clio_tool_approval_response" && parsed.payload.requestId === approvalRequestId) {
-		process.stdout.write(JSON.stringify({ type: "test_result", payload: parsed.payload }) + "\\n");
-		process.exit(0);
-	}
+rl.once("line", () => {
+	process.stdout.write(JSON.stringify({ type: "clio_tool_approval_request", payload: { requestId: "abc" } }) + "\\n");
+	process.exit(0);
 });
 `,
 		);
@@ -401,19 +378,17 @@ rl.on("line", (line) => {
 				{ workerEntryPath: stubEntry },
 			);
 
-			let request: ToolApprovalRequestPayload | null = null;
-			worker.onApprovalRequest(async (req) => {
-				request = req;
-				return { requestId: req.requestId, decision: "allow" as const, reason: "test" };
-			});
+			ok(!("onApprovalRequest" in worker), "SpawnedWorker must not expose onApprovalRequest");
+			ok(!("sendApprovalResponse" in worker), "SpawnedWorker must not expose sendApprovalResponse");
 
 			const events: unknown[] = [];
 			for await (const ev of worker.events) events.push(ev);
 			const exit = await worker.promise;
 			strictEqual(exit.exitCode, 0);
-			ok(request !== null, "approval request was forwarded to callback");
-			const testResult = events.find(isTestResultEvent);
-			ok(testResult, "worker received the approval response");
+			const passthrough = events.some(
+				(ev) => !!ev && typeof ev === "object" && (ev as { type?: unknown }).type === "clio_tool_approval_request",
+			);
+			ok(passthrough, "approval-request line is surfaced as a plain event, not intercepted");
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
@@ -433,7 +408,6 @@ rl.on("line", (line) => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
-					...approvalNoops(),
 				};
 			},
 		});
@@ -479,7 +453,6 @@ rl.on("line", (line) => {
 					events: emptyEvents(),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
-					...approvalNoops(),
 				};
 			},
 		});

@@ -197,10 +197,12 @@ Representative built-in runtime IDs:
 | Protocol-compatible | `openai-compat`, `anthropic-compat` |
 | Cloud | `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
-| CLI/subprocess | `claude-code-cli`, `codex-cli`, `gemini-cli`, `copilot-cli`, `opencode-cli` |
-| SDK | `claude-code-sdk` |
+| CLI/subprocess | `codex-cli`, `opencode-cli` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
+
+> [!NOTE]
+> Subprocess runtimes (`codex-cli`, `opencode-cli`) are **worker-only runtimes**. They can execute worker tasks but are blocked from being configured or used as orchestrator (chat) or print targets.
 
 ---
 

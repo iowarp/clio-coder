@@ -117,7 +117,6 @@ export async function handleRun(
 			...(options.requiredCapabilities && options.requiredCapabilities.length > 0
 				? { requiredCapabilities: options.requiredCapabilities }
 				: {}),
-			supervised: true,
 		};
 		const handle = await dispatch.dispatch(request);
 		for await (const event of handle.events) {

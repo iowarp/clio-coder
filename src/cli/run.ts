@@ -42,7 +42,6 @@ Flags:
   --agent-runtime <id>      pick the first fleet profile whose endpoint uses this runtime
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
-  --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
   --skill <path>            load one explicit skill for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 `;
@@ -52,9 +51,7 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
 		parsed.toolProfile !== undefined ||
-		parsed.required.length > 0 ||
-		parsed.autoApprove !== undefined ||
-		parsed.supervised
+		parsed.required.length > 0
 	);
 }
 
@@ -236,8 +233,6 @@ async function runDispatch(
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.toolProfile) dispatchReq.toolProfile = parsed.toolProfile;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
-	dispatchReq.supervised = parsed.supervised === true;
-	if (parsed.autoApprove) dispatchReq.autoApprove = parsed.autoApprove;
 	if (noSkills) dispatchReq.noSkills = true;
 	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
 	try {

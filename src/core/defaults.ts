@@ -167,9 +167,8 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 targets: []
 # Example mixed local and hosted layout:
 #   clio configure --runtime openai-codex --id codex-pro --model gpt-5.4 --set-orchestrator --set-worker-default --worker-profile codex-mini --worker-profile-model gpt-5.4-mini
-#   clio configure --runtime claude-code-sdk --id claude-sdk-opus --model claude-opus-4-7 --worker-profile claude-opus
-#   clio configure --runtime copilot-cli --id copilot-sonnet --model claude-sonnet-4.6 --worker-profile copilot-sonnet
-#   clio configure --runtime gemini-cli --id gemini-flash --model gemini-3-flash-preview --worker-profile gemini-flash
+#   clio configure --runtime codex-cli --id codex-worker --model gpt-5.4 --worker-profile codex-worker
+#   clio configure --runtime opencode-cli --id opencode-worker --model gpt-5.4 --worker-profile opencode-worker
 #   clio targets add --runtime llamacpp --id mini --url http://mini:8080 --model AgenticQwen-30B-A3B-i1-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
 #   clio targets add --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
 #

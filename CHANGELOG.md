@@ -3,6 +3,40 @@
 All notable changes to Clio Coder are tracked here. Format loosely follows
 Keep a Changelog.
 
+## 0.2.2 - unreleased
+
+Clio Coder 0.2.2 removes the Claude Code runtime surface. Claude Code no longer
+has a programmatic use case for Clio, so the SDK runtime, its safety/approval
+bridge, and the Claude Code CLI subprocess path are gone. The only Anthropic
+support that remains is the normal Anthropic Messages API through pi-ai. Hosted
+defaults continue to lead with ChatGPT/Codex OAuth, native local runtimes stay
+first-class, and worker subprocess runtimes are now limited to Codex CLI and
+OpenCode CLI.
+
+### Removed
+
+- Removed the `claude-code-sdk` runtime descriptor, its worker runtime
+  implementation (`src/engine/claude-code-sdk-runtime.ts`), and the SDK safety
+  policy bridge (`src/engine/sdk-policy-bridge.ts`).
+- Removed the `claude-code-cli`, `gemini-cli`, and `copilot-cli` subprocess
+  runtime descriptors and their invocation/parsing paths. Worker subprocess
+  runtimes are now `codex-cli` and `opencode-cli` only.
+- Removed the Claude Code native CLI auth/status path.
+- Removed the tool-approval IPC that existed solely for the Claude Code SDK
+  worker: the `clio_tool_approval_request`/`clio_tool_approval_response`
+  channel, the `SpawnedWorker` approval handlers, the worker stdin demux
+  approval wait, the TUI tool-approval overlay, and the `tool.approval.*` bus
+  channels.
+- Removed the `--auto-approve` CLI flag, the `auto_approve` dispatch tool
+  argument, and the `WorkerSpec.autoApprove` field. These only steered the
+  removed SDK approval loop.
+- Removed the Claude-Code-specific `--supervised` dispatch flag and
+  `DispatchRequest.supervised` field. They only set the SDK approval auto-deny
+  default. The worker-runtime `supervised` permission strategy for Codex CLI and
+  OpenCode CLI is unchanged and still maps from the run mode.
+- Removed the Claude Code / agent-SDK entries from `RuntimeApiFamily` and the
+  worker spec's accepted runtime API families.
+
 ## 0.2.1 - 2026-06-05
 
 Clio Coder 0.2.1 is an alpha source-checkout patch for local model operators

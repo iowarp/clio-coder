@@ -9,6 +9,7 @@ import {
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
+	isWorkerOnlyRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -381,6 +382,12 @@ function applyEndpoint(settings: ClioSettings, descriptor: EndpointDescriptor): 
 }
 
 function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
+	const runtime = getRuntimeRegistry().get(descriptor.runtime);
+	if (runtime && isWorkerOnlyRuntime(runtime)) {
+		throw new Error(
+			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+		);
+	}
 	settings.orchestrator.endpoint = descriptor.id;
 	settings.orchestrator.model = model ?? descriptor.defaultModel ?? null;
 }
@@ -643,6 +650,12 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
 	applyEndpoint(settings, descriptor);
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
+	if (setOrchestrator && isWorkerOnlyRuntime(runtime)) {
+		printError(
+			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+		);
+		return 1;
+	}
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
 	if (setOrchestrator)
 		setOrchestratorPointer(settings, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
@@ -1043,9 +1056,11 @@ async function runInteractive(
 		}
 	}
 
-	const setOrchestrator = defaults.setOrchestrator
-		? true
-		: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.endpoint);
+	const setOrchestrator = isWorkerOnlyRuntime(runtime)
+		? false
+		: defaults.setOrchestrator
+			? true
+			: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.endpoint);
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
 		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.endpoint);

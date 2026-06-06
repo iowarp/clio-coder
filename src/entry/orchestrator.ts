@@ -33,12 +33,15 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
+	isWorkerOnlyRuntime,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
+import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
@@ -343,13 +346,23 @@ export function advanceScopedTarget(
 ): { endpoint: string; model: string | null } | null {
 	const scope = settings.scope ?? [];
 	if (scope.length === 0) return null;
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	const filteredScope = scope.filter((entry) => {
+		const [endpointId] = entry.split("/");
+		const endpoint = settings.endpoints.find((e) => e.id === endpointId);
+		if (!endpoint) return false;
+		const runtime = registry.get(endpoint.runtime);
+		return !runtime || !isWorkerOnlyRuntime(runtime);
+	});
+	if (filteredScope.length === 0) return null;
 	const activeEndpoint = settings.orchestrator.endpoint ?? "";
 	const activeModel = settings.orchestrator.model ?? "";
 	const activeCombinedRef =
 		activeEndpoint.length > 0 && activeModel.length > 0 ? `${activeEndpoint}/${activeModel}` : "";
-	const idx = scope.findIndex((entry) => entry === activeCombinedRef || entry === activeEndpoint);
-	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : scope.length - 1);
-	const next = scope[base % scope.length];
+	const idx = filteredScope.findIndex((entry) => entry === activeCombinedRef || entry === activeEndpoint);
+	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : filteredScope.length - 1);
+	const next = filteredScope[base % filteredScope.length];
 	if (!next) return null;
 	const [endpoint, ...modelParts] = next.split("/");
 	if (!endpoint) return null;
@@ -698,6 +711,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			});
 		},
 		onSelectModel: ({ endpoint, model }) => {
+			const registry = getRuntimeRegistry();
+			const settings = getCurrentSettings();
+			const target = settings.endpoints.find((e) => e.id === endpoint);
+			if (target) {
+				const runtime = registry.get(target.runtime);
+				if (runtime && isWorkerOnlyRuntime(runtime)) {
+					throw new Error(
+						`cannot use target '${endpoint}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+					);
+				}
+			}
 			updateSettings((current) => {
 				current.orchestrator.endpoint = endpoint;
 				current.orchestrator.model = model;

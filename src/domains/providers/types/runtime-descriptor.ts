@@ -24,18 +24,13 @@ export type RuntimeApiFamily =
 	| "anthropic-messages"
 	| "bedrock-converse-stream"
 	| "google-generative-ai"
-	| "google-gemini-cli"
 	| "google-vertex"
 	| "lmstudio-native"
 	| "mistral-conversations"
 	| "ollama-native"
 	| "rerank-http"
 	| "embeddings-http"
-	| "claude-agent-sdk"
-	| "subprocess-claude-code"
 	| "subprocess-codex"
-	| "subprocess-gemini"
-	| "subprocess-copilot"
 	| "subprocess-opencode";
 
 export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "cli" | "none";

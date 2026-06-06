@@ -10,6 +10,7 @@ import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
+import { isWorkerOnlyRuntime } from "./eligibility.js";
 import { resolveProvidersModelsDir } from "./knowledge-base-path.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
@@ -56,7 +57,7 @@ function availabilityFor(
 	endpoint: EndpointDescriptor,
 	authStatusFor: (endpoint: EndpointDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
-	if (desc.kind === "subprocess" || desc.kind === "sdk") {
+	if (isWorkerOnlyRuntime(desc)) {
 		return { available: true, reason: desc.auth };
 	}
 	if (desc.auth === "api-key" || desc.auth === "oauth") {

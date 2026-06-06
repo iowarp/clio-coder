@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import { type AuthTarget, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
 import { catalogProviderForRuntime, listCatalogModelsForRuntime } from "./catalog.js";
+import { isWorkerOnlyRuntime } from "./eligibility.js";
 import { getRuntimeRegistry } from "./registry.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
@@ -36,11 +37,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	openai: "OpenAI Platform API",
 	"openai-codex": "ChatGPT Plus/Pro via Codex OAuth",
 	openrouter: "OpenRouter API",
-	"claude-code-sdk": "Claude Code Agent SDK",
-	"claude-code-cli": "Claude Code CLI",
 	"codex-cli": "Codex CLI",
-	"gemini-cli": "Gemini CLI",
-	"copilot-cli": "GitHub Copilot CLI",
 	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
 	"lmstudio-native": "LM Studio SDK + native model management",
@@ -82,7 +79,7 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
 	if (runtime.auth === "oauth") return "subscription";
-	if (runtime.kind === "subprocess" || runtime.kind === "sdk") return "cli-runtime";
+	if (isWorkerOnlyRuntime(runtime)) return "cli-runtime";
 	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
 	}

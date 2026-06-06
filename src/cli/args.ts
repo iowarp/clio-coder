@@ -16,8 +16,6 @@ export interface RunCliArgs {
 	agentRuntime?: string;
 	toolProfile?: string;
 	required: string[];
-	autoApprove?: "allow" | "deny";
-	supervised: boolean;
 	noSkills: boolean;
 	skillPaths: string[];
 	fileArgs: string[];
@@ -32,7 +30,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		help: false,
 		json: false,
 		required: [],
-		supervised: false,
 		noSkills: false,
 		skillPaths: [],
 		fileArgs: [],
@@ -104,19 +101,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		if (arg === "--require") {
 			const value = need(arg);
 			if (value !== null) parsed.required.push(value);
-			continue;
-		}
-		if (arg === "--auto-approve") {
-			const value = need(arg);
-			if (value !== null) {
-				const normalized = value.toLowerCase();
-				if (normalized === "allow" || normalized === "deny") parsed.autoApprove = normalized;
-				else parsed.diagnostics.push({ type: "error", message: "--auto-approve must be 'allow' or 'deny'" });
-			}
-			continue;
-		}
-		if (arg === "--supervised") {
-			parsed.supervised = true;
 			continue;
 		}
 		if (arg === "--no-skills") {

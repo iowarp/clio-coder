@@ -63,8 +63,6 @@ async function main(): Promise<number> {
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.runtimeResolution) input.runtimeResolution = spec.runtimeResolution;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
-	if (spec.autoApprove !== undefined) input.autoApprove = spec.autoApprove;
-	input.awaitApproval = demux.awaitApproval;
 	const handle = startWorkerRun(input, emitEvent);
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);

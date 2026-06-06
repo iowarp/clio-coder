@@ -39,7 +39,6 @@ export interface SubprocessWorkerHandle {
 
 export type SubprocessParserKind =
 	| "plain-text"
-	| "claude-code-stream-json"
 	| "codex-jsonl"
 	| "gemini-stream-json"
 	| "copilot-jsonl"
@@ -47,7 +46,6 @@ export type SubprocessParserKind =
 
 export type SubprocessResumeStrategy =
 	| { type: "none" }
-	| { type: "claude-resume"; sessionId: string }
 	| { type: "codex-resume"; sessionId: string }
 	| { type: "gemini-resume"; sessionId: string }
 	| { type: "copilot-resume"; sessionId: string }
@@ -82,29 +80,6 @@ export function planSubprocessInvocation(input: SubprocessWorkerInput): Subproce
 	const permissionStrategy = permissionStrategyForMode(input.mode);
 	const resumeStrategy = resumeStrategyFor(runtime.id, input.sessionId);
 	switch (runtime.id) {
-		case "claude-code-cli": {
-			const args = ["--print", "--model", wireModelId, "--output-format", "stream-json", "--include-partial-messages"];
-			args.push("--permission-mode", claudePermissionMode(permissionStrategy));
-			if (resumeStrategy.type === "claude-resume") args.push("--resume", resumeStrategy.sessionId);
-			if (systemPrompt.length > 0) {
-				args.push("--append-system-prompt", systemPrompt);
-			}
-			args.push(task);
-			return {
-				runtimeId: runtime.id,
-				binary: "claude",
-				args,
-				provider: "anthropic",
-				api: "subprocess-claude-code",
-				parser: "claude-code-stream-json",
-				resumeStrategy,
-				permissionStrategy,
-				modelArgument: "flag",
-				environmentPolicy: runtime.credentialsEnvVar ? "api-key-env" : "inherit",
-				headlessCommand: runtime.headlessCommand ?? "claude --print --output-format stream-json <prompt>",
-				...(runtime.credentialsEnvVar ? { envKeyName: runtime.credentialsEnvVar } : {}),
-			};
-		}
 		case "codex-cli": {
 			const args =
 				resumeStrategy.type === "codex-resume"
@@ -130,47 +105,6 @@ export function planSubprocessInvocation(input: SubprocessWorkerInput): Subproce
 				modelArgument: "stdin",
 				environmentPolicy: runtime.credentialsEnvVar ? "api-key-env" : "inherit",
 				headlessCommand: runtime.headlessCommand ?? "codex exec --json -m <model> -",
-				...(runtime.credentialsEnvVar ? { envKeyName: runtime.credentialsEnvVar } : {}),
-			};
-		}
-		case "gemini-cli": {
-			const args = ["-p", task, "-m", wireModelId, "--output-format", "stream-json"];
-			args.push("--approval-mode", geminiApprovalMode(permissionStrategy));
-			if (resumeStrategy.type === "gemini-resume") args.push("--resume", resumeStrategy.sessionId);
-			const plan: SubprocessRuntimePlan = {
-				runtimeId: runtime.id,
-				binary: "gemini",
-				args,
-				provider: "google",
-				api: "subprocess-gemini",
-				parser: "gemini-stream-json",
-				resumeStrategy,
-				permissionStrategy,
-				modelArgument: "flag",
-				environmentPolicy: runtime.credentialsEnvVar ? "api-key-env" : "inherit",
-				headlessCommand: runtime.headlessCommand ?? "gemini --prompt <prompt> --output-format stream-json",
-			};
-			if (systemPrompt.length > 0) plan.stdin = systemPrompt;
-			if (runtime.credentialsEnvVar) plan.envKeyName = runtime.credentialsEnvVar;
-			return plan;
-		}
-		case "copilot-cli": {
-			const args = ["-p", task, "--model", wireModelId, "--output-format", "json"];
-			if (permissionStrategy === "full-access") args.push("--allow-all-tools");
-			if (permissionStrategy === "read-only") args.push("--mode", "plan");
-			if (resumeStrategy.type === "copilot-resume") args.push(`--resume=${resumeStrategy.sessionId}`);
-			return {
-				runtimeId: runtime.id,
-				binary: "copilot",
-				args,
-				provider: "github-copilot",
-				api: "subprocess-copilot",
-				parser: "copilot-jsonl",
-				resumeStrategy,
-				permissionStrategy,
-				modelArgument: "flag",
-				environmentPolicy: runtime.credentialsEnvVar ? "api-key-env" : "inherit",
-				headlessCommand: runtime.headlessCommand ?? "copilot --prompt <prompt> --output-format json",
 				...(runtime.credentialsEnvVar ? { envKeyName: runtime.credentialsEnvVar } : {}),
 			};
 		}
@@ -293,39 +227,10 @@ function parseStructuredEvent(parser: SubprocessParserKind, event: unknown, acc:
 		const message = extractFirstString(event, ["message", "error", "detail"]);
 		if (message) acc.errors.push(message);
 	}
-	if (parser === "claude-code-stream-json") parseClaudeCliEvent(event, acc);
-	else if (parser === "codex-jsonl") parseCodexEvent(event, acc);
+	if (parser === "codex-jsonl") parseCodexEvent(event, acc);
 	else if (parser === "gemini-stream-json") parseGeminiEvent(event, acc);
 	else if (parser === "copilot-jsonl") parseCopilotEvent(event, acc);
 	else if (parser === "opencode-json") parseOpenCodeEvent(event, acc);
-}
-
-function parseClaudeCliEvent(event: Record<string, unknown>, acc: ParserAccumulator): void {
-	if (event.type === "stream_event" && isRecord(event.event)) {
-		const streamEvent = event.event;
-		if (streamEvent.type === "content_block_delta" && isRecord(streamEvent.delta)) {
-			const delta = streamEvent.delta;
-			appendText(acc, extractFirstString(delta, ["text", "thinking"]) ?? "");
-		}
-		return;
-	}
-	if (event.type === "assistant" && isRecord(event.message)) {
-		appendText(acc, extractClaudeContent(event.message.content));
-		setMergedUsage(acc, normalizeUsage(event.message.usage, undefined));
-		return;
-	}
-	if (event.type === "result") {
-		const result = extractFirstString(event, ["result"]);
-		if (result && result.length > 0) acc.text = result;
-		setMergedUsage(acc, normalizeUsage(event.usage, numberField(event, "total_cost_usd")));
-		if (event.subtype !== "success") {
-			const errors = Array.isArray(event.errors)
-				? event.errors.filter((value): value is string => typeof value === "string")
-				: [];
-			acc.errors.push(...errors);
-		}
-	}
-	if (event.type === "auth_status" && typeof event.error === "string") acc.errors.push(event.error);
 }
 
 function parseCodexEvent(event: Record<string, unknown>, acc: ParserAccumulator): void {
@@ -496,40 +401,12 @@ function permissionStrategyForMode(mode: ModeName | undefined): SubprocessRuntim
 function resumeStrategyFor(runtimeId: string, sessionId: string | undefined): SubprocessResumeStrategy {
 	if (!sessionId) return { type: "none" };
 	switch (runtimeId) {
-		case "claude-code-cli":
-			return { type: "claude-resume", sessionId };
 		case "codex-cli":
 			return { type: "codex-resume", sessionId };
-		case "gemini-cli":
-			return { type: "gemini-resume", sessionId };
-		case "copilot-cli":
-			return { type: "copilot-resume", sessionId };
 		case "opencode-cli":
 			return { type: "opencode-session", sessionId };
 		default:
 			return { type: "none" };
-	}
-}
-
-function claudePermissionMode(strategy: SubprocessRuntimePlan["permissionStrategy"]): string {
-	switch (strategy) {
-		case "read-only":
-			return "plan";
-		case "full-access":
-			return "bypassPermissions";
-		default:
-			return "default";
-	}
-}
-
-function geminiApprovalMode(strategy: SubprocessRuntimePlan["permissionStrategy"]): string {
-	switch (strategy) {
-		case "read-only":
-			return "plan";
-		case "full-access":
-			return "yolo";
-		default:
-			return "default";
 	}
 }
 
@@ -588,11 +465,6 @@ function normalizeUsage(raw: unknown, totalCostUsd: number | undefined): Usage |
 		totalTokens,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totalCostUsd ?? 0 },
 	};
-}
-
-function extractClaudeContent(content: unknown): string {
-	if (!Array.isArray(content)) return "";
-	return content.map((block) => extractTextDeep(block)).join("");
 }
 
 function extractTextDeep(value: unknown): string {

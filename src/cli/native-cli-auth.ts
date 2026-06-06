@@ -30,35 +30,11 @@ interface NativeCommandResult {
 
 export function nativeCliAuthSpec(runtime: RuntimeDescriptor): NativeAuthSpec | null {
 	switch (runtime.id) {
-		case "claude-code-sdk":
-		case "claude-code-cli":
-			return {
-				binary: "claude",
-				statusArgs: ["auth", "status"],
-				loginArgs: ["auth", "login"],
-				logoutArgs: ["auth", "logout"],
-				loginGuidance: "claude auth login",
-				logoutGuidance: "claude auth logout",
-				authRequired: true,
-				parseStatus: parseClaudeAuthStatus,
-			};
 		case "codex-cli":
 			return {
 				binary: "codex",
 				loginGuidance: "codex login",
 				logoutGuidance: "codex logout",
-				authRequired: true,
-			};
-		case "gemini-cli":
-			return {
-				binary: "gemini",
-				loginGuidance: "gemini auth login",
-				authRequired: true,
-			};
-		case "copilot-cli":
-			return {
-				binary: "copilot",
-				loginGuidance: "copilot auth login",
 				authRequired: true,
 			};
 		case "opencode-cli":
@@ -136,25 +112,6 @@ export async function runNativeCliLogout(runtime: RuntimeDescriptor, interactive
 		`Starting native logout: ${spec.logoutGuidance ?? `${spec.binary} ${spec.logoutArgs.join(" ")}`}\n`,
 	);
 	return (await runNativeCommand(spec.binary, spec.logoutArgs, "inherit")).exitCode;
-}
-
-function parseClaudeAuthStatus(result: NativeCommandResult): NativeCliAuthStatus {
-	const output = `${result.stdout}\n${result.stderr}`.trim();
-	const lower = output.toLowerCase();
-	if (result.error) {
-		return { state: "unknown", detail: result.error, exitCode: 1 };
-	}
-	if (result.exitCode === 0 && !lower.includes("not logged in") && !lower.includes("unauth")) {
-		return { state: "authenticated", detail: output || "claude auth status ok", exitCode: 0 };
-	}
-	if (lower.includes("not logged in") || lower.includes("unauth") || lower.includes("login required")) {
-		return { state: "unauthenticated", detail: output || "claude auth login required", exitCode: 1 };
-	}
-	return {
-		state: "unknown",
-		detail: output || `claude auth status exited ${result.exitCode}`,
-		exitCode: result.exitCode === 0 ? 0 : 1,
-	};
 }
 
 function runNativeCommand(
