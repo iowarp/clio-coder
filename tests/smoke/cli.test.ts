@@ -341,6 +341,30 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				client.notifications.some((message) => JSON.stringify(message).includes("acp mock reply")),
 				`notifications=${JSON.stringify(client.notifications)}`,
 			);
+			// Every session/update a live `clio acp` process emits must use an ACP v1
+			// SessionUpdate variant. A non-spec discriminator (e.g. the old "progress")
+			// would break strict serde clients such as Zed.
+			const validSessionUpdates = new Set([
+				"user_message_chunk",
+				"agent_message_chunk",
+				"agent_thought_chunk",
+				"tool_call",
+				"tool_call_update",
+				"plan",
+				"available_commands_update",
+				"current_mode_update",
+			]);
+			for (const message of client.notifications) {
+				if (typeof message !== "object" || message === null) continue;
+				const record = message as { method?: unknown; params?: unknown };
+				if (record.method !== "session/update") continue;
+				const params = record.params as { update?: { sessionUpdate?: unknown } } | undefined;
+				const variant = params?.update?.sessionUpdate;
+				ok(
+					typeof variant === "string" && validSessionUpdates.has(variant),
+					`non-spec sessionUpdate emitted: ${JSON.stringify(variant)}`,
+				);
+			}
 			await client.request("session/close", { sessionId: session.sessionId });
 			client.close();
 			const exit = await client.wait();

@@ -1,5 +1,29 @@
 import type { AgentMessage } from "../types.js";
 
+/**
+ * ACP extensibility reserves `_meta` for non-spec data. Clio namespaces its
+ * extensions so a strict client (Zed/serde) never sees an unknown top-level
+ * field on a standard response.
+ */
+export const ACP_USAGE_META_KEY = "clio.coder/usage";
+export const ACP_SESSION_META_KEY = "clio.coder/session";
+
+/** ACP v1 `ToolKind` closed enum (schema 0.4.5). */
+export type AcpToolKind =
+	| "read"
+	| "edit"
+	| "delete"
+	| "move"
+	| "search"
+	| "execute"
+	| "think"
+	| "fetch"
+	| "switch_mode"
+	| "other";
+
+/** ACP v1 `ToolCallStatus` closed enum (schema 0.4.5). */
+export type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+
 export interface AcpJsonRpcRequest {
 	jsonrpc: "2.0";
 	id: string | number;

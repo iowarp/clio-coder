@@ -9,7 +9,10 @@ import type {
 	AcpPromptResponse,
 	AcpRequestPermissionResponse,
 	AcpSessionUpdateParams,
+	AcpToolCallStatus,
+	AcpToolKind,
 } from "./types.js";
+import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY } from "./types.js";
 
 type AcpServerEvent = unknown;
 type AcpEventRecord = Record<string, unknown> & { type?: unknown };
@@ -41,6 +44,8 @@ interface AcpServerSession {
 
 interface ActivePrompt {
 	cancelled: boolean;
+	errored: boolean;
+	errorMessage?: string;
 	sentAssistantChars: number;
 	sentThinkingChars: number;
 	stopReason: string;
@@ -66,6 +71,52 @@ function eventRecord(value: unknown): AcpEventRecord {
 
 function textContent(text: string): { type: "text"; text: string } {
 	return { type: "text", text };
+}
+
+/**
+ * Maps Clio canonical tool names onto the ACP v1 `ToolKind` closed enum. The
+ * kind is a UI hint; the human-readable tool name travels in `title`. Anything
+ * unrecognised (dynamic/MCP tools) falls back to `other` so the discriminated
+ * union always deserialises on strict clients.
+ */
+const TOOL_KIND_BY_NAME: Record<string, AcpToolKind> = {
+	read: "read",
+	ls: "read",
+	read_skill: "read",
+	write: "edit",
+	edit: "edit",
+	create_skill: "edit",
+	write_plan: "edit",
+	write_review: "edit",
+	grep: "search",
+	find: "search",
+	glob: "search",
+	find_symbol: "search",
+	entry_points: "search",
+	where_is: "search",
+	workspace_context: "search",
+	bash: "execute",
+	run_tests: "execute",
+	run_lint: "execute",
+	run_build: "execute",
+	package_script: "execute",
+	validate_frontend: "execute",
+	web_fetch: "fetch",
+	git_status: "other",
+	git_diff: "other",
+	git_log: "other",
+	dispatch: "other",
+	dispatch_batch: "other",
+};
+
+function toolKind(name: string | undefined): AcpToolKind {
+	if (!name) return "other";
+	return TOOL_KIND_BY_NAME[name] ?? "other";
+}
+
+/** ACP `ToolCallContent[]`. The `content` variant wraps a regular ContentBlock. */
+function toolCallContent(text: string): Array<{ type: "content"; content: { type: "text"; text: string } }> {
+	return [{ type: "content", content: textContent(text) }];
 }
 
 function contentText(value: unknown): string {
@@ -147,13 +198,46 @@ function assistantThinking(message: unknown): string {
 		.join("");
 }
 
-function stopReasonFromMessage(message: unknown, fallback: string): string {
-	if (!isRecord(message)) return fallback;
-	const raw = message.stopReason;
-	if (raw === "aborted") return "cancelled";
-	if (raw === "error") return "error";
-	if (typeof raw === "string" && raw.length > 0 && raw !== "stop") return raw;
-	return fallback;
+/**
+ * Collapses pi-agent / Clio message stop reasons onto the ACP v1 StopReason
+ * closed enum (end_turn | max_tokens | max_turn_requests | refusal | cancelled).
+ * Tool-driven or unknown reasons ("stop", "toolUse", "length"…) map to
+ * "end_turn"; "error" is a sentinel that the prompt handler converts into a
+ * JSON-RPC error, since ACP has no error StopReason.
+ */
+function mapAcpStopReason(raw: unknown): string {
+	switch (raw) {
+		case "aborted":
+		case "cancelled":
+			return "cancelled";
+		case "error":
+			return "error";
+		case "refusal":
+			return "refusal";
+		case "length":
+		case "max_tokens":
+		case "maxTokens":
+			return "max_tokens";
+		case "max_turn_requests":
+		case "maxTurnRequests":
+			return "max_turn_requests";
+		default:
+			return "end_turn";
+	}
+}
+
+/** Applies a message's stop reason to the active prompt, tracking the error sentinel. */
+function applyStopReason(active: ActivePrompt, message: unknown): void {
+	const mapped = mapAcpStopReason(isRecord(message) ? message.stopReason : undefined);
+	if (mapped === "error") {
+		active.errored = true;
+		const explicit = isRecord(message) && typeof message.errorMessage === "string" ? message.errorMessage : "";
+		const text = explicit.length > 0 ? explicit : assistantText(message);
+		if (text.length > 0) active.errorMessage = text;
+		return;
+	}
+	active.errored = false;
+	active.stopReason = mapped;
 }
 
 function outputText(value: unknown): string {
@@ -197,31 +281,6 @@ function sendUpdate(transport: AcpJsonRpcPeerTransport, sessionId: string, updat
 	transport.notify("session/update", params);
 }
 
-function mapProgressEvent(event: AcpEventRecord): Record<string, unknown> | null {
-	if (event.type === "agent_start") return { sessionUpdate: "progress", title: "started", status: "in_progress" };
-	if (event.type === "prompt_diagnostics") {
-		return {
-			sessionUpdate: "progress",
-			title: "prompt_diagnostics",
-			status: "completed",
-			content: textContent("prompt compiled"),
-			rawOutput: event.promptDiagnostics,
-		};
-	}
-	if (event.type === "retry_status") {
-		return {
-			sessionUpdate: "progress",
-			title: "retry",
-			status: isRecord(event.status) ? event.status.phase : "in_progress",
-			rawOutput: event.status,
-		};
-	}
-	if (event.type === "clio_plan_update") {
-		return { sessionUpdate: "plan", status: "in_progress", rawOutput: event.payload };
-	}
-	return null;
-}
-
 function handleChatEvent(
 	rawEvent: AcpServerEvent,
 	transport: AcpJsonRpcPeerTransport,
@@ -244,30 +303,33 @@ function handleChatEvent(
 		if (text.length === 0) return;
 		active.sentThinkingChars += text.length;
 		sendUpdate(transport, sessionId, {
-			sessionUpdate: "thought_message_chunk",
+			sessionUpdate: "agent_thought_chunk",
 			content: textContent(text),
 		});
 		return;
 	}
 	if (event.type === "tool_execution_start") {
+		const toolName = eventString(event, "toolName");
 		sendUpdate(transport, sessionId, {
 			sessionUpdate: "tool_call",
 			toolCallId: eventString(event, "toolCallId") ?? `tool-${Date.now()}`,
-			title: eventString(event, "toolName") ?? "tool",
-			kind: eventString(event, "toolName") ?? "tool",
-			status: "in_progress",
+			title: toolName ?? "tool",
+			kind: toolKind(toolName),
+			status: "in_progress" satisfies AcpToolCallStatus,
 			rawInput: isRecord(event.args) ? event.args : {},
 		});
 		return;
 	}
 	if (event.type === "tool_execution_end") {
+		const toolName = eventString(event, "toolName");
+		const output = outputText(event.result);
 		sendUpdate(transport, sessionId, {
 			sessionUpdate: "tool_call_update",
 			toolCallId: eventString(event, "toolCallId") ?? `tool-${Date.now()}`,
-			title: eventString(event, "toolName") ?? "tool",
-			kind: eventString(event, "toolName") ?? "tool",
+			title: toolName ?? "tool",
+			kind: toolKind(toolName),
 			status: toolStatus(event),
-			content: textContent(outputText(event.result)),
+			...(output.length > 0 ? { content: toolCallContent(output) } : {}),
 			rawOutput: { result: event.result, isError: event.isError === true },
 		});
 		return;
@@ -275,13 +337,13 @@ function handleChatEvent(
 	if (event.type === "message_end") {
 		const message = event.message;
 		mergeMessageUsage(active.usage, message, active.usageMessages);
-		active.stopReason = stopReasonFromMessage(message, active.stopReason);
+		applyStopReason(active, message);
 		const thinking = assistantThinking(message);
 		if (thinking.length > active.sentThinkingChars) {
 			const tail = thinking.slice(active.sentThinkingChars);
 			active.sentThinkingChars = thinking.length;
 			sendUpdate(transport, sessionId, {
-				sessionUpdate: "thought_message_chunk",
+				sessionUpdate: "agent_thought_chunk",
 				content: textContent(tail),
 			});
 		}
@@ -300,16 +362,13 @@ function handleChatEvent(
 		mergeMessagesUsage(active.usage, event.messages, active.usageMessages);
 		const messages = Array.isArray(event.messages) ? event.messages : [];
 		const last = [...messages].reverse().find((message) => isRecord(message) && message.role === "assistant");
-		active.stopReason = stopReasonFromMessage(last, active.stopReason);
-		sendUpdate(transport, sessionId, {
-			sessionUpdate: "progress",
-			title: "completed",
-			status: "completed",
-		});
+		if (last !== undefined) applyStopReason(active, last);
 		return;
 	}
-	const progress = mapProgressEvent(event);
-	if (progress) sendUpdate(transport, sessionId, progress);
+	// Clio lifecycle events (agent_start, prompt_diagnostics, retry_status,
+	// clio_plan_update) have no ACP v1 SessionUpdate equivalent. The prompt turn
+	// is bounded by the session/prompt response, so emitting non-spec
+	// `progress` updates would break strict clients. They are intentionally dropped.
 }
 
 function rawToolInput(call: { tool: string; args?: Record<string, unknown> }): Record<string, unknown> {
@@ -398,14 +457,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				...(options.version !== undefined ? { version: options.version } : {}),
 			},
 			agentCapabilities: {
-				sessionCapabilities: {
-					new: {},
-					prompt: {},
-					cancel: {},
-					close: {},
+				loadSession: false,
+				promptCapabilities: { audio: false, embeddedContext: false, image: false },
+				mcpCapabilities: { http: false, sse: false },
+				// Clio mediates every tool through its own safety policy and supports an
+				// explicit session/close (a documented ACP RFD, not yet in the stable
+				// schema). Both are advertised via the _meta extension slot so strict
+				// clients never observe a non-spec capability field.
+				_meta: {
+					[ACP_SESSION_META_KEY]: { close: true },
+					"clio.coder/tools": "mediated",
 				},
-				streaming: true,
-				tools: "mediated",
 			},
 			authMethods: [],
 		} satisfies AcpInitializeResponse;
@@ -421,7 +483,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const meta = options.session?.create({ cwd: sessionCwd });
 		const id = meta?.id ?? randomUUID();
 		sessions.set(id, { id, cwd: sessionCwd, activePrompt: null });
-		return { sessionId: id, cwd: sessionCwd };
+		// NewSessionResponse is { sessionId, modes?, models?, _meta? }; cwd is not a
+		// schema field. Clio runs a single-session-per-process server pinned to the
+		// launch cwd, so no extra fields are needed.
+		return { sessionId: id };
 	});
 
 	const cancel = (params: unknown): Record<string, never> => {
@@ -454,6 +519,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (options.session?.current()?.id !== session.id && options.session) options.session.resume(session.id);
 		const active: ActivePrompt = {
 			cancelled: false,
+			errored: false,
 			sentAssistantChars: 0,
 			sentThinkingChars: 0,
 			stopReason: "end_turn",
@@ -470,16 +536,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (session.activePrompt === active) session.activePrompt = null;
 			if (activeSessionId === session.id) activeSessionId = null;
 		}
+		// ACP has no error StopReason: a failed turn is signalled by failing the
+		// session/prompt request itself. Cancellation takes precedence over error.
+		if (active.errored && !active.cancelled) {
+			throw new Error(active.errorMessage ?? "ACP prompt turn failed");
+		}
 		const stopReason = active.cancelled ? "cancelled" : active.stopReason;
+		// PromptResponse is { stopReason, _meta? } in ACP v1; token usage is not a
+		// schema field, so it travels under a namespaced _meta key.
 		return {
 			stopReason,
-			usage: active.usage,
-			tokenUsage: {
-				inputTokens: active.usage.input,
-				outputTokens: active.usage.output,
-				cacheReadTokens: active.usage.cacheRead,
-				cacheWriteTokens: active.usage.cacheWrite,
-				reasoningTokens: active.usage.reasoning,
+			_meta: {
+				[ACP_USAGE_META_KEY]: {
+					input: active.usage.input,
+					output: active.usage.output,
+					cacheRead: active.usage.cacheRead,
+					cacheWrite: active.usage.cacheWrite,
+					reasoning: active.usage.reasoning,
+				},
 			},
 		};
 	});
