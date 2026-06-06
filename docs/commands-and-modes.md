@@ -1,5 +1,9 @@
 # Commands and Modes
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.1).
+
+
 Clio Coder is a terminal-first alpha harness. This page keeps the command
 reference, interaction modes, dispatch surface, verification lanes, and common
 operator guidance out of the README so the release entry point stays short.

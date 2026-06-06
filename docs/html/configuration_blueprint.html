@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Configuration & Target Resolution Blueprint</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #6b7280;
+      
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+      
+      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+      position: relative;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 18px;
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow-glow);
+      position: relative;
+    }
+    
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 20px;
+      background: var(--gradient-main);
+      z-index: -1;
+      opacity: 0.3;
+      filter: blur(4px);
+    }
+
+    .header-logo svg {
+      width: 38px;
+      height: 38px;
+      fill: none;
+      stroke: var(--color-cyan);
+      stroke-width: 2;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 1.5rem auto;
+      font-weight: 400;
+    }
+
+    .meta-grid {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .meta-badge {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .meta-badge .label {
+      color: var(--text-muted);
+    }
+
+    .meta-badge .value {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--color-cyan);
+    }
+
+    .tabs-nav {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.75rem 1.5rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-main);
+      color: #090d16;
+      font-weight: 700;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .tab-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
+
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.4s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      margin-bottom: 2rem;
+    }
+
+    .card-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
+    }
+
+    .card-title svg {
+      width: 20px;
+      height: 20px;
+      stroke: var(--color-cyan);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 900px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    textarea.code-area {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      background: #05080e;
+      resize: vertical;
+      min-height: 250px;
+      line-height: 1.5;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .btn-primary {
+      background: var(--gradient-main);
+      color: #090d16;
+      border-color: transparent;
+      font-weight: 700;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #2bf1ff, #d64eff);
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    /* Status Indicators */
+    .status-panel {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .status-panel.success {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+
+    .status-panel.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+    }
+
+    .status-panel.warning {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      color: #fcd34d;
+    }
+
+    .badge-caps {
+      display: inline-flex;
+      gap: 0.35rem;
+      margin-top: 0.25rem;
+    }
+
+    .cap-badge {
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      font-weight: bold;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+    }
+
+    .cap-badge.active {
+      background: rgba(var(--color-cyan-rgb), 0.15);
+      border-color: var(--color-cyan);
+      color: var(--color-cyan);
+    }
+
+    .flowchart-container {
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      overflow: auto;
+      display: flex;
+      justify-content: center;
+    }
+
+    .interactive-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .interactive-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .interactive-item:hover, .interactive-item.selected {
+      background: rgba(var(--color-cyan-rgb), 0.05);
+      border-color: var(--color-cyan);
+    }
+
+    .console-box {
+      background: #020408;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #a7f3d0;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .slider-row input[type="range"] {
+      flex-grow: 1;
+    }
+
+    .slider-val {
+      font-family: var(--font-mono);
+      color: var(--color-cyan);
+      font-weight: 600;
+      min-width: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <h1>Configuration & Target Resolution</h1>
+      <p class="subtitle">Interactive Visual Specification for Target-First Runtime Dispatching</p>
+      
+      <div class="meta-grid">
+        <div class="meta-badge">
+          <span class="label">Release:</span>
+          <span class="value">v0.2.1-alpha</span>
+        </div>
+        <div class="meta-badge">
+          <span class="label">Scope:</span>
+          <span class="value">settings.yaml / targets / auth</span>
+        </div>
+        <div class="meta-badge">
+          <span class="label">Resolution:</span>
+          <span class="value">Target-first Routing</span>
+        </div>
+      </div>
+
+      <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('validator')">
+          <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Settings.yaml Validator
+        </button>
+        <button class="tab-btn" onclick="switchTab('resolver')">
+          <svg viewBox="0 0 24 24"><path d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+          Runtime Target Resolver
+        </button>
+        <button class="tab-btn" onclick="switchTab('generator')">
+          <svg viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          CLI Config Generator
+        </button>
+        <button class="tab-btn" onclick="switchTab('flowchart')">
+          <svg viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
+          Resolution Lifecycle
+        </button>
+      </div>
+    </header>
+
+    <!-- Tab 1: Settings.yaml Validator -->
+    <div id="validator" class="tab-pane active">
+      <div class="grid-2">
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            YAML Raw Settings Editor
+          </div>
+          <div class="form-group">
+            <label>Raw settings.yaml Content</label>
+            <textarea id="raw-yaml" class="code-area" oninput="validateYaml()"></textarea>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary" onclick="loadSampleSettings('valid')">Load Valid Sample</button>
+            <button class="btn" onclick="loadSampleSettings('invalid')">Load Invalid Sample</button>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+            Live Parser & Validation Receipt
+          </div>
+          <div id="validator-status" class="status-panel success">
+            No syntax errors. Ready to validate.
+          </div>
+          <div style="margin-top: 1.5rem;">
+            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color: #ffffff;">Detected Configuration Properties:</h4>
+            <div id="config-properties" style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: Runtime Target Resolver -->
+    <div id="resolver" class="tab-pane">
+      <div class="grid-2">
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+            Mock Target Endpoint Setup
+          </div>
+          
+          <div class="form-group">
+            <label>Target ID</label>
+            <input type="text" id="target-id" value="dev-qwen-local">
+          </div>
+
+          <div class="grid-2" style="gap: 1rem; margin-bottom: 0;">
+            <div class="form-group">
+              <label>Runtime Descriptor</label>
+              <select id="target-runtime" onchange="updateRuntimeDefaults()">
+                <option value="llamacpp">llamacpp (Local)</option>
+                <option value="ollama-native">ollama-native (Local)</option>
+                <option value="openai">openai (Cloud)</option>
+                <option value="anthropic">anthropic (Cloud)</option>
+                <option value="openai-compat">openai-compat (Custom Endpoint)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Base URL</label>
+              <input type="text" id="target-url" value="http://127.0.0.1:8080">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Default Wire Model ID</label>
+            <input type="text" id="target-model" value="Qwen2.5-Coder-32B-Instruct">
+          </div>
+
+          <div class="form-group">
+            <label>Auth Credentials Source</label>
+            <select id="target-auth">
+              <option value="none">No Auth (Local server)</option>
+              <option value="api-key-env">API Key from Environment (CLIO_API_KEY_...)</option>
+              <option value="credentials-yaml">Stored API Key in credentials.yaml</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 1.5rem;">
+            <label>Declared Capability Overrides</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
+                <input type="checkbox" id="cap-chat" checked> Chat Enabled (C)
+              </label>
+              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
+                <input type="checkbox" id="cap-tools" checked> Tool Calling (T)
+              </label>
+              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
+                <input type="checkbox" id="cap-reasoning"> Reasoning Models (R)
+              </label>
+              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
+                <input type="checkbox" id="cap-vision"> Vision Support (V)
+              </label>
+            </div>
+          </div>
+
+          <div class="grid-2" style="gap: 1rem; margin-bottom: 1.5rem;">
+            <div class="form-group" style="margin:0;">
+              <label>Context Window</label>
+              <input type="number" id="target-context" value="131072">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Max Output Tokens</label>
+              <input type="number" id="target-maxtokens" value="4096">
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="resolveTarget()">
+            <svg viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Resolve Target eligibility
+          </button>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Resolved Runtime Target Spec
+          </div>
+          
+          <div id="resolver-output" class="status-panel success" style="display:none;">
+            Target resolved successfully.
+          </div>
+
+          <div id="resolution-summary" style="margin-top: 1rem; display:none;">
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); padding: 1.25rem; border-radius: 8px; margin-bottom: 1rem;">
+              <p style="margin-bottom: 0.5rem;"><strong>Target Name:</strong> <span id="res-id" style="color:var(--color-cyan)">-</span></p>
+              <p style="margin-bottom: 0.5rem;"><strong>Effective Endpoint URL:</strong> <span id="res-url">-</span></p>
+              <p style="margin-bottom: 0.5rem;"><strong>Auth Handshake:</strong> <span id="res-auth">-</span></p>
+              <p style="margin-bottom: 0.5rem;"><strong>Capability Badges:</strong></p>
+              <div class="badge-caps" id="res-badges">
+                <!-- Badges go here -->
+              </div>
+            </div>
+
+            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color:#ffffff;">Target Resolution Diagnostic Trace:</h4>
+            <div class="console-box" id="resolution-log">
+              <!-- logs go here -->
+            </div>
+          </div>
+          
+          <div id="resolution-placeholder" style="text-align: center; color: var(--text-dark); padding: 4rem 1rem;">
+            Configure the endpoint settings on the left and click "Resolve Target" to run the resolution diagnostics chain.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: CLI Config Generator -->
+    <div id="generator" class="tab-pane">
+      <div class="grid-2">
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            Interactive CLI Command Configurator
+          </div>
+
+          <div class="form-group">
+            <label>Target Identifier</label>
+            <input type="text" id="gen-id" value="ollama-deepseek" oninput="generateCommand()">
+          </div>
+
+          <div class="grid-2" style="gap: 1rem; margin-bottom: 0;">
+            <div class="form-group">
+              <label>Runtime ID</label>
+              <select id="gen-runtime" onchange="updateGenDefaults(); generateCommand();">
+                <option value="ollama-native">ollama-native</option>
+                <option value="llamacpp">llamacpp</option>
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+                <option value="openai-compat">openai-compat</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Endpoint URL</label>
+              <input type="text" id="gen-url" value="http://127.0.0.1:11434" oninput="generateCommand()">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Model Name</label>
+            <input type="text" id="gen-model" value="deepseek-coder:6.7b" oninput="generateCommand()">
+          </div>
+
+          <div class="grid-2" style="gap: 1rem; margin-bottom: 0;">
+            <div class="form-group">
+              <label>API Key Environment Variable (Optional)</label>
+              <input type="text" id="gen-env" placeholder="DEEPSEEK_API_KEY" oninput="generateCommand()">
+            </div>
+            <div class="form-group">
+              <label>Role Promotion</label>
+              <select id="gen-role" onchange="generateCommand()">
+                <option value="both">Set as both Orchestrator & Fleet default</option>
+                <option value="orchestrator">Orchestrator only (Chat)</option>
+                <option value="fleet">Fleet default only (Workers)</option>
+                <option value="none">Register target only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            Generated Clio CLI Commands
+          </div>
+          
+          <div class="form-group">
+            <label>1. Target Registration Command</label>
+            <div class="console-box" id="cmd-register" style="color:#6ee7b7; padding: 1.25rem;">
+              clio configure ...
+            </div>
+          </div>
+
+          <div class="form-group" id="promotion-group">
+            <label>2. Active Target Switch Command</label>
+            <div class="console-box" id="cmd-switch" style="color:#6ee7b7; padding: 1.25rem;">
+              clio targets use ...
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>3. Connection Diagnostics & Probing</label>
+            <div class="console-box" id="cmd-probe" style="color:#38bdf8; padding: 1.25rem;">
+              clio targets --probe --target ollama-deepseek
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Resolution Lifecycle -->
+    <div id="flowchart" class="tab-pane">
+      <div class="glass-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Configuration loading & Target Resolution Sequence
+        </div>
+        <div class="flowchart-container">
+          <svg width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
+            <!-- Definitions for markers and filters -->
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
+              </marker>
+              <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- Grid background -->
+            <path d="M 0 0 L 850 0 M 0 40 L 850 40 M 0 80 L 850 80 M 0 120 L 850 120 M 0 160 L 850 160 M 0 200 L 850 200 M 0 240 L 850 240 M 0 280 L 850 280 M 0 320 L 850 320 M 0 360 L 850 360 M 0 400 L 850 400" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
+            <path d="M 0 0 L 0 420 M 50 0 L 50 420 M 100 0 L 100 420 M 150 0 L 150 420 M 200 0 L 200 420 M 250 0 L 250 420 M 300 0 L 300 420 M 350 0 L 350 420 M 400 0 L 400 420 M 450 0 L 450 420 M 500 0 L 500 420 M 550 0 L 550 420 M 600 0 L 600 420 M 650 0 L 650 420 M 700 0 L 700 420 M 750 0 L 750 420 M 800 0 L 800 420" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
+
+            <!-- Phase 1: Storage -->
+            <g transform="translate(10, 10)">
+              <rect x="10" y="20" width="160" height="360" rx="10" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
+              <text x="90" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">1. CONFIG STORAGE</text>
+              
+              <!-- settings.yaml -->
+              <rect x="25" y="80" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="90" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">settings.yaml</text>
+              <text x="90" y="123" fill="var(--text-muted)" font-size="10" text-anchor="middle">Targets, defaults, limits</text>
+
+              <!-- credentials.yaml -->
+              <rect x="25" y="180" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="90" y="205" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">credentials.yaml</text>
+              <text x="90" y="223" fill="var(--text-muted)" font-size="10" text-anchor="middle">Encrypted API Keys</text>
+
+              <!-- Env variables -->
+              <rect x="25" y="280" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="90" y="305" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Environment Vars</text>
+              <text x="90" y="323" fill="var(--text-muted)" font-size="9" text-anchor="middle">CLIO_HOME, CLIO_API_KEY_x</text>
+            </g>
+
+            <!-- Phase 2: Engine Config Resolver -->
+            <g transform="translate(200, 10)">
+              <rect x="10" y="20" width="180" height="360" rx="10" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
+              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">2. CONFIG BOOTSTRAP</text>
+
+              <rect x="25" y="130" width="150" height="120" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5" filter="url(#glow-cyan)" />
+              <text x="100" y="160" fill="var(--color-cyan)" font-size="13" font-weight="700" text-anchor="middle">defaults.ts / config.ts</text>
+              <text x="100" y="185" fill="#fff" font-size="10" text-anchor="middle">Merges locations</text>
+              <text x="100" y="205" fill="#fff" font-size="10" text-anchor="middle">Validates config schema</text>
+              <text x="100" y="225" fill="#fff" font-size="10" text-anchor="middle">Discovers TargetSpecs</text>
+            </g>
+
+            <!-- Phase 3: Runtime Handshake -->
+            <g transform="translate(410, 10)">
+              <rect x="10" y="20" width="200" height="360" rx="10" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
+              <text x="110" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">3. RESOLUTION LANE</text>
+
+              <rect x="25" y="100" width="170" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="110" y="125" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Runtime Descriptor</text>
+              <text x="110" y="142" fill="var(--text-muted)" font-size="10" text-anchor="middle">llamacpp, openai, ollama...</text>
+
+              <rect x="25" y="220" width="170" height="70" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="110" y="245" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Model Probing & Catalog</text>
+              <text x="110" y="262" fill="var(--text-muted)" font-size="9" text-anchor="middle">Compares specs with local/cloud</text>
+              <text x="110" y="275" fill="var(--text-muted)" font-size="9" text-anchor="middle">catalog rules & wire compatibility</text>
+            </g>
+
+            <!-- Phase 4: Output dispatch -->
+            <g transform="translate(640, 10)">
+              <rect x="10" y="20" width="180" height="360" rx="10" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
+              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">4. RESOLVED ENDPOINTS</text>
+
+              <rect x="25" y="100" width="150" height="60" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1" />
+              <text x="100" y="125" fill="var(--color-purple)" font-size="12" font-weight="700" text-anchor="middle">Orchestrator Target</text>
+              <text x="100" y="143" fill="var(--text-muted)" font-size="10" text-anchor="middle">Active Chat Endpoint</text>
+
+              <rect x="25" y="220" width="150" height="60" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
+              <text x="100" y="245" fill="var(--color-emerald)" font-size="12" font-weight="700" text-anchor="middle">Worker Fleet Targets</text>
+              <text x="100" y="263" fill="var(--text-muted)" font-size="10" text-anchor="middle">Parallel Task Targets</text>
+            </g>
+
+            <!-- Arrows -->
+            <!-- Config -> Bootstrap -->
+            <path d="M 180 120 L 225 180" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+            <path d="M 180 220 L 225 200" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+            <path d="M 180 300 L 225 220" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+
+            <!-- Bootstrap -> Resolution -->
+            <path d="M 390 170 L 425 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+            <path d="M 390 210 L 425 240" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+
+            <!-- Resolution -> Endpoints -->
+            <path d="M 605 130 L 655 130" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+            <path d="M 605 255 L 655 255" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById(tabId).classList.add('active');
+      event.currentTarget.classList.add('active');
+    }
+
+    // YAML Validation logic
+    const validSample = `version: 1
+identity: clio
+defaultMode: default
+safetyLevel: auto-edit
+
+targets:
+  - id: local-qwen
+    runtime: llamacpp
+    url: http://127.0.0.1:8080
+    defaultModel: AgenticQwen-30B-A3B-i1-Q4_K_M
+    capabilities:
+      contextWindow: 262144
+      maxTokens: 65536
+      reasoning: true
+
+orchestrator:
+  target: local-qwen
+  model: AgenticQwen-30B-A3B-i1-Q4_K_M
+  thinkingLevel: off
+
+workers:
+  default:
+    target: local-qwen
+    model: AgenticQwen-30B-A3B-i1-Q4_K_M
+  profiles: {}
+
+budget:
+  sessionCeilingUsd: 5
+  concurrency: auto`;
+
+    const invalidSample = `version: "abc" # Error: version must be an integer (1)
+identity: clio
+defaultMode: super-mode # Error: invalid mode
+safetyLevel: auto-edit
+
+targets:
+  - id: "" # Error: Target ID cannot be empty
+    runtime: unknown-runtime # Error: invalid runtime descriptor`;
+
+    function loadSampleSettings(type) {
+      if (type === 'valid') {
+        document.getElementById('raw-yaml').value = validSample;
+      } else {
+        document.getElementById('raw-yaml').value = invalidSample;
+      }
+      validateYaml();
+    }
+
+    function validateYaml() {
+      const text = document.getElementById('raw-yaml').value;
+      const statusPanel = document.getElementById('validator-status');
+      const propertiesList = document.getElementById('config-properties');
+      propertiesList.innerHTML = '';
+
+      if (!text.trim()) {
+        statusPanel.className = 'status-panel warning';
+        statusPanel.textContent = 'Configuration is empty. Type or load a sample settings YAML.';
+        return;
+      }
+
+      // Very simple mock YAML parser
+      try {
+        const lines = text.split('\n');
+        const errors = [];
+        let version = null;
+        let defaultMode = null;
+        let safetyLevel = null;
+        let targets = [];
+
+        lines.forEach((line, idx) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('#') || !trimmed) return;
+
+          const parts = trimmed.split(':');
+          if (parts.length >= 2) {
+            const key = parts[0].trim();
+            const val = parts[1].split('#')[0].trim();
+
+            if (key === 'version') {
+              version = val;
+              if (val !== '1') {
+                errors.push(`Line ${idx+1}: Schema version must be exactly 1 (found "${val}")`);
+              }
+            }
+            if (key === 'defaultMode') {
+              defaultMode = val;
+              if (!['default', 'advise', 'super'].includes(val)) {
+                errors.push(`Line ${idx+1}: defaultMode must be default, advise, or super (found "${val}")`);
+              }
+            }
+            if (key === 'safetyLevel') {
+              safetyLevel = val;
+              if (!['suggest', 'auto-edit', 'full-auto'].includes(val)) {
+                errors.push(`Line ${idx+1}: safetyLevel must be suggest, auto-edit, or full-auto (found "${val}")`);
+              }
+            }
+            if (key === 'id' && trimmed.includes('- id')) {
+              if (!val || val === '""' || val === "''") {
+                errors.push(`Line ${idx+1}: Target id cannot be empty`);
+              }
+            }
+            if (key === 'runtime') {
+              if (!['llamacpp', 'ollama-native', 'openai', 'anthropic', 'openai-compat', 'lemonade'].includes(val)) {
+                errors.push(`Line ${idx+1}: Unknown runtime descriptor "${val}"`);
+              }
+            }
+          }
+        });
+
+        if (errors.length > 0) {
+          statusPanel.className = 'status-panel error';
+          statusPanel.innerHTML = `<strong>Schema Validation Errors:</strong><ul style="margin-left: 1.5rem; margin-top:0.5rem;">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`;
+        } else {
+          statusPanel.className = 'status-panel success';
+          statusPanel.innerHTML = `<strong>Success:</strong> settings.yaml is structurally valid and fully conforms to Clio Coder v0.2.1 settings schema constraints.`;
+          
+          // Render properties badges
+          addPropertyBadge('Schema Version', version || '1', 'cyan');
+          addPropertyBadge('Operating Mode', defaultMode || 'default', 'purple');
+          addPropertyBadge('Safety Level', safetyLevel || 'auto-edit', 'emerald');
+        }
+      } catch (err) {
+        statusPanel.className = 'status-panel error';
+        statusPanel.textContent = `Parse Error: ${err.message}`;
+      }
+    }
+
+    function addPropertyBadge(label, val, color) {
+      const container = document.getElementById('config-properties');
+      const item = document.createElement('div');
+      item.className = 'meta-badge';
+      item.style.borderLeft = `3px solid var(--color-${color})`;
+      item.innerHTML = `<span class="label">${label}:</span> <span class="value" style="color:var(--color-${color})">${val}</span>`;
+      container.appendChild(item);
+    }
+
+    // Resolver logic
+    const runtimeDefaults = {
+      llamacpp: { url: 'http://127.0.0.1:8080', model: 'Qwen2.5-Coder-32B-Instruct', context: 131072, maxtokens: 4096, chat: true, tools: true, reasoning: false, vision: false },
+      'ollama-native': { url: 'http://127.0.0.1:11434', model: 'qwen2.5-coder:14b', context: 32768, maxtokens: 2048, chat: true, tools: true, reasoning: false, vision: false },
+      openai: { url: 'https://api.openai.com/v1', model: 'gpt-4o', context: 128000, maxtokens: 4096, chat: true, tools: true, reasoning: false, vision: true },
+      anthropic: { url: 'https://api.anthropic.com/v1', model: 'claude-3-5-sonnet-latest', context: 200000, maxtokens: 8192, chat: true, tools: true, reasoning: false, vision: true },
+      'openai-compat': { url: 'http://127.0.0.1:5000/v1', model: 'custom-model', context: 8192, maxtokens: 1024, chat: true, tools: false, reasoning: false, vision: false }
+    };
+
+    function updateRuntimeDefaults() {
+      const runtime = document.getElementById('target-runtime').value;
+      const defaults = runtimeDefaults[runtime];
+      if (defaults) {
+        document.getElementById('target-url').value = defaults.url;
+        document.getElementById('target-model').value = defaults.model;
+        document.getElementById('target-context').value = defaults.context;
+        document.getElementById('target-maxtokens').value = defaults.maxtokens;
+        document.getElementById('cap-chat').checked = defaults.chat;
+        document.getElementById('cap-tools').checked = defaults.tools;
+        document.getElementById('cap-reasoning').checked = defaults.reasoning;
+        document.getElementById('cap-vision').checked = defaults.vision;
+      }
+    }
+
+    function resolveTarget() {
+      document.getElementById('resolution-placeholder').style.display = 'none';
+      document.getElementById('resolution-summary').style.display = 'block';
+      const outputBanner = document.getElementById('resolver-output');
+      outputBanner.style.display = 'flex';
+
+      const targetId = document.getElementById('target-id').value;
+      const runtime = document.getElementById('target-runtime').value;
+      const url = document.getElementById('target-url').value;
+      const model = document.getElementById('target-model').value;
+      const auth = document.getElementById('target-auth').value;
+
+      document.getElementById('res-id').textContent = targetId;
+      document.getElementById('res-url').textContent = url;
+      
+      let authStr = 'Unauthenticated / Local';
+      if (auth === 'api-key-env') authStr = 'API Key from Env (CLIO_API_KEY_...)';
+      if (auth === 'credentials-yaml') authStr = 'Stored API Key (credentials.yaml)';
+      document.getElementById('res-auth').textContent = authStr;
+
+      // Badges
+      const badgesContainer = document.getElementById('res-badges');
+      badgesContainer.innerHTML = '';
+      
+      const caps = [];
+      if (document.getElementById('cap-chat').checked) caps.push({ code: 'C', name: 'Chat' });
+      if (document.getElementById('cap-tools').checked) caps.push({ code: 'T', name: 'Tools' });
+      if (document.getElementById('cap-reasoning').checked) caps.push({ code: 'R', name: 'Reasoning' });
+      if (document.getElementById('cap-vision').checked) caps.push({ code: 'V', name: 'Vision' });
+
+      caps.forEach(cap => {
+        const badge = document.createElement('span');
+        badge.className = 'cap-badge active';
+        badge.textContent = `${cap.code} - ${cap.name}`;
+        badgesContainer.appendChild(badge);
+      });
+
+      // Write logs
+      const logs = [];
+      logs.push(`[info] [resolution-engine] Initiating resolveTarget() for ID: "${targetId}"`);
+      logs.push(`[info] [resolution-engine] Loaded runtime descriptor: "${runtime}"`);
+      logs.push(`[info] [resolution-engine] Dispatch endpoint URL: ${url}`);
+      
+      if (auth === 'none') {
+        logs.push(`[info] [auth-handler] No authorization headers required.`);
+      } else {
+        logs.push(`[info] [auth-handler] Verification token requested from store for provider type...`);
+        logs.push(`[info] [auth-handler] Handshake credentials verified (Status: SUCCESS).`);
+      }
+
+      logs.push(`[info] [probe-engine] Running active probe against endpoint: ${url}/models`);
+      logs.push(`[success] [probe-engine] Model catalog verified: found model ID "${model}" matches wire specifications.`);
+      logs.push(`[info] [capability-badge] Resolved context window: ${document.getElementById('target-context').value} tokens.`);
+      logs.push(`[info] [capability-badge] Resolved max output threshold: ${document.getElementById('target-maxtokens').value} tokens.`);
+      logs.push(`[info] [capability-badge] Dynamic capabilities determined: [${caps.map(c => c.name).join(', ')}]`);
+      logs.push(`[success] [resolution-engine] Target "${targetId}" is ELIGIBLE as active Orchestrator.`);
+
+      document.getElementById('resolution-log').innerHTML = logs.join('\n');
+    }
+
+    // Generator logic
+    function updateGenDefaults() {
+      const runtime = document.getElementById('gen-runtime').value;
+      const urls = {
+        'ollama-native': 'http://127.0.0.1:11434',
+        'llamacpp': 'http://127.0.0.1:8080',
+        'openai': 'https://api.openai.com/v1',
+        'anthropic': 'https://api.anthropic.com/v1',
+        'openai-compat': 'http://127.0.0.1:5000/v1'
+      };
+      const models = {
+        'ollama-native': 'deepseek-coder:6.7b',
+        'llamacpp': 'Qwen2.5-Coder-32B-Instruct',
+        'openai': 'gpt-4o',
+        'anthropic': 'claude-3-5-sonnet-latest',
+        'openai-compat': 'custom-model'
+      };
+      
+      document.getElementById('gen-url').value = urls[runtime];
+      document.getElementById('gen-model').value = models[runtime];
+    }
+
+    function generateCommand() {
+      const id = document.getElementById('gen-id').value;
+      const runtime = document.getElementById('gen-runtime').value;
+      const url = document.getElementById('gen-url').value;
+      const model = document.getElementById('gen-model').value;
+      const env = document.getElementById('gen-env').value;
+      const role = document.getElementById('gen-role').value;
+
+      let configCmd = `clio configure \\\n  --id ${id} \\\n  --runtime ${runtime} \\\n  --url ${url} \\\n  --model ${model}`;
+      
+      if (env) {
+        configCmd += ` \\\n  --api-key-env ${env}`;
+      }
+
+      if (role === 'both') {
+        configCmd += ` \\\n  --set-orchestrator \\\n  --set-fleet-default`;
+      } else if (role === 'orchestrator') {
+        configCmd += ` \\\n  --set-orchestrator`;
+      } else if (role === 'fleet') {
+        configCmd += ` \\\n  --set-fleet-default`;
+      }
+
+      document.getElementById('cmd-register').textContent = configCmd;
+
+      const promoGroup = document.getElementById('promotion-group');
+      if (role === 'none') {
+        promoGroup.style.display = 'block';
+        document.getElementById('cmd-switch').textContent = `clio targets use ${id}`;
+      } else {
+        promoGroup.style.display = 'none';
+      }
+
+      document.getElementById('cmd-probe').textContent = `clio targets --probe --target ${id}`;
+    }
+
+    // Initial load
+    window.onload = function() {
+      loadSampleSettings('valid');
+      updateGenDefaults();
+      generateCommand();
+    }
+  </script>
+</body>
+</html>

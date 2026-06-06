@@ -1,0 +1,2243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Architecture Spec & Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.75);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      --color-primary: #00f0ff; /* Neon Cyan */
+      --color-primary-rgb: 0, 240, 255;
+      --color-secondary: #bd00ff; /* Neon Purple */
+      --color-secondary-rgb: 189, 0, 255;
+      --color-accent: #10b981; /* Neon Emerald */
+      --color-accent-rgb: 16, 185, 129;
+      --color-warn: #f59e0b; /* Amber */
+      --color-danger: #ef4444; /* Rose */
+      
+      --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+      --shadow-glow: 0 0 25px rgba(var(--color-primary-rgb), 0.15);
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.04) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.04) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.01);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Header */
+    header {
+      position: relative;
+      padding-bottom: 2rem;
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--border-card);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 54px;
+      height: 54px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      box-shadow: var(--shadow-glow);
+    }
+
+    .header-logo svg {
+      width: 30px;
+      height: 30px;
+      fill: var(--color-primary);
+    }
+
+    .header-title-text h1 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      background: linear-gradient(to right, #ffffff, #9ca3af);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-title-text p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .metadata-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      padding: 0.5rem 1rem;
+      border-radius: 30px;
+    }
+
+    .metadata-item {
+      font-size: 0.8rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .metadata-label {
+      color: var(--text-muted);
+    }
+
+    .metadata-value {
+      color: var(--color-primary);
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .metadata-divider {
+      width: 1px;
+      height: 12px;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Tabs */
+    .nav-tabs {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 0.35rem;
+      border-radius: 10px;
+      border: 1px solid var(--border-card);
+      width: fit-content;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.5rem 1.25rem;
+      border-radius: 6px;
+      font-family: var(--font-sans);
+      font-weight: 600;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .tab-btn.active {
+      color: var(--bg-dark);
+      background: var(--color-primary);
+      box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cards */
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.75rem;
+    }
+
+    /* Grid Layouts */
+    .spec-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .spec-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Dependency Visualizer SVG */
+    .visualizer-container {
+      position: relative;
+      width: 100%;
+      height: 600px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .visualizer-svg {
+      width: 100%;
+      height: 100%;
+      user-select: none;
+    }
+
+    .node {
+      cursor: pointer;
+      transition: filter 0.2s ease;
+    }
+
+    .node rect {
+      fill: rgba(17, 24, 39, 0.9);
+      stroke: var(--border-card);
+      stroke-width: 1.5;
+      transition: all 0.3s ease;
+    }
+
+    .node:hover rect {
+      stroke: var(--color-primary);
+      filter: drop-shadow(0 0 5px rgba(var(--color-primary-rgb), 0.5));
+    }
+
+    .node.selected rect {
+      stroke: var(--color-primary);
+      fill: rgba(var(--color-primary-rgb), 0.1);
+      stroke-width: 2.5;
+      filter: drop-shadow(0 0 8px rgba(var(--color-primary-rgb), 0.6));
+    }
+
+    .node.dependency rect {
+      stroke: var(--color-accent);
+      fill: rgba(var(--color-accent-rgb), 0.06);
+      stroke-width: 2;
+    }
+
+    .node.dependent rect {
+      stroke: var(--color-secondary);
+      fill: rgba(var(--color-secondary-rgb), 0.06);
+      stroke-width: 2;
+    }
+
+    .node text {
+      fill: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--font-sans);
+      pointer-events: none;
+      transition: fill 0.2s ease;
+    }
+
+    .node.selected text {
+      fill: #ffffff;
+      font-weight: 700;
+    }
+
+    .link {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.08);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 2;
+      transition: all 0.3s ease;
+      marker-end: url(#arrow-default);
+    }
+
+    .link.to-dependency {
+      stroke: var(--color-accent);
+      stroke-width: 2.5;
+      stroke-dasharray: none;
+      opacity: 1;
+      marker-end: url(#arrow-dependency);
+    }
+
+    .link.from-dependent {
+      stroke: var(--color-secondary);
+      stroke-width: 2.5;
+      stroke-dasharray: none;
+      opacity: 1;
+      marker-end: url(#arrow-dependent-glow);
+    }
+
+    .node.dimmed {
+      opacity: 0.25;
+    }
+
+    .link.dimmed {
+      opacity: 0.04;
+    }
+
+    /* Detail Sidebar Panel */
+    .sidebar-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .panel-icon-container {
+      width: 42px;
+      height: 42px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    .panel-title h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .panel-title span {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .panel-section-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      font-weight: 700;
+    }
+
+    .panel-tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .panel-tag {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .panel-tag:hover {
+      background: rgba(var(--color-primary-rgb), 0.1);
+      border-color: var(--color-primary);
+      color: #ffffff;
+    }
+
+    .panel-tag.dependency-tag {
+      border-color: rgba(var(--color-accent-rgb), 0.4);
+      color: #a7f3d0;
+    }
+
+    .panel-tag.dependent-tag {
+      border-color: rgba(var(--color-secondary-rgb), 0.4);
+      color: #f3e8ff;
+    }
+
+    .panel-tag.dependency-tag:hover {
+      background: rgba(var(--color-accent-rgb), 0.15);
+      border-color: var(--color-accent);
+    }
+
+    .panel-tag.dependent-tag:hover {
+      background: rgba(var(--color-secondary-rgb), 0.15);
+      border-color: var(--color-secondary);
+    }
+
+    .panel-desc {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .panel-contract {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      padding: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .panel-contract pre {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      color: #9cdcfe;
+    }
+
+    /* Simulator Panel */
+    .simulator-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr 1.3fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1200px) {
+      .simulator-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+
+    .form-select, .form-input, .form-textarea {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      color: var(--text-main);
+      padding: 0.5rem 0.75rem;
+      font-family: var(--font-sans);
+      font-size: 0.875rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .form-select:focus, .form-input:focus, .form-textarea:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 5px rgba(var(--color-primary-rgb), 0.2);
+    }
+
+    .form-textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .form-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .form-checkbox input {
+      accent-color: var(--color-primary);
+    }
+
+    .btn-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      background: var(--gradient-main);
+      color: var(--bg-dark);
+      border: none;
+      border-radius: 6px;
+      padding: 0.65rem 1.25rem;
+      font-weight: 700;
+      font-family: var(--font-sans);
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      width: 100%;
+    }
+
+    .btn-action:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 0 15px rgba(var(--color-primary-rgb), 0.4);
+    }
+
+    /* Rules Table */
+    .rules-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 480px;
+      overflow-y: auto;
+      padding-right: 0.25rem;
+    }
+
+    .rule-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem;
+      transition: all 0.2s ease;
+    }
+
+    .rule-card:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .rule-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.35rem;
+    }
+
+    .rule-card-id {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-primary);
+    }
+
+    .rule-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+
+    .rule-badge-enabled {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--color-accent);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .rule-badge-disabled {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--color-danger);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .rule-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .rule-card-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: var(--text-dark);
+      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      padding-top: 0.4rem;
+    }
+
+    .rule-delete-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-dark);
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: color 0.2s ease;
+    }
+
+    .rule-delete-btn:hover {
+      color: var(--color-danger);
+    }
+
+    /* Terminal Console Output */
+    .terminal-container {
+      background: #040711;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      padding: 1rem;
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      height: 480px;
+    }
+
+    .terminal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #111827;
+      padding-bottom: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-dark);
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .terminal-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot-red { background: #ef4444; }
+    .terminal-dot-yellow { background: #f59e0b; }
+    .terminal-dot-green { background: #10b981; }
+
+    .terminal-logs {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      line-height: 1.4;
+    }
+
+    .log-line {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .log-time {
+      color: var(--text-dark);
+      user-select: none;
+    }
+
+    .log-tag {
+      font-weight: 600;
+      color: var(--color-primary);
+    }
+
+    .log-tag.system { color: var(--text-muted); }
+    .log-tag.hook { color: #818cf8; }
+    .log-tag.rule { color: #f472b6; }
+    .log-tag.effect { color: var(--color-accent); }
+    .log-tag.block { color: var(--color-danger); }
+
+    .log-message {
+      color: var(--text-main);
+      white-space: pre-wrap;
+    }
+
+    .terminal-status-panel {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      padding: 0.65rem;
+      font-size: 0.75rem;
+    }
+
+    .terminal-status-title {
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+      text-transform: uppercase;
+      font-size: 0.65rem;
+      letter-spacing: 0.05em;
+    }
+
+    .protected-paths-box {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      max-height: 60px;
+      overflow-y: auto;
+    }
+
+    .path-badge {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      color: #fca5a5;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .path-badge svg {
+      width: 10px;
+      height: 10px;
+      fill: currentColor;
+    }
+
+    /* Diagram Tab CSS */
+    .diagram-panel-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      .diagram-panel-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .sequence-svg-container {
+      width: 100%;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .sequence-svg {
+      width: 100%;
+      height: auto;
+    }
+
+    .seq-actor-box {
+      fill: #111827;
+      stroke: var(--border-card);
+      stroke-width: 1.5;
+    }
+
+    .seq-actor-box.highlight {
+      stroke: var(--color-primary);
+      fill: rgba(0, 240, 255, 0.05);
+    }
+
+    .seq-lifeline {
+      stroke: var(--text-dark);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 4;
+    }
+
+    .seq-activation {
+      fill: var(--color-primary);
+      opacity: 0.8;
+      stroke-width: 0;
+    }
+
+    .seq-activation.accent {
+      fill: var(--color-accent);
+    }
+
+    .seq-activation.secondary {
+      fill: var(--color-secondary);
+    }
+
+    .seq-arrow {
+      stroke: var(--text-main);
+      stroke-width: 1.5;
+      fill: none;
+      marker-end: url(#seq-arrowhead);
+    }
+
+    .seq-arrow.dashed {
+      stroke-dasharray: 3 3;
+      stroke: var(--text-muted);
+    }
+
+    .seq-arrow.blocked-arrow {
+      stroke: var(--color-danger);
+      marker-end: url(#seq-arrowhead-red);
+    }
+
+    .seq-label {
+      font-size: 11px;
+      font-weight: 500;
+      fill: var(--text-main);
+      font-family: var(--font-mono);
+    }
+
+    .seq-label.muted {
+      fill: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .seq-label.blocked-text {
+      fill: #fca5a5;
+    }
+
+    /* Modal dialog */
+    .dialog-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(4, 7, 17, 0.8);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .dialog-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .dialog-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      width: 90%;
+      max-width: 500px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      animation: dialogSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes dialogSlide {
+      from { transform: translateY(-20px) scale(0.95); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+
+    .dialog-header {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #ffffff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .dialog-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+    }
+
+    .dialog-close:hover {
+      color: #ffffff;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-primary-small {
+      background: var(--color-primary);
+      color: var(--bg-dark);
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .btn-primary-small:hover {
+      filter: brightness(1.1);
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <header>
+    <div class="header-title">
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="header-title-text">
+        <h1>Clio Coder Architecture Spec</h1>
+        <p>Experimental Domain Dependency Registry & Middleware Simulator</p>
+      </div>
+    </div>
+
+    <div class="metadata-badge">
+      <div class="metadata-item">
+        <span class="metadata-label">PRODUCT VERSION:</span>
+        <span class="metadata-value" id="product-version">0.2.1</span>
+      </div>
+      <div class="metadata-divider"></div>
+      <div class="metadata-item">
+        <span class="metadata-label">SPEC CLASSIFICATION:</span>
+        <span class="metadata-value" style="color: var(--color-accent)">source-aligned</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('tab-graph')">Domain Dependency Graph</button>
+    <button class="tab-btn" onclick="switchTab('tab-simulator')">Middleware & Hook Simulator</button>
+    <button class="tab-btn" onclick="switchTab('tab-diagrams')">Sequence Flow Diagrams</button>
+  </div>
+
+  <!-- Tab 1: Dependency Graph -->
+  <div id="tab-graph" class="tab-content active">
+    <div class="spec-grid">
+      <!-- Left: SVG Visualizer -->
+      <div class="glass-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary)"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Interactive Domain Dependency Visualizer
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Click any node to focus it. Highlights upstream <strong style="color: var(--color-accent);">dependencies</strong> (green) and downstream <strong style="color: var(--color-secondary);">dependents</strong> (purple). Double-click a focused node to clear selection.
+        </p>
+        <div class="visualizer-container">
+          <svg id="dep-svg" class="visualizer-svg">
+            <defs>
+              <marker id="arrow-default" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.15)" />
+              </marker>
+              <marker id="arrow-dependency" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-accent)" />
+              </marker>
+              <marker id="arrow-dependent-glow" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-secondary)" />
+              </marker>
+            </defs>
+            <g id="links-group"></g>
+            <g id="nodes-group"></g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Right: Detailed Sidebar -->
+      <div class="glass-card sidebar-panel" id="detail-panel">
+        <div class="panel-header">
+          <div class="panel-icon-container" id="detail-icon">⚙️</div>
+          <div class="panel-title">
+            <h3 id="detail-name">config</h3>
+            <span id="detail-path">src/domains/config/</span>
+          </div>
+        </div>
+        
+        <div>
+          <div class="panel-section-title">Description</div>
+          <div class="panel-desc" id="detail-desc">
+            Manages settings.yaml, keybindings, and holds the core configuration state, with support for live configuration hot-reloads during active processes.
+          </div>
+        </div>
+
+        <div>
+          <div class="panel-section-title">Upstream Dependencies</div>
+          <div class="panel-tag-list" id="detail-dependencies">
+            <span class="panel-tag">None</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel-section-title">Downstream Dependents</div>
+          <div class="panel-tag-list" id="detail-dependents">
+            <span class="panel-tag">agents</span>
+            <span class="panel-tag">dispatch</span>
+            <span class="panel-tag">modes</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel-section-title">Public Contract Surface</div>
+          <div class="panel-contract">
+            <pre id="detail-contract">interface ConfigContract {
+  getSettings(): Settings;
+  onUpdate(listener: (s: Settings) => void): () => void;
+  reload(): Promise<void>;
+}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: Simulator -->
+  <div id="tab-simulator" class="tab-content">
+    <div class="simulator-grid">
+      <!-- Panel A: Active Rules & Editor -->
+      <div class="glass-card" style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="card-title" style="margin-bottom: 0.5rem;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary)"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+          Middleware Rules Engine
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-muted);">
+          Rules are evaluated in the middleware hook boundary. Add or delete mock rules below to test trigger conditions.
+        </p>
+
+        <div class="rules-list" id="sim-rules-container">
+          <!-- Populated by JS -->
+        </div>
+
+        <button class="btn-action" style="background: rgba(255, 255, 255, 0.05); color: var(--text-main); border: 1px solid var(--border-card); font-size: 0.8rem; margin-top: 0.5rem;" onclick="showAddRuleModal()">
+          + Add New Rule
+        </button>
+      </div>
+
+      <!-- Panel B: Event Input Context -->
+      <div class="glass-card" style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary)"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Context Stimulator
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label" for="sim-hook">Hook Event Trigger</label>
+          <select id="sim-hook" class="form-select" onchange="onHookChange()">
+            <option value="before_tool" selected>before_tool (Registry Admission Gate)</option>
+            <option value="after_tool">after_tool (Registry Post-Execution)</option>
+            <option value="before_model">before_model (Model Prompt Compilation)</option>
+            <option value="after_model">after_model (Model Inference Completed)</option>
+            <option value="on_blocked_tool">on_blocked_tool (Safety Block Event)</option>
+            <option value="on_dispatch_start">on_dispatch_start (Subprocess Worker Spawning)</option>
+            <option value="on_dispatch_end">on_dispatch_end (Subprocess Worker Complete)</option>
+          </select>
+        </div>
+
+        <div id="dynamic-fields">
+          <!-- Populated dynamically based on chosen Hook -->
+        </div>
+
+        <div style="flex: 1;"></div>
+
+        <button class="btn-action" onclick="runSimulation()">
+          ⚡ Fire Hook Event
+        </button>
+      </div>
+
+      <!-- Panel C: Output Trace -->
+      <div class="glass-card" style="display: flex; flex-direction: column; gap: 1rem; padding: 1.25rem;">
+        <div class="card-title" style="margin-bottom: 0.5rem;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-accent)"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+          Simulation Output & State
+        </div>
+
+        <div class="terminal-container">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="terminal-dot terminal-dot-red"></span>
+              <span class="terminal-dot terminal-dot-yellow"></span>
+              <span class="terminal-dot terminal-dot-green"></span>
+            </div>
+            <span>clio-middleware-audit.log</span>
+          </div>
+
+          <div class="terminal-logs" id="sim-logs">
+            <div class="log-line">
+              <span class="log-time">[12:00:00]</span>
+              <span class="log-tag system">sys</span>
+              <span class="log-message">Simulator initialized. Select a hook and fire it to begin trace audits.</span>
+            </div>
+          </div>
+
+          <div class="terminal-status-panel">
+            <div class="terminal-status-title">Simulated Registry Protected Paths</div>
+            <div class="protected-paths-box" id="protected-paths-container">
+              <div style="color: var(--text-dark); font-style: italic; font-size: 0.75rem;">No active path policy blocks.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 3: Sequence Diagrams -->
+  <div id="tab-diagrams" class="tab-content">
+    <div class="diagram-panel-container">
+      <!-- Sequence Diagram 1 -->
+      <div class="glass-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary)"><polygon points="12 2 2 7 12 12 22 7 12 2z"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          Domain Loading & Dependency Lifecycle Flow
+        </div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+          Illustrates the manifest-driven boot sequence. Resolves ordering via topological sort and boots extensions. Enforcement of budget limits during reverse-order shutdown.
+        </p>
+
+        <div class="sequence-svg-container">
+          <svg viewBox="0 0 800 450" class="sequence-svg">
+            <defs>
+              <marker id="seq-arrowhead" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-main)" />
+              </marker>
+              <marker id="seq-arrowhead-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-danger)" />
+              </marker>
+            </defs>
+
+            <!-- Actors -->
+            <rect x="30" y="20" width="120" height="30" rx="6" class="seq-actor-box highlight" />
+            <text x="90" y="38" text-anchor="middle" class="seq-label">Orchestrator</text>
+            <line x1="90" y1="50" x2="90" y2="400" class="seq-lifeline" />
+
+            <rect x="210" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="270" y="38" text-anchor="middle" class="seq-label">Domain Loader</text>
+            <line x1="270" y1="50" x2="270" y2="400" class="seq-lifeline" />
+
+            <rect x="390" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="450" y="38" text-anchor="middle" class="seq-label">topoSort()</text>
+            <line x1="450" y1="50" x2="450" y2="400" class="seq-lifeline" />
+
+            <rect x="570" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="630" y="38" text-anchor="middle" class="seq-label">Domain Module</text>
+            <line x1="630" y1="50" x2="630" y2="400" class="seq-lifeline" />
+
+            <rect x="710" y="20" width="70" height="30" rx="6" class="seq-actor-box" />
+            <text x="745" y="38" text-anchor="middle" class="seq-label">Event Bus</text>
+            <line x1="745" y1="50" x2="745" y2="400" class="seq-lifeline" />
+
+            <!-- Activation bars -->
+            <rect x="85" y="65" width="10" height="320" class="seq-activation secondary" />
+            <rect x="265" y="70" width="10" height="305" class="seq-activation" />
+            <rect x="445" y="90" width="10" height="50" class="seq-activation accent" />
+            <rect x="625" y="170" width="10" height="110" class="seq-activation accent" />
+
+            <!-- Messages -->
+            <path d="M 95 70 L 265 70" class="seq-arrow" />
+            <text x="180" y="65" text-anchor="middle" class="seq-label muted">loadDomains(modules)</text>
+
+            <path d="M 275 90 L 445 90" class="seq-arrow" />
+            <text x="360" y="85" text-anchor="middle" class="seq-label muted">topoSort(modules)</text>
+
+            <!-- Self loop inside topoSort -->
+            <path d="M 455 105 C 485 105, 485 125, 455 125" class="seq-arrow" />
+            <text x="495" y="118" class="seq-label muted">cycle & dep validation</text>
+
+            <path d="M 445 140 L 275 140" class="seq-arrow dashed" />
+            <text x="360" y="135" text-anchor="middle" class="seq-label muted">return order: string[]</text>
+
+            <!-- Loading Loop -->
+            <path d="M 275 170 L 625 170" class="seq-arrow" />
+            <text x="450" y="165" text-anchor="middle" class="seq-label muted">createExtension(context)</text>
+
+            <path d="M 625 195 L 275 195" class="seq-arrow dashed" />
+            <text x="450" y="190" text-anchor="middle" class="seq-label muted">return Bundle { extension, contract }</text>
+
+            <path d="M 275 220 L 625 220" class="seq-arrow" />
+            <text x="450" y="215" text-anchor="middle" class="seq-label muted">extension.start()</text>
+
+            <path d="M 625 245 L 275 245" class="seq-arrow dashed" />
+            <text x="450" y="240" text-anchor="middle" class="seq-label muted">completed</text>
+
+            <path d="M 275 270 L 745 270" class="seq-arrow" />
+            <text x="510" y="265" text-anchor="middle" class="seq-label muted">emit(DomainLoaded, name)</text>
+
+            <!-- Shutdown -->
+            <path d="M 95 315 L 265 315" class="seq-arrow" />
+            <text x="180" y="310" text-anchor="middle" class="seq-label muted">stop() (trigger shutdown)</text>
+
+            <path d="M 275 335 L 625 335" class="seq-arrow" />
+            <text x="450" y="330" text-anchor="middle" class="seq-label muted">extension.stop() (reverse order)</text>
+
+            <path d="M 625 355 L 275 355" class="seq-arrow dashed" />
+            <text x="450" y="350" text-anchor="middle" class="seq-label muted">done / runWithBudget() checks</text>
+
+            <path d="M 265 375 L 95 375" class="seq-arrow dashed" />
+            <text x="180" y="370" text-anchor="middle" class="seq-label muted">resolved</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Sequence Diagram 2 -->
+      <div class="glass-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary)"><polygon points="12 2 2 7 12 12 22 7 12 2z"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          Component Middleware & Registry Dispatch Loop
+        </div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+          Shows how the Tool Registry queries the Middleware Contract during a tool call. Illustrates path protection registration and execution blocking flows.
+        </p>
+
+        <div class="sequence-svg-container">
+          <svg viewBox="0 0 800 450" class="sequence-svg">
+            <defs>
+              <marker id="seq-arrowhead2" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-main)" />
+              </marker>
+            </defs>
+
+            <!-- Actors -->
+            <rect x="30" y="20" width="120" height="30" rx="6" class="seq-actor-box highlight" />
+            <text x="90" y="38" text-anchor="middle" class="seq-label">Tool Registry</text>
+            <line x1="90" y1="50" x2="90" y2="400" class="seq-lifeline" />
+
+            <rect x="210" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="270" y="38" text-anchor="middle" class="seq-label">Middleware Contract</text>
+            <line x1="270" y1="50" x2="270" y2="400" class="seq-lifeline" />
+
+            <rect x="390" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="450" y="38" text-anchor="middle" class="seq-label">Rule Engine</text>
+            <line x1="450" y1="50" x2="450" y2="400" class="seq-lifeline" />
+
+            <rect x="570" y="20" width="120" height="30" rx="6" class="seq-actor-box" />
+            <text x="630" y="38" text-anchor="middle" class="seq-label">Protected State</text>
+            <line x1="630" y1="50" x2="630" y2="400" class="seq-lifeline" />
+
+            <rect x="710" y="20" width="70" height="30" rx="6" class="seq-actor-box" />
+            <text x="745" y="38" text-anchor="middle" class="seq-label">Tool Spec</text>
+            <line x1="745" y1="50" x2="745" y2="400" class="seq-lifeline" />
+
+            <!-- Activation bars -->
+            <rect x="85" y="65" width="10" height="320" class="seq-activation secondary" />
+            <rect x="265" y="70" width="10" height="150" class="seq-activation" />
+            <rect x="445" y="80" width="10" height="110" class="seq-activation accent" />
+            <rect x="625" y="240" width="10" height="40" class="seq-activation" />
+            <rect x="740" y="295" width="10" height="40" class="seq-activation accent" />
+
+            <!-- Messages -->
+            <path d="M 95 70 L 265 70" class="seq-arrow" />
+            <text x="180" y="65" text-anchor="middle" class="seq-label muted">runToolHook("before_tool")</text>
+
+            <path d="M 275 85 L 445 85" class="seq-arrow" />
+            <text x="360" y="80" text-anchor="middle" class="seq-label muted">runHook(before_tool_input)</text>
+
+            <!-- Self loop inside Rule Engine -->
+            <path d="M 455 100 C 485 100, 485 120, 455 120" class="seq-arrow" />
+            <text x="495" y="112" class="seq-label muted">evaluate active rules</text>
+
+            <path d="M 455 135 C 485 135, 485 155, 455 155" class="seq-arrow" />
+            <text x="495" y="148" class="seq-label muted">validate effects output</text>
+
+            <path d="M 445 180 L 275 180" class="seq-arrow dashed" />
+            <text x="360" y="175" text-anchor="middle" class="seq-label muted">return effects list</text>
+
+            <path d="M 265 210 L 95 210" class="seq-arrow dashed" />
+            <text x="180" y="205" text-anchor="middle" class="seq-label muted">return { effects }</text>
+
+            <!-- Optional block check -->
+            <path d="M 95 240 L 625 240" class="seq-arrow" />
+            <text x="360" y="235" text-anchor="middle" class="seq-label muted">applyProtectPathEffects()</text>
+
+            <!-- If block tool matches -->
+            <path d="M 90 270 C 50 270, 50 290, 90 290" class="seq-arrow blocked-arrow" />
+            <text x="105" y="285" class="seq-label blocked-text">If block_tool -> Block execution (stop)</text>
+
+            <!-- Otherwise run -->
+            <path d="M 95 310 L 740 310" class="seq-arrow" />
+            <text x="417" y="305" text-anchor="middle" class="seq-label muted">spec.run(args)</text>
+
+            <path d="M 740 335 L 95 335" class="seq-arrow dashed" />
+            <text x="417" y="330" text-anchor="middle" class="seq-label muted">return output / ToolResult</text>
+
+            <!-- After Tool Hook -->
+            <path d="M 95 365 L 265 365" class="seq-arrow" stroke-dasharray="2 2" />
+            <text x="180" y="360" text-anchor="middle" class="seq-label muted">runToolHook("after_tool") ...</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Rule Dialog -->
+<div class="dialog-overlay" id="add-rule-dialog">
+  <div class="dialog-box">
+    <div class="dialog-header">
+      <span>Add Mock Rule</span>
+      <button class="dialog-close" onclick="closeAddRuleModal()">&times;</button>
+    </div>
+    
+    <div class="form-group">
+      <label class="form-label" for="rule-id">Rule ID</label>
+      <input type="text" id="rule-id" class="form-input" placeholder="e.g. custom.my-rule">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="rule-desc">Description</label>
+      <input type="text" id="rule-desc" class="form-input" placeholder="Blocks dangerous scripts">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="rule-hook">Trigger Hook</label>
+      <select id="rule-hook" class="form-select">
+        <option value="before_tool">before_tool</option>
+        <option value="after_tool">after_tool</option>
+        <option value="before_model">before_model</option>
+        <option value="after_model">after_model</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="rule-effect">Effect Kind</label>
+      <select id="rule-effect" class="form-select" onchange="onRuleEffectChange()">
+        <option value="block_tool">block_tool</option>
+        <option value="protect_path">protect_path</option>
+        <option value="annotate_tool_result">annotate_tool_result</option>
+        <option value="inject_reminder">inject_reminder</option>
+        <option value="require_validation">require_validation</option>
+      </select>
+    </div>
+
+    <div id="rule-effect-param-group" class="form-group">
+      <label class="form-label" id="rule-param-label" for="rule-effect-param">Effect Parameters</label>
+      <input type="text" id="rule-effect-param" class="form-input" placeholder="Reason or message">
+    </div>
+
+    <div class="form-group">
+      <label class="form-checkbox">
+        <input type="checkbox" id="rule-enabled" checked>
+        Enabled
+      </label>
+    </div>
+
+    <div class="dialog-actions">
+      <button class="btn-secondary" onclick="closeAddRuleModal()">Cancel</button>
+      <button class="btn-primary-small" onclick="saveNewRule()">Save Rule</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Clio Coder domains data
+  const DOMAINS_DATA = {
+    "config": {
+      name: "config",
+      path: "src/domains/config/",
+      desc: "Manages settings.yaml, keybindings, and holds the core configuration state, with support for live configuration hot-reloads during active processes.",
+      dependsOn: [],
+      dependents: ["extensions", "resources", "share", "providers", "safety", "modes", "prompts", "agents", "session", "observability", "scheduling", "dispatch", "intelligence", "lifecycle"],
+      contract: `interface ConfigContract {
+  getSettings(): Settings;
+  onUpdate(listener: (s: Settings) => void): () => void;
+  reload(): Promise<void>;
+}`
+    },
+    "extensions": {
+      name: "extensions",
+      path: "src/domains/extensions/",
+      desc: "Handles plugin discovery, validation, and registers user/project extensions dynamically into the orchestrator runtime.",
+      dependsOn: ["config"],
+      dependents: ["share"],
+      contract: `interface ExtensionsContract {
+  listExtensions(): ReadonlyArray<ClioExtension>;
+  loadExtension(path: string): Promise<ClioExtension>;
+  unloadExtension(id: string): Promise<void>;
+}`
+    },
+    "resources": {
+      name: "resources",
+      path: "src/domains/resources/",
+      desc: "Resolves skill directories, prompts path roots, and serves built-in static files/templates.",
+      dependsOn: ["config"],
+      dependents: ["context", "share", "prompts"],
+      contract: `interface ResourcesContract {
+  getSkillsDir(): string;
+  listSkills(): Promise<SkillMetadata[]>;
+  readResource(relPath: string): Promise<string>;
+}`
+    },
+    "share": {
+      name: "share",
+      path: "src/domains/share/",
+      desc: "Manages portability formats. Exports and imports Clio packages, session logs, and configurations into compressed archives.",
+      dependsOn: ["config", "extensions", "resources"],
+      dependents: [],
+      contract: `interface ShareContract {
+  exportBundle(options: ExportOptions): Promise<string>;
+  importBundle(archivePath: string): Promise<ImportResult>;
+}`
+    },
+    "context": {
+      name: "context",
+      path: "src/domains/context/",
+      desc: "Manages CLIO.md contextual discovery, workspace guidelines, user profile adoptions, and rehydrates model context fragments.",
+      dependsOn: ["resources"],
+      dependents: ["prompts"],
+      contract: `interface ContextContract {
+  getWorkspaceRoot(): string;
+  readClioMd(): Promise<string | null>;
+  getContextSummary(): Promise<ContextSummary>;
+}`
+    },
+    "providers": {
+      name: "providers",
+      path: "src/domains/providers/",
+      desc: "Bridges Clio Coder to target models. Manages api credentials, lists models, checks capacities, and initiates provider instances via engine runtime descriptors.",
+      dependsOn: ["config"],
+      dependents: ["observability", "dispatch"],
+      contract: `interface ProvidersContract {
+  listModels(): Promise<ModelDescriptor[]>;
+  getProvider(modelId: string): Promise<ModelProvider>;
+  validateCredentials(providerName: string): Promise<boolean>;
+}`
+    },
+    "safety": {
+      name: "safety",
+      path: "src/domains/safety/",
+      desc: "Enforces damage control limits, evaluates command safety profiles, processes policy files, and validates path isolation rules.",
+      dependsOn: ["config"],
+      dependents: ["modes", "dispatch"],
+      contract: `interface SafetyContract {
+  evaluateCommand(cmd: string): SafetyDecision;
+  isPathProtected(path: string): boolean;
+  getDamageControlRules(): DamageControlRule[];
+}`
+    },
+    "modes": {
+      name: "modes",
+      path: "src/domains/modes/",
+      desc: "Manages the mode registry matrix (plan, edit, validate, safety-first, chat). Controls tool visibility based on active modes.",
+      dependsOn: ["config", "safety"],
+      dependents: ["agents", "prompts", "session", "dispatch"],
+      contract: `interface ModesContract {
+  current(): ModeName;
+  setMode(mode: ModeName): void;
+  getVisibleTools(mode: ModeName): ToolSpec[];
+}`
+    },
+    "prompts": {
+      name: "prompts",
+      path: "src/domains/prompts/",
+      desc: "Compiles system prompt templates, handles dynamic turn fragment insertion, system instructions, and compiles secure prompt envelopes with signature verification.",
+      dependsOn: ["config", "modes", "context", "resources"],
+      dependents: ["dispatch"],
+      contract: `interface PromptsContract {
+  compileEnvelope(turnInput: TurnInput): Promise<PromptEnvelope>;
+  registerFragment(id: string, renderer: FragmentRenderer): void;
+}`
+    },
+    "agents": {
+      name: "agents",
+      path: "src/domains/agents/",
+      desc: "Maintains templates for built-in and user fleet agents (scout, researcher, evolver, reviewer, scientific-validator). Spawns specialized workers.",
+      dependsOn: ["config", "modes"],
+      dependents: ["dispatch"],
+      contract: `interface AgentsContract {
+  listRecipes(): AgentRecipe[];
+  getRecipe(name: string): AgentRecipe | undefined;
+  spawnAgent(name: string, task: string): Promise<AgentInstance>;
+}`
+    },
+    "middleware": {
+      name: "middleware",
+      path: "src/domains/middleware/",
+      desc: "Enforces hook execution and returns side-effects. Consumes rules, matches active triggers on events, and performs strict validation on effects.",
+      dependsOn: [],
+      dependents: ["dispatch"],
+      contract: `interface MiddlewareContract {
+  runHook(input: MiddlewareHookInput): MiddlewareHookResult;
+  listRules(): ReadonlyArray<MiddlewareRule>;
+  snapshot(): MiddlewareSnapshot;
+}`
+    },
+    "session": {
+      name: "session",
+      path: "src/domains/session/",
+      desc: "Saves session events to high-performance JSONL logs. Manages undo/redo history and executes checkpoint compaction when token limits are near.",
+      dependsOn: ["config", "modes"],
+      dependents: ["observability"],
+      contract: `interface SessionContract {
+  writeTurn(turn: SessionTurn): Promise<void>;
+  compactHistory(targetTokens: number): Promise<CompactionResult>;
+  getCheckpoint(turnId: string): Promise<SessionState | null>;
+}`
+    },
+    "observability": {
+      name: "observability",
+      path: "src/domains/observability/",
+      desc: "Hooks into the event bus to collect latency statistics, record api costs, format token metrics, and export audit traces.",
+      dependsOn: ["providers", "session"],
+      dependents: ["scheduling"],
+      contract: `interface ObservabilityContract {
+  recordTokenUsage(model: string, promptTokens: number, completionTokens: number): void;
+  getTraceLogger(): TraceLogger;
+  getCostSummary(): Promise<CostSummary>;
+}`
+    },
+    "scheduling": {
+      name: "scheduling",
+      path: "src/domains/scheduling/",
+      desc: "Provides background cron executions, sets one-shot execution timers, and dispatches cleanup signals.",
+      dependsOn: ["config", "observability"],
+      dependents: [],
+      contract: `interface SchedulingContract {
+  scheduleCron(cronExpr: string, task: () => void): string;
+  cancelJob(jobId: string): void;
+}`
+    },
+    "dispatch": {
+      name: "dispatch",
+      path: "src/domains/dispatch/",
+      desc: "Central jobs manager. Spawns, runs, and monitors worker subprocesses. Tracks run ledgers and validates integrity of receipts.",
+      dependsOn: ["config", "safety", "modes", "agents", "providers", "middleware", "prompts"],
+      dependents: [],
+      contract: `interface DispatchContract {
+  dispatchJob(jobSpec: JobSpec): Promise<JobReceipt>;
+  getActiveJobs(): JobStatus[];
+  drain(): Promise<void>;
+}`
+    },
+    "intelligence": {
+      name: "intelligence",
+      path: "src/domains/intelligence/",
+      desc: "Manages knowledge graphs, vector retrieval indexes, workspace memories, and semantic query planning.",
+      dependsOn: ["config"],
+      dependents: [],
+      contract: `interface IntelligenceContract {
+  searchVectors(query: string, limit: number): Promise<VectorMatch[]>;
+  storeMemory(fact: string, sourceRefs: string[]): Promise<void>;
+}`
+    },
+    "lifecycle": {
+      name: "lifecycle",
+      path: "src/domains/lifecycle/",
+      desc: "Performs system checkups (doctor commands), checks diagnostic metrics, executes pending migrations, and reports Clio environment configuration details.",
+      dependsOn: ["config"],
+      dependents: [],
+      contract: `interface LifecycleContract {
+  version(): VersionInfo;
+  state(): StateInfo | null;
+  doctor(): DoctorFinding[];
+  runMigrations(dir: string): Promise<MigrationRunResult>;
+}`
+    },
+    "components": {
+      name: "components",
+      path: "src/domains/components/",
+      desc: "Scans files, calculates SHA-256 hash inventory, generates snapshots of behavior-affecting components, and computes snapshots diffs.",
+      dependsOn: [],
+      dependents: [],
+      contract: `interface ComponentsContract {
+  scanWorkspace(): Promise<ComponentSnapshot>;
+  computeDiff(before: ComponentSnapshot, after: ComponentSnapshot): ComponentDiff;
+}`
+    }
+  };
+
+  // SVG dimensions & positioning
+  const LAYER_X = [80, 260, 440, 620, 800];
+  const NODE_W = 120;
+  const NODE_H = 32;
+
+  const DOMAIN_COORDS = {
+    "config": { x: LAYER_X[0], y: 120 },
+    "middleware": { x: LAYER_X[0], y: 280 },
+    "components": { x: LAYER_X[0], y: 440 },
+
+    "extensions": { x: LAYER_X[1], y: 60 },
+    "resources": { x: LAYER_X[1], y: 140 },
+    "providers": { x: LAYER_X[1], y: 220 },
+    "safety": { x: LAYER_X[1], y: 300 },
+    "intelligence": { x: LAYER_X[1], y: 380 },
+    "lifecycle": { x: LAYER_X[1], y: 460 },
+
+    "context": { x: LAYER_X[2], y: 100 },
+    "share": { x: LAYER_X[2], y: 180 },
+    "modes": { x: LAYER_X[2], y: 260 },
+    "agents": { x: LAYER_X[2], y: 340 },
+    "session": { x: LAYER_X[2], y: 420 },
+
+    "prompts": { x: LAYER_X[3], y: 180 },
+    "observability": { x: LAYER_X[3], y: 340 },
+
+    "scheduling": { x: LAYER_X[4], y: 200 },
+    "dispatch": { x: LAYER_X[4], y: 360 }
+  };
+
+  const ICONS = {
+    "config": "⚙️",
+    "extensions": "🔌",
+    "resources": "📁",
+    "share": "📤",
+    "context": "🧠",
+    "providers": "🤖",
+    "safety": "🔒",
+    "modes": "🎛️",
+    "prompts": "✉️",
+    "agents": "👥",
+    "middleware": "🛡️",
+    "session": "📝",
+    "observability": "📊",
+    "scheduling": "⏰",
+    "dispatch": "🚀",
+    "intelligence": "💡",
+    "lifecycle": "🏥",
+    "components": "📦"
+  };
+
+  // State
+  let focusedDomain = null;
+  let activeTab = "tab-graph";
+
+  // Simulation Rules Data
+  let middlewareRules = [
+    {
+      id: "builtin.sandbox-protection",
+      description: "Blocks tool executions modifying private credential or system config files.",
+      enabled: true,
+      hook: "before_tool",
+      effectKind: "block_tool",
+      param: "access violation: modifying private credentials is forbidden; severity: hard-block"
+    },
+    {
+      id: "builtin.require-validation",
+      description: "Triggers validation checklist request when source script file edits are completed.",
+      enabled: true,
+      hook: "after_tool",
+      effectKind: "require_validation",
+      param: "validation required: script outputs require integration test suite run"
+    },
+    {
+      id: "builtin.protect-checkpoint",
+      description: "Locks simulation checkpoint state files upon successful command runs.",
+      enabled: true,
+      hook: "after_tool",
+      effectKind: "protect_path",
+      param: "out/checkpoint.nc; scientific validation benchmark file verified"
+    },
+    {
+      id: "builtin.remind-floating-point",
+      description: "Injects floating point compliance checklist reminder into prompts before invoking LLMs.",
+      enabled: true,
+      hook: "before_model",
+      effectKind: "inject_reminder",
+      param: "Check float accuracy; severity: info"
+    },
+    {
+      id: "builtin.annotate-compile-warnings",
+      description: "Appends stderr warning warnings notice onto tool result output.",
+      enabled: true,
+      hook: "after_tool",
+      effectKind: "annotate_tool_result",
+      param: "compiler warning found in build output; severity: warn"
+    }
+  ];
+
+  let simulatedProtectedPaths = new Set(["package.json", "docs/architecture.md"]);
+
+  // Initialize
+  window.onload = function() {
+    renderGraph();
+    selectDomain("config");
+    renderRules();
+    onHookChange();
+    renderProtectedPaths();
+  };
+
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    
+    event.currentTarget.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+    activeTab = tabId;
+  }
+
+  // Draw Graph
+  function renderGraph() {
+    const nodesGroup = document.getElementById("nodes-group");
+    const linksGroup = document.getElementById("links-group");
+    nodesGroup.innerHTML = "";
+    linksGroup.innerHTML = "";
+
+    // Draw Links
+    const links = [];
+    Object.keys(DOMAINS_DATA).forEach(sourceName => {
+      const source = DOMAINS_DATA[sourceName];
+      source.dependsOn.forEach(targetName => {
+        links.push({ source: sourceName, target: targetName });
+      });
+    });
+
+    links.forEach((link, idx) => {
+      const sCoords = DOMAIN_COORDS[link.source];
+      const tCoords = DOMAIN_COORDS[link.target];
+      if (!sCoords || !tCoords) return;
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      // Curved line
+      const x1 = sCoords.x;
+      const y1 = sCoords.y + NODE_H / 2;
+      const x2 = tCoords.x + NODE_W;
+      const y2 = tCoords.y + NODE_H / 2;
+      const dx = Math.abs(x1 - x2) * 0.4;
+      const dPath = `M ${x1} ${y1} C ${x1 - dx} ${y1}, ${x2 + dx} ${y2}, ${x2} ${y2}`;
+
+      path.setAttribute("d", dPath);
+      path.setAttribute("class", "link");
+      path.setAttribute("id", `link-${link.source}-${link.target}`);
+      linksGroup.appendChild(path);
+    });
+
+    // Draw Nodes
+    Object.keys(DOMAIN_COORDS).forEach(name => {
+      const coord = DOMAIN_COORDS[name];
+      
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", "node");
+      g.setAttribute("id", `node-${name}`);
+      g.setAttribute("transform", `translate(${coord.x}, ${coord.y})`);
+      g.onclick = () => onNodeClick(name);
+      g.ondblclick = () => onNodeDblClick(name);
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("width", NODE_W);
+      rect.setAttribute("height", NODE_H);
+      rect.setAttribute("rx", "6");
+      g.appendChild(rect);
+
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", NODE_W / 2);
+      text.setAttribute("y", NODE_H / 2 + 4);
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = `${ICONS[name]} ${name}`;
+      g.appendChild(text);
+
+      nodesGroup.appendChild(g);
+    });
+  }
+
+  function onNodeClick(name) {
+    if (focusedDomain === name) {
+      clearSelection();
+      return;
+    }
+    selectDomain(name);
+  }
+
+  function onNodeDblClick(name) {
+    clearSelection();
+  }
+
+  function selectDomain(name) {
+    focusedDomain = name;
+    const domain = DOMAINS_DATA[name];
+
+    // Sidebar
+    document.getElementById("detail-icon").textContent = ICONS[name];
+    document.getElementById("detail-name").textContent = name;
+    document.getElementById("detail-path").textContent = domain.path;
+    document.getElementById("detail-desc").textContent = domain.desc;
+    document.getElementById("detail-contract").textContent = domain.contract;
+
+    // Upstream dependencies list
+    const depList = document.getElementById("detail-dependencies");
+    depList.innerHTML = "";
+    if (domain.dependsOn.length === 0) {
+      depList.innerHTML = '<span class="panel-tag">None</span>';
+    } else {
+      domain.dependsOn.forEach(dep => {
+        const span = document.createElement("span");
+        span.className = "panel-tag dependency-tag";
+        span.textContent = `${ICONS[dep] || ""} ${dep}`;
+        span.onclick = () => selectDomain(dep);
+        depList.appendChild(span);
+      });
+    }
+
+    // Downstream dependents list
+    const dependents = [];
+    Object.keys(DOMAINS_DATA).forEach(key => {
+      if (DOMAINS_DATA[key].dependsOn.includes(name)) {
+        dependents.push(key);
+      }
+    });
+
+    const depedentsList = document.getElementById("detail-dependents");
+    depedentsList.innerHTML = "";
+    if (dependents.length === 0) {
+      depedentsList.innerHTML = '<span class="panel-tag">None</span>';
+    } else {
+      dependents.forEach(dep => {
+        const span = document.createElement("span");
+        span.className = "panel-tag dependent-tag";
+        span.textContent = `${ICONS[dep] || ""} ${dep}`;
+        span.onclick = () => selectDomain(dep);
+        depedentsList.appendChild(span);
+      });
+    }
+
+    // SVG classes
+    const nodes = document.querySelectorAll(".node");
+    const links = document.querySelectorAll(".link");
+
+    nodes.forEach(n => {
+      n.classList.remove("selected", "dependency", "dependent", "dimmed");
+      const nodeId = n.id.replace("node-", "");
+      if (nodeId !== name) {
+        n.classList.add("dimmed");
+      }
+    });
+
+    links.forEach(l => {
+      l.classList.remove("to-dependency", "from-dependent", "dimmed");
+      l.classList.add("dimmed");
+    });
+
+    // Highlight focused
+    document.getElementById(`node-${name}`).classList.remove("dimmed");
+    document.getElementById(`node-${name}`).classList.add("selected");
+
+    // Highlight dependencies
+    domain.dependsOn.forEach(dep => {
+      const nodeEl = document.getElementById(`node-${dep}`);
+      if (nodeEl) {
+        nodeEl.classList.remove("dimmed");
+        nodeEl.classList.add("dependency");
+      }
+      const linkEl = document.getElementById(`link-${name}-${dep}`);
+      if (linkEl) {
+        linkEl.classList.remove("dimmed");
+        linkEl.classList.add("to-dependency");
+      }
+    });
+
+    // Highlight dependents
+    dependents.forEach(dep => {
+      const nodeEl = document.getElementById(`node-${dep}`);
+      if (nodeEl) {
+        nodeEl.classList.remove("dimmed");
+        nodeEl.classList.add("dependent");
+      }
+      const linkEl = document.getElementById(`link-${dep}-${name}`);
+      if (linkEl) {
+        linkEl.classList.remove("dimmed");
+        linkEl.classList.add("from-dependent");
+      }
+    });
+  }
+
+  function clearSelection() {
+    focusedDomain = null;
+    document.querySelectorAll(".node").forEach(n => n.classList.remove("selected", "dependency", "dependent", "dimmed"));
+    document.querySelectorAll(".link").forEach(l => l.classList.remove("to-dependency", "from-dependent", "dimmed"));
+  }
+
+  // Simulator Section
+  function renderRules() {
+    const container = document.getElementById("sim-rules-container");
+    container.innerHTML = "";
+    middlewareRules.forEach((rule, idx) => {
+      const div = document.createElement("div");
+      div.className = "rule-card";
+      
+      const effectLabel = formatEffectLabel(rule.effectKind, rule.param);
+
+      div.innerHTML = `
+        <div class="rule-card-header">
+          <span class="rule-card-id">${rule.id}</span>
+          <div style="display:flex; gap:0.4rem; align-items:center;">
+            <span class="rule-badge ${rule.enabled ? 'rule-badge-enabled' : 'rule-badge-disabled'}">${rule.enabled ? 'active' : 'disabled'}</span>
+            <button class="rule-delete-btn" onclick="deleteRule(${idx})">&times;</button>
+          </div>
+        </div>
+        <div class="rule-card-desc">${rule.description}</div>
+        <div class="rule-card-meta">
+          <span>Hook: <b>${rule.hook}</b></span>
+          <span style="color:var(--color-accent);">${effectLabel}</span>
+        </div>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  function formatEffectLabel(kind, param) {
+    if (kind === "block_tool") return "🚫 block_tool";
+    if (kind === "protect_path") return "🔒 protect_path";
+    if (kind === "annotate_tool_result") return "✍️ annotate_tool";
+    if (kind === "inject_reminder") return "💡 inject_reminder";
+    if (kind === "require_validation") return "✅ require_validation";
+    return kind;
+  }
+
+  function deleteRule(index) {
+    middlewareRules.splice(index, 1);
+    renderRules();
+    addTerminalLog("sys", "Rule removed. Active middleware manifest updated.");
+  }
+
+  function showAddRuleModal() {
+    document.getElementById("add-rule-dialog").classList.add("active");
+    onRuleEffectChange();
+  }
+
+  function closeAddRuleModal() {
+    document.getElementById("add-rule-dialog").classList.remove("active");
+  }
+
+  function onRuleEffectChange() {
+    const effect = document.getElementById("rule-effect").value;
+    const label = document.getElementById("rule-param-label");
+    const input = document.getElementById("rule-effect-param");
+    
+    if (effect === "block_tool") {
+      label.innerText = "Block Reason";
+      input.placeholder = "access violation; severity: hard-block";
+    } else if (effect === "protect_path") {
+      label.innerText = "Protect Path";
+      input.placeholder = "out/simulation.nc";
+    } else if (effect === "annotate_tool_result") {
+      label.innerText = "Annotation Text";
+      input.placeholder = "Result checked against IEEE-754 standards; severity: info";
+    } else if (effect === "inject_reminder") {
+      label.innerText = "Reminder Checklist Message";
+      input.placeholder = "Always double check path write operations";
+    } else if (effect === "require_validation") {
+      label.innerText = "Validation Reason";
+      input.placeholder = "Test run required for build validation";
+    }
+  }
+
+  function saveNewRule() {
+    const id = document.getElementById("rule-id").value.trim();
+    const desc = document.getElementById("rule-desc").value.trim();
+    const hook = document.getElementById("rule-hook").value;
+    const effectKind = document.getElementById("rule-effect").value;
+    const param = document.getElementById("rule-effect-param").value.trim();
+    const enabled = document.getElementById("rule-enabled").checked;
+
+    if (!id || !desc) {
+      alert("Please fill in ID and Description");
+      return;
+    }
+
+    if (!/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/.test(id)) {
+      alert("Rule ID must be lowercase kebab-case, optionally dot-separated.");
+      return;
+    }
+
+    middlewareRules.push({ id, description: desc, enabled, hook, effectKind, param });
+    renderRules();
+    closeAddRuleModal();
+    addTerminalLog("sys", `Custom rule '${id}' successfully validated and loaded.`);
+  }
+
+  // Dynamic Simulator inputs based on Hook
+  function onHookChange() {
+    const hook = document.getElementById("sim-hook").value;
+    const container = document.getElementById("dynamic-fields");
+    
+    let html = "";
+    if (hook === "before_tool" || hook === "after_tool" || hook === "on_blocked_tool") {
+      html += `
+        <div class="form-group">
+          <label class="form-label">Tool Name</label>
+          <select id="field-toolName" class="form-select">
+            <option value="bash">bash (Terminal Executions)</option>
+            <option value="write_file">write_file (File Editor)</option>
+            <option value="read_skill">read_skill (Adopts context skills)</option>
+            <option value="view_file">view_file (Viewer)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Command / Arguments</label>
+          <input type="text" id="field-command" class="form-input" value="python run-sim.py --checkpoint out/checkpoint.nc">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Path Context</label>
+          <input type="text" id="field-path" class="form-input" value="out/checkpoint.nc">
+        </div>
+      `;
+      if (hook === "after_tool") {
+        html += `
+          <div class="form-group">
+            <label class="form-label">Exit Code</label>
+            <input type="number" id="field-exitCode" class="form-input" value="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tool Output</label>
+            <textarea id="field-output" class="form-textarea">Simulation completed successfully. exit code 0. [warning: IEEE-754 float precision overflow]</textarea>
+          </div>
+        `;
+      }
+    } else if (hook === "before_model" || hook === "after_model") {
+      html += `
+        <div class="form-group">
+          <label class="form-label">Target Model ID</label>
+          <input type="text" id="field-modelId" class="form-input" value="deepseek-coder-r1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Prompt Content Sample</label>
+          <textarea id="field-prompt" class="form-textarea">System: You are an expert scientific programmer. User: Edit the calculation script.</textarea>
+        </div>
+      `;
+      if (hook === "after_model") {
+        html += `
+          <div class="form-group">
+            <label class="form-label">Tokens Used</label>
+            <input type="number" id="field-tokens" class="form-input" value="1242">
+          </div>
+        `;
+      }
+    } else if (hook === "on_dispatch_start" || hook === "on_dispatch_end") {
+      html += `
+        <div class="form-group">
+          <label class="form-label">Target Agent ID</label>
+          <input type="text" id="field-agentId" class="form-input" value="scientific-validator">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Task Context Description</label>
+          <input type="text" id="field-task" class="form-input" value="Check numerical convergence bounds on simulation log.">
+        </div>
+      `;
+    }
+    
+    container.innerHTML = html;
+  }
+
+  // Execute Hook simulation
+  function runSimulation() {
+    const hook = document.getElementById("sim-hook").value;
+    
+    const logs = [];
+    logs.push({ tag: "hook", msg: `⚡ Hook dispatched: '${hook}'` });
+    
+    // Gather inputs
+    const inputs = { hook };
+    const toolNameEl = document.getElementById("field-toolName");
+    const cmdEl = document.getElementById("field-command");
+    const pathEl = document.getElementById("field-path");
+    const outputEl = document.getElementById("field-output");
+    const exitEl = document.getElementById("field-exitCode");
+    const modelEl = document.getElementById("field-modelId");
+    const tokensEl = document.getElementById("field-tokens");
+    const agentEl = document.getElementById("field-agentId");
+    const taskEl = document.getElementById("field-task");
+
+    if (toolNameEl) inputs.toolName = toolNameEl.value;
+    if (cmdEl) inputs.command = cmdEl.value;
+    if (pathEl) inputs.path = pathEl.value;
+    if (outputEl) inputs.output = outputEl.value;
+    if (exitEl) inputs.exitCode = parseInt(exitEl.value) || 0;
+    if (modelEl) inputs.modelId = modelEl.value;
+    if (tokensEl) inputs.tokens = parseInt(tokensEl.value) || 0;
+    if (agentEl) inputs.agentId = agentEl.value;
+    if (taskEl) inputs.task = taskEl.value;
+
+    logs.push({ tag: "system", msg: `Context: ${JSON.stringify(inputs, null, 2)}` });
+
+    // Step 1: Pre-Execution checks (Protected Path matches)
+    let isPathBlockedBefore = false;
+    if (hook === "before_tool" && inputs.path) {
+      if (simulatedProtectedPaths.has(inputs.path)) {
+        logs.push({ tag: "block", msg: `🚫 Protected Path Blocked: Access policy prohibits modifying protected file [${inputs.path}]` });
+        isPathBlockedBefore = true;
+      }
+    }
+
+    // Step 2: Evaluate Rules
+    const activeRules = middlewareRules.filter(r => r.enabled && r.hook === hook);
+    logs.push({ tag: "system", msg: `Found ${activeRules.length} matching middleware rules for hook.` });
+
+    const effects = [];
+    activeRules.forEach(rule => {
+      let matched = false;
+      
+      // Match conditions
+      if (rule.id === "builtin.sandbox-protection") {
+        if (inputs.path && (inputs.path.includes("private/") || inputs.path.includes(".env") || inputs.path.includes("etc/"))) {
+          matched = true;
+        }
+      } else if (rule.id === "builtin.require-validation") {
+        if (inputs.path && inputs.path.endsWith(".py")) {
+          matched = true;
+        }
+      } else if (rule.id === "builtin.protect-checkpoint") {
+        if (inputs.command && inputs.command.includes("run-sim") && inputs.exitCode === 0) {
+          matched = true;
+        }
+      } else if (rule.id === "builtin.remind-floating-point") {
+        matched = true; // Always matches before_model
+      } else if (rule.id === "builtin.annotate-compile-warnings") {
+        if (inputs.output && inputs.output.includes("warning:")) {
+          matched = true;
+        }
+      } else {
+        // Custom Rule matches: check simple containment match
+        matched = true;
+      }
+
+      if (matched) {
+        logs.push({ tag: "rule", msg: `✅ Rule matched: '${rule.id}' -> Triggering effect: '${rule.effectKind}'` });
+        effects.push({ kind: rule.effectKind, param: rule.param, ruleId: rule.id });
+      }
+    });
+
+    // Step 3: Process effects
+    let finalOutput = inputs.output || "";
+    let isBlockedByEffect = false;
+    let blockReason = "";
+
+    effects.forEach(effect => {
+      logs.push({ tag: "effect", msg: `✨ Applying effect [${effect.kind}]: ${effect.param}` });
+      
+      if (effect.kind === "block_tool") {
+        isBlockedByEffect = true;
+        blockReason = effect.param;
+      } else if (effect.kind === "protect_path") {
+        // Param is path;reason
+        const pathPart = effect.param.split(";")[0].trim();
+        simulatedProtectedPaths.add(pathPart);
+        renderProtectedPaths();
+        logs.push({ tag: "system", msg: `Registered protected path: ${pathPart}` });
+      } else if (effect.kind === "annotate_tool_result") {
+        // Suffix output
+        const sev = effect.param.includes("warn") ? "warn" : "info";
+        const msg = effect.param.replace("severity: warn", "").replace("severity: info", "").replace(";", "").trim();
+        finalOutput += `\n\n[middleware:${sev}] ${msg}`;
+      } else if (effect.kind === "require_validation") {
+        logs.push({ tag: "system", msg: `Validation Signal Registered: ${effect.param}` });
+      } else if (effect.kind === "inject_reminder") {
+        logs.push({ tag: "system", msg: `Prompt envelope reminder appended: "${effect.param}"` });
+      }
+    });
+
+    // Terminal Summary
+    if (isPathBlockedBefore) {
+      logs.push({ tag: "block", msg: `❌ Tool Dispatch BLOCKED. Reason: Path Protected.` });
+    } else if (isBlockedByEffect) {
+      logs.push({ tag: "block", msg: `❌ Tool Dispatch BLOCKED by middleware effect. Reason: "${blockReason}"` });
+    } else {
+      logs.push({ tag: "system", msg: `✔️ Hook processed successfully. No terminal block rules triggered.` });
+      if (hook === "after_tool") {
+        logs.push({ tag: "system", msg: `Final Output Suffix Annotated:\n----\n${finalOutput}\n----` });
+      }
+    }
+
+    // Write to terminal console
+    clearTerminal();
+    logs.forEach(log => {
+      addTerminalLog(log.tag, log.msg);
+    });
+  }
+
+  function clearTerminal() {
+    document.getElementById("sim-logs").innerHTML = "";
+  }
+
+  function addTerminalLog(tag, message) {
+    const logs = document.getElementById("sim-logs");
+    const line = document.createElement("div");
+    line.className = "log-line";
+    
+    const time = new Date().toTimeString().split(' ')[0];
+    
+    line.innerHTML = `
+      <span class="log-time">[${time}]</span>
+      <span class="log-tag ${tag}">${tag}</span>
+      <span class="log-message">${message}</span>
+    `;
+    logs.appendChild(line);
+    logs.scrollTop = logs.scrollHeight;
+  }
+
+  function renderProtectedPaths() {
+    const container = document.getElementById("protected-paths-container");
+    container.innerHTML = "";
+    
+    if (simulatedProtectedPaths.size === 0) {
+      container.innerHTML = `<div style="color: var(--text-dark); font-style: italic; font-size: 0.75rem;">No active path policy blocks.</div>`;
+      return;
+    }
+
+    simulatedProtectedPaths.forEach(path => {
+      const div = document.createElement("div");
+      div.className = "path-badge";
+      div.innerHTML = `
+        <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <span>${path}</span>
+        <span style="cursor:pointer; font-weight:800; margin-left:0.25rem;" onclick="removeProtectedPath('${path}')">&times;</span>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  function removeProtectedPath(path) {
+    simulatedProtectedPaths.delete(path);
+    renderProtectedPaths();
+    addTerminalLog("sys", `Protected path lock removed for '${path}'`);
+  }
+</script>
+
+</body>
+</html>

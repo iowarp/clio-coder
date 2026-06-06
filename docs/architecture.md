@@ -1,5 +1,8 @@
 # Clio Coder Architecture and Boundaries
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.2.1).
+
 Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
 
 This page is source-code aligned for the current `v0.2.1` development line.

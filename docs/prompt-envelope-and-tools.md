@@ -1,5 +1,8 @@
 # Prompt Envelope and Tool Delivery
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard with a token pressure calculator, visual tool schema diagrams, and a registry simulator is located at [docs/html/tools_blueprint.html](html/tools_blueprint.html) (Version: 0.2.1). You can open it in a browser to inspect prompt compiler inputs and tool call execution results in real-time.
+
 Clio Coder separates what the model is told from what the runtime is allowed to execute. The prompt compiler builds a hashed prompt envelope, the engine delivers provider tool schemas, and the registry remains the execution gate.
 
 Source of truth: `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/registry.ts`, `src/engine/worker-tools.ts`, and `src/domains/modes/matrix.ts`.
