@@ -14,6 +14,7 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -333,6 +334,112 @@ describe("contracts/dispatch", () => {
 			exit.resolve({ exitCode: 1, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("dispatches configured ACP delegation agents with delegation receipt metadata", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().delegation.agents = [
+				{
+					id: "opencode",
+					command: "opencode",
+					args: ["acp"],
+					connectTimeoutMs: 5,
+					turnTimeoutMs: 10,
+					permissionTimeoutMs: 15,
+					toolGovernance: "clio-policy",
+				},
+			];
+		}
+		let capturedTask = "";
+		let capturedCommand = "";
+
+		const bundle = createDispatchBundle(context, {
+			startAcpDelegationRun: (input) => {
+				capturedTask = input.task;
+				capturedCommand = input.agent.command;
+				return {
+					pid: 4242,
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+					toolCallLog: () => [
+						{
+							callId: "call-1",
+							tool: "read",
+							arguments: { path: "package.json" },
+							decision: "approved",
+							durationMs: 1,
+							timestamp: new Date(0).toISOString(),
+						},
+					],
+					events: (async function* () {
+						yield {
+							type: "message_end",
+							message: {
+								role: "assistant",
+								content: [{ type: "text", text: "delegated done" }],
+								timestamp: Date.now(),
+								stopReason: "stop",
+								usage: { input: 3, output: 4 },
+							},
+						} as unknown as Awaited<ReturnType<AcpDelegationRunHandle["events"]["next"]>>["value"];
+					})() as AcpDelegationRunHandle["events"],
+					promise: Promise.resolve({
+						messages: [],
+						exitCode: 0,
+						stopReason: "end_turn",
+						usage: {
+							inputTokens: 1,
+							outputTokens: 2,
+							cacheReadTokens: 0,
+							cacheWriteTokens: 0,
+							reasoningTokens: 0,
+						},
+						delegation: {
+							acpSessionId: "sess-1",
+							initialize: {
+								protocolVersion: 1,
+								agentCapabilities: { loadSession: true },
+								agentInfo: { name: "opencode", version: "1.0.0" },
+							},
+							toolCallsRequested: 1,
+							toolCallsApproved: 1,
+							toolCallsDenied: 0,
+						},
+					}),
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "opencode",
+				delegationAgentId: "opencode",
+				task: "delegate this",
+			});
+			const events: unknown[] = [];
+			for await (const event of handle.events) events.push(event);
+			const receipt = await handle.finalPromise;
+
+			strictEqual(capturedTask, "delegate this");
+			strictEqual(capturedCommand, "opencode");
+			strictEqual(receipt.runtimeKind, "acp-delegation");
+			strictEqual(receipt.endpointId, "delegation:opencode");
+			strictEqual(receipt.sessionId, "sess-1");
+			strictEqual(receipt.tokenCount, 3);
+			strictEqual(receipt.delegation?.agentConfigId, "opencode");
+			strictEqual(receipt.delegation?.toolCallsRequested, 1);
+			strictEqual(receipt.delegation?.toolCallLog[0]?.callId, "call-1");
+			ok(
+				events.some(
+					(event) => typeof event === "object" && event !== null && (event as { type?: string }).type === "message_end",
+				),
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

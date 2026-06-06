@@ -1248,6 +1248,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
 		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
+		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
 		exportShareArchive: (outPath) => {
 			if (!deps.share) throw new Error("share domain is not loaded");
 			const path = resolve(outPath);

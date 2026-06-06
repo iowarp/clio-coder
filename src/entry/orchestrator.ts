@@ -57,6 +57,12 @@ import {
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { serveClioAcpAgent } from "../engine/acp/server.js";
+import {
+	type AcpJsonRpcPeerTransport,
+	createStdioServerTransport,
+	type StdioServerTransportOptions,
+} from "../engine/acp/transport.js";
 import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -94,6 +100,11 @@ export interface BootOptions {
 		thinking?: ThinkingLevel;
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
+	};
+	/** Serve Clio as an Agent Client Protocol v1 agent over JSON-RPC stdio. */
+	acp?: {
+		transport?: AcpJsonRpcPeerTransport;
+		transportOptions?: StdioServerTransportOptions;
 	};
 }
 
@@ -451,8 +462,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });
 	timer.mark("session_start fired");
 
-	const interactive = !options.headless && process.env.CLIO_INTERACTIVE === "1";
-	if (!interactive && !options.headless) {
+	const acpMode = options.acp !== undefined;
+	const interactive = !options.headless && !acpMode && process.env.CLIO_INTERACTIVE === "1";
+	if (!interactive && !options.headless && !acpMode) {
 		process.stdout.write(buildBanner());
 		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
 	}
@@ -476,7 +488,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	if (!interactive && !options.headless) {
+	if (!interactive && !options.headless && !acpMode) {
 		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
@@ -606,6 +618,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		toolRegistry,
 	});
+
+	if (options.acp) {
+		const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
+		const code = await serveClioAcpAgent({
+			transport,
+			chat,
+			...(session ? { session } : {}),
+			toolRegistry,
+			cwd: process.cwd(),
+			version: getVersionInfo().clio,
+			permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,
+		});
+		chat.dispose();
+		await dispatch.drain();
+		await result.stop();
+		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+	}
 
 	if (options.headless) {
 		const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());

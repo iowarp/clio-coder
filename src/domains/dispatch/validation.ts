@@ -14,6 +14,7 @@ export interface JobSpec {
 	task: string;
 	workerProfile?: string;
 	workerRuntime?: string;
+	delegationAgentId?: string;
 	endpoint?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
@@ -33,6 +34,7 @@ const KNOWN_KEYS = new Set([
 	"task",
 	"workerProfile",
 	"workerRuntime",
+	"delegationAgentId",
 	"endpoint",
 	"model",
 	"thinkingLevel",
@@ -88,6 +90,12 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("workerRuntime" in spec && spec.workerRuntime !== undefined) {
 		if (typeof spec.workerRuntime !== "string" || spec.workerRuntime.length === 0) {
 			errors.push("workerRuntime must be a non-empty string");
+		}
+	}
+
+	if ("delegationAgentId" in spec && spec.delegationAgentId !== undefined) {
+		if (typeof spec.delegationAgentId !== "string" || spec.delegationAgentId.length === 0) {
+			errors.push("delegationAgentId must be a non-empty string");
 		}
 	}
 
@@ -155,6 +163,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	};
 	if (typeof spec.workerProfile === "string") out.workerProfile = spec.workerProfile;
 	if (typeof spec.workerRuntime === "string") out.workerRuntime = spec.workerRuntime;
+	if (typeof spec.delegationAgentId === "string") out.delegationAgentId = spec.delegationAgentId;
 	if (typeof spec.endpoint === "string") out.endpoint = spec.endpoint;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;

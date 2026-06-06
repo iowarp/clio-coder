@@ -128,6 +128,35 @@ const SkillsSchema = Type.Object({
 	trustProjectCompatRoots: Type.Boolean(),
 });
 
+const DelegationToolGovernanceSchema = Type.Union([
+	Type.Literal("clio-policy"),
+	Type.Literal("agent-managed"),
+	Type.Literal("deny-all"),
+]);
+
+const DelegationAgentSchema = Type.Object({
+	id: Type.String({ minLength: 1 }),
+	command: Type.String({ minLength: 1 }),
+	args: Type.Array(Type.String()),
+	cwd: Type.Optional(Type.String({ minLength: 1 })),
+	env: Type.Optional(Type.Record(Type.String(), Type.String())),
+	connectTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+	turnTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+	permissionTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+	toolGovernance: Type.Optional(DelegationToolGovernanceSchema),
+	labels: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+const DelegationSchema = Type.Object({
+	agents: Type.Array(DelegationAgentSchema),
+	defaults: Type.Object({
+		connectTimeoutMs: Type.Integer({ minimum: 0 }),
+		turnTimeoutMs: Type.Integer({ minimum: 0 }),
+		permissionTimeoutMs: Type.Integer({ minimum: 0 }),
+		toolGovernance: DelegationToolGovernanceSchema,
+	}),
+});
+
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
@@ -148,6 +177,7 @@ export const SettingsSchema = Type.Object({
 	theme: Type.String(),
 	terminal: TerminalSchema,
 	skills: SkillsSchema,
+	delegation: DelegationSchema,
 	// User keybinding overrides mirror pi-tui's KeybindingsConfig: each id
 	// maps to a KeyId (string) or a KeyId[] (array of strings). The loader
 	// in core/config.ts normalizes legacy single-string entries on read.

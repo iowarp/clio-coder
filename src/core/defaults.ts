@@ -69,6 +69,35 @@ export interface SkillsSettings {
 	trustProjectCompatRoots: boolean;
 }
 
+export type DelegationToolGovernance = "clio-policy" | "agent-managed" | "deny-all";
+
+export interface DelegationAgentConfig {
+	/** Stable id used by /delegate and dispatch receipts. */
+	id: string;
+	/** ACP stdio command. Official ACP v1 stdio messages are newline-delimited JSON-RPC. */
+	command: string;
+	args: string[];
+	cwd?: string;
+	env?: Record<string, string>;
+	connectTimeoutMs?: number;
+	turnTimeoutMs?: number;
+	permissionTimeoutMs?: number;
+	toolGovernance?: DelegationToolGovernance;
+	labels?: Record<string, string>;
+}
+
+export interface DelegationDefaults {
+	connectTimeoutMs: number;
+	turnTimeoutMs: number;
+	permissionTimeoutMs: number;
+	toolGovernance: DelegationToolGovernance;
+}
+
+export interface DelegationSettings {
+	agents: DelegationAgentConfig[];
+	defaults: DelegationDefaults;
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -105,6 +134,15 @@ export const DEFAULT_SETTINGS = {
 	skills: {
 		trustProjectCompatRoots: false,
 	} as SkillsSettings,
+	delegation: {
+		agents: [] as DelegationAgentConfig[],
+		defaults: {
+			connectTimeoutMs: 30000,
+			turnTimeoutMs: 300000,
+			permissionTimeoutMs: 120000,
+			toolGovernance: "clio-policy" as DelegationToolGovernance,
+		},
+	} as DelegationSettings,
 	// User keybinding overrides. Each id maps to a single KeyId string or a
 	// list of KeyIds. The interactive keybinding manager reads this table
 	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
@@ -249,6 +287,33 @@ terminal:
 # CLIO_TRUST_PROJECT_SKILLS=1 is set for the process.
 skills:
   trustProjectCompatRoots: false
+
+# External coding agents that speak Agent Client Protocol v1 over stdio.
+# These are delegated harnesses, not model targets, so they stay outside
+# targets[], orchestrator, workers, and model pickers.
+delegation:
+  defaults:
+    connectTimeoutMs: 30000
+    turnTimeoutMs: 300000
+    permissionTimeoutMs: 120000
+    toolGovernance: clio-policy   # clio-policy | agent-managed | deny-all
+  agents: []
+  # OpenCode native ACP:
+  # - id: opencode
+  #   command: opencode
+  #   args: [acp, --cwd, .]
+  #   toolGovernance: clio-policy
+  #   labels:
+  #     specialty: coding
+  #
+  # Codex via an ACP adapter:
+  # - id: codex
+  #   command: npx
+  #   args: [-y, "@agentclientprotocol/codex-acp"]
+  #   toolGovernance: clio-policy
+  #   labels:
+  #     specialty: coding
+
 keybindings: {}
 
 # Transient session state. Clio Coder rewrites this block; do not hand-edit.

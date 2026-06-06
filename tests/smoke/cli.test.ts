@@ -1,4 +1,5 @@
 import { match, ok, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -10,6 +11,87 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 	version: string;
 };
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
+
+interface JsonRpcProcessClient {
+	request<T>(method: string, params?: unknown): Promise<T>;
+	notifications: unknown[];
+	close(): void;
+	wait(timeoutMs?: number): Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
+}
+
+function createJsonRpcProcessClient(args: string[], env: NodeJS.ProcessEnv, cwd: string): JsonRpcProcessClient {
+	const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
+		cwd,
+		env: { ...process.env, ...env },
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	let nextId = 1;
+	let stdoutBuffer = "";
+	let stderr = "";
+	const pending = new Map<number, { resolve(value: unknown): void; reject(reason: unknown): void }>();
+	const notifications: unknown[] = [];
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	child.stdout.on("data", (chunk: string) => {
+		stdoutBuffer += chunk;
+		for (;;) {
+			const idx = stdoutBuffer.indexOf("\n");
+			if (idx === -1) break;
+			const line = stdoutBuffer.slice(0, idx);
+			stdoutBuffer = stdoutBuffer.slice(idx + 1);
+			if (line.trim().length === 0) continue;
+			const message = JSON.parse(line) as Record<string, unknown>;
+			if ("id" in message && ("result" in message || "error" in message)) {
+				const entry = pending.get(Number(message.id));
+				if (!entry) continue;
+				pending.delete(Number(message.id));
+				if (message.error && typeof message.error === "object") {
+					entry.reject(new Error(String((message.error as { message?: unknown }).message ?? "RPC error")));
+				} else {
+					entry.resolve(message.result);
+				}
+			} else {
+				notifications.push(message);
+			}
+		}
+	});
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+	child.on("exit", (code, signal) => {
+		for (const entry of pending.values()) {
+			entry.reject(new Error(`ACP subprocess exited before reply: code=${code ?? "null"} signal=${signal ?? "null"}`));
+		}
+		pending.clear();
+	});
+	return {
+		notifications,
+		request<T>(method: string, params?: unknown): Promise<T> {
+			const id = nextId++;
+			child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+			return new Promise<T>((resolve, reject) => {
+				pending.set(id, { resolve: (value) => resolve(value as T), reject });
+			});
+		},
+		close(): void {
+			child.stdin.end();
+		},
+		wait(timeoutMs = 20_000): Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }> {
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(() => {
+					child.kill("SIGKILL");
+					reject(new Error(`ACP subprocess timeout. stderr=${stderr}`));
+				}, timeoutMs);
+				child.on("close", (code, signal) => {
+					clearTimeout(timer);
+					resolve({ code, signal, stderr });
+				});
+			});
+		},
+	};
+}
 
 async function closeServer(server: Server | null): Promise<void> {
 	if (!server) return;
@@ -224,6 +306,45 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("serves ACP over stdio against a mock provider", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("acp mock reply");
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const client = createJsonRpcProcessClient(
+				["--no-context-files", "--no-skills", "acp"],
+				{
+					...scratch.env,
+					CLIO_TEST_OPENAI_KEY: "sk-test",
+				},
+				project,
+			);
+			const init = await client.request<{ protocolVersion: number }>("initialize", {
+				protocolVersion: 1,
+				clientInfo: { name: "smoke-client", version: "1" },
+			});
+			strictEqual(init.protocolVersion, 1);
+			const session = await client.request<{ sessionId: string }>("session/new", { cwd: project });
+			const prompt = await client.request<{ stopReason: string }>("session/prompt", {
+				sessionId: session.sessionId,
+				prompt: [{ type: "text", text: "hello" }],
+			});
+			strictEqual(prompt.stopReason, "end_turn");
+			ok(
+				client.notifications.some((message) => JSON.stringify(message).includes("acp mock reply")),
+				`notifications=${JSON.stringify(client.notifications)}`,
+			);
+			await client.request("session/close", { sessionId: session.sessionId });
+			client.close();
+			const exit = await client.wait();
+			strictEqual(exit.code, 0, `stderr=${exit.stderr}`);
 		} finally {
 			await closeServer(fixture.server);
 		}
