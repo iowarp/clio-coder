@@ -357,7 +357,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			const rows = items.map((skill) => {
 				const usage = `/skill:${skill.name}`;
-				return `  ${usage.padEnd(28)} ${skill.description}`;
+				const origin = `${skill.scope}/${skill.source}${skill.trusted ? "" : ", untrusted"}`;
+				return `  ${usage.padEnd(26)} ${skill.description}  (${origin})`;
 			});
 			const diagnostics =
 				list.diagnostics.length > 0 ? `\n${list.diagnostics.length} skill diagnostic(s) while loading resources.\n` : "\n";

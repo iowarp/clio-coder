@@ -92,4 +92,25 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
 		strictEqual(result.systemPrompt.includes("# Skills"), false);
 	});
+
+	it("includes the skills catalog when read_skill is active", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["read_skill"],
+				toolPaletteIntent: "skill_work",
+				toolPalettePhase: "editing",
+				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
+			},
+		});
+
+		ok(result.systemPrompt.includes("# Skills"));
+		ok(result.systemPrompt.includes("available_skills"));
+	});
 });
