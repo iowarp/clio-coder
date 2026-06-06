@@ -6,7 +6,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
-import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SpawnedWorker, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -416,6 +416,89 @@ rl.on("line", (line) => {
 			ok(testResult, "worker received the approval response");
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("forwards skill settings to the spawned worker spec", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9999,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "test skill forwarding",
+				noSkills: true,
+				skillPaths: ["/some/path/SKILL.md"],
+				trustProjectCompatRoots: true,
+			});
+			exit.resolve({ exitCode: 0, signal: null });
+			await handle.finalPromise;
+
+			const spec = capturedSpec as unknown as WorkerSpec;
+			ok(spec !== null);
+			strictEqual(spec.noSkills, true);
+			deepStrictEqual(spec.skillPaths, ["/some/path/SKILL.md"]);
+			strictEqual(spec.trustProjectCompatRoots, true);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("derives trustProjectCompatRoots from config when not explicitly in the request", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().skills.trustProjectCompatRoots = true;
+		}
+
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9999,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+					...approvalNoops(),
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "test default config trust",
+				noSkills: true,
+			});
+			exit.resolve({ exitCode: 0, signal: null });
+			await handle.finalPromise;
+
+			const spec = capturedSpec as unknown as WorkerSpec;
+			ok(spec !== null);
+			strictEqual(spec.trustProjectCompatRoots, true);
+		} finally {
+			await bundle.extension.stop?.();
 		}
 	});
 });

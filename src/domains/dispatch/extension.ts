@@ -399,7 +399,7 @@ function resolveDispatchAdmissionStage(
 	};
 }
 
-export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerSpec {
+export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
 	const spec: WorkerSpec = {
 		specVersion: WORKER_SPEC_VERSION,
 		systemPrompt: input.systemPrompt,
@@ -421,6 +421,13 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput): WorkerS
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	if (input.apiKey) spec.apiKey = input.apiKey;
+	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
+	if (input.req.skillPaths !== undefined) spec.skillPaths = input.req.skillPaths;
+	if (input.req.trustProjectCompatRoots !== undefined) {
+		spec.trustProjectCompatRoots = input.req.trustProjectCompatRoots;
+	} else if (config) {
+		spec.trustProjectCompatRoots = config.get().skills.trustProjectCompatRoots === true;
+	}
 	return spec;
 }
 
@@ -816,19 +823,22 @@ export function createDispatchBundle(
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
-		const spec = buildDispatchWorkerSpec({
-			req,
-			target: lifecycle.target,
-			admission: lifecycle.admission,
-			systemPrompt: lifecycle.systemPrompt,
-			dynamicPromptMessages: lifecycle.dynamicPromptMessages,
-			promptSignature: lifecycle.promptSignature,
-			toolSignature: lifecycle.toolSignature,
-			dynamicHash: lifecycle.dynamicHash,
-			middlewareSnapshot: middleware.snapshot(),
-			apiKey: lifecycle.apiKey,
-			approval: lifecycle.approval,
-		});
+		const spec = buildDispatchWorkerSpec(
+			{
+				req,
+				target: lifecycle.target,
+				admission: lifecycle.admission,
+				systemPrompt: lifecycle.systemPrompt,
+				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
+				promptSignature: lifecycle.promptSignature,
+				toolSignature: lifecycle.toolSignature,
+				dynamicHash: lifecycle.dynamicHash,
+				middlewareSnapshot: middleware.snapshot(),
+				apiKey: lifecycle.apiKey,
+				approval: lifecycle.approval,
+			},
+			config ?? undefined,
+		);
 		let worker: SpawnedWorker;
 		try {
 			worker = spawnWorker(spec, { cwd: lifecycle.cwd });

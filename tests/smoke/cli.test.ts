@@ -225,4 +225,33 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			await closeServer(fixture.server);
 		}
 	});
+
+	it("honors top-level skill flags before run subcommand", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		const explicitDir = join(scratch.dir, "explicit");
+		const skillFile = writeSkill(
+			explicitDir,
+			"explicit-smoke-top",
+			"Explicit smoke top skill.",
+			"Use explicit smoke top guidance.",
+		);
+		const fixture = await startOpenAICompatFixture("mock reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(
+				["--no-context-files", "--no-skills", "--skill", skillFile, "run", "please use the skill named explicit-smoke-top"],
+				{
+					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					cwd: project,
+					timeoutMs: 20_000,
+				},
+			);
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			ok(JSON.stringify(fixture.requests).includes("explicit-smoke-top"));
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
 });

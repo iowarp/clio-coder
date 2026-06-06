@@ -469,13 +469,22 @@ export function createWorkerToolRegistry(
 	mode: ModeName,
 	middlewareSnapshot?: MiddlewareSnapshot,
 	safety: SafetyContract = createWorkerSafety(),
+	skillLoaderOptions?: { noSkills?: boolean; skillPaths?: string[]; trustProjectCompatRoots?: boolean },
 ): ToolRegistry {
 	const registry = createRegistry({
 		safety,
 		modes: createWorkerModes(mode),
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
-	registerAllTools(registry);
+	registerAllTools(registry, {
+		getSkillLoaderOptions: () => ({
+			trustProjectCompatRoots: skillLoaderOptions?.trustProjectCompatRoots === true,
+			disableDiscovery: skillLoaderOptions?.noSkills === true,
+			...(skillLoaderOptions?.skillPaths && skillLoaderOptions.skillPaths.length > 0
+				? { explicitSkillPaths: skillLoaderOptions.skillPaths }
+				: {}),
+		}),
+	});
 	return registry;
 }
 

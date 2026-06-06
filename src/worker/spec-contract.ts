@@ -46,6 +46,9 @@ export interface WorkerSpec {
 	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	autoApprove?: "allow" | "deny";
+	noSkills?: boolean;
+	skillPaths?: ReadonlyArray<string>;
+	trustProjectCompatRoots?: boolean;
 }
 
 export interface WorkerPromptMessage {
@@ -374,6 +377,15 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
+	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
+		throw new Error("WorkerSpec.noSkills must be a boolean");
+	}
+	if (spec.skillPaths !== undefined) {
+		readStringArray(spec.skillPaths, "WorkerSpec.skillPaths");
+	}
+	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
+		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
+	}
 	return spec as unknown as WorkerSpec;
 }
 

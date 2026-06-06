@@ -23,6 +23,9 @@ export interface JobSpec {
 	memorySection?: string;
 	supervised?: boolean;
 	autoApprove?: "allow" | "deny";
+	noSkills?: boolean;
+	skillPaths?: ReadonlyArray<string>;
+	trustProjectCompatRoots?: boolean;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -41,6 +44,9 @@ const KNOWN_KEYS = new Set([
 	"memorySection",
 	"supervised",
 	"autoApprove",
+	"noSkills",
+	"skillPaths",
+	"trustProjectCompatRoots",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
@@ -137,6 +143,24 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("noSkills" in spec && spec.noSkills !== undefined) {
+		if (typeof spec.noSkills !== "boolean") {
+			errors.push("noSkills must be a boolean");
+		}
+	}
+
+	if ("skillPaths" in spec && spec.skillPaths !== undefined) {
+		if (!Array.isArray(spec.skillPaths) || spec.skillPaths.some((p) => typeof p !== "string")) {
+			errors.push("skillPaths must be a string[]");
+		}
+	}
+
+	if ("trustProjectCompatRoots" in spec && spec.trustProjectCompatRoots !== undefined) {
+		if (typeof spec.trustProjectCompatRoots !== "boolean") {
+			errors.push("trustProjectCompatRoots must be a boolean");
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -158,5 +182,8 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
 	if (typeof spec.supervised === "boolean") out.supervised = spec.supervised;
 	if (spec.autoApprove === "allow" || spec.autoApprove === "deny") out.autoApprove = spec.autoApprove;
+	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
+	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
+	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
 	return { ok: true, spec: out };
 }

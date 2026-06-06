@@ -79,6 +79,8 @@ export interface BootOptions {
 	apiKey?: string;
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
+	noSkills?: boolean;
+	skillPaths?: ReadonlyArray<string>;
 	/** Run one non-interactive main-agent turn. */
 	headless?: {
 		prompt: string;
@@ -396,10 +398,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ExtensionsDomainModule,
 		createResourcesDomainModule({
 			skills: () => ({
-				disableDiscovery: options.headless?.noSkills === true,
-				...(options.headless?.skillPaths && options.headless.skillPaths.length > 0
-					? { explicitSkillPaths: options.headless.skillPaths }
-					: {}),
+				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
+				...(options.skillPaths && options.skillPaths.length > 0
+					? { explicitSkillPaths: options.skillPaths }
+					: options.headless?.skillPaths && options.headless.skillPaths.length > 0
+						? { explicitSkillPaths: options.headless.skillPaths }
+						: {}),
 			}),
 		}),
 		ShareDomainModule,
@@ -511,10 +515,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
-			disableDiscovery: options.headless?.noSkills === true,
-			...(options.headless?.skillPaths && options.headless.skillPaths.length > 0
-				? { explicitSkillPaths: options.headless.skillPaths }
-				: {}),
+			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
+			...(options.skillPaths && options.skillPaths.length > 0
+				? { explicitSkillPaths: options.skillPaths }
+				: options.headless?.skillPaths && options.headless.skillPaths.length > 0
+					? { explicitSkillPaths: options.headless.skillPaths }
+					: {}),
 		}),
 	});
 
