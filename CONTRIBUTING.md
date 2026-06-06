@@ -142,3 +142,25 @@ Agents should:
 - Avoid touching unrelated files in a dirty worktree.
 - Leave remote writes, branch rules, and release tags to `@akougkas` unless
   explicitly instructed.
+
+## Skills
+
+`skills/` is the curated skills marketplace: maintainer-approved `SKILL.md`
+guides, distinct from the runtime skills any user can drop into a discovery
+root. It is not itself a discovery root, so nothing here auto-loads; skills
+activate only via `skills/install.sh`.
+
+To propose a skill:
+
+1. Add `skills/<name>/SKILL.md`. Follow the `superpowers:writing-skills`
+   methodology and Anthropic's skill-authoring guidance: a trigger-rich
+   `description` (third person, "Use when ..."), one excellent example, and
+   progressive disclosure (push heavy reference into `references/`).
+2. Include the provenance frontmatter (`registry-id`, `source-url`, `version`,
+   `license`) and ship an `evals.md` with the baseline scenarios you tested.
+3. Verify locally: `skills/install.sh <name>`, then
+   `clio skills validate skills/<name>/SKILL.md` and `clio skills list`.
+4. Open a PR. A maintainer reviews against the rubric, then sets `audit: pass`
+   and the `version` to approve it for the catalog.
+
+Full catalog conventions and install options: [skills/README.md](skills/README.md).

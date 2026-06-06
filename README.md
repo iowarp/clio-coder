@@ -145,6 +145,30 @@ Inside the TUI, try:
 /receipts
 ```
 
+## Skills
+
+Skills are reusable `SKILL.md` guides the model loads on demand. Clio discovers
+runtime skills from per-user and per-project roots (including `.clio/skills` and
+cross-harness layouts such as `.claude/skills` and `.codex/skills`), surfaces
+them in a catalog, and loads a body on request through `read_skill`. Manage them
+with `clio skills list | inspect | validate | create`.
+
+This repository also ships a curated **skills marketplace** under
+[skills/](skills/README.md): maintainer-approved skills that carry provenance
+frontmatter (`registry-id`, `source-url`, `audit`). The first wave is
+`context-prime` (orient at session start), `context-handoff` (brief the next
+session), `clio-dev` (self-development boundary), and `clio-test` (the v0.2.2
+test harness). The catalog is not a discovery root, so nothing auto-loads;
+activate a skill explicitly:
+
+```bash
+skills/install.sh context-handoff   # link into .clio/skills (project scope)
+clio skills list                    # confirm Clio sees it
+```
+
+See [skills/README.md](skills/README.md) for the catalog, install options, and
+how to contribute a skill.
+
 ## Documentation
 
 The README is only the release entry point. Detailed docs live under [docs/](docs/README.md).
