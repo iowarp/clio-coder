@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/clio-coder-logo-256.webp" alt="Clio Coder logo" width="128" height="128" />
+</p>
+
+<p align="center">
   <picture>
     <source srcset="assets/banner.webp" type="image/webp" />
     <img src="assets/banner.png" alt="Clio Coder, the coding agent in IOWarp's CLIO ecosystem of agentic science" width="100%" />

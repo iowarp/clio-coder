@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
-import { readClioVersion } from "../core/package-root.js";
+import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
 import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
@@ -11,7 +13,14 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import {
+	type Component,
+	getCapabilities,
+	Image,
+	type ImageTheme,
+	truncateToWidth,
+	visibleWidth,
+} from "../engine/tui.js";
 import {
 	abbreviateModelId,
 	type ClioTheme,
@@ -166,6 +175,33 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 /** Welcome header responsive bands. */
 const WIDE_MIN = 90;
 const MID_MIN = 64;
+const LOGO_ASSET_PATH = "assets/clio-coder-logo-128.webp";
+
+let cachedLogoBase64: string | null | undefined;
+
+function clioLogoBase64(): string | null {
+	if (cachedLogoBase64 !== undefined) return cachedLogoBase64;
+	const path = join(resolvePackageRoot(), LOGO_ASSET_PATH);
+	if (!existsSync(path)) {
+		cachedLogoBase64 = null;
+		return cachedLogoBase64;
+	}
+	cachedLogoBase64 = readFileSync(path).toString("base64");
+	return cachedLogoBase64;
+}
+
+function createLogoImage(theme: ClioTheme): Component | null {
+	const base64 = clioLogoBase64();
+	if (!base64) return null;
+	const imageTheme: ImageTheme = {
+		fallbackColor: (text) => theme.fg("dim", text),
+	};
+	return new Image(base64, "image/webp", imageTheme, {
+		filename: "clio-coder-logo-128.webp",
+		maxWidthCells: 8,
+		maxHeightCells: 4,
+	});
+}
 
 function joinColumns(left: string, right: string, width: number): string {
 	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
@@ -257,13 +293,17 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 
 export class WelcomeDashboard implements Component {
 	private readonly snapshot: WelcomeDashboardStats;
+	private readonly logo: Component | null;
 
 	constructor(deps: WelcomeDashboardDeps) {
 		this.snapshot = deriveWelcomeDashboardStats(deps);
+		this.logo = createLogoImage(clioTheme());
 	}
 
 	render(width: number): string[] {
-		return buildWelcomeDashboardLines(this.snapshot, width);
+		const lines = buildWelcomeDashboardLines(this.snapshot, width);
+		if (width < WIDE_MIN || !getCapabilities().images || !this.logo) return lines;
+		return [...this.logo.render(width), ...lines];
 	}
 
 	invalidate(): void {}

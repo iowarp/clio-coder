@@ -110,12 +110,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 38px;
-      height: 38px;
-      fill: none;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -584,10 +583,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="4" stroke-dasharray="4 2"/>
-          <path d="M9 9l3 3-3 3M13 15h4" stroke-linecap="round"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Clio Coder Safety Model Blueprint</h1>
       <p class="subtitle">Interactive technical specification and validation dashboard for the safety engine, default-deny boundaries, and action classification.</p>

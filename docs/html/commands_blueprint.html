@@ -89,6 +89,38 @@
       text-align: center;
     }
 
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 18px;
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow-glow);
+      position: relative;
+    }
+
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 20px;
+      background: var(--gradient-main);
+      z-index: -1;
+      opacity: 0.3;
+      filter: blur(4px);
+    }
+
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
+    }
+
     .header-badge {
       background: rgba(var(--color-cyan-rgb), 0.1);
       border: 1px solid rgba(var(--color-cyan-rgb), 0.2);
@@ -913,6 +945,9 @@
   <div class="container">
     <!-- Header -->
     <header>
+      <div class="header-logo">
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+      </div>
       <div class="header-badge">Interactive System Blueprint</div>
       <h1>Clio Coder Command & TUI Spec</h1>
       <p class="subtitle">An architectural blueprint detailing user-facing commands, keyboard shortcuts, interactive modes, TUI routing pipelines, safety state matrices, and screen paint workflows.</p>
