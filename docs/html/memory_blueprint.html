@@ -110,12 +110,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 36px;
-      height: 36px;
-      fill: none;
-      stroke: var(--color-primary);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -721,9 +720,7 @@
     <!-- Header -->
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Evidence & Memory Blueprint</h1>
       <div>

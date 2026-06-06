@@ -105,12 +105,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 38px;
-      height: 38px;
-      fill: none;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -425,9 +424,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Evaluation Runner & Suite Validator</h1>
       <p class="subtitle">Interactive Visual Specification for Subprocess Verification Harnesses</p>

@@ -105,12 +105,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 38px;
-      height: 38px;
-      fill: none;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -458,9 +457,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H17"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Evolution & Change Manifest Workspace</h1>
       <p class="subtitle">Interactive Visual Specification for Auditability, Regressions, and Falsification</p>

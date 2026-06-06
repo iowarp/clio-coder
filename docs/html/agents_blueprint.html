@@ -91,7 +91,15 @@
       filter: blur(4px);
     }
 
-    h1 {
+
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
+    }
+
+h1 {
       font-size: 2.75rem;
       font-weight: 800;
       letter-spacing: -0.05em;
@@ -417,10 +425,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24" width="36" height="36">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" fill="var(--color-primary)"/>
-          <path d="M2 17l10 5 10-5M2 12l10 5 10-5" fill="none" stroke="var(--color-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Clio Coder Agent Fleet Spec</h1>
       <div style="margin-top: 0.5rem;">

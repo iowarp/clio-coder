@@ -1,5 +1,5 @@
 export const GLYPH = {
-	agent: "◈",
+	agent: ">C_",
 	user: "›",
 	toolHeader: "▸",
 	running: "●",

@@ -44,6 +44,9 @@
 	},
 	"files": [
 		"dist",
+		"assets/banner.png",
+		"assets/banner.webp",
+		"assets/clio-coder-logo-*.webp",
 		"src/domains/agents/builtins/**",
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="96" height="96" />
+</p>
+
 # Clio Coder Documentation
 
 Clio Coder is an experimental community alpha. These docs describe the current

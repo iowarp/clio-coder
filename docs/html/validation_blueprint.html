@@ -105,12 +105,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 38px;
-      height: 38px;
-      fill: none;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -408,9 +407,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Scientific Validation Contracts</h1>
       <p class="subtitle">Interactive Visual Specification for Numeric Tolerances & HPC Artifact Verifications</p>

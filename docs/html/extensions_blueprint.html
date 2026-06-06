@@ -108,12 +108,11 @@
       filter: blur(4px);
     }
 
-    .header-logo svg {
-      width: 40px;
-      height: 40px;
-      fill: none;
-      stroke: var(--color-primary);
-      stroke-width: 2;
+    .header-logo img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -673,10 +672,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="4" />
-          <path d="M7 8h10M7 12h10M7 16h6" />
-        </svg>
+        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
       </div>
       <h1>Extensions & Custom Skills Spec</h1>
       <p class="subtitle">Architectural design and verification testing suite for Clio Coder's resource packaging, registries injection, and sharing archive subsystems.</p>

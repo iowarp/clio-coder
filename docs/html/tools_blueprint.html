@@ -111,10 +111,11 @@
       box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.2);
     }
 
-    .logo-hex svg {
-      width: 24px;
-      height: 24px;
-      fill: var(--color-cyan);
+    .logo-hex img {
+      width: 78%;
+      height: 78%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
     }
 
     h1 {
@@ -700,9 +701,7 @@
     <div class="header-top">
       <div class="logo-area">
         <div class="logo-hex">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
+          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
         </div>
         <div>
           <h1>Prompt Envelopes & Tools Spec</h1>
