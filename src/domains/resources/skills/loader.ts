@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { clioConfigDir } from "../../../core/xdg.js";
@@ -17,7 +17,16 @@ const CORE_FRONTMATTER_KEYS = new Set(["name", "description", "disable-model-inv
  * Semantic origin of a skill root. Distinct from {@link ResourceScope}, which
  * only encodes collision precedence tiers shared across resource kinds.
  */
-export type SkillSource = "clio" | "agents" | "codex" | "extension" | "path" | "cli";
+export type SkillSource =
+	| "clio"
+	| "agents"
+	| "claude"
+	| "codex"
+	| "copilot"
+	| "opencode"
+	| "extension"
+	| "path"
+	| "cli";
 
 /** Optional install provenance, captured from frontmatter when present. */
 export interface SkillProvenance {
@@ -83,6 +92,10 @@ export interface LoadSkillsInput {
 	configDir?: string;
 	/** Opt in to model-visible project compatibility roots (.agents/.codex). */
 	trustProjectCompatRoots?: boolean;
+	/** Disable normal root discovery. Explicit skill paths still load. */
+	disableDiscovery?: boolean;
+	/** One-shot skill files or directories loaded at CLI precedence. */
+	explicitSkillPaths?: ReadonlyArray<string>;
 }
 
 export type SkillExpansion =
@@ -139,9 +152,9 @@ function projectCompatTrusted(input: LoadSkillsInput): boolean {
 /**
  * Discovery roots, lowest to highest precedence:
  *  1. package/extension skills
- *  2. shared user compat roots (~/.agents/skills, ~/.codex/skills)
+ *  2. shared user compat roots (~/.agents, ~/.claude, ~/.codex, ~/.copilot, ~/.config/opencode)
  *  3. Clio user root (<config>/skills)
- *  4. project compat roots (.agents/skills, .codex/skills), trusted only on opt-in
+ *  4. project compat roots (.agents, .claude, .codex, .github, .opencode), trusted only on opt-in
  *  5. Clio project root (.clio/skills)
  */
 export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
@@ -171,10 +184,34 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		trusted: true,
 	});
 	roots.push({
+		path: path.join(home, ".claude", "skills"),
+		scope: "user",
+		source: "claude",
+		origin: "claude-user",
+		precedence: SKILL_PRECEDENCE.userCompat,
+		trusted: true,
+	});
+	roots.push({
 		path: path.join(home, ".codex", "skills"),
 		scope: "user",
 		source: "codex",
 		origin: "codex-user",
+		precedence: SKILL_PRECEDENCE.userCompat,
+		trusted: true,
+	});
+	roots.push({
+		path: path.join(home, ".config", "opencode", "skills"),
+		scope: "user",
+		source: "opencode",
+		origin: "opencode-user",
+		precedence: SKILL_PRECEDENCE.userCompat,
+		trusted: true,
+	});
+	roots.push({
+		path: path.join(home, ".copilot", "skills"),
+		scope: "user",
+		source: "copilot",
+		origin: "copilot-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
 	});
@@ -199,10 +236,34 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		trusted: trustProject,
 	});
 	roots.push({
+		path: path.join(cwd, ".claude", "skills"),
+		scope: "project",
+		source: "claude",
+		origin: "claude-project",
+		precedence: SKILL_PRECEDENCE.projectCompat,
+		trusted: trustProject,
+	});
+	roots.push({
 		path: path.join(cwd, ".codex", "skills"),
 		scope: "project",
 		source: "codex",
 		origin: "codex-project",
+		precedence: SKILL_PRECEDENCE.projectCompat,
+		trusted: trustProject,
+	});
+	roots.push({
+		path: path.join(cwd, ".opencode", "skills"),
+		scope: "project",
+		source: "opencode",
+		origin: "opencode-project",
+		precedence: SKILL_PRECEDENCE.projectCompat,
+		trusted: trustProject,
+	});
+	roots.push({
+		path: path.join(cwd, ".github", "skills"),
+		scope: "project",
+		source: "copilot",
+		origin: "copilot-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
 	});
@@ -304,6 +365,15 @@ function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenanc
 
 interface SkillCandidate {
 	skill: Skill;
+	canonicalPath: string;
+}
+
+function canonicalizePath(filePath: string): string {
+	try {
+		return realpathSync.native(filePath);
+	} catch {
+		return path.resolve(filePath);
+	}
 }
 
 function loadSkillFile(
@@ -375,7 +445,7 @@ function loadSkillFile(
 		diagnostics,
 		...(provenance ? { provenance } : {}),
 	};
-	return { candidate: { skill }, diagnostics };
+	return { candidate: { skill, canonicalPath: canonicalizePath(filePath) }, diagnostics };
 }
 
 function isSkillMarkdownFile(entryName: string): boolean {
@@ -409,11 +479,11 @@ function collectSkills(
 	for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
 		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 		const fullPath = path.join(dir, entry.name);
-		if (entry.isDirectory()) {
+		if (entry.isDirectory() || (entry.isSymbolicLink() && existsSync(path.join(fullPath, "SKILL.md")))) {
 			candidates.push(...collectSkills(root, fullPath, diagnostics, false));
 			continue;
 		}
-		if (!includeRootFiles || !entry.isFile() || !isSkillMarkdownFile(entry.name)) continue;
+		if (!includeRootFiles || (!entry.isFile() && !entry.isSymbolicLink()) || !isSkillMarkdownFile(entry.name)) continue;
 		const loaded = loadSkillFile(fullPath, root);
 		diagnostics.push(...loaded.diagnostics);
 		if (loaded.candidate) candidates.push(loaded.candidate);
@@ -425,6 +495,75 @@ function loadSkillRoot(root: SkillRoot, diagnostics: ResourceDiagnostic[]): Skil
 	const entries = readRootEntries(root, "skill", diagnostics);
 	if (entries.length === 0) return [];
 	return collectSkills(root, root.path, diagnostics, true);
+}
+
+function explicitSkillRoot(filePath: string): SkillRoot {
+	return {
+		path: filePath,
+		scope: "cli",
+		source: "path",
+		origin: "explicit-path",
+		precedence: SKILL_PRECEDENCE.cli,
+		trusted: true,
+	};
+}
+
+function loadExplicitSkillPath(inputPath: string, diagnostics: ResourceDiagnostic[]): SkillCandidate[] {
+	const resolved = path.resolve(inputPath);
+	const root = explicitSkillRoot(resolved);
+	if (!existsSync(resolved)) {
+		diagnostics.push({ type: "warning", message: `explicit skill path does not exist: ${resolved}`, path: resolved });
+		return [];
+	}
+	const skillFile =
+		path.basename(resolved) === "SKILL.md" || resolved.endsWith(".md") ? resolved : path.join(resolved, "SKILL.md");
+	if (!existsSync(skillFile)) {
+		diagnostics.push({
+			type: "warning",
+			message: `explicit skill path is not a SKILL.md file or skill directory: ${resolved}`,
+			path: resolved,
+		});
+		return [];
+	}
+	const loaded = loadSkillFile(skillFile, root);
+	diagnostics.push(...loaded.diagnostics);
+	return loaded.candidate ? [loaded.candidate] : [];
+}
+
+function dedupeCanonicalSkillPaths(
+	candidates: ReadonlyArray<SkillCandidate>,
+	diagnostics: ResourceDiagnostic[],
+): SkillCandidate[] {
+	const byPath = new Map<string, SkillCandidate[]>();
+	for (const candidate of candidates) {
+		const list = byPath.get(candidate.canonicalPath) ?? [];
+		list.push(candidate);
+		byPath.set(candidate.canonicalPath, list);
+	}
+	const winners: SkillCandidate[] = [];
+	for (const entries of byPath.values()) {
+		if (entries.length === 1) {
+			const only = entries[0];
+			if (only) winners.push(only);
+			continue;
+		}
+		const sorted = [...entries].sort((a, b) => {
+			const delta = a.skill.precedence - b.skill.precedence;
+			if (delta !== 0) return delta;
+			return a.skill.filePath.localeCompare(b.skill.filePath);
+		});
+		const winner = sorted[sorted.length - 1];
+		if (!winner) continue;
+		winners.push(winner);
+		for (const loser of sorted.slice(0, -1)) {
+			diagnostics.push({
+				type: "warning",
+				message: `${loser.skill.name} at ${loser.skill.filePath} resolves to the same canonical skill file as ${winner.skill.filePath}; using the higher-precedence entry`,
+				path: loser.skill.filePath,
+			});
+		}
+	}
+	return winners;
 }
 
 /** Resolve name collisions by precedence (higher wins), tiebroken by file path. */
@@ -471,10 +610,14 @@ function resolveSkillCollisions(candidates: ReadonlyArray<SkillCandidate>): {
 }
 
 export function loadSkills(input: LoadSkillsInput = {}): SkillList {
-	const roots = input.roots ?? defaultSkillRoots(input);
+	const roots = input.roots ?? (input.disableDiscovery === true ? [] : defaultSkillRoots(input));
 	const diagnostics: ResourceDiagnostic[] = [];
-	const candidates = roots.flatMap((root) => loadSkillRoot(root, diagnostics));
-	const resolved = resolveSkillCollisions(candidates);
+	const candidates = [
+		...roots.flatMap((root) => loadSkillRoot(root, diagnostics)),
+		...(input.explicitSkillPaths ?? []).flatMap((skillPath) => loadExplicitSkillPath(skillPath, diagnostics)),
+	];
+	const deduped = dedupeCanonicalSkillPaths(candidates, diagnostics);
+	const resolved = resolveSkillCollisions(deduped);
 	return {
 		items: [...resolved.winners].sort((a, b) => a.name.localeCompare(b.name)),
 		diagnostics: [...diagnostics, ...resolved.diagnostics],

@@ -6,6 +6,7 @@
  * are pure data: no class methods, no engine refs.
  */
 
+import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
@@ -144,6 +145,7 @@ export interface RunReceipt {
 	nodeVersion: string;
 	toolCalls: number;
 	toolStats: ToolCallStat[];
+	skillActivations?: SkillActivation[];
 	safety?: RunReceiptSafetySummary;
 	reproducibility?: RunReceiptReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */

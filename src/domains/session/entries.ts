@@ -15,6 +15,7 @@
  * SessionEntry[] surface regardless of session format version.
  */
 
+import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
 
 export interface SessionHeader {
@@ -154,6 +155,11 @@ export interface ProtectedArtifactEntry extends BaseSessionEntry {
 	correlationId?: string;
 }
 
+export interface SkillActivationEntry extends BaseSessionEntry {
+	kind: "skillActivation";
+	activation: SkillActivation;
+}
+
 export type TaskLedgerStatus = "pending" | "active" | "completed" | "blocked" | "cancelled";
 export type TaskLedgerEvidenceStatus = "required" | "pending" | "passed" | "failed" | "missing";
 
@@ -195,6 +201,7 @@ export type SessionEntry =
 	| SessionInfoEntry
 	| LabelEntry
 	| ProtectedArtifactEntry
+	| SkillActivationEntry
 	| TaskLedgerEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
@@ -217,6 +224,7 @@ export const SESSION_ENTRY_KINDS = [
 	"sessionInfo",
 	"label",
 	"protectedArtifact",
+	"skillActivation",
 	"taskLedger",
 ] as const;
 
@@ -388,6 +396,8 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isOptionalString(v.runId) &&
 				isOptionalString(v.correlationId)
 			);
+		case "skillActivation":
+			return isSkillActivation(v.activation);
 		case "taskLedger":
 			return (
 				Array.isArray(v.goals) &&

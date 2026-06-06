@@ -1,16 +1,24 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import type { ModesContract } from "../../src/domains/modes/contract.js";
 import {
+	createResourcesLoader,
 	expandSkillInvocationInput,
 	formatSkillsCatalogForPrompt,
 	loadSkills,
 	modelVisibleSkills,
+	type ResourcesContract,
 	type SkillRoot,
 } from "../../src/domains/resources/index.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { expandInteractiveSubmit } from "../../src/interactive/index.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { createReadSkillTool, createSkillTool } from "../../src/tools/skills.js";
 
 const scratchRoots: string[] = [];
@@ -36,6 +44,37 @@ function projectRoot(path: string): SkillRoot {
 
 function userRoot(path: string): SkillRoot {
 	return { path, scope: "user", source: "clio", origin: "config" };
+}
+
+function allowAllSafety(): SafetyContract {
+	return {
+		classify: () => ({ actionClass: "read", reasons: [] }),
+		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
+		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+		scopes: {
+			default: DEFAULT_SCOPE,
+			readonly: DEFAULT_SCOPE,
+			advise: DEFAULT_SCOPE,
+			super: DEFAULT_SCOPE,
+		},
+		isSubset,
+		audit: { recordCount: () => 0 },
+	};
+}
+
+function readSkillModes(): ModesContract {
+	const visible = new Set<ToolName>([ToolNames.ReadSkill]);
+	return {
+		current: () => "default",
+		setMode: () => "default",
+		cycleNormal: () => "default",
+		visibleTools: () => visible,
+		isToolVisible: (tool) => visible.has(tool),
+		isActionAllowed: () => true,
+		requestSuper: () => {},
+		confirmSuper: () => "super",
+		elevatedModeFor: () => null,
+	};
 }
 
 afterEach(() => {
@@ -145,6 +184,20 @@ describe("contracts/skills loader normalization", () => {
 		strictEqual(skill.content, "CLIO BODY");
 	});
 
+	it("dedups skills whose symlinked paths resolve to the same SKILL.md", () => {
+		const realRoot = scratchDir();
+		const aliasRoot = scratchDir();
+		writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."'], "REAL BODY");
+		symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
+		const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
+		strictEqual(list.items.length, 1);
+		const skill = list.items[0];
+		ok(skill);
+		strictEqual(skill.name, "linked-skill");
+		strictEqual(skill.content, "REAL BODY");
+		ok(list.diagnostics.some((diag) => diag.message.includes("same canonical skill file")));
+	});
+
 	it("hashes are stable across loads and change with content", () => {
 		const root = scratchDir();
 		const file = writeSkillDir(root, "hashing", ['name: "hashing"', 'description: "Hash stability."'], "ONE");
@@ -160,7 +213,7 @@ describe("contracts/skills loader normalization", () => {
 });
 
 describe("contracts/skills compatibility roots", () => {
-	it("discovers shared user .agents/skills and .codex/skills roots", () => {
+	it("discovers shared user Agent Skills, Claude, Codex, OpenCode, and Copilot roots", () => {
 		const home = scratchDir("clio-home-");
 		const project = scratchDir("clio-proj-");
 		const config = scratchDir("clio-cfg-");
@@ -172,15 +225,39 @@ describe("contracts/skills compatibility roots", () => {
 			'name: "codex-skill"',
 			'description: "From codex root."',
 		]);
+		writeSkillDir(join(home, ".claude", "skills"), "claude-skill", [
+			'name: "claude-skill"',
+			'description: "From claude root."',
+		]);
+		writeSkillDir(join(home, ".config", "opencode", "skills"), "opencode-skill", [
+			'name: "opencode-skill"',
+			'description: "From opencode root."',
+		]);
+		writeSkillDir(join(home, ".copilot", "skills"), "copilot-skill", [
+			'name: "copilot-skill"',
+			'description: "From copilot root."',
+		]);
 		const list = loadSkills({ cwd: project, home, configDir: config });
 		const names = list.items.map((s) => s.name);
 		ok(names.includes("agents-skill"));
 		ok(names.includes("codex-skill"));
+		ok(names.includes("claude-skill"));
+		ok(names.includes("opencode-skill"));
+		ok(names.includes("copilot-skill"));
 		const agents = list.items.find((s) => s.name === "agents-skill");
 		ok(agents);
 		strictEqual(agents.source, "agents");
 		strictEqual(agents.scope, "user");
 		strictEqual(agents.trusted, true);
+		const claude = list.items.find((s) => s.name === "claude-skill");
+		ok(claude);
+		strictEqual(claude.source, "claude");
+		const opencode = list.items.find((s) => s.name === "opencode-skill");
+		ok(opencode);
+		strictEqual(opencode.source, "opencode");
+		const copilot = list.items.find((s) => s.name === "copilot-skill");
+		ok(copilot);
+		strictEqual(copilot.source, "copilot");
 	});
 
 	it("treats project compat roots as untrusted by default", () => {
@@ -191,10 +268,27 @@ describe("contracts/skills compatibility roots", () => {
 			'name: "proj-compat"',
 			'description: "Project compat skill."',
 		]);
+		writeSkillDir(join(project, ".claude", "skills"), "proj-claude", [
+			'name: "proj-claude"',
+			'description: "Project Claude skill."',
+		]);
+		writeSkillDir(join(project, ".opencode", "skills"), "proj-opencode", [
+			'name: "proj-opencode"',
+			'description: "Project OpenCode skill."',
+		]);
+		writeSkillDir(join(project, ".github", "skills"), "proj-copilot", [
+			'name: "proj-copilot"',
+			'description: "Project Copilot skill."',
+		]);
 		const list = loadSkills({ cwd: project, home, configDir: config });
 		const skill = list.items.find((s) => s.name === "proj-compat");
 		ok(skill);
 		strictEqual(skill.trusted, false);
+		for (const name of ["proj-claude", "proj-opencode", "proj-copilot"]) {
+			const projectSkill = list.items.find((s) => s.name === name);
+			ok(projectSkill);
+			strictEqual(projectSkill.trusted, false);
+		}
 		strictEqual(
 			modelVisibleSkills(list.items).some((s) => s.name === "proj-compat"),
 			false,
@@ -215,6 +309,22 @@ describe("contracts/skills compatibility roots", () => {
 		ok(skill);
 		strictEqual(skill.trusted, true);
 		ok(modelVisibleSkills(list.items).some((s) => s.name === "proj-optin"));
+	});
+
+	it("threads project compat trust through createResourcesLoader", () => {
+		const project = scratchDir("clio-proj-");
+		writeSkillDir(join(project, ".codex", "skills"), "proj-loader", [
+			'name: "proj-loader"',
+			'description: "Project compat through resources loader."',
+		]);
+		const loader = createResourcesLoader({
+			cwd: project,
+			skills: () => ({ trustProjectCompatRoots: true }),
+		});
+		const skill = loader.skills(project).items.find((entry) => entry.name === "proj-loader");
+		ok(skill);
+		strictEqual(skill.trusted, true);
+		ok(loader.skillsCatalog(project).includes("proj-loader"));
 	});
 });
 
@@ -241,6 +351,33 @@ describe("contracts/skills slash-command parity", () => {
 		ok(expansion.text.includes("FOLLOW STEPS"));
 		ok(expansion.text.includes("do the thing"));
 		if (expansion.expanded) strictEqual(expansion.skill.name, "expandable");
+	});
+
+	it("returns slash-command activation metadata from interactive submit expansion", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const resources: ResourcesContract = {
+			contextFiles: () => [],
+			renderContextFiles: () => "",
+			skills: () => list,
+			skillsCatalog: () => formatSkillsCatalogForPrompt(list),
+			expandSkillInvocation: (text: string) => expandSkillInvocationInput(text, list),
+			expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
+			prompts: () => ({ items: [], diagnostics: [] }),
+			themes: () => ({ items: [], diagnostics: [] }),
+			resolvePath: (value: string) => value,
+			reload: async () => undefined,
+		};
+		const expanded = expandInteractiveSubmit("/skill:expandable do the thing", resources);
+		strictEqual(expanded.skillActivations.length, 1);
+		const activation = expanded.skillActivations[0];
+		ok(activation);
+		strictEqual(activation.name, "expandable");
+		strictEqual(activation.triggeredBy, "slash-command");
+		strictEqual(activation.source, "clio");
+		match(activation.hash, /^[0-9a-f]{64}$/);
+		ok(expanded.text.includes("FOLLOW STEPS"));
 	});
 
 	it("leaves non-skill input untouched", () => {
@@ -294,6 +431,41 @@ describe("contracts/skills tools", () => {
 		match(String(details.hash), /^[0-9a-f]{64}$/);
 		strictEqual(details.scope, "project");
 		ok(String(details.baseDir).includes(".clio"));
+	});
+
+	it("read_skill activation is emitted by the registry with turn metadata", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"readable",
+			['name: "readable"', 'description: "Readable skill."'],
+			"READ ME BODY",
+		);
+		const activations: Array<{
+			name: string;
+			filePath: string;
+			hash: string;
+			source: string;
+			triggeredBy: string;
+			turnId?: string;
+		}> = [];
+		const registry = createRegistry({
+			safety: allowAllSafety(),
+			modes: readSkillModes(),
+			onSkillActivation: (activation) => activations.push(activation),
+		});
+		registry.register(createReadSkillTool({ getCwd: () => cwd }));
+
+		const result = await registry.invoke({ tool: ToolNames.ReadSkill, args: { name: "readable" } }, { turnId: "turn-1" });
+		strictEqual(result.kind, "ok");
+		strictEqual(activations.length, 1);
+		const activation = activations[0];
+		ok(activation);
+		strictEqual(activation.name, "readable");
+		strictEqual(activation.triggeredBy, "tool");
+		strictEqual(activation.turnId, "turn-1");
+		match(activation.hash, /^[0-9a-f]{64}$/);
+		ok(activation.filePath.endsWith("SKILL.md"));
 	});
 
 	it("read_skill include_tree lists sibling resources without executing them", async () => {

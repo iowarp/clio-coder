@@ -1,5 +1,5 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -97,6 +97,14 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
+function writeSkill(dir: string, name: string, description: string, body = "Skill body."): string {
+	const skillDir = join(dir, name);
+	mkdirSync(skillDir, { recursive: true });
+	const file = join(skillDir, "SKILL.md");
+	writeFileSync(file, ["---", `name: ${name}`, `description: ${description}`, "---", "", body, ""].join("\n"), "utf8");
+	return file;
+}
+
 describe("clio cli smoke tests", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
@@ -153,6 +161,31 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		ok(Array.isArray(parsed) && parsed.length > 0);
 	});
 
+	it("skills list, inspect, validate, and create work in a scratch project", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const project = join(scratch.dir, "project");
+		const skillFile = writeSkill(join(project, ".clio", "skills"), "smoke-skill", "Smoke test skill.");
+
+		const list = await runCli(["skills", "list", "--json", "--all"], { env: scratch.env, cwd: project });
+		strictEqual(list.code, 0, `stderr=${list.stderr}`);
+		const listed = JSON.parse(list.stdout) as { skills: Array<{ name: string }> };
+		ok(listed.skills.some((skill) => skill.name === "smoke-skill"));
+
+		const inspect = await runCli(["skills", "inspect", "smoke-skill", "--json"], { env: scratch.env, cwd: project });
+		strictEqual(inspect.code, 0, `stderr=${inspect.stderr}`);
+		const inspected = JSON.parse(inspect.stdout) as { skill: { name: string; path: string } };
+		strictEqual(inspected.skill.name, "smoke-skill");
+
+		const validate = await runCli(["skills", "validate", skillFile, "--json"], { env: scratch.env, cwd: project });
+		strictEqual(validate.code, 0, `stderr=${validate.stderr}`);
+		const validated = JSON.parse(validate.stdout) as { ok: boolean };
+		strictEqual(validated.ok, true);
+
+		const created = await runCli(["skills", "create", "cli-made"], { env: scratch.env, cwd: project });
+		strictEqual(created.code, 0, `stderr=${created.stderr}`);
+		ok(existsSync(join(project, ".clio", "skills", "cli-made", "SKILL.md")));
+	});
+
 	it("runs non-interactively against a mock provider", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const fixture = await startOpenAICompatFixture("mock reply");
@@ -164,6 +197,30 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("honors explicit --skill paths even with --no-skills", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		const explicitDir = join(scratch.dir, "explicit");
+		const skillFile = writeSkill(explicitDir, "explicit-smoke", "Explicit smoke skill.", "Use explicit smoke guidance.");
+		const fixture = await startOpenAICompatFixture("mock reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(
+				["--no-context-files", "run", "--no-skills", "--skill", skillFile, "please use the skill named explicit-smoke"],
+				{
+					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					cwd: project,
+					timeoutMs: 20_000,
+				},
+			);
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			ok(JSON.stringify(fixture.requests).includes("explicit-smoke"));
 		} finally {
 			await closeServer(fixture.server);
 		}

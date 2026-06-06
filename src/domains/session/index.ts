@@ -34,6 +34,7 @@ export type {
 	SessionFileEntry,
 	SessionHeader,
 	SessionInfoEntry,
+	SkillActivationEntry,
 	TaskLedgerEntry,
 	TaskLedgerEvidenceStatus,
 	TaskLedgerGoal,

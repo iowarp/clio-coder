@@ -1,11 +1,19 @@
 import type { DomainModule } from "../../core/domain-loader.js";
 import { createResourcesBundle } from "./extension.js";
+import type { ResourceLoaderOptions } from "./loader.js";
 import { ResourcesManifest } from "./manifest.js";
 
 export const ResourcesDomainModule: DomainModule = {
 	manifest: ResourcesManifest,
 	createExtension: createResourcesBundle,
 };
+
+export function createResourcesDomainModule(options: ResourceLoaderOptions = {}): DomainModule {
+	return {
+		manifest: ResourcesManifest,
+		createExtension: (context) => createResourcesBundle(context, options),
+	};
+}
 
 export type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 export { resolveResourceCollisions } from "./collision.js";
@@ -16,7 +24,7 @@ export {
 	renderProjectContextFiles,
 } from "./context-files/loader.js";
 export type { ResourceList, ResourcesContract } from "./contract.js";
-export { createResourcesLoader } from "./loader.js";
+export { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";
 export {
 	expandPromptTemplateInput,
@@ -31,6 +39,7 @@ export {
 	defaultSkillRoots,
 	expandSkillInvocationInput,
 	formatSkillsCatalogForPrompt,
+	type LoadSkillsInput,
 	loadSkills,
 	modelVisibleSkills,
 	type Skill,

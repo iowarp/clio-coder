@@ -1099,6 +1099,13 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 			`${prefix} protectedArtifact protect:${tool} ${artifact.path} source=${artifact.source}${validation} reason=${truncateText(artifact.reason, 120)}`,
 		];
 	}
+	if (entry.kind === "skillActivation") {
+		const activation = entry.activation;
+		const turn = activation.turnId === undefined ? "" : ` turn=${activation.turnId}`;
+		return [
+			`${prefix} skillActivation ${activation.name} source=${activation.source} hash=${activation.hash} triggeredBy=${activation.triggeredBy}${turn} path=${activation.filePath}`,
+		];
+	}
 	if (entry.kind === "taskLedger") {
 		return [
 			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,

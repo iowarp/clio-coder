@@ -40,7 +40,26 @@ describe("contracts/config", () => {
 		strictEqual(normalized.orchestrator.model, null);
 		strictEqual(normalized.workers.default.endpoint, "codex-pro");
 		strictEqual(normalized.workers.default.model, "gpt-5.4");
+		strictEqual(normalized.skills.trustProjectCompatRoots, false);
 		strictEqual(Value.Check(SettingsSchema, normalized), true);
+	});
+
+	it("normalizes skills trust settings and treats them as next-turn changes", () => {
+		const normalized = normalizeSettings({
+			skills: {
+				trustProjectCompatRoots: true,
+			},
+		});
+		strictEqual(normalized.skills.trustProjectCompatRoots, true);
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
+
+		const prev = structuredClone(DEFAULT_SETTINGS);
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.skills.trustProjectCompatRoots = true;
+		const diff = diffSettings(prev, next);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.nextTurn, ["skills.trustProjectCompatRoots"]);
+		deepStrictEqual(diff.restartRequired, []);
 	});
 
 	it("classifies settings changes next-turn updates", () => {

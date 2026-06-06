@@ -14,6 +14,7 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import type { ToolApprovalRequestPayload } from "../../src/engine/worker-events.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -40,6 +41,10 @@ function approvalNoops(): Pick<SpawnedWorker, "onApprovalRequest" | "sendApprova
 		onApprovalRequest: () => {},
 		sendApprovalResponse: () => {},
 	};
+}
+
+function isTestResultEvent(value: unknown): value is { type: "test_result"; payload?: unknown } {
+	return !!value && typeof value === "object" && (value as { type?: unknown }).type === "test_result";
 }
 
 function stubContext(): DomainContext {
@@ -396,18 +401,18 @@ rl.on("line", (line) => {
 				{ workerEntryPath: stubEntry },
 			);
 
-			let request: any = null;
+			let request: ToolApprovalRequestPayload | null = null;
 			worker.onApprovalRequest(async (req) => {
 				request = req;
 				return { requestId: req.requestId, decision: "allow" as const, reason: "test" };
 			});
 
-			const events: any[] = [];
+			const events: unknown[] = [];
 			for await (const ev of worker.events) events.push(ev);
 			const exit = await worker.promise;
 			strictEqual(exit.exitCode, 0);
 			ok(request !== null, "approval request was forwarded to callback");
-			const testResult = events.find((e) => (e as any).type === "test_result");
+			const testResult = events.find(isTestResultEvent);
 			ok(testResult, "worker received the approval response");
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });

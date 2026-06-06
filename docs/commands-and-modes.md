@@ -44,6 +44,7 @@ the current test suite.
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
+| `clio skills list\|inspect\|validate\|create` | Manage discovered and Clio-native skills. |
 | `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
@@ -58,6 +59,8 @@ the current test suite.
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
+| `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
+| `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
 | `--agent-profile <name>` | Use a named fleet profile for dispatch. |
 | `--agent-runtime <id>` | Pick the first fleet profile whose endpoint uses this runtime. |
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |

@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import type { ToolName } from "../../core/tool-names.js";
 import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
 import {
@@ -844,6 +845,7 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		const skillActivations: SkillActivation[] = [];
 		let failureMessage: string | undefined;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
@@ -869,6 +871,7 @@ export function createDispatchBundle(
 						reasonCode?: string;
 						policySource?: string;
 						reason?: string;
+						skillActivation?: unknown;
 					};
 				};
 				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
@@ -891,6 +894,9 @@ export function createDispatchBundle(
 				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
+					if (isSkillActivation(event.payload.skillActivation)) {
+						skillActivations.push(event.payload.skillActivation);
+					}
 					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
 					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
 					else if (event.payload.decision === "elevated") safetyDecisionCounts.elevated += 1;
@@ -1021,6 +1027,7 @@ export function createDispatchBundle(
 				nodeVersion: process.version,
 				toolCalls: countToolCalls(toolStats),
 				toolStats: snapshotToolStats(toolStats),
+				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,

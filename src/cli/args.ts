@@ -18,6 +18,8 @@ export interface RunCliArgs {
 	required: string[];
 	autoApprove?: "allow" | "deny";
 	supervised: boolean;
+	noSkills: boolean;
+	skillPaths: string[];
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -31,6 +33,8 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		json: false,
 		required: [],
 		supervised: false,
+		noSkills: false,
+		skillPaths: [],
 		fileArgs: [],
 		messages: [],
 		diagnostics: [],
@@ -113,6 +117,15 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--supervised") {
 			parsed.supervised = true;
+			continue;
+		}
+		if (arg === "--no-skills") {
+			parsed.noSkills = true;
+			continue;
+		}
+		if (arg === "--skill") {
+			const value = need(arg);
+			if (value !== null) parsed.skillPaths.push(value);
 			continue;
 		}
 		if (arg?.startsWith("-")) {

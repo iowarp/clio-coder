@@ -43,6 +43,8 @@ Flags:
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
   --auto-approve <mode>     approval behavior for SDK tool asks: allow|deny
+  --skill <path>            load one explicit skill for this run, repeatable
+  --no-skills               disable skill discovery while still honoring --skill
 `;
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
@@ -117,6 +119,8 @@ export async function runClioRun(
 				headless: {
 					prompt: assembled.prompt,
 					mode: parsed.json ? "json" : "text",
+					...(parsed.noSkills ? { noSkills: true } : {}),
+					...(parsed.skillPaths.length > 0 ? { skillPaths: parsed.skillPaths } : {}),
 					...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
 					...(parsed.target !== undefined ? { target: parsed.target } : {}),
 					...(parsed.model !== undefined ? { model: parsed.model } : {}),

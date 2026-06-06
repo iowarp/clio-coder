@@ -33,7 +33,15 @@ function isFingerprint(value: unknown): value is Fingerprint {
 }
 
 const ADOPTION_SCOPES = new Set<AdoptionScope>(["project", "global"]);
-const ADOPTION_PROVIDERS = new Set<AdoptionProvider>(["claude-code", "codex", "gemini", "cursor", "copilot"]);
+const ADOPTION_PROVIDERS = new Set<AdoptionProvider>([
+	"claude-code",
+	"agents",
+	"codex",
+	"gemini",
+	"cursor",
+	"copilot",
+	"opencode",
+]);
 const ADOPTION_KINDS = new Set<AdoptionSourceKind>(["instructions", "settings", "command", "agent", "skill", "rule"]);
 
 function isContextSourceSnapshot(value: unknown): value is AdoptionSourceSnapshot {

@@ -1,6 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { SkillActivation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -116,6 +117,7 @@ export type ChatLoopEvent =
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
+	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
 export interface ChatLoop {
@@ -258,6 +260,7 @@ export interface PromptDiagnostics {
 		mode: string;
 	};
 	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
+	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
 function notConfiguredNotice(): string {
@@ -463,6 +466,7 @@ function promptDiagnostics(
 	systemPromptReused: boolean,
 	tools: ReadonlyArray<unknown>,
 	toolPalette: ToolPaletteResult | null,
+	skillActivations: ReadonlyArray<SkillActivation>,
 ): PromptDiagnostics {
 	const toolSignature = toolSignatureFromState(tools);
 	const palette =
@@ -500,6 +504,7 @@ function promptDiagnostics(
 			contentHash: segment.contentHash,
 			tokenEstimate: segment.tokenEstimate,
 		})),
+		...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 	};
 }
 
@@ -592,6 +597,11 @@ function currentVisibleTurnCount(deps: CreateChatLoopDeps): number {
 	} catch {
 		return 0;
 	}
+}
+
+function activeSkillActivations(deps: CreateChatLoopDeps, pending: ReadonlyArray<SkillActivation>): SkillActivation[] {
+	const prior = deps.session?.current()?.skillActivations ?? [];
+	return [...prior, ...pending];
 }
 
 interface RunUsageSummary {
@@ -1559,7 +1569,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * stays on `state.systemPrompt` from the previous compile (or from
 	 * `ensureRuntime`).
 	 */
-	const compilePromptForTurn = async (agentRuntime: AgentRuntime, userText: string): Promise<CompileResult | null> => {
+	const compilePromptForTurn = async (
+		agentRuntime: AgentRuntime,
+		userText: string,
+		pendingSkillActivations: ReadonlyArray<SkillActivation>,
+	): Promise<CompileResult | null> => {
 		if (!deps.prompts) {
 			currentTurnHash = null;
 			currentPromptDiagnostics = null;
@@ -1653,6 +1667,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				systemPromptReused,
 				agentRuntime.agent.state.tools,
 				currentToolPalette,
+				activeSkillActivations(deps, pendingSkillActivations),
 			);
 			return result;
 		} catch (err) {
@@ -1768,6 +1783,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return userTurn.id;
 	};
 
+	const recordSubmittedSkillActivations = (
+		activations: ReadonlyArray<SkillActivation> | undefined,
+		userTurnId: string | null,
+	): void => {
+		if (!deps.session || !activations || activations.length === 0) return;
+		for (const activation of activations) {
+			const withTurn = userTurnId ? { ...activation, turnId: userTurnId } : activation;
+			try {
+				deps.session.recordSkillActivation(withTurn);
+			} catch {
+				// The expanded prompt already contains the skill body. Ledger
+				// persistence is best-effort and must not abort the turn.
+			}
+		}
+	};
+
 	return {
 		queueFollowUp(text: string): boolean {
 			const trimmed = text.trim();
@@ -1832,7 +1863,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const resolvedTools = resolveToolsForRuntime(agentRuntime, deps, text, recentToolNames, currentToolInvokeOptions);
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;
-			const compileResult = await compilePromptForTurn(agentRuntime, text);
+			const pendingSkillActivations = options.skillActivations ?? [];
+			const compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
 
 			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
 			// the threshold so /compact integration tests and live drills can
@@ -1846,7 +1878,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
-			appendSubmittedUserTurn(agentRuntime, text, images);
+			const userTurnId = appendSubmittedUserTurn(agentRuntime, text, images);
+			recordSubmittedSkillActivations(pendingSkillActivations, userTurnId);
 			if (currentPromptDiagnostics) {
 				emit({ type: "prompt_diagnostics", promptDiagnostics: currentPromptDiagnostics });
 			}

@@ -119,6 +119,18 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			if (!state) throw new Error("session.appendEntry: no current session");
 			return appendEntry(state, entry);
 		},
+		recordSkillActivation(activation) {
+			if (!state) throw new Error("session.recordSkillActivation: no current session");
+			appendEntry(state, {
+				kind: "skillActivation",
+				parentTurnId: activation.turnId ?? null,
+				activation,
+			});
+			const existing = state.meta.skillActivations ?? [];
+			state.meta.skillActivations = [...existing, activation];
+			persistSessionMeta(state);
+			return activation;
+		},
 		async checkpoint(reason) {
 			if (!state) throw new Error("session.checkpoint: no current session");
 			await performCheckpoint(state, reason);
