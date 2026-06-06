@@ -10,7 +10,7 @@ import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
-import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
+import { EMPTY_CAPABILITIES, WORKER_ONLY_RUNTIME_IDS } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
@@ -35,9 +35,9 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
-function stubContext(): DomainContext {
+function stubContext(options: { endpoint?: EndpointDescriptor; runtime?: RuntimeDescriptor } = {}): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: EndpointDescriptor = {
+	const endpoint: EndpointDescriptor = options.endpoint ?? {
 		id: "default",
 		runtime: "openai",
 		defaultModel: "gpt-4o",
@@ -46,14 +46,14 @@ function stubContext(): DomainContext {
 	settings.workers.default.endpoint = endpoint.id;
 	settings.workers.default.model = endpoint.defaultModel ?? "gpt-4o";
 
-	const runtime: RuntimeDescriptor = {
-		id: "openai",
+	const runtime: RuntimeDescriptor = options.runtime ?? {
+		id: endpoint.runtime,
 		displayName: "OpenAI",
 		kind: "http",
 		apiFamily: "openai-completions",
 		auth: "api-key",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
-		synthesizeModel: () => ({ id: endpoint.defaultModel, provider: "openai" }) as never,
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		synthesizeModel: () => ({ id: endpoint.defaultModel, provider: endpoint.runtime }) as never,
 	};
 	const status: EndpointStatus = {
 		endpoint,
@@ -61,7 +61,7 @@ function stubContext(): DomainContext {
 		available: true,
 		reason: "test",
 		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
-		capabilities: { ...EMPTY_CAPABILITIES, chat: true },
+		capabilities: { ...runtime.defaultCapabilities },
 		discoveredModels: [],
 	};
 	const providers: ProvidersContract = {
@@ -214,6 +214,49 @@ describe("contracts/dispatch", () => {
 			ok(receipt.integrity?.digest);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+
+	it("dispatch accepts codex-cli and opencode-cli as worker-only subprocess targets", async () => {
+		for (const id of WORKER_ONLY_RUNTIME_IDS) {
+			const endpoint: EndpointDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
+			const runtime: RuntimeDescriptor = {
+				id,
+				displayName: id,
+				kind: "subprocess",
+				apiFamily: id === "codex-cli" ? "subprocess-codex" : "subprocess-opencode",
+				auth: "cli",
+				defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+				synthesizeModel: () => ({ id: "worker-model", provider: id }) as never,
+			};
+			const context = stubContext({ endpoint, runtime });
+			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+			let capturedSpec: WorkerSpec | null = null;
+
+			const bundle = createDispatchBundle(context, {
+				spawnWorker: (spec) => {
+					capturedSpec = spec;
+					return {
+						pid: 9001,
+						promise: exit.promise,
+						events: emptyEvents(),
+						abort: () => {},
+						heartbeatAt: { current: Date.now() },
+					};
+				},
+			});
+
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({ agentId: "coder", task: `run ${id}` });
+				exit.resolve({ exitCode: 0, signal: null });
+				await handle.finalPromise;
+				const spec = capturedSpec as unknown as WorkerSpec;
+				strictEqual(spec.runtimeId, id);
+				strictEqual(spec.runtime.kind, "subprocess");
+			} finally {
+				await bundle.extension.stop?.();
+			}
 		}
 	});
 

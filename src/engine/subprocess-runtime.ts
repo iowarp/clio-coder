@@ -37,18 +37,11 @@ export interface SubprocessWorkerHandle {
 	abort(): void;
 }
 
-export type SubprocessParserKind =
-	| "plain-text"
-	| "codex-jsonl"
-	| "gemini-stream-json"
-	| "copilot-jsonl"
-	| "opencode-json";
+export type SubprocessParserKind = "plain-text" | "codex-jsonl" | "opencode-json";
 
 export type SubprocessResumeStrategy =
 	| { type: "none" }
 	| { type: "codex-resume"; sessionId: string }
-	| { type: "gemini-resume"; sessionId: string }
-	| { type: "copilot-resume"; sessionId: string }
 	| { type: "opencode-session"; sessionId: string };
 
 export interface SubprocessRuntimePlan {
@@ -228,8 +221,6 @@ function parseStructuredEvent(parser: SubprocessParserKind, event: unknown, acc:
 		if (message) acc.errors.push(message);
 	}
 	if (parser === "codex-jsonl") parseCodexEvent(event, acc);
-	else if (parser === "gemini-stream-json") parseGeminiEvent(event, acc);
-	else if (parser === "copilot-jsonl") parseCopilotEvent(event, acc);
 	else if (parser === "opencode-json") parseOpenCodeEvent(event, acc);
 }
 
@@ -245,29 +236,6 @@ function parseCodexEvent(event: Record<string, unknown>, acc: ParserAccumulator)
 	if (type === "turn.failed" || type === "error") {
 		const message = extractFirstString(event, ["message", "error"]);
 		if (message) acc.errors.push(message);
-	}
-}
-
-function parseGeminiEvent(event: Record<string, unknown>, acc: ParserAccumulator): void {
-	if (event.type === "message") appendText(acc, extractTextDeep(event.message ?? event.content ?? event));
-	if (event.type === "result") {
-		const result = extractTextDeep(event.result ?? event.response ?? event);
-		if (result.length > 0) acc.text = result;
-		// Gemini's stream-json emits per-call counts under `stats`; older builds used `usage`.
-		setMergedUsage(acc, normalizeUsage(event.stats ?? event.usage, undefined));
-	}
-	if (event.type === "error") {
-		const message = extractFirstString(event, ["message", "error"]);
-		if (message) acc.errors.push(message);
-	}
-}
-
-function parseCopilotEvent(event: Record<string, unknown>, acc: ParserAccumulator): void {
-	appendText(acc, extractTextDeep(event.delta ?? event.message ?? event.response ?? event.content ?? ""));
-	if (event.type === "result" || event.type === "turn.completed") {
-		const result = extractTextDeep(event.result ?? event.output ?? event);
-		if (result.length > 0) acc.text = result;
-		setMergedUsage(acc, normalizeUsage(event.usage, undefined));
 	}
 }
 

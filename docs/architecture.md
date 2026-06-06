@@ -13,7 +13,7 @@ src/
 ├── cli/             # clio subcommands, argument parsing, headless run modes
 ├── core/            # config/state paths, event bus, defaults, shared primitives
 ├── domains/         # feature domains loaded through manifests/contracts
-├── engine/          # pi SDK/provider boundary and runtime adapters
+├── engine/          # pi-ai/provider boundary and runtime adapters
 ├── entry/           # orchestrator bootstrap wiring
 ├── interactive/     # TUI panels, overlays, key routing, dashboard, slash commands
 ├── tools/           # built-in tool specs and registry admission boundary
@@ -43,11 +43,11 @@ Important domain directories include:
 
 `npm run check:boundaries` executes the boundaries test suite under `tests/boundaries/boundaries.test.ts`. Treat these checks as the executable specification.
 
-### Rule 1: pi SDK value imports stay in `src/engine/**`
+### Rule 1: pi-ai value imports stay in `src/engine/**`
 
 Only files under `src/engine/**` may value-import `@earendil-works/pi-*` packages. Outside `src/engine`, type-only imports are not generally open-ended; the current explicit allowlist is limited to provider runtime descriptor shapes from `@earendil-works/pi-ai`.
 
-Why: provider SDKs and pi runtime values should be swappable behind one engine boundary. Domains and the TUI should work against Clio contracts, not vendor/runtime implementations.
+Why: provider SDKs and pi-ai runtime values should be swappable behind one engine boundary. Domains and the TUI should work against Clio contracts, not vendor/runtime implementations.
 
 ### Rule 2: workers do not value-import domains except runtime rehydration
 

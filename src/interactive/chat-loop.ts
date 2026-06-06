@@ -147,7 +147,7 @@ export interface ChatLoop {
 	 * from the selected session entries; omit it for a fresh session.
 	 */
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
-	/** Abort the live agent and release SDK session-scoped resources before shutdown. */
+	/** Abort the live agent and release pi-ai session-scoped resources before shutdown. */
 	dispose(): void;
 }
 
@@ -1108,11 +1108,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 	};
 
-	const cleanupSdkSessionResources = (sessionId: string | undefined): void => {
+	const cleanupSessionResources = (sessionId: string | undefined): void => {
 		try {
 			cleanupEngineSessionResources(sessionId);
 		} catch (err) {
-			emitNotice(`[Clio Coder] SDK session cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+			emitNotice(`[Clio Coder] session resource cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	};
 
@@ -1209,7 +1209,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// Drop any in-flight stream on the prior agent before discarding it.
 		if (runtime) {
 			runtime.agent.abort();
-			cleanupSdkSessionResources(runtime.agent.sessionId);
+			cleanupSessionResources(runtime.agent.sessionId);
 		}
 		const handle = createAgent({
 			initialState: {
@@ -2003,7 +2003,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (runtime) {
 				runtime.agent.abort();
 				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
-				cleanupSdkSessionResources(runtime.agent.sessionId);
+				cleanupSessionResources(runtime.agent.sessionId);
 			}
 			retryCountdown?.cancel();
 			queuedFollowUps.length = 0;
@@ -2028,7 +2028,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (runtime) {
 				runtime.agent.abort();
 				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
-				cleanupSdkSessionResources(runtime.agent.sessionId);
+				cleanupSessionResources(runtime.agent.sessionId);
 			}
 			retryCountdown?.cancel();
 			queuedFollowUps.length = 0;

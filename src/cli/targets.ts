@@ -4,7 +4,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { isWorkerOnlyRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import { isOrchestratorTargetEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -204,7 +204,13 @@ function runUse(args: ReadonlyArray<string>): number {
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(target.runtime);
-	if (runtime && isWorkerOnlyRuntime(runtime)) {
+	if (!runtime) {
+		printError(
+			`cannot use target '${target.id}' as orchestrator target because runtime '${target.runtime}' is not registered`,
+		);
+		return 1;
+	}
+	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
 		printError(`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`);
 		return 1;
 	}
@@ -374,7 +380,8 @@ function runConvert(args: ReadonlyArray<string>): number {
 	ensureClioState();
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	if (!registry.get(runtimeId)) {
+	const runtime = registry.get(runtimeId);
+	if (!runtime) {
 		printError(`unknown runtime id: ${runtimeId} (run \`clio configure --list\` to see registered runtimes)`);
 		return 2;
 	}
@@ -387,6 +394,10 @@ function runConvert(args: ReadonlyArray<string>): number {
 	if (target.runtime === runtimeId) {
 		printOk(`target ${id} already uses runtime ${runtimeId}`);
 		return 0;
+	}
+	if (settings.orchestrator.endpoint === id && !isOrchestratorTargetEligibleRuntime(runtime)) {
+		printError(`cannot convert orchestrator target '${id}' to worker-only runtime '${runtime.id}'`);
+		return 1;
 	}
 	const previousRuntime = target.runtime;
 	target.runtime = runtimeId;
@@ -459,7 +470,6 @@ function colorHealth(status: EndpointStatus["health"]["status"]): string {
 function formatUrl(status: EndpointStatus): string {
 	const runtime = status.runtime;
 	if (runtime?.kind === "subprocess") return "(subprocess)";
-	if (runtime?.kind === "sdk") return "(sdk)";
 	if (status.endpoint.url) return status.endpoint.url;
 	return "(built-in)";
 }
@@ -508,8 +518,6 @@ function tierLabel(tier: ProviderOutputTier): string {
 			return "Cloud";
 		case "local-native":
 			return "Local native";
-		case "sdk":
-			return "SDK runtimes";
 		case "cli":
 			return "CLI runtimes";
 		case "cli-gold":
@@ -531,18 +539,16 @@ function tierRank(tier: ProviderOutputTier): number {
 			return 1;
 		case "local-native":
 			return 2;
-		case "sdk":
-			return 3;
 		case "cli-gold":
-			return 4;
+			return 3;
 		case "cli-silver":
-			return 5;
+			return 4;
 		case "cli":
-			return 6;
+			return 5;
 		case "cli-bronze":
-			return 7;
+			return 6;
 		case "unknown":
-			return 8;
+			return 7;
 	}
 }
 

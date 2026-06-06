@@ -252,7 +252,7 @@ function normalizeToolNames(tools: ReadonlyArray<string> | undefined): string[] 
 
 function toolIsActive(inputs: DynamicInputs, name: string): boolean {
 	const active = normalizeToolNames(inputs.activeToolNames);
-	return !active || active.includes(name);
+	return active?.includes(name) === true;
 }
 
 function renderProjectBlock(contextFiles: string | undefined, projectType: string | null | undefined): string {

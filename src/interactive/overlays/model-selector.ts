@@ -10,7 +10,11 @@ import type {
 	RuntimeResolutionDiagnostic,
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
-import { isWorkerOnlyRuntime, listKnownModelsForRuntime, resolveRuntimeTarget } from "../../domains/providers/index.js";
+import {
+	isOrchestratorTargetEligibleRuntime,
+	listKnownModelsForRuntime,
+	resolveRuntimeTarget,
+} from "../../domains/providers/index.js";
 import {
 	type Component,
 	getKeybindings,
@@ -246,7 +250,7 @@ function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFla
 		tools: caps.tools,
 		reasoning: caps.reasoning,
 		vision: caps.vision,
-		streaming: kind === "http" || kind === "sdk" || kind === "subprocess",
+		streaming: kind === "http" || kind === "subprocess",
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
@@ -416,7 +420,7 @@ export function buildModelItems(deps: {
 	const recentSet = new Set(deps.settings.state?.recentModels ?? []);
 	const list = [...deps.providers.list()]
 		.filter((status) => {
-			return !status.runtime || !isWorkerOnlyRuntime(status.runtime);
+			return status.runtime !== null && isOrchestratorTargetEligibleRuntime(status.runtime);
 		})
 		.sort((a, b) => {
 			const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;

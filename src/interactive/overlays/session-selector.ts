@@ -32,8 +32,8 @@ const SESSION_LAYOUT: SelectListLayoutOptions = {
 
 /**
  * Format an ISO-8601 instant as a human-relative string ("3 minutes ago",
- * "yesterday", "2026-04-12"). Mirrors the convention Claude Code and Codex
- * use in their resume pickers so users do not have to read raw timestamps.
+ * "yesterday", "2026-04-12"). Mirrors common coding-tool resume pickers so
+ * users do not have to read raw timestamps.
  */
 export function formatRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
 	if (!iso) return "—";

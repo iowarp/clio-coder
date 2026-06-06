@@ -79,7 +79,6 @@
 		"prepublishOnly": "npm run ci:release"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.2.120",
 		"@earendil-works/pi-agent-core": "0.78.1",
 		"@earendil-works/pi-ai": "0.78.1",
 		"@earendil-works/pi-tui": "0.78.1",

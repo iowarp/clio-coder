@@ -12,7 +12,7 @@ import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
-export type RunKind = "http" | "subprocess" | "sdk";
+export type RunKind = "http" | "subprocess";
 
 export interface RunReceiptIntegrity {
 	version: 1;

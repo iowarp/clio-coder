@@ -11,7 +11,8 @@ export interface AgentRecipe {
 	model?: string;
 	endpoint?: string;
 	thinkingLevel?: RecipeThinkingLevel;
-	runtime?: "native" | "sdk" | "cli";
+	/** Legacy recipe hint only; dispatch target selection comes from configured worker targets/profiles. */
+	runtime?: "native" | "cli";
 	skills?: ReadonlyArray<string>;
 	source: "builtin" | "user" | "project";
 	filepath: string;

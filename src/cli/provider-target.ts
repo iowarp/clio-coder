@@ -81,7 +81,7 @@ export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectablePro
 			? row.status.source === "environment"
 				? `env${row.status.detail ? `:${row.status.detail}` : ""}`
 				: row.status.source
-			: row.entry.runtimeId.endsWith("-cli") || row.entry.runtimeId.endsWith("-sdk")
+			: row.entry.runtimeId.endsWith("-cli")
 				? "native-cli"
 				: "disconnected";
 		return {

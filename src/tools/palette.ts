@@ -88,7 +88,7 @@ const DISPATCH_RE =
 	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet)\b/i;
 const EXTERNAL_RE = /\b(?:web|http|https|url|fetch|browse|internet|online|external research|latest|current|today)\b/i;
 const SKILL_RE = /\b(?:skill|skills|SKILL\.md)\b/i;
-const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold|install|update)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
+const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
 const SHELL_RE = /\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
 const AVOID_SHELL_RE =
 	/\b(?:(?:do\s+not|don't)\s+(?:use\s+)?|(?:without|no)\s+(?:using\s+)?)\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;

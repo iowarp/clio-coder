@@ -337,7 +337,27 @@ describe("contracts/skills prompt catalog", () => {
 		ok(catalog.startsWith("# Skills"));
 		match(catalog, /catalog_hash="[0-9a-f]{12}"/);
 		match(catalog, /source="clio"/);
+		match(catalog, /origin="project"/);
 		ok(catalog.includes("<description>Catalog entry.</description>"));
+	});
+
+	it("preserves extension skill root origin in model-visible descriptors", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "extension-visible", ['name: "extension-visible"', 'description: "Extension catalog entry."']);
+		const list = loadSkills({
+			roots: [
+				{
+					path: root,
+					scope: "package",
+					source: "extension",
+					origin: "extension:user:test-pack",
+					trusted: true,
+				},
+			],
+		});
+		const catalog = formatSkillsCatalogForPrompt(list);
+		match(catalog, /source="extension"/);
+		match(catalog, /origin="extension:user:test-pack"/);
 	});
 });
 
@@ -377,6 +397,7 @@ describe("contracts/skills slash-command parity", () => {
 		strictEqual(activation.triggeredBy, "slash-command");
 		strictEqual(activation.source, "clio");
 		match(activation.hash, /^[0-9a-f]{64}$/);
+		strictEqual(activation.sourceOrigin, "project");
 		ok(expanded.text.includes("FOLLOW STEPS"));
 	});
 
@@ -430,6 +451,7 @@ describe("contracts/skills tools", () => {
 		strictEqual(details.name, "readable");
 		match(String(details.hash), /^[0-9a-f]{64}$/);
 		strictEqual(details.scope, "project");
+		strictEqual(details.sourceOrigin, "project");
 		ok(String(details.baseDir).includes(".clio"));
 	});
 
@@ -446,6 +468,7 @@ describe("contracts/skills tools", () => {
 			filePath: string;
 			hash: string;
 			source: string;
+			sourceOrigin?: string;
 			triggeredBy: string;
 			turnId?: string;
 		}> = [];
@@ -465,6 +488,7 @@ describe("contracts/skills tools", () => {
 		strictEqual(activation.triggeredBy, "tool");
 		strictEqual(activation.turnId, "turn-1");
 		match(activation.hash, /^[0-9a-f]{64}$/);
+		strictEqual(activation.sourceOrigin, "project");
 		ok(activation.filePath.endsWith("SKILL.md"));
 	});
 

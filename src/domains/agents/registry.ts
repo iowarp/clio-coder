@@ -9,7 +9,7 @@ function parseMode(value: unknown): AgentRecipe["mode"] {
 }
 
 function parseRuntime(value: unknown): AgentRecipe["runtime"] {
-	if (value === "native" || value === "sdk" || value === "cli") return value;
+	if (value === "native" || value === "cli") return value;
 	return undefined;
 }
 

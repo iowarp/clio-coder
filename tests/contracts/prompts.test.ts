@@ -93,6 +93,25 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(result.systemPrompt.includes("# Skills"), false);
 	});
 
+	it("does not emit tool-gated catalogs when active tool names are absent", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			mode: "modes.default",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				agentCatalogStable: "Clio fleet details.",
+				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
+			},
+		});
+
+		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
+		strictEqual(result.systemPrompt.includes("# Skills"), false);
+	});
+
 	it("includes the skills catalog when read_skill is active", () => {
 		const table = loadFragments();
 		const result = compile(table, {

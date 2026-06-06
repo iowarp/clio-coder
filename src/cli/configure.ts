@@ -9,7 +9,7 @@ import {
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
-	isWorkerOnlyRuntime,
+	isOrchestratorTargetEligibleRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -383,7 +383,12 @@ function applyEndpoint(settings: ClioSettings, descriptor: EndpointDescriptor): 
 
 function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
-	if (runtime && isWorkerOnlyRuntime(runtime)) {
+	if (!runtime) {
+		throw new Error(
+			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
+		);
+	}
+	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
 		throw new Error(
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
 		);
@@ -395,6 +400,19 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDesc
 function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
 	settings.workers.default.endpoint = descriptor.id;
 	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
+}
+
+function assertOrchestratorReplacementEligible(settings: ClioSettings, descriptor: EndpointDescriptor): void {
+	if (settings.orchestrator.endpoint !== descriptor.id) return;
+	const runtime = getRuntimeRegistry().get(descriptor.runtime);
+	if (!runtime) {
+		throw new Error(
+			`cannot update orchestrator target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
+		);
+	}
+	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
+		throw new Error(`cannot update orchestrator target '${descriptor.id}' to worker-only runtime '${runtime.id}'`);
+	}
 }
 
 function setWorkerProfilePointer(
@@ -647,15 +665,21 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
-	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
-	applyEndpoint(settings, descriptor);
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
-	if (setOrchestrator && isWorkerOnlyRuntime(runtime)) {
+	if (setOrchestrator && !isOrchestratorTargetEligibleRuntime(runtime)) {
 		printError(
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
 		);
 		return 1;
 	}
+	try {
+		assertOrchestratorReplacementEligible(settings, descriptor);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
+	applyEndpoint(settings, descriptor);
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
 	if (setOrchestrator)
 		setOrchestratorPointer(settings, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
@@ -1039,6 +1063,12 @@ async function runInteractive(
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 	});
+	try {
+		assertOrchestratorReplacementEligible(settings, descriptor);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
 	if (apiKeyLiteral) auth.setApiKey(runtime.id, apiKeyLiteral);
 
 	const probe = await runtimeProbe(runtime, descriptor);
@@ -1056,7 +1086,7 @@ async function runInteractive(
 		}
 	}
 
-	const setOrchestrator = isWorkerOnlyRuntime(runtime)
+	const setOrchestrator = !isOrchestratorTargetEligibleRuntime(runtime)
 		? false
 		: defaults.setOrchestrator
 			? true

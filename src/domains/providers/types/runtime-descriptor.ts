@@ -5,16 +5,8 @@ import type { EndpointDescriptor } from "./endpoint-descriptor.js";
 import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 
-export type RuntimeKind = "http" | "subprocess" | "sdk";
-export type RuntimeTier =
-	| "protocol"
-	| "cloud"
-	| "local-native"
-	| "sdk"
-	| "cli"
-	| "cli-gold"
-	| "cli-silver"
-	| "cli-bronze";
+export type RuntimeKind = "http" | "subprocess";
+export type RuntimeTier = "protocol" | "cloud" | "local-native" | "cli" | "cli-gold" | "cli-silver" | "cli-bronze";
 
 export type RuntimeApiFamily =
 	| "openai-completions"

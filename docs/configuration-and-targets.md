@@ -1,6 +1,8 @@
 # Configuration, Targets, Runtimes, and Auth
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. This keeps local runtimes, cloud APIs, SDK-backed runtimes, and CLI-backed runtimes on the same operational surface.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets must be HTTP/native/pi-ai-backed; fleet dispatch may also use the worker-only `codex-cli` and `opencode-cli` subprocess runtimes.
+
+Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every pi-ai provider.
 
 Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, and `src/cli/auth.ts`.
 
@@ -30,6 +32,17 @@ Default data subdirectories include sessions, audit, state, agents, prompts, rec
 ## Settings shape
 
 On disk, configured model targets live under `targets:`. When loaded in code, the historical internal name is `endpoints`.
+
+Terminology used in code and receipts:
+
+| Term | Meaning |
+| --- | --- |
+| `RuntimeDescriptor` | Executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, `llamacpp`, or `codex-cli`. |
+| Target / `TargetSpec` / `EndpointDescriptor` | Persisted user-configured endpoint plus runtime id, model defaults, auth metadata, and capability overrides. |
+| Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
+| Orchestrator target | Main chat/print target. Must be HTTP/native/pi-ai-backed, not subprocess. |
+| Worker target | Fleet dispatch target. May be HTTP/native or one of the worker-only subprocess runtimes. |
+| Worker-only runtime | `codex-cli` or `opencode-cli`, used only by dispatch workers. |
 
 ```yaml
 version: 1
@@ -148,7 +161,7 @@ clio targets remove <id>
 clio targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets both the orchestrator and the default fleet target. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
+`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses worker-only subprocess runtimes because those cannot be chat/print targets. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
 
 ### Local reasoning-token budgets
 
@@ -194,10 +207,10 @@ Representative built-in runtime IDs:
 
 | Category | Runtime IDs |
 | --- | --- |
-| Protocol-compatible | `openai-compat`, `anthropic-compat` |
+| Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
-| CLI/subprocess | `codex-cli`, `opencode-cli` |
+| Worker-only subprocess | `codex-cli`, `opencode-cli` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
 

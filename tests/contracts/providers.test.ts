@@ -1,4 +1,6 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	createMemoryAuthStorage,
@@ -6,7 +8,11 @@ import {
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
-import { isWorkerOnlyRuntime } from "../../src/domains/providers/eligibility.js";
+import {
+	isOrchestratorTargetEligibleRuntime,
+	isWorkerOnlyRuntime,
+	WORKER_ONLY_RUNTIME_IDS,
+} from "../../src/domains/providers/eligibility.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
@@ -14,6 +20,11 @@ import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtime
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import {
+	parseWorkerSpec,
+	WORKER_RUNTIME_DESCRIPTOR_VERSION,
+	WORKER_SPEC_VERSION,
+} from "../../src/worker/spec-contract.js";
 
 function fakeDescriptor(id: string, overrides: Partial<RuntimeDescriptor> = {}): RuntimeDescriptor {
 	return {
@@ -173,13 +184,16 @@ describe("contracts/providers/runtime-cleanup", () => {
 		for (const removed of ["claude-code-sdk", "claude-code-cli", "gemini-cli", "copilot-cli"]) {
 			ok(!builtinIds.has(removed), `runtime '${removed}' must be absent from the builtin registry`);
 		}
-		// No descriptor may advertise a Claude Code / agent-sdk API family.
+		// No descriptor may advertise a Claude Code / agent-sdk API family or unsupported kind.
 		for (const runtime of BUILTIN_RUNTIMES) {
 			ok(
 				!/claude|agent-sdk/.test(runtime.apiFamily),
 				`runtime '${runtime.id}' must not use a Claude Code apiFamily (${runtime.apiFamily})`,
 			);
-			ok(runtime.kind !== "sdk", `no builtin runtime should use the sdk kind (${runtime.id})`);
+			ok(
+				runtime.kind === "http" || runtime.kind === "subprocess",
+				`runtime '${runtime.id}' must use a supported RuntimeKind (${runtime.kind})`,
+			);
 		}
 	});
 
@@ -188,15 +202,20 @@ describe("contracts/providers/runtime-cleanup", () => {
 		ok(anthropic, "anthropic runtime must remain registered");
 		strictEqual(anthropic?.apiFamily, "anthropic-messages");
 		strictEqual(anthropic?.kind, "http");
-		// Protocol-compatible escape hatch stays available.
+		// Protocol-compatible escape hatches stay available.
 		ok(builtinIds.has("anthropic-compat"), "anthropic-compat must remain registered");
+		ok(builtinIds.has("openai-compat"), "openai-compat must remain registered");
 	});
 
 	it("limits worker-only (subprocess) runtimes to codex-cli and opencode-cli", () => {
 		const workerOnly = BUILTIN_RUNTIMES.filter((r) => isWorkerOnlyRuntime(r))
 			.map((r) => r.id)
 			.sort();
-		deepStrictEqual(workerOnly, ["codex-cli", "opencode-cli"]);
+		deepStrictEqual(workerOnly, [...WORKER_ONLY_RUNTIME_IDS].sort());
+		const workerOnlySet = new Set<string>(workerOnly);
+		for (const runtime of BUILTIN_RUNTIMES.filter((entry) => !workerOnlySet.has(entry.id))) {
+			ok(isOrchestratorTargetEligibleRuntime(runtime), `${runtime.id} should be orchestrator/print eligible`);
+		}
 	});
 
 	it("rejects worker-only runtimes as orchestrator and print targets", () => {
@@ -216,6 +235,79 @@ describe("contracts/providers/runtime-cleanup", () => {
 			if (!res.ok) {
 				ok(res.diagnostics.some((d) => d.code === "worker-only-target-unsupported"));
 			}
+		}
+	});
+
+	it("accepts codex-cli and opencode-cli as dispatch worker targets", () => {
+		for (const id of WORKER_ONLY_RUNTIME_IDS) {
+			const apiFamily = id === "codex-cli" ? "subprocess-codex" : "subprocess-opencode";
+			const runtime = fakeDescriptor(id, { kind: "subprocess", apiFamily, auth: "cli" });
+			const endpoint: EndpointDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
+			const mockProviders: ProvidersContract = {
+				list: () => [],
+				getEndpoint: (targetId: string) => (targetId === endpoint.id ? endpoint : null),
+				getRuntime: (runtimeId: string) => (runtimeId === id ? runtime : null),
+				getDetectedReasoning: () => null,
+				knowledgeBase: null,
+			} as never;
+
+			const res = resolveRuntimeTarget(mockProviders, { endpointId: endpoint.id, use: "dispatch" });
+			strictEqual(res.ok, true, `${id} must remain dispatch-eligible`);
+		}
+	});
+
+	it("rejects sdk runtime kind in the worker spec contract", () => {
+		throws(
+			() =>
+				parseWorkerSpec({
+					specVersion: WORKER_SPEC_VERSION,
+					systemPrompt: "",
+					task: "t",
+					endpoint: { id: "target", runtime: "legacy-sdk" },
+					runtime: {
+						version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+						id: "legacy-sdk",
+						kind: "sdk",
+						apiFamily: "openai-responses",
+						auth: "none",
+					},
+					runtimeId: "legacy-sdk",
+					wireModelId: "model",
+					allowedTools: [],
+				}),
+			/http, subprocess/,
+		);
+	});
+
+	it("has no builtin Claude Code SDK/CLI/approval IPC runtime implementation paths", () => {
+		const removedPaths = [
+			"src/engine/claude-code-sdk-runtime.ts",
+			"src/engine/sdk-policy-bridge.ts",
+			"src/domains/providers/runtimes/cli-stub/claude-code-cli.ts",
+			"src/domains/providers/runtimes/cli-stub/claude-code-sdk.ts",
+			"src/domains/providers/runtimes/cli-stub/gemini-cli.ts",
+			"src/domains/providers/runtimes/cli-stub/copilot-cli.ts",
+			"src/interactive/tool-approval-overlay.ts",
+			"src/interactive/overlays/tool-approval-overlay.ts",
+		];
+		for (const rel of removedPaths) {
+			ok(!existsSync(join(process.cwd(), rel)), `${rel} must stay removed`);
+		}
+	});
+
+	it("keeps docs-sensitive runtime lists free of removed CLI and Claude Code support", () => {
+		const docs = [
+			"README.md",
+			"docs/configuration-and-targets.md",
+			"docs/commands-and-modes.md",
+			"docs/safety-model.md",
+			"docs/built-in-agents.md",
+		];
+		const forbidden =
+			/claude-code-(?:sdk|cli)|gemini-cli|copilot-cli|Claude Code runtime|External CLI\/SDK|SDK-backed runtimes|native \| sdk \| cli/i;
+		for (const rel of docs) {
+			const text = readFileSync(join(process.cwd(), rel), "utf8");
+			ok(!forbidden.test(text), `${rel} must not advertise removed runtime support`);
 		}
 	});
 });
