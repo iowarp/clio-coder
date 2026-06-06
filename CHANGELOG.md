@@ -5,15 +5,77 @@ Keep a Changelog.
 
 ## 0.2.2 - unreleased
 
-Clio Coder 0.2.2 removes the Claude Code runtime surface and every built-in CLI
-subprocess runtime. Claude Code no longer has a programmatic use case for Clio,
-and batch CLI harnesses (Codex CLI, OpenCode CLI) cannot support Clio's steering,
-follow-up prompting, runtime control, receipts, tool governance, or session
-continuity. `RuntimeDescriptor` now describes HTTP/native/pi-ai-backed executable
-adapters only, and chat, print, and dispatch worker targets all resolve through
-one target-eligibility policy. The only Anthropic support that remains is the
-normal Anthropic Messages API through pi-ai. Hosted defaults continue to lead
-with ChatGPT/Codex OAuth, and native local runtimes stay first-class.
+Clio Coder 0.2.2 is a harness-shaping release. It cuts away the brittle
+Claude Code/CLI-subprocess runtime era, adds ACP as the deliberate interop
+surface, hardens skill activation and dispatch worker metadata, and turns
+`CLIO.md` into a higher-signal project constitution that future Clio sessions can
+use without rediscovering the same architecture traps. The runtime contract is
+now narrower and more honest: Clio drives HTTP/native/pi-ai-backed executable
+adapters directly, and external coding agents integrate through ACP delegation
+rather than hidden subprocess shims.
+
+### Added
+
+- Added `clio acp`, a stdio Agent Client Protocol v1 server surface for ACP
+  frontends. The server maps Clio chat events, tool-call updates, cancellation,
+  usage metadata, cwd-aware session creation, and optional session close support
+  into ACP-shaped JSON-RPC messages.
+- Added ACP delegation support for configured agents. Dispatch can spawn an ACP
+  peer, initialize a session, send the delegated task with Clio prompt context,
+  mediate `session/request_permission` through Clio safety policy, stream mapped
+  agent events, and record ACP session/usage metadata in receipts.
+- Added contract and smoke coverage for ACP event mapping, permission mediation,
+  stdio delegation, `clio acp` serving, strict ACP v1 initialize/update shapes,
+  stop-reason normalization, and cancellation.
+- Added richer skill compatibility and activation behavior: normalized skill
+  loading, project/user compatibility roots for Agent Skills, Claude, Codex,
+  OpenCode, and Copilot-style layouts, slash-command parity, runtime-option
+  propagation to workers, and upgraded `read_skill` / `create_skill` tooling.
+- Added custom-section support to `CLIO.md` parsing, serialization, bootstrap
+  generation, and project-context rendering. `/init --generate` can now preserve
+  compact architecture boundaries, workflow traps, retrieval strategy, generated
+  artifact policy, and failure modes instead of flattening everything into six
+  bullets.
+- Added Clio-source-tree awareness to the prompt harness. When Clio is running
+  inside her own repository, the model is told that TUI, skills, agents, tools,
+  prompts, context/bootstrap, and harness changes are ordinary local source work
+  when requested, while publishing, pushing, releases, PRs, and registry
+  contribution still require explicit user intent.
+
+### Changed
+
+- Replaced the split worker/orchestrator runtime eligibility vocabulary with a
+  single `isTargetEligibleRuntime` policy used by chat, print, dispatch, target
+  listing, and worker-spec validation.
+- Restricted `RuntimeDescriptor` to the direct runtime path Clio can actually
+  govern: HTTP/native/pi-ai-backed targets. The normal Anthropic Messages API
+  through pi-ai remains; Claude Code as a programmatic runtime does not.
+- Changed dispatch receipt behavior for batch and delegated work so worker
+  summaries and ACP delegation metadata are clearer and easier to audit.
+- Refreshed the root `CLIO.md` from a tiny rule list into Clio Coder's own
+  repository rulebook: architecture map, context/bootstrap constitution,
+  workflow for changing Clio itself, self-development/contribution etiquette,
+  and high-risk failure modes.
+- Converted release/developer guide material into interactive HTML blueprints
+  for installation, lifecycle, documentation, validation, and related operator
+  workflows.
+
+### Fixed
+
+- Fixed ACP server/client output to conform to ACP v1 closed-schema shapes:
+  non-spec capabilities stay out of top-level initialize responses, tool kinds
+  are mapped to ACP's closed enum, Clio metadata is namespaced under `_meta`, and
+  pi-agent stop reasons such as tool-use/error are normalized or surfaced as
+  protocol-safe results.
+- Fixed runtime target cleanup fallout after subprocess removal so target
+  eligibility, provider support lists, dispatch worker specs, and runtime
+  diagnostics agree on the same direct-runtime model.
+- Fixed skill worker launches so runtime options are propagated into worker
+  specs instead of being lost across dispatch boundaries.
+- Fixed dispatch batch worker summaries so multi-worker runs report coherent
+  completion data.
+- Fixed CLIO.md project-context injection so custom H2 sections survive parsing
+  and are visible to future turns instead of being silently discarded.
 
 ### Removed
 
@@ -29,24 +91,35 @@ with ChatGPT/Codex OAuth, and native local runtimes stay first-class.
 - Removed the worker-only runtime terminology and eligibility helpers
   (`WORKER_ONLY_RUNTIME_IDS`, `isWorkerOnlyRuntime`,
   `isWorkerTargetEligibleRuntime`, `isOrchestratorTargetEligibleRuntime`),
-  replaced by a single `isTargetEligibleRuntime` predicate. `RuntimeKind` is now
-  `"http"` only; the `cli`/`cli-gold`/`cli-silver`/`cli-bronze` runtime tiers, the
-  `cli` auth type, and the `subprocess-codex`/`subprocess-opencode` api families
-  are gone.
+  replaced by the single direct-runtime eligibility predicate.
+- Removed the `cli`/`cli-gold`/`cli-silver`/`cli-bronze` runtime tiers, the `cli`
+  auth type, and the `subprocess-codex`/`subprocess-opencode` API families from
+  the built-in runtime model.
 - Removed the tool-approval IPC that existed solely for the Claude Code SDK
   worker: the `clio_tool_approval_request`/`clio_tool_approval_response`
   channel, the `SpawnedWorker` approval handlers, the worker stdin demux
   approval wait, the TUI tool-approval overlay, and the `tool.approval.*` bus
   channels.
 - Removed the `--auto-approve` CLI flag, the `auto_approve` dispatch tool
-  argument, and the `WorkerSpec.autoApprove` field. These only steered the
-  removed SDK approval loop.
-- Removed the Claude-Code-specific `--supervised` dispatch flag and
-  `DispatchRequest.supervised` field. They only set the SDK approval auto-deny
-  default. The worker-runtime `supervised` permission strategy for Codex CLI and
-  OpenCode CLI is unchanged and still maps from the run mode.
-- Removed the Claude Code / agent-SDK entries from `RuntimeApiFamily` and the
-  worker spec's accepted runtime API families.
+  argument, the `WorkerSpec.autoApprove` field, the Claude-Code-specific
+  `--supervised` dispatch flag, and `DispatchRequest.supervised`.
+- Removed Claude Code / agent-SDK entries from `RuntimeApiFamily` and the worker
+  spec's accepted runtime API families.
+
+### Release verification
+
+- Recent deterministic checks on the v0.2.2 line: `npm run typecheck`,
+  `npm run build`, and `npm run test -- tests/contracts/bootstrap.test.ts` passed;
+  the test command exercised the full configured contract/smoke/boundary suite
+  with 122 passing tests.
+- Known release-gate blocker before tagging: `npm run lint` currently reports
+  pre-existing accessibility issues in generated `docs/html/*_blueprint.html`
+  files, primarily SVGs without titles and buttons without explicit `type`
+  attributes. `npm run ci:release` will remain blocked until those docs are
+  fixed or the release gate is intentionally scoped.
+- Before final release prep, bump package/docs from 0.2.1 to 0.2.2, date this
+  changelog section, rebuild `dist`, and run the full `npm run ci:release` plus
+  packaging sanity checks.
 
 ## 0.2.1 - 2026-06-05
 
