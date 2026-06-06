@@ -373,7 +373,7 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	}
 	// Live receipts always record "http"; "subprocess" is tolerated only so
 	// receipts written by older Clio versions still render.
-	if (r.runtimeKind !== "http" && r.runtimeKind !== "subprocess") {
+	if (r.runtimeKind !== "http" && r.runtimeKind !== "subprocess" && r.runtimeKind !== "acp-delegation") {
 		return { ok: false, reason: `runtimeKind invalid: ${String(r.runtimeKind)}` };
 	}
 	const exitCode = r.exitCode;

@@ -148,13 +148,18 @@ function formatUsd(value: number): string {
 }
 
 function endpointModelCell(row: DispatchBoardRow): string {
+	if (row.runtimeKind === "acp-delegation") return `acp/${row.wireModelId}`;
 	return `${row.endpointId}/${row.wireModelId}`;
+}
+
+function runtimeCell(row: DispatchBoardRow): string {
+	return row.runtimeKind === "acp-delegation" ? `acp:${row.runtimeId}` : `${row.runtimeKind}:${row.runtimeId}`;
 }
 
 function renderRowContent(row: DispatchBoardRow): string {
 	return buildContentLine([
 		leftCell(row.agentId, AGENT_WIDTH),
-		leftCell(`${row.runtimeKind}:${row.runtimeId}`, RUNTIME_WIDTH),
+		leftCell(runtimeCell(row), RUNTIME_WIDTH),
 		leftCell(endpointModelCell(row), ENDPOINT_MODEL_WIDTH),
 		leftCell(row.status, STATUS_WIDTH),
 		rightCell(formatElapsedMs(row.elapsedMs), ELAPSED_WIDTH),
@@ -176,7 +181,7 @@ function renderTaskIslandRow(row: DispatchBoardRow): string {
 	return buildContentLine([
 		statusGlyph(row.status),
 		leftCell(row.agentId, 9),
-		leftCell(`${row.endpointId}/${row.wireModelId}`, 17),
+		leftCell(endpointModelCell(row), 17),
 		rightCell(formatElapsedMs(row.elapsedMs), 7),
 		rightCell(formatTokenCount(row.tokenCount), 6),
 	]);
@@ -190,9 +195,8 @@ function parseText(value: unknown, fallback: string): string {
 	return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
-function parseRuntimeKind(_value: unknown): RunKind {
-	// Clio only drives HTTP/native runtimes; legacy persisted values coerce to http.
-	return "http";
+function parseRuntimeKind(value: unknown): RunKind {
+	return value === "acp-delegation" ? "acp-delegation" : "http";
 }
 
 function parseFiniteNumber(value: unknown, fallback: number): number {

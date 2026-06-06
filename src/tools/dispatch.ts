@@ -81,6 +81,8 @@ function dispatchRequestFromArgs(
 	if (workerProfile) request.workerProfile = workerProfile;
 	const workerRuntime = stringArg(args, "agent_runtime", "agentRuntime", "worker_runtime", "workerRuntime");
 	if (workerRuntime) request.workerRuntime = workerRuntime;
+	const delegationAgentId = stringArg(args, "delegation_agent_id", "delegationAgentId", "delegate", "acp_agent_id");
+	if (delegationAgentId) request.delegationAgentId = delegationAgentId;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
 	const memorySection = stringArg(args, "memory_section", "memorySection");
@@ -265,6 +267,9 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			agent_runtime: Type.Optional(
 				Type.String({ description: "Runtime selector used when no explicit target is given." }),
 			),
+			delegation_agent_id: Type.Optional(
+				Type.String({ description: "ACP delegation agent id from settings.delegation.agents[]." }),
+			),
 			tool_profile: Type.Optional(
 				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
 			),
@@ -366,6 +371,7 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 						model: Type.Optional(Type.String()),
 						agent_profile: Type.Optional(Type.String()),
 						agent_runtime: Type.Optional(Type.String()),
+						delegation_agent_id: Type.Optional(Type.String()),
 						tool_profile: Type.Optional(
 							Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
 						),
@@ -387,6 +393,7 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 			model: Type.Optional(Type.String({ description: "Default model override for every task." })),
 			agent_profile: Type.Optional(Type.String({ description: "Default fleet profile." })),
 			agent_runtime: Type.Optional(Type.String({ description: "Default worker runtime selector." })),
+			delegation_agent_id: Type.Optional(Type.String({ description: "Default ACP delegation agent id." })),
 			tool_profile: Type.Optional(
 				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
 			),

@@ -106,6 +106,17 @@ function isStructuredOutputs(
 	return value === "json-schema" || value === "gbnf" || value === "xgrammar" || value === "none";
 }
 
+function positiveInteger(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+}
+
+function normalizeDelegationToolGovernance(
+	value: unknown,
+	fallback: ClioSettings["delegation"]["defaults"]["toolGovernance"],
+): ClioSettings["delegation"]["defaults"]["toolGovernance"] {
+	return value === "clio-policy" || value === "agent-managed" || value === "deny-all" ? value : fallback;
+}
+
 export function mergeSettings<T>(defaults: T, overrides: unknown): T {
 	if (overrides === undefined) return cloneValue(defaults);
 	if (Array.isArray(defaults)) {
@@ -240,6 +251,56 @@ function normalizeEndpoint(value: unknown): ClioSettings["endpoints"][number] | 
 	if (typeof value.gateway === "boolean") endpoint.gateway = value.gateway;
 	if (pricing) endpoint.pricing = pricing;
 	return endpoint;
+}
+
+function normalizeDelegationDefaults(value: unknown): ClioSettings["delegation"]["defaults"] {
+	const out = cloneValue(DEFAULT_SETTINGS.delegation.defaults);
+	if (!isPlainObject(value)) return out;
+	out.connectTimeoutMs = positiveInteger(value.connectTimeoutMs, out.connectTimeoutMs);
+	out.turnTimeoutMs = positiveInteger(value.turnTimeoutMs, out.turnTimeoutMs);
+	out.permissionTimeoutMs = positiveInteger(value.permissionTimeoutMs, out.permissionTimeoutMs);
+	out.toolGovernance = normalizeDelegationToolGovernance(value.toolGovernance, out.toolGovernance);
+	return out;
+}
+
+function normalizeDelegationAgent(
+	value: unknown,
+	defaults: ClioSettings["delegation"]["defaults"],
+	seen: Set<string>,
+): ClioSettings["delegation"]["agents"][number] | null {
+	if (!isPlainObject(value)) return null;
+	const id = trimString(value.id);
+	const command = trimString(value.command);
+	if (!id || !command || seen.has(id)) return null;
+	seen.add(id);
+	const agent: ClioSettings["delegation"]["agents"][number] = {
+		id,
+		command,
+		args: trimStringArray(value.args),
+		connectTimeoutMs: positiveInteger(value.connectTimeoutMs, defaults.connectTimeoutMs),
+		turnTimeoutMs: positiveInteger(value.turnTimeoutMs, defaults.turnTimeoutMs),
+		permissionTimeoutMs: positiveInteger(value.permissionTimeoutMs, defaults.permissionTimeoutMs),
+		toolGovernance: normalizeDelegationToolGovernance(value.toolGovernance, defaults.toolGovernance),
+	};
+	const cwd = trimString(value.cwd);
+	const env = trimStringRecord(value.env);
+	const labels = trimStringRecord(value.labels);
+	if (cwd) agent.cwd = cwd;
+	if (env) agent.env = env;
+	if (labels) agent.labels = labels;
+	return agent;
+}
+
+function normalizeDelegation(value: unknown): ClioSettings["delegation"] {
+	const record = isPlainObject(value) ? value : null;
+	const defaults = normalizeDelegationDefaults(record?.defaults);
+	const seen = new Set<string>();
+	const agents = Array.isArray(record?.agents)
+		? (record.agents as unknown[])
+				.map((entry) => normalizeDelegationAgent(entry, defaults, seen))
+				.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+		: [];
+	return { defaults, agents };
 }
 
 interface LegacyEndpointContext {
@@ -613,6 +674,8 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 			settings.skills.trustProjectCompatRoots = raw.skills.trustProjectCompatRoots;
 		}
 	}
+
+	settings.delegation = normalizeDelegation(raw.delegation);
 
 	if (isPlainObject(raw.keybindings)) {
 		// pi-tui's KeybindingsConfig accepts `KeyId | KeyId[]`. Legacy Clio

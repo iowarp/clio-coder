@@ -1,3 +1,4 @@
+import { runAcpCommand } from "./acp.js";
 import { runAgentsCommand } from "./agents.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
@@ -27,6 +28,7 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 
 Usage:
   clio                      start interactive repository chat
+  clio acp                  serve Clio as an ACP v1 agent over stdio
   clio run [flags] <task>   run one headless main-agent turn
   clio --version, -v        print the Clio Coder version
   clio --api-key <key>      override the active target API key for this run
@@ -81,6 +83,8 @@ async function main(argv: string[]): Promise<number> {
 	if (!subcommand) return runClioCommand(bootOptions);
 
 	switch (subcommand) {
+		case "acp":
+			return runAcpCommand(subArgs, bootOptions);
 		case "auth":
 			return runAuthCommand(subArgs);
 		case "configure":

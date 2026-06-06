@@ -36,6 +36,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"budget.sessionCeilingUsd",
 	"terminal",
 	"skills",
+	"delegation",
 	"compaction",
 	"retry",
 ]);

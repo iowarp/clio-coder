@@ -13,12 +13,11 @@ import type { RuntimeTargetSnapshot } from "../providers/index.js";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
 /**
- * Runtime kind recorded on a run envelope/receipt. Clio only drives HTTP/native
- * runtimes, so live runs always record "http". The literal is kept narrow on
- * purpose; legacy persisted receipts that carried other values are coerced to
- * "http" on read.
+ * Runtime kind recorded on a run envelope/receipt. "http" covers Clio-owned
+ * model runtimes; "acp-delegation" covers external Agent Client Protocol
+ * harnesses that Clio supervises as delegated coding agents.
  */
-export type RunKind = "http";
+export type RunKind = "http" | "acp-delegation";
 
 export interface RunReceiptIntegrity {
 	version: 1;
@@ -77,6 +76,38 @@ export interface SafetyBlockedAttempt {
 	reasonCode?: string;
 	policySource?: string;
 	reason?: string;
+}
+
+export interface DelegationToolCallLogEntry {
+	callId: string;
+	tool: string;
+	arguments: Record<string, unknown>;
+	decision: "approved" | "denied" | "cancelled" | "error";
+	reason?: string;
+	safetyDecision?: {
+		kind: "allow" | "ask" | "block";
+		reasonCode?: string;
+		policySource?: string;
+		ruleId?: string;
+	};
+	durationMs: number;
+	timestamp: string;
+}
+
+export interface RunReceiptDelegation {
+	agentConfigId: string;
+	command: string;
+	args: string[];
+	acpSessionId: string | null;
+	acpProtocolVersion: number | null;
+	acpAgentName: string | null;
+	acpAgentVersion: string | null;
+	agentCapabilities: Record<string, unknown>;
+	toolCallsRequested: number;
+	toolCallsApproved: number;
+	toolCallsDenied: number;
+	toolGovernance: "clio-policy" | "agent-managed" | "deny-all";
+	toolCallLog: DelegationToolCallLogEntry[];
 }
 
 export interface RunReceiptSafetySummary {
@@ -156,6 +187,7 @@ export interface RunReceipt {
 	reproducibility?: RunReceiptReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;
+	delegation?: RunReceiptDelegation;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

@@ -26,6 +26,9 @@ export type SlashCommand =
 	| { kind: "share"; args: string }
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
+	| { kind: "delegate"; agentId: string; task: string }
+	| { kind: "delegate-usage" }
+	| { kind: "agents" }
 	| { kind: "providers" }
 	| { kind: "connect"; target?: string }
 	| { kind: "disconnect"; target?: string }
@@ -139,6 +142,34 @@ export async function handleRun(
 	}
 }
 
+export async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
+	const { dispatch, io, bus } = deps;
+	try {
+		const handle = await dispatch.dispatch({
+			agentId,
+			delegationAgentId: agentId,
+			task,
+		});
+		for await (const event of handle.events) {
+			const e = event as { type?: string };
+			if (!e.type || e.type === "heartbeat") continue;
+			bus?.emit(BusChannels.DispatchProgress, {
+				runId: handle.runId,
+				agentId,
+				event,
+			});
+		}
+		const receipt = await handle.finalPromise;
+		if (receipt.exitCode !== 0 || receipt.failureMessage) {
+			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
+			io.stderr(`[delegate] failed: exit=${receipt.exitCode}${failure}\n`);
+		}
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		io.stderr(`[delegate] failed: ${msg}\n`);
+	}
+}
+
 const VALID_RUN_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function parseInitCommand(rest: string): SlashCommand {
@@ -210,6 +241,14 @@ function parseRunCommand(rest: string): SlashCommand {
 	return { kind: "run", agentId, task, options };
 }
 
+function parseDelegateCommand(rest: string): SlashCommand {
+	const parts = rest.split(/\s+/).filter(Boolean);
+	const agentId = parts[0];
+	const task = parts.slice(1).join(" ").trim();
+	if (!agentId || task.length === 0) return { kind: "delegate-usage" };
+	return { kind: "delegate", agentId, task };
+}
+
 /**
  * Runtime dependencies every slash-command handler may need. Every field is
  * injected at startInteractive construction time; handlers never reach into
@@ -228,6 +267,13 @@ export interface SlashCommandContext {
 	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	listDelegationAgents: () => ReadonlyArray<{
+		id: string;
+		command: string;
+		args: ReadonlyArray<string>;
+		toolGovernance?: string;
+		labels?: Record<string, string>;
+	}>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openProviders: () => void;
@@ -503,6 +549,58 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				);
 				ctx.render();
 			})();
+		},
+	},
+	{
+		name: "delegate",
+		description: "Run an ACP delegation agent",
+		argumentHint: "<agent-id> <task>",
+		kinds: ["delegate", "delegate-usage"],
+		match(trimmed) {
+			if (trimmed === "/delegate" || trimmed === "/delegate ") return { kind: "delegate-usage" };
+			if (trimmed.startsWith("/delegate ")) return parseDelegateCommand(trimmed.slice("/delegate ".length).trim());
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind === "delegate-usage") {
+				ctx.io.stdout("\nusage: /delegate <agent-id> <task>\n");
+				return;
+			}
+			if (command.kind !== "delegate") return;
+			void (async () => {
+				await handleDelegate(command.agentId, command.task, {
+					dispatch: ctx.dispatch,
+					io: ctx.io,
+					workerDefault: ctx.workerDefault(),
+					bus: ctx.bus,
+				});
+				ctx.render();
+			})();
+		},
+	},
+	{
+		name: "agents",
+		description: "List ACP delegation agents",
+		kinds: ["agents"],
+		match(trimmed) {
+			return trimmed === "/agents" ? { kind: "agents" } : null;
+		},
+		handle(_command, ctx) {
+			const agents = ctx.listDelegationAgents();
+			if (agents.length === 0) {
+				ctx.io.stdout("\nACP delegation agents: none configured\n");
+				return;
+			}
+			const rows = agents.map((agent) => {
+				const labels =
+					agent.labels && Object.keys(agent.labels).length > 0
+						? ` labels=${Object.entries(agent.labels)
+								.map(([key, value]) => `${key}:${value}`)
+								.join(",")}`
+						: "";
+				return `  ${agent.id.padEnd(18)} ${agent.command} ${agent.args.join(" ")} governance=${agent.toolGovernance ?? "clio-policy"}${labels}`;
+			});
+			ctx.io.stdout(`\nACP delegation agents:\n${rows.join("\n")}\n`);
 		},
 	},
 	{

@@ -63,6 +63,47 @@ describe("contracts/config", () => {
 		deepStrictEqual(diff.restartRequired, []);
 	});
 
+	it("normalizes ACP delegation agents and treats them as next-turn settings", () => {
+		const normalized = normalizeSettings({
+			delegation: {
+				defaults: {
+					connectTimeoutMs: 7,
+					turnTimeoutMs: 11,
+					permissionTimeoutMs: 13,
+					toolGovernance: "deny-all",
+				},
+				agents: [
+					{
+						id: "opencode",
+						command: "opencode",
+						args: ["acp", "--cwd", "."],
+						toolGovernance: "clio-policy",
+						labels: { specialty: "coding" },
+					},
+					{ id: "opencode", command: "ignored", args: [] },
+					{ id: "missing-command" },
+				],
+			},
+		});
+
+		strictEqual(normalized.delegation.defaults.connectTimeoutMs, 7);
+		strictEqual(normalized.delegation.defaults.toolGovernance, "deny-all");
+		strictEqual(normalized.delegation.agents.length, 1);
+		strictEqual(normalized.delegation.agents[0]?.id, "opencode");
+		strictEqual(normalized.delegation.agents[0]?.turnTimeoutMs, 11);
+		strictEqual(normalized.delegation.agents[0]?.toolGovernance, "clio-policy");
+		deepStrictEqual(normalized.delegation.agents[0]?.args, ["acp", "--cwd", "."]);
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
+
+		const prev = structuredClone(DEFAULT_SETTINGS);
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.delegation.agents = normalized.delegation.agents;
+		const diff = diffSettings(prev, next);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.nextTurn, ["delegation.agents.0"]);
+		deepStrictEqual(diff.restartRequired, []);
+	});
+
 	it("classifies settings changes next-turn updates", () => {
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);

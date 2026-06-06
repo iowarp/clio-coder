@@ -15,6 +15,11 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import type { ToolName } from "../../core/tool-names.js";
+import {
+	type AcpDelegationRunHandle,
+	type AcpDelegationRunInput,
+	startAcpDelegationRun,
+} from "../../engine/acp/adapter.js";
 import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
 import {
 	serializeWorkerRuntimeDescriptor,
@@ -86,6 +91,7 @@ interface ActiveRun {
 
 export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	startAcpDelegationRun?: (input: AcpDelegationRunInput) => AcpDelegationRunHandle;
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
 	resilienceCooldownMs?: number;
@@ -274,6 +280,22 @@ interface DispatchLifecycleStage {
 	runtimeLimitations: string[];
 }
 
+interface AcpDelegationLifecycleStage {
+	currentMode: ModeName;
+	admission: DispatchAdmissionStage;
+	agentConfig: ReturnType<ConfigContract["get"]>["delegation"]["agents"][number];
+	cwd: string;
+	systemPrompt: string;
+	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
+	compiledPromptHash: string | null;
+	staticCompositionHash: string | null;
+	sessionShellHash: string | null;
+	dynamicHash: string | null;
+	promptSignature: string | null;
+	toolSignature: string;
+	runtimeLimitations: string[];
+}
+
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
 	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
 }
@@ -313,6 +335,10 @@ function runtimeLimitations(_runtimeKind: RunKind, _runtimeId: string): string[]
 	// observes and controls directly, so there are no runtime-imposed dispatch
 	// limitations to record.
 	return [];
+}
+
+function acpRuntimeLimitations(): string[] {
+	return ["external ACP agent executes its own tools; Clio mediates permission requests and records decisions"];
 }
 
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
@@ -367,6 +393,40 @@ function resolveDispatchAdmissionStage(
 	return {
 		currentMode,
 		workerMode,
+		allowedTools,
+		requestedActions,
+		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
+	};
+}
+
+function resolveDelegationAdmissionStage(
+	req: DispatchRequest,
+	currentMode: ModeName,
+	visibleTools: ReadonlyArray<ToolName>,
+	safety: SafetyContract,
+): DispatchAdmissionStage {
+	const allowedTools = applyToolProfile(Array.from(visibleTools), req.toolProfile);
+	const requestedActions = deriveRequestedActions(allowedTools, safety);
+	const orchScope = pickOrchestratorScope(safety, currentMode);
+	if (orchScope === null) {
+		throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow delegation`);
+	}
+	const workerScope = pickWorkerScope(safety, currentMode);
+	const verdict = admit(
+		{
+			requestedScope: workerScope,
+			orchestratorScope: orchScope,
+			requestedActions,
+			agentId: req.agentId,
+		},
+		safety.isSubset,
+	);
+	if (!verdict.admitted) {
+		throw new Error(`dispatch: delegation admission denied: ${verdict.reason}`);
+	}
+	return {
+		currentMode,
+		workerMode: currentMode,
 		allowedTools,
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
@@ -544,6 +604,7 @@ export function createDispatchBundle(
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
+	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 	const resilienceCooldownMs = options?.resilienceCooldownMs ?? DEFAULT_RESILIENCE_COOLDOWN_MS;
@@ -706,6 +767,380 @@ export function createDispatchBundle(
 		};
 	}
 
+	function resolveAcpDelegationLifecycle(req: DispatchRequest): AcpDelegationLifecycleStage {
+		const agentId = req.delegationAgentId;
+		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
+		const settings = config?.get();
+		if (!settings) throw new Error("dispatch: config domain required for ACP delegation");
+		const configured = settings.delegation.agents.find((entry) => entry.id === agentId);
+		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
+		const currentMode = modes.current();
+		const admission = resolveDelegationAdmissionStage(req, currentMode, Array.from(modes.visibleTools()), safety);
+		const cwd = req.cwd ?? process.cwd();
+		const systemPrompt = buildStableSystemPrompt(req, null);
+		const dynamicPromptMessages = buildDynamicPromptMessages(req);
+		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
+		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
+		const staticCompositionHash = promptHash(systemPrompt);
+		const sessionShellHash = staticCompositionHash;
+		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
+		const currentToolSignature = toolSignature(admission.allowedTools);
+		const agentConfig =
+			currentMode === "advise" && configured.toolGovernance !== "deny-all"
+				? { ...configured, toolGovernance: "deny-all" as const }
+				: configured;
+		return {
+			currentMode,
+			admission,
+			agentConfig,
+			cwd,
+			systemPrompt,
+			dynamicPromptMessages,
+			compiledPromptHash,
+			staticCompositionHash,
+			sessionShellHash,
+			dynamicHash,
+			promptSignature: compiledPromptHash,
+			toolSignature: currentToolSignature,
+			runtimeLimitations: acpRuntimeLimitations(),
+		};
+	}
+
+	async function dispatchAcpDelegation(req: DispatchRequest): Promise<{
+		runId: string;
+		events: AsyncIterableIterator<unknown>;
+		finalPromise: Promise<RunReceipt>;
+	}> {
+		const lifecycle = resolveAcpDelegationLifecycle(req);
+		const endpointId = `delegation:${lifecycle.agentConfig.id}`;
+		const runtimeId = "acp";
+		const wireModelId = lifecycle.agentConfig.id;
+		assertTargetNotCoolingDown(endpointId, runtimeId, wireModelId);
+
+		if (scheduling) {
+			const preflight = scheduling.preflight();
+			if (preflight.verdict === "over" || preflight.verdict === "at") {
+				throw new Error(
+					`dispatch: admission denied: budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
+				);
+			}
+		}
+
+		let workerSlotHeld = false;
+		const releaseWorkerSlot = (): void => {
+			if (!workerSlotHeld || !scheduling) return;
+			workerSlotHeld = false;
+			scheduling.releaseWorker();
+		};
+		if (scheduling) {
+			workerSlotHeld = scheduling.tryAcquireWorker();
+			if (!workerSlotHeld) {
+				throw new Error(
+					`dispatch: admission denied: concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
+				);
+			}
+		}
+
+		let acp: AcpDelegationRunHandle;
+		try {
+			acp = startAcpRun({
+				agent: lifecycle.agentConfig,
+				task: req.task,
+				systemPrompt: lifecycle.systemPrompt,
+				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
+				cwd: lifecycle.cwd,
+				mode: lifecycle.admission.workerMode,
+				safety,
+				clientVersion: readClioVersion(),
+			});
+		} catch (error) {
+			releaseWorkerSlot();
+			throw error;
+		}
+
+		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
+		const blockedAttempts: SafetyBlockedAttempt[] = [];
+		const toolStats = new Map<string, ToolCallStat>();
+		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		let failureMessage: string | undefined;
+		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
+			for await (const raw of acp.events) {
+				const event = raw as {
+					type?: string;
+					message?: {
+						role?: string;
+						usage?: unknown;
+						model?: unknown;
+						responseModel?: unknown;
+						responseId?: unknown;
+						stopReason?: unknown;
+						errorMessage?: unknown;
+					};
+					payload?: {
+						tool?: string;
+						mode?: string;
+						durationMs?: number;
+						outcome?: "ok" | "error" | "blocked";
+						decision?: "allowed" | "blocked" | "elevated";
+						actionClass?: string;
+						ruleId?: string;
+						reasonCode?: string;
+						policySource?: string;
+						reason?: string;
+					};
+				};
+				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+					const u = event.message.usage;
+					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+					tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+					tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
+					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+					const model = readStringOrNull(event.message.model);
+					const responseModel = readStringOrNull(event.message.responseModel);
+					const responseId = readStringOrNull(event.message.responseId);
+					if (model !== null || responseModel !== null || responseId !== null) {
+						upstreamResponses.push({ model, responseModel, responseId });
+					}
+					if (event.message.stopReason === "error") {
+						const message = readStringOrNull(event.message.errorMessage);
+						if (message !== null) failureMessage = message;
+					}
+				}
+				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+					recordToolFinish(toolStats, event.payload);
+					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+					else if (event.payload.decision === "elevated") safetyDecisionCounts.elevated += 1;
+					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+						if (event.payload.mode !== undefined) attempt.mode = event.payload.mode;
+						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+						if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+						if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+						blockedAttempts.push(attempt);
+					}
+				}
+				yield raw;
+			}
+		})();
+
+		const ledgerRef = requireLedger();
+		const envelope = ledgerRef.create({
+			agentId: req.agentId,
+			task: req.task,
+			endpointId,
+			wireModelId,
+			runtimeId,
+			runtimeKind: "acp-delegation",
+			sessionId: null,
+			cwd: lifecycle.cwd,
+			staticShellHash: lifecycle.staticCompositionHash,
+			sessionShellHash: lifecycle.sessionShellHash,
+			dynamicHash: lifecycle.dynamicHash,
+			promptSignature: lifecycle.promptSignature,
+			toolSignature: lifecycle.toolSignature,
+		});
+		ledgerRef.update(envelope.id, {
+			status: "running",
+			pid: acp.pid,
+			heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+		});
+		context.bus.emit(BusChannels.DispatchEnqueued, {
+			runId: envelope.id,
+			agentId: req.agentId,
+			endpointId,
+			wireModelId,
+			runtimeId,
+			runtimeKind: "acp-delegation",
+		});
+		context.bus.emit(BusChannels.DispatchStarted, {
+			runId: envelope.id,
+			agentId: req.agentId,
+			endpointId,
+			wireModelId,
+			runtimeId,
+			runtimeKind: "acp-delegation",
+			pid: acp.pid,
+		});
+
+		const startedAt = envelope.startedAt;
+		const activeRun: ActiveRun = {
+			runId: envelope.id,
+			abort: acp.abort,
+			promise: acp.promise.then(() => undefined),
+			recipe: null,
+			startedAt,
+			endpointId,
+			wireModelId,
+			runtimeId,
+			runtimeKind: "acp-delegation",
+			agentId: req.agentId,
+			task: req.task,
+			cwd: lifecycle.cwd,
+			aborted: false,
+			heartbeatAt: acp.heartbeatAt,
+			heartbeatStatus: "alive",
+			terminalStatusOverride: null,
+			finalPromise: undefined as unknown as Promise<RunReceipt>,
+		};
+
+		const buildReceiptDraft = (
+			result: Awaited<AcpDelegationRunHandle["promise"]>,
+			endedAt: string,
+			status: RunStatus,
+		): RunReceiptDraft => {
+			tokenMeter.inputTokens += result.usage.inputTokens;
+			tokenMeter.outputTokens += result.usage.outputTokens;
+			tokenMeter.cacheReadTokens += result.usage.cacheReadTokens;
+			tokenMeter.cacheWriteTokens += result.usage.cacheWriteTokens;
+			tokenMeter.reasoningTokens += result.usage.reasoningTokens;
+			const tokenCount =
+				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
+			const safetyMetadata = safety.policy?.metadata(lifecycle.currentMode) ?? null;
+			const init = result.delegation.initialize;
+			const agentInfo = init?.agentInfo;
+			const finalFailureMessage = result.failureMessage ?? failureMessage;
+			return {
+				runId: envelope.id,
+				agentId: req.agentId,
+				task: req.task,
+				endpointId,
+				wireModelId,
+				runtimeId,
+				runtimeKind: "acp-delegation",
+				startedAt,
+				endedAt,
+				exitCode: status === "dead" ? 1 : status === "interrupted" ? 1 : result.exitCode,
+				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
+				tokenCount,
+				inputTokenCount: tokenMeter.inputTokens,
+				outputTokenCount: tokenMeter.outputTokens,
+				cacheReadTokenCount: tokenMeter.cacheReadTokens,
+				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
+				reasoningTokenCount: tokenMeter.reasoningTokens,
+				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
+				costUsd: 0,
+				compiledPromptHash: lifecycle.compiledPromptHash,
+				staticCompositionHash: lifecycle.staticCompositionHash,
+				staticShellHash: lifecycle.staticCompositionHash,
+				sessionShellHash: lifecycle.sessionShellHash,
+				dynamicHash: lifecycle.dynamicHash,
+				promptSignature: lifecycle.promptSignature,
+				toolSignature: lifecycle.toolSignature,
+				clioVersion: readClioVersion(),
+				piMonoVersion: readPiMonoVersion(),
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: countToolCalls(toolStats),
+				toolStats: snapshotToolStats(toolStats),
+				safety: {
+					decisions: safetyDecisionCounts,
+					blockedAttempts,
+					dispatchScope: MODE_MATRIX[lifecycle.currentMode].dispatchScope,
+					workerMode: lifecycle.admission.workerMode,
+					requestedActions: lifecycle.admission.requestedActions,
+					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					runtimeLimitations: lifecycle.runtimeLimitations,
+				},
+				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
+				delegation: {
+					agentConfigId: lifecycle.agentConfig.id,
+					command: lifecycle.agentConfig.command,
+					args: [...(lifecycle.agentConfig.args ?? [])],
+					acpSessionId: result.delegation.acpSessionId,
+					acpProtocolVersion: typeof init?.protocolVersion === "number" ? init.protocolVersion : null,
+					acpAgentName: agentInfo?.title ?? agentInfo?.name ?? null,
+					acpAgentVersion: agentInfo?.version ?? null,
+					agentCapabilities: init?.agentCapabilities ?? {},
+					toolCallsRequested: result.delegation.toolCallsRequested,
+					toolCallsApproved: result.delegation.toolCallsApproved,
+					toolCallsDenied: result.delegation.toolCallsDenied,
+					toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-policy",
+					toolCallLog: acp.toolCallLog(),
+				},
+				sessionId: result.delegation.acpSessionId,
+			};
+		};
+
+		const emitTerminalDispatchEvent = (receipt: RunReceipt, status: RunStatus): void => {
+			const startMs = Date.parse(receipt.startedAt);
+			const endMs = Date.parse(receipt.endedAt);
+			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+			const payload = {
+				runId: envelope.id,
+				agentId: req.agentId,
+				endpointId,
+				wireModelId,
+				runtimeId,
+				runtimeKind: "acp-delegation",
+				tokenCount: receipt.tokenCount,
+				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
+				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
+				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
+				staticShellHash: receipt.staticShellHash ?? null,
+				sessionShellHash: receipt.sessionShellHash ?? null,
+				dynamicHash: receipt.dynamicHash ?? null,
+				costUsd: receipt.costUsd,
+				durationMs,
+				exitCode: receipt.exitCode,
+			};
+			if (status === "completed") {
+				context.bus.emit(BusChannels.DispatchCompleted, payload);
+				return;
+			}
+			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: status });
+		};
+
+		const finalPromise = (async (): Promise<RunReceipt> => {
+			try {
+				const result = await acp.promise;
+				const endedAt = new Date().toISOString();
+				const status: RunStatus =
+					activeRun.terminalStatusOverride ??
+					(activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed");
+				activeRun.terminalStatusOverride = status;
+				const receiptDraft = buildReceiptDraft(result, endedAt, status);
+				const ledgerPatch: Partial<RunEnvelope> = {
+					status,
+					endedAt,
+					exitCode: receiptDraft.exitCode,
+					sessionId: receiptDraft.sessionId,
+					tokenCount: receiptDraft.tokenCount,
+					costUsd: receiptDraft.costUsd,
+					staticShellHash: receiptDraft.staticShellHash ?? null,
+					sessionShellHash: receiptDraft.sessionShellHash ?? null,
+					dynamicHash: receiptDraft.dynamicHash ?? null,
+					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
+					cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount ?? 0,
+					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
+					heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+				};
+				ledgerRef.update(envelope.id, ledgerPatch);
+				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
+				await ledgerRef.persist();
+				active.delete(envelope.id);
+				recordTargetOutcome(endpointId, runtimeId, wireModelId, status, receipt.exitCode);
+				emitTerminalDispatchEvent(receipt, status);
+				return receipt;
+			} finally {
+				releaseWorkerSlot();
+			}
+		})();
+
+		activeRun.finalPromise = finalPromise;
+		active.set(envelope.id, activeRun);
+
+		return {
+			runId: envelope.id,
+			events: enrichedEvents,
+			finalPromise,
+		};
+	}
+
 	async function dispatch(req: DispatchRequest): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -715,6 +1150,9 @@ export function createDispatchBundle(
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
+		}
+		if (req.delegationAgentId) {
+			return dispatchAcpDelegation(req);
 		}
 
 		const lifecycle = await resolveLifecycle(req);
