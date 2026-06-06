@@ -15,6 +15,7 @@ receipts over older prose.
 | --- | --- |
 | Commands, slash commands, modes, keybindings, dispatch, verification, and troubleshooting | [commands-and-modes.md](commands-and-modes.md) |
 | Runtime targets, local model configuration, fleet profiles, and auth | [configuration-and-targets.md](configuration-and-targets.md) |
+| Installation, upgrade, reset, uninstallation, configuration folders, and permissions | [installation-and-lifecycle.md](installation-and-lifecycle.md) |
 | Safety modes, default-deny Bash, project policy, damage-control rules, and typed validation | [safety-model.md](safety-model.md) |
 | Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](architecture.md) |
 | Prompt envelopes, provider tool contracts, active tool palettes, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) |
