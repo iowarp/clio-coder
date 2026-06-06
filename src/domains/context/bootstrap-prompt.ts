@@ -18,9 +18,11 @@ Produce a CLIO.md with these possible sections:
 
 3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
 
-4. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
+4. Custom H2 sections. Zero to four sections, each with a title and markdown body. Use these only for repository-specific architecture boundaries, agent workflow traps, context-retrieval strategy, generated-file policies, or failure modes that are not obvious from the language. Do not add generic "how to build/test" guidance.
 
-Total CLIO.md size target: 800-2000 bytes without adoption, or compact and provenance-rich with adoption.
+5. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
+
+Total CLIO.md size target: 1200-3500 bytes without adoption, or compact and provenance-rich with adoption.
 
 Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
 
@@ -29,7 +31,8 @@ Return only compact JSON with this exact shape:
   "projectName": "string",
   "identity": "string",
   "conventions": ["string"],
-  "invariants": ["string"]
+  "invariants": ["string"],
+  "sections": [{ "title": "string", "body": "markdown string" }]
 }`;
 
 export interface BootstrapPromptInput {
@@ -79,6 +82,7 @@ function extractJsonObject(text: string): unknown {
 }
 
 function stringArray(value: unknown, key: string, maxItems: number, maxChars: number): string[] {
+	if (value === undefined) return [];
 	if (!Array.isArray(value)) throw new Error(`bootstrap model output '${key}' must be an array`);
 	return value
 		.map((item, index) => {
@@ -98,6 +102,30 @@ function stringField(record: Record<string, unknown>, key: string, maxChars: num
 	return value.replace(/\s+/g, " ").trim().slice(0, maxChars);
 }
 
+function structuredSections(value: unknown): NonNullable<BootstrapStructuredOutput["sections"]> {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) throw new Error("bootstrap model output 'sections' must be an array");
+	return value
+		.map((item, index) => {
+			if (typeof item !== "object" || item === null || Array.isArray(item)) {
+				throw new Error(`bootstrap model output 'sections[${index}]' must be an object`);
+			}
+			const record = item as Record<string, unknown>;
+			if (typeof record.title !== "string" || record.title.trim().length === 0) {
+				throw new Error(`bootstrap model output 'sections[${index}].title' must be a non-empty string`);
+			}
+			if (typeof record.body !== "string" || record.body.trim().length === 0) {
+				throw new Error(`bootstrap model output 'sections[${index}].body' must be a non-empty string`);
+			}
+			return {
+				title: record.title.replace(/\s+/g, " ").trim().slice(0, 80),
+				body: record.body.trim().slice(0, 2500),
+			};
+		})
+		.filter((section) => section.title.length > 0 && section.body.length > 0)
+		.slice(0, 4);
+}
+
 export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutput {
 	const parsed = extractJsonObject(text);
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -109,5 +137,6 @@ export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutp
 		identity: stringField(record, "identity", 600),
 		conventions: stringArray(record.conventions, "conventions", 6, 200),
 		invariants: stringArray(record.invariants, "invariants", 3, 280),
+		sections: structuredSections(record.sections),
 	};
 }

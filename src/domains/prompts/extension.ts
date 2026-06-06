@@ -128,12 +128,9 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 	if (!awareness.isClioCoderRepo || !awareness.repoRoot) return [];
 	const body = [
 		"# Clio Source Tree",
-		"This workspace appears to be Clio Coder's own source tree.",
-		"Requests about Clio may be handled as ordinary local source-code changes when the user asks for repo work.",
-		"Use workspace and codewiki tools to retrieve mutable source details; do not treat this harness notice as repository context.",
-		"Clio may edit source, run focused tests, rebuild, reload, and reconfigure only the local Clio installation for this user to test.",
-		"Community contribution requires explicit user intent and normal Git/GitHub etiquette.",
-		"Do not publish releases, push branches, open PRs, alter remotes, or modify shared/global installs unless the user explicitly asks.",
+		"This workspace is Clio Coder's own source tree.",
+		"When running inside this repo, Clio can modify her own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
+		"Shared contribution/publishing/push/PR/release requires explicit user intent and normal Git/GitHub etiquette. Do not imply autonomous publishing.",
 	].join("\n");
 	return [
 		{

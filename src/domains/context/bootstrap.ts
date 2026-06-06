@@ -8,7 +8,7 @@ import {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
-import { type ClioMdFingerprintFooter, parseClioMd, serializeClioMd } from "./clio-md.js";
+import { type ClioMdFingerprintFooter, type ClioMdSection, parseClioMd, serializeClioMd } from "./clio-md.js";
 import { buildCodewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -19,6 +19,7 @@ export interface BootstrapStructuredOutput {
 	identity: string;
 	conventions: string[];
 	invariants: string[];
+	sections?: ClioMdSection[];
 	importedAgentContext?: string;
 }
 
