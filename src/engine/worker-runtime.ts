@@ -5,7 +5,7 @@
  * AgentEvent to an emit callback (the worker entry serializes events to NDJSON
  * stdout). Post-W5 the surface takes a resolved EndpointDescriptor +
  * RuntimeDescriptor + wire model id, not a provider/model pair. Subprocess
- * runtimes (claude-code-cli, codex-cli, gemini-cli) do not touch pi-ai; they
+ * runtimes (codex-cli, opencode-cli) do not touch pi-ai; they
  * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
  */
 
@@ -30,11 +30,10 @@ import { resolveToolPalette } from "../tools/palette.js";
 import type { WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
-import { startClaudeCodeSdkWorkerRun } from "./claude-code-sdk-runtime.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
-import type { ClioWorkerEvent, ToolApprovalResponsePayload } from "./worker-events.js";
+import type { ClioWorkerEvent } from "./worker-events.js";
 import {
 	createWorkerLoopGuard,
 	createWorkerSafety,
@@ -62,8 +61,6 @@ export interface WorkerRunInput {
 	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
-	autoApprove?: "allow" | "deny";
-	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
 	signal?: AbortSignal;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
@@ -209,30 +206,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		subprocessInput.mode = mode;
 		subprocessInput.allowedTools = activeWorkerTools;
 		return startSubprocessWorkerRun(subprocessInput, emit);
-	}
-
-	if (input.runtime.kind === "sdk" && input.runtime.id === "claude-code-sdk") {
-		const sdkInput: Parameters<typeof startClaudeCodeSdkWorkerRun>[0] = {
-			systemPrompt: input.systemPrompt,
-			dynamicPromptMessages: input.dynamicPromptMessages ?? [],
-			task: input.task,
-			endpoint: input.endpoint,
-			runtime: input.runtime,
-			wireModelId: input.wireModelId,
-		};
-		if (input.sessionId !== undefined) {
-			sdkInput.threadId = input.sessionId;
-			sdkInput.resumeSessionId = input.sessionId;
-		}
-		sdkInput.mode = mode;
-		if (input.thinkingLevel !== undefined) sdkInput.thinkingLevel = input.thinkingLevel;
-		sdkInput.allowedTools = activeWorkerTools;
-		if (input.signal !== undefined) sdkInput.signal = input.signal;
-		const sdkSafety = createWorkerSafety({ cwd: process.cwd() });
-		sdkInput.safety = sdkSafety;
-		if (input.autoApprove !== undefined) sdkInput.autoApprove = input.autoApprove;
-		if (input.awaitApproval !== undefined) sdkInput.awaitApproval = input.awaitApproval;
-		return startClaudeCodeSdkWorkerRun(sdkInput, emit);
 	}
 
 	const kb = getKnowledgeBase();

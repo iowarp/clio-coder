@@ -6,8 +6,10 @@ import {
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
+import { isWorkerOnlyRuntime } from "../../src/domains/providers/eligibility.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
+import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
 import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
@@ -161,5 +163,59 @@ describe("contracts/providers", () => {
 		strictEqual(model.cost.input, 0.15);
 		strictEqual(model.cost.output, 0.6);
 		ok(model.compat);
+	});
+});
+
+describe("contracts/providers/runtime-cleanup", () => {
+	const builtinIds = new Set(BUILTIN_RUNTIMES.map((r) => r.id));
+
+	it("does not register any Claude Code or removed CLI runtimes", () => {
+		for (const removed of ["claude-code-sdk", "claude-code-cli", "gemini-cli", "copilot-cli"]) {
+			ok(!builtinIds.has(removed), `runtime '${removed}' must be absent from the builtin registry`);
+		}
+		// No descriptor may advertise a Claude Code / agent-sdk API family.
+		for (const runtime of BUILTIN_RUNTIMES) {
+			ok(
+				!/claude|agent-sdk/.test(runtime.apiFamily),
+				`runtime '${runtime.id}' must not use a Claude Code apiFamily (${runtime.apiFamily})`,
+			);
+			ok(runtime.kind !== "sdk", `no builtin runtime should use the sdk kind (${runtime.id})`);
+		}
+	});
+
+	it("keeps the Anthropic API runtime on the anthropic-messages family", () => {
+		const anthropic = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic");
+		ok(anthropic, "anthropic runtime must remain registered");
+		strictEqual(anthropic?.apiFamily, "anthropic-messages");
+		strictEqual(anthropic?.kind, "http");
+		// Protocol-compatible escape hatch stays available.
+		ok(builtinIds.has("anthropic-compat"), "anthropic-compat must remain registered");
+	});
+
+	it("limits worker-only (subprocess) runtimes to codex-cli and opencode-cli", () => {
+		const workerOnly = BUILTIN_RUNTIMES.filter((r) => isWorkerOnlyRuntime(r))
+			.map((r) => r.id)
+			.sort();
+		deepStrictEqual(workerOnly, ["codex-cli", "opencode-cli"]);
+	});
+
+	it("rejects worker-only runtimes as orchestrator and print targets", () => {
+		const runtime = fakeDescriptor("codex-cli", { kind: "subprocess", apiFamily: "subprocess-codex" });
+		const endpoint: EndpointDescriptor = { id: "codex-worker", runtime: "codex-cli", defaultModel: "gpt-5.4" };
+		const mockProviders: ProvidersContract = {
+			list: () => [],
+			getEndpoint: (id: string) => (id === "codex-worker" ? endpoint : null),
+			getRuntime: (id: string) => (id === "codex-cli" ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		for (const use of ["orchestrator", "print"] as const) {
+			const res = resolveRuntimeTarget(mockProviders, { endpointId: "codex-worker", use });
+			strictEqual(res.ok, false, `${use} target must reject a worker-only runtime`);
+			if (!res.ok) {
+				ok(res.diagnostics.some((d) => d.code === "worker-only-target-unsupported"));
+			}
+		}
 	});
 });

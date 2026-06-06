@@ -1,5 +1,6 @@
 import { targetRequiresAuth } from "./auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "./contract.js";
+import { isWorkerOnlyRuntime } from "./eligibility.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
@@ -91,7 +92,6 @@ export interface ResolveRuntimeTargetInput {
 	requestedThinkingLevel?: ThinkingLevel;
 	requiredCapabilities?: ReadonlyArray<string>;
 	use?: RuntimeResolutionUse;
-	allowSubprocess?: boolean;
 	requireTools?: boolean;
 	requireStreaming?: boolean;
 	requireOutputBudget?: boolean;
@@ -275,18 +275,14 @@ export function resolveRuntimeTarget(
 		};
 	}
 
-	if (
-		(input.use === "orchestrator" || input.use === "print") &&
-		runtime.kind === "subprocess" &&
-		!input.allowSubprocess
-	) {
+	if ((input.use === "orchestrator" || input.use === "print") && isWorkerOnlyRuntime(runtime)) {
 		return {
 			ok: false,
 			diagnostics: [
 				diagnostic(
 					"error",
-					"subprocess-orchestrator-unsupported",
-					`target '${endpointId}' uses a subprocess runtime (${runtime.id}); subprocess runtimes can only be used as worker targets, not as the orchestrator chat target`,
+					"worker-only-target-unsupported",
+					`target '${endpointId}' uses a worker-only runtime (${runtime.id}); subprocess and sdk runtimes can only be used as worker targets, not as orchestrator or print targets`,
 				),
 			],
 		};

@@ -10,7 +10,7 @@ import type {
 	RuntimeResolutionDiagnostic,
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
-import { listKnownModelsForRuntime, resolveRuntimeTarget } from "../../domains/providers/index.js";
+import { isWorkerOnlyRuntime, listKnownModelsForRuntime, resolveRuntimeTarget } from "../../domains/providers/index.js";
 import {
 	type Component,
 	getKeybindings,
@@ -414,16 +414,20 @@ export function buildModelItems(deps: {
 	const activeRef = activeEndpoint && activeModel ? `${activeEndpoint}/${activeModel}` : activeEndpoint;
 	const favoriteSet = new Set(deps.settings.modelSelector?.favorites ?? []);
 	const recentSet = new Set(deps.settings.state?.recentModels ?? []);
-	const list = [...deps.providers.list()].sort((a, b) => {
-		const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
-		const bActive = b.endpoint.id === activeEndpoint ? 0 : 1;
-		return (
-			aActive - bActive ||
-			statusPriority(a) - statusPriority(b) ||
-			(a.runtime?.displayName ?? a.endpoint.runtime).localeCompare(b.runtime?.displayName ?? b.endpoint.runtime) ||
-			a.endpoint.id.localeCompare(b.endpoint.id)
-		);
-	});
+	const list = [...deps.providers.list()]
+		.filter((status) => {
+			return !status.runtime || !isWorkerOnlyRuntime(status.runtime);
+		})
+		.sort((a, b) => {
+			const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
+			const bActive = b.endpoint.id === activeEndpoint ? 0 : 1;
+			return (
+				aActive - bActive ||
+				statusPriority(a) - statusPriority(b) ||
+				(a.runtime?.displayName ?? a.endpoint.runtime).localeCompare(b.runtime?.displayName ?? b.endpoint.runtime) ||
+				a.endpoint.id.localeCompare(b.endpoint.id)
+			);
+		});
 	const scopeSet = new Set(deps.settings.scope ?? []);
 	const items: SelectItem[] = [];
 	const refs: ModelSelection[] = [];

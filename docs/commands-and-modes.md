@@ -65,7 +65,6 @@ the current test suite.
 | `--agent-runtime <id>` | Pick the first fleet profile whose endpoint uses this runtime. |
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
-| `--auto-approve <mode>` | Approval behavior for SDK tool asks: `allow` or `deny`. |
 
 Example:
 

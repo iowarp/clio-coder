@@ -45,7 +45,6 @@ export interface WorkerSpec {
 	allowedTools: ReadonlyArray<ToolName>;
 	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
-	autoApprove?: "allow" | "deny";
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
@@ -66,18 +65,13 @@ const RUNTIME_API_FAMILIES = [
 	"anthropic-messages",
 	"bedrock-converse-stream",
 	"google-generative-ai",
-	"google-gemini-cli",
 	"google-vertex",
 	"lmstudio-native",
 	"mistral-conversations",
 	"ollama-native",
 	"rerank-http",
 	"embeddings-http",
-	"claude-agent-sdk",
-	"subprocess-claude-code",
 	"subprocess-codex",
-	"subprocess-gemini",
-	"subprocess-copilot",
 	"subprocess-opencode",
 ] as const satisfies ReadonlyArray<RuntimeApiFamily>;
 const RUNTIME_AUTHS = [
@@ -97,7 +91,6 @@ const THINKING_LEVELS = [
 	"xhigh",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
 const MODE_NAMES = ["default", "advise", "super"] as const satisfies ReadonlyArray<ModeName>;
-const AUTO_APPROVE_VALUES = ["allow", "deny"] as const;
 const ENDPOINT_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = [
 	"before_model",
@@ -371,7 +364,6 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
 	readOptionalEnum(spec, "mode", "WorkerSpec", MODE_NAMES);
-	readOptionalEnum(spec, "autoApprove", "WorkerSpec", AUTO_APPROVE_VALUES);
 	validateAllowedTools(spec.allowedTools);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.modelCapabilities !== undefined)

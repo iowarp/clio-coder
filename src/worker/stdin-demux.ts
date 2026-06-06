@@ -1,20 +1,10 @@
-import { isToolApprovalResponse, type ToolApprovalResponsePayload } from "../engine/worker-events.js";
 import { parseWorkerSpec, type WorkerSpec } from "./spec-contract.js";
-
-interface PendingApproval {
-	resolve: (response: ToolApprovalResponsePayload) => void;
-	reject: (err: Error) => void;
-	timer: ReturnType<typeof setTimeout> | null;
-}
 
 export interface WorkerStdinDemux {
 	feed(chunk: string): void;
 	eof(): void;
 	readSpec(): Promise<WorkerSpec>;
-	awaitApproval(requestId: string, timeoutMs?: number): Promise<ToolApprovalResponsePayload>;
 }
-
-const DEFAULT_APPROVAL_TIMEOUT_MS = Number(process.env.CLIO_SDK_APPROVAL_TIMEOUT_MS ?? 60000);
 
 export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let buffer = "";
@@ -24,15 +14,6 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let specError: Error | null = null;
 	let specReceived = false;
 	let closed = false;
-	const pending = new Map<string, PendingApproval>();
-
-	function failPending(err: Error): void {
-		for (const [, item] of pending) {
-			if (item.timer) clearTimeout(item.timer);
-			item.reject(err);
-		}
-		pending.clear();
-	}
 
 	function resolveSpec(spec: WorkerSpec): void {
 		specValue = spec;
@@ -55,19 +36,6 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			}
 			return;
 		}
-
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(line);
-		} catch {
-			return;
-		}
-		if (!isToolApprovalResponse(parsed)) return;
-		const slot = pending.get(parsed.payload.requestId);
-		if (!slot) return;
-		if (slot.timer) clearTimeout(slot.timer);
-		pending.delete(parsed.payload.requestId);
-		slot.resolve(parsed.payload);
 	}
 
 	return {
@@ -90,7 +58,6 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				buffer = "";
 			}
 			if (!specReceived) rejectSpec(new Error("worker stdin closed before spec received"));
-			failPending(new Error("worker stdin closed before approval response"));
 		},
 		readSpec(): Promise<WorkerSpec> {
 			if (specValue) return Promise.resolve(specValue);
@@ -99,19 +66,6 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			return new Promise((resolve, reject) => {
 				specResolve = resolve;
 				specReject = reject;
-			});
-		},
-		awaitApproval(requestId, timeoutMs = DEFAULT_APPROVAL_TIMEOUT_MS): Promise<ToolApprovalResponsePayload> {
-			if (closed) return Promise.reject(new Error("worker stdin closed; cannot await approval"));
-			return new Promise((resolve, reject) => {
-				const timer =
-					timeoutMs > 0
-						? setTimeout(() => {
-								pending.delete(requestId);
-								reject(new Error(`approval ${requestId} timed out after ${timeoutMs}ms`));
-							}, timeoutMs)
-						: null;
-				pending.set(requestId, { resolve, reject, timer });
 			});
 		},
 	};

@@ -64,10 +64,6 @@ import type {
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
-type WorkerApprovalHandler = Parameters<SpawnedWorker["onApprovalRequest"]>[0];
-type WorkerApprovalRequest = Parameters<WorkerApprovalHandler>[0];
-type WorkerApprovalResponse = Awaited<ReturnType<WorkerApprovalHandler>>;
-
 interface ActiveRun {
 	runId: string;
 	abort: () => void;
@@ -97,7 +93,6 @@ export interface DispatchBundleOptions {
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
-const DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS = 60000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 
 function sha256(input: string): string {
@@ -257,7 +252,6 @@ interface DispatchWorkerSpecInput {
 	toolSignature: string;
 	dynamicHash: string | null;
 	apiKey: string | undefined;
-	approval: DispatchAutoApproveDerivation;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 }
 
@@ -277,7 +271,7 @@ interface DispatchLifecycleStage {
 	toolSignature: string;
 	apiKey: string | undefined;
 	runtimeKind: RunKind;
-	approval: DispatchAutoApproveDerivation;
+	runtimeLimitations: string[];
 }
 
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
@@ -317,28 +311,8 @@ function supportsRequiredCapabilities(
 function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	if (runtimeKind === "http") return [];
 	return [
-		`${runtimeId} is a delegated ${runtimeKind} runtime; Clio records launch policy and final output but cannot fully observe internal tool calls made inside the external agent.`,
+		`${runtimeId} is an opaque worker-only runtime; Clio records launch policy and final output but cannot observe or control internal tool calls.`,
 	];
-}
-
-export interface DispatchAutoApproveDerivation {
-	supervised: boolean;
-	autoApprove: "allow" | "deny" | undefined;
-	runtimeLimitations: string[];
-}
-
-export function deriveAutoApproveForDispatch(
-	req: Pick<DispatchRequest, "supervised" | "autoApprove">,
-	existingLimitations: ReadonlyArray<string> = [],
-): DispatchAutoApproveDerivation {
-	const supervised = req.supervised === true;
-	let autoApprove = req.autoApprove;
-	const nextLimitations = [...existingLimitations];
-	if (!supervised && autoApprove === undefined) {
-		autoApprove = "deny";
-		nextLimitations.push("headless ask auto-denied; pass --auto-approve to override");
-	}
-	return { supervised, autoApprove, runtimeLimitations: nextLimitations };
 }
 
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
@@ -417,7 +391,6 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		mode: input.admission.workerMode,
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
-	if (input.approval.autoApprove !== undefined) spec.autoApprove = input.approval.autoApprove;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	if (input.apiKey) spec.apiKey = input.apiKey;
@@ -429,54 +402,6 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		spec.trustProjectCompatRoots = config.get().skills.trustProjectCompatRoots === true;
 	}
 	return spec;
-}
-
-function approvalResponseTimeoutMs(): number {
-	const raw = process.env.CLIO_SDK_APPROVAL_TIMEOUT_MS;
-	if (raw === undefined || raw.trim().length === 0) return DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS;
-	const parsed = Number(raw);
-	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_APPROVAL_RESPONSE_TIMEOUT_MS;
-}
-
-function isApprovalResponsePayload(value: unknown): value is WorkerApprovalResponse {
-	if (!value || typeof value !== "object") return false;
-	const payload = value as Partial<WorkerApprovalResponse>;
-	return typeof payload.requestId === "string" && (payload.decision === "allow" || payload.decision === "deny");
-}
-
-function waitForToolApprovalResponse(
-	context: DomainContext,
-	request: WorkerApprovalRequest,
-): Promise<WorkerApprovalResponse> {
-	return new Promise((resolve) => {
-		let settled = false;
-		let timeout: ReturnType<typeof setTimeout> | null = null;
-		let unsubscribe = (): void => {};
-		const finish = (response: WorkerApprovalResponse): void => {
-			if (settled) return;
-			settled = true;
-			if (timeout) clearTimeout(timeout);
-			unsubscribe();
-			resolve(response);
-		};
-		unsubscribe = context.bus.on(BusChannels.ToolApprovalResponse, (payload) => {
-			if (!isApprovalResponsePayload(payload)) return;
-			if (payload.requestId !== request.requestId) return;
-			finish(payload);
-		});
-		const timeoutMs = approvalResponseTimeoutMs();
-		if (timeoutMs > 0) {
-			timeout = setTimeout(() => {
-				finish({
-					requestId: request.requestId,
-					decision: "deny",
-					reason: `approval response timed out after ${timeoutMs}ms`,
-				});
-			}, timeoutMs);
-			timeout.unref?.();
-		}
-		context.bus.emit(BusChannels.ToolApprovalRequest, { request });
-	});
 }
 
 function pickCapabilityMatchedWorker(
@@ -760,7 +685,7 @@ export function createDispatchBundle(
 		// requiring the user to invent a credential.
 		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
-		const approval = deriveAutoApproveForDispatch(req, runtimeLimitations(runtimeKind, target.runtime.id));
+		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
 			recipe,
 			currentMode,
@@ -777,7 +702,7 @@ export function createDispatchBundle(
 			toolSignature: currentToolSignature,
 			apiKey,
 			runtimeKind,
-			approval,
+			runtimeLimitations: limitations,
 		};
 	}
 
@@ -835,7 +760,6 @@ export function createDispatchBundle(
 				dynamicHash: lifecycle.dynamicHash,
 				middlewareSnapshot: middleware.snapshot(),
 				apiKey: lifecycle.apiKey,
-				approval: lifecycle.approval,
 			},
 			config ?? undefined,
 		);
@@ -846,7 +770,6 @@ export function createDispatchBundle(
 			releaseWorkerSlot();
 			throw error;
 		}
-		worker.onApprovalRequest((request) => waitForToolApprovalResponse(context, request));
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const heartbeatAt = worker.heartbeatAt;
@@ -1045,7 +968,7 @@ export function createDispatchBundle(
 					workerMode: lifecycle.admission.workerMode,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
-					runtimeLimitations: lifecycle.approval.runtimeLimitations,
+					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
 				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
 				runtimeResolution: runtimeTargetSnapshot(lifecycle.target.runtimeResolution),

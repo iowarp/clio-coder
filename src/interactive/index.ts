@@ -40,7 +40,6 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
-import type { ToolApprovalRequestPayload, ToolApprovalResponsePayload } from "../engine/worker-events.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -78,11 +77,6 @@ import {
 	resolveThinkingCapability,
 	resolveThinkingLabeler,
 } from "./overlays/thinking-selector.js";
-import {
-	openToolApprovalOverlay,
-	routeToolApprovalOverlayKey,
-	type ToolApprovalOverlayKeyDeps,
-} from "./overlays/tool-approval-overlay.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
@@ -263,7 +257,6 @@ export type OverlayState =
 	| "auth"
 	| "cost"
 	| "receipts"
-	| "tool-approval"
 	| "thinking"
 	| "model"
 	| "scoped-models"
@@ -352,10 +345,6 @@ export interface ReceiptsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface ToolApprovalOverlayDeps {
-	resolve?: ToolApprovalOverlayKeyDeps["resolve"];
-}
-
 export interface ThinkingOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -399,7 +388,6 @@ export interface OverlayKeyDeps
 		AuthOverlayKeyDeps,
 		CostOverlayKeyDeps,
 		ReceiptsOverlayKeyDeps,
-		ToolApprovalOverlayDeps,
 		ThinkingOverlayKeyDeps,
 		ModelOverlayKeyDeps,
 		ScopedModelsOverlayKeyDeps,
@@ -789,10 +777,6 @@ export function routeOverlayKey(
 		// Do not swallow arrow keys or Enter; the focused SelectList needs them.
 		return routeReceiptsOverlayKey(data, deps);
 	}
-	if (overlayState === "tool-approval") {
-		if (deps.resolve) routeToolApprovalOverlayKey(data, { resolve: deps.resolve });
-		return true;
-	}
 	if (overlayState === "thinking") {
 		// Same policy as receipts: the Box forwards unconsumed input to the SelectList.
 		return routeThinkingOverlayKey(data, deps);
@@ -840,23 +824,6 @@ export function routeOverlayKey(
 	}
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
-}
-
-function isToolApprovalBusRequest(value: unknown): value is { request: ToolApprovalRequestPayload } {
-	if (!value || typeof value !== "object") return false;
-	const request = (value as { request?: unknown }).request;
-	if (!request || typeof request !== "object") return false;
-	const candidate = request as Partial<ToolApprovalRequestPayload>;
-	return (
-		typeof candidate.requestId === "string" &&
-		typeof candidate.claudeToolName === "string" &&
-		(candidate.clioToolName === null || typeof candidate.clioToolName === "string") &&
-		typeof candidate.args === "object" &&
-		candidate.args !== null &&
-		typeof candidate.classification === "object" &&
-		candidate.classification !== null &&
-		typeof candidate.mode === "string"
-	);
 }
 
 export async function startInteractive(deps: InteractiveDeps): Promise<number> {
@@ -1463,7 +1430,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let overlayState: OverlayState = "closed";
 	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
 	let authDialogDismiss: (() => void) | null = null;
-	let pendingToolApproval: ToolApprovalRequestPayload | null = null;
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
@@ -1540,15 +1506,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "auth") {
 			authDialogDismiss?.();
 			authDialogDismiss = null;
-		}
-		if (overlayState === "tool-approval" && pendingToolApproval) {
-			const request = pendingToolApproval;
-			pendingToolApproval = null;
-			deps.bus.emit(BusChannels.ToolApprovalResponse, {
-				requestId: request.requestId,
-				decision: "deny",
-				reason: "overlay closed without choice",
-			} satisfies ToolApprovalResponsePayload);
 		}
 		overlayState = "closed";
 		stopDispatchBoardTicker();
@@ -1981,11 +1938,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			openSuperOverlay("tool");
 		}) ?? (() => {});
 
-	const unsubscribeToolApprovalRequests = deps.bus.on(BusChannels.ToolApprovalRequest, (payload) => {
-		if (!isToolApprovalBusRequest(payload)) return;
-		openToolApprovalOverlayState(payload.request);
-	});
-
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "providers";
@@ -2018,33 +1970,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "receipts";
 		overlayHandle = openReceiptsOverlay(tui, deps.dispatch);
-		tui.requestRender();
-	};
-
-	const resolveToolApproval = (decision: ToolApprovalResponsePayload["decision"], reason: string): void => {
-		const request = pendingToolApproval;
-		if (!request) return;
-		pendingToolApproval = null;
-		deps.bus.emit(BusChannels.ToolApprovalResponse, {
-			requestId: request.requestId,
-			decision,
-			reason,
-		});
-		closeOverlay();
-	};
-
-	const openToolApprovalOverlayState = (request: ToolApprovalRequestPayload): void => {
-		if (overlayState !== "closed") {
-			deps.bus.emit(BusChannels.ToolApprovalResponse, {
-				requestId: request.requestId,
-				decision: "deny",
-				reason: `approval overlay unavailable while ${overlayState} overlay is open`,
-			} satisfies ToolApprovalResponsePayload);
-			return;
-		}
-		pendingToolApproval = request;
-		overlayState = "tool-approval";
-		overlayHandle = openToolApprovalOverlay({ tui, request });
 		tui.requestRender();
 	};
 
@@ -2383,7 +2308,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeFooterTokens();
 		unsubscribeModeTheme();
 		unsubscribeSuperRequired();
-		unsubscribeToolApprovalRequests();
 		agentProgress.stop();
 		deps.chat.dispose();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
@@ -2580,7 +2504,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				},
 				now: () => Date.now(),
 				closeOverlay,
-				resolve: resolveToolApproval,
 				requestShutdown: () => {
 					void shutdown();
 				},

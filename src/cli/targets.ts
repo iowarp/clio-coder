@@ -4,7 +4,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { isWorkerOnlyRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -199,6 +199,13 @@ function runUse(args: ReadonlyArray<string>): number {
 	const target = settings.endpoints.find((entry) => entry.id === parsed.id);
 	if (!target) {
 		printError(`no target with id ${parsed.id}`);
+		return 1;
+	}
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	const runtime = registry.get(target.runtime);
+	if (runtime && isWorkerOnlyRuntime(runtime)) {
+		printError(`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`);
 		return 1;
 	}
 	const sharedModel = parsed.model ?? target.defaultModel ?? null;

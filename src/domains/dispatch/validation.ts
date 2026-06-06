@@ -21,8 +21,6 @@ export interface JobSpec {
 	toolProfile?: ToolProfileName;
 	cwd?: string;
 	memorySection?: string;
-	supervised?: boolean;
-	autoApprove?: "allow" | "deny";
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
@@ -42,8 +40,6 @@ const KNOWN_KEYS = new Set([
 	"toolProfile",
 	"cwd",
 	"memorySection",
-	"supervised",
-	"autoApprove",
 	"noSkills",
 	"skillPaths",
 	"trustProjectCompatRoots",
@@ -131,18 +127,6 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
-	if ("supervised" in spec && spec.supervised !== undefined) {
-		if (typeof spec.supervised !== "boolean") {
-			errors.push("supervised must be a boolean");
-		}
-	}
-
-	if ("autoApprove" in spec && spec.autoApprove !== undefined) {
-		if (spec.autoApprove !== "allow" && spec.autoApprove !== "deny") {
-			errors.push("autoApprove must be one of: allow|deny");
-		}
-	}
-
 	if ("noSkills" in spec && spec.noSkills !== undefined) {
 		if (typeof spec.noSkills !== "boolean") {
 			errors.push("noSkills must be a boolean");
@@ -180,8 +164,6 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.toolProfile === "string" && isToolProfileName(spec.toolProfile)) out.toolProfile = spec.toolProfile;
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
-	if (typeof spec.supervised === "boolean") out.supervised = spec.supervised;
-	if (spec.autoApprove === "allow" || spec.autoApprove === "deny") out.autoApprove = spec.autoApprove;
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
 	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
