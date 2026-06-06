@@ -9,11 +9,17 @@ export interface ClioMdFingerprintFooter {
 	loc: number;
 }
 
+export interface ClioMdSection {
+	title: string;
+	body: string;
+}
+
 export interface ParsedClioMd {
 	projectName: string;
 	identity: string;
 	conventions: string[];
 	invariants: string[];
+	sections: ClioMdSection[];
 	importedAgentContext: string | null;
 	fingerprint: ClioMdFingerprintFooter | null;
 	firstInit: boolean;
@@ -27,6 +33,7 @@ export interface SerializeClioMdInput {
 	identity: string;
 	conventions: ReadonlyArray<string>;
 	invariants: ReadonlyArray<string>;
+	sections?: ReadonlyArray<ClioMdSection>;
 	importedAgentContext?: string;
 	fingerprint: ClioMdFingerprintFooter;
 }
@@ -121,19 +128,29 @@ function validateFooter(value: unknown): ClioMdFingerprintFooter | null {
 	};
 }
 
-function readSections(body: string): Map<string, string> {
+function readSections(body: string): ClioMdSection[] {
 	const headings = [...body.matchAll(H2_RE)];
-	const sections = new Map<string, string>();
+	const sections: ClioMdSection[] = [];
 	for (let i = 0; i < headings.length; i += 1) {
 		const heading = headings[i];
 		if (!heading || heading.index === undefined) continue;
 		const next = headings[i + 1];
-		const title = (heading[1] ?? "").trim().toLowerCase();
+		const title = (heading[1] ?? "").trim();
 		const start = heading.index + heading[0].length;
 		const end = next?.index ?? body.length;
-		sections.set(title, body.slice(start, end).trim());
+		sections.push({ title, body: body.slice(start, end).trim() });
 	}
 	return sections;
+}
+
+function sectionBody(sections: ReadonlyArray<ClioMdSection>, title: string): string {
+	return sections.find((section) => section.title.toLowerCase() === title.toLowerCase())?.body ?? "";
+}
+
+const RESERVED_SECTION_TITLES = new Set(["conventions", "hard invariants", "imported agent context"]);
+
+function extraSections(sections: ReadonlyArray<ClioMdSection>): ClioMdSection[] {
+	return sections.filter((section) => !RESERVED_SECTION_TITLES.has(section.title.toLowerCase()));
 }
 
 function identityParagraph(afterH1: string): string {
@@ -186,16 +203,22 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	if (charLen(identity) > 600) errors.push("identity paragraph must be at most 600 characters");
 
 	const sections = readSections(afterH1);
-	const conventions = parseBullets(sections.get("conventions") ?? "");
-	const invariants = parseNumbered(sections.get("hard invariants") ?? "");
-	const importedAgentContext = sections.get("imported agent context") ?? null;
+	const conventions = parseBullets(sectionBody(sections, "conventions"));
+	const invariants = parseNumbered(sectionBody(sections, "hard invariants"));
+	const customSections = extraSections(sections);
+	const importedAgentContext = sectionBody(sections, "imported agent context") || null;
 	if (conventions.length > 6) errors.push("conventions must contain at most 6 bullets");
 	if (invariants.length > 3) errors.push("hard invariants must contain at most 3 numbered rules");
+	if (customSections.length > 8) errors.push("custom sections must contain at most 8 H2 sections");
 	for (const [index, item] of conventions.entries()) {
 		if (charLen(item) > 200) errors.push(`convention ${index + 1} must be at most 200 characters`);
 	}
 	for (const [index, item] of invariants.entries()) {
 		if (charLen(item) > 280) errors.push(`hard invariant ${index + 1} must be at most 280 characters`);
+	}
+	for (const [index, section] of customSections.entries()) {
+		if (charLen(section.title) > 80) errors.push(`custom section ${index + 1} title must be at most 80 characters`);
+		if (charLen(section.body) > 2500) errors.push(`custom section ${index + 1} body must be at most 2500 characters`);
 	}
 	if (errors.length > 0) return { ok: false, errors, warnings };
 
@@ -206,6 +229,7 @@ export function parseClioMd(source: string): ClioMdParseResult {
 			identity,
 			conventions,
 			invariants,
+			sections: customSections,
 			importedAgentContext,
 			fingerprint: footerResult.footer,
 			firstInit: footerResult.firstInit,
@@ -228,6 +252,11 @@ function renderWithoutParse(input: SerializeClioMdInput): string {
 	}
 	if (input.invariants.length > 0) {
 		lines.push("", "## Hard invariants", "", ...input.invariants.map((item, index) => `${index + 1}. ${item.trim()}`));
+	}
+	for (const section of input.sections ?? []) {
+		const title = section.title.trim();
+		const body = section.body.trim();
+		if (title.length > 0 && body.length > 0) lines.push("", `## ${title}`, "", body);
 	}
 	const imported = input.importedAgentContext?.trim();
 	if (imported && imported.length > 0) {
@@ -253,6 +282,9 @@ export function renderProjectContextFragment(parsed: ParsedClioMd): string {
 	}
 	if (parsed.invariants.length > 0) {
 		sections.push("## Hard invariants", ...parsed.invariants.map((item, index) => `${index + 1}. ${item}`));
+	}
+	for (const section of parsed.sections) {
+		sections.push(`## ${section.title}`, section.body);
 	}
 	if (parsed.importedAgentContext) {
 		sections.push("## Imported agent context", parsed.importedAgentContext);

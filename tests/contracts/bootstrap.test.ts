@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { parseClioMd, serializeClioMd } from "../../src/domains/context/clio-md.js";
+import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { runBootstrap } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
@@ -42,6 +42,25 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.fingerprint?.treeHash, fingerprint.treeHash);
 			strictEqual(parsed.value.conventions.length, 1);
 			strictEqual(parsed.value.invariants.length, 1);
+		}
+	});
+
+	it("preserves custom CLIO.md sections in project context", () => {
+		const text = serializeClioMd({
+			projectName: "Sample",
+			identity: "Sample is a TypeScript project with custom agent guidance.",
+			conventions: [],
+			invariants: [],
+			sections: [{ title: "Architecture traps", body: "Do not cross the engine boundary for SDK details." }],
+			fingerprint,
+		});
+		const parsed = parseClioMd(text);
+		ok(parsed.ok);
+		if (parsed.ok) {
+			strictEqual(parsed.value.sections.length, 1);
+			strictEqual(parsed.value.sections[0]?.title, "Architecture traps");
+			strictEqual(parsed.value.sections[0]?.body, "Do not cross the engine boundary for SDK details.");
+			ok(renderProjectContextFragment(parsed.value).includes("## Architecture traps"));
 		}
 	});
 
