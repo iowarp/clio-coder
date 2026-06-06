@@ -23,6 +23,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ACP v1 (schema 0.4.5) closed enums. Anything a Clio ACP server emits must stay
+// inside these sets or strict clients (Zed/serde) reject the discriminated union.
+const VALID_SESSION_UPDATES = new Set([
+	"user_message_chunk",
+	"agent_message_chunk",
+	"agent_thought_chunk",
+	"tool_call",
+	"tool_call_update",
+	"plan",
+	"available_commands_update",
+	"current_mode_update",
+]);
+const VALID_TOOL_KINDS = new Set([
+	"read",
+	"edit",
+	"delete",
+	"move",
+	"search",
+	"execute",
+	"think",
+	"fetch",
+	"switch_mode",
+	"other",
+]);
+const VALID_TOOL_CONTENT_TYPES = new Set(["content", "diff", "terminal"]);
+const USAGE_META_KEY = "clio.coder/usage";
+
+function sessionUpdates(notifications: ReadonlyArray<unknown>): Record<string, unknown>[] {
+	const updates: Record<string, unknown>[] = [];
+	for (const message of notifications) {
+		if (!isRecord(message) || message.method !== "session/update") continue;
+		if (!isRecord(message.params) || !isRecord(message.params.update)) continue;
+		updates.push(message.params.update);
+	}
+	return updates;
+}
+
 function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 	let nextId = 1;
 	let buffer = "";
@@ -127,17 +164,23 @@ function createMockChat(): AcpServerChat & { submitted: string[]; cancelled: boo
 	};
 }
 
-function createCancellableMockChat(): AcpServerChat & { cancelled: boolean } {
+function createCancellableMockChat(): AcpServerChat & { cancelled: boolean; started: Promise<void> } {
 	const listeners = new Set<(event: unknown) => void>();
 	let streaming = false;
 	let resolveSubmit: (() => void) | null = null;
+	let resolveStarted: (() => void) | null = null;
+	const started = new Promise<void>((resolve) => {
+		resolveStarted = resolve;
+	});
 	const emit = (event: unknown): void => {
 		for (const listener of listeners) listener(event);
 	};
 	return {
 		cancelled: false,
+		started,
 		async submit(): Promise<void> {
 			streaming = true;
+			resolveStarted?.();
 			emit({ type: "agent_start" });
 			await new Promise<void>((resolve) => {
 				resolveSubmit = resolve;
@@ -164,6 +207,133 @@ function createCancellableMockChat(): AcpServerChat & { cancelled: boolean } {
 		getSessionId: () => null,
 		dispose: () => {},
 	};
+}
+
+// Emits an intermediate assistant message that stops for a tool call (pi-ai
+// stopReason "toolUse"), runs the tool, then finishes normally ("stop"). The
+// turn's reported StopReason must collapse to the ACP-valid "end_turn".
+function createToolUseMockChat(): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "agent_start" });
+			emit({ type: "text_delta", delta: "calling tool" });
+			emit({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "calling tool" }], stopReason: "toolUse" },
+			});
+			emit({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "x" } });
+			emit({ type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: "ok", isError: false });
+			emit({ type: "text_delta", delta: " done" });
+			const final = { role: "assistant", content: [{ type: "text", text: "calling tool done" }], stopReason: "stop" };
+			emit({ type: "message_end", message: final });
+			emit({ type: "agent_end", messages: [final] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+		dispose: () => {},
+	};
+}
+
+// A turn that fails (pi-ai stopReason "error", which has no ACP StopReason).
+function createErroringMockChat(): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "agent_start" });
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: "provider exploded" }],
+				stopReason: "error",
+				errorMessage: "provider exploded",
+			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+		dispose: () => {},
+	};
+}
+
+async function runChat(
+	chat: AcpServerChat,
+): Promise<{ prompt: Promise<Record<string, unknown>>; close(): Promise<void> }> {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const server = serveClioAcpAgent({ transport, chat, cwd: process.cwd(), version: "test" });
+	const client = createRpcClient(clientToServer, serverToClient);
+	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+	const prompt = client.request<Record<string, unknown>>("session/prompt", {
+		sessionId: session.sessionId,
+		prompt: [{ type: "text", text: "go" }],
+	});
+	return {
+		prompt,
+		async close(): Promise<void> {
+			client.close();
+			await server;
+		},
+	};
+}
+
+interface ServerPromptRun {
+	init: Record<string, unknown>;
+	session: { sessionId: string };
+	prompt: Record<string, unknown>;
+	chat: ReturnType<typeof createMockChat>;
+	notifications: unknown[];
+	code: number;
+}
+
+async function runServerPrompt(): Promise<ServerPromptRun> {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const chat = createMockChat();
+	const server = serveClioAcpAgent({ transport, chat, cwd: process.cwd(), version: "test" });
+	const client = createRpcClient(clientToServer, serverToClient);
+	const init = await client.request<Record<string, unknown>>("initialize", {
+		protocolVersion: 1,
+		clientInfo: { name: "mock-client", version: "1" },
+	});
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+	const prompt = await client.request<Record<string, unknown>>("session/prompt", {
+		sessionId: session.sessionId,
+		prompt: [{ type: "text", text: "say hello" }],
+	});
+	await client.request("session/close", { sessionId: session.sessionId });
+	client.close();
+	const code = await server;
+	return { init, session, prompt, chat, notifications: client.notifications, code };
 }
 
 const safety: SafetyContract = {
@@ -241,12 +411,12 @@ rl.on("line", (line) => {
       send({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "clientInfo.version required" } });
       return;
     }
-    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { close: {} } }, agentInfo: { name: "mock-acp", version: "1" } } });
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: false, _meta: { "clio.coder/session": { close: true } } }, agentInfo: { name: "mock-acp", version: "1" } } });
   } else if (msg.method === "session/new") {
     send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "sess-1" } });
   } else if (msg.method === "session/prompt") {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello from acp" } } } });
-    send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn", usage: { input: 2, output: 3 } } });
+    send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn", _meta: { "clio.coder/usage": { input: 2, output: 3 } } } });
   } else if (msg.method === "session/close") {
     send({ jsonrpc: "2.0", id: msg.id, result: {} });
     process.exit(0);
@@ -293,68 +463,95 @@ rl.on("line", (line) => {
 		}
 	});
 
-	it("serves Clio as an ACP agent over newline JSON-RPC streams", async () => {
-		const clientToServer = new PassThrough();
-		const serverToClient = new PassThrough();
-		const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
-		const chat = createMockChat();
-		const server = serveClioAcpAgent({ transport, chat, cwd: process.cwd(), version: "test" });
-		const client = createRpcClient(clientToServer, serverToClient);
+	it("serves Clio as an ACP agent with conformant initialize + prompt shapes", async () => {
+		const { init, session, prompt, chat, notifications, code } = await runServerPrompt();
 
-		const init = await client.request<{ protocolVersion: number; agentInfo: { name: string } }>("initialize", {
-			protocolVersion: 1,
-			clientInfo: { name: "mock-client", version: "1" },
-		});
 		strictEqual(init.protocolVersion, 1);
-		strictEqual(init.agentInfo.name, "clio-coder");
+		strictEqual((init.agentInfo as { name?: string }).name, "clio-coder");
 
-		const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+		// AgentCapabilities must match the ACP v1 schema, which has no
+		// sessionCapabilities / streaming / tools fields.
+		const caps = init.agentCapabilities as Record<string, unknown>;
+		strictEqual(caps.loadSession, false);
+		ok(isRecord(caps.promptCapabilities), "promptCapabilities must be present");
+		ok(isRecord(caps.mcpCapabilities), "mcpCapabilities must be present");
+		ok(!("sessionCapabilities" in caps), "sessionCapabilities is not an ACP v1 field");
+		ok(!("streaming" in caps), "streaming is not an ACP v1 field");
+		ok(!("tools" in caps), "tools is not an ACP v1 field");
+		// Clio advertises optional session/close support via the _meta extension slot.
+		ok(isRecord(caps._meta), "clio extensions belong in agentCapabilities._meta");
+
 		strictEqual(typeof session.sessionId, "string");
 
-		const prompt = await client.request<{ stopReason: string; usage: { input: number; output: number } }>(
-			"session/prompt",
-			{
-				sessionId: session.sessionId,
-				prompt: [{ type: "text", text: "say hello" }],
-			},
-		);
 		strictEqual(prompt.stopReason, "end_turn");
-		strictEqual(prompt.usage.input, 4);
-		strictEqual(prompt.usage.output, 5);
+		ok(!("usage" in prompt), "usage must not sit at the top level of PromptResponse");
+		ok(!("tokenUsage" in prompt), "tokenUsage must not sit at the top level of PromptResponse");
+		const meta = prompt._meta as Record<string, unknown>;
+		ok(isRecord(meta), "usage is carried in PromptResponse._meta");
+		const usage = meta[USAGE_META_KEY] as Record<string, unknown>;
+		strictEqual(usage.input, 4);
+		strictEqual(usage.output, 5);
 		strictEqual(chat.submitted[0], "say hello");
 
-		ok(
-			client.notifications.some(
-				(message) =>
-					isRecord(message) &&
-					message.method === "session/update" &&
-					isRecord(message.params) &&
-					isRecord(message.params.update) &&
-					message.params.update.sessionUpdate === "agent_message_chunk",
-			),
-		);
-		ok(
-			client.notifications.some(
-				(message) =>
-					isRecord(message) &&
-					isRecord(message.params) &&
-					isRecord(message.params.update) &&
-					message.params.update.sessionUpdate === "thought_message_chunk",
-			),
-		);
-		ok(
-			client.notifications.some(
-				(message) =>
-					isRecord(message) &&
-					isRecord(message.params) &&
-					isRecord(message.params.update) &&
-					message.params.update.sessionUpdate === "tool_call_update",
-			),
-		);
+		const updates = sessionUpdates(notifications);
+		ok(updates.some((u) => u.sessionUpdate === "agent_message_chunk"));
+		ok(updates.some((u) => u.sessionUpdate === "agent_thought_chunk"));
+		ok(updates.some((u) => u.sessionUpdate === "tool_call"));
+		ok(updates.some((u) => u.sessionUpdate === "tool_call_update"));
+		strictEqual(code, 0);
+	});
 
-		await client.request("session/close", { sessionId: session.sessionId });
-		client.close();
-		strictEqual(await server, 0);
+	it("only emits ACP v1 session/update variants and conformant tool calls", async () => {
+		const { notifications } = await runServerPrompt();
+		const updates = sessionUpdates(notifications);
+		ok(updates.length > 0, "expected session/update notifications");
+
+		for (const update of updates) {
+			const kind = update.sessionUpdate;
+			ok(typeof kind === "string" && VALID_SESSION_UPDATES.has(kind), `invalid sessionUpdate: ${String(kind)}`);
+			if (kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
+				ok(isRecord(update.content) && update.content.type === "text", "message chunk content must be a ContentBlock");
+			}
+			if (kind === "tool_call" || kind === "tool_call_update") {
+				if (update.kind !== undefined && update.kind !== null) {
+					ok(VALID_TOOL_KINDS.has(update.kind as string), `invalid tool kind: ${String(update.kind)}`);
+				}
+				if (update.content !== undefined && update.content !== null) {
+					ok(Array.isArray(update.content), "tool call content must be a ToolCallContent[]");
+					for (const block of update.content as unknown[]) {
+						ok(
+							isRecord(block) && typeof block.type === "string" && VALID_TOOL_CONTENT_TYPES.has(block.type),
+							`invalid tool call content block: ${JSON.stringify(block)}`,
+						);
+					}
+				}
+			}
+		}
+
+		const toolCall = updates.find((u) => u.sessionUpdate === "tool_call");
+		ok(toolCall, "expected a tool_call update");
+		strictEqual(toolCall?.title, "read");
+		ok(VALID_TOOL_KINDS.has(toolCall?.kind as string), "tool_call must carry a valid ToolKind");
+	});
+
+	it("collapses pi-agent tool-use stop reasons to the ACP-valid end_turn", async () => {
+		const run = await runChat(createToolUseMockChat());
+		const prompt = await run.prompt;
+		strictEqual(prompt.stopReason, "end_turn");
+		await run.close();
+	});
+
+	it("fails the prompt turn with a JSON-RPC error when the run errors", async () => {
+		const run = await runChat(createErroringMockChat());
+		let rejected: Error | null = null;
+		try {
+			await run.prompt;
+		} catch (err) {
+			rejected = err as Error;
+		}
+		ok(rejected, "session/prompt must reject when the turn errors");
+		ok(/provider exploded/.test(rejected?.message ?? ""), `unexpected error: ${rejected?.message}`);
+		await run.close();
 	});
 
 	it("cancels an active ACP prompt through the chat loop abort path", async () => {
@@ -371,18 +568,19 @@ rl.on("line", (line) => {
 			sessionId: session.sessionId,
 			prompt: [{ type: "text", text: "wait" }],
 		});
-		await client.waitForNotification(
-			(message) =>
-				isRecord(message) &&
-				isRecord(message.params) &&
-				isRecord(message.params.update) &&
-				message.params.update.sessionUpdate === "progress" &&
-				message.params.update.title === "started",
-		);
+		await chat.started;
 		await client.request("session/cancel", { sessionId: session.sessionId });
 		const result = await prompt;
 		strictEqual(chat.cancelled, true);
 		strictEqual(result.stopReason, "cancelled");
+
+		for (const update of sessionUpdates(client.notifications)) {
+			ok(
+				typeof update.sessionUpdate === "string" && VALID_SESSION_UPDATES.has(update.sessionUpdate),
+				`invalid sessionUpdate during cancel: ${String(update.sessionUpdate)}`,
+			);
+		}
+
 		await client.request("session/close", { sessionId: session.sessionId });
 		client.close();
 		strictEqual(await server, 0);

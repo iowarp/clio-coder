@@ -7,6 +7,7 @@ import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
 import { type AcpJsonRpcTransport, createStdioTransport } from "./transport.js";
 import type { AcpDelegationResult, AcpDelegationUsage, AcpInitializeResponse, AcpPromptResponse } from "./types.js";
+import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 
@@ -81,6 +82,12 @@ function sessionIdFrom(value: unknown): string | null {
 function supportsSessionClose(init: AcpInitializeResponse | null): boolean {
 	const caps = init?.agentCapabilities;
 	if (!isRecord(caps)) return false;
+	// session/close is a documented ACP RFD, not part of the stable schema, so a
+	// peer announces support through the _meta extension slot.
+	const meta = isRecord(caps._meta) ? caps._meta[ACP_SESSION_META_KEY] : undefined;
+	if (isRecord(meta) && meta.close === true) return true;
+	// Legacy Clio servers advertised close via a non-spec sessionCapabilities.close
+	// field; honour it so older peers still get a graceful close.
 	const sessionCaps = caps.sessionCapabilities;
 	return isRecord(sessionCaps) && isRecord(sessionCaps.close);
 }
@@ -212,8 +219,18 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 				input.agent.turnTimeoutMs,
 			);
-			mergeUsage(usage, promptResponse?.usage);
-			mergeUsage(usage, promptResponse?.tokenUsage);
+			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
+			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage
+			// is best-effort. Fall back to legacy top-level fields for older peers.
+			const metaUsage = isRecord(promptResponse?._meta)
+				? (promptResponse._meta as Record<string, unknown>)[ACP_USAGE_META_KEY]
+				: undefined;
+			if (metaUsage !== undefined) {
+				mergeUsage(usage, metaUsage);
+			} else {
+				mergeUsage(usage, promptResponse?.usage);
+				mergeUsage(usage, promptResponse?.tokenUsage);
+			}
 			for (const event of mapper.finalEvents(promptResponse ?? null)) emit(event);
 			const stopReason = typeof promptResponse?.stopReason === "string" ? promptResponse.stopReason : "end_turn";
 			const toolSnapshot = mediator.snapshot();
