@@ -14,7 +14,7 @@ import { runModelsCommand } from "./models.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
 import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
-import { extractApiKeyFlag, extractNoContextFilesFlag, parseFlags, printError } from "./shared.js";
+import { extractApiKeyFlag, extractNoContextFilesFlag, extractSkillsFlags, parseFlags, printError } from "./shared.js";
 import { runSkillsCommand } from "./skills.js";
 import { runTargetsCommand } from "./targets.js";
 import { runUninstallCommand } from "./uninstall.js";
@@ -59,7 +59,8 @@ Usage:
 
 async function main(argv: string[]): Promise<number> {
 	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
-	const { noContextFiles, rest } = extractNoContextFilesFlag(afterApiKey);
+	const { noContextFiles, rest: afterNoContextFiles } = extractNoContextFilesFlag(afterApiKey);
+	const { noSkills, skillPaths, rest } = extractSkillsFlags(afterNoContextFiles);
 	const { flags, positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
@@ -74,6 +75,8 @@ async function main(argv: string[]): Promise<number> {
 	const bootOptions = {
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(noContextFiles ? { noContextFiles: true } : {}),
+		...(noSkills ? { noSkills: true } : {}),
+		...(skillPaths.length > 0 ? { skillPaths } : {}),
 	};
 	if (!subcommand) return runClioCommand(bootOptions);
 

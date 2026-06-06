@@ -53,6 +53,9 @@ async function main(): Promise<number> {
 		wireModelId: spec.wireModelId,
 		mode,
 		allowedTools: spec.allowedTools,
+		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
+		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
+		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;

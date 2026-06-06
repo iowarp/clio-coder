@@ -101,3 +101,39 @@ export function extractNoContextFilesFlag(argv: ReadonlyArray<string>): { noCont
 	}
 	return { noContextFiles, rest };
 }
+
+/**
+ * Pre-extract the top-level --no-skills and --skill flags from argv.
+ * This ensures that both interactive and headless run modes share identical command line flag support.
+ */
+export function extractSkillsFlags(argv: ReadonlyArray<string>): {
+	noSkills: boolean;
+	skillPaths: string[];
+	rest: string[];
+} {
+	const rest: string[] = [];
+	let noSkills = false;
+	const skillPaths: string[] = [];
+	let sawSubcommand = false;
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === undefined) continue;
+		if (!sawSubcommand) {
+			if (arg === "--no-skills") {
+				noSkills = true;
+				continue;
+			}
+			if (arg === "--skill") {
+				const value = argv[i + 1];
+				if (value !== undefined && !value.startsWith("-")) {
+					skillPaths.push(value);
+					i += 1;
+					continue;
+				}
+			}
+		}
+		rest.push(arg);
+		if (!arg.startsWith("-")) sawSubcommand = true;
+	}
+	return { noSkills, skillPaths, rest };
+}

@@ -65,6 +65,9 @@ export interface WorkerRunInput {
 	autoApprove?: "allow" | "deny";
 	awaitApproval?: (requestId: string, timeoutMs?: number) => Promise<ToolApprovalResponsePayload>;
 	signal?: AbortSignal;
+	noSkills?: boolean;
+	skillPaths?: ReadonlyArray<string>;
+	trustProjectCompatRoots?: boolean;
 }
 
 export interface WorkerRunResult {
@@ -245,7 +248,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// the registry would create its own state and the beforeToolCall hook would
 	// be unable to observe repetition that already triggered admission.
 	const safety = createWorkerSafety({ cwd: process.cwd() });
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, safety);
+	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, safety, {
+		...(input.noSkills !== undefined ? { noSkills: input.noSkills } : {}),
+		...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
+		...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
+	});
 	const loopGuard = createWorkerLoopGuard({ safety });
 	const telemetry: ToolTelemetry = {
 		onStart(event) {

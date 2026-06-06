@@ -87,7 +87,7 @@ async function assemblePrompt(
 
 export async function runClioRun(
 	args: ReadonlyArray<string>,
-	options: { apiKey?: string; noContextFiles?: boolean } = {},
+	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
 	if (parsed.help) {
@@ -110,17 +110,22 @@ export async function runClioRun(
 	const assembled = await assemblePrompt(parsed);
 	if (!assembled) return 2;
 
+	const noSkills = options.noSkills === true || parsed.noSkills === true;
+	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+
 	if (parsed.agentId === undefined) {
 		takeOverStdout();
 		try {
 			const code = await runClioCommand({
 				...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
 				...(options.noContextFiles ? { noContextFiles: true } : {}),
+				...(noSkills ? { noSkills: true } : {}),
+				...(skillPaths.length > 0 ? { skillPaths } : {}),
 				headless: {
 					prompt: assembled.prompt,
 					mode: parsed.json ? "json" : "text",
-					...(parsed.noSkills ? { noSkills: true } : {}),
-					...(parsed.skillPaths.length > 0 ? { skillPaths: parsed.skillPaths } : {}),
+					...(noSkills ? { noSkills: true } : {}),
+					...(skillPaths.length > 0 ? { skillPaths } : {}),
 					...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
 					...(parsed.target !== undefined ? { target: parsed.target } : {}),
 					...(parsed.model !== undefined ? { model: parsed.model } : {}),
@@ -134,13 +139,17 @@ export async function runClioRun(
 		}
 	}
 
-	return runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, options);
+	return runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+		...options,
+		noSkills,
+		skillPaths,
+	});
 }
 
 async function runDispatch(
 	parsed: RunCliArgs & { agentId: string },
 	task: string,
-	options: { apiKey?: string; noContextFiles?: boolean },
+	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> },
 ): Promise<number> {
 	if (parsed.toolProfile !== undefined && !isToolProfileName(parsed.toolProfile)) {
 		process.stderr.write("clio run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
@@ -213,6 +222,9 @@ async function runDispatch(
 		providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
 	}
 
+	const noSkills = options.noSkills === true || parsed.noSkills === true;
+	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+
 	const dispatchReq: DispatchRequest = {
 		agentId: parsed.agentId,
 		task,
@@ -226,6 +238,16 @@ async function runDispatch(
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
 	dispatchReq.supervised = parsed.supervised === true;
 	if (parsed.autoApprove) dispatchReq.autoApprove = parsed.autoApprove;
+	if (noSkills) dispatchReq.noSkills = true;
+	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
+	try {
+		const settings = readSettings();
+		if (settings.skills?.trustProjectCompatRoots) {
+			dispatchReq.trustProjectCompatRoots = true;
+		}
+	} catch {
+		// Ignore configuration read errors
+	}
 
 	let memorySection = "";
 	try {
