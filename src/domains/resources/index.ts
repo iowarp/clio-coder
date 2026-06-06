@@ -28,11 +28,15 @@ export {
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
 export {
+	defaultSkillRoots,
 	expandSkillInvocationInput,
 	formatSkillsCatalogForPrompt,
 	loadSkills,
+	modelVisibleSkills,
 	type Skill,
 	type SkillExpansion,
 	type SkillList,
+	type SkillProvenance,
 	type SkillRoot,
+	type SkillSource,
 } from "./skills/loader.js";

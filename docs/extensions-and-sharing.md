@@ -8,16 +8,29 @@ Source of truth: `src/domains/extensions/**`, `src/domains/resources/**`, `src/d
 
 ## Resource roots and precedence
 
-Prompts and skills are loaded from package, user, and project roots. Higher-ranked scopes override lower-ranked resources with the same name.
+Prompts and skills are loaded from package, user, and project roots. Higher-ranked roots override lower-ranked resources with the same name.
+
+Prompts use the three-tier precedence:
 
 | Rank | Scope | Root |
 | --- | --- | --- |
 | 0 | package | enabled extension resource roots |
-| 1 | user | `<configDir>/prompts` and `<configDir>/skills` |
-| 2 | project | `.clio/prompts` and `.clio/skills` |
+| 1 | user | `<configDir>/prompts` |
+| 2 | project | `.clio/prompts` |
 | 3 | cli | reserved for call-site injected resources |
 
-Project resources override user resources; user/project resources override extension defaults.
+Skills add Agent Skills compatibility roots so that skills installed by other agents (Codex, the `agents` convention, or `npx skills`) are usable without copying. The skill precedence, lowest to highest, is:
+
+| Precedence | Scope | Source | Root |
+| --- | --- | --- | --- |
+| 10 | package | extension | enabled extension resource roots |
+| 20 | user | agents / codex | `~/.agents/skills`, `~/.codex/skills` |
+| 30 | user | clio | `<configDir>/skills` |
+| 40 | project | agents / codex | `.agents/skills`, `.codex/skills` (untrusted by default) |
+| 50 | project | clio | `.clio/skills` |
+| 60 | cli | path | reserved for call-site injected resources |
+
+Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`.
 
 ---
 
@@ -54,7 +67,7 @@ Templates without frontmatter are accepted; Clio derives a fallback description 
 
 ## Skills
 
-Skills require YAML frontmatter and stricter naming. They may be a single Markdown file or a directory containing `SKILL.md`.
+Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. A missing description is the only hard rejection; every other validation issue degrades to a warning and the skill still loads.
 
 Example `.clio/skills/hdf5-review/SKILL.md`:
 
@@ -62,6 +75,10 @@ Example `.clio/skills/hdf5-review/SKILL.md`:
 ---
 name: hdf5-review
 description: Review HDF5/NetCDF validation logic and output assumptions.
+license: MIT
+allowed-tools:
+  - Read
+  - Grep
 ---
 
 When asked to review scientific array output:
@@ -78,7 +95,44 @@ Use in the TUI:
 /skill:hdf5-review review the output validation path
 ```
 
-Skill names must match their path subject, use lowercase letters/numbers/hyphens, avoid leading/trailing hyphens, and stay within length limits. `disable-model-invocation: true` hides a skill from the automatic model-visible catalog while keeping it loadable by explicit command/tool paths.
+`/skills [query]` lists every discovered skill with its scope, source, and trust state. `/skill:name args` force-activates a skill by expanding its body into the submitted message. The same expansion runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
+
+### Naming and validation
+
+The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should use lowercase letters, numbers, and single hyphens; format violations warn but do not block loading.
+
+Recognized frontmatter fields:
+
+- `name`, `description`: core identity.
+- `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill:name`.
+- `license`, `version`, `compatibility`, `allowed-tools`, and any other keys: captured as skill metadata and surfaced by `read_skill`.
+- `source-url`, `registry-id`, `installed-at`, `updated-at`, `audit`: captured as install provenance when present.
+
+### Trust and compatibility roots
+
+Shared user roots (`~/.agents/skills`, `~/.codex/skills`) are model-visible by default, like the Clio user root. Project-local compatibility roots (`.agents/skills`, `.codex/skills`) are discovered but **untrusted by default**: they appear in `/skills` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
+
+Opt in to model-visible project compatibility roots by setting `CLIO_TRUST_PROJECT_SKILLS=1`. `.clio/skills` is always trusted as the Clio-native project root.
+
+### read_skill and create_skill
+
+`read_skill` loads a skill body after the model matches the catalog. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` (optionally with `max_tree_entries`) to list sibling files under the skill base directory. `read_skill` never executes bundled scripts and only resolves skills the model is allowed to see.
+
+`create_skill` writes a `SKILL.md` folder. It defaults to project scope, refuses to overwrite without `overwrite: true`, and warns when the destination is gitignored. Pass `with_scaffold: true` to also create `scripts/`, `references/`, and `assets/` folders, and supply `license`, `version`, `compatibility`, `allowed_tools`, or `metadata` to populate frontmatter.
+
+### Skills.sh and Agent Skills compatibility
+
+Clio is local-first. Skills run from disk and no chat turn depends on network access. Because the compatibility roots above use the standard `SKILL.md` shape, skills installed by the Skills.sh CLI for other agents are usable directly:
+
+```text
+npx skills add <skill> -a codex   # installs into ~/.codex/skills
+```
+
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Remote search, audit, and install through Clio are designed but not enabled in this release.
+
+### Prompt envelope and safety
+
+The skills catalog is included in the prompt only when `read_skill` or `create_skill` is active for the turn, and it is suppressed entirely on no-tool turns. The catalog lists names, scopes, sources, and short content hashes plus a `catalog_hash`; full bodies are never sent until a skill is explicitly activated. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates.
 
 ---
 

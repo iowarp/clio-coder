@@ -97,6 +97,9 @@ prompt to open autocomplete.
 | `/cost` | Show token and USD totals for completed runs in the session. |
 | `/receipts` | Browse saved run receipts. |
 | `/receipts verify <runId>` | Verify a receipt against the persisted run ledger. |
+| `/skills [query]` | List discovered skills with scope, source, and trust state. |
+| `/skill:name args` | Force-activate a skill by expanding its body into the message. |
+| `/prompts [query]` | List available prompt templates. |
 | `/extensions` | List installed extension packages and active/shadowed/disabled state. |
 | `/share export <path>` | Export current project resources to a share archive. |
 | `/share import [--dry-run] [--force] <path>` | Preview or apply a share archive import. |
