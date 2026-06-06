@@ -33,7 +33,7 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	isOrchestratorTargetEligibleRuntime,
+	isTargetEligibleRuntime,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
@@ -353,7 +353,7 @@ export function advanceScopedTarget(
 		const endpoint = settings.endpoints.find((e) => e.id === endpointId);
 		if (!endpoint) return false;
 		const runtime = registry.get(endpoint.runtime);
-		return runtime !== null && isOrchestratorTargetEligibleRuntime(runtime);
+		return runtime !== null && isTargetEligibleRuntime(runtime);
 	});
 	if (filteredScope.length === 0) return null;
 	const activeEndpoint = settings.orchestrator.endpoint ?? "";
@@ -721,9 +721,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						`cannot use target '${endpoint}' as orchestrator target because runtime '${target.runtime}' is not registered`,
 					);
 				}
-				if (!isOrchestratorTargetEligibleRuntime(runtime)) {
+				if (!isTargetEligibleRuntime(runtime)) {
 					throw new Error(
-						`cannot use target '${endpoint}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+						`cannot use target '${endpoint}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 					);
 				}
 			}

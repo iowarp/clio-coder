@@ -54,7 +54,7 @@ Core surfaces:
 | Surface | Purpose |
 | --- | --- |
 | Interactive TUI | Work with an assistant without leaving the shell. |
-| Target-first configuration | Route chat through HTTP/native/pi-ai-backed targets and fleet dispatch through those plus `codex-cli`/`opencode-cli` worker subprocess targets. |
+| Target-first configuration | Route chat and fleet dispatch through HTTP/native/pi-ai-backed targets. |
 | Built-in agents | Dispatch `scout`, `planner`, `reviewer`, `implementer`, and other focused recipes. |
 | Typed tools | Run common git, test, lint, build, package-script, and frontend validation paths without handing the model an unrestricted shell. |
 | Receipts and audit logs | Track completed runs, token usage, costs, tool activity, safety decisions, and receipt integrity. |
@@ -77,8 +77,7 @@ Requirements:
 - Node.js `>=22.19.0`
 - npm
 - A model target, such as a local OpenAI-compatible gateway, Ollama, LM Studio,
-  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API. Fleet workers
-  may also use the worker-only `codex-cli` or `opencode-cli` subprocess targets.
+  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API.
 
 Recommended alpha install:
 

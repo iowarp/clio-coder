@@ -56,7 +56,7 @@ export interface WorkerPromptMessage {
 	contentHash: string;
 }
 
-const RUNTIME_KINDS = ["http", "subprocess"] as const satisfies ReadonlyArray<RuntimeKind>;
+const RUNTIME_KINDS = ["http"] as const satisfies ReadonlyArray<RuntimeKind>;
 const RUNTIME_API_FAMILIES = [
 	"openai-completions",
 	"openai-responses",
@@ -71,15 +71,12 @@ const RUNTIME_API_FAMILIES = [
 	"ollama-native",
 	"rerank-http",
 	"embeddings-http",
-	"subprocess-codex",
-	"subprocess-opencode",
 ] as const satisfies ReadonlyArray<RuntimeApiFamily>;
 const RUNTIME_AUTHS = [
 	"api-key",
 	"oauth",
 	"aws-sdk",
 	"vertex-adc",
-	"cli",
 	"none",
 ] as const satisfies ReadonlyArray<RuntimeAuth>;
 const THINKING_LEVELS = [

@@ -54,8 +54,6 @@ function latencyTag(status: EndpointStatus): string {
 }
 
 function endpointLocation(status: EndpointStatus): string {
-	const kind = status.runtime?.kind;
-	if (kind === "subprocess") return "(subprocess)";
 	return status.endpoint.url ?? "(no url)";
 }
 

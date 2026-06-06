@@ -1,6 +1,6 @@
 # Configuration, Targets, Runtimes, and Auth
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets must be HTTP/native/pi-ai-backed; fleet dispatch may also use the worker-only `codex-cli` and `opencode-cli` subprocess runtimes.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native/pi-ai-backed runtimes.
 
 Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every pi-ai provider.
 
@@ -37,12 +37,11 @@ Terminology used in code and receipts:
 
 | Term | Meaning |
 | --- | --- |
-| `RuntimeDescriptor` | Executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, `llamacpp`, or `codex-cli`. |
+| `RuntimeDescriptor` | HTTP/native/pi-ai-backed executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, or `llamacpp`. |
 | Target / `TargetSpec` / `EndpointDescriptor` | Persisted user-configured endpoint plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
-| Orchestrator target | Main chat/print target. Must be HTTP/native/pi-ai-backed, not subprocess. |
-| Worker target | Fleet dispatch target. May be HTTP/native or one of the worker-only subprocess runtimes. |
-| Worker-only runtime | `codex-cli` or `opencode-cli`, used only by dispatch workers. |
+| Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
+| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, resolved exactly like an orchestrator target. |
 
 ```yaml
 version: 1
@@ -161,7 +160,7 @@ clio targets remove <id>
 clio targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses worker-only subprocess runtimes because those cannot be chat/print targets. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
+`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
 
 ### Local reasoning-token budgets
 
@@ -210,12 +209,11 @@ Representative built-in runtime IDs:
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
-| Worker-only subprocess | `codex-cli`, `opencode-cli` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
 
 > [!NOTE]
-> Subprocess runtimes (`codex-cli`, `opencode-cli`) are **worker-only runtimes**. They can execute worker tasks but are blocked from being configured or used as orchestrator (chat) or print targets.
+> Every runtime is an HTTP/native/pi-ai-backed adapter. Chat, print, and dispatch worker targets all resolve through the same target-eligibility policy.
 
 ---
 
@@ -234,7 +232,6 @@ Auth types come from runtime descriptors:
 | --- | --- |
 | `api-key` | Environment variable or stored credential. |
 | `oauth` | Browser/manual OAuth flow where implemented. |
-| `cli` | Delegated to the native CLI's own login/status behavior. |
 | `aws-sdk` / `vertex-adc` | Uses platform SDK/application credentials. |
 | `none` | No credential required. |
 

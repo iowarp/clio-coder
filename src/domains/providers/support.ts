@@ -1,12 +1,11 @@
 import type { ClioSettings } from "../../core/config.js";
 import { type AuthTarget, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
 import { catalogProviderForRuntime, listCatalogModelsForRuntime } from "./catalog.js";
-import { isWorkerOnlyRuntime } from "./eligibility.js";
 import { getRuntimeRegistry } from "./registry.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
-export type ProviderSupportGroup = "featured" | "cloud-api" | "subscription" | "local-http" | "cli-runtime";
+export type ProviderSupportGroup = "featured" | "cloud-api" | "subscription" | "local-http";
 
 export interface ProviderSupportEntry {
 	runtimeId: string;
@@ -37,8 +36,6 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	openai: "OpenAI Platform API",
 	"openai-codex": "ChatGPT Plus/Pro via Codex OAuth",
 	openrouter: "OpenRouter API",
-	"codex-cli": "Codex CLI",
-	"opencode-cli": "OpenCode CLI",
 	"ollama-native": "Ollama native API",
 	"lmstudio-native": "LM Studio SDK + native model management",
 	llamacpp: "llama.cpp server (auto-detect surface)",
@@ -56,8 +53,6 @@ function groupPriority(group: ProviderSupportGroup): number {
 			return 2;
 		case "local-http":
 			return 3;
-		case "cli-runtime":
-			return 4;
 	}
 }
 
@@ -71,15 +66,12 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 			return "Cloud APIs";
 		case "local-http":
 			return "Local HTTP";
-		case "cli-runtime":
-			return "CLI runtimes";
 	}
 }
 
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
 	if (runtime.auth === "oauth") return "subscription";
-	if (isWorkerOnlyRuntime(runtime)) return "cli-runtime";
 	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
 	}
@@ -118,7 +110,7 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		...(defaultModel ? { defaultModel } : {}),
 		modelHints,
 		featured: runtime.id === "openai-codex",
-		connectable: runtime.auth === "oauth" || runtime.auth === "api-key" || runtime.auth === "cli",
+		connectable: runtime.auth === "oauth" || runtime.auth === "api-key",
 		supportsCustomUrl:
 			runtime.kind === "http" &&
 			(classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat" || runtime.id === "anthropic-compat"),

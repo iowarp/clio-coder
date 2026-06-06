@@ -8,11 +8,7 @@ import {
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
-import {
-	isOrchestratorTargetEligibleRuntime,
-	isWorkerOnlyRuntime,
-	WORKER_ONLY_RUNTIME_IDS,
-} from "../../src/domains/providers/eligibility.js";
+import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
@@ -181,19 +177,24 @@ describe("contracts/providers/runtime-cleanup", () => {
 	const builtinIds = new Set(BUILTIN_RUNTIMES.map((r) => r.id));
 
 	it("does not register any Claude Code or removed CLI runtimes", () => {
-		for (const removed of ["claude-code-sdk", "claude-code-cli", "gemini-cli", "copilot-cli"]) {
+		for (const removed of [
+			"claude-code-sdk",
+			"claude-code-cli",
+			"gemini-cli",
+			"copilot-cli",
+			"codex-cli",
+			"opencode-cli",
+		]) {
 			ok(!builtinIds.has(removed), `runtime '${removed}' must be absent from the builtin registry`);
 		}
-		// No descriptor may advertise a Claude Code / agent-sdk API family or unsupported kind.
+		// Every builtin runtime is an HTTP/native adapter; no Claude Code, agent-sdk,
+		// or subprocess/CLI families or kinds survive.
 		for (const runtime of BUILTIN_RUNTIMES) {
 			ok(
-				!/claude|agent-sdk/.test(runtime.apiFamily),
-				`runtime '${runtime.id}' must not use a Claude Code apiFamily (${runtime.apiFamily})`,
+				!/claude|agent-sdk|subprocess/.test(runtime.apiFamily),
+				`runtime '${runtime.id}' must not use a removed apiFamily (${runtime.apiFamily})`,
 			);
-			ok(
-				runtime.kind === "http" || runtime.kind === "subprocess",
-				`runtime '${runtime.id}' must use a supported RuntimeKind (${runtime.kind})`,
-			);
+			strictEqual(runtime.kind, "http", `runtime '${runtime.id}' must be an http runtime`);
 		}
 	});
 
@@ -207,56 +208,52 @@ describe("contracts/providers/runtime-cleanup", () => {
 		ok(builtinIds.has("openai-compat"), "openai-compat must remain registered");
 	});
 
-	it("limits worker-only (subprocess) runtimes to codex-cli and opencode-cli", () => {
-		const workerOnly = BUILTIN_RUNTIMES.filter((r) => isWorkerOnlyRuntime(r))
-			.map((r) => r.id)
-			.sort();
-		deepStrictEqual(workerOnly, [...WORKER_ONLY_RUNTIME_IDS].sort());
-		const workerOnlySet = new Set<string>(workerOnly);
-		for (const runtime of BUILTIN_RUNTIMES.filter((entry) => !workerOnlySet.has(entry.id))) {
-			ok(isOrchestratorTargetEligibleRuntime(runtime), `${runtime.id} should be orchestrator/print eligible`);
+	it("treats every builtin runtime as one http target-eligibility class", () => {
+		for (const runtime of BUILTIN_RUNTIMES) {
+			ok(isTargetEligibleRuntime(runtime), `${runtime.id} should be target-eligible`);
 		}
 	});
 
-	it("rejects worker-only runtimes as orchestrator and print targets", () => {
-		const runtime = fakeDescriptor("codex-cli", { kind: "subprocess", apiFamily: "subprocess-codex" });
-		const endpoint: EndpointDescriptor = { id: "codex-worker", runtime: "codex-cli", defaultModel: "gpt-5.4" };
+	it("rejects non-http runtime targets cleanly for orchestrator, print, and dispatch", () => {
+		const runtime = { ...fakeDescriptor("legacy-subprocess"), kind: "subprocess" } as unknown as RuntimeDescriptor;
+		const endpoint: EndpointDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
 		const mockProviders: ProvidersContract = {
 			list: () => [],
-			getEndpoint: (id: string) => (id === "codex-worker" ? endpoint : null),
-			getRuntime: (id: string) => (id === "codex-cli" ? runtime : null),
+			getEndpoint: (id: string) => (id === "legacy-target" ? endpoint : null),
+			getRuntime: (id: string) => (id === "legacy-subprocess" ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
 
-		for (const use of ["orchestrator", "print"] as const) {
-			const res = resolveRuntimeTarget(mockProviders, { endpointId: "codex-worker", use });
-			strictEqual(res.ok, false, `${use} target must reject a worker-only runtime`);
+		for (const use of ["orchestrator", "print", "dispatch"] as const) {
+			const res = resolveRuntimeTarget(mockProviders, { endpointId: "legacy-target", use });
+			strictEqual(res.ok, false, `${use} target must reject a non-http runtime`);
 			if (!res.ok) {
-				ok(res.diagnostics.some((d) => d.code === "worker-only-target-unsupported"));
+				ok(res.diagnostics.some((d) => d.code === "runtime-target-unsupported"));
 			}
 		}
 	});
 
-	it("accepts codex-cli and opencode-cli as dispatch worker targets", () => {
-		for (const id of WORKER_ONLY_RUNTIME_IDS) {
-			const apiFamily = id === "codex-cli" ? "subprocess-codex" : "subprocess-opencode";
-			const runtime = fakeDescriptor(id, { kind: "subprocess", apiFamily, auth: "cli" });
-			const endpoint: EndpointDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
-			const mockProviders: ProvidersContract = {
-				list: () => [],
-				getEndpoint: (targetId: string) => (targetId === endpoint.id ? endpoint : null),
-				getRuntime: (runtimeId: string) => (runtimeId === id ? runtime : null),
-				getDetectedReasoning: () => null,
-				knowledgeBase: null,
-			} as never;
+	it("accepts an http runtime as a dispatch worker target", () => {
+		const runtime = fakeDescriptor("http-worker", { auth: "api-key" });
+		const endpoint: EndpointDescriptor = {
+			id: "http-worker-target",
+			runtime: "http-worker",
+			defaultModel: "worker-model",
+		};
+		const mockProviders: ProvidersContract = {
+			list: () => [],
+			getEndpoint: (targetId: string) => (targetId === endpoint.id ? endpoint : null),
+			getRuntime: (runtimeId: string) => (runtimeId === "http-worker" ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
 
-			const res = resolveRuntimeTarget(mockProviders, { endpointId: endpoint.id, use: "dispatch" });
-			strictEqual(res.ok, true, `${id} must remain dispatch-eligible`);
-		}
+		const res = resolveRuntimeTarget(mockProviders, { endpointId: endpoint.id, use: "dispatch" });
+		strictEqual(res.ok, true, "http target must be dispatch-eligible");
 	});
 
-	it("rejects sdk runtime kind in the worker spec contract", () => {
+	it("rejects unsupported runtime kinds in the worker spec contract", () => {
 		throws(
 			() =>
 				parseWorkerSpec({
@@ -275,18 +272,22 @@ describe("contracts/providers/runtime-cleanup", () => {
 					wireModelId: "model",
 					allowedTools: [],
 				}),
-			/http, subprocess/,
+			/one of: http/,
 		);
 	});
 
-	it("has no builtin Claude Code SDK/CLI/approval IPC runtime implementation paths", () => {
+	it("has no builtin Claude Code SDK/CLI, native CLI auth, or subprocess runtime paths", () => {
 		const removedPaths = [
 			"src/engine/claude-code-sdk-runtime.ts",
 			"src/engine/sdk-policy-bridge.ts",
+			"src/engine/subprocess-runtime.ts",
+			"src/cli/native-cli-auth.ts",
 			"src/domains/providers/runtimes/cli-stub/claude-code-cli.ts",
 			"src/domains/providers/runtimes/cli-stub/claude-code-sdk.ts",
 			"src/domains/providers/runtimes/cli-stub/gemini-cli.ts",
 			"src/domains/providers/runtimes/cli-stub/copilot-cli.ts",
+			"src/domains/providers/runtimes/cli-stub/codex-cli.ts",
+			"src/domains/providers/runtimes/cli-stub/opencode-cli.ts",
 			"src/interactive/tool-approval-overlay.ts",
 			"src/interactive/overlays/tool-approval-overlay.ts",
 		];
@@ -304,7 +305,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 			"docs/built-in-agents.md",
 		];
 		const forbidden =
-			/claude-code-(?:sdk|cli)|gemini-cli|copilot-cli|Claude Code runtime|External CLI\/SDK|SDK-backed runtimes|native \| sdk \| cli/i;
+			/claude-code-(?:sdk|cli)|gemini-cli|copilot-cli|codex-cli|opencode-cli|worker-only|Claude Code runtime|External CLI\/SDK|SDK-backed runtimes|native \| sdk \| cli/i;
 		for (const rel of docs) {
 			const text = readFileSync(join(process.cwd(), rel), "utf8");
 			ok(!forbidden.test(text), `${rel} must not advertise removed runtime support`);

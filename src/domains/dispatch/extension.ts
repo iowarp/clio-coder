@@ -308,11 +308,11 @@ function supportsRequiredCapabilities(
 	return true;
 }
 
-function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
-	if (runtimeKind === "http") return [];
-	return [
-		`${runtimeId} is an opaque worker-only runtime; Clio records launch policy and final output but cannot observe or control internal tool calls.`,
-	];
+function runtimeLimitations(_runtimeKind: RunKind, _runtimeId: string): string[] {
+	// Clio only drives HTTP/native runtimes through pi-agent-core, which Clio
+	// observes and controls directly, so there are no runtime-imposed dispatch
+	// limitations to record.
+	return [];
 }
 
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {

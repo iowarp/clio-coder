@@ -4,9 +4,8 @@
  * Owns the pi-agent-core Agent instance for a worker run and forwards every
  * AgentEvent to an emit callback (the worker entry serializes events to NDJSON
  * stdout). Post-W5 the surface takes a resolved EndpointDescriptor +
- * RuntimeDescriptor + wire model id, not a provider/model pair. Subprocess
- * runtimes (codex-cli, opencode-cli) do not touch pi-ai; they
- * delegate to subprocess-runtime.ts which spawns the CLI agent directly.
+ * RuntimeDescriptor + wire model id, not a provider/model pair. Every runtime
+ * is an HTTP/native/pi-ai-backed adapter driven through pi-agent-core.
  */
 
 import type { ToolName } from "../core/tool-names.js";
@@ -31,7 +30,6 @@ import type { WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
-import { startSubprocessWorkerRun } from "./subprocess-runtime.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import {
@@ -161,15 +159,6 @@ function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 	return input.runtime.defaultCapabilities.tools === true;
 }
 
-function taskWithDynamicPromptContext(input: WorkerRunInput): string {
-	const dynamic = input.dynamicPromptMessages ?? [];
-	if (dynamic.length === 0) return input.task;
-	// Subprocess CLIs expose one prompt string through argv/stdin, not an
-	// ordered role/message transport. Keep the volatile context adjacent to the
-	// task without pretending those runtimes can preserve provider message roles.
-	return [...dynamic.map((fragment) => fragment.body), input.task].join("\n\n");
-}
-
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -191,22 +180,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		workerAllowedTools: input.allowedTools,
 	});
 	const activeWorkerTools = workerPalette.activeTools;
-
-	if (input.runtime.kind === "subprocess") {
-		const subprocessInput: Parameters<typeof startSubprocessWorkerRun>[0] = {
-			systemPrompt: input.systemPrompt,
-			task: taskWithDynamicPromptContext(input),
-			endpoint: input.endpoint,
-			runtime: input.runtime,
-			wireModelId: input.wireModelId,
-		};
-		if (input.apiKey !== undefined) subprocessInput.apiKey = input.apiKey;
-		if (input.signal !== undefined) subprocessInput.signal = input.signal;
-		if (input.sessionId !== undefined) subprocessInput.sessionId = input.sessionId;
-		subprocessInput.mode = mode;
-		subprocessInput.allowedTools = activeWorkerTools;
-		return startSubprocessWorkerRun(subprocessInput, emit);
-	}
 
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);

@@ -12,7 +12,13 @@ import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
-export type RunKind = "http" | "subprocess";
+/**
+ * Runtime kind recorded on a run envelope/receipt. Clio only drives HTTP/native
+ * runtimes, so live runs always record "http". The literal is kept narrow on
+ * purpose; legacy persisted receipts that carried other values are coerced to
+ * "http" on read.
+ */
+export type RunKind = "http";
 
 export interface RunReceiptIntegrity {
 	version: 1;

@@ -5,7 +5,6 @@ import { readSettings } from "../core/config.js";
 import { authNotRequiredStatus, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
-import { nativeCliAuthStatus, runNativeCliLogin, runNativeCliLogout } from "./native-cli-auth.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import {
@@ -55,27 +54,12 @@ function printStatusLine(id: string, label: string, type: string | null, present
 	process.stdout.write(formatColumns([[id, label, type ?? "-", present ? "present" : "absent", source]]));
 }
 
-function printNativeStatusLine(
-	id: string,
-	label: string,
-	state: "authenticated" | "unauthenticated" | "unknown" | "not-required",
-	detail: string,
-): void {
-	process.stdout.write(formatColumns([[id, label, "cli", state, detail]]));
-}
-
 function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
 	return formatColumns(
 		rows.map((row) => {
 			const status = row.status;
 			if (status === null) {
-				return [
-					row.entry.runtimeId,
-					row.entry.label,
-					"cli",
-					"unknown",
-					"native CLI auth; target status probes when supported",
-				];
+				return [row.entry.runtimeId, row.entry.label, "-", "unknown", "no auth probe available"];
 			}
 			return [
 				row.entry.runtimeId,
@@ -270,10 +254,6 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		}
 	}
 
-	if (resolved.runtime.auth === "cli") {
-		return runNativeCliLogin(resolved.runtime, input.isTTY && output.isTTY);
-	}
-
 	if (resolved.runtime.auth !== "api-key") {
 		printError(`runtime ${resolved.runtime.id} does not support interactive auth login`);
 		return 1;
@@ -320,11 +300,6 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 		if (!resolved) {
 			printError(`unknown target or runtime: ${target}`);
 			return 2;
-		}
-		if (resolved.runtime.auth === "cli") {
-			const status = await nativeCliAuthStatus(resolved.runtime);
-			printNativeStatusLine(resolved.runtime.id, resolved.runtime.displayName, status.state, status.detail);
-			return status.exitCode;
 		}
 		const status = statusForResolvedTarget(resolved, auth);
 		printStatusLine(
@@ -373,10 +348,6 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		process.stderr.write(USAGE);
 		return 2;
 	}
-	if (resolved.runtime.auth === "cli") {
-		return runNativeCliLogout(resolved.runtime, input.isTTY && output.isTTY);
-	}
-
 	const auth = openAuthStorage();
 	const status = statusForResolvedTarget(resolved, auth);
 	if (!status.available) {

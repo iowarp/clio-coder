@@ -5,8 +5,8 @@ import type { EndpointDescriptor } from "./endpoint-descriptor.js";
 import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 
-export type RuntimeKind = "http" | "subprocess";
-export type RuntimeTier = "protocol" | "cloud" | "local-native" | "cli" | "cli-gold" | "cli-silver" | "cli-bronze";
+export type RuntimeKind = "http";
+export type RuntimeTier = "protocol" | "cloud" | "local-native";
 
 export type RuntimeApiFamily =
 	| "openai-completions"
@@ -21,11 +21,9 @@ export type RuntimeApiFamily =
 	| "mistral-conversations"
 	| "ollama-native"
 	| "rerank-http"
-	| "embeddings-http"
-	| "subprocess-codex"
-	| "subprocess-opencode";
+	| "embeddings-http";
 
-export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "cli" | "none";
+export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "none";
 
 export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;
