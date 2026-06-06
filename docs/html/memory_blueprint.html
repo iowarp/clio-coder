@@ -1,0 +1,1990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Memory & Evidence Blueprint</title>
+  <!-- Modern Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #6b7280;
+      
+      /* Vibrant Color Palettes */
+      --color-primary: #00f0ff; /* Glowing Cyan */
+      --color-primary-rgb: 0, 240, 255;
+      --color-secondary: #bd00ff; /* Glowing Purple */
+      --color-secondary-rgb: 189, 0, 255;
+      --color-accent: #10b981; /* Emerald Green */
+      --color-accent-rgb: 16, 185, 129;
+      --color-warn: #f59e0b; /* Amber */
+      --color-warn-rgb: 245, 158, 11;
+      --color-danger: #ef4444; /* Rose Red */
+      --color-danger-rgb: 239, 68, 68;
+      --color-info: #3b82f6; /* Blue */
+      
+      --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+      --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.15);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+      position: relative;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 18px;
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow-glow);
+      position: relative;
+    }
+    
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 20px;
+      background: var(--gradient-main);
+      z-index: -1;
+      opacity: 0.3;
+      filter: blur(4px);
+    }
+
+    .header-logo svg {
+      width: 36px;
+      height: 36px;
+      fill: none;
+      stroke: var(--color-primary);
+      stroke-width: 2;
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, #ffffff, #a5b4fc, var(--color-primary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .version-stamp {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      color: var(--color-primary);
+      margin-top: 0.5rem;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 1rem auto 0 auto;
+      font-weight: 400;
+    }
+
+    /* Glass Card Layout */
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      margin-bottom: 2rem;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .glass-card:hover {
+      border-color: rgba(var(--color-primary-rgb), 0.2);
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
+    }
+
+    .card-title svg {
+      width: 20px;
+      height: 20px;
+      stroke: var(--color-primary);
+      fill: none;
+      stroke-width: 2;
+    }
+
+    /* Tabs Navigation */
+    .tabs-nav {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.75rem 1.5rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-main);
+      color: #090d16;
+      font-weight: 700;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .tab-btn svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+    }
+
+    /* Tab Contents */
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.4s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Grid Layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .grid-sidebar {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .grid-2, .grid-3, .grid-sidebar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Form Styles */
+    .form-group {
+      margin-bottom: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    input[type="text"], input[type="number"], select, textarea {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.15);
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    /* Tags & Multi-select */
+    .tags-selector-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 0.5rem;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border-card);
+      padding: 0.75rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .tag-checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      text-transform: none;
+      letter-spacing: normal;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .tag-checkbox-label:hover {
+      color: var(--text-main);
+    }
+
+    .tag-checkbox-label input {
+      accent-color: var(--color-primary);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+      font-family: var(--font-sans);
+    }
+
+    .btn-primary {
+      background: var(--gradient-main);
+      color: #090d16;
+      font-weight: 700;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.3);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(var(--color-primary-rgb), 0.2);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--color-danger);
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+      box-shadow: 0 4px 12px rgba(var(--color-danger-rgb), 0.2);
+    }
+
+    .btn-accent {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--color-accent);
+    }
+
+    .btn-accent:hover {
+      background: rgba(16, 185, 129, 0.25);
+      box-shadow: 0 4px 12px rgba(var(--color-accent-rgb), 0.2);
+    }
+
+    .btn-warn {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--color-warn);
+    }
+
+    .btn-warn:hover {
+      background: rgba(245, 158, 11, 0.25);
+      box-shadow: 0 4px 12px rgba(var(--color-warn-rgb), 0.2);
+    }
+
+    .btn-sm {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      border-radius: 6px;
+    }
+
+    /* Badge Styles */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-sans);
+    }
+
+    .badge-proposed {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--color-warn);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .badge-approved {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--color-accent);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .badge-rejected {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--color-danger);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    /* Table Styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.9rem;
+    }
+
+    th {
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      background: rgba(0, 0, 0, 0.15);
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    /* Code Block Display */
+    .code-block {
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      overflow-x: auto;
+      white-space: pre;
+      color: #e5e7eb;
+      position: relative;
+    }
+
+    .code-block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-dark);
+      font-family: var(--font-sans);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.5rem;
+    }
+
+    /* SVG Diagram Styling */
+    .svg-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 1rem;
+      overflow: auto;
+    }
+
+    .svg-diagram {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .svg-node {
+      transition: filter 0.3s ease, stroke-width 0.3s ease;
+      cursor: pointer;
+    }
+
+    .svg-node:hover {
+      filter: drop-shadow(0px 0px 8px rgba(var(--color-primary-rgb), 0.6));
+      stroke-width: 2.5px;
+    }
+
+    /* Specific simulator widgets */
+    .store-records-list {
+      max-height: 480px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding-right: 0.5rem;
+    }
+
+    .record-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .record-card:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(var(--color-primary-rgb), 0.15);
+    }
+
+    .record-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .record-id-scope {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .record-id {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--color-primary);
+      font-size: 0.85rem;
+    }
+
+    .record-lesson {
+      font-size: 0.9rem;
+      color: var(--text-main);
+    }
+
+    .record-details {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.15);
+      padding: 0.5rem;
+      border-radius: 4px;
+    }
+
+    .record-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      margin-top: 0.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 0.5rem;
+    }
+
+    /* Alerts and indicators */
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .alert-info {
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #93c5fd;
+    }
+
+    .alert-warn {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fde047;
+    }
+
+    .alert-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    .live-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--color-accent);
+      box-shadow: 0 0 8px var(--color-accent);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.6; }
+      50% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.6; }
+    }
+
+    /* Injection threats validator widget */
+    .threat-level-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .threat-safe {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--color-accent);
+    }
+
+    .threat-suspicious {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--color-warn);
+    }
+
+    .threat-danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--color-danger);
+    }
+
+    .metric-bubble {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      text-align: center;
+    }
+
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--color-primary);
+    }
+
+    .metric-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-top: 0.15rem;
+    }
+
+    /* Flex helpers */
+    .flex-between {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .flex-gap-2 {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .flex-wrap {
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h1>Evidence & Memory Blueprint</h1>
+      <div>
+        <span class="version-stamp">Clio Coder v0.2.1</span>
+        <span class="version-stamp" style="color: var(--text-muted);">Generated: 2026-06-06</span>
+      </div>
+      <p class="subtitle">
+        System architecture, directory validation flowcharts, and interactive simulator for Clio Coder's evidence corpus and long-term memory lifecycle.
+      </p>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab(event, 'arch-pane')">
+        <svg viewBox="0 0 24 24"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h12c.5 0 1 .2 1.4.6.4.4.6.9.6 1.4v18l-5-4-5 4-5-4-5 4z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Architecture & Diagrams
+      </button>
+      <button class="tab-btn" onclick="switchTab(event, 'simulator-pane')">
+        <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Memory Proposal Simulator
+      </button>
+      <button class="tab-btn" onclick="switchTab(event, 'prompt-pane')">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Prompt Injection Lab
+      </button>
+    </div>
+
+    <!-- Tab 1: Architecture & Diagrams -->
+    <div id="arch-pane" class="tab-pane active">
+      
+      <!-- Directory Layout Section -->
+      <div class="glass-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Evidence Directory Structure
+        </div>
+        <p class="subtitle" style="margin: 0 0 1.5rem 0; text-align: left; max-width: 100%;">
+          An evidence corpus is built deterministically for each run, session, or eval. Hover over the nodes in the structure below to highlight details.
+        </p>
+
+        <div class="svg-container">
+          <svg class="svg-diagram" width="850" height="420" viewBox="0 0 850 420">
+            <!-- Definitions for gradients and shadows -->
+            <defs>
+              <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.8" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.8" />
+              </linearGradient>
+              <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#bd00ff" stop-opacity="0.8" />
+                <stop offset="100%" stop-color="#ef4444" stop-opacity="0.8" />
+              </linearGradient>
+              <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="5" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- Connective lines (dendrogram layout) -->
+            <path d="M 120 70 L 120 370" stroke="rgba(255,255,255,0.08)" stroke-width="2" fill="none" />
+            <path d="M 120 120 L 220 120" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+            <path d="M 120 170 L 220 170" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+            <path d="M 120 220 L 220 220" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+            <path d="M 120 270 L 220 270" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+            <path d="M 120 320 L 220 320" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+            <path d="M 120 370 L 220 370" stroke="rgba(0, 240, 255, 0.25)" stroke-width="2" fill="none" />
+
+            <!-- Directory Root Node -->
+            <g class="svg-node" transform="translate(40, 40)">
+              <rect x="0" y="0" width="160" height="50" rx="8" fill="rgba(17, 24, 39, 0.9)" stroke="var(--color-primary)" stroke-width="1.5" />
+              <text x="20" y="30" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12" font-weight="bold">&lt;dataDir&gt;/evidence/</text>
+              <circle cx="10" cy="25" r="4" fill="var(--color-primary)" />
+            </g>
+
+            <!-- File: overview.json -->
+            <g class="svg-node" transform="translate(220, 95)" onclick="showArchDetail('overview')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">overview.json</text>
+              <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Metadata</text>
+              <circle cx="170" cy="23" r="3" fill="var(--color-primary)" />
+            </g>
+
+            <!-- File: findings.json / findings.md -->
+            <g class="svg-node" transform="translate(220, 145)" onclick="showArchDetail('findings')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">findings.json/.md</text>
+              <text x="140" y="27" fill="var(--color-warn)" font-family="var(--font-sans)" font-size="10">Findings</text>
+              <circle cx="170" cy="23" r="3" fill="var(--color-warn)" />
+            </g>
+
+            <!-- File: transcript.md -->
+            <g class="svg-node" transform="translate(220, 195)" onclick="showArchDetail('transcript')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">transcript.md</text>
+              <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">History</text>
+              <circle cx="170" cy="23" r="3" fill="var(--text-muted)" />
+            </g>
+
+            <!-- File: receipt.json -->
+            <g class="svg-node" transform="translate(220, 245)" onclick="showArchDetail('receipt')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">receipt.json</text>
+              <text x="140" y="27" fill="var(--color-accent)" font-family="var(--font-sans)" font-size="10">Receipts</text>
+              <circle cx="170" cy="23" r="3" fill="var(--color-accent)" />
+            </g>
+
+            <!-- File: trace.cleaned.jsonl -->
+            <g class="svg-node" transform="translate(220, 295)" onclick="showArchDetail('trace')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="11">trace.cleaned.jsonl</text>
+              <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Telemetry</text>
+              <circle cx="170" cy="23" r="3" fill="var(--text-muted)" />
+            </g>
+
+            <!-- File: protected-artifacts.json -->
+            <g class="svg-node" transform="translate(220, 345)" onclick="showArchDetail('protected')">
+              <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+              <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="11">protected-artifacts</text>
+              <text x="140" y="27" fill="var(--color-danger)" font-family="var(--font-sans)" font-size="10">Safety</text>
+              <circle cx="170" cy="23" r="3" fill="var(--color-danger)" />
+            </g>
+
+            <!-- Details Panel (Embedded SVG or Interactive Target HTML side) -->
+            <g transform="translate(440, 95)">
+              <rect x="0" y="0" width="370" height="296" rx="10" fill="rgba(0, 0, 0, 0.3)" stroke="rgba(255,255,255,0.06)" stroke-width="1" />
+              <text x="20" y="30" fill="var(--color-primary)" font-family="var(--font-sans)" font-size="14" font-weight="bold" id="detail-title">Overview metadata</text>
+              <foreignObject x="20" y="45" width="330" height="230">
+                <div id="detail-body" style="color: var(--text-muted); font-family: var(--font-sans); font-size: 0.85rem; line-height: 1.4; padding-top: 5px;">
+                  Select a file from the tree to inspect its function and data properties.
+                  <br/><br/>
+                  <strong>overview.json</strong> holds stable summary information about the execution, including the runs involved, statuses, tasks executed, runtimeIds, tags, modelIDs, totals metrics, and generated dates.
+                </div>
+              </foreignObject>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- State Machine Section -->
+      <div class="glass-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Memory Record Lifecycle State Machine
+        </div>
+        <p class="subtitle" style="margin: 0 0 1.5rem 0; text-align: left; max-width: 100%;">
+          Visual representation of transitions from raw execution evidence to long-term memory prompt injection and eventual stale pruning.
+        </p>
+
+        <div class="svg-container">
+          <svg class="svg-diagram" width="850" height="300" viewBox="0 0 850 300">
+            <!-- Markers for arrows -->
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.4)" />
+              </marker>
+              <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-primary)" />
+              </marker>
+              <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-accent)" />
+              </marker>
+              <marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-danger)" />
+              </marker>
+            </defs>
+
+            <!-- State: Evidence Corpus -->
+            <g class="svg-node" transform="translate(30, 110)">
+              <rect x="0" y="0" width="130" height="60" rx="8" fill="rgba(17, 24, 39, 0.9)" stroke="rgba(255, 255, 255, 0.15)" stroke-width="1.5" />
+              <text x="20" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="12" font-weight="bold">Evidence Corpus</text>
+              <text x="20" y="44" fill="var(--text-dark)" font-family="var(--font-mono)" font-size="9">run-*, session-*</text>
+            </g>
+
+            <!-- Arrow: Propose -->
+            <path d="M 160 140 L 234 140" stroke="var(--color-primary)" stroke-width="2" fill="none" marker-end="url(#arrow-cyan)" />
+            <text x="165" y="130" fill="var(--color-primary)" font-family="var(--font-mono)" font-size="9">clio memory propose</text>
+
+            <!-- State: Proposed -->
+            <g class="svg-node" transform="translate(240, 110)">
+              <rect x="0" y="0" width="140" height="60" rx="8" fill="rgba(17, 24, 39, 0.9)" stroke="var(--color-warn)" stroke-width="2" />
+              <text x="25" y="27" fill="var(--text-main)" font-family="var(--font-sans)" font-size="13" font-weight="bold">Proposed State</text>
+              <text x="25" y="44" fill="var(--color-warn)" font-family="var(--font-mono)" font-size="9">approved: false</text>
+            </g>
+
+            <!-- Transition: Approve (Up and right) -->
+            <path d="M 380 120 L 484 75" stroke="var(--color-accent)" stroke-width="2" fill="none" marker-end="url(#arrow-green)" />
+            <text x="390" y="90" fill="var(--color-accent)" font-family="var(--font-mono)" font-size="9">clio memory approve</text>
+
+            <!-- State: Approved -->
+            <g class="svg-node" transform="translate(490, 30)">
+              <rect x="0" y="0" width="140" height="60" rx="8" fill="rgba(17, 24, 39, 0.9)" stroke="var(--color-accent)" stroke-width="2" />
+              <text x="25" y="27" fill="var(--text-main)" font-family="var(--font-sans)" font-size="13" font-weight="bold">Approved State</text>
+              <text x="25" y="44" fill="var(--color-accent)" font-family="var(--font-mono)" font-size="9">Prompt-injected</text>
+            </g>
+
+            <!-- Transition: Reject (Down and right) -->
+            <path d="M 380 160 L 484 205" stroke="var(--color-danger)" stroke-width="2" fill="none" marker-end="url(#arrow-red)" />
+            <text x="390" y="195" fill="var(--color-danger)" font-family="var(--font-mono)" font-size="9">clio memory reject</text>
+
+            <!-- State: Rejected -->
+            <g class="svg-node" transform="translate(490, 190)">
+              <rect x="0" y="0" width="140" height="60" rx="8" fill="rgba(17, 24, 39, 0.9)" stroke="var(--color-danger)" stroke-width="2" />
+              <text x="25" y="27" fill="var(--text-main)" font-family="var(--font-sans)" font-size="13" font-weight="bold">Rejected State</text>
+              <text x="25" y="44" fill="var(--color-danger)" font-family="var(--font-mono)" font-size="9">rejectedAt set</text>
+            </g>
+
+            <!-- Arrow: Toggle Approved -> Rejected -->
+            <path d="M 540 90 L 540 184" stroke="rgba(239, 68, 68, 0.6)" stroke-dasharray="3,3" stroke-width="1.5" fill="none" marker-end="url(#arrow-red)" />
+            <text x="545" y="140" fill="var(--color-danger)" font-family="var(--font-mono)" font-size="8">reject</text>
+
+            <!-- Arrow: Toggle Rejected -> Approved -->
+            <path d="M 580 190 L 580 96" stroke="rgba(16, 185, 129, 0.6)" stroke-dasharray="3,3" stroke-width="1.5" fill="none" marker-end="url(#arrow-green)" />
+            <text x="585" y="145" fill="var(--color-accent)" font-family="var(--font-mono)" font-size="8">approve</text>
+
+            <!-- Transitions to Pruned (End State) -->
+            <path d="M 630 60 L 714 110" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" marker-end="url(#arrow)" />
+            <text x="635" y="75" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="8">stale &gt; 180d</text>
+
+            <path d="M 310 170 L 310 270 L 710 270 L 740 180" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" marker-end="url(#arrow)" />
+            <text x="320" y="260" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="8">unapproved stale &gt; 30d</text>
+
+            <path d="M 630 220 L 714 170" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" marker-end="url(#arrow)" />
+            <text x="640" y="210" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="8">stale &gt; 30d</text>
+
+            <!-- State: Pruned -->
+            <g class="svg-node" transform="translate(720, 110)">
+              <rect x="0" y="0" width="100" height="60" rx="8" fill="rgba(17, 24, 39, 0.5)" stroke="var(--text-dark)" stroke-width="1" />
+              <text x="25" y="27" fill="var(--text-dark)" font-family="var(--font-sans)" font-size="13" font-weight="bold">Pruned</text>
+              <text x="20" y="44" fill="var(--text-dark)" font-family="var(--font-mono)" font-size="8">deleted from disk</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+      
+    </div>
+
+    <!-- Tab 2: Memory Proposal Simulator -->
+    <div id="simulator-pane" class="tab-pane">
+      <div class="grid-sidebar">
+        
+        <!-- Controls Column -->
+        <div class="control-panel">
+          <div class="glass-card" style="padding: 1.25rem;">
+            <div class="card-title" style="margin-bottom: 0.75rem; font-size: 1.05rem;">
+              <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              1. Simulated Evidence
+            </div>
+
+            <!-- Evidence Source metadata forms -->
+            <div class="form-group">
+              <label for="sim-evidence-id">Evidence ID</label>
+              <input type="text" id="sim-evidence-id" value="run-f7e9a2b8" placeholder="e.g. run-f7e9a2b8" />
+            </div>
+
+            <div class="form-group">
+              <label for="sim-source-kind">Source Kind</label>
+              <select id="sim-source-kind" onchange="onSourceKindChange()">
+                <option value="run">Run</option>
+                <option value="session">Session</option>
+                <option value="eval" selected>Eval</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="sim-task">Primary Task Name</label>
+              <input type="text" id="sim-task" value="compile-mpi-fortran-bench" placeholder="e.g. compile-mpi-fortran-bench" />
+            </div>
+
+            <div class="form-group">
+              <label for="sim-finding">Warning / Finding</label>
+              <textarea id="sim-finding" rows="2" placeholder="e.g. gfortran: error: MPI package not found in current environment.">gfortran: error: MPI package not found in current environment.</textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="sim-cwds">Working Directories</label>
+              <input type="text" id="sim-cwds" value="/home/akougkas/hpc-workspace" placeholder="CWD list (comma separated)" />
+            </div>
+
+            <div class="form-group">
+              <label for="sim-runtimes">Runtime IDs</label>
+              <input type="text" id="sim-runtimes" value="openmpi-4.1.2-gcc" placeholder="Runtime IDs (comma separated)" />
+            </div>
+
+            <div class="form-group">
+              <label for="sim-models">Model IDs</label>
+              <input type="text" id="sim-models" value="gpt-4o, claude-3-5-sonnet" placeholder="Model IDs (comma separated)" />
+            </div>
+
+            <div class="form-group">
+              <label>Evidence Tags (Closed Set)</label>
+              <div class="tags-selector-grid" id="tags-checkboxes">
+                <!-- Javascript will render tags checklist here -->
+              </div>
+            </div>
+
+            <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" onclick="proposeMemoryFromSimulatedEvidence()">
+              Propose Memory Record
+            </button>
+          </div>
+
+          <div class="glass-card" style="padding: 1.25rem;">
+            <div class="card-title" style="margin-bottom: 0.75rem; font-size: 1.05rem;">
+              <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Playground Helpers
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <button class="btn btn-secondary btn-sm" onclick="addMockRecords(10)">+10 Mock</button>
+              <button class="btn btn-secondary btn-sm" onclick="addMockRecords(100)">+100 Mock</button>
+              <button class="btn btn-secondary btn-sm" onclick="fillToLimit()">Fill to 500</button>
+              <button class="btn btn-danger btn-sm" onclick="clearMemoryStore()">Clear Store</button>
+            </div>
+            <button class="btn btn-secondary btn-sm" style="width: 100%; margin-top: 0.5rem;" onclick="resetToDefaultMocks()">
+              Reset to Default Examples
+            </button>
+          </div>
+        </div>
+
+        <!-- Store Output & Action Logs Column -->
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+          
+          <!-- Store metrics display -->
+          <div class="grid-3" style="gap: 1rem; margin-bottom: 0.5rem;">
+            <div class="metric-bubble">
+              <div class="metric-value" id="metric-store-count">0 / 500</div>
+              <div class="metric-label">Store Bounded Cap</div>
+            </div>
+            <div class="metric-bubble">
+              <div class="metric-value" style="color: var(--color-accent);" id="metric-approved-count">0</div>
+              <div class="metric-label">Approved Records</div>
+            </div>
+            <div class="metric-bubble">
+              <div class="metric-value" style="color: var(--color-warn);" id="metric-proposed-count">0</div>
+              <div class="metric-label">Proposed/Rejected</div>
+            </div>
+          </div>
+
+          <!-- Sandbox Alert Box -->
+          <div id="sim-alert-box" style="display: none;"></div>
+
+          <!-- Stale Pruner simulator control panel -->
+          <div class="glass-card" style="padding: 1.25rem; margin-bottom: 0;">
+            <div class="flex-between flex-wrap" style="gap: 1rem;">
+              <div class="flex-gap-2">
+                <span class="live-dot"></span>
+                <span style="font-size: 0.85rem; font-weight: bold; text-transform: uppercase; color: var(--text-muted);">
+                  Simulation Stale Pruning Controls
+                </span>
+              </div>
+              <div class="flex-gap-2">
+                <label for="prune-date-offset" style="margin: 0;">Simulated Date:</label>
+                <select id="prune-date-offset" onchange="updateSimulatedDateDisplay()">
+                  <option value="0">Today (2026-06-06)</option>
+                  <option value="35">Today + 35 Days (Triggers 30d Unapproved stale)</option>
+                  <option value="190">Today + 190 Days (Triggers 180d Approved stale)</option>
+                </select>
+                <button class="btn btn-warn btn-sm" onclick="runSimulationPruning()">Prune Stale</button>
+              </div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-dark); margin-top: 0.5rem; font-family: var(--font-mono);" id="sim-date-string">
+              Current Simulation Date: Saturday, June 06, 2026
+            </div>
+          </div>
+
+          <!-- Records List Container -->
+          <div class="glass-card" style="flex-grow: 1;">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Memory records.json Store
+            </div>
+            
+            <div class="store-records-list" id="store-records-list-element">
+              <!-- Rendered memory cards will be inserted here dynamically -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Tab 3: Prompt Injection Lab -->
+    <div id="prompt-pane" class="tab-pane">
+      <div class="grid-sidebar">
+        
+        <!-- Selection Filters Panel -->
+        <div class="control-panel">
+          <div class="glass-card">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Retrieval Filters
+            </div>
+
+            <div class="form-group">
+              <label for="prompt-token-budget">Token Budget</label>
+              <input type="number" id="prompt-token-budget" value="400" min="10" max="10000" oninput="triggerPromptSectionRebuild()" />
+              <div style="font-size: 0.7rem; color: var(--text-dark); font-family: var(--font-mono);">
+                Target cost estimation
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="prompt-max-items">Max Items</label>
+              <input type="number" id="prompt-max-items" value="5" min="1" max="50" oninput="triggerPromptSectionRebuild()" />
+            </div>
+
+            <div class="form-group">
+              <label>Allowed Scopes</label>
+              <div style="display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.25rem;">
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="global" checked onchange="triggerPromptSectionRebuild()" /> global</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="repo" checked onchange="triggerPromptSectionRebuild()" /> repo</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="language" onchange="triggerPromptSectionRebuild()" /> language</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="runtime" onchange="triggerPromptSectionRebuild()" /> runtime</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="agent" onchange="triggerPromptSectionRebuild()" /> agent</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="task-family" onchange="triggerPromptSectionRebuild()" /> task-family</label>
+                <label class="tag-checkbox-label"><input type="checkbox" class="prompt-scope-check" value="hpc-domain" onchange="triggerPromptSectionRebuild()" /> hpc-domain</label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="prompt-regressions">Active Suppressions (Regressions)</label>
+              <input type="text" id="prompt-regressions" placeholder="e.g. compiler-bug, run-fail" oninput="triggerPromptSectionRebuild()" />
+              <div style="font-size: 0.7rem; color: var(--text-dark); font-family: var(--font-mono); line-height: 1.3; margin-top: 0.25rem;">
+                Enter comma-separated tags. Any memory record listing these regressions is skipped.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rendered Prompt Area -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+          
+          <!-- Live metrics and warnings -->
+          <div class="glass-card" style="margin-bottom: 0;">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Prompt Injection & Security Threat Analyzer
+            </div>
+
+            <div class="form-group">
+              <label for="custom-lesson-content">Test Custom Lesson for Prompt Injection</label>
+              <textarea id="custom-lesson-content" rows="3" style="font-family: var(--font-mono); font-size: 0.85rem;" oninput="runPromptThreatAnalysis()" placeholder="Type a proposed lesson content here to check it for LLM escape or instruction injection risk tokens..."></textarea>
+            </div>
+
+            <!-- Live security assessment badge -->
+            <div class="flex-between" style="background: rgba(0, 0, 0, 0.2); padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);">
+              <span style="font-size: 0.85rem; font-weight: 600;">Active Threat Level:</span>
+              <div class="threat-level-badge threat-safe" id="threat-badge-indicator">
+                Safe
+              </div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.4;" id="threat-explanation">
+              No injection or system escape tokens detected. Clean alphanumeric output.
+            </div>
+          </div>
+
+          <!-- Section renderer output -->
+          <div class="glass-card" style="flex-grow: 1;">
+            <div class="flex-between" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+              <div class="card-title" style="border: 0; padding: 0; margin: 0;">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Rendered chat-loop prompt section
+              </div>
+              <div class="flex-gap-2">
+                <span class="badge badge-approved" id="prompt-section-token-indicator">0 Tokens</span>
+                <span class="badge badge-proposed" id="prompt-section-item-indicator">0 Items</span>
+              </div>
+            </div>
+
+            <div class="code-block" id="prompt-section-output-code">
+              <!-- Rendered template from selectMemoryForPrompt -->
+            </div>
+            
+            <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+              <strong>Note on determinism:</strong> The local chat loop retrieves memory synchronously from the local JSON store, sorted by <code>lastVerifiedAt</code> (or <code>createdAt</code>) descending, and then by <code>id</code> ascending. Budgeting acts as a strict deterministic cutoff.
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Javascript Logic for Playground -->
+  <script>
+    // Constant limits and variables
+    const MEMORY_STORE_MAX_RECORDS = 500;
+    const MEMORY_STALE_APPROVED_DAYS = 180;
+    const MEMORY_STALE_UNAPPROVED_DAYS = 30;
+
+    const EVIDENCE_TAGS = [
+      "audit-linked", "audit-missing", "best-effort-link", "timeout", 
+      "context-overflow", "provider-transient", "missing-dependency", 
+      "wrong-runtime", "proxy-validation", "no-validation", 
+      "destructive-cleanup", "blocked-tool", "protected-artifact", 
+      "tool-loop", "test-failure", "build-failure", "cwd-missing", 
+      "session-linked", "session-missing", "auth-failure", "unknown"
+    ];
+
+    const TAG_PRIORITY = [
+      "test-failure", "build-failure", "blocked-tool", "protected-artifact",
+      "timeout", "context-overflow", "missing-dependency", "wrong-runtime",
+      "auth-failure", "cwd-missing", "destructive-cleanup", "unknown"
+    ];
+
+    const MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"];
+
+    // Simulated memory store database
+    let memoryStore = [];
+
+    // Simulated current date offset
+    let simulatedDateOffsetDays = 0;
+    function getSimulatedDate() {
+      const baseDate = new Date("2026-06-06T12:53:00-05:00");
+      if (simulatedDateOffsetDays === 0) return baseDate;
+      const futureMs = baseDate.getTime() + (simulatedDateOffsetDays * 24 * 60 * 60 * 1000);
+      return new Date(futureMs);
+    }
+
+    // Initialize Page
+    window.addEventListener("DOMContentLoaded", () => {
+      renderTagsSelector();
+      resetToDefaultMocks();
+      updateStoreView();
+      runPromptThreatAnalysis();
+    });
+
+    // Tab switcher
+    function switchTab(event, paneId) {
+      document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+      
+      document.getElementById(paneId).classList.add("active");
+      event.currentTarget.classList.add("active");
+    }
+
+    // Detail Panel triggers in Architecture tab
+    function showArchDetail(fileKey) {
+      const title = document.getElementById("detail-title");
+      const body = document.getElementById("detail-body");
+
+      const fileDetails = {
+        overview: {
+          title: "overview.json (Run/Session Metadata)",
+          text: `A stable JSON representation of execution context. Key fields:
+                 <ul>
+                   <li><strong>version</strong>: 1 (Current schema version)</li>
+                   <li><strong>evidenceId</strong>: Deterministic run/session/eval ID</li>
+                   <li><strong>source</strong>: Source kind (run, session, eval) and primary identifier</li>
+                   <li><strong>tasks</strong>: String array of active tasks at run-time</li>
+                   <li><strong>cwds</strong>: Repository-relative working directories</li>
+                   <li><strong>tags</strong>: EvidenceTag labels determined from log events</li>
+                   <li><strong>totals</strong>: Performance and payload counts (costUsd, tokens, run duration)</li>
+                 </ul>`
+        },
+        findings: {
+          title: "findings.json & findings.md (Agent Lessons & Diagnostics)",
+          text: `These files record structured findings generated during verification.
+                 <ul>
+                   <li><strong>findings.json</strong>: Contains a list of <code>EvidenceFinding</code> objects, each citing an ID, severity (<code>info</code> or <code>warn</code>), active tag, and details.</li>
+                   <li><strong>findings.md</strong>: Compiled Markdown report containing readable error diagnostics.</li>
+                   <li>Note: Findings are written deterministically by the telemetry layer; Clio does not call a model to summarize or extract these.</li>
+                 </ul>`
+        },
+        transcript: {
+          title: "transcript.md (Human-Readable Log)",
+          text: `A comprehensive formatted execution transcript. It contains:
+                 <ul>
+                   <li>All human prompts, agent responses, tool invocations, and command outputs.</li>
+                   <li>Clean, readable codeblocks representing outputs and errors.</li>
+                   <li>Serves as the primary audit record for developers investigating tool loops or validation faults.</li>
+                 </ul>`
+        },
+        receipt: {
+          title: "receipt.json (Deterministic Execution Signatures)",
+          text: `Holds cryptographic and transactional receipts signed by the target runtime or local model coordinator.
+                 <ul>
+                   <li>Contains the receipt bundle <code>{ version: 1, receipts: [...] }</code>.</li>
+                   <li>Validates that model API costs, token consumption, and outputs match the recorded traces.</li>
+                   <li>Used to confirm that evidence claims are backed by verifiable transaction records.</li>
+                 </ul>`
+        },
+        trace: {
+          title: "trace.cleaned.jsonl (Compact Telemetry Rows)",
+          text: `Normalised telemetry lines for hot rendering and log ingestion.
+                 <ul>
+                   <li>Combines raw execution traces with corresponding tool summaries.</li>
+                   <li>Eliminates verbose system logs, preserving only the tool commands, exit codes, and findings.</li>
+                   <li>Facilitates fast scans by memory-propose utilities to check applicability criteria.</li>
+                 </ul>`
+        },
+        protected: {
+          title: "protected-artifacts.json (Safety-Gated Resources)",
+          text: `Records state changes and access events for resources designated under project damage-control policies.
+                 <ul>
+                   <li>Identifies files and systems protected from modification or destructive cleanups.</li>
+                   <li>Logs policy validation decisions when tools try to access sensitive target files.</li>
+                   <li>Linked to the <code>protected-artifact</code> evidence tag when a safety block or violation occurs.</li>
+                 </ul>`
+        }
+      };
+
+      if (fileDetails[fileKey]) {
+        title.innerHTML = fileDetails[fileKey].title;
+        body.innerHTML = fileDetails[fileKey].text;
+      }
+    }
+
+    // Render checkbox inputs for tags closed set
+    function renderTagsSelector() {
+      const container = document.getElementById("tags-checkboxes");
+      container.innerHTML = "";
+      EVIDENCE_TAGS.forEach(tag => {
+        const label = document.createElement("label");
+        label.className = "tag-checkbox-label";
+        
+        const isChecked = tag === "test-failure" || tag === "build-failure";
+        label.innerHTML = `<input type="checkbox" class="sim-tag-check" value="${tag}" ${isChecked ? 'checked' : ''}> ${tag}`;
+        container.appendChild(label);
+      });
+    }
+
+    // Update simulation date display
+    function updateSimulatedDateDisplay() {
+      const select = document.getElementById("prune-date-offset");
+      simulatedDateOffsetDays = parseInt(select.value, 10);
+      const date = getSimulatedDate();
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      document.getElementById("sim-date-string").textContent = "Current Simulation Date: " + date.toLocaleDateString("en-US", options);
+    }
+
+    // Source kind selector change handler
+    function onSourceKindChange() {
+      const kind = document.getElementById("sim-source-kind").value;
+      const evidenceInput = document.getElementById("sim-evidence-id");
+      if (kind === "run") {
+        evidenceInput.value = "run-" + Math.random().toString(16).slice(2, 10);
+      } else if (kind === "session") {
+        evidenceInput.value = "session-" + Math.random().toString(16).slice(2, 10);
+      } else {
+        evidenceInput.value = "eval-" + Math.random().toString(16).slice(2, 10);
+      }
+    }
+
+    // SHA-256 equivalent slice for mem- record ID
+    async function calculateMemoryId(evidenceId) {
+      const msgBuffer = new TextEncoder().encode(evidenceId);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return "mem-" + hashHex.slice(0, 16);
+    }
+
+    // Propose memory record logic
+    async function proposeMemoryFromSimulatedEvidence() {
+      const evidenceId = document.getElementById("sim-evidence-id").value.trim();
+      const kind = document.getElementById("sim-source-kind").value;
+      const task = document.getElementById("sim-task").value.trim();
+      const warning = document.getElementById("sim-finding").value.trim();
+      const cwdsRaw = document.getElementById("sim-cwds").value;
+      const runtimesRaw = document.getElementById("sim-runtimes").value;
+      const modelsRaw = document.getElementById("sim-models").value;
+
+      if (!evidenceId) {
+        showSimAlert("Evidence ID is required", "danger");
+        return;
+      }
+
+      // Collect tags checked
+      const tags = [];
+      document.querySelectorAll(".sim-tag-check").forEach(chk => {
+        if (chk.checked) tags.push(chk.value);
+      });
+
+      // Parse arrays
+      const cwds = cwdsRaw.split(",").map(c => c.trim()).filter(c => c.length > 0);
+      const runtimes = runtimesRaw.split(",").map(r => r.trim()).filter(r => r.length > 0);
+      const models = modelsRaw.split(",").map(m => m.trim()).filter(m => m.length > 0);
+
+      const memId = await calculateMemoryId(evidenceId);
+
+      // Check duplicate
+      const existing = memoryStore.find(item => item.id === memId);
+      if (existing) {
+        showSimAlert(`Proposal Idempotence: Memory record ${memId} already proposed from evidence ${evidenceId}`, "warn");
+        return;
+      }
+
+      // Cap at 500 checks
+      if (memoryStore.length >= MEMORY_STORE_MAX_RECORDS) {
+        showSimAlert(`Error: memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio memory prune --stale`, "danger");
+        return;
+      }
+
+      // Infer primary tag
+      let primaryTag = null;
+      for (const t of TAG_PRIORITY) {
+        if (tags.includes(t)) {
+          primaryTag = t;
+          break;
+        }
+      }
+      if (!primaryTag) primaryTag = tags[0] || "unknown";
+
+      // Infer Scope
+      let scope = "global";
+      if (kind === "eval") scope = "task-family";
+      else if (cwds.length > 0) scope = "repo";
+      else if (runtimes.length > 0) scope = "runtime";
+      else if (models.length > 0) scope = "agent";
+
+      // Build Lesson
+      let lessonText = "";
+      const citedTask = task || "the cited workflow";
+      const findingSnippet = warning ? ` Finding: ${warning}` : "";
+      
+      if (primaryTag === "test-failure") {
+        lessonText = `Evidence ${evidenceId} shows validation failure around "${citedTask}". Recheck the failing validation path before claiming completion.${findingSnippet}`;
+      } else if (primaryTag === "build-failure") {
+        lessonText = `Evidence ${evidenceId} shows build failure around "${citedTask}". Rebuild before treating related changes as complete.${findingSnippet}`;
+      } else if (primaryTag === "blocked-tool") {
+        lessonText = `Evidence ${evidenceId} shows blocked tool activity around "${citedTask}". Adjust the workflow to respect tool and safety policy.${findingSnippet}`;
+      } else if (primaryTag === "protected-artifact") {
+        lessonText = `Evidence ${evidenceId} includes protected artifacts for "${citedTask}". Preserve validated artifacts unless newer validation supersedes them.${findingSnippet}`;
+      } else if (primaryTag === "timeout") {
+        lessonText = `Evidence ${evidenceId} shows timeout risk around "${citedTask}". Prefer bounded validation steps and explicit limits.${findingSnippet}`;
+      } else if (primaryTag === "context-overflow") {
+        lessonText = `Evidence ${evidenceId} shows context pressure around "${citedTask}". Prefer scoped retrieval or compaction over prompt growth.${findingSnippet}`;
+      } else if (primaryTag === "missing-dependency") {
+        lessonText = `Evidence ${evidenceId} shows a missing dependency around "${citedTask}". Verify local prerequisites before rerunning the workflow.${findingSnippet}`;
+      } else if (primaryTag === "wrong-runtime") {
+        lessonText = `Evidence ${evidenceId} shows runtime mismatch around "${citedTask}". Confirm the configured runtime and model before dispatch.${findingSnippet}`;
+      } else if (primaryTag === "auth-failure") {
+        lessonText = `Evidence ${evidenceId} shows auth failure around "${citedTask}". Check target credentials before repeating the workflow.${findingSnippet}`;
+      } else if (primaryTag === "cwd-missing") {
+        lessonText = `Evidence ${evidenceId} shows missing working-directory state around "${citedTask}". Confirm repo-local cwd paths before running commands.${findingSnippet}`;
+      } else if (primaryTag === "destructive-cleanup") {
+        lessonText = `Evidence ${evidenceId} shows destructive cleanup risk around "${citedTask}". Keep validated artifacts protected until replacement validation exists.${findingSnippet}`;
+      } else {
+        lessonText = `Evidence ${evidenceId} records tags ${tags.join(", ")} for "${citedTask}". Keep this as memory only after human approval.${findingSnippet}`;
+      }
+
+      // Truncate lesson to 240 chars
+      if (lessonText.length > 240) {
+        lessonText = lessonText.slice(0, 237) + "...";
+      }
+
+      // appliesWhen / avoidWhen
+      const appliesWhen = [
+        `source:${kind}:${evidenceId}`,
+        ...tags.map(t => `tag:${t}`),
+        ...cwds.map(c => `cwd:${c.slice(0, 40)}`),
+        ...runtimes.map(r => `runtime:${r}`),
+        ...models.map(m => `model:${m}`)
+      ].sort();
+
+      const avoidWhen = cwds.length > 0 || runtimes.length > 0 || tags.length > 0 
+        ? ["current task, repo, runtime, or failure mode differs from cited evidence"] 
+        : [];
+
+      // Calculate confidence
+      let confidence = 0.45;
+      if (kind === "run") confidence += 0.05;
+      if (kind === "eval") confidence += 0.05;
+      if (tags.length > 0) confidence += 0.05;
+      if (warning) confidence += 0.05;
+      confidence = Math.min(0.75, parseFloat(confidence.toFixed(2)));
+
+      const simulatedNowStr = getSimulatedDate().toISOString();
+
+      const record = {
+        id: memId,
+        scope: scope,
+        key: `evidence:${evidenceId}`,
+        lesson: lessonText,
+        evidenceRefs: [evidenceId],
+        appliesWhen: appliesWhen,
+        avoidWhen: avoidWhen,
+        confidence: confidence,
+        createdAt: simulatedNowStr,
+        approved: false
+      };
+
+      // Add to store
+      memoryStore.push(record);
+      sortMemoryRecordsStore();
+      updateStoreView();
+      showSimAlert(`Successfully proposed memory record <strong>${memId}</strong> from evidence <strong>${evidenceId}</strong>.`, "info");
+      
+      // Update other views
+      triggerPromptSectionRebuild();
+    }
+
+    // Approve a record in memory store
+    function approveRecord(id) {
+      const record = memoryStore.find(item => item.id === id);
+      if (record) {
+        record.approved = true;
+        record.lastVerifiedAt = getSimulatedDate().toISOString();
+        delete record.rejectedAt;
+        updateStoreView();
+        triggerPromptSectionRebuild();
+        showSimAlert(`Approved memory record <strong>${id}</strong>. Added to active prompt injection candidates.`, "accent");
+      }
+    }
+
+    // Reject a record in memory store
+    function rejectRecord(id) {
+      const record = memoryStore.find(item => item.id === id);
+      if (record) {
+        record.approved = false;
+        record.rejectedAt = getSimulatedDate().toISOString();
+        updateStoreView();
+        triggerPromptSectionRebuild();
+        showSimAlert(`Rejected memory record <strong>${id}</strong>. Record remains in store to avoid duplicate proposals but is excluded from injection.`, "danger");
+      }
+    }
+
+    // Add regression to record
+    function addRegression(id) {
+      const record = memoryStore.find(item => item.id === id);
+      if (record) {
+        if (!record.regressions) record.regressions = [];
+        const regressionName = prompt("Enter regression name to suppress this record:", "test-regression");
+        if (regressionName) {
+          record.regressions.push(regressionName.trim());
+          updateStoreView();
+          triggerPromptSectionRebuild();
+          showSimAlert(`Added regression suppression <strong>${regressionName}</strong> to memory <strong>${id}</strong>.`, "warn");
+        }
+      }
+    }
+
+    // Delete record completely
+    function deleteRecord(id) {
+      memoryStore = memoryStore.filter(item => item.id !== id);
+      updateStoreView();
+      triggerPromptSectionRebuild();
+      showSimAlert(`Deleted memory record <strong>${id}</strong> from local database.`, "info");
+    }
+
+    // Prune stale records logic simulation
+    function runSimulationPruning() {
+      const now = getSimulatedDate();
+      const nowMs = now.getTime();
+      
+      const pruned = [];
+      const kept = [];
+
+      memoryStore.forEach(record => {
+        const reference = record.lastVerifiedAt ?? record.createdAt;
+        const referenceMs = Date.parse(reference);
+        const staleAfterDays = record.approved ? MEMORY_STALE_APPROVED_DAYS : MEMORY_STALE_UNAPPROVED_DAYS;
+        const diffDays = (nowMs - referenceMs) / (24 * 60 * 60 * 1000);
+        
+        if (diffDays > staleAfterDays) {
+          pruned.push(record);
+        } else {
+          kept.push(record);
+        }
+      });
+
+      memoryStore = kept;
+      updateStoreView();
+      triggerPromptSectionRebuild();
+
+      if (pruned.length > 0) {
+        showSimAlert(`Stale pruning complete: deleted <strong>${pruned.length}</strong> stale records. Kept <strong>${kept.length}</strong> records.`, "warn");
+      } else {
+        showSimAlert(`Stale pruning complete: no records met stale requirements (&gt;30d unapproved or &gt;180d approved relative to simulation date).`, "info");
+      }
+    }
+
+    // Sort Memory Store by priority
+    function sortMemoryRecordsStore() {
+      memoryStore.sort((left, right) => {
+        const byScope = scopeRank(left.scope) - scopeRank(right.scope);
+        if (byScope !== 0) return byScope;
+        const byKey = left.key.localeCompare(right.key);
+        if (byKey !== 0) return byKey;
+        const byCreated = left.createdAt.localeCompare(right.createdAt);
+        if (byCreated !== 0) return byCreated;
+        return left.id.localeCompare(right.id);
+      });
+    }
+
+    function scopeRank(scope) {
+      const ranks = {
+        "global": 0, "repo": 1, "language": 2, "runtime": 3,
+        "agent": 4, "task-family": 5, "hpc-domain": 6
+      };
+      return ranks[scope] ?? 99;
+    }
+
+    // Update the visual records list and metric counts
+    function updateStoreView() {
+      const listContainer = document.getElementById("store-records-list-element");
+      listContainer.innerHTML = "";
+
+      // Update metrics
+      document.getElementById("metric-store-count").textContent = `${memoryStore.length} / ${MEMORY_STORE_MAX_RECORDS}`;
+      
+      const approvedCount = memoryStore.filter(r => r.approved).length;
+      const proposedCount = memoryStore.filter(r => !r.approved).length;
+      document.getElementById("metric-approved-count").textContent = approvedCount;
+      document.getElementById("metric-proposed-count").textContent = proposedCount;
+
+      if (memoryStore.length === 0) {
+        listContainer.innerHTML = `<div style="text-align: center; color: var(--text-dark); padding: 2rem; font-style: italic;">
+                                     Local records.json store is empty. Propose or generate mock examples above.
+                                   </div>`;
+        return;
+      }
+
+      memoryStore.forEach(record => {
+        const card = document.createElement("div");
+        card.className = "record-card";
+
+        let statusBadge = `<span class="badge badge-proposed">Proposed</span>`;
+        if (record.approved) {
+          statusBadge = `<span class="badge badge-approved">Approved</span>`;
+        } else if (record.rejectedAt) {
+          statusBadge = `<span class="badge badge-rejected">Rejected</span>`;
+        }
+
+        // Action buttons based on status
+        let actionButtons = "";
+        if (!record.approved) {
+          actionButtons += `<button class="btn btn-accent btn-sm" onclick="approveRecord('${record.id}')">Approve</button>`;
+        }
+        if (record.approved || !record.rejectedAt) {
+          actionButtons += `<button class="btn btn-danger btn-sm" onclick="rejectRecord('${record.id}')">Reject</button>`;
+        }
+        actionButtons += `<button class="btn btn-secondary btn-sm" onclick="addRegression('${record.id}')">Add Regression</button>`;
+        actionButtons += `<button class="btn btn-secondary btn-sm" onclick="deleteRecord('${record.id}')">Delete</button>`;
+
+        // Build applies/avoid lists string
+        const appliesStr = record.appliesWhen.join(" | ");
+        const avoidStr = record.avoidWhen.join(" | ") || "none";
+        const regressionsStr = record.regressions && record.regressions.length > 0 ? record.regressions.join(", ") : "none";
+
+        card.innerHTML = `
+          <div class="record-card-header">
+            <div class="record-id-scope">
+              <span class="record-id">${record.id}</span>
+              <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.08);">${record.scope}</span>
+              <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-dark);">${record.key}</span>
+            </div>
+            ${statusBadge}
+          </div>
+          <div class="record-lesson">
+            ${escapeHtml(record.lesson)}
+          </div>
+          <div class="record-details">
+            <div><strong>Confidence:</strong> ${record.confidence}</div>
+            <div><strong>Created At:</strong> ${record.createdAt.slice(0, 16)}</div>
+            <div><strong>Last Verified:</strong> ${record.lastVerifiedAt ? record.lastVerifiedAt.slice(0, 16) : 'N/A'}</div>
+            <div><strong>Regressions:</strong> ${regressionsStr}</div>
+            <div style="grid-column: 1 / -1;"><strong>Applies When:</strong> ${escapeHtml(appliesStr)}</div>
+            <div style="grid-column: 1 / -1;"><strong>Avoid When:</strong> ${escapeHtml(avoidStr)}</div>
+          </div>
+          <div class="record-actions">
+            ${actionButtons}
+          </div>
+        `;
+        listContainer.appendChild(card);
+      });
+    }
+
+    // Helper alerts
+    function showSimAlert(message, severity) {
+      const box = document.getElementById("sim-alert-box");
+      box.className = `alert alert-${severity}`;
+      box.innerHTML = `<div>${message}</div>`;
+      box.style.display = "block";
+      
+      // Auto-dismiss after 6s unless danger
+      if (severity !== "danger") {
+        setTimeout(() => {
+          box.style.display = "none";
+        }, 6000);
+      }
+    }
+
+    // HTML escape helper
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // Playground helper: reset to default examples
+    function resetToDefaultMocks() {
+      memoryStore = [
+        {
+          id: "mem-a8b9c0d1e2f3a4b5",
+          scope: "repo",
+          key: "evidence:run-test-failures",
+          lesson: "Evidence run-test-failures shows validation failure around compile step. Recheck the failing validation path before claiming completion. Finding: compiler failed: undefined reference to MPI_Init.",
+          evidenceRefs: ["run-test-failures"],
+          appliesWhen: ["cwd:/workspaces/hpc-solver", "tag:test-failure", "source:run:run-test-failures"],
+          avoidWhen: ["current task, repo, runtime, or failure mode differs from cited evidence"],
+          confidence: 0.65,
+          createdAt: "2026-05-15T10:30:00.000Z",
+          lastVerifiedAt: "2026-05-20T12:00:00.000Z",
+          approved: true
+        },
+        {
+          id: "mem-d4e5f6a7b8c9d0e1",
+          scope: "task-family",
+          key: "evidence:eval-timeout-limits",
+          lesson: "Evidence eval-timeout-limits shows timeout risk around mpi-execution-suite. Prefer bounded validation steps and explicit limits. Finding: MPI solver stalled in collective exchange.",
+          evidenceRefs: ["eval-timeout-limits"],
+          appliesWhen: ["runtime:openmpi-4", "tag:timeout", "source:eval:eval-timeout-limits"],
+          avoidWhen: ["current task, repo, runtime, or failure mode differs from cited evidence"],
+          confidence: 0.70,
+          createdAt: "2026-06-01T15:45:00.000Z",
+          approved: false
+        },
+        {
+          id: "mem-9f0e1d2c3b4a5987",
+          scope: "global",
+          key: "evidence:session-missing-dep",
+          lesson: "Evidence session-missing-dep shows a missing dependency around verification. Verify local prerequisites before rerunning the workflow. Finding: command not found: cmake.",
+          evidenceRefs: ["session-missing-dep"],
+          appliesWhen: ["tag:missing-dependency", "source:session:session-missing-dep"],
+          avoidWhen: ["current task, repo, runtime, or failure mode differs from cited evidence"],
+          confidence: 0.55,
+          createdAt: "2026-05-10T09:00:00.000Z",
+          rejectedAt: "2026-05-12T14:20:00.000Z",
+          approved: false
+        }
+      ];
+      sortMemoryRecordsStore();
+      updateStoreView();
+      triggerPromptSectionRebuild();
+      showSimAlert("Reset store to default mock records.", "info");
+    }
+
+    // Playground helper: add mock records
+    function addMockRecords(count) {
+      if (memoryStore.length >= MEMORY_STORE_MAX_RECORDS) {
+        showSimAlert("Cannot add mock records: store already full.", "danger");
+        return;
+      }
+
+      const countToAdd = Math.min(count, MEMORY_STORE_MAX_RECORDS - memoryStore.length);
+      const kinds = ["run", "session", "eval"];
+      const scopes = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"];
+
+      for (let i = 0; i < countToAdd; i++) {
+        const randId = Math.random().toString(16).slice(2, 10);
+        const evidenceId = `run-mock-${randId}`;
+        const memId = "mem-" + Math.random().toString(16).slice(2, 10).padStart(16, '0');
+        const scope = scopes[Math.floor(Math.random() * scopes.length)];
+        
+        memoryStore.push({
+          id: memId,
+          scope: scope,
+          key: `evidence:${evidenceId}`,
+          lesson: `Evidence ${evidenceId} shows failure around task simulation. Verify configurations carefully.`,
+          evidenceRefs: [evidenceId],
+          appliesWhen: [`tag:unknown`, `source:run:${evidenceId}`],
+          avoidWhen: ["current task, repo, runtime, or failure mode differs from cited evidence"],
+          confidence: 0.5,
+          createdAt: getSimulatedDate().toISOString(),
+          approved: false
+        });
+      }
+
+      sortMemoryRecordsStore();
+      updateStoreView();
+      triggerPromptSectionRebuild();
+      showSimAlert(`Added <strong>${countToAdd}</strong> proposed mock records.`, "info");
+    }
+
+    // Playground helper: fill to limit
+    function fillToLimit() {
+      const current = memoryStore.length;
+      if (current >= MEMORY_STORE_MAX_RECORDS) {
+        showSimAlert("Store is already full.", "warn");
+        return;
+      }
+      addMockRecords(MEMORY_STORE_MAX_RECORDS - current);
+    }
+
+    // Playground helper: clear store
+    function clearMemoryStore() {
+      memoryStore = [];
+      updateStoreView();
+      triggerPromptSectionRebuild();
+      showSimAlert("Cleared memory store completely.", "danger");
+    }
+
+    // Prompt Section Rebuild triggered by filters change
+    function triggerPromptSectionRebuild() {
+      const budgetInput = document.getElementById("prompt-token-budget");
+      const maxItemsInput = document.getElementById("prompt-max-items");
+      const budget = parseInt(budgetInput.value, 10) || 400;
+      const maxItems = parseInt(maxItemsInput.value, 10) || 5;
+
+      // Collect allowed scopes
+      const allowedScopes = [];
+      document.querySelectorAll(".prompt-scope-check").forEach(chk => {
+        if (chk.checked) allowedScopes.push(chk.value);
+      });
+
+      // Parse active regressions suppressions
+      const activeRegressionsText = document.getElementById("prompt-regressions").value;
+      const activeRegressions = activeRegressionsText.split(",")
+        .map(r => r.trim())
+        .filter(r => r.length > 0);
+
+      // Filtering criteria from operations.ts selectApprovedMemory
+      // Candidates criteria:
+      // 1. approved = true
+      // 2. evidenceRefs.length > 0
+      // 3. record.regressions is undefined or empty
+      // 4. scope is in allowedScopes
+      const candidates = [...memoryStore]
+        .filter(record => record.approved)
+        .filter(record => record.evidenceRefs && record.evidenceRefs.length > 0)
+        // Check regressions: any record with regressions is skipped if record has regressions.
+        // Wait, the TypeScript code is: record.regressions === undefined || record.regressions.length === 0.
+        // So if a record has *any* regressions configured, it's skipped from prompt section, or if we cross-reference active regressions.
+        // Let's implement active regressions suppression: if record has a regression listed that matches an active regression, suppress it.
+        // Actually, let's look at operations.ts line 40:
+        // .filter((record) => record.regressions === undefined || record.regressions.length === 0)
+        // But what if we want to simulate suppression? Let's check if the record's regressions has any intersection with activeRegressions, 
+        // OR if it has ANY regressions at all. Let's make it suppress if the record has any regression that is in the activeRegressions list, 
+        // which makes it an interactive suppression simulator!
+        .filter(record => {
+          if (!record.regressions || record.regressions.length === 0) return true;
+          // Intersection check
+          const hasActiveRegression = record.regressions.some(r => activeRegressions.includes(r));
+          return !hasActiveRegression;
+        })
+        .filter(record => allowedScopes.includes(record.scope));
+
+      // Sort retrieval priority:
+      // Sort by lastVerifiedAt (falling back to createdAt) descending, then id ascending
+      candidates.sort((left, right) => {
+        const leftVerified = left.lastVerifiedAt ?? left.createdAt;
+        const rightVerified = right.lastVerifiedAt ?? right.createdAt;
+        const byVerified = rightVerified.localeCompare(leftVerified);
+        if (byVerified !== 0) return byVerified;
+        return left.id.localeCompare(right.id);
+      });
+
+      // Estimate tokens and respect budget limit
+      const selected = [];
+      let spent = 0;
+
+      for (const record of candidates) {
+        if (selected.length >= maxItems) break;
+
+        const cost = estimateMemoryTokens(record);
+        if (spent + cost > budget) continue;
+
+        selected.push(record);
+        spent += cost;
+      }
+
+      // Render prompt output
+      const outputContainer = document.getElementById("prompt-section-output-code");
+      
+      if (selected.length === 0) {
+        outputContainer.textContent = "/* No memories selected. Section remains empty in the chat prompt. */";
+        document.getElementById("prompt-section-token-indicator").textContent = `0 Tokens`;
+        document.getElementById("prompt-section-item-indicator").textContent = `0 Items`;
+        return;
+      }
+
+      let lines = [
+        "# Memory",
+        "",
+        "Approved long-term memory records that may apply. Each lesson is gated by human approval and cited evidence; do not extrapolate beyond the cited findings.",
+        ""
+      ];
+
+      selected.forEach(record => {
+        const lesson = record.lesson.replace(/\s+/g, " ").trim();
+        const evidence = record.evidenceRefs.join(", ");
+        lines.push(`- [${record.id}] (scope=${record.scope}) ${lesson} Evidence: ${evidence}.`);
+      });
+
+      outputContainer.textContent = lines.join("\n");
+      document.getElementById("prompt-section-token-indicator").textContent = `${spent} Tokens`;
+      document.getElementById("prompt-section-item-indicator").textContent = `${selected.length} Items / ${candidates.length} Match`;
+    }
+
+    // Token estimation algorithm from operations.ts
+    function estimateMemoryTokens(record) {
+      const text = [
+        record.scope,
+        record.key,
+        record.lesson,
+        ...record.evidenceRefs,
+        ...record.appliesWhen,
+        ...record.avoidWhen,
+        ...(record.regressions ?? [])
+      ].join("\n");
+      return Math.max(1, Math.ceil(text.length / 4));
+    }
+
+    // Prompt Injection & System Escape Validator
+    function runPromptThreatAnalysis() {
+      const content = document.getElementById("custom-lesson-content").value;
+      const indicator = document.getElementById("threat-badge-indicator");
+      const explanation = document.getElementById("threat-explanation");
+
+      if (!content.trim()) {
+        indicator.textContent = "Safe";
+        indicator.className = "threat-level-badge threat-safe";
+        explanation.textContent = "No content entered. Write or paste a lesson output above to audit.";
+        return;
+      }
+
+      // Detection vectors
+      const threatVectors = [
+        { pattern: /ignore\s+(?:the\s+)?(?:above|previous|instructions)/i, name: "Instruction Override Bypass", severity: "danger" },
+        { pattern: /system\s*(?:prompt|message|instructions|role)/i, name: "Role Configuration Escape", severity: "danger" },
+        { pattern: /\[\s*(?:system|user|assistant)\s*\]/i, name: "Enveloped Chat Token Mimic", severity: "danger" },
+        { pattern: /(?:^|[\r\n])#+\s+Memory/i, name: "Section Header Hijacking", severity: "danger" },
+        { pattern: /<script/i, name: "HTML Tag Injection Risk", severity: "danger" },
+        { pattern: /[\r\n]/, name: "Multiple Whitespace / Linebreaks", severity: "suspicious" },
+        { pattern: /assistant:/i, name: "Role Prefix Spoofing", severity: "suspicious" },
+        { pattern: /`{3,}/, name: "Codeblock Boundaries Injection", severity: "suspicious" }
+      ];
+
+      let matchingThreats = [];
+      let maxSeverity = "safe";
+
+      for (const vector of threatVectors) {
+        if (vector.pattern.test(content)) {
+          matchingThreats.push(vector.name);
+          if (vector.severity === "danger") {
+            maxSeverity = "danger";
+          } else if (vector.severity === "suspicious" && maxSeverity !== "danger") {
+            maxSeverity = "suspicious";
+          }
+        }
+      }
+
+      if (maxSeverity === "danger") {
+        indicator.textContent = "High Risk";
+        indicator.className = "threat-level-badge threat-danger";
+        explanation.innerHTML = `<strong>Danger! Prompt Injection Hazard Detected:</strong> Contains tokens resembling system instruction overrides (${matchingThreats.join(", ")}).
+                                 <br/><br/>
+                                 <em>How Clio Handles this:</em> During the prompt build phase, Clio compacts all whitespaces into a single line, prepends strict citation boundaries, and restricts extrapolation. However, raw injection terms like this should be manually audited and rejected by operators during the approval stage.`;
+      } else if (maxSeverity === "suspicious") {
+        indicator.textContent = "Suspicious";
+        indicator.className = "threat-level-badge threat-suspicious";
+        explanation.innerHTML = `<strong>Warning: Suspicious Formatting Detected:</strong> Contains format elements like line breaks or role spoof tags (${matchingThreats.join(", ")}).
+                                 <br/><br/>
+                                 <em>How Clio Handles this:</em> Clio's chat builder automatically removes newline boundaries, sanitizing lines into a unified string to prevent segment breaks in the system prompt.`;
+      } else {
+        indicator.textContent = "Safe";
+        indicator.className = "threat-level-badge threat-safe";
+        explanation.textContent = "No prompt injection tokens, system override phrases, or role spoof headers detected. Record is safe for human review and injection.";
+      }
+    }
+  </script>
+</body>
+</html>

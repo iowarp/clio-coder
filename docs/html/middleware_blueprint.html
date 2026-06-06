@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Middleware & Component Blueprint</title>
+  <!-- Modern Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.75);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      /* Vibrant Color Palettes */
+      --color-primary: #00f0ff; /* Glowing Neon Cyan */
+      --color-primary-rgb: 0, 240, 255;
+      --color-secondary: #bd00ff; /* Glowing Purple */
+      --color-secondary-rgb: 189, 0, 255;
+      --color-accent: #10b981; /* Neon Emerald */
+      --color-accent-rgb: 16, 185, 129;
+      --color-warn: #f59e0b; /* Amber */
+      --color-danger: #ef4444; /* Rose Red */
+      --color-info: #3b82f6; /* Blue */
+      
+      --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+      --gradient-accent: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+      --shadow-glow: 0 0 25px rgba(var(--color-primary-rgb), 0.15);
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.04) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.04) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    /* Container */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2.5rem 2rem;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+      position: relative;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 20px;
+      margin-bottom: 1.25rem;
+      box-shadow: var(--shadow-glow);
+      position: relative;
+    }
+    
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 22px;
+      background: var(--gradient-main);
+      z-index: -1;
+      opacity: 0.3;
+      filter: blur(4px);
+    }
+
+    .header-logo svg {
+      width: 36px;
+      height: 36px;
+      fill: none;
+      stroke: var(--color-primary);
+      stroke-width: 2;
+    }
+
+    h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-primary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 1.5rem auto;
+      font-weight: 400;
+    }
+
+    .badge-container {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+
+    .badge.version {
+      background: rgba(var(--color-primary-rgb), 0.1);
+      border-color: rgba(var(--color-primary-rgb), 0.3);
+      color: var(--color-primary);
+    }
+
+    .badge.active {
+      background: rgba(var(--color-accent-rgb), 0.1);
+      border-color: rgba(var(--color-accent-rgb), 0.3);
+      color: var(--color-accent);
+    }
+
+    /* Glass Card layout */
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 18px;
+      padding: 2.25rem;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+      margin-bottom: 2rem;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .glass-card:hover {
+      border-color: rgba(var(--color-primary-rgb), 0.18);
+    }
+
+    .glass-card-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      color: #ffffff;
+      border-bottom: 1px solid var(--border-card);
+      padding-bottom: 0.75rem;
+    }
+
+    .glass-card-title svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--color-primary);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    /* Tabs Navigation */
+    .tabs-nav {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 3rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.8rem 1.6rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      font-family: var(--font-sans);
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-main);
+      color: #050508;
+      font-weight: 700;
+      border-color: transparent;
+      box-shadow: 0 4px 18px rgba(var(--color-primary-rgb), 0.35);
+    }
+
+    .tab-btn svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .tab-btn.active svg {
+      stroke: #050508;
+    }
+
+    /* Tab Contents */
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.45s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Grid Layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 2rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .grid-sidebar {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      .grid-2, .grid-3, .grid-sidebar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Forms & Controls */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .select-input, .text-input, .textarea-input {
+      background: rgba(5, 8, 15, 0.8);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      color: var(--text-main);
+      padding: 0.8rem 1rem;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      transition: all 0.25s ease;
+      width: 100%;
+    }
+
+    .select-input:focus, .text-input:focus, .textarea-input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 12px rgba(var(--color-primary-rgb), 0.25);
+    }
+
+    .textarea-input {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    /* Code Block Display */
+    .code-box {
+      background: #040710;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+      padding: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #a5b4fc;
+      overflow-x: auto;
+      position: relative;
+      max-height: 480px;
+    }
+
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-dark);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .json-key { color: #f43f5e; }
+    .json-string { color: #34d399; }
+    .json-number { color: #fbbf24; }
+    .json-boolean { color: #38bdf8; }
+    .json-null { color: #a78bfa; }
+
+    /* Interactive Buttons */
+    .btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.8rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+      font-family: var(--font-sans);
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .btn-primary {
+      background: var(--gradient-main);
+      border-color: transparent;
+      color: #050508;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.2);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.3);
+    }
+
+    .btn-accent {
+      background: rgba(var(--color-accent-rgb), 0.12);
+      border-color: rgba(var(--color-accent-rgb), 0.3);
+      color: var(--color-accent);
+    }
+
+    .btn-accent:hover {
+      background: rgba(var(--color-accent-rgb), 0.2);
+      color: #ffffff;
+      box-shadow: 0 0 12px rgba(var(--color-accent-rgb), 0.2);
+    }
+
+    /* List group, status lights */
+    .list-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .list-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      padding: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+
+    .list-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .item-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .item-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .item-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dark);
+      display: inline-block;
+    }
+
+    .status-dot.active { background: var(--color-accent); box-shadow: 0 0 8px var(--color-accent); }
+    .status-dot.warn { background: var(--color-warn); box-shadow: 0 0 8px var(--color-warn); }
+    .status-dot.danger { background: var(--color-danger); box-shadow: 0 0 8px var(--color-danger); }
+    .status-dot.primary { background: var(--color-primary); box-shadow: 0 0 8px var(--color-primary); }
+
+    /* SVG Diagram Styling */
+    .diagram-container {
+      text-align: center;
+      padding: 1.5rem;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 12px;
+      border: 1px solid var(--border-card);
+      overflow-x: auto;
+    }
+
+    .diagram-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* Simulator Interactive Columns */
+    .interactive-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .file-tree-sim {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-height: 400px;
+      overflow-y: auto;
+      padding-right: 0.5rem;
+    }
+
+    .file-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+
+    .file-row.changed {
+      border-color: rgba(var(--color-primary-rgb), 0.35);
+      background: rgba(var(--color-primary-rgb), 0.03);
+    }
+
+    .file-row.added {
+      border-color: rgba(var(--color-accent-rgb), 0.35);
+      background: rgba(var(--color-accent-rgb), 0.03);
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-family: var(--font-mono);
+    }
+
+    .file-icon {
+      width: 16px;
+      height: 16px;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .file-icon.file { stroke: var(--text-muted); }
+    .file-icon.folder { stroke: var(--color-primary); }
+
+    .file-meta-badges {
+      display: flex;
+      gap: 0.4rem;
+    }
+
+    .mini-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .mini-badge.authority { background: rgba(189, 0, 255, 0.15); color: #e0a3ff; border: 1px solid rgba(189, 0, 255, 0.3); }
+    .mini-badge.reload { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .mini-badge.mutable { background: rgba(16, 185, 129, 0.15); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 5rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border-card);
+      color: var(--text-dark);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    footer a:hover {
+      color: var(--color-primary);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- HEADER -->
+    <header>
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h1>Middleware & Component Registry</h1>
+      <p class="subtitle">Secure, deterministic component state snapshots alongside an experimental, lightweight hook/effect validation contract.</p>
+      <div class="badge-container">
+        <span class="badge version">Target Version: 0.2.1</span>
+        <span class="badge active"><span class="status-dot active"></span> Active Scanner</span>
+        <span class="badge"><span class="status-dot primary"></span> Experimental Middleware Runtime</span>
+      </div>
+    </header>
+
+    <!-- NAVIGATION TABS -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab('component-scanner')">
+        <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke-linecap="round" stroke-linejoin="round"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></button>
+        Component Scanner
+      </button>
+      <button class="tab-btn" onclick="switchTab('middleware-runtime')">
+        <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+        Hook Pipeline Playground
+      </button>
+      <button class="tab-btn" onclick="switchTab('system-architecture')">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke-linecap="round" stroke-linejoin="round"></path><path d="M2 17l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M2 12l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        Dataflow & Visual Map
+      </button>
+    </div>
+
+    <!-- TAB 1: COMPONENT SCANNER SIMULATOR -->
+    <div id="tab-component-scanner" class="tab-pane active">
+      <div class="grid-sidebar">
+        
+        <!-- CONTROL PANEL -->
+        <div class="control-panel-column">
+          <div class="glass-card">
+            <div class="glass-card-title">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+              Simulate File Mutations
+            </div>
+            
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
+              Modify file contents or simulate adding new custom components below to see how the system calculates SHA-256 integrity and executes snap-diffing.
+            </p>
+
+            <div class="form-group">
+              <label for="sim-file-select">Select Simulated Target File</label>
+              <select id="sim-file-select" class="select-input" onchange="onSelectedFileChange()">
+                <option value="safe-exec.ts">src/tools/safe-exec.ts (tool-implementation)</option>
+                <option value="damage-control.yaml">damage-control-rules.yaml (safety-rule-pack)</option>
+                <option value="defaults.ts">src/core/defaults.ts (config-schema)</option>
+                <option value="agent-recipe.md">src/domains/agents/builtins/explore.md (agent-recipe)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="sim-file-content">Simulated File Contents</label>
+              <textarea id="sim-file-content" class="textarea-input" oninput="onFileContentModified()"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Current Status</label>
+              <div style="background: rgba(0, 0, 0, 0.2); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-card); font-family: var(--font-mono); font-size: 0.8rem;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 0.25rem;">
+                  <span style="color: var(--text-muted);">Size:</span>
+                  <span id="sim-file-size" style="color: var(--text-main);">0 bytes</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color: var(--text-muted);">SHA-256:</span>
+                  <span id="sim-file-hash" style="color: var(--color-primary); word-break: break-all;">-</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+              <button class="btn btn-primary" style="flex: 1;" onclick="triggerScanSnapshot()">
+                <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                Generate Snapshot
+              </button>
+              <button class="btn btn-accent" onclick="resetFileMutations()">
+                Reset Files
+              </button>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="glass-card-title">
+              <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              Scan Configuration
+            </div>
+            <div class="list-group">
+              <div class="list-item" style="padding: 0.75rem;">
+                <div class="item-meta">
+                  <span class="item-title" style="font-size:0.85rem;">Scanner Strictness</span>
+                  <span class="item-subtitle">Verify closed fields and validation enums</span>
+                </div>
+                <span class="status-indicator"><span class="status-dot active"></span> Enforcing</span>
+              </div>
+              <div class="list-item" style="padding: 0.75rem;">
+                <div class="item-meta">
+                  <span class="item-title" style="font-size:0.85rem;">Recursion Depth</span>
+                  <span class="item-subtitle">Scan child domains automatically</span>
+                </div>
+                <span style="font-family: var(--font-mono); font-size: 0.8rem; font-weight:700; color: var(--color-primary);">Deep (8)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SIMULATED TREE VIEWER & OUTPUTS -->
+        <div class="workspace-column">
+          <div class="glass-card">
+            <div class="interactive-header">
+              <h3 style="font-size:1.25rem;">Harness Component Inventory</h3>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Simulated State:</span>
+                <span class="badge" id="diff-indicator" style="font-size:0.75rem; border-color: rgba(16,185,129,0.3); color: var(--color-accent); background: rgba(16,185,129,0.05);">Unchanged</span>
+              </div>
+            </div>
+
+            <div class="file-tree-sim" id="sim-file-tree">
+              <!-- Dynamically populated files -->
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="glass-card" style="padding: 1.5rem; margin-bottom: 0;">
+              <div class="code-header">
+                <span>clio components snapshot --json</span>
+                <button class="btn" style="padding:0.25rem 0.6rem; font-size:0.75rem; border-radius:4px;" onclick="copyCode('snapshot-code')">Copy</button>
+              </div>
+              <pre class="code-box" id="snapshot-code" style="max-height: 250px;">Generating snapshot JSON...</pre>
+            </div>
+
+            <div class="glass-card" style="padding: 1.5rem; margin-bottom: 0;">
+              <div class="code-header">
+                <span>clio components diff --from before.json --to after.json</span>
+                <button class="btn" style="padding:0.25rem 0.6rem; font-size:0.75rem; border-radius:4px;" onclick="copyCode('diff-code')">Copy</button>
+              </div>
+              <pre class="code-box" id="diff-code" style="max-height: 250px;">Generating differential snapshot JSON...</pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 2: MIDDLEWARE HOOK PLAYGROUND -->
+    <div id="tab-middleware-runtime" class="tab-pane">
+      <div class="grid-sidebar">
+        
+        <!-- PIPELINE RULES -->
+        <div class="control-panel-column">
+          <div class="glass-card">
+            <div class="glass-card-title">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+              Registered Rules
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem;">
+              Enable or disable simulated middleware rules inside the harness pipeline to inspect hook cascades.
+            </p>
+
+            <div class="list-group" id="rules-container">
+              <!-- Dynamically populated rules -->
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="glass-card-title">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Dispatch Event
+            </div>
+            
+            <div class="form-group">
+              <label for="hook-select">Hook Identifier</label>
+              <select id="hook-select" class="select-input" onchange="onHookSelectChange()">
+                <option value="before_tool">before_tool (Executes before any tool is run)</option>
+                <option value="after_tool">after_tool (Executes after a tool completes)</option>
+                <option value="before_model">before_model (Executes before LLM invocation)</option>
+                <option value="on_dispatch_start">on_dispatch_start (Fires at dispatch boot)</option>
+              </select>
+            </div>
+
+            <div id="hook-meta-fields">
+              <!-- Dynamic Metadata fields depending on selected hook -->
+            </div>
+
+            <button class="btn btn-primary" style="width: 100%; margin-top: 0.75rem;" onclick="dispatchMiddlewareHook()">
+              <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2;"><polyline points="22 2 15 22 11 13 2 9 22 2"></polyline><line x1="22" y1="2" x2="11" y2="13"></line></svg>
+              Execute runMiddlewareHook()
+            </button>
+          </div>
+        </div>
+
+        <!-- PLAYGROUND WORKSPACE -->
+        <div class="workspace-column">
+          <div class="glass-card" style="margin-bottom: 1.5rem;">
+            <div class="glass-card-title">
+              <svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+              Pipeline Visual Live Execution Feed
+            </div>
+            
+            <div id="execution-feed-log" style="background: rgba(0,0,0,0.3); border-radius: 10px; border: 1px solid var(--border-card); height: 180px; overflow-y: auto; padding: 1rem; font-family: var(--font-mono); font-size: 0.85rem; display:flex; flex-direction:column; gap:0.5rem;">
+              <span style="color: var(--text-dark);">// Trigger Dispatch above to feed live event logs here...</span>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="glass-card" style="padding: 1.5rem; margin-bottom: 0;">
+              <div class="code-header">
+                <span>Input Event (MiddlewareHookInput)</span>
+              </div>
+              <pre class="code-box" id="hook-input-code" style="max-height: 250px;">Waiting for dispatch...</pre>
+            </div>
+
+            <div class="glass-card" style="padding: 1.5rem; margin-bottom: 0;">
+              <div class="code-header">
+                <span>Output Result (MiddlewareHookResult)</span>
+              </div>
+              <pre class="code-box" id="hook-result-code" style="max-height: 250px;">Waiting for dispatch...</pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 3: SYSTEM ARCHITECTURE VISUAL MAP -->
+    <div id="tab-system-architecture" class="tab-pane">
+      <div class="glass-card">
+        <div class="glass-card-title">
+          <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          Component Verification and Hook/Effect Dispatch Dataflow Diagram
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 2rem;">
+          This visual chart details the two primary execution planes: the static compile-time component scanning sequence and the runtime dynamic middleware interception pipeline.
+        </p>
+
+        <!-- Inline SVG Flowchart -->
+        <div class="diagram-container">
+          <svg viewBox="0 0 1000 420" width="1000" height="420" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="gradient-blue-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f0ff" />
+                <stop offset="100%" stop-color="#bd00ff" />
+              </linearGradient>
+              <linearGradient id="gradient-cyan-emerald" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f0ff" />
+                <stop offset="100%" stop-color="#10b981" />
+              </linearGradient>
+              <filter id="shadow">
+                <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#00f0ff" flood-opacity="0.15" />
+              </filter>
+            </defs>
+
+            <!-- Background Grid -->
+            <g opacity="0.05">
+              <line x1="0" y1="50" x2="1000" y2="50" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="0" y1="150" x2="1000" y2="150" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="0" y1="250" x2="1000" y2="250" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="0" y1="350" x2="1000" y2="350" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="200" y1="0" x2="200" y2="420" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="500" y1="0" x2="500" y2="420" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+              <line x1="800" y1="0" x2="800" y2="420" stroke="#ffffff" stroke-width="1" stroke-dasharray="5,5"/>
+            </g>
+
+            <!-- LANE 1: COMPONENT SCANNER PIPELINE (STATIC PLANE) -->
+            <text x="30" y="35" fill="#00f0ff" font-family="'JetBrains Mono'" font-size="12" font-weight="700" letter-spacing="1">PLANE A: STATIC COMPONENT VERIFICATION (scan.ts)</text>
+            <rect x="25" y="45" width="445" height="155" fill="none" stroke="rgba(0, 240, 255, 0.2)" stroke-width="1.5" rx="10" stroke-dasharray="4,4"/>
+
+            <!-- Steps -->
+            <!-- Step 1: Input Files -->
+            <rect x="45" y="85" width="100" height="45" fill="rgba(17, 24, 39, 0.8)" stroke="#4b5563" stroke-width="1.5" rx="6" />
+            <text x="95" y="105" fill="#f3f4f6" font-family="'Plus Jakarta Sans'" font-size="11" font-weight="600" text-anchor="middle">TS/YAML/MD Files</text>
+            <text x="95" y="120" fill="#9ca3af" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">Source Repo</text>
+
+            <!-- Arrow 1 -> 2 -->
+            <line x1="145" y1="107" x2="175" y2="107" stroke="#00f0ff" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+            
+            <!-- Step 2: Scanner -->
+            <rect x="180" y="80" width="115" height="55" fill="rgba(0, 240, 255, 0.05)" stroke="#00f0ff" stroke-width="2" rx="8" filter="url(#shadow)"/>
+            <text x="237" y="102" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="12" font-weight="700" text-anchor="middle">scan.ts (Scanner)</text>
+            <text x="237" y="117" fill="#00f0ff" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">SHA-256 Hashing</text>
+
+            <!-- Arrow 2 -> 3 -->
+            <line x1="295" y1="107" x2="325" y2="107" stroke="#00f0ff" stroke-width="2" />
+
+            <!-- Step 3: Snapshot JSON -->
+            <rect x="330" y="85" width="120" height="45" fill="rgba(17, 24, 39, 0.8)" stroke="#bd00ff" stroke-width="1.5" rx="6" />
+            <text x="390" y="105" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="11" font-weight="600" text-anchor="middle">ComponentSnapshot</text>
+            <text x="390" y="120" fill="#a5b4fc" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">snapshot.json (v1)</text>
+
+            <!-- Diff arrow going down -->
+            <path d="M 390 130 L 390 160 L 237 160 L 237 135" fill="none" stroke="#bd00ff" stroke-width="1.5" stroke-dasharray="3,3" />
+            <text x="313" y="153" fill="#bd00ff" font-family="'Plus Jakarta Sans'" font-size="9" font-weight="600" text-anchor="middle">Snap Diffing</text>
+
+
+            <!-- LANE 2: DYNAMIC MIDDLEWARE PIPELINE (RUNTIME PLANE) -->
+            <text x="30" y="240" fill="#bd00ff" font-family="'JetBrains Mono'" font-size="12" font-weight="700" letter-spacing="1">PLANE B: INTERCEPTION WORKFLOW (runtime.ts)</text>
+            <rect x="25" y="250" width="940" height="145" fill="none" stroke="rgba(189, 0, 255, 0.2)" stroke-width="1.5" rx="10" stroke-dasharray="4,4"/>
+
+            <!-- Step 1: Hook event input -->
+            <rect x="45" y="295" width="135" height="50" fill="rgba(17, 24, 39, 0.8)" stroke="#4b5563" stroke-width="1.5" rx="6" />
+            <text x="112" y="317" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="12" font-weight="600" text-anchor="middle">Harness Event Trigger</text>
+            <text x="112" y="332" fill="#9ca3af" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">e.g. before_tool</text>
+
+            <!-- Arrow -->
+            <line x1="180" y1="320" x2="225" y2="320" stroke="#bd00ff" stroke-width="2" />
+
+            <!-- Step 2: runMiddlewareHook -->
+            <rect x="230" y="290" width="195" height="60" fill="rgba(189, 0, 255, 0.05)" stroke="#bd00ff" stroke-width="2" rx="8" />
+            <text x="327" y="315" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="13" font-weight="700" text-anchor="middle">runMiddlewareHook()</text>
+            <text x="327" y="332" fill="#a5b4fc" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">Attach & Cascade Rules</text>
+
+            <!-- Arrow -->
+            <line x1="425" y1="320" x2="470" y2="320" stroke="#bd00ff" stroke-width="2" />
+
+            <!-- Step 3: Match Rule Configs -->
+            <rect x="475" y="295" width="140" height="50" fill="rgba(17, 24, 39, 0.8)" stroke="#10b981" stroke-width="1.5" rx="6" />
+            <text x="545" y="317" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="11" font-weight="600" text-anchor="middle">Evaluator (validate.ts)</text>
+            <text x="545" y="332" fill="#34d399" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">Checks Rule Match</text>
+
+            <!-- Arrow -->
+            <line x1="615" y1="320" x2="660" y2="320" stroke="#10b981" stroke-width="2" />
+
+            <!-- Step 4: Output Effects -->
+            <rect x="665" y="295" width="130" height="50" fill="rgba(17, 24, 39, 0.8)" stroke="#00f0ff" stroke-width="1.5" rx="6" />
+            <text x="730" y="317" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="12" font-weight="600" text-anchor="middle">MiddlewareEffects</text>
+            <text x="730" y="332" fill="#00f0ff" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">List of actions to return</text>
+
+            <!-- Arrow -->
+            <line x1="795" y1="320" x2="835" y2="320" stroke="#00f0ff" stroke-width="2" />
+
+            <!-- Step 5: Registry Execution -->
+            <rect x="840" y="290" width="110" height="60" fill="rgba(16, 185, 129, 0.05)" stroke="#10b981" stroke-width="2" rx="8" />
+            <text x="895" y="315" fill="#ffffff" font-family="'Plus Jakarta Sans'" font-size="11" font-weight="700" text-anchor="middle">Harness Execution</text>
+            <text x="895" y="332" fill="#34d399" font-family="'JetBrains Mono'" font-size="9" text-anchor="middle">Block / Remind</text>
+
+
+            <!-- Connection from Snapshot Plane to Hook Plane -->
+            <path d="M 450 107 L 545 107 L 545 290" fill="none" stroke="#bd00ff" stroke-width="1.5" stroke-dasharray="4,4" />
+            <text x="555" y="200" fill="#a5b4fc" font-family="'JetBrains Mono'" font-size="9" writing-mode="tb">Validates Rule Schemes</text>
+
+            <!-- Arrow Markers -->
+            <marker id="arrow-cyan" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#00f0ff"/>
+            </marker>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer>
+      <p>Produced automatically for Clio Coder's Engineering Audit Documentation.</p>
+      <p style="margin-top: 0.5rem;"><a href="https://github.com/iowarp/clio-coder" target="_blank">Clio Coder Repository</a> &bull; part of IOWarp's CLIO ecosystem of agentic science.</p>
+    </footer>
+
+  </div>
+
+  <!-- DYNAMIC SIMULATION SCRIPT -->
+  <script>
+    // -------------------------------------------------------------
+    // TABS MANAGEMENT
+    // -------------------------------------------------------------
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.toLowerCase().includes(tabId.split('-')[0]));
+      if (targetBtn) targetBtn.classList.add('active');
+      
+      const pane = document.getElementById('tab-' + tabId);
+      if (pane) pane.classList.add('active');
+    }
+
+    function copyCode(elementId) {
+      const text = document.getElementById(elementId).innerText;
+      navigator.clipboard.writeText(text);
+      
+      // Temporary button text update
+      const btn = event.target;
+      const originalText = btn.innerText;
+      btn.innerText = "Copied!";
+      setTimeout(() => btn.innerText = originalText, 1500);
+    }
+
+    // -------------------------------------------------------------
+    // DATA MOCKS (COMPONENTS & FILES)
+    // -------------------------------------------------------------
+    let virtualFiles = {
+      "safe-exec.ts": {
+        path: "src/tools/safe-exec.ts",
+        kind: "tool-implementation",
+        ownerDomain: "tools",
+        mutable: false,
+        authority: "enforcing",
+        reloadClass: "restart-required",
+        content: `import { execChild } from "./subprocess.js";\nimport { isPathAllowed } from "./safety-bounds.js";\n\nexport function executeSafeCommand(cmd: string) {\n\tif (!isPathAllowed(cmd)) {\n\t\tthrow new Error("Command safety boundary violated");\n\t}\n\treturn execChild(cmd);\n}`
+      },
+      "damage-control.yaml": {
+        path: "damage-control-rules.yaml",
+        kind: "safety-rule-pack",
+        ownerDomain: "safety",
+        mutable: true,
+        authority: "enforcing",
+        reloadClass: "hot",
+        content: `version: 1\nrules:\n  - id: deny-rm-root\n    pattern: "rm -rf /"\n    severity: hard-block\n  - id: sandbox-writable-check\n    pattern: "chmod 777"\n    severity: warn`
+      },
+      "defaults.ts": {
+        path: "src/core/defaults.ts",
+        kind: "config-schema",
+        ownerDomain: "config",
+        mutable: false,
+        authority: "runtime-critical",
+        reloadClass: "restart-required",
+        content: `export const DEFAULT_HARNESS_SETTINGS = {\n\tversion: "0.2.1",\n\tmode: "advisory",\n\tmaxToolCalls: 50,\n\tlogLevel: "info",\n\tprovider: "openai"\n};`
+      },
+      "agent-recipe.md": {
+        path: "src/domains/agents/builtins/explore.md",
+        kind: "agent-recipe",
+        ownerDomain: "agents",
+        mutable: true,
+        authority: "advisory",
+        reloadClass: "next-dispatch",
+        content: `---\nname: explorer-agent\ndescription: Rapid codebase explorer\ntools:\n  - grep\n  - glob\n  - view\n---\nBegin searching for target file references.`
+      }
+    };
+
+    let originalFiles = JSON.parse(JSON.stringify(virtualFiles)); // Deep clone
+
+    // -------------------------------------------------------------
+    // HELPER FUNCTIONS
+    // -------------------------------------------------------------
+    function simpleHash(str) {
+      // Fast deterministic hashing simulating SHA-256 for interface
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      const absolute = Math.abs(hash).toString(16).padStart(8, '0');
+      return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b" + absolute;
+    }
+
+    // -------------------------------------------------------------
+    // TAB 1: SCANNER CONTROLLER
+    // -------------------------------------------------------------
+    function updateFileTreeUI() {
+      const treeContainer = document.getElementById("sim-file-tree");
+      treeContainer.innerHTML = "";
+
+      let isAnyChanged = false;
+
+      for (const [key, item] of Object.entries(virtualFiles)) {
+        const currentHash = simpleHash(item.content);
+        const originalHash = simpleHash(originalFiles[key].content);
+        const isChanged = currentHash !== originalHash;
+        if (isChanged) isAnyChanged = true;
+
+        const row = document.createElement("div");
+        row.className = `file-row \${isChanged ? 'changed' : ''}`;
+        
+        row.innerHTML = `
+          <div class="file-info">
+            <svg class="file-icon file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z" stroke-linejoin="round"></path></svg>
+            <div>
+              <span style="font-weight:600; color:#fff;">\${item.path.split('/').pop()}</span>
+              <span style="display:block; font-size:0.75rem; color:var(--text-muted);">\${item.path}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:1.25rem;">
+            <div class="file-meta-badges">
+              <span class="mini-badge authority">\${item.authority}</span>
+              <span class="mini-badge reload">\${item.reloadClass}</span>
+              \${item.mutable ? '<span class="mini-badge mutable">mutable</span>' : ''}
+            </div>
+            <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-dark);">
+              Hash: \${currentHash.substring(0, 10)}...
+            </div>
+          </div>
+        `;
+        treeContainer.appendChild(row);
+      }
+
+      const diffBadge = document.getElementById("diff-indicator");
+      if (isAnyChanged) {
+        diffBadge.innerText = "Modifications Detected";
+        diffBadge.style.color = "var(--color-warn)";
+        diffBadge.style.borderColor = "rgba(245,158,11,0.3)";
+        diffBadge.style.background = "rgba(245,158,11,0.05)";
+      } else {
+        diffBadge.innerText = "Verified Consistent";
+        diffBadge.style.color = "var(--color-accent)";
+        diffBadge.style.borderColor = "rgba(16,185,129,0.3)";
+        diffBadge.style.background = "rgba(16,185,129,0.05)";
+      }
+    }
+
+    function onSelectedFileChange() {
+      const selected = document.getElementById("sim-file-select").value;
+      const fileData = virtualFiles[selected];
+      
+      document.getElementById("sim-file-content").value = fileData.content;
+      onFileContentModified();
+    }
+
+    function onFileContentModified() {
+      const selected = document.getElementById("sim-file-select").value;
+      const val = document.getElementById("sim-file-content").value;
+      
+      // Update local storage
+      virtualFiles[selected].content = val;
+
+      const size = val.length;
+      const hashVal = simpleHash(val);
+
+      document.getElementById("sim-file-size").innerText = size + " bytes";
+      document.getElementById("sim-file-hash").innerText = hashVal;
+
+      updateFileTreeUI();
+    }
+
+    function resetFileMutations() {
+      virtualFiles = JSON.parse(JSON.stringify(originalFiles));
+      const selected = document.getElementById("sim-file-select").value;
+      document.getElementById("sim-file-content").value = virtualFiles[selected].content;
+      onFileContentModified();
+      updateFileTreeUI();
+      triggerScanSnapshot();
+    }
+
+    function triggerScanSnapshot() {
+      const snapshot = {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        root: "/home/akougkas/iowarp/clio-coder",
+        components: []
+      };
+
+      for (const [key, item] of Object.entries(virtualFiles)) {
+        snapshot.components.push({
+          id: key.replace(/\.[^/.]+$/, ""),
+          kind: item.kind,
+          path: item.path,
+          ownerDomain: item.ownerDomain,
+          mutable: item.mutable,
+          authority: item.authority,
+          reloadClass: item.reloadClass,
+          contentHash: simpleHash(item.content),
+          description: `Simulated snapshot entry for \${item.path}`
+        });
+      }
+
+      // Render snapshot
+      renderJSONHighlighted("snapshot-code", snapshot);
+
+      // Render differential snapshot
+      const diff = {
+        version: 1,
+        from: {
+          root: "/home/akougkas/iowarp/clio-coder",
+          generatedAt: new Date(Date.now() - 600000).toISOString(),
+          componentCount: 4
+        },
+        to: {
+          root: "/home/akougkas/iowarp/clio-coder",
+          generatedAt: snapshot.generatedAt,
+          componentCount: 4
+        },
+        summary: { added: 0, removed: 0, changed: 0, unchanged: 4 },
+        added: [],
+        removed: [],
+        changed: []
+      };
+
+      for (const [key, item] of Object.entries(virtualFiles)) {
+        const afterHash = simpleHash(item.content);
+        const beforeHash = simpleHash(originalFiles[key].content);
+        
+        if (afterHash !== beforeHash) {
+          diff.summary.changed++;
+          diff.summary.unchanged--;
+          diff.changed.push({
+            id: key.replace(/\.[^/.]+$/, ""),
+            before: {
+              id: key.replace(/\.[^/.]+$/, ""),
+              kind: item.kind,
+              path: item.path,
+              ownerDomain: item.ownerDomain,
+              mutable: item.mutable,
+              authority: item.authority,
+              reloadClass: item.reloadClass,
+              contentHash: beforeHash
+            },
+            after: {
+              id: key.replace(/\.[^/.]+$/, ""),
+              kind: item.kind,
+              path: item.path,
+              ownerDomain: item.ownerDomain,
+              mutable: item.mutable,
+              authority: item.authority,
+              reloadClass: item.reloadClass,
+              contentHash: afterHash
+            },
+            changedFields: ["contentHash"]
+          });
+        }
+      }
+
+      renderJSONHighlighted("diff-code", diff);
+    }
+
+    // -------------------------------------------------------------
+    // TAB 2: MIDDLEWARE CONTROLLER
+    // -------------------------------------------------------------
+    let middlewareRules = [
+      {
+        id: "lab.damage-control-blocker",
+        source: "builtin",
+        description: "Hard-block commands that attempt dangerous root operations.",
+        enabled: true,
+        hooks: ["before_tool"],
+        effectKinds: ["block_tool"],
+        simulate: function(input) {
+          if (input.toolName === "bash" && input.metadata && input.metadata.command && input.metadata.command.includes("rm -rf /")) {
+            return {
+              kind: "block_tool",
+              reason: "Security hazard: Attempted to run rm -rf on root level directory",
+              severity: "hard-block"
+            };
+          }
+          return null;
+        }
+      },
+      {
+        id: "lab.sandbox-path-protector",
+        source: "builtin",
+        description: "Protect write permissions of critical binary/execution pipelines.",
+        enabled: true,
+        hooks: ["before_tool"],
+        effectKinds: ["protect_path"],
+        simulate: function(input) {
+          if (input.toolName === "create" && input.metadata && input.metadata.path && input.metadata.path.includes("bin/")) {
+            return {
+              kind: "protect_path",
+              path: input.metadata.path,
+              reason: "Directory 'bin/' contains system dependencies and is write-locked."
+            };
+          }
+          return null;
+        }
+      },
+      {
+        id: "lab.scientific-validator-reminder",
+        source: "builtin",
+        description: "Enforce audit verification reminders after editing model parameters.",
+        enabled: true,
+        hooks: ["after_tool"],
+        effectKinds: ["inject_reminder"],
+        simulate: function(input) {
+          if (input.toolName === "edit" && input.metadata && input.metadata.path && input.metadata.path.includes("defaults.ts")) {
+            return {
+              kind: "inject_reminder",
+              message: "Validation Reminder: Default configuration has been modified. Run 'clio components' and double-check integrity.",
+              severity: "warn"
+            };
+          }
+          return null;
+        }
+      }
+    ];
+
+    function populateRulesUI() {
+      const container = document.getElementById("rules-container");
+      container.innerHTML = "";
+
+      middlewareRules.forEach((rule, idx) => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        
+        item.innerHTML = `
+          <div class="item-meta" style="max-width: 70%;">
+            <span class="item-title">\${rule.id}</span>
+            <span class="item-subtitle">\${rule.description}</span>
+            <div style="margin-top:0.4rem; display:flex; gap:0.4rem; flex-wrap:wrap;">
+              <span class="mini-badge" style="font-size:0.65rem; background:rgba(255,255,255,0.04); color:var(--text-muted);">Hooks: \${rule.hooks.join(', ')}</span>
+              <span class="mini-badge" style="font-size:0.65rem; background:rgba(0,240,255,0.08); color:var(--color-primary);">Emit: \${rule.effectKinds.join(', ')}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:1rem;">
+            <span class="status-indicator">
+              <span class="status-dot \${rule.enabled ? 'active' : ''}"></span>
+              \${rule.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+            <button class="btn" style="padding:0.4rem 0.8rem; font-size:0.75rem;" onclick="toggleRule(\${idx})">
+              \${rule.enabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function toggleRule(index) {
+      middlewareRules[index].enabled = !middlewareRules[index].enabled;
+      populateRulesUI();
+      logFeedAction(`Rule '\${middlewareRules[index].id}' has been \${middlewareRules[index].enabled ? 'enabled' : 'disabled'}.`, 'info');
+    }
+
+    function logFeedAction(msg, type='info') {
+      const feed = document.getElementById("execution-feed-log");
+      if (feed.innerHTML.includes("// Trigger")) {
+        feed.innerHTML = "";
+      }
+      
+      const time = new Date().toLocaleTimeString();
+      let color = "var(--text-muted)";
+      if (type === 'warn') color = "var(--color-warn)";
+      if (type === 'error') color = "var(--color-danger)";
+      if (type === 'success') color = "var(--color-accent)";
+      if (type === 'trigger') color = "var(--color-primary)";
+
+      feed.innerHTML += `<div style="color: \${color};"><span style="color:var(--text-dark);">[\${time}]</span> \${msg}</div>`;
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function onHookSelectChange() {
+      const hook = document.getElementById("hook-select").value;
+      const fieldsContainer = document.getElementById("hook-meta-fields");
+      fieldsContainer.innerHTML = "";
+
+      if (hook === "before_tool") {
+        fieldsContainer.innerHTML = `
+          <div class="form-group">
+            <label for="meta-tool-name">Tool Name</label>
+            <select id="meta-tool-name" class="select-input" onchange="onPlaygroundToolChange()">
+              <option value="bash">bash</option>
+              <option value="create">create</option>
+              <option value="edit">edit</option>
+            </select>
+          </div>
+          <div class="form-group" id="tool-meta-subfield">
+            <label id="tool-meta-label" for="meta-tool-arg">Command payload</label>
+            <input type="text" id="meta-tool-arg" class="text-input" value="npm run build">
+          </div>
+        `;
+      } else if (hook === "after_tool") {
+        fieldsContainer.innerHTML = `
+          <div class="form-group">
+            <label for="meta-tool-name">Completed Tool Name</label>
+            <select id="meta-tool-name" class="select-input" onchange="onPlaygroundToolChange()">
+              <option value="edit">edit</option>
+              <option value="bash">bash</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label id="tool-meta-label" for="meta-tool-arg">Target File Edited</label>
+            <input type="text" id="meta-tool-arg" class="text-input" value="src/core/defaults.ts">
+          </div>
+        `;
+      } else if (hook === "before_model") {
+        fieldsContainer.innerHTML = `
+          <div class="form-group">
+            <label for="meta-model-id">Simulated LLM ID</label>
+            <input type="text" id="meta-model-id" class="text-input" value="gemini-3.5-flash">
+          </div>
+        `;
+      }
+      updatePlaygroundPreview();
+    }
+
+    function onPlaygroundToolChange() {
+      const tool = document.getElementById("meta-tool-name").value;
+      const label = document.getElementById("tool-meta-label");
+      const input = document.getElementById("meta-tool-arg");
+
+      if (tool === "bash") {
+        label.innerText = "Command payload";
+        input.value = "rm -rf /usr/bin/local";
+      } else if (tool === "create") {
+        label.innerText = "File Path to Create";
+        input.value = "bin/custom-compiler.sh";
+      } else if (tool === "edit") {
+        label.innerText = "File Path to Edit";
+        input.value = "src/core/defaults.ts";
+      }
+      updatePlaygroundPreview();
+    }
+
+    function getHookInputObject() {
+      const hook = document.getElementById("hook-select").value;
+      const input = {
+        hook: hook,
+        runId: "run-" + Math.floor(Math.random()*10000000).toString(16),
+        sessionId: "b44d2d48-6a56-42d4",
+        turnId: "turn-002",
+        correlationId: "corr-1122"
+      };
+
+      if (hook === "before_tool" || hook === "after_tool") {
+        const toolName = document.getElementById("meta-tool-name").value;
+        const arg = document.getElementById("meta-tool-arg").value;
+        input.toolName = toolName;
+        input.metadata = {};
+        
+        if (toolName === "bash") {
+          input.metadata.command = arg;
+        } else if (toolName === "create" || toolName === "edit") {
+          input.metadata.path = arg;
+        }
+      } else if (hook === "before_model") {
+        input.modelId = document.getElementById("meta-model-id").value;
+      }
+
+      return input;
+    }
+
+    function updatePlaygroundPreview() {
+      const inputObj = getHookInputObject();
+      renderJSONHighlighted("hook-input-code", inputObj);
+    }
+
+    function dispatchMiddlewareHook() {
+      const input = getHookInputObject();
+      logFeedAction(`Dispatching hook trigger [\${input.hook}]`, 'trigger');
+
+      let effects = [];
+      let ruleIds = [];
+
+      middlewareRules.forEach(rule => {
+        if (!rule.enabled) return;
+
+        if (rule.hooks.includes(input.hook)) {
+          logFeedAction(`Evaluating registered rule rule: \${rule.id}...`);
+          const effect = rule.simulate(input);
+          if (effect) {
+            effects.push(effect);
+            ruleIds.push(rule.id);
+            
+            const sevType = effect.severity === 'hard-block' ? 'error' : (effect.severity === 'warn' ? 'warn' : 'success');
+            logFeedAction(`MATCH! Rule '\${rule.id}' produced effect: '\${effect.kind}' (\${effect.reason || effect.message})`, sevType);
+          }
+        }
+      });
+
+      if (effects.length === 0) {
+        logFeedAction(`Hook cascade resolved successfully with 0 effects.`, 'success');
+      }
+
+      const result = {
+        hook: input.hook,
+        input: input,
+        effects: effects,
+        ruleIds: ruleIds
+      };
+
+      renderJSONHighlighted("hook-result-code", result);
+    }
+
+
+    // -------------------------------------------------------------
+    // GENERAL UTILS
+    // -------------------------------------------------------------
+    function renderJSONHighlighted(containerId, data) {
+      const element = document.getElementById(containerId);
+      const jsonStr = JSON.stringify(data, null, 2);
+      
+      // Basic JSON highlighting RegExp
+      let html = jsonStr
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      html = html.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, function (match) {
+        let cls = 'json-number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'json-key';
+          } else {
+            cls = 'json-string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'json-boolean';
+        } else if (/null/.test(match)) {
+          cls = 'json-null';
+        }
+        return `<span class="\${cls}">\${match}</span>`;
+      });
+
+      element.innerHTML = html;
+    }
+
+    // -------------------------------------------------------------
+    // INITIALIZATION BOOTSTRAP
+    // -------------------------------------------------------------
+    window.onload = function() {
+      // Tab 1 Init
+      onSelectedFileChange();
+      
+      // Tab 2 Init
+      onHookSelectChange();
+      populateRulesUI();
+    };
+
+  </script>
+</body>
+</html>

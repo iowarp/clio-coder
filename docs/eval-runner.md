@@ -1,5 +1,8 @@
 # Clio Coder Local Evaluation Runner
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive task suite validator, subprocess execution simulator, and compare calculator is located at [docs/html/eval_blueprint.html](html/eval_blueprint.html) (Version: 0.2.1).
+
 The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.
 
 Source of truth: `src/domains/eval/**` and `src/cli/eval.ts`.

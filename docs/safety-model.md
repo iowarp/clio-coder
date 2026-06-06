@@ -1,5 +1,8 @@
 # Clio Coder Safety Model
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.1).
+
 Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by the mode matrix, tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
 
 Source of truth: `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.

@@ -1,0 +1,2114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Model Catalog & Probing Blueprint</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #6b7280;
+      
+      /* Glowing Neon Palette */
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+      --color-blue: #3b82f6;
+      --color-blue-rgb: 59, 130, 246;
+      
+      --gradient-cyan-purple: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2.5rem 2rem;
+    }
+
+    /* Header Styling */
+    header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+      position: relative;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 68px;
+      height: 68px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      margin-bottom: 1.25rem;
+      box-shadow: 0 0 25px rgba(var(--color-cyan-rgb), 0.15);
+      position: relative;
+    }
+
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 18px;
+      background: var(--gradient-cyan-purple);
+      z-index: -1;
+      opacity: 0.35;
+      filter: blur(4px);
+    }
+
+    .header-logo svg {
+      width: 36px;
+      height: 36px;
+      fill: none;
+      stroke: var(--color-cyan);
+      stroke-width: 2.5;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 1rem auto;
+      font-weight: 400;
+    }
+
+    .meta-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-family: var(--font-mono);
+      color: var(--color-cyan);
+    }
+
+    .meta-badge span {
+      color: var(--text-muted);
+    }
+
+    /* Tabs Navigation */
+    .tabs-nav {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.65rem 1.35rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-cyan-purple);
+      color: #090d16;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.2);
+    }
+
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.4s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Glass Cards */
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 16px;
+      padding: 2.25rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      margin-bottom: 2rem;
+    }
+
+    .glass-card-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
+    }
+
+    .glass-card-title svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--color-cyan);
+      fill: none;
+      stroke-width: 2;
+    }
+
+    /* Grid Layouts */
+    .simulator-grid {
+      display: grid;
+      grid-template-columns: 400px 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      .simulator-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Interactive Elements Styling */
+    .form-group {
+      margin-bottom: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+    }
+
+    .form-control {
+      background: rgba(9, 13, 22, 0.8);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      color: var(--text-main);
+      padding: 0.75rem;
+      font-family: var(--font-sans);
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
+    }
+
+    select.form-control {
+      cursor: pointer;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.95rem;
+      user-select: none;
+    }
+
+    .checkbox-group input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--color-cyan);
+      cursor: pointer;
+    }
+
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .slider-container input {
+      flex: 1;
+      accent-color: var(--color-cyan);
+    }
+
+    .slider-val {
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      min-width: 60px;
+      text-align: right;
+      color: var(--color-cyan);
+    }
+
+    /* Buttons */
+    .btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .btn-primary {
+      background: var(--gradient-cyan-purple);
+      color: #090d16;
+      font-weight: 700;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.15);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 4px 20px rgba(var(--color-cyan-rgb), 0.3);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    /* Live Output Monitor Panel */
+    .monitor-panel {
+      background: #060910;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+      padding: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-height: 400px;
+      position: relative;
+    }
+
+    .monitor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.5rem;
+      color: var(--text-muted);
+    }
+
+    .monitor-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dark);
+    }
+
+    .status-dot.active {
+      background: var(--color-emerald);
+      box-shadow: 0 0 8px var(--color-emerald);
+      animation: pulse 1.5s infinite alternate;
+    }
+
+    .status-dot.error {
+      background: var(--color-rose);
+      box-shadow: 0 0 8px var(--color-rose);
+    }
+
+    .status-dot.warn {
+      background: var(--color-amber);
+      box-shadow: 0 0 8px var(--color-amber);
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.4; }
+      to { opacity: 1; }
+    }
+
+    .monitor-log {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 250px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      color: #38bdf8;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      padding-bottom: 1rem;
+    }
+
+    .monitor-log .log-entry {
+      line-height: 1.4;
+    }
+
+    .monitor-log .log-time {
+      color: var(--text-dark);
+      margin-right: 0.5rem;
+    }
+
+    .monitor-log .log-info {
+      color: var(--text-main);
+    }
+
+    .monitor-log .log-success {
+      color: var(--color-emerald);
+    }
+
+    .monitor-log .log-warn {
+      color: var(--color-amber);
+    }
+
+    .monitor-log .log-error {
+      color: var(--color-rose);
+    }
+
+    /* Badges section */
+    .capabilities-badges-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+
+    .cap-badge {
+      display: inline-flex;
+      flex-direction: column;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      padding: 0.75rem 1.25rem;
+      min-width: 110px;
+      align-items: center;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+      opacity: 0.4;
+    }
+
+    .cap-badge.enabled {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .cap-badge.cap-chat.enabled {
+      border-color: rgba(var(--color-cyan-rgb), 0.5);
+      box-shadow: 0 0 12px rgba(var(--color-cyan-rgb), 0.1);
+    }
+
+    .cap-badge.cap-tools.enabled {
+      border-color: rgba(var(--color-purple-rgb), 0.5);
+      box-shadow: 0 0 12px rgba(var(--color-purple-rgb), 0.1);
+    }
+
+    .cap-badge.cap-reasoning.enabled {
+      border-color: rgba(var(--color-amber-rgb), 0.5);
+      box-shadow: 0 0 12px rgba(var(--color-amber-rgb), 0.1);
+    }
+
+    .cap-badge.cap-vision.enabled {
+      border-color: rgba(var(--color-emerald-rgb), 0.5);
+      box-shadow: 0 0 12px rgba(var(--color-emerald-rgb), 0.1);
+    }
+
+    .cap-badge .cap-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.25rem;
+      filter: grayscale(100%);
+      transition: filter 0.3s ease;
+    }
+
+    .cap-badge.enabled .cap-icon {
+      filter: grayscale(0%);
+    }
+
+    .cap-badge .cap-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .cap-badge.enabled .cap-label {
+      color: var(--text-main);
+    }
+
+    .cap-badge.enabled.cap-chat .cap-label { color: var(--color-cyan); }
+    .cap-badge.enabled.cap-tools .cap-label { color: var(--color-purple); }
+    .cap-badge.enabled.cap-reasoning .cap-label { color: var(--color-amber); }
+    .cap-badge.enabled.cap-vision .cap-label { color: var(--color-emerald); }
+
+    .cap-badge .cap-status-text {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      margin-top: 0.15rem;
+      color: var(--text-dark);
+    }
+
+    .cap-badge.enabled .cap-status-text {
+      color: var(--text-muted);
+    }
+
+    /* Json View Box */
+    .json-wrapper {
+      position: relative;
+      margin-top: 1rem;
+      background: #03060b;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 1rem;
+      overflow-x: auto;
+      max-height: 250px;
+    }
+
+    .json-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: var(--text-dark);
+      margin-bottom: 0.5rem;
+      font-family: var(--font-sans);
+      font-weight: 700;
+    }
+
+    .json-code {
+      color: #e2e8f0;
+      font-size: 0.8rem;
+      white-space: pre;
+    }
+
+    /* Merge Stack Layout */
+    .merge-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .merge-layer {
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      background: rgba(255, 255, 255, 0.02);
+      transition: all 0.25s ease;
+      position: relative;
+    }
+
+    .merge-layer::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--text-dark);
+      border-top-left-radius: 8px;
+      border-bottom-left-radius: 8px;
+    }
+
+    .merge-layer:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .merge-layer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+
+    .merge-layer-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .merge-layer-num {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .merge-layer-inputs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .merge-layer.layer-1::before { background: var(--color-blue); }
+    .merge-layer.layer-2::before { background: var(--color-emerald); }
+    .merge-layer.layer-3::before { background: var(--color-purple); }
+    .merge-layer.layer-4::before { background: var(--color-cyan); }
+    .merge-layer.layer-5::before { background: var(--color-amber); }
+
+    .merge-effective-card {
+      background: radial-gradient(circle at 100% 0%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%), rgba(0, 240, 255, 0.02);
+      border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
+      box-shadow: 0 0 20px rgba(var(--color-cyan-rgb), 0.05);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 1rem;
+    }
+
+    .effective-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+
+    .effective-cell {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      position: relative;
+    }
+
+    .effective-cell-name {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .effective-cell-val {
+      font-size: 1.1rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .effective-cell-source {
+      font-size: 0.65rem;
+      color: var(--text-dark);
+      font-family: var(--font-mono);
+    }
+
+    /* Resolver Sandbox */
+    .resolver-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 900px) {
+      .resolver-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .resolver-input-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .resolver-candidates {
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .candidate-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
+    .candidate-row:last-child {
+      border-bottom: none;
+    }
+
+    .candidate-endpoint { color: var(--color-cyan); }
+    .candidate-model { color: var(--text-main); }
+
+    .quick-examples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .example-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .example-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--color-cyan);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .trace-container {
+      background: #060910;
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      min-height: 380px;
+      font-family: var(--font-mono);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .trace-step {
+      padding: 0.6rem 0.8rem;
+      border-left: 2px solid var(--text-dark);
+      background: rgba(255, 255, 255, 0.01);
+      font-size: 0.85rem;
+    }
+
+    .trace-step.evaluating {
+      border-left-color: var(--color-blue);
+      color: #93c5fd;
+    }
+
+    .trace-step.matched {
+      border-left-color: var(--color-emerald);
+      background: rgba(var(--color-emerald-rgb), 0.03);
+      color: #6ee7b7;
+      font-weight: 600;
+    }
+
+    .trace-step.skipped {
+      border-left-color: var(--text-dark);
+      color: var(--text-dark);
+      opacity: 0.6;
+    }
+
+    .resolver-result-card {
+      border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
+      background: rgba(0, 240, 255, 0.01);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .resolver-result-header {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--color-cyan);
+      letter-spacing: 0.05em;
+    }
+
+    .resolver-result-val {
+      font-size: 1.15rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .resolver-result-val .badge-mini {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      color: var(--color-amber);
+    }
+
+    /* Flowcharts area styling */
+    .flowchart-container {
+      display: flex;
+      flex-direction: column;
+      gap: 3rem;
+      margin-top: 1rem;
+    }
+
+    .svg-wrapper {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .svg-wrapper svg {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .svg-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--color-cyan);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .svg-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 0.75rem;
+      max-width: 800px;
+    }
+
+    /* Footer styling */
+    footer {
+      text-align: center;
+      margin-top: 4rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 2rem;
+      color: var(--text-dark);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    footer a:hover {
+      color: var(--color-cyan);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
+      </div>
+      <h1>Model Catalog & Routing Blueprint</h1>
+      <div class="subtitle">Interactive visual specifications for model target configurations, runtime detection, dynamic capability badging, and routing resolution in Clio Coder.</div>
+      <div class="meta-badge">
+        <span>Clio Coder Version</span> v0.2.1
+      </div>
+    </header>
+
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab('probe-sim')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+        Connection Prober Simulator
+      </button>
+      <button class="tab-btn" onclick="switchTab('merge-sandbox')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+        Hierarchical Merge Stack
+      </button>
+      <button class="tab-btn" onclick="switchTab('resolver-sim')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        Target-First Resolver
+      </button>
+      <button class="tab-btn" onclick="switchTab('diagrams')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg>
+        Architecture Flowcharts
+      </button>
+    </div>
+
+    <!-- TAB 1: CONNECTION PROBER SIMULATOR -->
+    <div id="probe-sim" class="tab-pane active">
+      <div class="simulator-grid">
+        <div class="control-panel glass-card">
+          <div class="glass-card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 20v-6M6 20V10M18 20V4" /></svg>
+            Probe Configuration
+          </div>
+
+          <div class="form-group">
+            <label for="probe-target">Target Provider</label>
+            <select id="probe-target" class="form-control" onchange="onTargetChange()">
+              <option value="ollama">Ollama (Local Native)</option>
+              <option value="lmstudio">LM Studio (Local Native)</option>
+              <option value="openai">OpenAI (Cloud)</option>
+              <option value="bedrock">Amazon Bedrock (Cloud)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="probe-url">Endpoint URL</label>
+            <input type="text" id="probe-url" class="form-control" value="http://localhost:11434">
+          </div>
+
+          <div class="form-group">
+            <label for="probe-model">Model ID</label>
+            <select id="probe-model" class="form-control" onchange="onModelChange()">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="probe-latency">Simulated Latency</label>
+            <div class="slider-container">
+              <input type="range" id="probe-latency" min="10" max="2000" value="80" oninput="updateLatencyVal()">
+              <span id="latency-val" class="slider-val">80 ms</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="probe-auth">Auth Key (Optional)</label>
+            <input type="password" id="probe-auth" class="form-control" placeholder="Not required for Ollama" disabled>
+          </div>
+
+          <div class="form-group">
+            <label>Response Outcome</label>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.25rem;">
+              <label class="checkbox-group">
+                <input type="radio" name="outcome" value="success" checked>
+                <span>HTTP 200 OK (Success)</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="radio" name="outcome" value="unauthorized">
+                <span>HTTP 401 Unauthorized</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="radio" name="outcome" value="notfound">
+                <span>HTTP 404 Not Found</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="radio" name="outcome" value="timeout">
+                <span>Timeout / Network Loss</span>
+              </label>
+            </div>
+          </div>
+
+          <button id="run-probe-btn" class="btn btn-primary" onclick="runConnectionProbe()" style="margin-top: 1rem;">
+            Run Connection Probe
+          </button>
+        </div>
+
+        <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+          <div class="glass-card-title">
+            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+            Probe Console & capability badges
+          </div>
+
+          <div class="monitor-panel">
+            <div class="monitor-header">
+              <span>PROBE_DAEMON_MONITOR</span>
+              <div class="monitor-status">
+                <span id="probe-status-text">IDLE</span>
+                <div id="probe-status-dot" class="status-dot"></div>
+              </div>
+            </div>
+
+            <div id="probe-console-log" class="monitor-log">
+              <div class="log-entry"><span class="log-time">[12:53:02]</span><span class="log-info">Probe daemon initialized. Select target and click Run.</span></div>
+            </div>
+
+            <div>
+              <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem;">Detected Capabilities Badges</div>
+              <div class="capabilities-badges-row">
+                <div id="badge-chat" class="cap-badge cap-chat">
+                  <span class="cap-icon">💬</span>
+                  <span class="cap-label">Chat</span>
+                  <span class="cap-status-text" id="status-chat">Disabled</span>
+                </div>
+                <div id="badge-tools" class="cap-badge cap-tools">
+                  <span class="cap-icon">🔧</span>
+                  <span class="cap-label">Tools</span>
+                  <span class="cap-status-text" id="status-tools">Disabled</span>
+                </div>
+                <div id="badge-reasoning" class="cap-badge cap-reasoning">
+                  <span class="cap-icon">🧠</span>
+                  <span class="cap-label">Reasoning</span>
+                  <span class="cap-status-text" id="status-reasoning">Disabled</span>
+                </div>
+                <div id="badge-vision" class="cap-badge cap-vision">
+                  <span class="cap-icon">👁️</span>
+                  <span class="cap-label">Vision</span>
+                  <span class="cap-status-text" id="status-vision">Disabled</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="json-wrapper">
+            <div class="json-title" id="json-box-title">Response Payload</div>
+            <div class="json-code" id="response-json-code">{ "status": "no_active_probe" }</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: HIERARCHICAL CAPABILITY MERGE SANDBOX -->
+    <div id="merge-sandbox" class="tab-pane">
+      <div class="glass-card">
+        <div class="glass-card-title">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+          Capability Layer Aggregation Sandbox
+        </div>
+        <p style="margin-bottom: 1.5rem; color: var(--text-muted); font-size: 0.95rem;">
+          Clio Coder resolves model capabilities dynamically using a hierarchical overlay stack: 
+          <code>Runtime Defaults &rarr; Catalog Model &rarr; Knowledge Base (YAML quirks) &rarr; Live Probe &rarr; User overrides</code>. 
+          Modify individual properties on each layer below to see how the final effective capability and its source attribution update in real-time.
+        </p>
+
+        <div class="merge-stack">
+          <!-- Layer 1: Runtime Defaults -->
+          <div class="merge-layer layer-1">
+            <div class="merge-layer-header">
+              <span class="merge-layer-title"><span class="merge-layer-num">1</span> Runtime Base Defaults (Ollama / OpenAI Base)</span>
+            </div>
+            <div class="merge-layer-inputs">
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer1-chat" checked onchange="recalculateMergeStack()">
+                <span>Chat</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer1-tools" checked onchange="recalculateMergeStack()">
+                <span>Tools</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer1-reasoning" onchange="recalculateMergeStack()">
+                <span>Reasoning</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer1-vision" onchange="recalculateMergeStack()">
+                <span>Vision</span>
+              </label>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size:0.7rem;">Context Window</label>
+                <input type="number" id="layer1-context" class="form-control" value="8192" style="padding: 0.35rem; font-size: 0.8rem;" oninput="recalculateMergeStack()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Layer 2: Catalog Model -->
+          <div class="merge-layer layer-2">
+            <div class="merge-layer-header">
+              <span class="merge-layer-title"><span class="merge-layer-num">2</span> Catalog Definitions (pi-ai catalogs)</span>
+            </div>
+            <div class="merge-layer-inputs">
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer2-chat" checked onchange="recalculateMergeStack()">
+                <span>Chat</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer2-tools" checked onchange="recalculateMergeStack()">
+                <span>Tools</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer2-reasoning" onchange="recalculateMergeStack()">
+                <span>Reasoning</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer2-vision" onchange="recalculateMergeStack()">
+                <span>Vision</span>
+              </label>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size:0.7rem;">Context Window</label>
+                <input type="number" id="layer2-context" class="form-control" value="16384" style="padding: 0.35rem; font-size: 0.8rem;" oninput="recalculateMergeStack()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Layer 3: Knowledge Base YAML -->
+          <div class="merge-layer layer-3">
+            <div class="merge-layer-header">
+              <span class="merge-layer-title"><span class="merge-layer-num">3</span> Knowledge Base Entry (clio-local-coding-targets.yaml)</span>
+              <label class="checkbox-group" style="font-size:0.8rem; color:var(--color-purple);">
+                <input type="checkbox" id="layer3-active" checked onchange="recalculateMergeStack()">
+                <span>Enable Layer</span>
+              </label>
+            </div>
+            <div class="merge-layer-inputs" id="layer3-container">
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer3-chat" checked onchange="recalculateMergeStack()">
+                <span>Chat</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer3-tools" checked onchange="recalculateMergeStack()">
+                <span>Tools</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer3-reasoning" checked onchange="recalculateMergeStack()">
+                <span>Reasoning</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer3-vision" onchange="recalculateMergeStack()">
+                <span>Vision</span>
+              </label>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size:0.7rem;">Context Window</label>
+                <input type="number" id="layer3-context" class="form-control" value="131072" style="padding: 0.35rem; font-size: 0.8rem;" oninput="recalculateMergeStack()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Layer 4: Live Probe Result -->
+          <div class="merge-layer layer-4">
+            <div class="merge-layer-header">
+              <span class="merge-layer-title"><span class="merge-layer-num">4</span> Live Probe connection Discovery</span>
+              <label class="checkbox-group" style="font-size:0.8rem; color:var(--color-cyan);">
+                <input type="checkbox" id="layer4-active" onchange="recalculateMergeStack()">
+                <span>Enable Layer</span>
+              </label>
+            </div>
+            <div class="merge-layer-inputs" id="layer4-container" style="opacity: 0.5; pointer-events: none;">
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer4-chat" checked onchange="recalculateMergeStack()">
+                <span>Chat</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer4-tools" onchange="recalculateMergeStack()">
+                <span>Tools</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer4-reasoning" checked onchange="recalculateMergeStack()">
+                <span>Reasoning</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer4-vision" checked onchange="recalculateMergeStack()">
+                <span>Vision</span>
+              </label>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size:0.7rem;">Context Window</label>
+                <input type="number" id="layer4-context" class="form-control" value="65536" style="padding: 0.35rem; font-size: 0.8rem;" oninput="recalculateMergeStack()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Layer 5: User Settings Override -->
+          <div class="merge-layer layer-5">
+            <div class="merge-layer-header">
+              <span class="merge-layer-title"><span class="merge-layer-num">5</span> User settings.yaml Override</span>
+              <label class="checkbox-group" style="font-size:0.8rem; color:var(--color-amber);">
+                <input type="checkbox" id="layer5-active" onchange="recalculateMergeStack()">
+                <span>Enable Layer</span>
+              </label>
+            </div>
+            <div class="merge-layer-inputs" id="layer5-container" style="opacity: 0.5; pointer-events: none;">
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer5-chat" checked onchange="recalculateMergeStack()">
+                <span>Chat</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer5-tools" checked onchange="recalculateMergeStack()">
+                <span>Tools</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer5-reasoning" checked onchange="recalculateMergeStack()">
+                <span>Reasoning</span>
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="layer5-vision" checked onchange="recalculateMergeStack()">
+                <span>Vision</span>
+              </label>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size:0.7rem;">Context Window</label>
+                <input type="number" id="layer5-context" class="form-control" value="262144" style="padding: 0.35rem; font-size: 0.8rem;" oninput="recalculateMergeStack()">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="merge-effective-card">
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--color-cyan); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            Resolved Effective Capabilities
+          </h3>
+          <div class="effective-grid">
+            <div class="effective-cell">
+              <span class="effective-cell-name">Chat Capability</span>
+              <span class="effective-cell-val" id="eff-chat">true</span>
+              <span class="effective-cell-source" id="source-chat">layer 1 (default)</span>
+            </div>
+            <div class="effective-cell">
+              <span class="effective-cell-name">Tools Capability</span>
+              <span class="effective-cell-val" id="eff-tools">true</span>
+              <span class="effective-cell-source" id="source-tools">layer 1 (default)</span>
+            </div>
+            <div class="effective-cell">
+              <span class="effective-cell-name">Reasoning Capability</span>
+              <span class="effective-cell-val" id="eff-reasoning">true</span>
+              <span class="effective-cell-source" id="source-reasoning">layer 3 (kb)</span>
+            </div>
+            <div class="effective-cell">
+              <span class="effective-cell-name">Vision Capability</span>
+              <span class="effective-cell-val" id="eff-vision">false</span>
+              <span class="effective-cell-source" id="source-vision">layer 1 (default)</span>
+            </div>
+            <div class="effective-cell">
+              <span class="effective-cell-name">Context Window</span>
+              <span class="effective-cell-val" id="eff-context">131072</span>
+              <span class="effective-cell-source" id="source-context">layer 3 (kb)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: TARGET-FIRST RESOLVER SANDBOX -->
+    <div id="resolver-sim" class="tab-pane">
+      <div class="resolver-container">
+        <div class="resolver-input-panel glass-card">
+          <div class="glass-card-title">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            Resolver Input Parameters
+          </div>
+
+          <div class="form-group">
+            <label for="resolver-pattern">Model ID / Pattern</label>
+            <input type="text" id="resolver-pattern" class="form-control" value="openai/gpt-4o" oninput="runResolverSimulation()">
+            <div class="quick-examples">
+              <button class="example-btn" onclick="applyResolverExample('openai/gpt-4o')">openai/gpt-4o</button>
+              <button class="example-btn" onclick="applyResolverExample('gpt-4o-mini')">gpt-4o-mini</button>
+              <button class="example-btn" onclick="applyResolverExample('ollama/deepseek-r1:medium')">ollama/deepseek-r1:medium</button>
+              <button class="example-btn" onclick="applyResolverExample('*gpt*')">*gpt*</button>
+              <button class="example-btn" onclick="applyResolverExample('claude*')">claude*</button>
+              <button class="example-btn" onclick="applyResolverExample('agenticqwen:high')">agenticqwen:high</button>
+              <button class="example-btn" onclick="applyResolverExample('unknown-model')">unknown-model</button>
+            </div>
+          </div>
+
+          <div>
+            <label>Active Registered Target Models</label>
+            <div class="resolver-candidates" id="resolver-candidates-list">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card" style="display: flex; flex-direction: column;">
+          <div class="glass-card-title">
+            <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
+            Resolver Resolution Trace
+          </div>
+          <div class="trace-container" id="resolver-trace-log">
+            <!-- Trace steps populated dynamically -->
+          </div>
+          <div class="resolver-result-card" id="resolver-result-card">
+            <span class="resolver-result-header">Routing Output</span>
+            <span class="resolver-result-val" id="resolver-output">
+              openai/gpt-4o <span class="badge-mini">thinking: off</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: ARCHITECTURE FLOWCHARTS -->
+    <div id="diagrams" class="tab-pane">
+      <div class="flowchart-container">
+        
+        <!-- DIAGRAM A -->
+        <div class="glass-card">
+          <div class="svg-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            Hierarchical Capability Synthesis Overlay Flowchart
+          </div>
+          <div class="svg-wrapper">
+            <svg width="850" height="420" viewBox="0 0 850 420" xmlns="http://www.w3.org/2000/svg">
+              <!-- Definitions for arrows -->
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
+                </marker>
+                <marker id="arrow-white" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f3f4f6" />
+                </marker>
+              </defs>
+
+              <style>
+                .node-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 8; ry: 8; }
+                .node-box-cyan { fill: rgba(0, 240, 255, 0.03); stroke: #00f0ff; stroke-width: 2; rx: 10; ry: 10; }
+                .node-box-purple { fill: rgba(189, 0, 255, 0.03); stroke: #bd00ff; stroke-width: 1.5; rx: 8; ry: 8; }
+                .node-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13px; font-weight: 700; }
+                .node-text { fill: #9ca3af; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+                .node-text-bold { fill: #f3f4f6; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: bold; }
+                .arrow-line { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 1.5; }
+                .arrow-line-cyan { fill: none; stroke: #00f0ff; stroke-width: 2; }
+                .label-text { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 10px; }
+              </style>
+
+              <!-- Layer 1 -->
+              <rect x="20" y="30" width="180" height="90" class="node-box" />
+              <text x="35" y="55" class="node-title">Layer 1: Runtime Base</text>
+              <text x="35" y="75" class="node-text">chat: true</text>
+              <text x="35" y="95" class="node-text">tools: true</text>
+              <text x="35" y="110" class="node-text">context: 8k</text>
+
+              <!-- Layer 2 -->
+              <rect x="240" y="30" width="180" height="90" class="node-box" />
+              <text x="255" y="55" class="node-title">Layer 2: Catalog definition</text>
+              <text x="255" y="75" class="node-text">context: 16k</text>
+              <text x="255" y="95" class="node-text">vision: true</text>
+              
+              <!-- Layer 3 -->
+              <rect x="460" y="30" width="180" height="90" class="node-box" />
+              <text x="475" y="55" class="node-title">Layer 3: KB (YAML quirks)</text>
+              <text x="475" y="75" class="node-text">reasoning: true</text>
+              <text x="475" y="95" class="node-text">context: 131k</text>
+
+              <!-- Merge process -->
+              <path d="M 200 75 L 240 75" class="arrow-line" marker-end="url(#arrow-white)" />
+              <path d="M 420 75 L 460 75" class="arrow-line" marker-end="url(#arrow-white)" />
+              <path d="M 640 75 L 680 75" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Layer 4 -->
+              <rect x="680" y="30" width="150" height="90" class="node-box" />
+              <text x="695" y="55" class="node-title">Layer 4: Live Probe</text>
+              <text x="695" y="75" class="node-text">reasoning: true</text>
+              <text x="695" y="95" class="node-text">vision: false</text>
+
+              <path d="M 755 120 L 755 170" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Layer 5 -->
+              <rect x="665" y="170" width="180" height="90" class="node-box" />
+              <text x="680" y="195" class="node-title">Layer 5: User Settings</text>
+              <text x="680" y="215" class="node-text">settings.targets[x].caps</text>
+              <text x="680" y="235" class="node-text">vision: true (override)</text>
+
+              <!-- Connection to final output -->
+              <path d="M 665 215 L 450 215 L 450 280" class="arrow-line-cyan" marker-end="url(#arrow)" />
+              <text x="500" y="210" class="label-text" fill="#00f0ff">Applies overrides in order of hierarchy</text>
+
+              <!-- Final output block -->
+              <rect x="225" y="280" width="450" height="110" class="node-box-cyan" />
+              <text x="245" y="305" class="node-title" fill="#00f0ff">FINAL RESOLVED EFFECTIVE CAPABILITYFLAGS</text>
+              <text x="245" y="330" class="node-text-bold">chat: true <tspan fill="#6b7280">(from Layer 1)</tspan></text>
+              <text x="245" y="350" class="node-text-bold">tools: true <tspan fill="#6b7280">(from Layer 1)</tspan></text>
+              <text x="245" y="370" class="node-text-bold">vision: true <tspan fill="#6b7280">(overridden by Layer 5)</tspan></text>
+              <text x="475" y="330" class="node-text-bold">reasoning: true <tspan fill="#6b7280">(from Layer 3)</tspan></text>
+              <text x="475" y="350" class="node-text-bold">contextWindow: 131072 <tspan fill="#6b7280">(from Layer 3)</tspan></text>
+            </svg>
+          </div>
+          <div class="svg-desc">
+            <strong>Hierarchical Priority:</strong> Lower levels provide base definitions, which are progressively layered and overwritten by higher levels. The live connection probe outcomes (Layer 4) verify runtime reality, and user constraints in settings.yaml (Layer 5) act as the final absolute authority.
+          </div>
+        </div>
+
+        <!-- DIAGRAM B -->
+        <div class="glass-card">
+          <div class="svg-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            Target-First Model Resolver Match sequence
+          </div>
+          <div class="svg-wrapper">
+            <svg width="850" height="400" viewBox="0 0 850 400" xmlns="http://www.w3.org/2000/svg">
+              <style>
+                .step-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
+                .step-box-hit { fill: rgba(16, 185, 129, 0.03); stroke: #10b981; stroke-width: 2; rx: 8; ry: 8; }
+                .step-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700; }
+                .step-desc { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; }
+                .decision-diamond { fill: #1f2937; stroke: #3b82f6; stroke-width: 1.5; }
+              </style>
+
+              <!-- Step 1: Input -->
+              <rect x="20" y="150" width="130" height="60" class="step-box" />
+              <text x="35" y="175" class="step-title">User Pattern Input</text>
+              <text x="35" y="195" class="step-desc">e.g. gpt-4o:low</text>
+
+              <path d="M 150 180 L 190 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Step 2: Suffix splitting -->
+              <rect x="190" y="140" width="140" height="80" class="step-box" />
+              <text x="205" y="165" class="step-title">1. Suffix Parser</text>
+              <text x="205" y="185" class="step-desc">Splits ':thinkingLevel'</text>
+              <text x="205" y="200" class="step-desc">pattern &rarr; gpt-4o</text>
+
+              <path d="M 330 180 L 370 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Step 3: Exact match check -->
+              <rect x="370" y="140" width="130" height="80" class="step-box" />
+              <text x="385" y="165" class="step-title">2. Exact Match?</text>
+              <text x="385" y="185" class="step-desc">Matches 'target/id'</text>
+              <text x="385" y="200" class="step-desc">exactly?</text>
+
+              <!-- Branch from Exact Match -->
+              <path d="M 500 180 L 540 180" class="arrow-line" marker-end="url(#arrow-white)" />
+              <path d="M 435 220 L 435 270" class="arrow-line" marker-end="url(#arrow-white)" />
+              <text x="445" y="245" class="label-text">No</text>
+              <text x="510" y="170" class="label-text">Yes</text>
+
+              <!-- Step 4: Glob check -->
+              <rect x="370" y="270" width="130" height="80" class="step-box" />
+              <text x="385" y="295" class="step-title">3. Glob Match?</text>
+              <text x="385" y="315" class="step-desc">Matches regex pattern</text>
+              <text x="385" y="330" class="step-desc">like *gpt* ?</text>
+
+              <!-- Branch from Glob -->
+              <path d="M 500 310 L 610 310 L 610 220" class="arrow-line" marker-end="url(#arrow-white)" />
+              <path d="M 370 310 L 260 310 L 260 270" class="arrow-line" />
+              <text x="545" y="300" class="label-text">Yes</text>
+              <text x="290" y="300" class="label-text">No</text>
+
+              <!-- Step 5: Bare model match check -->
+              <rect x="195" y="270" width="130" height="80" class="step-box" />
+              <text x="210" y="295" class="step-title">4. Bare Model?</text>
+              <text x="210" y="315" class="step-desc">Exact case-insensitive</text>
+              <text x="210" y="330" class="step-desc">model ID?</text>
+
+              <!-- Branch from Bare Model -->
+              <path d="M 195 310 L 100 310 L 100 270" class="arrow-line" />
+              <path d="M 260 270 L 260 250" class="arrow-line" />
+              <text x="135" y="300" class="label-text">No</text>
+              
+              <!-- Step 6: Substring match check -->
+              <rect x="35" y="200" width="130" height="70" class="step-box" />
+              <text x="50" y="225" class="step-title">5. Substring Match?</text>
+              <text x="50" y="245" class="step-desc">Case-insensitive</text>
+              <text x="50" y="260" class="step-desc">substring match?</text>
+
+              <!-- Final result success -->
+              <rect x="540" y="140" width="280" height="80" class="step-box-hit" />
+              <text x="555" y="165" class="step-title" fill="#10b981">Resolved Target Reference</text>
+              <text x="555" y="185" class="step-desc" fill="#f3f4f6">Returns endpoint ID + wire model ID</text>
+              <text x="555" y="200" class="step-desc" fill="#f3f4f6">Applies thinking level target settings</text>
+
+              <path d="M 100 200 L 100 100 L 680 100 L 680 140" class="arrow-line" marker-end="url(#arrow-white)" />
+              <text x="80" y="130" class="label-text">Yes</text>
+            </svg>
+          </div>
+          <div class="svg-desc">
+            <strong>Target-First Matching Hierarchy:</strong> Exact references block any partial checks. The resolver handles glob patterns, strips thinking constraints before evaluating names, and falls back to a substring match to prevent user frustration.
+          </div>
+        </div>
+
+        <!-- DIAGRAM C -->
+        <div class="glass-card">
+          <div class="svg-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
+            Live Connection Probe & Capability Detection Pipeline
+          </div>
+          <div class="svg-wrapper">
+            <svg width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg">
+              <style>
+                .flow-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
+                .flow-box-active { fill: rgba(0, 240, 255, 0.02); stroke: #00f0ff; stroke-width: 1.5; rx: 6; ry: 6; }
+                .flow-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700; }
+                .flow-desc { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; }
+              </style>
+
+              <!-- Start -->
+              <rect x="20" y="150" width="120" height="60" class="flow-box-active" />
+              <text x="35" y="175" class="flow-title">1. Trigger Probe</text>
+              <text x="35" y="192" class="flow-desc">clio --probe / TUI</text>
+
+              <path d="M 140 180 L 180 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Liveness check -->
+              <rect x="180" y="140" width="150" height="80" class="flow-box" />
+              <text x="195" y="165" class="flow-title">2. Endpoint Ping</text>
+              <text x="195" y="185" class="flow-desc">Ping HTTP URL / WS</text>
+              <text x="195" y="200" class="flow-desc">Verifies liveness</text>
+
+              <path d="M 330 180 L 370 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Fingerprint Check -->
+              <rect x="370" y="140" width="160" height="80" class="flow-box" />
+              <text x="385" y="165" class="flow-title">3. Fingerprint Native</text>
+              <text x="385" y="185" class="flow-desc">Ollama: /api/version</text>
+              <text x="385" y="200" class="flow-desc">LM Studio: /api/v1/models</text>
+
+              <path d="M 530 180 L 570 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Loaded models list -->
+              <rect x="570" y="140" width="140" height="80" class="flow-box" />
+              <text x="585" y="165" class="flow-title">4. Model Tags</text>
+              <text x="585" y="185" class="flow-desc">Fetch active tags list</text>
+              <text x="585" y="200" class="flow-desc">Matches against catalog</text>
+
+              <path d="M 710 180 L 750 180" class="arrow-line" marker-end="url(#arrow-white)" />
+
+              <!-- Reasoning priming test -->
+              <rect x="550" y="260" width="180" height="90" class="flow-box-active" />
+              <text x="565" y="285" class="flow-title" fill="#00f0ff">5. Reasoning Priming</text>
+              <text x="565" y="305" class="flow-desc">One-shot request (2+2)</text>
+              <text x="565" y="320" class="flow-desc">Checks reasoning_content</text>
+
+              <path d="M 750 210 L 750 305 L 730 305" class="arrow-line" marker-end="url(#arrow-white)" />
+              <text x="758" y="250" class="label-text">If local compatible</text>
+
+              <!-- Final capabilities updates -->
+              <rect x="180" y="260" width="150" height="90" class="flow-box" />
+              <text x="195" y="285" class="flow-title">6. Update Cache</text>
+              <text x="195" y="305" class="flow-desc">Saves model caps</text>
+              <text x="195" y="320" class="flow-desc">Updates status & badges</text>
+
+              <path d="M 550 305 L 330 305" class="arrow-line" marker-end="url(#arrow-white)" />
+            </svg>
+          </div>
+          <div class="svg-desc">
+            <strong>Adaptive Capabilities Probing:</strong> Since local models and hardware configurations fluctuate, Clio Coder queries the tags list first to build the baseline model registry, and then initiates an optional 1-shot chat completion test to confirm reasoning capabilities in OpenAI-compatible local surfaces.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <footer>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.1. Designed with high-performance dark aesthetics.</p>
+    </footer>
+  </div>
+
+  <script>
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById(tabId).classList.add('active');
+      event.currentTarget.classList.add('active');
+
+      if (tabId === 'resolver-sim') {
+        runResolverSimulation();
+      }
+    }
+
+    // Dynamic model catalog per target
+    const modelCatalog = {
+      ollama: [
+        { id: "llama3:8b", name: "Llama 3 (8B)", chat: true, tools: true, reasoning: false, vision: false, context: 8192, format: "openai" },
+        { id: "deepseek-r1:8b", name: "DeepSeek R1 (8B)", chat: true, tools: false, reasoning: true, vision: false, context: 131072, format: "deepseek-r1" },
+        { id: "llava:7b", name: "LLaVA (7B Vision)", chat: true, tools: false, reasoning: false, vision: true, context: 4096, format: "openai" },
+        { id: "qwen2.5-coder:7b", name: "Qwen 2.5 Coder (7B)", chat: true, tools: true, reasoning: false, vision: false, context: 32768, format: "qwen" }
+      ],
+      lmstudio: [
+        { id: "qwen2.5-coder-7b-instruct", name: "Qwen 2.5 Coder 7B", chat: true, tools: true, reasoning: false, vision: false, context: 32768, format: "qwen" },
+        { id: "phi-4", name: "Microsoft Phi-4 (Reasoning)", chat: true, tools: true, reasoning: true, vision: false, context: 16384, format: "openai" },
+        { id: "deepseek-r1-distill-qwen-14b", name: "DeepSeek R1 Distill 14B", chat: true, tools: false, reasoning: true, vision: false, context: 131072, format: "deepseek-r1" }
+      ],
+      openai: [
+        { id: "gpt-4o", name: "GPT-4o (Chat/Vision/Tools)", chat: true, tools: true, reasoning: false, vision: true, context: 128000, format: "openai" },
+        { id: "gpt-4o-mini", name: "GPT-4o Mini", chat: true, tools: true, reasoning: false, vision: true, context: 128000, format: "openai" },
+        { id: "o1-mini", name: "o1 Mini (Reasoning)", chat: true, tools: false, reasoning: true, vision: false, context: 128000, format: "harmony" },
+        { id: "o3-mini", name: "o3 Mini (Reasoning/Tools)", chat: true, tools: true, reasoning: true, vision: false, context: 200000, format: "harmony" }
+      ],
+      bedrock: [
+        { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3.5 Sonnet v2", chat: true, tools: true, reasoning: false, vision: true, context: 200000, format: "anthropic" },
+        { id: "us.amazon.nova-pro-v1:0", name: "Amazon Nova Pro", chat: true, tools: true, reasoning: false, vision: true, context: 300000, format: "openai" },
+        { id: "anthropic.claude-3-5-haiku-20241022-v1:0", name: "Claude 3.5 Haiku", chat: true, tools: true, reasoning: false, vision: false, context: 200000, format: "anthropic" }
+      ]
+    };
+
+    // On target change
+    function onTargetChange() {
+      const target = document.getElementById('probe-target').value;
+      const urlInput = document.getElementById('probe-url');
+      const authInput = document.getElementById('probe-auth');
+      const modelSelect = document.getElementById('probe-model');
+      
+      // Clear previous console logs
+      const logBox = document.getElementById('probe-console-log');
+      logBox.innerHTML = `<div class="log-entry"><span class="log-time">[12:53:02]</span><span class="log-info">Switched target to ${target}.</span></div>`;
+      
+      // Update values based on target
+      if (target === 'ollama') {
+        urlInput.value = "http://localhost:11434";
+        authInput.value = "";
+        authInput.placeholder = "Not required for Ollama";
+        authInput.disabled = true;
+      } else if (target === 'lmstudio') {
+        urlInput.value = "http://localhost:1234";
+        authInput.value = "";
+        authInput.placeholder = "Optional API Key passkey";
+        authInput.disabled = false;
+      } else if (target === 'openai') {
+        urlInput.value = "https://api.openai.com/v1";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "Enter OpenAI API Key";
+        authInput.disabled = false;
+      } else if (target === 'bedrock') {
+        urlInput.value = "aws-sdk://us-east-1";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "Resolved from AWS Profile envs";
+        authInput.disabled = false;
+      }
+
+      // Populate models list
+      modelSelect.innerHTML = '';
+      modelCatalog[target].forEach(model => {
+        const opt = document.createElement('option');
+        opt.value = model.id;
+        opt.textContent = model.name;
+        modelSelect.appendChild(opt);
+      });
+
+      onModelChange();
+    }
+
+    // On model change
+    function onModelChange() {
+      const target = document.getElementById('probe-target').value;
+      const modelId = document.getElementById('probe-model').value;
+      const model = modelCatalog[target].find(m => m.id === modelId);
+      
+      const logBox = document.getElementById('probe-console-log');
+      if (model) {
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Selected Model: ${model.id} (Context: ${model.context} tokens)</span></div>`;
+      }
+    }
+
+    // Update latency label
+    function updateLatencyVal() {
+      const val = document.getElementById('probe-latency').value;
+      document.getElementById('latency-val').innerText = val + " ms";
+    }
+
+    // Run Connection Probe Simulation
+    function runConnectionProbe() {
+      const target = document.getElementById('probe-target').value;
+      const url = document.getElementById('probe-url').value;
+      const modelId = document.getElementById('probe-model').value;
+      const model = modelCatalog[target].find(m => m.id === modelId);
+      const latency = parseInt(document.getElementById('probe-latency').value);
+      const outcome = document.querySelector('input[name="outcome"]:checked').value;
+      
+      const logBox = document.getElementById('probe-console-log');
+      const statusText = document.getElementById('probe-status-text');
+      const statusDot = document.getElementById('probe-status-dot');
+      
+      // Reset badges
+      disableAllBadges();
+      
+      statusText.innerText = "PROBING";
+      statusDot.className = "status-dot active";
+      
+      logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Sending connection check request to: <strong>${url}</strong></span></div>`;
+      
+      if (target === 'ollama') {
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Attempting native fingerprint: HTTP GET /api/version</span></div>`;
+      } else if (target === 'lmstudio') {
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Attempting native fingerprint: HTTP GET /api/v1/models</span></div>`;
+      } else {
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Sending client handshake...</span></div>`;
+      }
+
+      // Simulate network request duration
+      setTimeout(() => {
+        if (outcome === 'timeout') {
+          statusText.innerText = "TIMEOUT";
+          statusDot.className = "status-dot error";
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-error">Error: connection timed out after ${latency}ms</span></div>`;
+          document.getElementById('response-json-code').innerText = JSON.stringify({ error: `Connection timeout after ${latency}ms`, code: "TIMEOUT" }, null, 2);
+          return;
+        } else if (outcome === 'unauthorized') {
+          statusText.innerText = "UNAUTHORIZED";
+          statusDot.className = "status-dot error";
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-error">Error: HTTP 401 Unauthorized. API Key is missing or invalid.</span></div>`;
+          document.getElementById('response-json-code').innerText = JSON.stringify({ error: "HTTP 401 Unauthorized: Invalid credentials.", status: 401 }, null, 2);
+          return;
+        } else if (outcome === 'notfound') {
+          statusText.innerText = "NOT FOUND";
+          statusDot.className = "status-dot error";
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-error">Error: HTTP 404 Not Found at url path.</span></div>`;
+          document.getElementById('response-json-code').innerText = JSON.stringify({ error: "HTTP 404 Not Found: Path does not exist.", status: 404 }, null, 2);
+          return;
+        }
+
+        // Success outcome
+        statusText.innerText = "HEALTHY";
+        statusDot.className = "status-dot active";
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-success">HTTP 200 OK received in ${latency}ms.</span></div>`;
+        
+        let responsePayload = {};
+        
+        if (target === 'ollama') {
+          responsePayload = {
+            version: "0.1.48",
+            models: [
+              { name: "llama3:8b", modified_at: "2026-06-01T12:00:00Z", size: 4700000000, details: { format: "gguf", family: "llama" } },
+              { name: "deepseek-r1:8b", modified_at: "2026-06-03T10:00:00Z", size: 4700000000, details: { format: "gguf", family: "qwen" } },
+              { name: "llava:7b", modified_at: "2026-06-02T15:00:00Z", size: 5200000000, details: { format: "gguf", family: "llama" } },
+              { name: "qwen2.5-coder:7b", modified_at: "2026-06-05T09:00:00Z", size: 4700000000, details: { format: "gguf", family: "qwen" } }
+            ]
+          };
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Found Ollama native server. Models retrieved from /api/tags: <strong>[${responsePayload.models.map(m => m.name).join(', ')}]</strong></span></div>`;
+        } else if (target === 'lmstudio') {
+          responsePayload = {
+            models: [
+              { id: "qwen2.5-coder-7b-instruct", object: "model", owned_by: "lmstudio", capabilities: { tools: true, vision: false } },
+              { id: "phi-4", object: "model", owned_by: "lmstudio", capabilities: { tools: true, vision: false } },
+              { id: "deepseek-r1-distill-qwen-14b", object: "model", owned_by: "lmstudio", capabilities: { tools: false, vision: false } }
+            ]
+          };
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Found LM Studio server. Active models: <strong>[${responsePayload.models.map(m => m.id).join(', ')}]</strong></span></div>`;
+        } else if (target === 'openai') {
+          responsePayload = {
+            object: "list",
+            data: [
+              { id: "gpt-4o", object: "model", created: 1715368132, owned_by: "system" },
+              { id: "gpt-4o-mini", object: "model", created: 1721112341, owned_by: "system" },
+              { id: "o1-mini", object: "model", created: 1726012391, owned_by: "system" },
+              { id: "o3-mini", object: "model", created: 1738012391, owned_by: "system" }
+            ]
+          };
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">OpenAI cloud handshake succeeded. Available models list parsed successfully.</span></div>`;
+        } else if (target === 'bedrock') {
+          responsePayload = {
+            handshake: "ok",
+            credentials: "aws-sdk-resolved",
+            models: [
+              "anthropic.claude-3-5-sonnet-20241022-v2:0",
+              "us.amazon.nova-pro-v1:0",
+              "anthropic.claude-3-5-haiku-20241022-v1:0"
+            ]
+          };
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">AWS Bedrock SDK initialized. Converse API capability checked.</span></div>`;
+        }
+
+        document.getElementById('response-json-code').innerText = JSON.stringify(responsePayload, null, 2);
+
+        // Capability Detection and Badging
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info" style="color: var(--color-cyan);">Running model capability extraction...</span></div>`;
+        
+        // Chat is always enabled
+        enableBadge('chat', 'Active');
+        
+        // Tools Check
+        if (model.tools) {
+          enableBadge('tools', model.format === 'qwen' ? 'Qwen format' : (model.format === 'anthropic' ? 'Anthropic' : 'OpenAI schema'));
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-success">&nbsp;&nbsp;✔ Tools enabled (format: ${model.format})</span></div>`;
+        } else {
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-warn">&nbsp;&nbsp;⚠ Tools not supported by model template</span></div>`;
+        }
+
+        // Vision Check
+        if (model.vision) {
+          enableBadge('vision', 'Multimodal');
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-success">&nbsp;&nbsp;✔ Vision active (image input supported)</span></div>`;
+        } else {
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">&nbsp;&nbsp;ℹ Vision unavailable</span></div>`;
+        }
+
+        // Reasoning Check
+        if (model.reasoning) {
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">&nbsp;&nbsp;Executing reasoning test probe (priming 1-shot completion)...</span></div>`;
+          
+          setTimeout(() => {
+            const reasoningFormat = model.format === 'deepseek-r1' ? 'deepseek-r1' : 'harmony';
+            enableBadge('reasoning', reasoningFormat);
+            logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-success">&nbsp;&nbsp;✔ Reasoning detected in output channel (thinkingFormat: ${reasoningFormat})</span></div>`;
+          }, 150);
+        } else {
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">&nbsp;&nbsp;ℹ Model behaves as direct-instruct (no thinking content channel)</span></div>`;
+        }
+
+      }, latency);
+    }
+
+    function enableBadge(id, statusText) {
+      const badge = document.getElementById('badge-' + id);
+      const text = document.getElementById('status-' + id);
+      badge.classList.add('enabled');
+      text.innerText = statusText;
+    }
+
+    function disableAllBadges() {
+      ['chat', 'tools', 'reasoning', 'vision'].forEach(id => {
+        const badge = document.getElementById('badge-' + id);
+        const text = document.getElementById('status-' + id);
+        badge.classList.remove('enabled');
+        text.innerText = 'Disabled';
+      });
+    }
+
+    // Initialize models list
+    onTargetChange();
+
+    // TAB 2: MERGE STACK LOGIC
+    function toggleMergeLayers() {
+      const l3Active = document.getElementById('layer3-active').checked;
+      const l4Active = document.getElementById('layer4-active').checked;
+      const l5Active = document.getElementById('layer5-active').checked;
+
+      document.getElementById('layer3-container').style.opacity = l3Active ? "1" : "0.5";
+      document.getElementById('layer3-container').style.pointerEvents = l3Active ? "auto" : "none";
+
+      document.getElementById('layer4-container').style.opacity = l4Active ? "1" : "0.5";
+      document.getElementById('layer4-container').style.pointerEvents = l4Active ? "auto" : "none";
+
+      document.getElementById('layer5-container').style.opacity = l5Active ? "1" : "0.5";
+      document.getElementById('layer5-container').style.pointerEvents = l5Active ? "auto" : "none";
+    }
+
+    function recalculateMergeStack() {
+      toggleMergeLayers();
+
+      const layers = [
+        {
+          id: "Layer 1 (Runtime defaults)",
+          active: true,
+          chat: document.getElementById('layer1-chat').checked,
+          tools: document.getElementById('layer1-tools').checked,
+          reasoning: document.getElementById('layer1-reasoning').checked,
+          vision: document.getElementById('layer1-vision').checked,
+          context: parseInt(document.getElementById('layer1-context').value) || 0
+        },
+        {
+          id: "Layer 2 (Catalog definition)",
+          active: true,
+          chat: document.getElementById('layer2-chat').checked,
+          tools: document.getElementById('layer2-tools').checked,
+          reasoning: document.getElementById('layer2-reasoning').checked,
+          vision: document.getElementById('layer2-vision').checked,
+          context: parseInt(document.getElementById('layer2-context').value) || 0
+        },
+        {
+          id: "Layer 3 (Knowledge base)",
+          active: document.getElementById('layer3-active').checked,
+          chat: document.getElementById('layer3-chat').checked,
+          tools: document.getElementById('layer3-tools').checked,
+          reasoning: document.getElementById('layer3-reasoning').checked,
+          vision: document.getElementById('layer3-vision').checked,
+          context: parseInt(document.getElementById('layer3-context').value) || 0
+        },
+        {
+          id: "Layer 4 (Live Probe)",
+          active: document.getElementById('layer4-active').checked,
+          chat: document.getElementById('layer4-chat').checked,
+          tools: document.getElementById('layer4-tools').checked,
+          reasoning: document.getElementById('layer4-reasoning').checked,
+          vision: document.getElementById('layer4-vision').checked,
+          context: parseInt(document.getElementById('layer4-context').value) || 0
+        },
+        {
+          id: "Layer 5 (User override)",
+          active: document.getElementById('layer5-active').checked,
+          chat: document.getElementById('layer5-chat').checked,
+          tools: document.getElementById('layer5-tools').checked,
+          reasoning: document.getElementById('layer5-reasoning').checked,
+          vision: document.getElementById('layer5-vision').checked,
+          context: parseInt(document.getElementById('layer5-context').value) || 0
+        }
+      ];
+
+      // Merge values
+      let resolved = { chat: false, tools: false, reasoning: false, vision: false, context: 0 };
+      let sources = { chat: 'None', tools: 'None', reasoning: 'None', vision: 'None', context: 'None' };
+
+      layers.forEach(layer => {
+        if (!layer.active) return;
+        
+        resolved.chat = layer.chat;
+        sources.chat = layer.id;
+
+        resolved.tools = layer.tools;
+        sources.tools = layer.id;
+
+        resolved.reasoning = layer.reasoning;
+        sources.reasoning = layer.id;
+
+        resolved.vision = layer.vision;
+        sources.vision = layer.id;
+
+        if (layer.context > 0) {
+          resolved.context = layer.context;
+          sources.context = layer.id;
+        }
+      });
+
+      // Update UI
+      document.getElementById('eff-chat').innerText = resolved.chat;
+      document.getElementById('source-chat').innerText = sources.chat;
+
+      document.getElementById('eff-tools').innerText = resolved.tools;
+      document.getElementById('source-tools').innerText = sources.tools;
+
+      document.getElementById('eff-reasoning').innerText = resolved.reasoning;
+      document.getElementById('source-reasoning').innerText = sources.reasoning;
+
+      document.getElementById('eff-vision').innerText = resolved.vision;
+      document.getElementById('source-vision').innerText = sources.vision;
+
+      document.getElementById('eff-context').innerText = resolved.context;
+      document.getElementById('source-context').innerText = sources.context;
+    }
+
+    recalculateMergeStack();
+
+    // TAB 3: RESOLVER SIMULATION LOGIC
+    const activeCandidates = [
+      { endpoint: "openai", model: "gpt-4o" },
+      { endpoint: "openai", model: "gpt-4o-mini" },
+      { endpoint: "openai", model: "o1-mini" },
+      { endpoint: "openai", model: "o3-mini" },
+      { endpoint: "ollama", model: "llama3:8b" },
+      { endpoint: "ollama", model: "deepseek-r1:8b" },
+      { endpoint: "lmstudio", model: "qwen2.5-coder-7b-instruct" },
+      { endpoint: "bedrock", model: "anthropic.claude-3-5-sonnet-20241022-v2:0" },
+      { endpoint: "openrouter", model: "google/gemini-2.5-pro" }
+    ];
+
+    function initResolverCandidates() {
+      const list = document.getElementById('resolver-candidates-list');
+      list.innerHTML = '';
+      activeCandidates.forEach(cand => {
+        const row = document.createElement('div');
+        row.className = 'candidate-row';
+        row.innerHTML = `<span class="candidate-endpoint">${cand.endpoint}/</span><span class="candidate-model">${cand.model}</span>`;
+        list.appendChild(row);
+      });
+    }
+
+    initResolverCandidates();
+
+    function applyResolverExample(val) {
+      document.getElementById('resolver-pattern').value = val;
+      runResolverSimulation();
+    }
+
+    function runResolverSimulation() {
+      const pattern = document.getElementById('resolver-pattern').value.trim();
+      const trace = document.getElementById('resolver-trace-log');
+      const output = document.getElementById('resolver-output');
+      const card = document.getElementById('resolver-result-card');
+      
+      trace.innerHTML = '';
+      
+      if (!pattern) {
+        trace.innerHTML = `<div class="trace-step skipped">Trace: Empty input pattern. Resolver idle.</div>`;
+        output.innerText = 'No match';
+        output.innerHTML = 'No match <span class="badge-mini" style="color: var(--color-rose);">Error: Empty pattern</span>';
+        card.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+        return;
+      }
+
+      // Step 1: Suffix parsing
+      let base = pattern;
+      let thinkingSuffix = undefined;
+      const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      const lastColon = pattern.lastIndexOf(':');
+      
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Suffix Splitter]</strong> Checking for thinking level suffix...</div>`;
+      
+      if (lastColon !== -1) {
+        const suffix = pattern.slice(lastColon + 1).trim();
+        if (thinkingLevels.includes(suffix)) {
+          base = pattern.slice(0, lastColon).trim();
+          thinkingSuffix = suffix;
+          trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ Extracted thinking level suffix: <strong>:${thinkingSuffix}</strong>. Base pattern: "${base}"</div>`;
+        } else {
+          trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;ℹ Found colon but suffix "${suffix}" is not a recognized thinking level (low/medium/high/etc). Treated as part of model ID.</div>`;
+        }
+      } else {
+        trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;ℹ No thinking level suffix found. Defaulting to orchestrator configuration.</div>`;
+      }
+
+      const lowerBase = base.toLowerCase();
+      
+      // Step 2: Exact endpoint/model matching
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 1: Exact Match]</strong> Testing exact match of pattern "${base}" against "endpoint/model"...</div>`;
+      
+      const exactFull = activeCandidates.filter(c => `${c.endpoint}/${c.model}`.toLowerCase() === lowerBase);
+      if (exactFull.length > 0) {
+        trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Exact match hit on "${exactFull[0].endpoint}/${exactFull[0].model}"</div>`;
+        resolveOutput(exactFull[0], thinkingSuffix);
+        return;
+      }
+      trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;✕ No exact match found.</div>`;
+
+      // Step 3: Glob matching
+      const globChars = /[*?[]/;
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 2: Glob Match]</strong> Testing wildcard pattern...</div>`;
+      if (globChars.test(base)) {
+        // Convert glob to regex
+        let reStr = "^" + base.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+        let regex = new RegExp(reStr, "i");
+        
+        trace.innerHTML += `<div class="trace-step evaluating">&nbsp;&nbsp;Converted glob "${base}" to RegExp: ${regex.toString()}</div>`;
+        
+        const globMatches = activeCandidates.filter(c => regex.test(`${c.endpoint}/${c.model}`) || regex.test(c.model));
+        if (globMatches.length > 0) {
+          trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Glob match hit on "${globMatches[0].endpoint}/${globMatches[0].model}"</div>`;
+          if (globMatches.length > 1) {
+            trace.innerHTML += `<div class="trace-step skipped" style="color:var(--color-amber); border-left-color:var(--color-amber);">&nbsp;&nbsp;⚠ Ambiguity Warning: ${globMatches.length} candidates matched; resolved to first: "${globMatches[0].endpoint}/${globMatches[0].model}"</div>`;
+          }
+          resolveOutput(globMatches[0], thinkingSuffix, globMatches.length > 1);
+          return;
+        }
+        trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;✕ Glob regex did not match any targets.</div>`;
+      } else {
+        trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;ℹ Pattern does not contain wildcard characters (*, ?, [). Skipping glob checks.</div>`;
+      }
+
+      // Step 4: Endpoint prefix shortcut matching
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 3: Endpoint Prefix Shortcut]</strong> Testing slash prefix mapping...</div>`;
+      const slashIdx = base.indexOf('/');
+      if (slashIdx !== -1) {
+        const ep = base.slice(0, slashIdx).toLowerCase();
+        const mdl = base.slice(slashIdx + 1).toLowerCase();
+        const epModel = activeCandidates.filter(c => c.endpoint.toLowerCase() === ep && c.model.toLowerCase() === mdl);
+        if (epModel.length > 0) {
+          trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Resolved endpoint prefix match: "${epModel[0].endpoint}/${epModel[0].model}"</div>`;
+          resolveOutput(epModel[0], thinkingSuffix);
+          return;
+        }
+        trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;✕ Endpoint prefix matched but model id not found under that endpoint.</div>`;
+      } else {
+        trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;ℹ Pattern does not contain slash separator. Skipping prefix matching.</div>`;
+      }
+
+      // Step 5: Bare model exact match
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 4: Bare Model ID Match]</strong> Testing exact model ID match (ignoring endpoint prefix)...</div>`;
+      const exactModel = activeCandidates.filter(c => c.model.toLowerCase() === lowerBase);
+      if (exactModel.length > 0) {
+        trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Bare model ID matched under endpoint "${exactModel[0].endpoint}"</div>`;
+        resolveOutput(exactModel[0], thinkingSuffix);
+        return;
+      }
+      trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;✕ No exact bare model ID match found.</div>`;
+
+      // Step 6: Bare model substring match
+      trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 5: Bare Model Substring Match]</strong> Testing substring match against active model IDs...</div>`;
+      const partial = activeCandidates.filter(c => c.model.toLowerCase().includes(lowerBase));
+      if (partial.length > 0) {
+        trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Partial substring match hit on "${partial[0].endpoint}/${partial[0].model}" (matches "${base}")</div>`;
+        if (partial.length > 1) {
+          trace.innerHTML += `<div class="trace-step skipped" style="color:var(--color-amber); border-left-color:var(--color-amber);">&nbsp;&nbsp;⚠ Ambiguity Warning: Multiple substrings match; resolved to first: "${partial[0].endpoint}/${partial[0].model}"</div>`;
+        }
+        resolveOutput(partial[0], thinkingSuffix, partial.length > 1);
+        return;
+      }
+      trace.innerHTML += `<div class="trace-step skipped">&nbsp;&nbsp;✕ Substring search returned no candidates.</div>`;
+
+      // Failure
+      trace.innerHTML += `<div class="trace-step skipped" style="border-left-color: var(--color-rose); color: #fca5a5;"><strong>[Outcome]</strong> Routing resolution failed: no models match the pattern "${pattern}".</div>`;
+      output.innerHTML = `No match <span class="badge-mini" style="color: var(--color-rose);">Error: UNRESOLVED</span>`;
+      card.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+    }
+
+    function resolveOutput(match, thinking, isAmbiguous = false) {
+      const output = document.getElementById('resolver-output');
+      const card = document.getElementById('resolver-result-card');
+      const level = thinking ? thinking : 'off';
+      
+      let html = `<strong>${match.endpoint}/${match.model}</strong>`;
+      html += ` <span class="badge-mini">thinking: ${level}</span>`;
+      if (isAmbiguous) {
+        html += ` <span class="badge-mini" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3);">Ambiguous match</span>`;
+      }
+      
+      output.innerHTML = html;
+      card.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    }
+
+    runResolverSimulation();
+  </script>
+</body>
+</html>

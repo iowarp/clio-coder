@@ -46,7 +46,7 @@ All files are created automatically during the first run. The configuration dire
 
 ## 3. Bootstrap Initialization
 
-When Clio Coder boots (or after a reset), it calls [initializeClioHome()](file:///home/akougkas/iowarp/clio-coder/src/core/init.ts#L31) to bootstrap missing structures:
+When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `src/core/init.ts`) to bootstrap missing structures:
 1.  **Directory Tree**: Recursively creates root `config`, `data`, and `cache` folders, followed by the 9 default data subdirectories: `sessions`, `audit`, `state`, `agents`, `prompts`, `receipts`, `evidence`, `evals`, and `memory`.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates an empty JSON credentials template and locks its permissions immediately to owner-only read-write (`0o600`).

@@ -1,0 +1,1975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Prompt Envelope & Tools Blueprint</title>
+  <!-- Typography Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      /* Glowing Neon Colors */
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+      
+      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
+      --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.01);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--color-cyan-rgb), 0.25);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Header */
+    header {
+      position: relative;
+      margin-bottom: 2.5rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--border-card);
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .logo-area {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-hex {
+      width: 48px;
+      height: 48px;
+      background: rgba(var(--color-cyan-rgb), 0.1);
+      border: 1.5px solid var(--color-cyan);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.2);
+    }
+
+    .logo-hex svg {
+      width: 24px;
+      height: 24px;
+      fill: var(--color-cyan);
+    }
+
+    h1 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .version-tag {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      border-radius: 9999px;
+      padding: 0.25rem 0.85rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--color-cyan);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-weight: 600;
+    }
+
+    .version-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-emerald);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--color-emerald);
+    }
+
+    .header-desc {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+      margin-top: 0.5rem;
+      max-width: 800px;
+    }
+
+    /* Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--border-card);
+      padding-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.65rem 1.25rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .tab-btn.active {
+      background: rgba(var(--color-cyan-rgb), 0.1);
+      color: var(--color-cyan);
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
+    }
+
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.35s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Grid & Cards */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    @media (max-width: 1024px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      margin-bottom: 1.5rem;
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #ffffff;
+      border-left: 3px solid var(--color-cyan);
+      padding-left: 0.65rem;
+    }
+
+    .card-subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-top: -0.85rem;
+      margin-bottom: 1.25rem;
+    }
+
+    /* Inputs Form Controls */
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    @media (max-width: 640px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.45rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 0.65rem 0.85rem;
+      color: #ffffff;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    textarea.code-editor {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      resize: vertical;
+      background: rgba(5, 8, 16, 0.6);
+      line-height: 1.5;
+    }
+
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 0.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 0.75rem;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--text-main);
+      cursor: pointer;
+      user-select: none;
+      text-transform: none;
+      letter-spacing: normal;
+      font-weight: 400;
+      margin-bottom: 0;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      accent-color: var(--color-cyan);
+      cursor: pointer;
+    }
+
+    /* Buttons */
+    .btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      color: #ffffff;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(var(--color-cyan-rgb), 0.4);
+    }
+
+    .btn-primary {
+      background: var(--gradient-main);
+      color: #050812;
+      border-color: transparent;
+      box-shadow: 0 4px 12px rgba(var(--color-cyan-rgb), 0.25);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 18px rgba(var(--color-cyan-rgb), 0.4);
+    }
+
+    .btn-danger {
+      background: rgba(var(--color-rose-rgb), 0.15);
+      border-color: var(--color-rose);
+      color: #ff8585;
+    }
+
+    .btn-danger:hover {
+      background: rgba(var(--color-rose-rgb), 0.25);
+    }
+
+    /* Calculator Results Panels */
+    .pressure-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      border-radius: 9999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--color-emerald);
+      border-radius: 9999px;
+      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+    }
+
+    .pill-cyan { color: var(--color-cyan); border-color: rgba(var(--color-cyan-rgb), 0.3); background: rgba(var(--color-cyan-rgb), 0.05); }
+    .pill-emerald { color: var(--color-emerald); border-color: rgba(var(--color-emerald-rgb), 0.3); background: rgba(var(--color-emerald-rgb), 0.05); }
+    .pill-amber { color: var(--color-amber); border-color: rgba(var(--color-amber-rgb), 0.3); background: rgba(var(--color-amber-rgb), 0.05); }
+    .pill-rose { color: var(--color-rose); border-color: rgba(var(--color-rose-rgb), 0.3); background: rgba(var(--color-rose-rgb), 0.05); }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .data-card {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem;
+      text-align: center;
+    }
+
+    .data-val {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.2rem;
+    }
+
+    .data-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .segment-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin-top: 1rem;
+    }
+
+    .segment-table th, .segment-table td {
+      border: 1px solid var(--border-card);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+    }
+
+    .segment-table th {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .segment-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .hash-badge {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      color: #a5b4fc;
+      max-width: 100px;
+      display: inline-block;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    /* Output console */
+    .console-out {
+      background: #04070e;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.825rem;
+      color: #8bebff;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      position: relative;
+    }
+
+    .console-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+      font-family: var(--font-sans);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .copy-btn {
+      background: transparent;
+      border: none;
+      color: var(--color-cyan);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .copy-btn:hover {
+      text-decoration: underline;
+    }
+
+    /* Preset Scenarios */
+    .scenario-grid {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .scenario-pill {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .scenario-pill:hover {
+      background: rgba(var(--color-cyan-rgb), 0.08);
+      color: var(--color-cyan);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    /* Diagrams Layout */
+    .diagrams-container {
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+    }
+
+    .diagram-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.5rem;
+    }
+
+    .diagram-desc {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      max-width: 900px;
+    }
+
+    .svg-wrapper {
+      width: 100%;
+      background: rgba(4, 7, 14, 0.8);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow-x: auto;
+    }
+
+    .svg-wrapper svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Tool Call Simulator Details */
+    .history-list {
+      max-height: 180px;
+      overflow-y: auto;
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .history-item {
+      font-size: 0.78rem;
+      font-family: var(--font-mono);
+      padding: 0.35rem;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .history-item:last-child {
+      border-bottom: none;
+    }
+
+    .history-timestamp {
+      color: var(--text-dark);
+      font-size: 0.7rem;
+    }
+
+    .verdict-box {
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.88rem;
+      display: none;
+    }
+
+    .verdict-box.show {
+      display: block;
+    }
+
+    .verdict-box.allow {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid var(--color-emerald);
+      color: #a7f3d0;
+    }
+
+    .verdict-box.block {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--color-rose);
+      color: #fecaca;
+    }
+
+    .verdict-box.elevated {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid var(--color-amber);
+      color: #fde68a;
+    }
+
+    /* Interactive Badge */
+    .pulse-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.725rem;
+      font-weight: 700;
+      color: var(--color-cyan);
+      background: rgba(var(--color-cyan-rgb), 0.1);
+      border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .pulse-dot {
+      width: 5px;
+      height: 5px;
+      background-color: var(--color-cyan);
+      border-radius: 50%;
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(var(--color-cyan-rgb), 0.5); }
+      70% { transform: scale(1.1); box-shadow: 0 0 0 5px rgba(var(--color-cyan-rgb), 0); }
+      100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(var(--color-cyan-rgb), 0); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <header>
+    <div class="header-top">
+      <div class="logo-area">
+        <div class="logo-hex">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Prompt Envelopes & Tools Spec</h1>
+          <div class="header-desc">
+            Technical architecture specification, compiler calculator, and registry simulator for Clio Coder's secure LLM delivery.
+          </div>
+        </div>
+      </div>
+      <div class="version-tag">
+        <div class="version-dot"></div>
+        Clio Coder v0.2.1
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <div class="tabs-nav">
+    <button class="tab-btn active" onclick="switchTab('tab-diagrams')">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
+      Architecture & Visual Flowcharts
+    </button>
+    <button class="tab-btn" onclick="switchTab('tab-calculator')">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
+      Token Pressure Calculator
+      <span class="pulse-badge"><span class="pulse-dot"></span>Calc</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('tab-simulator')">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+      Tool & Registry Simulator
+      <span class="pulse-badge"><span class="pulse-dot"></span>Sim</span>
+    </button>
+  </div>
+
+  <!-- Tab: Diagrams -->
+  <div id="tab-diagrams" class="tab-pane active">
+    <div class="diagrams-container">
+      
+      <!-- Diagram 1 -->
+      <div class="diagram-card">
+        <h2 class="card-title">1. Provider Tool Schema Delivery</h2>
+        <div class="diagram-desc">
+          Unlike legacy prompt-based wrappers, Clio converts TypeBox schemas into formal provider tool schemas. 
+          The model calls tools natively through the LLM API's structural JSON envelope rather than parsing text logs.
+        </div>
+        <div class="svg-wrapper">
+          <svg width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Background grids -->
+            <rect width="900" height="280" rx="8" fill="#04070e" />
+            
+            <!-- Nodes -->
+            <!-- Node A: TypeBox Code Spec -->
+            <rect x="30" y="80" width="180" height="90" rx="8" fill="rgba(189, 0, 255, 0.1)" stroke="#bd00ff" stroke-width="1.5" />
+            <text x="120" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">TypeBox Spec</text>
+            <text x="120" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/tools/*.ts</text>
+            <text x="120" y="152" fill="#bd00ff" font-family="var(--font-mono)" font-size="10" text-anchor="middle">Type.Object({path:...})</text>
+
+            <!-- Connector A -> B -->
+            <path d="M210 125 H260" stroke="rgba(189, 0, 255, 0.4)" stroke-width="2" stroke-dasharray="4" />
+            <polygon points="260,125 252,121 252,129" fill="#bd00ff" />
+
+            <!-- Node B: Registry.ts -->
+            <rect x="270" y="80" width="180" height="90" rx="8" fill="rgba(0, 240, 255, 0.1)" stroke="#00f0ff" stroke-width="1.5" />
+            <text x="360" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">ToolRegistry</text>
+            <text x="360" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/tools/registry.ts</text>
+            <text x="360" y="152" fill="#00f0ff" font-family="var(--font-mono)" font-size="10" text-anchor="middle">listForMode(mode)</text>
+
+            <!-- Connector B -> C -->
+            <path d="M450 125 H500" stroke="rgba(0, 240, 255, 0.4)" stroke-width="2" />
+            <polygon points="500,125 492,121 492,129" fill="#00f0ff" />
+
+            <!-- Node C: worker-tools.ts -->
+            <rect x="510" y="80" width="180" height="90" rx="8" fill="rgba(16, 185, 129, 0.1)" stroke="#10b981" stroke-width="1.5" />
+            <text x="600" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">Worker Resolver</text>
+            <text x="600" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/engine/worker-tools.ts</text>
+            <text x="600" y="152" fill="#10b981" font-family="var(--font-mono)" font-size="10" text-anchor="middle">resolveAgentTools()</text>
+
+            <!-- Connector C -> D -->
+            <path d="M690 125 H740" stroke="rgba(16, 185, 129, 0.4)" stroke-width="2" stroke-dasharray="4" />
+            <polygon points="740,125 732,121 732,129" fill="#10b981" />
+
+            <!-- Node D: LLM Provider Client -->
+            <rect x="750" y="60" width="120" height="130" rx="8" fill="rgba(245, 158, 11, 0.1)" stroke="#f59e0b" stroke-width="1.5" />
+            <text x="810" y="90" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">LLM Provider</text>
+            <text x="810" y="110" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">Format Mapping</text>
+            <text x="810" y="135" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• tools: [...]</text>
+            <text x="810" y="150" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• type: "function"</text>
+            <text x="810" y="165" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• parameters: json</text>
+
+            <!-- Flow annotations -->
+            <text x="235" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">registers</text>
+            <text x="475" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">exposes</text>
+            <text x="715" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">delivers</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Diagram 2 -->
+      <div class="diagram-card">
+        <h2 class="card-title">2. Prompt Wrapping Envelope & Cache Decision Flow</h2>
+        <div class="diagram-desc">
+          Clio splits prompts into three tiers (Static, Session, Dynamic) and generates distinct hashes. 
+          When supported by targets (e.g. llamacpp or cloud cache), Clio leverages these hashes to skip resending the session shell prompt if it has not changed.
+        </div>
+        <div class="svg-wrapper">
+          <svg width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="900" height="350" rx="8" fill="#04070e" />
+            
+            <!-- Box: Full Rendered Prompt Envelope -->
+            <rect x="20" y="30" width="300" height="290" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="var(--border-card)" stroke-width="1.5" />
+            <text x="35" y="55" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700">PROMPT ENVELOPE SECTIONS</text>
+            
+            <!-- Section 1: Static Shell -->
+            <rect x="35" y="75" width="270" height="65" rx="6" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-opacity="0.5" />
+            <text x="45" y="95" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Static Shell (Tier: static-shell)</text>
+            <text x="45" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Identity / Selected Mode / Safety instructions</text>
+            <text x="45" y="128" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">staticShellHash: SHA-256</text>
+
+            <!-- Section 2: Session Shell -->
+            <rect x="35" y="150" width="270" height="75" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-opacity="0.5" />
+            <text x="45" y="170" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Session Shell (Tier: session-shell)</text>
+            <text x="45" y="187" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Runtime Config / Tool Palette / Retrieval Hints</text>
+            <text x="45" y="202" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Skills list (when active)</text>
+            <text x="45" y="217" fill="var(--color-purple)" font-family="var(--font-mono)" font-size="9">sessionShellHash: SHA-256 (System Prompt)</text>
+
+            <!-- Section 3: Dynamic Turn -->
+            <rect x="35" y="235" width="270" height="70" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-opacity="0.5" />
+            <text x="45" y="255" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Dynamic Turn (Tier: dynamic-turn)</text>
+            <text x="45" y="272" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Memory / Project Context Files / Turn Counts</text>
+            <text x="45" y="290" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="9">dynamicHash: SHA-256 (Dynamic Fragments)</text>
+
+            <!-- Flow Arrows from Envelope to decision point -->
+            <path d="M320 175 H400" stroke="#a5b4fc" stroke-width="2" />
+            <polygon points="400,175 392,171 392,179" fill="#a5b4fc" />
+            
+            <!-- Decision Point Box -->
+            <rect x="410" y="125" width="180" height="100" rx="8" fill="rgba(245, 158, 11, 0.1)" stroke="var(--color-amber)" stroke-width="1.5" />
+            <text x="500" y="150" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Send Policy Check</text>
+            <text x="500" y="170" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Has sessionShellHash</text>
+            <text x="500" y="185" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">changed since last turn?</text>
+            <text x="500" y="208" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">reduced-repeated-envelope</text>
+
+            <!-- Choice: YES (Changed / First Turn) -->
+            <path d="M590 150 H670" stroke="var(--color-rose)" stroke-width="1.5" />
+            <polygon points="670,150 662,146 662,154" fill="var(--color-rose)" />
+            <text x="630" y="142" fill="var(--color-rose)" font-family="var(--font-sans)" font-size="10" text-anchor="middle" font-weight="600">YES</text>
+
+            <!-- Action: Send Full Envelope -->
+            <rect x="680" y="105" width="190" height="60" rx="6" fill="rgba(239, 68, 68, 0.05)" stroke="var(--color-rose)" stroke-width="1" />
+            <text x="775" y="128" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600" text-anchor="middle">Full System Reset</text>
+            <text x="775" y="145" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Send Static + Session Shell prompts</text>
+
+            <!-- Choice: NO (Not Changed) -->
+            <path d="M590 200 H670" stroke="var(--color-emerald)" stroke-width="1.5" />
+            <polygon points="670,200 662,196 662,204" fill="var(--color-emerald)" />
+            <text x="630" y="192" fill="var(--color-emerald)" font-family="var(--font-sans)" font-size="10" text-anchor="middle" font-weight="600">NO</text>
+
+            <!-- Action: Reuse Cache -->
+            <rect x="680" y="180" width="190" height="70" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
+            <text x="775" y="202" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600" text-anchor="middle">Reuse System Prompt</text>
+            <text x="775" y="218" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Send ONLY Dynamic fragments</text>
+            <text x="775" y="233" fill="var(--color-emerald)" font-family="var(--font-sans)" font-size="9" text-anchor="middle" font-weight="600">Saves substantial context/time</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Diagram 3 -->
+      <div class="diagram-card">
+        <h2 class="card-title">3. Tool Invocation & Result Shaping Lifecycle</h2>
+        <div class="diagram-desc">
+          Every tool invocation goes through the registry checks, classifying arguments, detecting loop locks, and evaluating security policies. 
+          Upon execution, outputs are bounded to respect context pressure through safe UTF-8 truncation and suffix injection.
+        </div>
+        <div class="svg-wrapper">
+          <svg width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="900" height="340" rx="8" fill="#04070e" />
+
+            <!-- Path Timeline -->
+            <!-- Step 1: LLM Tool Call Request -->
+            <rect x="30" y="40" width="150" height="60" rx="6" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" />
+            <text x="105" y="65" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Model Call Request</text>
+            <text x="105" y="82" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">{name, arguments}</text>
+
+            <!-- Arrow 1 -> 2 -->
+            <path d="M180 70 H220" stroke="var(--border-card)" stroke-width="1.5" />
+            <polygon points="220,70 214,66 214,74" fill="var(--text-muted)" />
+
+            <!-- Step 2: Loop Guard & Classification -->
+            <rect x="230" y="30" width="180" height="80" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" />
+            <text x="320" y="52" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Registry Admission Gates</text>
+            <text x="320" y="70" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">1. Visible in Mode?</text>
+            <text x="320" y="85" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">2. Action Class allowed?</text>
+            <text x="320" y="99" fill="var(--color-purple)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">Loop Guard & Safety Policy</text>
+
+            <!-- Arrow 2 -> 3 -->
+            <path d="M410 70 H450" stroke="var(--border-card)" stroke-width="1.5" />
+            <polygon points="450,70 444,66 444,74" fill="var(--text-muted)" />
+
+            <!-- Step 3: Tool Execution -->
+            <rect x="460" y="40" width="160" height="60" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" />
+            <text x="540" y="65" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Tool Execution (run)</text>
+            <text x="540" y="82" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Isolated execution scope</text>
+
+            <!-- Arrow 3 -> 4 (Down and Right to Shaping) -->
+            <path d="M620 70 H710 V140" stroke="var(--border-card)" stroke-width="1.5" fill="none" />
+            <polygon points="710,140 706,134 714,134" fill="var(--text-muted)" />
+
+            <!-- Step 4: Result Shaper Gate -->
+            <rect x="580" y="150" width="260" height="155" rx="8" fill="rgba(245, 158, 11, 0.05)" stroke="var(--color-amber)" stroke-width="1.5" />
+            <text x="710" y="175" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Result Shaper</text>
+            <text x="710" y="195" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Checks byte size of result against tool limit.</text>
+            
+            <rect x="595" y="210" width="230" height="40" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--border-card)" />
+            <text x="710" y="226" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Is Size &gt; maxBytes (Default 60KB)?</text>
+            <text x="710" y="238" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">UTF-8 Safe Truncation</text>
+            
+            <text x="710" y="270" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Appends follow-up hint + details metadata</text>
+            <text x="710" y="285" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">resultSize: {bytes, truncated: true}</text>
+
+            <!-- Arrow 4 -> 5 -->
+            <path d="M580 220 H340" stroke="var(--color-cyan)" stroke-width="1.5" />
+            <polygon points="340,220 348,224 348,216" fill="var(--color-cyan)" />
+
+            <!-- Step 5: Final Clean Delivery Envelope -->
+            <rect x="40" y="160" width="280" height="130" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5" />
+            <text x="180" y="185" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Final Delivery</text>
+            
+            <rect x="55" y="200" width="250" height="75" rx="4" fill="#04070e" stroke="var(--border-card)" />
+            <text x="65" y="218" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="10">kind: "ok"</text>
+            <text x="65" y="234" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">output: "...[truncated]\n\n[Use a narrower query...]"</text>
+            <text x="65" y="250" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">details: { resultSize: { truncated: true } }</text>
+            <text x="65" y="265" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">terminate: true/false</text>
+
+          </svg>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Tab: Calculator -->
+  <div id="tab-calculator" class="tab-pane">
+    <div class="grid-2">
+      <!-- Input Panel -->
+      <div class="glass-card">
+        <h2 class="card-title">Prompt Envelope Settings</h2>
+        
+        <div class="scenario-grid">
+          <button class="scenario-pill" onclick="loadScenario('standard')">Standard Code Turn</button>
+          <button class="scenario-pill" onclick="loadScenario('planning')">Planning Phase</button>
+          <button class="scenario-pill" onclick="loadScenario('constrained')">Constrained Context</button>
+          <button class="scenario-pill" onclick="loadScenario('no-tools')">Fallback (No Tools)</button>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="context-window">Context Window Size</label>
+            <select id="context-window" onchange="calculateTokenPressure()">
+              <option value="4096">4,096 tokens (Llama-3-8B-local)</option>
+              <option value="8192">8,192 tokens</option>
+              <option value="16384">16,384 tokens</option>
+              <option value="32768" selected>32,768 tokens (Mistral-Large-local)</option>
+              <option value="65536">65,536 tokens</option>
+              <option value="131072">131,072 tokens (Claude 3.5 Sonnet / Gemini)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="mode-select">Active Mode Profile</label>
+            <select id="mode-select" onchange="onModeChange()">
+              <option value="default" selected>default (Read, Write, Exec, Dispatch)</option>
+              <option value="advise">advise (Read, Dispatch only; restricted write)</option>
+              <option value="super">super (Read, Write, Exec, Dispatch, Sys-Modify)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="send-policy">Send Policy</label>
+            <select id="send-policy" onchange="calculateTokenPressure()">
+              <option value="reduced-repeated-envelope" selected>reduced-repeated-envelope</option>
+              <option value="prefix-cache-deterministic">prefix-cache-deterministic</option>
+              <option value="no-tools-fallback">no-tools-fallback</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="thinking-applied">Thinking Configuration</label>
+            <select id="thinking-applied" onchange="calculateTokenPressure()">
+              <option value="applied" selected>applied (budget: medium, mechanism: thinking)</option>
+              <option value="unsupported">unsupported</option>
+              <option value="always-on">always-on</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Active Tools & Schemas this Turn</label>
+          <div class="checkbox-grid" id="tools-checkboxes">
+            <!-- Populated dynamically by javascript -->
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="static-shell-input">Static Shell Parts (Verbatim Harness/Identity/Safety)</label>
+          <textarea id="static-shell-input" class="code-editor" rows="5" oninput="calculateTokenPressure()"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="dynamic-memory-input">Dynamic Turn: Memory Section</label>
+          <textarea id="dynamic-memory-input" class="code-editor" rows="2" oninput="calculateTokenPressure()"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="dynamic-project-input">Dynamic Turn: Project Files & Context</label>
+          <textarea id="dynamic-project-input" class="code-editor" rows="3" oninput="calculateTokenPressure()"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="user-query-input">Dynamic Turn: User Request (Query)</label>
+          <textarea id="user-query-input" class="code-editor" rows="3" oninput="calculateTokenPressure()"></textarea>
+        </div>
+      </div>
+
+      <!-- Result Panel -->
+      <div class="glass-card">
+        <h2 class="card-title">Envelope Pressure Diagnostics</h2>
+        
+        <div class="pressure-panel">
+          
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:700;">Context Window Pressure</span>
+            <span id="pressure-ratio" style="font-family:var(--font-mono); font-weight:700;">0 / 32,768 (0.00%)</span>
+          </div>
+
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="pressure-bar"></div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top: -0.25rem;">
+            <span class="status-pill pill-emerald" id="capacity-status">Optimal</span>
+            <span id="capacity-left" style="font-size:0.85rem; color:var(--text-muted);">32,768 tokens remaining</span>
+          </div>
+
+          <div class="data-grid" style="margin-top: 1rem;">
+            <div class="data-card">
+              <div class="data-val" id="val-static">0</div>
+              <div class="data-label">Static Shell</div>
+            </div>
+            <div class="data-card">
+              <div class="data-val" id="val-session">0</div>
+              <div class="data-label">Session Shell</div>
+            </div>
+            <div class="data-card">
+              <div class="data-val" id="val-dynamic">0</div>
+              <div class="data-label">Dynamic Turn</div>
+            </div>
+            <div class="data-card">
+              <div class="data-val" id="val-tools">0</div>
+              <div class="data-label">Tool Schemas</div>
+            </div>
+          </div>
+
+          <table class="segment-table">
+            <thead>
+              <tr>
+                <th>Segment ID</th>
+                <th>Tier</th>
+                <th>Hash (SHA-256)</th>
+                <th>Tokens</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="segments-table-body">
+              <!-- Populated dynamically by javascript -->
+            </tbody>
+          </table>
+
+          <div class="form-group" style="margin-top:1rem;">
+            <div class="console-header">
+              <span>Resulting compiled Prompt Envelope Signature (JSON)</span>
+              <button class="copy-btn" onclick="copyText('envelope-signature-out')">Copy JSON</button>
+            </div>
+            <pre class="console-out" id="envelope-signature-out"></pre>
+          </div>
+
+          <div class="form-group">
+            <div class="console-header">
+              <span>Verbatim System Prompt Sent to Provider</span>
+              <button class="copy-btn" onclick="copyText('system-prompt-out')">Copy Prompt</button>
+            </div>
+            <pre class="console-out" id="system-prompt-out"></pre>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Simulator -->
+  <div id="tab-simulator" class="tab-pane">
+    <div class="grid-2">
+      <!-- Left side: Tool Call Form -->
+      <div class="glass-card">
+        <h2 class="card-title">Tool Call Invocation</h2>
+        <p class="card-subtitle">Format tool arguments into Canonical JSON, check loop detectors, and trigger security validation policies.</p>
+
+        <div class="form-group">
+          <label for="sim-mode-select">Simulated Current Mode</label>
+          <select id="sim-mode-select" onchange="onSimModeChange()">
+            <option value="default" selected>default (Normal operations)</option>
+            <option value="advise">advise (Read/Dispatch only)</option>
+            <option value="super">super (Full privileges)</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sim-tool-select">Select Tool Name</label>
+            <select id="sim-tool-select" onchange="onSimToolChange()">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sim-max-bytes">Result Bounded Limit (Max Bytes)</label>
+            <input type="number" id="sim-max-bytes" value="200" min="50" max="60000" oninput="simulateToolFlow()">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="sim-args">Arguments (JSON Format)</label>
+          <textarea id="sim-args" class="code-editor" rows="5" oninput="simulateToolFlow()"></textarea>
+          <div id="args-json-err" style="color:var(--color-rose); font-size:0.8rem; margin-top:0.25rem; display:none;">Invalid JSON format</div>
+        </div>
+
+        <div class="form-group">
+          <label for="sim-raw-output">Simulated Raw Output from Tool Execution</label>
+          <textarea id="sim-raw-output" class="code-editor" rows="5" oninput="simulateToolFlow()">[
+  {"id": 1, "symbol": "compile", "path": "src/domains/prompts/compiler.ts", "line": 402},
+  {"id": 2, "symbol": "buildPromptEnvelope", "path": "src/domains/prompts/compiler.ts", "line": 362},
+  {"id": 3, "symbol": "estimatePromptTokens", "path": "src/domains/prompts/compiler.ts", "line": 316},
+  {"id": 4, "symbol": "renderToolContractBlock", "path": "src/domains/prompts/compiler.ts", "line": 184},
+  {"id": 5, "symbol": "renderRuntimeBlock", "path": "src/domains/prompts/compiler.ts", "line": 147},
+  {"id": 6, "symbol": "lookupFragment", "path": "src/domains/prompts/compiler.ts", "line": 120}
+]</textarea>
+        </div>
+
+        <div class="form-row">
+          <button class="btn btn-primary" onclick="executeSimulatedCall()">Submit Call to Registry</button>
+          <button class="btn btn-danger" onclick="clearSimHistory()">Clear History & Reset Loop</button>
+        </div>
+
+        <div class="form-group" style="margin-top:1.5rem;">
+          <label>Sliding Window History (10s window, max 50 calls)</label>
+          <div class="history-list" id="history-items">
+            <div style="color:var(--text-dark); text-align:center; padding:1.5rem 0; font-size:0.85rem;">No recent calls in buffer</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right side: Registry & Shaping Results -->
+      <div class="glass-card">
+        <h2 class="card-title">Registry Gates & Result Shaping Verdict</h2>
+        
+        <div id="verdict-display" class="verdict-box">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <div class="form-group">
+          <label>Parsed & Canonical Serialized Args (canonicalJson)</label>
+          <pre class="console-out" id="canonical-args-out" style="max-height: 100px;"></pre>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Tool Call Fingerprint (Hash)</label>
+            <pre class="console-out" id="call-hash-out" style="max-height: 50px; padding:0.4rem 0.8rem; overflow:hidden; text-overflow:ellipsis;"></pre>
+          </div>
+          <div class="form-group">
+            <label>Safety Classification Class</label>
+            <pre class="console-out" id="class-out" style="max-height: 50px; padding:0.4rem 0.8rem; overflow:hidden; text-overflow:ellipsis;"></pre>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="console-header">
+            <span>Registry Output Delivered to Model (Bounded result)</span>
+            <button class="copy-btn" onclick="copyText('shaped-result-out')">Copy Output</button>
+          </div>
+          <pre class="console-out" id="shaped-result-out" style="max-height: 250px; color:#4ef1a6;"></pre>
+        </div>
+
+        <div class="form-group">
+          <div class="console-header">
+            <span>Full ToolResult Details Payload (Diagnostic evidence metadata)</span>
+            <button class="copy-btn" onclick="copyText('result-details-out')">Copy Details</button>
+          </div>
+          <pre class="console-out" id="result-details-out" style="max-height: 180px; color:#c084fc;"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Navigation Tabs logic
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+    
+    // Find button
+    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.onclick.toString().includes(tabId));
+    if (btn) btn.classList.add('active');
+    
+    document.getElementById(tabId).classList.add('active');
+    
+    if (tabId === 'tab-calculator') {
+      calculateTokenPressure();
+    } else if (tabId === 'tab-simulator') {
+      simulateToolFlow();
+    }
+  }
+
+  // --- SCENARIO DATA & CALCULATOR STATE ---
+  const MOCK_FRAGMENTS = {
+    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.2.1.`,
+    
+    mode_default: `Advisory: You are in default mode. Edits within the workspace are permitted. You have access to active inspection, modification, and execution tools. Ensure that you run tests to verify compilation.`,
+    mode_advise: `Advisory: You are in advise mode. You may NOT edit codebase files directly, and you may NOT run execution tools (like bash). You can inspect files, write reviews, and write plans. Output an advisory markdown report as your final step.`,
+    mode_super: `Advisory: You are in super mode. Full escalation is active. You have access to execution-class and system-modification tools. Execute effectful commands with precision.`,
+    
+    safety_suggest: `Safety directive: suggest. Describe the proposed modifications, build procedures, or commands. Do not write file changes or execute commands.`,
+    safety_auto_edit: `Safety directive: auto-edit. Edits inside the repository workspace are permitted without confirmation. Execution-class actions (like running bash commands) require confirmation.`,
+    safety_full_auto: `Safety directive: full-auto. Edits and local commands are allowed to run automatically. System-level modifications and destructive git operations require explicit confirmations.`,
+  };
+
+  const SCENARIOS = {
+    standard: {
+      mode: 'default',
+      policy: 'reduced-repeated-envelope',
+      thinking: 'applied',
+      window: 32768,
+      tools: ['read', 'write', 'edit', 'bash', 'grep', 'find', 'workspace_context'],
+      memory: `Project goal: Refactor the MPI communicator wrapper in src/hpc/comm.ts to resolve thread races.\nRecent observation: The custom barrier function drifts during heavy MPI ranks exchange.`,
+      project: `Language: TypeScript\nTarget: node\nActive workspace files:\n- src/hpc/comm.ts (3,400 bytes)\n- src/hpc/barrier.ts (1,200 bytes)\n- tests/comm.test.ts (2,500 bytes)`,
+      notes: `Turn count: 4\nPrevious step: read src/hpc/comm.ts successfully.\nPending action: Locate race conditions inside MPI_Comm_dup wrapper.`,
+      query: `Identify the thread race in src/hpc/comm.ts and write a replacement chunk using the edit tool.`
+    },
+    planning: {
+      mode: 'advise',
+      policy: 'reduced-repeated-envelope',
+      thinking: 'applied',
+      window: 32768,
+      tools: ['read', 'grep', 'find', 'workspace_context', 'write_plan', 'write_review'],
+      memory: `Architecture review for compiler pipeline. Target is prefix cache friendly layout.\nGoal: Draft a 5-step plan to integrate TypeBox schemas into the worker subprocess layer safely.`,
+      project: `Language: C++\nWorkspace files:\n- include/compiler.h\n- src/compiler.cpp`,
+      notes: `Turn count: 1\nSession initialized.`,
+      query: `Inspect include/compiler.h and write a plan inside docs/plans/typebox_migration.md to outline the migration steps.`
+    },
+    constrained: {
+      mode: 'default',
+      policy: 'prefix-cache-deterministic',
+      thinking: 'always-on',
+      window: 4096,
+      tools: ['read', 'write', 'edit', 'grep'],
+      memory: `Local model, minimal context window budget constraint.`,
+      project: `Language: Python\nActive files: main.py`,
+      notes: `Turn count: 8`,
+      query: `Replace the division in main.py line 42 with a safe division wrapper.`
+    },
+    'no-tools': {
+      mode: 'advise',
+      policy: 'no-tools-fallback',
+      thinking: 'unsupported',
+      window: 8192,
+      tools: [],
+      memory: `Model has no active tool palette capabilities this turn.`,
+      project: `Language: Markdown`,
+      notes: `Turn count: 2`,
+      query: `Explain the difference between a prompt envelope and a tool contract.`
+    }
+  };
+
+  // Tools Metadata & Presets for Simulator
+  const ALL_TOOLS = {
+    read: { actionClass: 'read', estimate: 140, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "startLine": 1,\n  "endLine": 100\n}' },
+    write: { actionClass: 'write', estimate: 180, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "content": "// Modifying compile results",\n  "overwrite": true\n}' },
+    edit: { actionClass: 'write', estimate: 220, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "instructions": "Add detailed error messages",\n  "replacementChunks": [\n    {\n      "startLine": 120,\n      "endLine": 126,\n      "targetContent": "function lookupFragment(...) {\\n  ...",\n      "replacementContent": "function lookupFragment(...) {\\n  // Optimized lookup\\n  ..."\n    }\n  ]\n}' },
+    bash: { actionClass: 'execute', estimate: 160, preset: '{\n  "command": "npm run build && npm run test",\n  "cwd": "/home/akougkas/workspace"\n}' },
+    grep: { actionClass: 'read', estimate: 120, preset: '{\n  "pattern": "compileResult",\n  "path": "src/"\n}' },
+    find: { actionClass: 'read', estimate: 110, preset: '{\n  "pattern": "*.ts",\n  "path": "src/"\n}' },
+    glob: { actionClass: 'read', estimate: 110, preset: '{\n  "pattern": "src/**/*.ts",\n  "path": "src/"\n}' },
+    ls: { actionClass: 'read', estimate: 100, preset: '{\n  "path": "src/domains/prompts"\n}' },
+    web_fetch: { actionClass: 'read', estimate: 130, preset: '{\n  "url": "https://iowarp.ai/docs/tools"\n}' },
+    git_status: { actionClass: 'read', estimate: 90, preset: '{}' },
+    git_diff: { actionClass: 'read', estimate: 100, preset: '{\n  "path": "src/domains/prompts/compiler.ts"\n}' },
+    git_log: { actionClass: 'read', estimate: 100, preset: '{\n  "limit": 10\n}' },
+    run_tests: { actionClass: 'execute', estimate: 110, preset: '{\n  "suite": "smoke"\n}' },
+    run_lint: { actionClass: 'execute', estimate: 100, preset: '{}' },
+    run_build: { actionClass: 'execute', estimate: 100, preset: '{}' },
+    package_script: { actionClass: 'execute', estimate: 120, preset: '{\n  "scriptName": "dev"\n}' },
+    validate_frontend: { actionClass: 'execute', estimate: 110, preset: '{\n  "port": 3000\n}' },
+    workspace_context: { actionClass: 'read', estimate: 120, preset: '{\n  "path": "."\n}' },
+    find_symbol: { actionClass: 'read', estimate: 110, preset: '{\n  "symbol": "compile",\n  "path": "."\n}' },
+    entry_points: { actionClass: 'read', estimate: 100, preset: '{\n  "path": "."\n}' },
+    where_is: { actionClass: 'read', estimate: 110, preset: '{\n  "symbol": "compile",\n  "path": "."\n}' },
+    dispatch: { actionClass: 'dispatch', estimate: 150, preset: '{\n  "agent": "refactoring-specialist",\n  "prompt": "Rewrite compiler.ts with optimizations"\n}' },
+    dispatch_batch: { actionClass: 'dispatch', estimate: 180, preset: '{\n  "agents": ["specialist-1", "specialist-2"],\n  "prompts": ["Optimize database queries", "Refactor authentication"]\n}' },
+    read_skill: { actionClass: 'read', estimate: 110, preset: '{\n  "name": "refactor-ts"\n}' },
+    create_skill: { actionClass: 'write', estimate: 130, preset: '{\n  "name": "refactor-ts",\n  "content": "Advisory typescript rules..."\n}' },
+    write_plan: { actionClass: 'write', estimate: 140, preset: '{\n  "path": "docs/plans/migration.md",\n  "plan": "# Migration Plan\\n1. Move files\\n2. Build types"\n}' },
+    write_review: { actionClass: 'write', estimate: 140, preset: '{\n  "path": "docs/reviews/compiler_review.md",\n  "review": "# Review for compiler.ts\\nApproved with caveats."\n}' }
+  };
+
+  const MODE_PROFILES = {
+    default: {
+      tools: ['read', 'write', 'edit', 'bash', 'grep', 'find', 'glob', 'ls', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'run_tests', 'run_lint', 'run_build', 'package_script', 'validate_frontend', 'workspace_context', 'find_symbol', 'entry_points', 'where_is', 'dispatch', 'dispatch_batch', 'read_skill', 'create_skill'],
+      allowedActions: ['read', 'write', 'execute', 'dispatch'],
+      dispatchScope: 'any'
+    },
+    advise: {
+      tools: ['read', 'grep', 'find', 'glob', 'ls', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'write_plan', 'write_review', 'workspace_context', 'find_symbol', 'entry_points', 'where_is', 'dispatch', 'dispatch_batch', 'read_skill'],
+      allowedActions: ['read', 'write', 'dispatch'],
+      dispatchScope: 'readonly'
+    },
+    super: {
+      tools: ['read', 'write', 'edit', 'bash', 'grep', 'find', 'glob', 'ls', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'run_tests', 'run_lint', 'run_build', 'package_script', 'validate_frontend', 'workspace_context', 'find_symbol', 'entry_points', 'where_is', 'dispatch', 'dispatch_batch', 'read_skill', 'create_skill'],
+      allowedActions: ['read', 'write', 'execute', 'dispatch', 'system_modify'],
+      dispatchScope: 'any'
+    }
+  };
+
+  // State
+  let selectedScenarioTools = new Set();
+  let simHistory = [];
+
+  // Initialize
+  window.addEventListener('DOMContentLoaded', () => {
+    // Populate calculator tools checklists
+    renderCalculatorToolsCheckboxes();
+    loadScenario('standard');
+    
+    // Populate simulator tools dropdown
+    onSimModeChange();
+  });
+
+  function renderCalculatorToolsCheckboxes() {
+    const container = document.getElementById('tools-checkboxes');
+    container.innerHTML = '';
+    
+    Object.keys(ALL_TOOLS).forEach(toolName => {
+      const label = document.createElement('label');
+      label.className = 'checkbox-label';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = toolName;
+      checkbox.id = `calc-tool-${toolName}`;
+      checkbox.onchange = (e) => {
+        if (e.target.checked) {
+          selectedScenarioTools.add(toolName);
+        } else {
+          selectedScenarioTools.delete(toolName);
+        }
+        calculateTokenPressure();
+      };
+      
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(toolName));
+      container.appendChild(label);
+    });
+  }
+
+  function loadScenario(name) {
+    const scenario = SCENARIOS[name];
+    if (!scenario) return;
+    
+    document.getElementById('context-window').value = scenario.window;
+    document.getElementById('mode-select').value = scenario.mode;
+    document.getElementById('send-policy').value = scenario.policy;
+    document.getElementById('thinking-applied').value = scenario.thinking;
+    
+    // Populate inputs
+    let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
+    staticText += `[Fragment: modes/${scenario.mode}.md]\n${MOCK_FRAGMENTS[`mode_${scenario.mode}`]}\n\n`;
+    
+    // Set appropriate safety fragment based on mode
+    let safetyLevel = 'suggest';
+    if (scenario.mode === 'default') safetyLevel = 'auto-edit';
+    if (scenario.mode === 'super') safetyLevel = 'full-auto';
+    
+    staticText += `[Fragment: safety/${safetyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyLevel}`]}`;
+    
+    document.getElementById('static-shell-input').value = staticText;
+    document.getElementById('dynamic-memory-input').value = scenario.memory;
+    document.getElementById('dynamic-project-input').value = scenario.project;
+    document.getElementById('user-query-input').value = scenario.query;
+    
+    // Set checked tools
+    selectedScenarioTools.clear();
+    scenario.tools.forEach(t => selectedScenarioTools.add(t));
+    
+    // Update DOM checkboxes
+    Object.keys(ALL_TOOLS).forEach(t => {
+      const el = document.getElementById(`calc-tool-${t}`);
+      if (el) {
+        el.checked = scenario.tools.includes(t);
+        // Show/hide based on mode visibility rules
+        const isVisible = MODE_PROFILES[scenario.mode].tools.includes(t);
+        el.parentElement.style.opacity = isVisible ? '1' : '0.4';
+      }
+    });
+
+    calculateTokenPressure();
+  }
+
+  function onModeChange() {
+    const mode = document.getElementById('mode-select').value;
+    
+    // Disable/enable tools that are not visible in this mode
+    Object.keys(ALL_TOOLS).forEach(t => {
+      const el = document.getElementById(`calc-tool-${t}`);
+      if (el) {
+        const isVisible = MODE_PROFILES[mode].tools.includes(t);
+        el.parentElement.style.opacity = isVisible ? '1' : '0.4';
+        if (!isVisible && el.checked) {
+          el.checked = false;
+          selectedScenarioTools.delete(t);
+        }
+      }
+    });
+    
+    // Reload standard static prompt content for that mode
+    let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
+    staticText += `[Fragment: modes/${mode}.md]\n${MOCK_FRAGMENTS[`mode_${mode}`]}\n\n`;
+    
+    let safetyLevel = 'suggest';
+    if (mode === 'default') safetyLevel = 'auto-edit';
+    if (mode === 'super') safetyLevel = 'full-auto';
+    
+    staticText += `[Fragment: safety/${safetyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyLevel}`]}`;
+    document.getElementById('static-shell-input').value = staticText;
+
+    calculateTokenPressure();
+  }
+
+  // Helper token estimator
+  function estimateTokens(text) {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return 0;
+    return Math.ceil(trimmed.length / 4);
+  }
+
+  // Simple string hashing helper for simulated visual output
+  async function computeHash(text) {
+    if (!text) return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty hash
+    const msgBuffer = new TextEncoder().encode(text);
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      // Fallback simple hash for offline environments
+      let hash = 0;
+      for (let i = 0; i < text.length; i++) {
+        hash = (hash << 5) - hash + text.charCodeAt(i);
+        hash |= 0;
+      }
+      return "mocked_hash_" + Math.abs(hash).toString(16).padStart(16, '0');
+    }
+  }
+
+  async function calculateTokenPressure() {
+    const contextLimit = parseInt(document.getElementById('context-window').value);
+    const mode = document.getElementById('mode-select').value;
+    const sendPolicy = document.getElementById('send-policy').value;
+    const thinking = document.getElementById('thinking-applied').value;
+    
+    // Inputs
+    const staticText = document.getElementById('static-shell-input').value;
+    const memory = document.getElementById('dynamic-memory-input').value;
+    const project = document.getElementById('dynamic-project-input').value;
+    const query = document.getElementById('user-query-input').value;
+
+    // Tokens estimates
+    const staticTokens = estimateTokens(staticText);
+    
+    // Build runtime section (Simulating renderRuntimeBlock)
+    let runtimeText = `# Runtime\nProvider: local-harness\nModel: local-32b\nContext window: ${contextLimit}\nPrompt send policy: ${sendPolicy}`;
+    if (thinking === 'applied') {
+      runtimeText += `\nThinking level: medium\nThinking mechanism: thinking\nThinking applied: applied`;
+    }
+    const runtimeTokens = estimateTokens(runtimeText);
+
+    // Build tool contract block (Simulating renderToolContractBlock)
+    let toolContractText = `# Tool Contract\nProvider tool calls: ${sendPolicy !== 'no-tools-fallback' ? 'available' : 'unavailable'}.\n`;
+    if (sendPolicy === 'no-tools-fallback' || selectedScenarioTools.size === 0) {
+      toolContractText += `Active tools this turn: none.\nAnswer directly. Do not claim repository facts that require inspection.`;
+    } else {
+      toolContractText += `Active tools this turn: ${Array.from(selectedScenarioTools).join(', ')}.\n`;
+      toolContractText += `Only call tools in the active list, and only for concrete inspection or changes.`;
+    }
+    const contractTokens = estimateTokens(toolContractText);
+
+    // Tools schemas token estimate
+    let toolSchemasTokens = 0;
+    if (sendPolicy !== 'no-tools-fallback') {
+      selectedScenarioTools.forEach(t => {
+        toolSchemasTokens += ALL_TOOLS[t]?.estimate || 50;
+      });
+    }
+
+    // Dynamic Turn items
+    const memoryText = memory ? `# Memory\n\n${memory}` : '';
+    const memoryTokens = estimateTokens(memoryText);
+
+    const projectText = project ? `# Project\n\n${project}` : '';
+    const projectTokens = estimateTokens(projectText);
+
+    const sessionText = `# Session\nTurn count: 1\nNotes: active debugging session`;
+    const sessionTokens = estimateTokens(sessionText);
+
+    const queryText = query ? `# Request\n\n${query}` : '';
+    const queryTokens = estimateTokens(queryText);
+
+    // Retrieval Hints
+    let hintsText = '';
+    if (sendPolicy !== 'no-tools-fallback' && selectedScenarioTools.size > 0) {
+      hintsText = `# Retrieval Hints\nRepository structure and CLIO.md are not preloaded. Use workspace_context.`;
+    }
+    const hintsTokens = estimateTokens(hintsText);
+
+    // Tiers mapping
+    // static-shell: staticText
+    // session-shell: runtimeText, toolContractText, hintsText
+    // dynamic-turn: memoryText, projectText, sessionText, queryText
+    const staticShellTotal = staticTokens;
+    const sessionShellTotal = runtimeTokens + contractTokens + hintsTokens;
+    const dynamicTurnTotal = memoryTokens + projectTokens + sessionTokens + queryTokens;
+    
+    const totalPromptTokens = staticShellTotal + sessionShellTotal + dynamicTurnTotal + toolSchemasTokens;
+    const remainingCapacity = Math.max(0, contextLimit - totalPromptTokens);
+    const pressurePercent = ((totalPromptTokens / contextLimit) * 100).toFixed(2);
+
+    // UI Updates
+    document.getElementById('val-static').innerText = staticShellTotal.toLocaleString();
+    document.getElementById('val-session').innerText = sessionShellTotal.toLocaleString();
+    document.getElementById('val-dynamic').innerText = dynamicTurnTotal.toLocaleString();
+    document.getElementById('val-tools').innerText = toolSchemasTokens.toLocaleString();
+
+    document.getElementById('pressure-ratio').innerText = `${totalPromptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} (${pressurePercent}%)`;
+    
+    const pressureBar = document.getElementById('pressure-bar');
+    pressureBar.style.width = `${Math.min(100, parseFloat(pressurePercent))}%`;
+    
+    const capacityStatus = document.getElementById('capacity-status');
+    const capacityLeft = document.getElementById('capacity-left');
+    capacityLeft.innerText = `${remainingCapacity.toLocaleString()} tokens remaining`;
+
+    if (totalPromptTokens > contextLimit) {
+      pressureBar.style.backgroundColor = 'var(--color-rose)';
+      capacityStatus.innerText = 'OVERFLOW';
+      capacityStatus.className = 'status-pill pill-rose';
+    } else if (parseFloat(pressurePercent) > 85) {
+      pressureBar.style.backgroundColor = 'var(--color-rose)';
+      capacityStatus.innerText = 'CRITICAL';
+      capacityStatus.className = 'status-pill pill-rose';
+    } else if (parseFloat(pressurePercent) > 60) {
+      pressureBar.style.backgroundColor = 'var(--color-amber)';
+      capacityStatus.innerText = 'WARNING';
+      capacityStatus.className = 'status-pill pill-amber';
+    } else {
+      pressureBar.style.backgroundColor = 'var(--color-emerald)';
+      capacityStatus.innerText = 'OPTIMAL';
+      capacityStatus.className = 'status-pill pill-emerald';
+    }
+
+    // Hashes recomputation
+    const staticTextHash = await computeHash(staticText);
+    const sessionTextHash = await computeHash(runtimeText + "\n\n" + toolContractText + "\n\n" + hintsText);
+    const dynamicTextHash = await computeHash(memoryText + "\n\n" + projectText + "\n\n" + sessionText + "\n\n" + queryText);
+    
+    const fullPromptText = [staticText, runtimeText, toolContractText, hintsText, memoryText, projectText, sessionText, queryText]
+      .filter(x => x.trim().length > 0).join("\n\n");
+    const fullTextHash = await computeHash(fullPromptText);
+
+    // System prompt sent
+    let systemPromptCompiled = [staticText, runtimeText, toolContractText, hintsText].filter(x => x.trim().length > 0).join("\n\n");
+    document.getElementById('system-prompt-out').innerText = systemPromptCompiled || "[Empty]";
+
+    // Fill table
+    const segmentsTable = document.getElementById('segments-table-body');
+    segmentsTable.innerHTML = '';
+    
+    const segments = [
+      { id: 'identity', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS.identity), tokens: estimateTokens(MOCK_FRAGMENTS.identity), incl: true },
+      { id: 'mode', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS[`mode_${mode}`]), tokens: estimateTokens(MOCK_FRAGMENTS[`mode_${mode}`]), incl: true },
+      { id: 'runtime', tier: 'session-shell', hash: await computeHash(runtimeText), tokens: runtimeTokens, incl: true },
+      { id: 'tool-contract', tier: 'session-shell', hash: await computeHash(toolContractText), tokens: contractTokens, incl: true },
+      { id: 'retrieval-hints', tier: 'session-shell', hash: await computeHash(hintsText), tokens: hintsTokens, incl: hintsText.length > 0 },
+      { id: 'memory', tier: 'dynamic-turn', hash: await computeHash(memoryText), tokens: memoryTokens, incl: memoryText.length > 0 },
+      { id: 'project-context', tier: 'dynamic-turn', hash: await computeHash(projectText), tokens: projectTokens, incl: projectText.length > 0 },
+      { id: 'user-request', tier: 'dynamic-turn', hash: await computeHash(queryText), tokens: queryTokens, incl: queryText.length > 0 }
+    ];
+
+    segments.forEach(s => {
+      const row = document.createElement('tr');
+      row.style.opacity = s.incl ? '1' : '0.4';
+      row.innerHTML = `
+        <td style="font-family:var(--font-mono); font-weight:600;">${s.id}</td>
+        <td><span class="status-pill ${s.tier === 'static-shell' ? 'pill-cyan' : s.tier === 'session-shell' ? 'pill-purple' : 'pill-emerald'}">${s.tier}</span></td>
+        <td><span class="hash-badge" title="${s.hash}">${s.hash}</span></td>
+        <td style="font-family:var(--font-mono); text-align:right;">${s.tokens}</td>
+        <td>${s.incl ? 'Included' : 'Skipped'}</td>
+      `;
+      segmentsTable.appendChild(row);
+    });
+
+    // Envelope Signature JSON output
+    const envelopeSig = {
+      version: 1,
+      promptSignature: fullTextHash,
+      staticShellHash: staticTextHash,
+      sessionShellHash: sessionTextHash,
+      dynamicHash: dynamicTextHash,
+      parts: [
+        { id: "pinnedHarness", tier: "static-shell", contentHash: staticTextHash, tokenEstimate: staticShellTotal, included: true },
+        { id: "pinnedRuntime", tier: "session-shell", contentHash: await computeHash(runtimeText), tokenEstimate: runtimeTokens, included: true },
+        { id: "pinnedToolContract", tier: "session-shell", contentHash: await computeHash(toolContractText), tokenEstimate: contractTokens, included: true },
+        { id: "sessionContext", tier: "dynamic-turn", contentHash: await computeHash(memoryText + "\n\n" + sessionText), tokenEstimate: memoryTokens + sessionTokens, included: true },
+        { id: "turnContext", tier: "dynamic-turn", contentHash: await computeHash(projectText + "\n\n" + queryText), tokenEstimate: projectTokens + queryTokens, included: true },
+        { id: "retrievalHints", tier: "session-shell", contentHash: await computeHash(hintsText), tokenEstimate: hintsTokens, included: hintsText.length > 0 }
+      ]
+    };
+    
+    document.getElementById('envelope-signature-out').innerText = JSON.stringify(envelopeSig, null, 2);
+  }
+
+  // --- SIMULATOR LOGIC ---
+  function onSimModeChange() {
+    const mode = document.getElementById('sim-mode-select').value;
+    const toolSelect = document.getElementById('sim-tool-select');
+    toolSelect.innerHTML = '';
+    
+    const visibleTools = MODE_PROFILES[mode].tools;
+    visibleTools.forEach(toolName => {
+      const opt = document.createElement('option');
+      opt.value = toolName;
+      opt.innerText = `${toolName} (Action: ${ALL_TOOLS[toolName].actionClass})`;
+      toolSelect.appendChild(opt);
+    });
+
+    onSimToolChange();
+  }
+
+  function onSimToolChange() {
+    const toolName = document.getElementById('sim-tool-select').value;
+    if (!toolName || !ALL_TOOLS[toolName]) return;
+    
+    document.getElementById('sim-args').value = ALL_TOOLS[toolName].preset;
+    simulateToolFlow();
+  }
+
+  // Canonical JSON implementation in JS
+  function canonicalJson(value) {
+    if (value === undefined) {
+      throw new Error("canonicalJson: undefined is not representable at root");
+    }
+    return canonicalSerialize(value, new WeakSet());
+  }
+
+  function canonicalSerialize(value, seen) {
+    if (value === null) return "null";
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new Error("canonicalJson: non-finite number is not representable");
+      }
+      return JSON.stringify(value);
+    }
+    if (typeof value === "string" || typeof value === "boolean") {
+      return JSON.stringify(value);
+    }
+    if (typeof value === "bigint") {
+      throw new Error("canonicalJson: bigint is not representable");
+    }
+    if (typeof value === "symbol" || typeof value === "function") {
+      throw new Error("canonicalJson: unsupported type");
+    }
+    if (Array.isArray(value)) {
+      if (seen.has(value)) throw new Error("canonicalJson: circular reference");
+      seen.add(value);
+      try {
+        const parts = [];
+        for (let i = 0; i < value.length; i++) {
+          if (!(i in value) || value[i] === undefined) {
+            parts.push("null");
+            continue;
+          }
+          parts.push(canonicalSerialize(value[i], seen));
+        }
+        return `[${parts.join(",")}]`;
+      } finally {
+        seen.delete(value);
+      }
+    }
+    if (typeof value === "object") {
+      if (value instanceof Date) {
+        return JSON.stringify(value.toJSON());
+      }
+      if (seen.has(value)) throw new Error("canonicalJson: circular reference");
+      seen.add(value);
+      try {
+        const keys = Object.keys(value).sort();
+        const parts = [];
+        for (const key of keys) {
+          const child = value[key];
+          if (child === undefined) continue;
+          parts.push(`${JSON.stringify(key)}:${canonicalSerialize(child, seen)}`);
+        }
+        return `{${parts.join(",")}}`;
+      } finally {
+        seen.delete(value);
+      }
+    }
+    throw new Error("canonicalJson: unsupported type");
+  }
+
+  // Simple UTF-8 byte truncation matching truncate-utf8
+  function truncateUtf8(str, maxBytes, marker = "") {
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(str);
+    if (encoded.length <= maxBytes) return str;
+    
+    // Account for marker length
+    const markerEncoded = encoder.encode(marker);
+    const limit = maxBytes - markerEncoded.length;
+    
+    if (limit <= 0) return marker;
+    
+    // Find valid UTF-8 character boundary
+    let index = limit;
+    // In UTF-8, continuation bytes start with bits 10xxxxxx (0x80 to 0xBF)
+    // We backtrack until we find a byte that does not match this pattern
+    while (index > 0 && (encoded[index] & 0xC0) === 0x80) {
+      index--;
+    }
+    
+    const truncatedBytes = encoded.slice(0, index);
+    const decoder = new TextDecoder("utf-8");
+    return decoder.decode(truncatedBytes) + marker;
+  }
+
+  function getByteLength(str) {
+    return new TextEncoder().encode(str).length;
+  }
+
+  async function simulateToolFlow() {
+    const toolName = document.getElementById('sim-tool-select').value;
+    const mode = document.getElementById('sim-mode-select').value;
+    const rawArgsText = document.getElementById('sim-args').value;
+    const rawOutput = document.getElementById('sim-raw-output').value;
+    const maxBytes = parseInt(document.getElementById('sim-max-bytes').value) || 200;
+    
+    const errEl = document.getElementById('args-json-err');
+    errEl.style.display = 'none';
+    
+    let parsedArgs = {};
+    try {
+      parsedArgs = JSON.parse(rawArgsText);
+    } catch (e) {
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // 1. Canonical Serialization
+    let canonical = "";
+    try {
+      canonical = canonicalJson(parsedArgs);
+      document.getElementById('canonical-args-out').innerText = canonical;
+    } catch (e) {
+      document.getElementById('canonical-args-out').innerText = `Error serializing: ${e.message}`;
+      return;
+    }
+
+    // 2. Hash compute
+    const hash = await computeHash(`${toolName}${canonical}`);
+    document.getElementById('call-hash-out').innerText = hash;
+
+    // 3. Classification
+    const toolMeta = ALL_TOOLS[toolName];
+    const actionClass = toolMeta ? toolMeta.actionClass : 'unknown';
+    document.getElementById('class-out').innerText = actionClass;
+
+    // 4. Registry Gate evaluation
+    const verdictBox = document.getElementById('verdict-display');
+    const profile = MODE_PROFILES[mode];
+    
+    let verdictKind = "ok";
+    let blockReason = "";
+    
+    // Check Visibility
+    if (!profile.tools.includes(toolName)) {
+      verdictKind = "not_visible";
+      blockReason = `Registry rejection: Tool '${toolName}' is not visible in mode '${mode}'.`;
+    } 
+    // Check Action Class
+    else if (!profile.allowedActions.includes(actionClass)) {
+      // If it's write_plan or write_review, advise mode permits write action class
+      if (mode === 'advise' && actionClass === 'write' && (toolName === 'write_plan' || toolName === 'write_review')) {
+        // permitted
+      } else {
+        verdictKind = "blocked";
+        blockReason = `Registry Blocked: Action class '${actionClass}' is not allowed in mode '${mode}'.`;
+      }
+    }
+    // Hard-blocks simulation: project rules & protected paths
+    else if (actionClass === 'execute' && rawArgsText.includes('rm -rf')) {
+      verdictKind = "blocked";
+      blockReason = `Safety Gate Blocked: Command contains destructive pattern 'rm -rf'. Hard-blocked by damage-control rules.`;
+    }
+    else if (rawArgsText.includes('.git/config') || rawArgsText.includes('/etc/passwd')) {
+      verdictKind = "blocked";
+      blockReason = `Safety Gate Blocked: Path is protected. Write/read actions on configuration artifacts are denied.`;
+    }
+    
+    // Check loop detection (repetition check)
+    // Filter history to last 10 seconds
+    const now = Date.now();
+    const activeHistory = simHistory.filter(h => now - h.timestamp < 10000);
+    const matches = activeHistory.filter(h => h.hash === hash);
+    
+    if (verdictKind === "ok") {
+      if (matches.length > 0) {
+        verdictKind = "blocked";
+        blockReason = `Loop Guard Blocked: Tool '${toolName}' with identical arguments repeated ${matches.length + 1} times in 10000ms. Aborting to prevent runaway execution.`;
+      } else if (simHistory.length >= 50) {
+        verdictKind = "blocked";
+        blockReason = `Registry Cap Blocked: Turn tool-call cap reached (50 calls). Invocation denied.`;
+      }
+    }
+
+    // Show Verdict Pill
+    verdictBox.className = "verdict-box show";
+    if (verdictKind === "ok") {
+      verdictBox.innerText = `Verdict: Admitted & Executed successfully.`;
+      verdictBox.classList.add('allow');
+    } else {
+      verdictBox.innerText = verdictKind === 'not_visible' ? `Verdict: Rejected (Not Visible)\n${blockReason}` : `Verdict: Blocked\n${blockReason}`;
+      verdictBox.classList.add('block');
+    }
+
+    // 5. Result Shaping (If Admitted)
+    if (verdictKind === "ok") {
+      const byteSize = getByteLength(rawOutput);
+      const isTruncated = byteSize > maxBytes;
+      const followUp = "Use offset/limit arguments or narrow the path query to inspect omitted contents.";
+      
+      let finalOutputText = rawOutput;
+      let resultSizeDetails = {
+        bytes: byteSize,
+        shownBytes: byteSize,
+        maxBytes: maxBytes,
+        truncated: false,
+        policy: "truncate",
+        followUpHint: followUp
+      };
+
+      if (isTruncated) {
+        const truncatedContent = truncateUtf8(rawOutput, maxBytes, "\n[tool result truncated]");
+        finalOutputText = `${truncatedContent}\n\n[${followUp}]`;
+        resultSizeDetails.shownBytes = getByteLength(finalOutputText);
+        resultSizeDetails.truncated = true;
+      }
+
+      const toolResult = {
+        kind: "ok",
+        output: finalOutputText
+      };
+
+      const detailsPayload = {
+        resultSize: resultSizeDetails
+      };
+
+      document.getElementById('shaped-result-out').innerText = JSON.stringify(toolResult, null, 2);
+      document.getElementById('result-details-out').innerText = JSON.stringify(detailsPayload, null, 2);
+    } else {
+      // Return Blocked / Error Result
+      const toolResult = {
+        kind: "error",
+        message: blockReason
+      };
+      document.getElementById('shaped-result-out').innerText = JSON.stringify(toolResult, null, 2);
+      document.getElementById('result-details-out').innerText = JSON.stringify({ errorDetails: { verdict: verdictKind, reason: blockReason } }, null, 2);
+    }
+  }
+
+  function executeSimulatedCall() {
+    const toolName = document.getElementById('sim-tool-select').value;
+    const rawArgsText = document.getElementById('sim-args').value;
+    
+    let parsedArgs = {};
+    try {
+      parsedArgs = JSON.parse(rawArgsText);
+    } catch (e) {
+      alert("Invalid JSON arguments!");
+      return;
+    }
+
+    const canonical = canonicalJson(parsedArgs);
+    computeHash(`${toolName}${canonical}`).then(hash => {
+      // Add to history
+      simHistory.push({
+        tool: toolName,
+        args: canonical,
+        hash: hash,
+        timestamp: Date.now()
+      });
+
+      renderHistory();
+      simulateToolFlow();
+    });
+  }
+
+  function renderHistory() {
+    const container = document.getElementById('history-items');
+    container.innerHTML = '';
+    
+    if (simHistory.length === 0) {
+      container.innerHTML = `<div style="color:var(--text-dark); text-align:center; padding:1.5rem 0; font-size:0.85rem;">No recent calls in buffer</div>`;
+      return;
+    }
+
+    // Sort showing newest first
+    const reversed = [...simHistory].reverse();
+    reversed.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'history-item';
+      
+      const timeStr = new Date(item.timestamp).toLocaleTimeString();
+      const summaryArgs = item.args.length > 30 ? item.args.slice(0, 30) + '...' : item.args;
+      
+      el.innerHTML = `
+        <div>
+          <span style="color:var(--color-cyan); font-weight:700;">${item.tool}</span>
+          <span style="color:var(--text-muted); font-size:0.75rem;">${summaryArgs}</span>
+        </div>
+        <div class="history-timestamp">${timeStr}</div>
+      `;
+      container.appendChild(el);
+    });
+  }
+
+  function clearSimHistory() {
+    simHistory = [];
+    renderHistory();
+    simulateToolFlow();
+  }
+
+  // Copy helper
+  function copyText(elementId) {
+    const text = document.getElementById(elementId).innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      alert("Copied to clipboard!");
+    }).catch(err => {
+      console.error('Could not copy text: ', err);
+    });
+  }
+</script>
+</body>
+</html>
