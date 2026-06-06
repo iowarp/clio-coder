@@ -26,6 +26,11 @@ interface EventSummary {
 	lastAssistantText: string;
 }
 
+interface BatchRunSummary extends EventSummary {
+	runId: string;
+	agentId: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -171,6 +176,31 @@ async function consumeDispatchEvents(
 	return summary;
 }
 
+async function consumeDispatchBatchEvents(
+	batchId: string,
+	events: AsyncIterableIterator<unknown>,
+	bus: SafeEventBus | undefined,
+): Promise<Map<string, BatchRunSummary>> {
+	const summaries = new Map<string, BatchRunSummary>();
+	for await (const event of events) {
+		if (!isRecord(event) || event.type !== "batch_run_event") continue;
+		const runId = typeof event.runId === "string" ? event.runId : batchId;
+		const agentId = typeof event.agentId === "string" ? event.agentId : "batch";
+		const inner = event.event;
+		const summary = summaries.get(runId) ?? { runId, agentId, count: 0, types: [], lastAssistantText: "" };
+		summary.count += 1;
+		const type = isRecord(inner) && typeof inner.type === "string" ? inner.type : "unknown";
+		summary.types.push(type);
+		const text = assistantTextFromEvent(inner);
+		if (text.length > 0) summary.lastAssistantText = text;
+		summaries.set(runId, summary);
+		if (type !== "heartbeat") {
+			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
+		}
+	}
+	return summaries;
+}
+
 function receiptDetails(receipt: RunReceipt, receiptPath: string | null, summary: EventSummary): ToolResultDetails {
 	return {
 		runId: receipt.runId,
@@ -302,17 +332,30 @@ function formatBatchOutput(
 	batchId: string,
 	runIds: ReadonlyArray<string>,
 	receipts: ReadonlyArray<RunReceipt>,
+	receiptPaths: ReadonlyMap<string, string | null>,
+	summaries: ReadonlyMap<string, BatchRunSummary>,
 	maxOutputBytes: number,
 ): string {
 	const failed = receipts.filter((receipt) => receipt.exitCode !== 0);
+	const perRunOutputBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, receipts.length)));
 	const lines = [
 		`dispatch batch ${batchId} completed`,
 		`runs=${runIds.join(", ")} total=${receipts.length} failed=${failed.length}`,
 		"",
-		...receipts.map(
-			(receipt) =>
-				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount}`,
-		),
+		...receipts.flatMap((receipt) => {
+			const summary = summaries.get(receipt.runId);
+			const receiptPath = receiptPaths.get(receipt.runId) ?? "n/a";
+			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
+			const output =
+				summary?.lastAssistantText && summary.lastAssistantText.length > 0
+					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
+					: "(no assistant text captured)";
+			return [
+				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath}${failure}`,
+				"  agent output:",
+				...output.split("\n").map((line) => `  ${line}`),
+			];
+		}),
 	];
 	return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
 }
@@ -381,19 +424,32 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 			timer?.unref?.();
 			options?.signal?.addEventListener("abort", abort, { once: true });
 			try {
-				for await (const event of handle.events) {
-					if (isRecord(event) && event.type !== "batch_run_event") continue;
-					const runId = isRecord(event) && typeof event.runId === "string" ? event.runId : handle.batchId;
-					deps.bus?.emit(BusChannels.DispatchProgress, { runId, agentId: "batch", event });
-				}
+				const summaries = await consumeDispatchBatchEvents(handle.batchId, handle.events, deps.bus);
 				const receipts = await handle.finalPromise;
-				const output = formatBatchOutput(handle.batchId, handle.runIds, receipts, maxOutputBytesArg(args));
+				const receiptPaths = new Map<string, string | null>();
+				for (const receipt of receipts)
+					receiptPaths.set(receipt.runId, deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null);
+				const output = formatBatchOutput(
+					handle.batchId,
+					handle.runIds,
+					receipts,
+					receiptPaths,
+					summaries,
+					maxOutputBytesArg(args),
+				);
 				const failed = receipts.filter((receipt) => receipt.exitCode !== 0);
 				const details: ToolResultDetails = {
 					batchId: handle.batchId,
 					runIds: handle.runIds,
 					receiptCount: receipts.length,
 					failedCount: failed.length,
+					runs: receipts.map((receipt) => ({
+						runId: receipt.runId,
+						agentId: receipt.agentId,
+						exitCode: receipt.exitCode,
+						receiptPath: receiptPaths.get(receipt.runId) ?? null,
+						eventCount: summaries.get(receipt.runId)?.count ?? 0,
+					})),
 				};
 				if (failed.length > 0) return { kind: "error", message: output, details };
 				return { kind: "ok", output, details };
