@@ -214,8 +214,28 @@ describe("contracts/tools dispatch run paths", () => {
 				strictEqual(reqs[0]?.task, "task 1");
 				strictEqual(reqs[1]?.task, "task 2");
 				return {
+					batchId: "batch-1",
 					runIds: ["run-1", "run-2"],
-					events: (async function* () {})(),
+					events: (async function* () {
+						yield {
+							type: "batch_run_event",
+							runId: "run-1",
+							agentId: "coder",
+							event: {
+								type: "message_end",
+								message: { role: "assistant", content: "first scout finding" },
+							},
+						};
+						yield {
+							type: "batch_run_event",
+							runId: "run-2",
+							agentId: "coder",
+							event: {
+								type: "message_end",
+								message: { role: "assistant", content: "second scout finding" },
+							},
+						};
+					})(),
 					finalPromise: Promise.resolve([
 						{
 							runId: "run-1",
@@ -266,6 +286,7 @@ describe("contracts/tools dispatch run paths", () => {
 					]),
 				};
 			},
+			getRun: (runId: string) => ({ receiptPath: `/tmp/${runId}.json` }) as ReturnType<DispatchContract["getRun"]>,
 		} as never;
 
 		const tool = createDispatchBatchTool({ dispatch: mockDispatch });
@@ -280,6 +301,9 @@ describe("contracts/tools dispatch run paths", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("completed"));
 			ok(result.output.includes("total=2"));
+			ok(result.output.includes("receipt=/tmp/run-1.json"));
+			ok(result.output.includes("first scout finding"));
+			ok(result.output.includes("second scout finding"));
 		}
 	});
 });
