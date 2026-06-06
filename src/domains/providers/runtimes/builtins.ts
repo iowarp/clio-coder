@@ -10,8 +10,6 @@
 
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
-import codexCli from "./cli-stub/codex-cli.js";
-import openCodeCli from "./cli-stub/opencode-cli.js";
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
 import deepseek from "./cloud/deepseek.js";
@@ -45,8 +43,6 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openai,
 	openaiCodex,
 	openrouter,
-	codexCli,
-	openCodeCli,
 	lemonadeAnthropic,
 	lemonadeOpenai,
 	llamacpp,

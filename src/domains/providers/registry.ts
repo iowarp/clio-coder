@@ -130,8 +130,8 @@ function validateRuntimeDescriptor(value: unknown): RuntimeDescriptorValidation 
 	if (typeof v.displayName !== "string" || v.displayName.trim().length === 0) {
 		return { ok: false, reason: "displayName must be a non-empty string" };
 	}
-	if (v.kind !== "http" && v.kind !== "subprocess") {
-		return { ok: false, reason: "kind must be one of http, subprocess" };
+	if (v.kind !== "http") {
+		return { ok: false, reason: "kind must be http" };
 	}
 	if (typeof v.apiFamily !== "string" || v.apiFamily.trim().length === 0) {
 		return { ok: false, reason: "apiFamily must be a non-empty string" };

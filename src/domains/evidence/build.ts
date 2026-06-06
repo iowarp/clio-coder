@@ -1244,11 +1244,10 @@ function readToolStats(record: Record<string, unknown>, source: string, field: s
 }
 
 function readRunKind(record: Record<string, unknown>, source: string, field: string): RunKind {
-	const value = readString(record, source, field);
-	if (value !== "http" && value !== "subprocess") {
-		throw new Error(`${source}.${field}: expected http or subprocess`);
-	}
-	return value;
+	// Clio only drives HTTP/native runtimes. Live receipts always record "http";
+	// legacy persisted receipts that carried another value coerce to "http".
+	readString(record, source, field);
+	return "http";
 }
 
 function readRunStatus(record: Record<string, unknown>, source: string, field: string): RunStatus {

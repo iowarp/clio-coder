@@ -144,11 +144,11 @@ Prefer typed tools over Bash:
 
 ---
 
-## Dispatch and external runtimes
+## Dispatch runtimes
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-Worker-only subprocess runtimes (`codex-cli`, `opencode-cli`) are delegated sandboxes. Clio maps them conservatively by default and requires explicit opt-in (`CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`) before mapping super-style requests to external full-access/bypass modes. Receipts record subprocess runtime limitations.
+Dispatch workers run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs their tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
 ---
 

@@ -5,23 +5,34 @@ Keep a Changelog.
 
 ## 0.2.2 - unreleased
 
-Clio Coder 0.2.2 removes the Claude Code runtime surface. Claude Code no longer
-has a programmatic use case for Clio, so the SDK runtime, its safety/approval
-bridge, and the Claude Code CLI subprocess path are gone. The only Anthropic
-support that remains is the normal Anthropic Messages API through pi-ai. Hosted
-defaults continue to lead with ChatGPT/Codex OAuth, native local runtimes stay
-first-class, and worker subprocess runtimes are now limited to Codex CLI and
-OpenCode CLI.
+Clio Coder 0.2.2 removes the Claude Code runtime surface and every built-in CLI
+subprocess runtime. Claude Code no longer has a programmatic use case for Clio,
+and batch CLI harnesses (Codex CLI, OpenCode CLI) cannot support Clio's steering,
+follow-up prompting, runtime control, receipts, tool governance, or session
+continuity. `RuntimeDescriptor` now describes HTTP/native/pi-ai-backed executable
+adapters only, and chat, print, and dispatch worker targets all resolve through
+one target-eligibility policy. The only Anthropic support that remains is the
+normal Anthropic Messages API through pi-ai. Hosted defaults continue to lead
+with ChatGPT/Codex OAuth, and native local runtimes stay first-class.
 
 ### Removed
 
 - Removed the `claude-code-sdk` runtime descriptor, its worker runtime
   implementation (`src/engine/claude-code-sdk-runtime.ts`), and the SDK safety
   policy bridge (`src/engine/sdk-policy-bridge.ts`).
-- Removed the `claude-code-cli`, `gemini-cli`, and `copilot-cli` subprocess
-  runtime descriptors and their invocation/parsing paths. Worker subprocess
-  runtimes are now `codex-cli` and `opencode-cli` only.
-- Removed the Claude Code native CLI auth/status path.
+- Removed the `claude-code-cli`, `gemini-cli`, `copilot-cli`, `codex-cli`, and
+  `opencode-cli` CLI subprocess runtime descriptors and their invocation/parsing
+  paths. There are no remaining built-in subprocess runtimes.
+- Removed the subprocess runtime execution engine
+  (`src/engine/subprocess-runtime.ts`) and the native CLI
+  auth/status/login/logout path (`src/cli/native-cli-auth.ts`).
+- Removed the worker-only runtime terminology and eligibility helpers
+  (`WORKER_ONLY_RUNTIME_IDS`, `isWorkerOnlyRuntime`,
+  `isWorkerTargetEligibleRuntime`, `isOrchestratorTargetEligibleRuntime`),
+  replaced by a single `isTargetEligibleRuntime` predicate. `RuntimeKind` is now
+  `"http"` only; the `cli`/`cli-gold`/`cli-silver`/`cli-bronze` runtime tiers, the
+  `cli` auth type, and the `subprocess-codex`/`subprocess-opencode` api families
+  are gone.
 - Removed the tool-approval IPC that existed solely for the Claude Code SDK
   worker: the `clio_tool_approval_request`/`clio_tool_approval_response`
   channel, the `SpawnedWorker` approval handlers, the worker stdin demux

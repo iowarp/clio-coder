@@ -4,7 +4,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
-import { isOrchestratorTargetEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import { isTargetEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -210,8 +210,10 @@ function runUse(args: ReadonlyArray<string>): number {
 		);
 		return 1;
 	}
-	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
-		printError(`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`);
+	if (!isTargetEligibleRuntime(runtime)) {
+		printError(
+			`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
+		);
 		return 1;
 	}
 	const sharedModel = parsed.model ?? target.defaultModel ?? null;
@@ -395,8 +397,8 @@ function runConvert(args: ReadonlyArray<string>): number {
 		printOk(`target ${id} already uses runtime ${runtimeId}`);
 		return 0;
 	}
-	if (settings.orchestrator.endpoint === id && !isOrchestratorTargetEligibleRuntime(runtime)) {
-		printError(`cannot convert orchestrator target '${id}' to worker-only runtime '${runtime.id}'`);
+	if (settings.orchestrator.endpoint === id && !isTargetEligibleRuntime(runtime)) {
+		printError(`cannot convert orchestrator target '${id}' to non-HTTP/native runtime '${runtime.id}'`);
 		return 1;
 	}
 	const previousRuntime = target.runtime;
@@ -468,8 +470,6 @@ function colorHealth(status: EndpointStatus["health"]["status"]): string {
 }
 
 function formatUrl(status: EndpointStatus): string {
-	const runtime = status.runtime;
-	if (runtime?.kind === "subprocess") return "(subprocess)";
 	if (status.endpoint.url) return status.endpoint.url;
 	return "(built-in)";
 }
@@ -518,14 +518,6 @@ function tierLabel(tier: ProviderOutputTier): string {
 			return "Cloud";
 		case "local-native":
 			return "Local native";
-		case "cli":
-			return "CLI runtimes";
-		case "cli-gold":
-			return "Gold CLI runtimes";
-		case "cli-silver":
-			return "Silver CLI runtimes";
-		case "cli-bronze":
-			return "Bronze CLI runtimes";
 		case "unknown":
 			return "Unknown";
 	}
@@ -539,16 +531,8 @@ function tierRank(tier: ProviderOutputTier): number {
 			return 1;
 		case "local-native":
 			return 2;
-		case "cli-gold":
-			return 3;
-		case "cli-silver":
-			return 4;
-		case "cli":
-			return 5;
-		case "cli-bronze":
-			return 6;
 		case "unknown":
-			return 7;
+			return 3;
 	}
 }
 

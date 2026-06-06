@@ -73,10 +73,12 @@ describe("contracts/config", () => {
 		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
 	});
 
-	it("skips worker-only targets in scoped orchestrator cycling", () => {
+	it("skips targets whose runtime is unregistered or non-http in scoped cycling", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.endpoints = [
 			{ id: "chat", runtime: "openai-compat", defaultModel: "chat-model" },
+			// codex-cli was removed from the registry; an unresolved runtime target
+			// must be skipped rather than cycled into the orchestrator slot.
 			{ id: "codex-worker", runtime: "codex-cli", defaultModel: "gpt-5.4" },
 		];
 		settings.orchestrator.endpoint = "chat";

@@ -11,7 +11,7 @@ import type {
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
-	isOrchestratorTargetEligibleRuntime,
+	isTargetEligibleRuntime,
 	listKnownModelsForRuntime,
 	resolveRuntimeTarget,
 } from "../../domains/providers/index.js";
@@ -139,7 +139,7 @@ function truncateMiddle(text: string, maxWidth: number): string {
 }
 
 type ModelSource = "configured" | "live" | "catalog" | "default" | "missing";
-type ModelBucket = "local" | "cloud" | "cli";
+type ModelBucket = "local" | "cloud";
 type ModelRefreshScope = "selected" | "all";
 
 interface ModelCandidate {
@@ -185,7 +185,6 @@ export interface ModelOverlaySummary {
 	targets: number;
 	localModels: number;
 	cloudModels: number;
-	cliModels: number;
 	activeRef: string;
 	focusedModels?: number;
 }
@@ -250,7 +249,7 @@ function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFla
 		tools: caps.tools,
 		reasoning: caps.reasoning,
 		vision: caps.vision,
-		streaming: kind === "http" || kind === "subprocess",
+		streaming: kind === "http",
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
@@ -327,15 +326,6 @@ export function runtimeCapabilitySummary(resolution: OverlayRuntimeResolution): 
 function modelBucket(status: EndpointStatus): ModelBucket {
 	const tier = status.runtime?.tier;
 	if (
-		tier === "cli" ||
-		tier === "cli-gold" ||
-		tier === "cli-silver" ||
-		tier === "cli-bronze" ||
-		status.runtime?.kind === "subprocess"
-	) {
-		return "cli";
-	}
-	if (
 		tier === "protocol" ||
 		tier === "local-native" ||
 		status.endpoint.url?.includes("127.0.0.1") ||
@@ -383,19 +373,16 @@ function statusPriority(status: EndpointStatus): number {
 function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef: string): ModelOverlaySummary {
 	let localModels = 0;
 	let cloudModels = 0;
-	let cliModels = 0;
 	for (const row of rows) {
 		if (!row.selectable) continue;
 		if (row.bucket === "local") localModels++;
-		else if (row.bucket === "cli") cliModels++;
 		else cloudModels++;
 	}
 	return {
-		totalModels: localModels + cloudModels + cliModels,
+		totalModels: localModels + cloudModels,
 		targets,
 		localModels,
 		cloudModels,
-		cliModels,
 		activeRef,
 		focusedModels: rows.filter((row) => row.selectable && row.visibleByDefault !== false).length,
 	};
@@ -420,7 +407,7 @@ export function buildModelItems(deps: {
 	const recentSet = new Set(deps.settings.state?.recentModels ?? []);
 	const list = [...deps.providers.list()]
 		.filter((status) => {
-			return status.runtime !== null && isOrchestratorTargetEligibleRuntime(status.runtime);
+			return status.runtime !== null && isTargetEligibleRuntime(status.runtime);
 		})
 		.sort((a, b) => {
 			const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
@@ -766,7 +753,7 @@ function renderModelOverlayLines(input: {
 	const modeLabel = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
 	const lines = [
 		fitLine(
-			`${modeLabel} · ${filtered.length}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud  ${input.summary.cliModels} cli`,
+			`${modeLabel} · ${filtered.length}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
 			width,
 		),
 		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),

@@ -97,7 +97,7 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
-function seedWorkerOnlyTarget(configDir: string): void {
+function seedUnregisteredRuntimeTarget(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
 	const yaml = readFileSync(p, "utf8");
 	const patched = yaml.replace(
@@ -178,12 +178,12 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		ok(Array.isArray(parsed) && parsed.length > 0);
 	});
 
-	it("targets use rejects worker-only subprocess runtimes as orchestrator targets", async () => {
+	it("targets use rejects a target whose runtime is not registered", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
-		seedWorkerOnlyTarget(join(scratch.dir, "config"));
+		seedUnregisteredRuntimeTarget(join(scratch.dir, "config"));
 		const result = await runCli(["targets", "use", "codex-worker"], { env: scratch.env });
 		strictEqual(result.code, 1);
-		match(result.stderr, /worker-only/);
+		match(result.stderr, /not registered/);
 		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
 		match(settings, /^ {2}target: null$/m);
 	});

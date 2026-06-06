@@ -81,7 +81,7 @@ function evalOverview(
 		cwds: uniqueStrings(artifact.results.map((result) => result.cwd)),
 		agentIds: ["eval-local"],
 		endpointIds: ["local"],
-		runtimeIds: ["subprocess"],
+		runtimeIds: ["local"],
 		modelIds: ["none"],
 		totals: {
 			runs: artifact.results.length,

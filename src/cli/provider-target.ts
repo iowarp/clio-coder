@@ -61,10 +61,7 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 		.filter((entry) => entry.connectable)
 		.map((entry) => {
 			const runtime = getRuntimeRegistry().get(entry.runtimeId);
-			const status =
-				runtime && runtime.auth !== "cli"
-					? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
-					: null;
+			const status = runtime ? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }) : null;
 			return {
 				entry,
 				status,
@@ -81,9 +78,7 @@ export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectablePro
 			? row.status.source === "environment"
 				? `env${row.status.detail ? `:${row.status.detail}` : ""}`
 				: row.status.source
-			: row.entry.runtimeId.endsWith("-cli")
-				? "native-cli"
-				: "disconnected";
+			: "disconnected";
 		return {
 			group: row.entry.group,
 			cells: [row.entry.runtimeId, row.entry.label, status, `targets=${row.targetCount}`],

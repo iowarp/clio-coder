@@ -190,8 +190,8 @@ function parseText(value: unknown, fallback: string): string {
 	return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
-function parseRuntimeKind(value: unknown): RunKind {
-	if (value === "http" || value === "subprocess") return value;
+function parseRuntimeKind(_value: unknown): RunKind {
+	// Clio only drives HTTP/native runtimes; legacy persisted values coerce to http.
 	return "http";
 }
 

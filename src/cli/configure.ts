@@ -9,7 +9,7 @@ import {
 	buildProviderSupportEntry,
 	configuredEndpointsForRuntime,
 	defaultModelForRuntime,
-	isOrchestratorTargetEligibleRuntime,
+	isTargetEligibleRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -267,19 +267,15 @@ function printRuntimeList(includeHidden: boolean): void {
 				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
 				: null;
 		const authLabel =
-			runtime?.auth === "cli"
-				? "cli"
-				: runtime?.auth === "oauth"
+			runtime?.auth === "oauth"
+				? status?.available
+					? "connected"
+					: "login"
+				: runtime?.auth === "api-key"
 					? status?.available
-						? "connected"
-						: "login"
-					: runtime?.auth === "api-key"
-						? status?.available
-							? "credential"
-							: "needs-key"
-						: runtime?.kind === "subprocess"
-							? "cli"
-							: (runtime?.auth ?? "none");
+						? "credential"
+						: "needs-key"
+					: (runtime?.auth ?? "none");
 		const modelLabel =
 			entry.modelHints.length > 0
 				? entry.modelHints.slice(0, 2).join(", ")
@@ -388,9 +384,9 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDesc
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
 		);
 	}
-	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
+	if (!isTargetEligibleRuntime(runtime)) {
 		throw new Error(
-			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
 	}
 	settings.orchestrator.endpoint = descriptor.id;
@@ -410,8 +406,8 @@ function assertOrchestratorReplacementEligible(settings: ClioSettings, descripto
 			`cannot update orchestrator target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
 		);
 	}
-	if (!isOrchestratorTargetEligibleRuntime(runtime)) {
-		throw new Error(`cannot update orchestrator target '${descriptor.id}' to worker-only runtime '${runtime.id}'`);
+	if (!isTargetEligibleRuntime(runtime)) {
+		throw new Error(`cannot update orchestrator target '${descriptor.id}' to non-HTTP/native runtime '${runtime.id}'`);
 	}
 }
 
@@ -494,7 +490,6 @@ function buildDescriptor(
 }
 
 function describeAuthStatus(runtime: RuntimeDescriptor): string {
-	if (runtime.auth === "cli") return "native CLI auth";
 	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (!status.available) return "not connected";
 	if (status.source === "environment") return `environment${status.detail ? ` (${status.detail})` : ""}`;
@@ -666,9 +661,9 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
-	if (setOrchestrator && !isOrchestratorTargetEligibleRuntime(runtime)) {
+	if (setOrchestrator && !isTargetEligibleRuntime(runtime)) {
 		printError(
-			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is worker-only`,
+			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
 		return 1;
 	}
@@ -1086,7 +1081,7 @@ async function runInteractive(
 		}
 	}
 
-	const setOrchestrator = !isOrchestratorTargetEligibleRuntime(runtime)
+	const setOrchestrator = !isTargetEligibleRuntime(runtime)
 		? false
 		: defaults.setOrchestrator
 			? true
