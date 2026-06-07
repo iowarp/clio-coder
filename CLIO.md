@@ -54,6 +54,16 @@ Distinguish local testing/configuration from community contribution:
 - Contributions back to the shared registry/repository require explicit user intent and normal Git/GitHub etiquette.
 - Never push, open PRs, publish releases, or alter remotes without an explicit user request.
 
+The same split applies to skills. The repository `skills/` directory is a
+curated marketplace. It is not a runtime discovery root, so nothing there
+auto-loads; runtime skills load from `.clio/skills`, the user config skills dir,
+and cross-harness roots. `skills/install.sh` links a catalog skill into a runtime
+root, and provenance frontmatter (`audit: pass`, `registry-id`, `source-url`)
+marks maintainer-approved skills apart from local ones. Authoring or installing a
+skill locally is ordinary self-development; adding or approving a marketplace
+skill is a contribution requiring explicit user intent. Users invoke a skill
+deliberately with `/skill:<name>`. See `skills/README.md` and `CONTRIBUTING.md`.
+
 ## High-risk failure modes
 
 A prompt improvement can regress performance by spending tokens on obvious advice. Optimize for decision leverage per token: hard boundaries, retrieval strategy, non-obvious invariants, and known edge cases beat command lists and directory summaries.
