@@ -3,22 +3,49 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
+import { parse as parseYaml } from "yaml";
 import { normalizeSettings } from "../../src/core/config.js";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { expandConfigPath, expandConfigValue, resolveConfigValue } from "../../src/core/resolve-config-value.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
 import { SettingsSchema } from "../../src/domains/config/schema.js";
 import { advanceScopedTarget } from "../../src/entry/orchestrator.js";
 
 describe("contracts/config", () => {
+	it("keeps first-run default settings YAML generic and parseable", () => {
+		const forbidden = [
+			/\bmini\b/i,
+			/\bdynamo\b/i,
+			/\bzbook\b/i,
+			/\b192\.168\./,
+			/\bQwopus\b/i,
+			/\bAgenticQwen\b/i,
+			/\bQwen3\.6\b/i,
+			/\bNemotron\b/i,
+			/\bgemma-4\b/i,
+			/\b262144\b/,
+			/\b65536\b/,
+			/\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b/,
+			/http:\/\/(?!localhost(?::|\/|$)|127\.0\.0\.1(?::|\/|$))[a-z0-9.-]+(?::\d+)?/i,
+		];
+		for (const pattern of forbidden) {
+			strictEqual(pattern.test(DEFAULT_SETTINGS_YAML), false, `DEFAULT_SETTINGS_YAML leaked ${pattern}`);
+		}
+
+		const parsed = parseYaml(DEFAULT_SETTINGS_YAML) as unknown;
+		const normalized = normalizeSettings(parsed);
+		deepStrictEqual(normalized, DEFAULT_SETTINGS);
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
+	});
+
 	it("normalizes target config and default/fallback models", () => {
 		const normalized = normalizeSettings({
 			identity: "clio",
 			targets: [
 				{
-					id: "codex-pro",
+					id: "hosted-target",
 					runtime: "openai-codex",
-					wireModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4"],
+					wireModels: ["primary-model", "worker-model", "primary-model"],
 				},
 			],
 			orchestrator: {
@@ -28,19 +55,19 @@ describe("contracts/config", () => {
 			},
 			workers: {
 				default: {
-					target: "codex-pro",
+					target: "hosted-target",
 					model: "",
 					thinkingLevel: "medium",
 				},
 			},
 		});
 
-		strictEqual(normalized.endpoints[0]?.defaultModel, "gpt-5.4");
-		deepStrictEqual(normalized.endpoints[0]?.wireModels, ["gpt-5.4", "gpt-5.4-mini"]);
+		strictEqual(normalized.endpoints[0]?.defaultModel, "primary-model");
+		deepStrictEqual(normalized.endpoints[0]?.wireModels, ["primary-model", "worker-model"]);
 		strictEqual(normalized.orchestrator.endpoint, null);
 		strictEqual(normalized.orchestrator.model, null);
-		strictEqual(normalized.workers.default.endpoint, "codex-pro");
-		strictEqual(normalized.workers.default.model, "gpt-5.4");
+		strictEqual(normalized.workers.default.endpoint, "hosted-target");
+		strictEqual(normalized.workers.default.model, "primary-model");
 		strictEqual(normalized.skills.trustProjectCompatRoots, false);
 		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
@@ -122,7 +149,10 @@ describe("contracts/config", () => {
 			},
 		});
 		strictEqual(normalized.compaction.thresholds.llmSummary, 0.92);
-		strictEqual(normalized.compaction.thresholds.maskObservations, DEFAULT_SETTINGS.compaction.thresholds.maskObservations);
+		strictEqual(
+			normalized.compaction.thresholds.maskObservations,
+			DEFAULT_SETTINGS.compaction.thresholds.maskObservations,
+		);
 		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
 

@@ -245,7 +245,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 		parameters: Type.Object({
 			task: Type.String({ description: "Concrete agent task. Include expected output, constraints, and handoff format." }),
 			agent_id: Type.Optional(Type.String({ description: "Agent recipe id from the fleet catalog. Defaults to coder." })),
-			target: Type.Optional(Type.String({ description: "Target id, such as dynamo. Omit for the fleet default." })),
+			target: Type.Optional(Type.String({ description: "Configured target id. Omit for the fleet default." })),
 			model: Type.Optional(Type.String({ description: "Model override. Omit for the target/profile default." })),
 			thinking_level: Type.Optional(
 				Type.Union([

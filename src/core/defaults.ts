@@ -32,8 +32,8 @@ export type WorkerProfiles = Record<string, WorkerTarget>;
  *     /compact still runs when auto=false.
  *   - excludeLastTurns: number of recent user turns protected from
  *     progressive masking/pruning.
- *   - model: optional pattern (e.g. "openai/gpt-5-mini") used to resolve
- *     a dedicated summarization model. Falls back to the orchestrator
+ *   - model: optional pattern (e.g. "provider/summary-model-id") used to
+ *     resolve a dedicated summarization model. Falls back to the orchestrator
  *     target when absent.
  *   - systemPrompt: optional path to a prompt-override file; resolved to
  *     text at call time, not at settings load.
@@ -207,10 +207,12 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 # Set CLIO_HOME for a single-tree install, or CLIO_CONFIG_DIR / CLIO_DATA_DIR /
 # CLIO_CACHE_DIR to override config, data, and cache separately.
 #
-# Common first run:
-#   1. Run: clio
-#   2. Follow the configuration wizard if no usable target exists.
-#   3. Inspect targets later with: clio targets
+# Common first run after installation:
+#   1. Repair/create local state: clio doctor --fix
+#   2. List runtimes: clio configure --list
+#   3. Configure one target with your runtime/model (examples below).
+#   4. Select and probe it: clio targets use <id> && clio targets --probe
+#   5. Launch: clio
 
 version: 1
 identity: clio
@@ -223,37 +225,22 @@ safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 # (cloud APIs, local HTTP engines, or third-party plugins under
 # ~/.clio/runtimes/).
 targets: []
-# Example mixed local and hosted layout:
-#   clio configure --runtime openai-codex --id codex-pro --model gpt-5.4 --set-orchestrator --set-worker-default --worker-profile codex-mini --worker-profile-model gpt-5.4-mini
-#   clio targets add --runtime llamacpp --id mini --url http://mini:8080 --model AgenticQwen-30B-A3B-i1-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
-#   clio targets add --runtime lmstudio-native --id dynamo --url http://dynamo:1234 --model gemma-4-26B-A4B-it-Q4_K_M --context-window 262144 --max-tokens 65536 --reasoning true
+# Local runtime examples (uncomment/adapt one; replace your-model-id):
+#   clio configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio configure --id local-ollama --runtime ollama-native --url http://localhost:11434 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio configure --id local-llamacpp --runtime llamacpp --url http://127.0.0.1:8080 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio configure --id local-vllm --runtime vllm --url http://localhost:8000 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio configure --id local-sglang --runtime sglang --url http://localhost:30000 --model your-model-id --set-orchestrator --set-fleet-default
+# Add --context-window <tokens>, --max-tokens <tokens>, or --reasoning true
+# only when you have runtime/model-specific values to override probe results.
 #
-# Example targets:
+# Example target block equivalent to one configured local runtime:
 # targets:
-#   - id: codex-pro
-#     runtime: openai-codex
-#     defaultModel: gpt-5.4
-#     auth:
-#       oauthProfile: openai-codex
-#     wireModels:
-#       - gpt-5.4
-#       - gpt-5.4-mini
-#   - id: mini
-#     runtime: llamacpp
-#     url: http://mini:8080
-#     defaultModel: AgenticQwen-30B-A3B-i1-Q4_K_M
-#     capabilities:
-#       contextWindow: 262144
-#       maxTokens: 65536
-#       reasoning: true
-#       thinkingFormat: qwen-chat-template
-#   - id: dynamo
+#   - id: local-lmstudio
 #     runtime: lmstudio-native
-#     url: http://dynamo:1234
-#     defaultModel: gemma-4-26B-A4B-it-Q4_K_M
+#     url: http://localhost:1234
+#     defaultModel: your-model-id
 #     capabilities:
-#       contextWindow: 262144
-#       maxTokens: 65536
 #       reasoning: true
 
 # Optional npm packages that export clioRuntimes: RuntimeDescriptor[].
@@ -261,7 +248,7 @@ runtimePlugins: []
 
 # Orchestrator target for the interactive loop. \`target\` refers to
 # targets[].id; \`model\` is the wire model id to request.
-# thinkingLevel valid values: off | minimal | low | medium | high | xhigh.
+# Keep thinkingLevel off unless a target/model supports explicit reasoning levels.
 orchestrator:
   target: null
   model: null
@@ -276,9 +263,9 @@ workers:
     model: null
     thinkingLevel: off
   profiles: {}
-  # codex-mini:
-  #   target: codex-pro
-  #   model: gpt-5.4-mini
+  # fast-local:
+  #   target: local-lmstudio
+  #   model: your-model-id
   #   thinkingLevel: off
 
 # Ctrl+P cycling order: plain target ids or "target/model" refs.
@@ -348,8 +335,8 @@ state:
 #   thresholds        pressure = estimated_tokens / context_window.
 #                     Earlier stages reclaim context without an LLM call;
 #                     llmSummary is the final full summarization stage.
-#   model             optional pattern (e.g. openai/gpt-5-mini) for a dedicated
-#                     summarization model. Absent ⇒ orchestrator target.
+#   model             optional pattern (e.g. provider/summary-model-id) for a
+#                     dedicated summarization model. Absent ⇒ orchestrator target.
 #   systemPrompt      optional path to a prompt-override file.
 compaction:
   auto: true
@@ -360,7 +347,7 @@ compaction:
     pruneObservations: 0.85
     maskDialogue: 0.9
     llmSummary: 0.99
-  # model: openai/gpt-5-mini
+  # model: provider/summary-model-id
   # systemPrompt: ~/.config/clio/prompts/compaction.md
 
 # Transient provider/stream retry controls for interactive chat.

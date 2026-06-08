@@ -293,6 +293,15 @@ describe("contracts/tools result shaping and truncation", () => {
 });
 
 describe("contracts/tools dispatch run paths", () => {
+	it("keeps dispatch target schema examples environment-neutral", () => {
+		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const schemaText = JSON.stringify(tool.parameters);
+
+		for (const pattern of [/\bdynamo\b/i, /\bmini\b/i, /\bzbook\b/i, /\b192\.168\./]) {
+			strictEqual(pattern.test(schemaText), false, `dispatch schema leaked ${pattern}`);
+		}
+	});
+
 	it("createDispatchTool triggers dispatch contract", async () => {
 		const mockDispatch: DispatchContract = {
 			dispatch: async (req: DispatchRequest) => {

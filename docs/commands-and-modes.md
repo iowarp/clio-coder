@@ -75,8 +75,8 @@ Example:
 ```bash
 clio run \
   "Find the test command and summarize the project structure." \
-  --target mini \
-  --model AgenticQwen-30B-A3B-i1-Q4_K_M
+  --target local-lmstudio \
+  --model your-model-id
 ```
 
 ## Interactive Slash Commands

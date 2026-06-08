@@ -112,37 +112,42 @@ Start Clio Coder from the repository you want to work on:
 ```bash
 cd /path/to/your/repo
 clio doctor --fix
-clio configure
+clio configure --list
+```
+
+Start one local runtime, then configure a single target with its runtime id and
+wire model id. Example for LM Studio:
+
+```bash
+clio configure \
+  --id local-lmstudio \
+  --runtime lmstudio-native \
+  --url http://localhost:1234 \
+  --model your-model-id \
+  --set-orchestrator \
+  --set-fleet-default
+clio targets use local-lmstudio
 clio targets --probe
 clio
 ```
 
-For local runtimes, use the matching runtime id so Clio can manage target
-capabilities and resident-model lifecycle details:
+Other common local runtime ids are `ollama-native`, `llamacpp`, `vllm`, and
+`sglang`; use `your-model-id` from that runtime's model list. Add
+`--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only
+when you know those model-specific overrides.
+
+Quick headless smoke after the target probes healthy:
 
 ```bash
-clio configure --runtime lmstudio-native --id lmstudio --url http://127.0.0.1:1234 --model your-model
-clio configure --runtime ollama-native   --id ollama   --url http://127.0.0.1:11434 --model your-model
-clio configure --runtime llamacpp        --id llamacpp --url http://127.0.0.1:8080  --model your-model
-clio configure --runtime vllm            --id vllm     --url http://127.0.0.1:8000  --model your-model
-clio configure --runtime sglang          --id sglang   --url http://127.0.0.1:30000 --model your-model
+clio run "Summarize this repository layout and identify the main entry points."
 ```
 
-Quick headless smoke:
-
-```bash
-clio run --agent scout "Summarize this repository layout and identify the main entry points."
-```
-
-Inside the TUI, try:
+Inside the TUI, verify onboarding with:
 
 ```text
-/run scout summarize the repo structure
-/run planner propose one small, low-risk improvement
-/run reviewer check whether that plan is safe and complete
 /targets
-/model
-/receipts
+/agents
+/skills
 ```
 
 ## Skills

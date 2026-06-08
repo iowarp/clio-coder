@@ -10,17 +10,17 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { createChatLoop, type ChatLoopEvent } from "../../src/interactive/chat-loop.js";
-import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
+import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatPanel } from "../../src/interactive/chat-panel.js";
 
 function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.endpoint = "mini";
+	value.orchestrator.endpoint = "test-target";
 	value.orchestrator.model = "model";
 	value.endpoints = [
 		{
-			id: "mini",
+			id: "test-target",
 			runtime: "fake-runtime",
 			defaultModel: "model",
 			capabilities: { contextWindow: 1000, maxTokens: 256, tools: true, chat: true },
@@ -46,7 +46,7 @@ function modes(): ModesContract {
 
 function providers(): ProvidersContract {
 	const endpoint: EndpointDescriptor = {
-		id: "mini",
+		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",
 		capabilities: { contextWindow: 1000, maxTokens: 256, tools: true, chat: true },
@@ -106,7 +106,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 				createdAt: new Date().toISOString(),
 				cwd: input?.cwd ?? process.cwd(),
 				model: input?.model ?? "model",
-				endpoint: input?.endpoint ?? "mini",
+				endpoint: input?.endpoint ?? "test-target",
 			} as SessionMeta;
 			return current;
 		},
@@ -246,7 +246,7 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 				}),
 			modes: modes(),
 			providers: providers(),
-			knownEndpoints: () => new Set(["mini"]),
+			knownEndpoints: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			autoCompact: async (_instructions: string | undefined, trigger: string | undefined): Promise<CompactResult> => {
@@ -306,7 +306,7 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 			getSettings: () => settings(),
 			modes: modes(),
 			providers: providers(),
-			knownEndpoints: () => new Set(["mini"]),
+			knownEndpoints: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			createAgent: createFakeAgentFactory(async (agent) => {

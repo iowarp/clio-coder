@@ -106,7 +106,7 @@ Interactive TUI:
 
 ```text
 /run coder implement the new command
-/run --target local-qwen --model qwen3-coder coder fix the failing unit test
+/run --target local-lmstudio --model your-model-id coder fix the failing unit test
 /run --agent-profile cheap --tool-profile minimal-local verifier run the regression tests
 ```
 
