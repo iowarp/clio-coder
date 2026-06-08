@@ -903,25 +903,25 @@
       <h1>Model Catalog & Routing Blueprint</h1>
       <div class="subtitle">Interactive visual specifications for model target configurations, runtime detection, dynamic capability badging, and routing resolution in Clio Coder.</div>
       <div class="meta-badge">
-        <span>Clio Coder Version</span> v0.2.1
+        <span>Clio Coder Version</span> v0.2.2
       </div>
     </header>
 
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('probe-sim')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+      <button type="button" class="tab-btn active" onclick="_switchTab('probe-sim')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
         Connection Prober Simulator
       </button>
-      <button class="tab-btn" onclick="switchTab('merge-sandbox')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('merge-sandbox')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
         Hierarchical Merge Stack
       </button>
-      <button class="tab-btn" onclick="switchTab('resolver-sim')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('resolver-sim')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         Target-First Resolver
       </button>
-      <button class="tab-btn" onclick="switchTab('diagrams')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('diagrams')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg>
         Architecture Flowcharts
       </button>
     </div>
@@ -931,7 +931,7 @@
       <div class="simulator-grid">
         <div class="control-panel glass-card">
           <div class="glass-card-title">
-            <svg viewBox="0 0 24 24"><path d="M12 20v-6M6 20V10M18 20V4" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20v-6M6 20V10M18 20V4" /></svg>
             Probe Configuration
           </div>
 
@@ -960,7 +960,7 @@
           <div class="form-group">
             <label for="probe-latency">Simulated Latency</label>
             <div class="slider-container">
-              <input type="range" id="probe-latency" min="10" max="2000" value="80" oninput="updateLatencyVal()">
+              <input type="range" id="probe-latency" min="10" max="2000" value="80" oninput="_updateLatencyVal()">
               <span id="latency-val" class="slider-val">80 ms</span>
             </div>
           </div>
@@ -992,14 +992,14 @@
             </div>
           </div>
 
-          <button id="run-probe-btn" class="btn btn-primary" onclick="runConnectionProbe()" style="margin-top: 1rem;">
+          <button type="button" id="run-probe-btn" class="btn btn-primary" onclick="_runConnectionProbe()" style="margin-top: 1rem;">
             Run Connection Probe
           </button>
         </div>
 
         <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
           <div class="glass-card-title">
-            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
             Probe Console & capability badges
           </div>
 
@@ -1055,7 +1055,7 @@
     <div id="merge-sandbox" class="tab-pane">
       <div class="glass-card">
         <div class="glass-card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
           Capability Layer Aggregation Sandbox
         </div>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted); font-size: 0.95rem;">
@@ -1225,7 +1225,7 @@
 
         <div class="merge-effective-card">
           <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--color-cyan); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
             Resolved Effective Capabilities
           </h3>
           <div class="effective-grid">
@@ -1264,7 +1264,7 @@
       <div class="resolver-container">
         <div class="resolver-input-panel glass-card">
           <div class="glass-card-title">
-            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
             Resolver Input Parameters
           </div>
 
@@ -1272,13 +1272,13 @@
             <label for="resolver-pattern">Model ID / Pattern</label>
             <input type="text" id="resolver-pattern" class="form-control" value="openai/gpt-4o" oninput="runResolverSimulation()">
             <div class="quick-examples">
-              <button class="example-btn" onclick="applyResolverExample('openai/gpt-4o')">openai/gpt-4o</button>
-              <button class="example-btn" onclick="applyResolverExample('gpt-4o-mini')">gpt-4o-mini</button>
-              <button class="example-btn" onclick="applyResolverExample('ollama/deepseek-r1:medium')">ollama/deepseek-r1:medium</button>
-              <button class="example-btn" onclick="applyResolverExample('*gpt*')">*gpt*</button>
-              <button class="example-btn" onclick="applyResolverExample('claude*')">claude*</button>
-              <button class="example-btn" onclick="applyResolverExample('agenticqwen:high')">agenticqwen:high</button>
-              <button class="example-btn" onclick="applyResolverExample('unknown-model')">unknown-model</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('openai/gpt-4o')">openai/gpt-4o</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('gpt-4o-mini')">gpt-4o-mini</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('ollama/deepseek-r1:medium')">ollama/deepseek-r1:medium</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('*gpt*')">*gpt*</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('claude*')">claude*</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('agenticqwen:high')">agenticqwen:high</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('unknown-model')">unknown-model</button>
             </div>
           </div>
 
@@ -1292,7 +1292,7 @@
 
         <div class="glass-card" style="display: flex; flex-direction: column;">
           <div class="glass-card-title">
-            <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
             Resolver Resolution Trace
           </div>
           <div class="trace-container" id="resolver-trace-log">
@@ -1315,11 +1315,11 @@
         <!-- DIAGRAM A -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
             Hierarchical Capability Synthesis Overlay Flowchart
           </div>
           <div class="svg-wrapper">
-            <svg width="850" height="420" viewBox="0 0 850 420" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" xmlns="http://www.w3.org/2000/svg">
               <!-- Definitions for arrows -->
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1402,11 +1402,11 @@
         <!-- DIAGRAM B -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             Target-First Model Resolver Match sequence
           </div>
           <div class="svg-wrapper">
-            <svg width="850" height="400" viewBox="0 0 850 400" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="400" viewBox="0 0 850 400" xmlns="http://www.w3.org/2000/svg">
               <style>
                 .step-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .step-box-hit { fill: rgba(16, 185, 129, 0.03); stroke: #10b981; stroke-width: 2; rx: 8; ry: 8; }
@@ -1489,11 +1489,11 @@
         <!-- DIAGRAM C -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
             Live Connection Probe & Capability Detection Pipeline
           </div>
           <div class="svg-wrapper">
-            <svg width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg">
               <style>
                 .flow-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .flow-box-active { fill: rgba(0, 240, 255, 0.02); stroke: #00f0ff; stroke-width: 1.5; rx: 6; ry: 6; }
@@ -1559,15 +1559,15 @@
     </div>
 
     <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.1. Designed with high-performance dark aesthetics.</p>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.2. Designed with high-performance dark aesthetics.</p>
     </footer>
   </div>
 
   <script>
     // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    function _switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
       
       document.getElementById(tabId).classList.add('active');
       event.currentTarget.classList.add('active');
@@ -1662,18 +1662,18 @@
     }
 
     // Update latency label
-    function updateLatencyVal() {
+    function _updateLatencyVal() {
       const val = document.getElementById('probe-latency').value;
-      document.getElementById('latency-val').innerText = val + " ms";
+      document.getElementById('latency-val').innerText = `${val} ms`;
     }
 
     // Run Connection Probe Simulation
-    function runConnectionProbe() {
+    function _runConnectionProbe() {
       const target = document.getElementById('probe-target').value;
       const url = document.getElementById('probe-url').value;
       const modelId = document.getElementById('probe-model').value;
       const model = modelCatalog[target].find(m => m.id === modelId);
-      const latency = parseInt(document.getElementById('probe-latency').value);
+      const latency = parseInt(document.getElementById('probe-latency').value, 10);
       const outcome = document.querySelector('input[name="outcome"]:checked').value;
       
       const logBox = document.getElementById('probe-console-log');
@@ -1810,16 +1810,16 @@
     }
 
     function enableBadge(id, statusText) {
-      const badge = document.getElementById('badge-' + id);
-      const text = document.getElementById('status-' + id);
+      const badge = document.getElementById(`badge-${id}`);
+      const text = document.getElementById(`status-${id}`);
       badge.classList.add('enabled');
       text.innerText = statusText;
     }
 
     function disableAllBadges() {
       ['chat', 'tools', 'reasoning', 'vision'].forEach(id => {
-        const badge = document.getElementById('badge-' + id);
-        const text = document.getElementById('status-' + id);
+        const badge = document.getElementById(`badge-${id}`);
+        const text = document.getElementById(`status-${id}`);
         badge.classList.remove('enabled');
         text.innerText = 'Disabled';
       });
@@ -1855,7 +1855,7 @@
           tools: document.getElementById('layer1-tools').checked,
           reasoning: document.getElementById('layer1-reasoning').checked,
           vision: document.getElementById('layer1-vision').checked,
-          context: parseInt(document.getElementById('layer1-context').value) || 0
+          context: parseInt(document.getElementById('layer1-context').value, 10) || 0
         },
         {
           id: "Layer 2 (Catalog definition)",
@@ -1864,7 +1864,7 @@
           tools: document.getElementById('layer2-tools').checked,
           reasoning: document.getElementById('layer2-reasoning').checked,
           vision: document.getElementById('layer2-vision').checked,
-          context: parseInt(document.getElementById('layer2-context').value) || 0
+          context: parseInt(document.getElementById('layer2-context').value, 10) || 0
         },
         {
           id: "Layer 3 (Knowledge base)",
@@ -1873,7 +1873,7 @@
           tools: document.getElementById('layer3-tools').checked,
           reasoning: document.getElementById('layer3-reasoning').checked,
           vision: document.getElementById('layer3-vision').checked,
-          context: parseInt(document.getElementById('layer3-context').value) || 0
+          context: parseInt(document.getElementById('layer3-context').value, 10) || 0
         },
         {
           id: "Layer 4 (Live Probe)",
@@ -1882,7 +1882,7 @@
           tools: document.getElementById('layer4-tools').checked,
           reasoning: document.getElementById('layer4-reasoning').checked,
           vision: document.getElementById('layer4-vision').checked,
-          context: parseInt(document.getElementById('layer4-context').value) || 0
+          context: parseInt(document.getElementById('layer4-context').value, 10) || 0
         },
         {
           id: "Layer 5 (User override)",
@@ -1891,13 +1891,13 @@
           tools: document.getElementById('layer5-tools').checked,
           reasoning: document.getElementById('layer5-reasoning').checked,
           vision: document.getElementById('layer5-vision').checked,
-          context: parseInt(document.getElementById('layer5-context').value) || 0
+          context: parseInt(document.getElementById('layer5-context').value, 10) || 0
         }
       ];
 
       // Merge values
-      let resolved = { chat: false, tools: false, reasoning: false, vision: false, context: 0 };
-      let sources = { chat: 'None', tools: 'None', reasoning: 'None', vision: 'None', context: 'None' };
+      const resolved = { chat: false, tools: false, reasoning: false, vision: false, context: 0 };
+      const sources = { chat: 'None', tools: 'None', reasoning: 'None', vision: 'None', context: 'None' };
 
       layers.forEach(layer => {
         if (!layer.active) return;
@@ -1965,7 +1965,7 @@
 
     initResolverCandidates();
 
-    function applyResolverExample(val) {
+    function _applyResolverExample(val) {
       document.getElementById('resolver-pattern').value = val;
       runResolverSimulation();
     }
@@ -1988,7 +1988,7 @@
 
       // Step 1: Suffix parsing
       let base = pattern;
-      let thinkingSuffix = undefined;
+      let thinkingSuffix ;
       const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
       const lastColon = pattern.lastIndexOf(':');
       
@@ -2025,8 +2025,8 @@
       trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 2: Glob Match]</strong> Testing wildcard pattern...</div>`;
       if (globChars.test(base)) {
         // Convert glob to regex
-        let reStr = "^" + base.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
-        let regex = new RegExp(reStr, "i");
+        const reStr = `^${base.replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
+        const regex = new RegExp(reStr, "i");
         
         trace.innerHTML += `<div class="trace-step evaluating">&nbsp;&nbsp;Converted glob "${base}" to RegExp: ${regex.toString()}</div>`;
         

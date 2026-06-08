@@ -712,24 +712,24 @@
       </div>
       <div class="version-tag">
         <div class="version-dot"></div>
-        Clio Coder v0.2.1
+        Clio Coder v0.2.2
       </div>
     </div>
   </header>
 
   <!-- Navigation Tabs -->
   <div class="tabs-nav">
-    <button class="tab-btn active" onclick="switchTab('tab-diagrams')">
-      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
+    <button type="button" class="tab-btn active" onclick="_switchTab('tab-diagrams')">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
       Architecture & Visual Flowcharts
     </button>
-    <button class="tab-btn" onclick="switchTab('tab-calculator')">
-      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
+    <button type="button" class="tab-btn" onclick="_switchTab('tab-calculator')">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
       Token Pressure Calculator
       <span class="pulse-badge"><span class="pulse-dot"></span>Calc</span>
     </button>
-    <button class="tab-btn" onclick="switchTab('tab-simulator')">
-      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+    <button type="button" class="tab-btn" onclick="_switchTab('tab-simulator')">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
       Tool & Registry Simulator
       <span class="pulse-badge"><span class="pulse-dot"></span>Sim</span>
     </button>
@@ -747,7 +747,7 @@
           The model calls tools natively through the LLM API's structural JSON envelope rather than parsing text logs.
         </div>
         <div class="svg-wrapper">
-          <svg width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg">
             <!-- Background grids -->
             <rect width="900" height="280" rx="8" fill="#04070e" />
             
@@ -806,7 +806,7 @@
           When supported by targets (e.g. llamacpp or cloud cache), Clio leverages these hashes to skip resending the session shell prompt if it has not changed.
         </div>
         <div class="svg-wrapper">
-          <svg width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect width="900" height="350" rx="8" fill="#04070e" />
             
             <!-- Box: Full Rendered Prompt Envelope -->
@@ -875,7 +875,7 @@
           Upon execution, outputs are bounded to respect context pressure through safe UTF-8 truncation and suffix injection.
         </div>
         <div class="svg-wrapper">
-          <svg width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect width="900" height="340" rx="8" fill="#04070e" />
 
             <!-- Path Timeline -->
@@ -949,10 +949,10 @@
         <h2 class="card-title">Prompt Envelope Settings</h2>
         
         <div class="scenario-grid">
-          <button class="scenario-pill" onclick="loadScenario('standard')">Standard Code Turn</button>
-          <button class="scenario-pill" onclick="loadScenario('planning')">Planning Phase</button>
-          <button class="scenario-pill" onclick="loadScenario('constrained')">Constrained Context</button>
-          <button class="scenario-pill" onclick="loadScenario('no-tools')">Fallback (No Tools)</button>
+          <button type="button" class="scenario-pill" onclick="loadScenario('standard')">Standard Code Turn</button>
+          <button type="button" class="scenario-pill" onclick="loadScenario('planning')">Planning Phase</button>
+          <button type="button" class="scenario-pill" onclick="loadScenario('constrained')">Constrained Context</button>
+          <button type="button" class="scenario-pill" onclick="loadScenario('no-tools')">Fallback (No Tools)</button>
         </div>
 
         <div class="form-row">
@@ -969,7 +969,7 @@
           </div>
           <div class="form-group">
             <label for="mode-select">Active Mode Profile</label>
-            <select id="mode-select" onchange="onModeChange()">
+            <select id="mode-select" onchange="_onModeChange()">
               <option value="default" selected>default (Read, Write, Exec, Dispatch)</option>
               <option value="advise">advise (Read, Dispatch only; restricted write)</option>
               <option value="super">super (Read, Write, Exec, Dispatch, Sys-Modify)</option>
@@ -1081,7 +1081,7 @@
           <div class="form-group" style="margin-top:1rem;">
             <div class="console-header">
               <span>Resulting compiled Prompt Envelope Signature (JSON)</span>
-              <button class="copy-btn" onclick="copyText('envelope-signature-out')">Copy JSON</button>
+              <button type="button" class="copy-btn" onclick="_copyText('envelope-signature-out')">Copy JSON</button>
             </div>
             <pre class="console-out" id="envelope-signature-out"></pre>
           </div>
@@ -1089,7 +1089,7 @@
           <div class="form-group">
             <div class="console-header">
               <span>Verbatim System Prompt Sent to Provider</span>
-              <button class="copy-btn" onclick="copyText('system-prompt-out')">Copy Prompt</button>
+              <button type="button" class="copy-btn" onclick="_copyText('system-prompt-out')">Copy Prompt</button>
             </div>
             <pre class="console-out" id="system-prompt-out"></pre>
           </div>
@@ -1148,8 +1148,8 @@
         </div>
 
         <div class="form-row">
-          <button class="btn btn-primary" onclick="executeSimulatedCall()">Submit Call to Registry</button>
-          <button class="btn btn-danger" onclick="clearSimHistory()">Clear History & Reset Loop</button>
+          <button type="button" class="btn btn-primary" onclick="_executeSimulatedCall()">Submit Call to Registry</button>
+          <button type="button" class="btn btn-danger" onclick="_clearSimHistory()">Clear History & Reset Loop</button>
         </div>
 
         <div class="form-group" style="margin-top:1.5rem;">
@@ -1188,7 +1188,7 @@
         <div class="form-group">
           <div class="console-header">
             <span>Registry Output Delivered to Model (Bounded result)</span>
-            <button class="copy-btn" onclick="copyText('shaped-result-out')">Copy Output</button>
+            <button type="button" class="copy-btn" onclick="_copyText('shaped-result-out')">Copy Output</button>
           </div>
           <pre class="console-out" id="shaped-result-out" style="max-height: 250px; color:#4ef1a6;"></pre>
         </div>
@@ -1196,7 +1196,7 @@
         <div class="form-group">
           <div class="console-header">
             <span>Full ToolResult Details Payload (Diagnostic evidence metadata)</span>
-            <button class="copy-btn" onclick="copyText('result-details-out')">Copy Details</button>
+            <button type="button" class="copy-btn" onclick="_copyText('result-details-out')">Copy Details</button>
           </div>
           <pre class="console-out" id="result-details-out" style="max-height: 180px; color:#c084fc;"></pre>
         </div>
@@ -1208,9 +1208,9 @@
 
 <script>
   // Navigation Tabs logic
-  function switchTab(tabId) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+  function _switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+    document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
     
     // Find button
     const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.onclick.toString().includes(tabId));
@@ -1227,7 +1227,7 @@
 
   // --- SCENARIO DATA & CALCULATOR STATE ---
   const MOCK_FRAGMENTS = {
-    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.2.1.`,
+    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.2.2.`,
     
     mode_default: `Advisory: You are in default mode. Edits within the workspace are permitted. You have access to active inspection, modification, and execution tools. Ensure that you run tests to verify compilation.`,
     mode_advise: `Advisory: You are in advise mode. You may NOT edit codebase files directly, and you may NOT run execution tools (like bash). You can inspect files, write reviews, and write plans. Output an advisory markdown report as your final step.`,
@@ -1335,7 +1335,7 @@
   };
 
   // State
-  let selectedScenarioTools = new Set();
+  const selectedScenarioTools = new Set();
   let simHistory = [];
 
   // Initialize
@@ -1402,7 +1402,7 @@
     
     // Set checked tools
     selectedScenarioTools.clear();
-    scenario.tools.forEach(t => selectedScenarioTools.add(t));
+    scenario.tools.forEach(t => { selectedScenarioTools.add(t); });
     
     // Update DOM checkboxes
     Object.keys(ALL_TOOLS).forEach(t => {
@@ -1418,7 +1418,7 @@
     calculateTokenPressure();
   }
 
-  function onModeChange() {
+  function _onModeChange() {
     const mode = document.getElementById('mode-select').value;
     
     // Disable/enable tools that are not visible in this mode
@@ -1470,12 +1470,12 @@
         hash = (hash << 5) - hash + text.charCodeAt(i);
         hash |= 0;
       }
-      return "mocked_hash_" + Math.abs(hash).toString(16).padStart(16, '0');
+      return `mocked_hash_${Math.abs(hash).toString(16).padStart(16, '0')}`;
     }
   }
 
   async function calculateTokenPressure() {
-    const contextLimit = parseInt(document.getElementById('context-window').value);
+    const contextLimit = parseInt(document.getElementById('context-window').value, 10);
     const mode = document.getElementById('mode-select').value;
     const sendPolicy = document.getElementById('send-policy').value;
     const thinking = document.getElementById('thinking-applied').value;
@@ -1581,15 +1581,15 @@
 
     // Hashes recomputation
     const staticTextHash = await computeHash(staticText);
-    const sessionTextHash = await computeHash(runtimeText + "\n\n" + toolContractText + "\n\n" + hintsText);
-    const dynamicTextHash = await computeHash(memoryText + "\n\n" + projectText + "\n\n" + sessionText + "\n\n" + queryText);
+    const sessionTextHash = await computeHash(`${runtimeText}\n\n${toolContractText}\n\n${hintsText}`);
+    const dynamicTextHash = await computeHash(`${memoryText}\n\n${projectText}\n\n${sessionText}\n\n${queryText}`);
     
     const fullPromptText = [staticText, runtimeText, toolContractText, hintsText, memoryText, projectText, sessionText, queryText]
       .filter(x => x.trim().length > 0).join("\n\n");
     const fullTextHash = await computeHash(fullPromptText);
 
     // System prompt sent
-    let systemPromptCompiled = [staticText, runtimeText, toolContractText, hintsText].filter(x => x.trim().length > 0).join("\n\n");
+    const systemPromptCompiled = [staticText, runtimeText, toolContractText, hintsText].filter(x => x.trim().length > 0).join("\n\n");
     document.getElementById('system-prompt-out').innerText = systemPromptCompiled || "[Empty]";
 
     // Fill table
@@ -1631,8 +1631,8 @@
         { id: "pinnedHarness", tier: "static-shell", contentHash: staticTextHash, tokenEstimate: staticShellTotal, included: true },
         { id: "pinnedRuntime", tier: "session-shell", contentHash: await computeHash(runtimeText), tokenEstimate: runtimeTokens, included: true },
         { id: "pinnedToolContract", tier: "session-shell", contentHash: await computeHash(toolContractText), tokenEstimate: contractTokens, included: true },
-        { id: "sessionContext", tier: "dynamic-turn", contentHash: await computeHash(memoryText + "\n\n" + sessionText), tokenEstimate: memoryTokens + sessionTokens, included: true },
-        { id: "turnContext", tier: "dynamic-turn", contentHash: await computeHash(projectText + "\n\n" + queryText), tokenEstimate: projectTokens + queryTokens, included: true },
+        { id: "sessionContext", tier: "dynamic-turn", contentHash: await computeHash(`${memoryText}\n\n${sessionText}`), tokenEstimate: memoryTokens + sessionTokens, included: true },
+        { id: "turnContext", tier: "dynamic-turn", contentHash: await computeHash(`${projectText}\n\n${queryText}`), tokenEstimate: projectTokens + queryTokens, included: true },
         { id: "retrievalHints", tier: "session-shell", contentHash: await computeHash(hintsText), tokenEstimate: hintsTokens, included: hintsText.length > 0 }
       ]
     };
@@ -1763,7 +1763,7 @@
     const mode = document.getElementById('sim-mode-select').value;
     const rawArgsText = document.getElementById('sim-args').value;
     const rawOutput = document.getElementById('sim-raw-output').value;
-    const maxBytes = parseInt(document.getElementById('sim-max-bytes').value) || 200;
+    const maxBytes = parseInt(document.getElementById('sim-max-bytes').value, 10) || 200;
     
     const errEl = document.getElementById('args-json-err');
     errEl.style.display = 'none';
@@ -1860,7 +1860,7 @@
       const followUp = "Use offset/limit arguments or narrow the path query to inspect omitted contents.";
       
       let finalOutputText = rawOutput;
-      let resultSizeDetails = {
+      const resultSizeDetails = {
         bytes: byteSize,
         shownBytes: byteSize,
         maxBytes: maxBytes,
@@ -1898,7 +1898,7 @@
     }
   }
 
-  function executeSimulatedCall() {
+  function _executeSimulatedCall() {
     const toolName = document.getElementById('sim-tool-select').value;
     const rawArgsText = document.getElementById('sim-args').value;
     
@@ -1941,7 +1941,7 @@
       el.className = 'history-item';
       
       const timeStr = new Date(item.timestamp).toLocaleTimeString();
-      const summaryArgs = item.args.length > 30 ? item.args.slice(0, 30) + '...' : item.args;
+      const summaryArgs = item.args.length > 30 ? `${item.args.slice(0, 30)}...` : item.args;
       
       el.innerHTML = `
         <div>
@@ -1954,14 +1954,14 @@
     });
   }
 
-  function clearSimHistory() {
+  function _clearSimHistory() {
     simHistory = [];
     renderHistory();
     simulateToolFlow();
   }
 
   // Copy helper
-  function copyText(elementId) {
+  function _copyText(elementId) {
     const text = document.getElementById(elementId).innerText;
     navigator.clipboard.writeText(text).then(() => {
       alert("Copied to clipboard!");

@@ -1,6 +1,6 @@
+import type { MessageEntry, SessionEntry } from "../entries.js";
 import type { ContextCompactionStage } from "./auto.js";
 import { calculateContextTokens } from "./tokens.js";
-import type { MessageEntry, SessionEntry } from "../entries.js";
 
 export type ProgressiveCompactionStage = "mask_observations" | "prune_observations" | "mask_dialogue";
 
@@ -24,7 +24,7 @@ export interface ProgressiveCompactionResult {
 type StoredProgressiveStage = ProgressiveCompactionStage | "llm_summary";
 
 const OBSERVATION_MASK_TEXT = "contents masked to save context";
-const OBSERVATION_PRUNE_TEXT = "output removed to save context";
+const _OBSERVATION_PRUNE_TEXT = "output removed to save context";
 const DIALOGUE_MASK_TEXT = "message masked to save context";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,11 +98,7 @@ function lineCount(text: string): number {
 	return text.split(/\r\n|\r|\n/).length;
 }
 
-function observationMarker(
-	toolName: string,
-	text: string,
-	stage: "mask_observations" | "prune_observations",
-): string {
+function observationMarker(toolName: string, text: string, stage: "mask_observations" | "prune_observations"): string {
 	const lines = lineCount(text);
 	const chars = text.length;
 	if (stage === "prune_observations") {
@@ -152,10 +148,7 @@ function shouldRewriteObservation(entry: MessageEntry, target: "mask_observation
 	return target === "prune_observations" || stage !== "mask_observations";
 }
 
-function rewriteObservation(
-	entry: MessageEntry,
-	target: "mask_observations" | "prune_observations",
-): MessageEntry {
+function rewriteObservation(entry: MessageEntry, target: "mask_observations" | "prune_observations"): MessageEntry {
 	const next = cloneEntry(entry) as MessageEntry;
 	const { obj, result, toolName } = extractToolResultPayload(next.payload);
 	const text = resultText(result);
@@ -333,12 +326,7 @@ export function applyProgressiveCompaction(input: ProgressiveCompactionInput): P
 			if (observationStage === "mask_observations") maskedObservations += 1;
 			else prunedObservations += 1;
 		}
-		if (
-			input.stage === "mask_dialogue" &&
-			index < cutoff &&
-			next.kind === "message" &&
-			next.turnId !== firstUserId
-		) {
+		if (input.stage === "mask_dialogue" && index < cutoff && next.kind === "message" && next.turnId !== firstUserId) {
 			const rewritten = rewriteDialogue(next);
 			if (rewritten) {
 				next = rewritten;

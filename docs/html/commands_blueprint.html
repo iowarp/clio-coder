@@ -955,7 +955,7 @@
       <div class="metadata-grid">
         <div class="meta-item">
           <div class="meta-label">Product Version</div>
-          <div class="meta-value">v0.2.1</div>
+          <div class="meta-value">v0.2.2</div>
         </div>
         <div class="meta-item">
           <div class="meta-label">System Harness</div>
@@ -981,16 +981,16 @@
       <!-- Left side: Command DB Explorer -->
       <div class="glass-card">
         <div class="tabs">
-          <button class="tab-btn active" onclick="setTab('all')">All</button>
-          <button class="tab-btn" onclick="setTab('cli')">CLI Commands</button>
-          <button class="tab-btn" onclick="setTab('slash')">Slash Commands</button>
-          <button class="tab-btn" onclick="setTab('hotkey')">TUI Hotkeys</button>
+          <button type="button" class="tab-btn active" onclick="_setTab('all')">All</button>
+          <button type="button" class="tab-btn" onclick="_setTab('cli')">CLI Commands</button>
+          <button type="button" class="tab-btn" onclick="_setTab('slash')">Slash Commands</button>
+          <button type="button" class="tab-btn" onclick="_setTab('hotkey')">TUI Hotkeys</button>
         </div>
         
         <div class="filter-bar">
           <div class="search-input-wrapper">
             <!-- Simple SVG Search Icon -->
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
@@ -1025,12 +1025,12 @@
           
           <div class="presets-title">Presets & Examples (Click to load)</div>
           <div class="presets-list">
-            <button class="preset-btn" onclick="loadPreset('clio run --agent coder &quot;audit dependencies&quot;')">clio run --agent coder ...</button>
-            <button class="preset-btn" onclick="loadPreset('clio targets use cloud-target')">clio targets use ...</button>
-            <button class="preset-btn" onclick="loadPreset('/run architect &quot;refactor main.ts&quot; --thinking high')">/run architect ...</button>
-            <button class="preset-btn" onclick="loadPreset('/model agentic-qwen:medium')">/model agentic-qwen...</button>
-            <button class="preset-btn" onclick="loadPreset('clio reset --state')">clio reset --state</button>
-            <button class="preset-btn" onclick="loadPreset('clio run --thinking custom')">clio run [invalid option]</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('clio run --agent coder &quot;audit dependencies&quot;')">clio run --agent coder ...</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('clio targets use cloud-target')">clio targets use ...</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('/run architect &quot;refactor main.ts&quot; --thinking high')">/run architect ...</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('/model agentic-qwen:medium')">/model agentic-qwen...</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('clio reset --state')">clio reset --state</button>
+            <button type="button" class="preset-btn" onclick="loadPreset('clio run --thinking custom')">clio run [invalid option]</button>
           </div>
           
           <div class="term-window">
@@ -1038,7 +1038,7 @@
               <div class="term-dot td-red"></div>
               <div class="term-dot td-yellow"></div>
               <div class="term-dot td-green"></div>
-              <div class="term-title">clio-coder v0.2.1 – interactive shell environment</div>
+              <div class="term-title">clio-coder v0.2.2 – interactive shell environment</div>
             </div>
             
             <div class="term-body">
@@ -1108,10 +1108,10 @@
         <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">Click the box below and press a key chord, or select a predefined sequence to calculate its transport reliability across terminal emulators.</p>
         
         <div class="key-tester">
-          <div class="key-display" id="keyDisplay" tabindex="0" onkeydown="testKey(event)">Alt+M</div>
+          <div class="key-display" id="keyDisplay" tabindex="0" onkeydown="_testKey(event)">Alt+M</div>
           <div class="tester-prompt">Click to record keypress<br>or select preset below:</div>
           
-          <select id="presetKeys" class="filter-select" style="width: 100%; text-align: center;" onchange="loadPresetKey()">
+          <select id="presetKeys" class="filter-select" style="width: 100%; text-align: center;" onchange="_loadPresetKey()">
             <option value="alt+m">Alt+M (Cycle Mode)</option>
             <option value="shift+tab">Shift+Tab (Cycle Thinking)</option>
             <option value="alt+s">Alt+S (Super Request)</option>
@@ -1166,9 +1166,9 @@
         <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">Select an operator mode to simulate target evaluation and tool admission blockades from Clio Coder's safety model.</p>
         
         <div class="mode-selector-strip">
-          <button class="mode-btn active" data-mode="default" onclick="setSimMode('default')">Default Mode</button>
-          <button class="mode-btn" data-mode="advise" onclick="setSimMode('advise')">Advise Mode</button>
-          <button class="mode-btn" data-mode="super" onclick="setSimMode('super')">Super Mode</button>
+          <button type="button" class="mode-btn active" data-mode="default" onclick="_setSimMode('default')">Default Mode</button>
+          <button type="button" class="mode-btn" data-mode="advise" onclick="_setSimMode('advise')">Advise Mode</button>
+          <button type="button" class="mode-btn" data-mode="super" onclick="_setSimMode('super')">Super Mode</button>
         </div>
         
         <div class="tool-list">
@@ -1222,7 +1222,7 @@
       <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">1. Keyboard Input Router Workflow</h3>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Maps how keystrokes from the terminal raw stream are routed through overlay controls, leader key timers, and hotkey managers.</p>
       <div class="svg-wrapper">
-        <svg width="960" height="420" viewBox="0 0 960 420">
+        <svg aria-hidden="true" width="960" height="420" viewBox="0 0 960 420">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.4)" />
@@ -1316,7 +1316,7 @@
       <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">2. Screen Paint & Re-render Loop</h3>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Explains the TUI paint cycle from event trigger, layout build phase, to terminal ANSI stream flush.</p>
       <div class="svg-wrapper">
-        <svg width="960" height="300" viewBox="0 0 960 300">
+        <svg aria-hidden="true" width="960" height="300" viewBox="0 0 960 300">
           <!-- Nodes -->
           <!-- Render Event triggers -->
           <rect x="20" y="100" width="130" height="80" class="svg-node amber" />
@@ -1362,7 +1362,7 @@
       <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">3. Command Dispatcher Pipeline</h3>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Traces execution from interactive TUI editor or headless shell inputs down to the Fleet agent dispatch contract.</p>
       <div class="svg-wrapper">
-        <svg width="960" height="380" viewBox="0 0 960 380">
+        <svg aria-hidden="true" width="960" height="380" viewBox="0 0 960 380">
           <!-- Inputs -->
           <rect x="20" y="60" width="130" height="50" class="svg-node purple" />
           <text x="85" y="85" class="svg-text svg-text-header">TUI Editor Input</text>
@@ -1413,7 +1413,7 @@
 
     <!-- Footer -->
     <footer class="page-footer">
-      Clio Coder Specification System • Interactive Command & TUI Engine Blueprint • Version 0.2.1 • 2026
+      Clio Coder Specification System • Interactive Command & TUI Engine Blueprint • Version 0.2.2 • 2026
     </footer>
   </div>
 
@@ -1620,10 +1620,10 @@
     let currentTab = 'all';
 
     // Set Tabs
-    function setTab(tab) {
+    function _setTab(tab) {
       currentTab = tab;
       const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => btn.classList.remove('active'));
+      buttons.forEach(btn => { btn.classList.remove('active'); });
       event.target.classList.add('active');
       filterCommands();
     }
@@ -1729,7 +1729,7 @@
       }
       
       let isValid = true;
-      let errors = [];
+      const errors = [];
       
       // Slash command parsing
       if (raw.startsWith('/')) {
@@ -1742,7 +1742,7 @@
         if (cmd === '/run') {
           valPrereq.textContent = "Active Target & Agent recipe";
           // Validate /run syntax
-          let options = {};
+          const options = {};
           let i = 1;
           while (i < parts.length && parts[i].startsWith('--')) {
             const flag = parts[i];
@@ -1854,8 +1854,8 @@
             valPrereq.textContent = "None";
           } else if (subcommand === 'run') {
             valPrereq.textContent = "Target connected";
-            let options = {};
-            let taskArray = [];
+            const options = {};
+            const taskArray = [];
             let i = 2;
             while (i < parts.length) {
               const part = parts[i];
@@ -1931,9 +1931,9 @@
     }
 
     // SECTION 2: KEY COMPATIBILITY CALCULATOR
-    function testKey(event) {
+    function _testKey(event) {
       event.preventDefault();
-      let modifiers = [];
+      const modifiers = [];
       if (event.ctrlKey) modifiers.push('ctrl');
       if (event.shiftKey) modifiers.push('shift');
       if (event.altKey) modifiers.push('alt');
@@ -1958,7 +1958,7 @@
       return chord.split('+').map(seg => seg.charAt(0).toUpperCase() + seg.slice(1)).join('+');
     }
 
-    function loadPresetKey() {
+    function _loadPresetKey() {
       const val = document.getElementById('presetKeys').value;
       document.getElementById('keyDisplay').textContent = formatKeyLabel(val);
       calculateCompatibility(val);
@@ -1976,7 +1976,7 @@
       const baseKey = parts[parts.length - 1];
       
       let compatibility = 100;
-      let warnings = [];
+      const warnings = [];
       
       // 1. macOS Option-as-Meta warning
       if (hasAlt && baseKey.length === 1 && baseKey >= 'a' && baseKey <= 'z') {
@@ -2077,8 +2077,8 @@
       const inputs = document.querySelectorAll('.override-input');
       const alertBox = document.getElementById('overrideConflictAlert');
       
-      let bindsMap = {};
-      let conflicts = [];
+      const bindsMap = {};
+      const conflicts = [];
       
       inputs.forEach(inp => {
         const id = inp.dataset.id;
@@ -2109,9 +2109,9 @@
     }
 
     // SECTION 3: SAFETY MODE SIMULATOR
-    function setSimMode(mode) {
+    function _setSimMode(mode) {
       const buttons = document.querySelectorAll('.mode-btn');
-      buttons.forEach(btn => btn.classList.remove('active'));
+      buttons.forEach(btn => { btn.classList.remove('active'); });
       event.target.classList.add('active');
       
       const rAdmit = document.getElementById('readAdmit');

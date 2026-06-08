@@ -1,17 +1,17 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-	DEFAULT_CONTEXT_COMPACTION_THRESHOLDS,
-	shouldCompact,
-} from "../../src/domains/session/compaction/auto.js";
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLDS, shouldCompact } from "../../src/domains/session/compaction/auto.js";
 import { applyProgressiveCompaction } from "../../src/domains/session/compaction/progressive.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
-import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { formatProgressiveCompactionNotice } from "../../src/interactive/chat-loop.js";
+import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
-function entryBase(id: string, parentTurnId: string | null = null): Pick<SessionEntry, "turnId" | "parentTurnId" | "timestamp"> {
+function entryBase(
+	id: string,
+	parentTurnId: string | null = null,
+): Pick<SessionEntry, "turnId" | "parentTurnId" | "timestamp"> {
 	return {
 		turnId: id,
 		parentTurnId,
@@ -28,7 +28,12 @@ function user(id: string, text: string, parentTurnId: string | null = null): Mes
 	};
 }
 
-function assistant(id: string, content: unknown[], parentTurnId: string | null = null, usageTokens = 100_000): MessageEntry {
+function assistant(
+	id: string,
+	content: unknown[],
+	parentTurnId: string | null = null,
+	usageTokens = 100_000,
+): MessageEntry {
 	return {
 		kind: "message",
 		...entryBase(id, parentTurnId),
@@ -154,7 +159,11 @@ describe("contracts/context compaction stages", () => {
 		ok(selectedIds.indexOf("02") >= 0, `expected matching tool_call to be retained, got ${selectedIds}`);
 		ok(selectedIds.indexOf("02") < selectedIds.indexOf("03"));
 
-		const replay = buildReplayAgentMessagesFromTurns(entries) as Array<{ role?: string; toolCallId?: string; content?: unknown }>;
+		const replay = buildReplayAgentMessagesFromTurns(entries) as Array<{
+			role?: string;
+			toolCallId?: string;
+			content?: unknown;
+		}>;
 		const callIndex = replay.findIndex(
 			(message) =>
 				message.role === "assistant" &&
@@ -163,9 +172,7 @@ describe("contracts/context compaction stages", () => {
 					(block) => !!block && typeof block === "object" && (block as { id?: unknown }).id === "call-1",
 				),
 		);
-		const resultIndex = replay.findIndex(
-			(message) => message.role === "toolResult" && message.toolCallId === "call-1",
-		);
+		const resultIndex = replay.findIndex((message) => message.role === "toolResult" && message.toolCallId === "call-1");
 		ok(callIndex >= 0 && resultIndex > callIndex, `callIndex=${callIndex} resultIndex=${resultIndex}`);
 	});
 
@@ -192,7 +199,9 @@ describe("contracts/context compaction stages", () => {
 		strictEqual(result.maskedDialogue, 1);
 
 		const maskedAssistant = result.entries[1] as MessageEntry;
-		const assistantPayload = maskedAssistant.payload as { content?: Array<{ type?: string; id?: string; text?: string }> };
+		const assistantPayload = maskedAssistant.payload as {
+			content?: Array<{ type?: string; id?: string; text?: string }>;
+		};
 		const content = assistantPayload.content ?? [];
 		ok(content.some((block) => block.type === "toolCall" && block.id === "call-1"));
 		ok(content.some((block) => block.type === "text" && block.text?.includes("Earlier assistant response masked")));

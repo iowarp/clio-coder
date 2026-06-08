@@ -465,7 +465,7 @@
       <div class="meta-grid">
         <div class="meta-badge">
           <span class="label">Release:</span>
-          <span class="value">v0.2.1-alpha</span>
+          <span class="value">v0.2.2-alpha</span>
         </div>
         <div class="meta-badge">
           <span class="label">Scope:</span>
@@ -478,20 +478,20 @@
       </div>
 
       <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('validator')">
-          <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <button type="button" class="tab-btn active" onclick="_switchTab('validator')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           JSON Schema Validator
         </button>
-        <button class="tab-btn" onclick="switchTab('assessor')">
-          <svg viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('assessor')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
           Authority Risk Assessor
         </button>
-        <button class="tab-btn" onclick="switchTab('tracker')">
-          <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('tracker')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
           Workflow Checklist
         </button>
-        <button class="tab-btn" onclick="switchTab('flowchart')">
-          <svg viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
           Evolution Lifecycle
         </button>
       </div>
@@ -502,7 +502,7 @@
       <div class="grid-2">
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
             Change Manifest JSON Editor
           </div>
           <div class="form-group">
@@ -510,14 +510,14 @@
             <textarea id="raw-json" class="code-area" oninput="validateJson()"></textarea>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <button class="btn btn-primary" onclick="loadSampleJson('valid')">Load Valid Manifest</button>
-            <button class="btn" onclick="loadSampleJson('invalid')">Load High-Risk Regress Missing</button>
+            <button type="button" class="btn btn-primary" onclick="loadSampleJson('valid')">Load Valid Manifest</button>
+            <button type="button" class="btn" onclick="loadSampleJson('invalid')">Load High-Risk Regress Missing</button>
           </div>
         </div>
 
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
             Manifest Audit Receipt
           </div>
           <div id="validator-status" class="status-panel success">
@@ -538,7 +538,7 @@
       <div class="grid-2">
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
             Select Change Characteristics
           </div>
 
@@ -584,7 +584,7 @@
 
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2"/></svg>
             Risk Assessment Metric
           </div>
 
@@ -611,13 +611,13 @@
     <div id="tracker" class="tab-pane">
       <div class="glass-card">
         <div class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
           Clio Coder Recommended Change Workflow
         </div>
         
         <div class="checklist">
           <div class="checklist-item" id="item-1">
-            <input type="checkbox" onchange="toggleCheckItem(1)">
+            <input type="checkbox" onchange="_toggleCheckItem(1)">
             <div class="checklist-item-text">
               <p class="checklist-title">1. Capture the Current Git Commit SHA</p>
               <p class="checklist-desc">Run <code style="font-family:var(--font-mono); color:var(--color-cyan)">git rev-parse HEAD</code> to reference the base state of the codebase before any harness modification.</p>
@@ -625,7 +625,7 @@
           </div>
 
           <div class="checklist-item" id="item-2">
-            <input type="checkbox" onchange="toggleCheckItem(2)">
+            <input type="checkbox" onchange="_toggleCheckItem(2)">
             <div class="checklist-item-text">
               <p class="checklist-title">2. Snapshot Component Integrity</p>
               <p class="checklist-desc">Save a component snapshot of key runtime schemas and prompt envelopes before making edits: <code style="font-family:var(--font-mono); color:var(--color-cyan)">clio components snapshot --out before.json</code>.</p>
@@ -633,7 +633,7 @@
           </div>
 
           <div class="checklist-item" id="item-3">
-            <input type="checkbox" onchange="toggleCheckItem(3)">
+            <input type="checkbox" onchange="_toggleCheckItem(3)">
             <div class="checklist-item-text">
               <p class="checklist-title">3. Draft the Change Manifest File</p>
               <p class="checklist-desc">Create <code style="font-family:var(--font-mono);">change-manifest.json</code> containing the targets, predicted regression classes, validation strategies, and authority declarations.</p>
@@ -641,15 +641,15 @@
           </div>
 
           <div class="checklist-item" id="item-4">
-            <input type="checkbox" onchange="toggleCheckItem(4)">
+            <input type="checkbox" onchange="_toggleCheckItem(4)">
             <div class="checklist-item-text">
               <p class="checklist-title">4. Execute Code Improvements & Validate</p>
-              <p class="checklist-desc">Write minimal modifications to targets/tools. Execute validation tests and generate test reports or receipts under `<dataDir>/evals/` or `<dataDir>/evidence/`.</p>
+              <p class="checklist-desc">Write minimal modifications to targets/tools. Execute validation tests and generate test reports or receipts under <code>&lt;dataDir&gt;/evals/</code> or <code>&lt;dataDir&gt;/evidence/</code>.</p>
             </div>
           </div>
 
           <div class="checklist-item" id="item-5">
-            <input type="checkbox" onchange="toggleCheckItem(5)">
+            <input type="checkbox" onchange="_toggleCheckItem(5)">
             <div class="checklist-item-text">
               <p class="checklist-title">5. Validate Manifest Conformity</p>
               <p class="checklist-desc">Run <code style="font-family:var(--font-mono); color:var(--color-cyan)">clio evolve manifest validate change-manifest.json</code> to ensure zero schema drift, and check that high-authority paths document regression hypotheses.</p>
@@ -657,7 +657,7 @@
           </div>
 
           <div class="checklist-item" id="item-6">
-            <input type="checkbox" onchange="toggleCheckItem(6)">
+            <input type="checkbox" onchange="_toggleCheckItem(6)">
             <div class="checklist-item-text">
               <p class="checklist-title">6. Promote Change or Rollback</p>
               <p class="checklist-desc">If tests pass and manifest validates, merge the changes. If not, follow the declared <code style="font-family:var(--font-mono)">rollbackPlan</code> to clean the branch back to the baseline SHA.</p>
@@ -671,11 +671,11 @@
     <div id="flowchart" class="tab-pane">
       <div class="glass-card">
         <div class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           Change Manifest Validation Flow
         </div>
         <div class="flowchart-container">
-          <svg width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
+          <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
@@ -748,9 +748,9 @@
   </div>
 
   <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    function _switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
       
       document.getElementById(tabId).classList.add('active');
       event.currentTarget.classList.add('active');
@@ -948,7 +948,7 @@
     }
 
     // Checklist
-    function toggleCheckItem(id) {
+    function _toggleCheckItem(id) {
       const item = document.getElementById(`item-${id}`);
       const checkbox = item.querySelector('input[type="checkbox"]');
       if (checkbox.checked) {
@@ -958,7 +958,7 @@
       }
     }
 
-    window.onload = function() {
+    window.onload = () => {
       loadSampleJson('valid');
       assessRisk();
     }

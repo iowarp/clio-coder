@@ -97,14 +97,20 @@ function reserveTurnBudget(options: ToolInvokeOptions | undefined): ReadTurnBudg
 function recordTurnBudget(reservation: ReadTurnBudgetReservation | null, text: string): number {
 	if (reservation === null) return outputBytes(text);
 	const bytes = outputBytes(text);
-	const state = readTurnBudgets.get(reservation.key) ?? { usedBytes: reservation.usedBeforeBytes, lastSeenAt: Date.now() };
+	const state = readTurnBudgets.get(reservation.key) ?? {
+		usedBytes: reservation.usedBeforeBytes,
+		lastSeenAt: Date.now(),
+	};
 	state.usedBytes += bytes;
 	state.lastSeenAt = Date.now();
 	readTurnBudgets.set(reservation.key, state);
 	return bytes;
 }
 
-function budgetDetails(reservation: ReadTurnBudgetReservation | null, shownBytes: number): Record<string, unknown> | null {
+function budgetDetails(
+	reservation: ReadTurnBudgetReservation | null,
+	shownBytes: number,
+): Record<string, unknown> | null {
 	if (reservation === null) return null;
 	return {
 		turnBudgetBytes: reservation.limitBytes,
@@ -193,8 +199,8 @@ export const readTool: ToolSpec = {
 					truncation.truncatedBy === "lines"
 						? `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`
 						: `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines} (${formatSize(
-							truncation.maxBytes,
-						)} limit). Use offset=${nextOffset} to continue.]`;
+								truncation.maxBytes,
+							)} limit). Use offset=${nextOffset} to continue.]`;
 				output += `\n\n${suffix}`;
 			} else if (limit !== null && startIndex + truncation.outputLines < totalLines) {
 				const nextOffset = startIndex + truncation.outputLines + 1;

@@ -591,7 +591,7 @@
       <div class="meta-grid">
         <div class="meta-badge">
           <span class="label">Product Version:</span>
-          <span class="value">0.2.1</span>
+          <span class="value">0.2.2</span>
         </div>
         <div class="meta-badge">
           <span class="label">Audit Scope:</span>
@@ -605,12 +605,12 @@
     </header>
 
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('playground')">
-        <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      <button type="button" class="tab-btn active" onclick="_switchTab('playground')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         Interactive Playground
       </button>
-      <button class="tab-btn" onclick="switchTab('flowcharts')">
-        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('flowcharts')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
         Safety Flowcharts
       </button>
     </div>
@@ -621,21 +621,21 @@
         <!-- Controls Column -->
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
             Sandbox Configuration
           </div>
 
           <div class="presets-container">
             <span class="label" style="display:block; width:100%; margin-bottom:0.25rem;">Preset Scenarios:</span>
-            <button class="preset-chip" onclick="loadPreset('npm-test')">npm test</button>
-            <button class="preset-chip" onclick="loadPreset('git-status')">git status</button>
-            <button class="preset-chip" onclick="loadPreset('rm-rf-root')">rm -rf /</button>
-            <button class="preset-chip" onclick="loadPreset('git-reset-hard')">git reset --hard</button>
-            <button class="preset-chip" onclick="loadPreset('write-env')">write .env</button>
-            <button class="preset-chip" onclick="loadPreset('git-restore-dot')">git restore .</button>
-            <button class="preset-chip" onclick="loadPreset('curl-sh')">curl | sh</button>
-            <button class="preset-chip" onclick="loadPreset('write-etc')">write /etc/hosts</button>
-            <button class="preset-chip" onclick="loadPreset('delete-by-id')">SQL DELETE by id</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('npm-test')">npm test</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('git-status')">git status</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('rm-rf-root')">rm -rf /</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('git-reset-hard')">git reset --hard</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('write-env')">write .env</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('git-restore-dot')">git restore .</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('curl-sh')">curl | sh</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('write-etc')">write /etc/hosts</button>
+            <button type="button" class="preset-chip" onclick="_loadPreset('delete-by-id')">SQL DELETE by id</button>
           </div>
 
           <div class="form-row">
@@ -711,13 +711,13 @@ commands:
         <!-- Output Column -->
         <div class="glass-card" style="display: flex; flex-direction: column;">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             Policy Engine Assessment
           </div>
 
           <div id="eval-result-badge" class="result-badge-container state-allow">
             <div class="badge-status" id="eval-status">
-              <svg viewBox="0 0 24 24" id="eval-status-icon"><path d="M9 12l2 2 4-4"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24" id="eval-status-icon"><path d="M9 12l2 2 4-4"/></svg>
               <span>ALLOW</span>
             </div>
             <div class="badge-inline" id="eval-source">builtin-command-allowlist</div>
@@ -726,7 +726,7 @@ commands:
           <div class="terminal-view">
             <div class="terminal-header">
               <span>Clio Safety Interceptor Log</span>
-              <span>v0.2.1</span>
+              <span>v0.2.2</span>
             </div>
             <div class="terminal-content" id="eval-terminal-log">
               Initializing...
@@ -765,7 +765,7 @@ commands:
       <!-- SVG 1: Action Classification -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
           1. Command / Action Classification Pipeline
         </h2>
         <p class="flow-desc">
@@ -773,7 +773,7 @@ commands:
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-dark)" />
@@ -832,7 +832,7 @@ commands:
       <!-- SVG 2: Default-Deny Boundaries -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           2. Default-Deny Safety Boundaries (Bash Decision Matrix)
         </h2>
         <p class="flow-desc">
@@ -840,7 +840,7 @@ commands:
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="850" height="360" viewBox="0 0 850 360">
+          <svg aria-hidden="true" class="svg-flow" width="850" height="360" viewBox="0 0 850 360">
             <rect x="0" y="0" width="850" height="360" rx="12" fill="rgba(255, 255, 255, 0.01)" stroke="rgba(255,255,255,0.03)" />
 
             <!-- Start Decision Node -->
@@ -914,7 +914,7 @@ commands:
       <!-- SVG 3: Elevation Matrix -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M9 11l3-3 3 3m-3-3v8m0-13a9 9 0 110 18 9 9 0 010-18z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11l3-3 3 3m-3-3v8m0-13a9 9 0 110 18 9 9 0 010-18z"/></svg>
           3. Mode Elevation Transitions
         </h2>
         <p class="flow-desc">
@@ -922,7 +922,7 @@ commands:
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
             <rect x="0" y="0" width="800" height="240" rx="12" fill="rgba(255, 255, 255, 0.01)" stroke="rgba(255,255,255,0.03)" />
 
             <!-- Advise Mode Node -->
@@ -957,7 +957,7 @@ commands:
     </div>
 
     <footer>
-      <p>Clio Coder Safety Dashboard &bull; Version 0.2.1</p>
+      <p>Clio Coder Safety Dashboard &bull; Version 0.2.2</p>
       <p style="margin-top: 0.5rem;">Interactive spec generated automatically for Clio Coder's Engineering Documentation.</p>
     </footer>
   </div>
@@ -1027,11 +1027,11 @@ commands:
     ];
 
     // Helper functions
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    function _switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
       
-      document.getElementById('pane-' + tabId).classList.add('active');
+      document.getElementById(`pane-${tabId}`).classList.add('active');
       event.currentTarget.classList.add('active');
     }
 
@@ -1053,7 +1053,7 @@ commands:
       runEvaluation();
     }
 
-    function loadPreset(presetId) {
+    function _loadPreset(presetId) {
       const toolEl = document.getElementById('config-tool');
       const cmdEl = document.getElementById('config-command');
       const fileEl = document.getElementById('config-filepath');
@@ -1103,9 +1103,9 @@ commands:
     function resolvePath(target, baseCwd) {
       let resolved = target.trim();
       if (resolved === '~') return '/home/akougkas';
-      if (resolved.startsWith('~/')) resolved = '/home/akougkas/' + resolved.slice(2);
+      if (resolved.startsWith('~/')) resolved = `/home/akougkas/${resolved.slice(2)}`;
       if (!resolved.startsWith('/') && baseCwd) {
-        resolved = baseCwd.replace(/\/$/, '') + '/' + resolved;
+        resolved = `${baseCwd.replace(/\/$/, '')}/${resolved}`;
       }
       // Collapse dots
       resolved = resolved.replace(/\/+/g, '/');
@@ -1116,7 +1116,7 @@ commands:
       const c = resolvePath(candidate);
       const p = resolvePath(parent);
       if (c === p) return true;
-      return c.startsWith(p + '/');
+      return c.startsWith(`${p}/`);
     }
 
     // Simplified YAML policy parser
@@ -1135,7 +1135,7 @@ commands:
       let currentKey = null;
       let currentCommand = null;
 
-      for (let line of lines) {
+      for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
 
@@ -1229,8 +1229,8 @@ commands:
           reasons.push(`write-path-home-escape: ${filePathStr}`);
         } else {
           let rootEsc = false;
-          for (let prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
-            if (targetAbs === prefix || targetAbs.startsWith(prefix + '/')) {
+          for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
+            if (targetAbs === prefix || targetAbs.startsWith(`${prefix}/`)) {
               actionClass = 'system_modify';
               reasons.push(`write-path-system-root: ${prefix}`);
               rootEsc = true;
@@ -1249,7 +1249,7 @@ commands:
         
         // Match regexes
         let gitDestructive = false;
-        for (let p of GIT_DESTRUCTIVE_PATTERNS) {
+        for (const p of GIT_DESTRUCTIVE_PATTERNS) {
           if (p.re.test(commandStr)) {
             actionClass = 'git_destructive';
             reasons.push(`pattern:${p.name}`);
@@ -1260,7 +1260,7 @@ commands:
 
         if (!gitDestructive) {
           let sysModify = false;
-          for (let p of SYSTEM_MODIFY_PATTERNS) {
+          for (const p of SYSTEM_MODIFY_PATTERNS) {
             if (p.re.test(commandStr)) {
               actionClass = 'system_modify';
               reasons.push(`pattern:${p.name}`);
@@ -1272,27 +1272,27 @@ commands:
           if (!sysModify) {
             // Parse write / delete targets inside command
             const cmdTargets = extractTargets(commandStr);
-            let writeMod = false;
-            for (let target of cmdTargets.writeTargets) {
+            let _writeMod = false;
+            for (const target of cmdTargets.writeTargets) {
               const targetAbs = resolvePath(target, resolvedCwd);
               if (target.startsWith('~')) {
                 actionClass = 'system_modify';
                 reasons.push(`bash-write-target-home-escape: ${target}`);
-                writeMod = true;
+                _writeMod = true;
                 break;
               }
-              for (let prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
-                if (targetAbs === prefix || targetAbs.startsWith(prefix + '/')) {
+              for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
+                if (targetAbs === prefix || targetAbs.startsWith(`${prefix}/`)) {
                   actionClass = 'system_modify';
                   reasons.push(`bash-write-target-system-root: ${target}`);
-                  writeMod = true;
+                  _writeMod = true;
                   break;
                 }
               }
               if (!isSameOrDescendant(targetAbs, workspaceRoot)) {
                 actionClass = 'system_modify';
                 reasons.push(`bash-write-target-outside-cwd: ${target}`);
-                writeMod = true;
+                _writeMod = true;
                 break;
               }
             }
@@ -1312,18 +1312,18 @@ commands:
       // 2. Decision Logic
       let decision = "allow";
       let reasonCode = "allowed";
-      let matchedRuleId = "";
+      let _matchedRuleId = "";
       const decisionReasons = [...reasons];
-      let logHtml = "";
+      let _logHtml = "";
 
-      logHtml += `[SYSTEM] Classifying tool call: tool=${tool}, actionClass=${actionClass}\n`;
+      _logHtml += `[SYSTEM] Classifying tool call: tool=${tool}, actionClass=${actionClass}\n`;
       if (reasons.length > 0) {
-        logHtml += `[CLASSIFY] Detections: ${reasons.join(', ')}\n`;
+        _logHtml += `[CLASSIFY] Detections: ${reasons.join(', ')}\n`;
       }
 
       // Check Mode limitations (Matrix gating)
       if (activeMode === 'advise') {
-        logHtml += `[MODE] Mode 'advise' allows only read/search tools.\n`;
+        _logHtml += `[MODE] Mode 'advise' allows only read/search tools.\n`;
         if (actionClass !== 'read') {
           decision = 'block';
           reasonCode = 'advise-mode-readonly';
@@ -1334,14 +1334,14 @@ commands:
       // Check Settings Safety Level Guidelines (simulate playground action response)
       if (decision !== 'block') {
         if (safetyLevel === 'suggest') {
-          logHtml += `[SAFETY] Safety level 'suggest' redirects all effectful actions to descriptions.\n`;
+          _logHtml += `[SAFETY] Safety level 'suggest' redirects all effectful actions to descriptions.\n`;
           if (actionClass !== 'read') {
             decision = 'suggest';
             reasonCode = 'safety-level-suggest';
             decisionReasons.push("Safety level 'suggest' is active. Describing action instead of executing.");
           }
         } else if (safetyLevel === 'auto-edit') {
-          logHtml += `[SAFETY] Safety level 'auto-edit' allows writes but gates execute actions.\n`;
+          _logHtml += `[SAFETY] Safety level 'auto-edit' allows writes but gates execute actions.\n`;
           if (actionClass === 'execute') {
             decision = 'ask';
             reasonCode = 'safety-level-auto-edit-gate';
@@ -1354,7 +1354,7 @@ commands:
       if (decision !== 'block' && decision !== 'suggest') {
         let dcMatch = null;
         const scan = tool === 'bash' ? commandStr : filePathStr;
-        for (let rule of DAMAGE_CONTROL_RULES) {
+        for (const rule of DAMAGE_CONTROL_RULES) {
           if (rule.pattern.test(scan)) {
             dcMatch = rule;
             break;
@@ -1362,8 +1362,8 @@ commands:
         }
 
         if (dcMatch) {
-          logHtml += `[DAMAGE-CONTROL] Matched damage-control rule: ${dcMatch.id} (${dcMatch.description})\n`;
-          matchedRuleId = dcMatch.id;
+          _logHtml += `[DAMAGE-CONTROL] Matched damage-control rule: ${dcMatch.id} (${dcMatch.description})\n`;
+          _matchedRuleId = dcMatch.id;
           
           if (dcMatch.block) {
             decision = 'block';
@@ -1375,7 +1375,7 @@ commands:
               reasonCode = `damage-control:${dcMatch.id}`;
               decisionReasons.push(`Damage-control rule '${dcMatch.id}' requires confirmation.`);
             } else {
-              logHtml += `[DAMAGE-CONTROL] Rule confirmed via Super mode.\n`;
+              _logHtml += `[DAMAGE-CONTROL] Rule confirmed via Super mode.\n`;
               decision = 'allow';
               reasonCode = `damage-control:${dcMatch.id}`;
               decisionReasons.push("Damage-control rule confirmed in super mode.");
@@ -1403,19 +1403,19 @@ commands:
         const targetPaths = [];
         if (tool === 'bash') {
           const cmdTargets = extractTargets(commandStr);
-          for (let t of cmdTargets.writeTargets) targetPaths.push({ op: 'write', path: t });
-          for (let t of cmdTargets.deleteTargets) targetPaths.push({ op: 'delete', path: t });
+          for (const t of cmdTargets.writeTargets) targetPaths.push({ op: 'write', path: t });
+          for (const t of cmdTargets.deleteTargets) targetPaths.push({ op: 'delete', path: t });
         } else if (tool === 'write' || tool === 'edit') {
           targetPaths.push({ op: 'write', path: filePathStr });
         } else if (tool === 'read') {
           targetPaths.push({ op: 'read', path: filePathStr });
         }
 
-        for (let target of targetPaths) {
+        for (const target of targetPaths) {
           const resolvedTarget = resolvePath(target.path, resolvedCwd);
           
           // Zero Access check
-          for (let p of mergedZeroAccess) {
+          for (const p of mergedZeroAccess) {
             if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
               decision = 'block';
               reasonCode = 'path-policy:zeroAccessPaths';
@@ -1427,7 +1427,7 @@ commands:
 
           // Read Only check
           if (target.op === 'write' || target.op === 'delete') {
-            for (let p of mergedReadOnly) {
+            for (const p of mergedReadOnly) {
               if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
                 decision = 'block';
                 reasonCode = 'path-policy:readOnlyPaths';
@@ -1440,7 +1440,7 @@ commands:
 
           // No Delete check
           if (target.op === 'delete') {
-            for (let p of mergedNoDelete) {
+            for (const p of mergedNoDelete) {
               if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
                 decision = 'block';
                 reasonCode = 'path-policy:noDeletePaths';
@@ -1456,13 +1456,13 @@ commands:
       // Check Default-Deny Bash validation
       if (decision !== 'block' && decision !== 'suggest' && tool === 'bash') {
         if (activeMode === 'super') {
-          logHtml += `[BASH] Bash allowed in 'super' mode.\n`;
+          _logHtml += `[BASH] Bash allowed in 'super' mode.\n`;
           decision = 'allow';
           reasonCode = 'super-allows-bash';
         } else {
           // Check matching project command
           let projMatch = null;
-          for (let cmd of projectPolicy.commands || []) {
+          for (const cmd of projectPolicy.commands || []) {
             if (cmd.command === commandStr && isSameOrDescendant(resolvedCwd, resolvePath(cmd.cwd || '.', workspaceRoot))) {
               projMatch = cmd;
               break;
@@ -1470,7 +1470,7 @@ commands:
           }
 
           if (projMatch) {
-            logHtml += `[BASH] Matched project safety policy command: '${projMatch.id}'\n`;
+            _logHtml += `[BASH] Matched project safety policy command: '${projMatch.id}'\n`;
             if (projMatch.requireConfirmation) {
               decision = 'ask';
               reasonCode = `project-policy:${projMatch.id}`;
@@ -1496,7 +1496,7 @@ commands:
               } else {
                 // Check built-in allowlist
                 let allowMatch = null;
-                for (let allow of BUILTIN_ALLOWLIST) {
+                for (const allow of BUILTIN_ALLOWLIST) {
                   if (allow.re.test(commandStr)) {
                     allowMatch = allow;
                     break;
@@ -1504,7 +1504,7 @@ commands:
                 }
 
                 if (allowMatch) {
-                  logHtml += `[BASH] Matched built-in default-deny command allowlist: ${allowMatch.id}\n`;
+                  _logHtml += `[BASH] Matched built-in default-deny command allowlist: ${allowMatch.id}\n`;
                   decision = 'allow';
                   reasonCode = allowMatch.id;
                   decisionReasons.push(`Matched built-in default-deny command allowlist '${allowMatch.id}'`);
@@ -1525,17 +1525,17 @@ commands:
       const sourceEl = document.getElementById('eval-source');
 
       badge.className = 'result-badge-container';
-      badge.classList.add('state-' + decision);
+      badge.classList.add(`state-${decision}`);
       
       let iconSvg = '';
       if (decision === 'allow') {
-        iconSvg = '<svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke="currentColor"/></svg>';
+        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke="currentColor"/></svg>';
       } else if (decision === 'ask') {
-        iconSvg = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor"/><line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor"/></svg>';
+        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor"/><line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor"/></svg>';
       } else if (decision === 'block') {
-        iconSvg = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="15" y1="9" x2="9" y2="15" stroke="currentColor"/><line x1="9" y1="9" x2="15" y2="15" stroke="currentColor"/></svg>';
+        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="15" y1="9" x2="9" y2="15" stroke="currentColor"/><line x1="9" y1="9" x2="15" y2="15" stroke="currentColor"/></svg>';
       } else {
-        iconSvg = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="currentColor"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor"/></svg>';
+        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="currentColor"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor"/></svg>';
       }
 
       statusEl.innerHTML = `${iconSvg}<span>${decision === 'suggest' ? 'SUGGEST' : decision}</span>`;
@@ -1575,8 +1575,8 @@ commands:
       if (decision === 'ask') {
         const btn = document.createElement('button');
         btn.className = 'btn btn-primary';
-        btn.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg> Confirm & Elevate Mode to Super`;
-        btn.onclick = function() {
+        btn.innerHTML = `<svg aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg> Confirm & Elevate Mode to Super`;
+        btn.onclick = () => {
           document.getElementById('config-mode').value = 'super';
           runEvaluation();
         };
@@ -1586,10 +1586,10 @@ commands:
       if (decision === 'block' && tool === 'bash') {
         const btn = document.createElement('button');
         btn.className = 'btn';
-        btn.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Add Command to Project Policy`;
-        btn.onclick = function() {
-          const cleanCmd = commandStr.replace(/'/g, "\\'");
-          const newPolicy = yamlPolicyText.trim() + `\n  - id: custom-allow-${Math.floor(Math.random()*1000)}\n    command: "${commandStr}"\n    cwd: .\n    requireConfirmation: false`;
+        btn.innerHTML = `<svg aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Add Command to Project Policy`;
+        btn.onclick = () => {
+          const _cleanCmd = commandStr.replace(/'/g, "\\'");
+          const newPolicy = `${yamlPolicyText.trim()}\n  - id: custom-allow-${Math.floor(Math.random()*1000)}\n    command: "${commandStr}"\n    cwd: .\n    requireConfirmation: false`;
           document.getElementById('config-project-policy').value = newPolicy;
           runEvaluation();
         };
