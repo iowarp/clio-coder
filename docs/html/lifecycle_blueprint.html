@@ -644,24 +644,24 @@ h1 {
 
     <!-- Navigation Tabs -->
     <nav class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('fs')">
-        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+      <button type="button" class="tab-btn active" onclick="_switchTab('fs')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
         Filesystem Map
       </button>
-      <button class="tab-btn" onclick="switchTab('install')">
-        <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('install')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
         Install & Bootstrap
       </button>
-      <button class="tab-btn" onclick="switchTab('upgrade')">
-        <svg viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('upgrade')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
         Upgrade & Migrations
       </button>
-      <button class="tab-btn" onclick="switchTab('uninstall')">
-        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('uninstall')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
         Uninstall & Reset
       </button>
-      <button class="tab-btn" onclick="switchTab('flows')">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('flows')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
         Sequence Flowcharts
       </button>
     </nav>
@@ -670,7 +670,7 @@ h1 {
     <div id="pane-fs" class="tab-pane active">
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
           Dynamic Path Resolver & Layout
         </h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
@@ -684,9 +684,9 @@ h1 {
             <div class="form-group">
               <label>Target Operating System</label>
               <div class="os-selector">
-                <button class="os-btn active" id="os-linux" onclick="setOS('linux')">Linux</button>
-                <button class="os-btn" id="os-darwin" onclick="setOS('darwin')">macOS</button>
-                <button class="os-btn" id="os-win32" onclick="setOS('win32')">Windows</button>
+                <button type="button" class="os-btn active" id="os-linux" onclick="_setOS('linux')">Linux</button>
+                <button type="button" class="os-btn" id="os-darwin" onclick="_setOS('darwin')">macOS</button>
+                <button type="button" class="os-btn" id="os-win32" onclick="_setOS('win32')">Windows</button>
               </div>
             </div>
             
@@ -743,7 +743,7 @@ h1 {
       <!-- File Structure Visualizer -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0-2-.9-2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0-2-.9-2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
           Resolved File System Structure
         </h2>
         <p style="margin-bottom: 1.25rem; color: var(--text-muted);">
@@ -754,14 +754,14 @@ h1 {
           <!-- CONFIG ROOT -->
           <div class="tree-node tree-root">
             <div class="tree-item" title="Config Root: Stores persistent global options and authentications">
-              <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
               <span id="tree-root-config">/home/user/.config/clio</span>
               <span class="node-desc">Config Root</span>
             </div>
             
             <div class="tree-node">
               <div class="tree-item" title="settings.yaml: Holds targets specifications, preferred model orchestrator/workers, keybindings, and compaction policies. Read-write. Mode: 0o644">
-                <svg class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                 <span>settings.yaml</span>
                 <span class="badge badge-primary">Mode: 0o644</span>
                 <span class="node-desc">Target configs & default models</span>
@@ -770,7 +770,7 @@ h1 {
             
             <div class="tree-node">
               <div class="tree-item" title="credentials.yaml: Contains sensitive API tokens. Created during bootstrap, managed via clio auth. Mode: 0o600">
-                <svg class="tree-icon icon-file-secret" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-file-secret" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
                 <span>credentials.yaml</span>
                 <span class="badge badge-danger">Mode: 0o600</span>
                 <span class="node-desc">API Keys / Secrets</span>
@@ -779,7 +779,7 @@ h1 {
             
             <div class="tree-node">
               <div class="tree-item" title="credentials.yaml.lock: Acquired during credentials read/write to prevent concurrent process collisions. Auto-cleans.">
-                <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-2 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3-7H9V7.5C9 5.8 10.3 4.5 12 4.5c1.7 0 3 1.3 3 3V9z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-2 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3-7H9V7.5C9 5.8 10.3 4.5 12 4.5c1.7 0 3 1.3 3 3V9z"/></svg>
                 <span>credentials.yaml.lock</span>
                 <span class="node-desc">Lockfile (transient)</span>
               </div>
@@ -789,14 +789,14 @@ h1 {
           <!-- DATA ROOT -->
           <div class="tree-node tree-root" style="margin-top: 1rem;">
             <div class="tree-item" title="Data Root: Houses sessions logs, audit trails, and compiled model memories.">
-              <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
               <span id="tree-root-data">/home/user/.local/share/clio</span>
               <span class="node-desc">Data Root</span>
             </div>
             
             <div class="tree-node">
               <div class="tree-item" title="install.json: Written on init. Detects environment version drifts (version, date, platform, node version).">
-                <svg class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                 <span>install.json</span>
                 <span class="node-desc">Install info metadata</span>
               </div>
@@ -805,12 +805,12 @@ h1 {
             <!-- STATE -->
             <div class="tree-node">
               <div class="tree-item" title="state/: Directory storing global state details such as migration records.">
-                <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                 <span>state</span>
               </div>
               <div class="tree-node">
                 <div class="tree-item" title="migrations.json: Tracks applied database/state schema migrations (e.g. YYYY-MM-DD-initial).">
-                  <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                   <span>migrations.json</span>
                   <span class="node-desc">Applied migrations record</span>
                 </div>
@@ -820,12 +820,12 @@ h1 {
             <!-- AUDIT -->
             <div class="tree-node">
               <div class="tree-item" title="audit/: Contains daily logs of tool executions, mode adjustments, and cancellations.">
-                <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                 <span>audit</span>
               </div>
               <div class="tree-node">
                 <div class="tree-item" title="YYYY-MM-DD.jsonl: Fsynced line-by-line. Redacts secrets/tokens to audit tool activities safely.">
-                  <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                   <span>2026-06-06.jsonl</span>
                   <span class="node-desc">Daily safety audit log</span>
                 </div>
@@ -835,41 +835,41 @@ h1 {
             <!-- SESSIONS -->
             <div class="tree-node">
               <div class="tree-item" title="sessions/: Houses durable conversation trees, user questions, and model outputs.">
-                <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                 <span>sessions</span>
               </div>
               
               <div class="tree-node">
                 <div class="tree-item" title="&lt;cwdHash&gt;/: First 16 chars of repository path's SHA-256. Organizes sessions by checkout folder.">
-                  <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                  <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                   <span>9f86d081884c7d65</span>
                   <span class="node-desc">Repo Path Hash</span>
                 </div>
                 
                 <div class="tree-node">
                   <div class="tree-item" title="&lt;sessionId&gt;/: Unique UUID directory representing a single durable conversation session.">
-                    <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                    <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                     <span>b44d2d48-6a56-42d4</span>
                     <span class="node-desc">Session ID</span>
                   </div>
                   
                   <div class="tree-node">
                     <div class="tree-item" title="meta.json: Holds session information, compiler prompt structures, and date markers.">
-                      <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                       <span>meta.json</span>
                       <span class="node-desc">Session configuration & timestamps</span>
                     </div>
                   </div>
                   <div class="tree-node">
                     <div class="tree-item" title="current.jsonl: Line-by-line append-only transcript of conversation turns and tool exchanges.">
-                      <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                       <span>current.jsonl</span>
                       <span class="node-desc">Conversation turn logs</span>
                     </div>
                   </div>
                   <div class="tree-node">
                     <div class="tree-item" title="tree.json: Flat map tracking message/turn indices, forks, and parent-child linkages.">
-                      <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                       <span>tree.json</span>
                       <span class="node-desc">Turn fork hierarchy tree</span>
                     </div>
@@ -881,19 +881,19 @@ h1 {
             <!-- EVIDENCE -->
             <div class="tree-node">
               <div class="tree-item" title="evidence/: Compiled folders analyzing past runs, errors, tool calls, and execution findings.">
-                <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                 <span>evidence</span>
               </div>
               <div class="tree-node">
                 <div class="tree-item" title="run-&lt;runId&gt;/: Evidence directory analyzing a specific run. Contains full debug assets.">
-                  <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                  <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                   <span>run-a9b8c7d6/</span>
                 </div>
                 <div class="tree-node" style="margin-left: 3rem;">
-                  <div class="tree-item" title="overview.json: Static metadata mapping models, run times, and included artifacts."><svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>overview.json</span></div>
-                  <div class="tree-item" title="findings.json: Machine-readable collection of warnings, errors, or anomalies in the run."><svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>findings.json</span></div>
-                  <div class="tree-item" title="transcript.md: Formatted conversation trace for user review."><svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>transcript.md</span></div>
-                  <div class="tree-item" title="receipt.json: Token billing and tool integrity receipts."><svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>receipt.json</span></div>
+                  <div class="tree-item" title="overview.json: Static metadata mapping models, run times, and included artifacts."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>overview.json</span></div>
+                  <div class="tree-item" title="findings.json: Machine-readable collection of warnings, errors, or anomalies in the run."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>findings.json</span></div>
+                  <div class="tree-item" title="transcript.md: Formatted conversation trace for user review."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>transcript.md</span></div>
+                  <div class="tree-item" title="receipt.json: Token billing and tool integrity receipts."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>receipt.json</span></div>
                 </div>
               </div>
             </div>
@@ -901,12 +901,12 @@ h1 {
             <!-- MEMORY -->
             <div class="tree-node">
               <div class="tree-item" title="memory/: Stores agent lessons and instructions linked to past evidence.">
-                <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                 <span>memory</span>
               </div>
               <div class="tree-node">
                 <div class="tree-item" title="records.json: Holds up to 500 proposed/approved/rejected lessons. Used for prompt injects.">
-                  <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                   <span>records.json</span>
                   <span class="node-desc">Long-term memory store</span>
                 </div>
@@ -915,29 +915,29 @@ h1 {
             
             <!-- OTHER STATIC DATA DIRS -->
             <div class="tree-node">
-              <div class="tree-item" title="agents/: Extension agent descriptors."><svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>agents</span><span class="node-desc">Custom Agent Profiles</span></div>
+              <div class="tree-item" title="agents/: Extension agent descriptors."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>agents</span><span class="node-desc">Custom Agent Profiles</span></div>
             </div>
             <div class="tree-node">
-              <div class="tree-item" title="prompts/: Custom prompt structures."><svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>prompts</span><span class="node-desc">Prompt Templates</span></div>
+              <div class="tree-item" title="prompts/: Custom prompt structures."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>prompts</span><span class="node-desc">Prompt Templates</span></div>
             </div>
             <div class="tree-node">
-              <div class="tree-item" title="receipts/: Session run validation receipts."><svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>receipts</span><span class="node-desc">Validation Receipts</span></div>
+              <div class="tree-item" title="receipts/: Session run validation receipts."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>receipts</span><span class="node-desc">Validation Receipts</span></div>
             </div>
             <div class="tree-node">
-              <div class="tree-item" title="evals/: Evaluation benchmarks run histories."><svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>evals</span><span class="node-desc">Evaluation Reports</span></div>
+              <div class="tree-item" title="evals/: Evaluation benchmarks run histories."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>evals</span><span class="node-desc">Evaluation Reports</span></div>
             </div>
           </div>
           
           <!-- CACHE ROOT -->
           <div class="tree-node tree-root" style="margin-top: 1rem;">
             <div class="tree-item" title="Cache Root: Stores ephemeral information (model list capabilities caches).">
-              <svg class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
               <span id="tree-root-cache">/home/user/.cache/clio</span>
               <span class="node-desc">Cache Root</span>
             </div>
             <div class="tree-node">
               <div class="tree-item" title="Bootstrapped folder for ephemeral cache needs. Cleared completely during resets.">
-                <svg class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
+                <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
                 <span>.gitkeep</span>
                 <span class="node-desc">Placeholder</span>
               </div>
@@ -953,7 +953,7 @@ h1 {
         <!-- Installation Methods -->
         <div class="glass-card">
           <h2 class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>
             Installation Methods
           </h2>
           <div style="display: flex; flex-direction: column; gap: 1.5rem;">
@@ -986,7 +986,7 @@ npm link</code></pre>
         <!-- Home Initialization -->
         <div class="glass-card">
           <h2 class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
             First-Run Bootstrap (`initializeClioHome`)
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -1028,7 +1028,7 @@ npm link</code></pre>
       <!-- Doctor / Diagnostics -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
           Diagnostic Checks (`clio doctor`)
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
@@ -1078,7 +1078,7 @@ npm link</code></pre>
     <div id="pane-upgrade" class="tab-pane">
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
           Upgrade Mechanism (`clio upgrade`)
         </h2>
         <p style="font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1.5rem;">
@@ -1113,7 +1113,7 @@ clio doctor --fix</code></pre>
       <!-- State Migrations -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M19 15v4H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-4h-2zM6 10l1.41 1.41L11 7.83V16h2V7.83l3.58 3.59L18 10l-6-6-6 6z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 15v4H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-4h-2zM6 10l1.41 1.41L11 7.83V16h2V7.83l3.58 3.59L18 10l-6-6-6 6z"/></svg>
           Durable State Migrations
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
@@ -1152,7 +1152,7 @@ clio doctor --fix</code></pre>
         <!-- Uninstallation -->
         <div class="glass-card">
           <h2 class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
             Clean Uninstallation (`clio uninstall`)
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -1189,7 +1189,7 @@ clio uninstall --keep-config --force</code></pre>
         <!-- System Reset -->
         <div class="glass-card">
           <h2 class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
             Selective Reset Wipes (`clio reset`)
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -1233,7 +1233,7 @@ clio uninstall --keep-config --force</code></pre>
       <!-- Leftovers list -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
           System Clean Up & Leftover Checklist
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
@@ -1282,7 +1282,7 @@ clio uninstall --keep-config --force</code></pre>
       <!-- Bootstrap Sequence Flowchart -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
           Initialization & Bootstrap Execution Flow
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -1290,7 +1290,7 @@ clio uninstall --keep-config --force</code></pre>
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
             <!-- Definitions -->
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1330,7 +1330,7 @@ clio uninstall --keep-config --force</code></pre>
       <!-- Upgrade Flowchart -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
           Upgrade Command Execution Sequence (`clio upgrade`)
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -1338,7 +1338,7 @@ clio uninstall --keep-config --force</code></pre>
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="280" viewBox="0 0 800 280">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="280" viewBox="0 0 800 280">
             <!-- Flow lines -->
             <path d="M 110 90 L 162 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
             <path d="M 290 90 L 342 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -1404,12 +1404,12 @@ clio uninstall --keep-config --force</code></pre>
   <script>
     let currentOS = 'linux';
 
-    function setOS(os) {
+    function _setOS(os) {
       document.getElementById('os-linux').classList.remove('active');
       document.getElementById('os-darwin').classList.remove('active');
       document.getElementById('os-win32').classList.remove('active');
       
-      document.getElementById('os-' + os).classList.add('active');
+      document.getElementById(`os-${os}`).classList.add('active');
       currentOS = os;
       updateSimulation();
     }
@@ -1420,7 +1420,7 @@ clio uninstall --keep-config --force</code></pre>
       const dataOverride = document.getElementById('env-clio-data').value.trim();
       const cacheOverride = document.getElementById('env-clio-cache').value.trim();
 
-      let defaultPaths = {
+      const defaultPaths = {
         linux: {
           config: "~/.config/clio",
           data: "~/.local/share/clio",
@@ -1441,7 +1441,7 @@ clio uninstall --keep-config --force</code></pre>
         }
       }[currentOS];
 
-      let resolved = {
+      const resolved = {
         config: defaultPaths.config,
         data: defaultPaths.data,
         cache: defaultPaths.cache
@@ -1450,8 +1450,8 @@ clio uninstall --keep-config --force</code></pre>
       // Handle CLIO_HOME override
       if (clioHome) {
         resolved.config = clioHome;
-        resolved.data = clioHome + defaultPaths.separator + "data";
-        resolved.cache = clioHome + defaultPaths.separator + "cache";
+        resolved.data = `${clioHome + defaultPaths.separator}data`;
+        resolved.cache = `${clioHome + defaultPaths.separator}cache`;
       }
 
       // Handle individual overrides (which take precedence)
@@ -1470,17 +1470,17 @@ clio uninstall --keep-config --force</code></pre>
       document.getElementById('tree-root-cache').innerText = resolved.cache;
     }
 
-    function switchTab(tabId) {
+    function _switchTab(tabId) {
       // Hide all panes
       const panes = document.querySelectorAll('.tab-pane');
-      panes.forEach(pane => pane.classList.remove('active'));
+      panes.forEach(pane => { pane.classList.remove('active'); });
       
       // Deactivate all buttons
       const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => btn.classList.remove('active'));
+      buttons.forEach(btn => { btn.classList.remove('active'); });
 
       // Show target pane
-      document.getElementById('pane-' + tabId).classList.add('active');
+      document.getElementById(`pane-${tabId}`).classList.add('active');
 
       // Find trigger and activate it
       event.currentTarget.classList.add('active');

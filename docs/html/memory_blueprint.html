@@ -724,7 +724,7 @@
       </div>
       <h1>Evidence & Memory Blueprint</h1>
       <div>
-        <span class="version-stamp">Clio Coder v0.2.1</span>
+        <span class="version-stamp">Clio Coder v0.2.2</span>
         <span class="version-stamp" style="color: var(--text-muted);">Generated: 2026-06-06</span>
       </div>
       <p class="subtitle">
@@ -734,16 +734,16 @@
 
     <!-- Navigation Tabs -->
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab(event, 'arch-pane')">
-        <svg viewBox="0 0 24 24"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h12c.5 0 1 .2 1.4.6.4.4.6.9.6 1.4v18l-5-4-5 4-5-4-5 4z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <button type="button" class="tab-btn active" onclick="_switchTab(event, 'arch-pane')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h12c.5 0 1 .2 1.4.6.4.4.6.9.6 1.4v18l-5-4-5 4-5-4-5 4z" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Architecture & Diagrams
       </button>
-      <button class="tab-btn" onclick="switchTab(event, 'simulator-pane')">
-        <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab(event, 'simulator-pane')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Memory Proposal Simulator
       </button>
-      <button class="tab-btn" onclick="switchTab(event, 'prompt-pane')">
-        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab(event, 'prompt-pane')">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Prompt Injection Lab
       </button>
     </div>
@@ -754,7 +754,7 @@
       <!-- Directory Layout Section -->
       <div class="glass-card">
         <div class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Evidence Directory Structure
         </div>
         <p class="subtitle" style="margin: 0 0 1.5rem 0; text-align: left; max-width: 100%;">
@@ -762,7 +762,7 @@
         </p>
 
         <div class="svg-container">
-          <svg class="svg-diagram" width="850" height="420" viewBox="0 0 850 420">
+          <svg aria-hidden="true" class="svg-diagram" width="850" height="420" viewBox="0 0 850 420">
             <!-- Definitions for gradients and shadows -->
             <defs>
               <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -796,7 +796,7 @@
             </g>
 
             <!-- File: overview.json -->
-            <g class="svg-node" transform="translate(220, 95)" onclick="showArchDetail('overview')">
+            <g class="svg-node" transform="translate(220, 95)" onclick="_showArchDetail('overview')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">overview.json</text>
               <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Metadata</text>
@@ -804,7 +804,7 @@
             </g>
 
             <!-- File: findings.json / findings.md -->
-            <g class="svg-node" transform="translate(220, 145)" onclick="showArchDetail('findings')">
+            <g class="svg-node" transform="translate(220, 145)" onclick="_showArchDetail('findings')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">findings.json/.md</text>
               <text x="140" y="27" fill="var(--color-warn)" font-family="var(--font-sans)" font-size="10">Findings</text>
@@ -812,7 +812,7 @@
             </g>
 
             <!-- File: transcript.md -->
-            <g class="svg-node" transform="translate(220, 195)" onclick="showArchDetail('transcript')">
+            <g class="svg-node" transform="translate(220, 195)" onclick="_showArchDetail('transcript')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">transcript.md</text>
               <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">History</text>
@@ -820,7 +820,7 @@
             </g>
 
             <!-- File: receipt.json -->
-            <g class="svg-node" transform="translate(220, 245)" onclick="showArchDetail('receipt')">
+            <g class="svg-node" transform="translate(220, 245)" onclick="_showArchDetail('receipt')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="12">receipt.json</text>
               <text x="140" y="27" fill="var(--color-accent)" font-family="var(--font-sans)" font-size="10">Receipts</text>
@@ -828,7 +828,7 @@
             </g>
 
             <!-- File: trace.cleaned.jsonl -->
-            <g class="svg-node" transform="translate(220, 295)" onclick="showArchDetail('trace')">
+            <g class="svg-node" transform="translate(220, 295)" onclick="_showArchDetail('trace')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="11">trace.cleaned.jsonl</text>
               <text x="140" y="27" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Telemetry</text>
@@ -836,7 +836,7 @@
             </g>
 
             <!-- File: protected-artifacts.json -->
-            <g class="svg-node" transform="translate(220, 345)" onclick="showArchDetail('protected')">
+            <g class="svg-node" transform="translate(220, 345)" onclick="_showArchDetail('protected')">
               <rect x="0" y="0" width="180" height="46" rx="6" fill="rgba(17, 24, 39, 0.85)" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
               <text x="15" y="27" fill="var(--text-main)" font-family="var(--font-mono)" font-size="11">protected-artifacts</text>
               <text x="140" y="27" fill="var(--color-danger)" font-family="var(--font-sans)" font-size="10">Safety</text>
@@ -862,7 +862,7 @@
       <!-- State Machine Section -->
       <div class="glass-card">
         <div class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Memory Record Lifecycle State Machine
         </div>
         <p class="subtitle" style="margin: 0 0 1.5rem 0; text-align: left; max-width: 100%;">
@@ -870,7 +870,7 @@
         </p>
 
         <div class="svg-container">
-          <svg class="svg-diagram" width="850" height="300" viewBox="0 0 850 300">
+          <svg aria-hidden="true" class="svg-diagram" width="850" height="300" viewBox="0 0 850 300">
             <!-- Markers for arrows -->
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -965,7 +965,7 @@
         <div class="control-panel">
           <div class="glass-card" style="padding: 1.25rem;">
             <div class="card-title" style="margin-bottom: 0.75rem; font-size: 1.05rem;">
-              <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               1. Simulated Evidence
             </div>
 
@@ -977,7 +977,7 @@
 
             <div class="form-group">
               <label for="sim-source-kind">Source Kind</label>
-              <select id="sim-source-kind" onchange="onSourceKindChange()">
+              <select id="sim-source-kind" onchange="_onSourceKindChange()">
                 <option value="run">Run</option>
                 <option value="session">Session</option>
                 <option value="eval" selected>Eval</option>
@@ -1016,23 +1016,23 @@
               </div>
             </div>
 
-            <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" onclick="proposeMemoryFromSimulatedEvidence()">
+            <button type="button" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" onclick="_proposeMemoryFromSimulatedEvidence()">
               Propose Memory Record
             </button>
           </div>
 
           <div class="glass-card" style="padding: 1.25rem;">
             <div class="card-title" style="margin-bottom: 0.75rem; font-size: 1.05rem;">
-              <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Playground Helpers
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-              <button class="btn btn-secondary btn-sm" onclick="addMockRecords(10)">+10 Mock</button>
-              <button class="btn btn-secondary btn-sm" onclick="addMockRecords(100)">+100 Mock</button>
-              <button class="btn btn-secondary btn-sm" onclick="fillToLimit()">Fill to 500</button>
-              <button class="btn btn-danger btn-sm" onclick="clearMemoryStore()">Clear Store</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addMockRecords(10)">+10 Mock</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addMockRecords(100)">+100 Mock</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="_fillToLimit()">Fill to 500</button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="_clearMemoryStore()">Clear Store</button>
             </div>
-            <button class="btn btn-secondary btn-sm" style="width: 100%; margin-top: 0.5rem;" onclick="resetToDefaultMocks()">
+            <button type="button" class="btn btn-secondary btn-sm" style="width: 100%; margin-top: 0.5rem;" onclick="resetToDefaultMocks()">
               Reset to Default Examples
             </button>
           </div>
@@ -1071,12 +1071,12 @@
               </div>
               <div class="flex-gap-2">
                 <label for="prune-date-offset" style="margin: 0;">Simulated Date:</label>
-                <select id="prune-date-offset" onchange="updateSimulatedDateDisplay()">
+                <select id="prune-date-offset" onchange="_updateSimulatedDateDisplay()">
                   <option value="0">Today (2026-06-06)</option>
                   <option value="35">Today + 35 Days (Triggers 30d Unapproved stale)</option>
                   <option value="190">Today + 190 Days (Triggers 180d Approved stale)</option>
                 </select>
-                <button class="btn btn-warn btn-sm" onclick="runSimulationPruning()">Prune Stale</button>
+                <button type="button" class="btn btn-warn btn-sm" onclick="_runSimulationPruning()">Prune Stale</button>
               </div>
             </div>
             <div style="font-size: 0.75rem; color: var(--text-dark); margin-top: 0.5rem; font-family: var(--font-mono);" id="sim-date-string">
@@ -1087,7 +1087,7 @@
           <!-- Records List Container -->
           <div class="glass-card" style="flex-grow: 1;">
             <div class="card-title">
-              <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Memory records.json Store
             </div>
             
@@ -1109,7 +1109,7 @@
         <div class="control-panel">
           <div class="glass-card">
             <div class="card-title">
-              <svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Retrieval Filters
             </div>
 
@@ -1155,7 +1155,7 @@
           <!-- Live metrics and warnings -->
           <div class="glass-card" style="margin-bottom: 0;">
             <div class="card-title">
-              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Prompt Injection & Security Threat Analyzer
             </div>
 
@@ -1180,7 +1180,7 @@
           <div class="glass-card" style="flex-grow: 1;">
             <div class="flex-between" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.75rem; margin-bottom: 1rem;">
               <div class="card-title" style="border: 0; padding: 0; margin: 0;">
-                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 Rendered chat-loop prompt section
               </div>
               <div class="flex-gap-2">
@@ -1227,7 +1227,7 @@
       "auth-failure", "cwd-missing", "destructive-cleanup", "unknown"
     ];
 
-    const MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"];
+    const _MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"];
 
     // Simulated memory store database
     let memoryStore = [];
@@ -1250,16 +1250,16 @@
     });
 
     // Tab switcher
-    function switchTab(event, paneId) {
-      document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
-      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+    function _switchTab(event, paneId) {
+      document.querySelectorAll(".tab-pane").forEach(pane => { pane.classList.remove("active"); });
+      document.querySelectorAll(".tab-btn").forEach(btn => { btn.classList.remove("active"); });
       
       document.getElementById(paneId).classList.add("active");
       event.currentTarget.classList.add("active");
     }
 
     // Detail Panel triggers in Architecture tab
-    function showArchDetail(fileKey) {
+    function _showArchDetail(fileKey) {
       const title = document.getElementById("detail-title");
       const body = document.getElementById("detail-body");
 
@@ -1345,24 +1345,24 @@
     }
 
     // Update simulation date display
-    function updateSimulatedDateDisplay() {
+    function _updateSimulatedDateDisplay() {
       const select = document.getElementById("prune-date-offset");
       simulatedDateOffsetDays = parseInt(select.value, 10);
       const date = getSimulatedDate();
       const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-      document.getElementById("sim-date-string").textContent = "Current Simulation Date: " + date.toLocaleDateString("en-US", options);
+      document.getElementById("sim-date-string").textContent = `Current Simulation Date: ${date.toLocaleDateString("en-US", options)}`;
     }
 
     // Source kind selector change handler
-    function onSourceKindChange() {
+    function _onSourceKindChange() {
       const kind = document.getElementById("sim-source-kind").value;
       const evidenceInput = document.getElementById("sim-evidence-id");
       if (kind === "run") {
-        evidenceInput.value = "run-" + Math.random().toString(16).slice(2, 10);
+        evidenceInput.value = `run-${Math.random().toString(16).slice(2, 10)}`;
       } else if (kind === "session") {
-        evidenceInput.value = "session-" + Math.random().toString(16).slice(2, 10);
+        evidenceInput.value = `session-${Math.random().toString(16).slice(2, 10)}`;
       } else {
-        evidenceInput.value = "eval-" + Math.random().toString(16).slice(2, 10);
+        evidenceInput.value = `eval-${Math.random().toString(16).slice(2, 10)}`;
       }
     }
 
@@ -1372,11 +1372,11 @@
       const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      return "mem-" + hashHex.slice(0, 16);
+      return `mem-${hashHex.slice(0, 16)}`;
     }
 
     // Propose memory record logic
-    async function proposeMemoryFromSimulatedEvidence() {
+    async function _proposeMemoryFromSimulatedEvidence() {
       const evidenceId = document.getElementById("sim-evidence-id").value.trim();
       const kind = document.getElementById("sim-source-kind").value;
       const task = document.getElementById("sim-task").value.trim();
@@ -1466,7 +1466,7 @@
 
       // Truncate lesson to 240 chars
       if (lessonText.length > 240) {
-        lessonText = lessonText.slice(0, 237) + "...";
+        lessonText = `${lessonText.slice(0, 237)}...`;
       }
 
       // appliesWhen / avoidWhen
@@ -1516,7 +1516,7 @@
     }
 
     // Approve a record in memory store
-    function approveRecord(id) {
+    function _approveRecord(id) {
       const record = memoryStore.find(item => item.id === id);
       if (record) {
         record.approved = true;
@@ -1529,7 +1529,7 @@
     }
 
     // Reject a record in memory store
-    function rejectRecord(id) {
+    function _rejectRecord(id) {
       const record = memoryStore.find(item => item.id === id);
       if (record) {
         record.approved = false;
@@ -1541,7 +1541,7 @@
     }
 
     // Add regression to record
-    function addRegression(id) {
+    function _addRegression(id) {
       const record = memoryStore.find(item => item.id === id);
       if (record) {
         if (!record.regressions) record.regressions = [];
@@ -1556,7 +1556,7 @@
     }
 
     // Delete record completely
-    function deleteRecord(id) {
+    function _deleteRecord(id) {
       memoryStore = memoryStore.filter(item => item.id !== id);
       updateStoreView();
       triggerPromptSectionRebuild();
@@ -1564,7 +1564,7 @@
     }
 
     // Prune stale records logic simulation
-    function runSimulationPruning() {
+    function _runSimulationPruning() {
       const now = getSimulatedDate();
       const nowMs = now.getTime();
       
@@ -1650,13 +1650,13 @@
         // Action buttons based on status
         let actionButtons = "";
         if (!record.approved) {
-          actionButtons += `<button class="btn btn-accent btn-sm" onclick="approveRecord('${record.id}')">Approve</button>`;
+          actionButtons += `<button type="button" class="btn btn-accent btn-sm" onclick="_approveRecord('${record.id}')">Approve</button>`;
         }
         if (record.approved || !record.rejectedAt) {
-          actionButtons += `<button class="btn btn-danger btn-sm" onclick="rejectRecord('${record.id}')">Reject</button>`;
+          actionButtons += `<button type="button" class="btn btn-danger btn-sm" onclick="_rejectRecord('${record.id}')">Reject</button>`;
         }
-        actionButtons += `<button class="btn btn-secondary btn-sm" onclick="addRegression('${record.id}')">Add Regression</button>`;
-        actionButtons += `<button class="btn btn-secondary btn-sm" onclick="deleteRecord('${record.id}')">Delete</button>`;
+        actionButtons += `<button type="button" class="btn btn-secondary btn-sm" onclick="_addRegression('${record.id}')">Add Regression</button>`;
+        actionButtons += `<button type="button" class="btn btn-secondary btn-sm" onclick="_deleteRecord('${record.id}')">Delete</button>`;
 
         // Build applies/avoid lists string
         const appliesStr = record.appliesWhen.join(" | ");
@@ -1767,13 +1767,13 @@
       }
 
       const countToAdd = Math.min(count, MEMORY_STORE_MAX_RECORDS - memoryStore.length);
-      const kinds = ["run", "session", "eval"];
+      const _kinds = ["run", "session", "eval"];
       const scopes = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"];
 
       for (let i = 0; i < countToAdd; i++) {
         const randId = Math.random().toString(16).slice(2, 10);
         const evidenceId = `run-mock-${randId}`;
-        const memId = "mem-" + Math.random().toString(16).slice(2, 10).padStart(16, '0');
+        const memId = `mem-${Math.random().toString(16).slice(2, 10).padStart(16, '0')}`;
         const scope = scopes[Math.floor(Math.random() * scopes.length)];
         
         memoryStore.push({
@@ -1797,7 +1797,7 @@
     }
 
     // Playground helper: fill to limit
-    function fillToLimit() {
+    function _fillToLimit() {
       const current = memoryStore.length;
       if (current >= MEMORY_STORE_MAX_RECORDS) {
         showSimAlert("Store is already full.", "warn");
@@ -1807,7 +1807,7 @@
     }
 
     // Playground helper: clear store
-    function clearMemoryStore() {
+    function _clearMemoryStore() {
       memoryStore = [];
       updateStoreView();
       triggerPromptSectionRebuild();
@@ -1893,7 +1893,7 @@
         return;
       }
 
-      let lines = [
+      const lines = [
         "# Memory",
         "",
         "Approved long-term memory records that may apply. Each lesson is gated by human approval and cited evidence; do not extrapolate beyond the cited findings.",
@@ -1950,7 +1950,7 @@
         { pattern: /`{3,}/, name: "Codeblock Boundaries Injection", severity: "suspicious" }
       ];
 
-      let matchingThreats = [];
+      const matchingThreats = [];
       let maxSeverity = "safe";
 
       for (const vector of threatVectors) {

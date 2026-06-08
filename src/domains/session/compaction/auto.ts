@@ -71,10 +71,7 @@ export function normalizeContextCompactionThresholds(
 	};
 }
 
-function stageThreshold(
-	thresholds: ContextCompactionThresholds,
-	stage: ContextCompactionStage,
-): number {
+function stageThreshold(thresholds: ContextCompactionThresholds, stage: ContextCompactionStage): number {
 	switch (stage) {
 		case "warning":
 			return thresholds.warning;

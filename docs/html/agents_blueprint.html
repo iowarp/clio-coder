@@ -429,23 +429,23 @@ h1 {
       </div>
       <h1>Clio Coder Agent Fleet Spec</h1>
       <div style="margin-top: 0.5rem;">
-        <span class="version-stamp">Clio Coder v0.2.1</span>
+        <span class="version-stamp">Clio Coder v0.2.2</span>
       </div>
       <p class="subtitle">Technical Blueprint & Interactive Playground for Recipe Discovery, Gating, and Dispatch Admission Policies.</p>
     </header>
 
     <!-- Navigation Tabs -->
     <nav class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('simulator')">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/></svg>
+      <button type="button" class="tab-btn active" onclick="_switchTab('simulator')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/></svg>
         Dispatch Admission Simulator
       </button>
-      <button class="tab-btn" onclick="switchTab('catalog')">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z" fill="currentColor"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('catalog')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z" fill="currentColor"/></svg>
         Built-in Catalog Explorer
       </button>
-      <button class="tab-btn" onclick="switchTab('diagrams')">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/></svg>
+      <button type="button" class="tab-btn" onclick="_switchTab('diagrams')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/></svg>
         Sequence Diagrams
       </button>
     </nav>
@@ -454,7 +454,7 @@ h1 {
     <div id="pane-simulator" class="tab-pane active">
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
           Gating Policy & Dispatch Admission Simulator
         </h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
@@ -533,7 +533,7 @@ h1 {
     <div id="pane-catalog" class="tab-pane">
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
           Built-in Agent Registry Explorer
         </h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
@@ -577,7 +577,7 @@ h1 {
       <!-- Recipe discovery -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
           Recipe Discovery & Overriding Hierarchy
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -585,7 +585,7 @@ h1 {
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="150" viewBox="0 0 800 150">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="150" viewBox="0 0 800 150">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                 <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--text-muted)"/>
@@ -613,7 +613,7 @@ h1 {
       <!-- Admission check flowchart -->
       <div class="glass-card">
         <h2 class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
           Dispatch Admission Check Pipeline
         </h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
@@ -621,7 +621,7 @@ h1 {
         </p>
 
         <div class="svg-flow-container">
-          <svg class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
+          <svg aria-hidden="true" class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
             <path d="M 130 90 L 180 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
             <path d="M 320 90 L 370 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
             <path d="M 500 90 L 550 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -768,7 +768,7 @@ h1 {
       const mode = document.getElementById("sim-mode").value;
       const profileName = document.getElementById("sim-profile").value;
       
-      let reqTools = [];
+      const reqTools = [];
       ALL_TOOLS.forEach(tool => {
         if (document.getElementById(`tool-${tool}`).checked) {
           reqTools.push(tool);
@@ -784,7 +784,7 @@ h1 {
       log(`[clio:dispatch] Starting admission check for recipe=${recipeName} under mode=${mode}...`, "info");
       
       let hasError = false;
-      let effectiveTools = [];
+      const effectiveTools = [];
 
       reqTools.forEach(tool => {
         log(`Checking visibility for tool: ${tool}...`, "info");
@@ -831,7 +831,7 @@ h1 {
       const consoleLog = document.getElementById("sim-console");
       const span = document.createElement("span");
       span.className = `log-${type}`;
-      span.innerText = msg + "\n";
+      span.innerText = `${msg}\n`;
       consoleLog.appendChild(span);
       consoleLog.scrollTop = consoleLog.scrollHeight;
     }
@@ -872,13 +872,13 @@ h1 {
       document.getElementById("detail-body").innerText = recipe.body;
     }
 
-    function switchTab(tabId) {
+    function _switchTab(tabId) {
       const panes = document.querySelectorAll('.tab-pane');
-      panes.forEach(pane => pane.classList.remove('active'));
+      panes.forEach(pane => { pane.classList.remove('active'); });
       const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => btn.classList.remove('active'));
+      buttons.forEach(btn => { btn.classList.remove('active'); });
 
-      document.getElementById('pane-' + tabId).classList.add('active');
+      document.getElementById(`pane-${tabId}`).classList.add('active');
       event.currentTarget.classList.add('active');
     }
 

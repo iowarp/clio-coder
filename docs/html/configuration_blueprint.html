@@ -463,7 +463,7 @@
       <div class="meta-grid">
         <div class="meta-badge">
           <span class="label">Release:</span>
-          <span class="value">v0.2.1-alpha</span>
+          <span class="value">v0.2.2-alpha</span>
         </div>
         <div class="meta-badge">
           <span class="label">Scope:</span>
@@ -476,20 +476,20 @@
       </div>
 
       <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('validator')">
-          <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <button type="button" class="tab-btn active" onclick="_switchTab('validator')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           Settings.yaml Validator
         </button>
-        <button class="tab-btn" onclick="switchTab('resolver')">
-          <svg viewBox="0 0 24 24"><path d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('resolver')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
           Runtime Target Resolver
         </button>
-        <button class="tab-btn" onclick="switchTab('generator')">
-          <svg viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('generator')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           CLI Config Generator
         </button>
-        <button class="tab-btn" onclick="switchTab('flowchart')">
-          <svg viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
+        <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
           Resolution Lifecycle
         </button>
       </div>
@@ -500,7 +500,7 @@
       <div class="grid-2">
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
             YAML Raw Settings Editor
           </div>
           <div class="form-group">
@@ -508,14 +508,14 @@
             <textarea id="raw-yaml" class="code-area" oninput="validateYaml()"></textarea>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <button class="btn btn-primary" onclick="loadSampleSettings('valid')">Load Valid Sample</button>
-            <button class="btn" onclick="loadSampleSettings('invalid')">Load Invalid Sample</button>
+            <button type="button" class="btn btn-primary" onclick="loadSampleSettings('valid')">Load Valid Sample</button>
+            <button type="button" class="btn" onclick="loadSampleSettings('invalid')">Load Invalid Sample</button>
           </div>
         </div>
 
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
             Live Parser & Validation Receipt
           </div>
           <div id="validator-status" class="status-panel success">
@@ -536,7 +536,7 @@
       <div class="grid-2">
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
             Mock Target Endpoint Setup
           </div>
           
@@ -548,7 +548,7 @@
           <div class="grid-2" style="gap: 1rem; margin-bottom: 0;">
             <div class="form-group">
               <label>Runtime Descriptor</label>
-              <select id="target-runtime" onchange="updateRuntimeDefaults()">
+              <select id="target-runtime" onchange="_updateRuntimeDefaults()">
                 <option value="llamacpp">llamacpp (Local)</option>
                 <option value="ollama-native">ollama-native (Local)</option>
                 <option value="openai">openai (Cloud)</option>
@@ -605,15 +605,15 @@
             </div>
           </div>
 
-          <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="resolveTarget()">
-            <svg viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <button type="button" class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="_resolveTarget()">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             Resolve Target eligibility
           </button>
         </div>
 
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
             Resolved Runtime Target Spec
           </div>
           
@@ -650,7 +650,7 @@
       <div class="grid-2">
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             Interactive CLI Command Configurator
           </div>
 
@@ -700,7 +700,7 @@
 
         <div class="glass-card">
           <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             Generated Clio CLI Commands
           </div>
           
@@ -732,11 +732,11 @@
     <div id="flowchart" class="tab-pane">
       <div class="glass-card">
         <div class="card-title">
-          <svg viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           Configuration loading & Target Resolution Sequence
         </div>
         <div class="flowchart-container">
-          <svg width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
+          <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
             <!-- Definitions for markers and filters -->
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -835,9 +835,9 @@
 
   <script>
     // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    function _switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
       
       document.getElementById(tabId).classList.add('active');
       event.currentTarget.classList.add('active');
@@ -911,7 +911,7 @@ targets:
         let version = null;
         let defaultMode = null;
         let safetyLevel = null;
-        let targets = [];
+        const _targets = [];
 
         lines.forEach((line, idx) => {
           const trimmed = line.trim();
@@ -958,7 +958,7 @@ targets:
           statusPanel.innerHTML = `<strong>Schema Validation Errors:</strong><ul style="margin-left: 1.5rem; margin-top:0.5rem;">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`;
         } else {
           statusPanel.className = 'status-panel success';
-          statusPanel.innerHTML = `<strong>Success:</strong> settings.yaml is structurally valid and fully conforms to Clio Coder v0.2.1 settings schema constraints.`;
+          statusPanel.innerHTML = `<strong>Success:</strong> settings.yaml is structurally valid and fully conforms to Clio Coder v0.2.2 settings schema constraints.`;
           
           // Render properties badges
           addPropertyBadge('Schema Version', version || '1', 'cyan');
@@ -989,7 +989,7 @@ targets:
       'openai-compat': { url: 'http://127.0.0.1:5000/v1', model: 'custom-model', context: 8192, maxtokens: 1024, chat: true, tools: false, reasoning: false, vision: false }
     };
 
-    function updateRuntimeDefaults() {
+    function _updateRuntimeDefaults() {
       const runtime = document.getElementById('target-runtime').value;
       const defaults = runtimeDefaults[runtime];
       if (defaults) {
@@ -1004,7 +1004,7 @@ targets:
       }
     }
 
-    function resolveTarget() {
+    function _resolveTarget() {
       document.getElementById('resolution-placeholder').style.display = 'none';
       document.getElementById('resolution-summary').style.display = 'block';
       const outputBanner = document.getElementById('resolver-output');
@@ -1043,7 +1043,7 @@ targets:
 
       // Write logs
       const logs = [];
-      logs.push(`[info] [resolution-engine] Initiating resolveTarget() for ID: "${targetId}"`);
+      logs.push(`[info] [resolution-engine] Initiating _resolveTarget() for ID: "${targetId}"`);
       logs.push(`[info] [resolution-engine] Loaded runtime descriptor: "${runtime}"`);
       logs.push(`[info] [resolution-engine] Dispatch endpoint URL: ${url}`);
       
@@ -1122,7 +1122,7 @@ targets:
     }
 
     // Initial load
-    window.onload = function() {
+    window.onload = () => {
       loadSampleSettings('valid');
       updateGenDefaults();
       generateCommand();

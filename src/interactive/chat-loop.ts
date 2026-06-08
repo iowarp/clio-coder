@@ -40,8 +40,8 @@ import type { CompactResult } from "../domains/session/compaction/compact.js";
 import {
 	applyProgressiveCompaction,
 	isProgressiveCompactionStage,
-	shouldAnnounceStage,
 	type ProgressiveCompactionResult,
+	shouldAnnounceStage,
 } from "../domains/session/compaction/progressive.js";
 import {
 	type ContextUsageSnapshot,
@@ -1854,7 +1854,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					excludeLastTurns: cfg?.excludeLastTurns ?? 6,
 				}),
 			);
-			if (!result || !result.changed) {
+			if (!result?.changed) {
 				maybeNoticeStage(
 					selectedStage,
 					`[context engine] ${selectedStage} reached at ${formatPressure(pressure)}, but no stale entries were eligible`,
@@ -2198,7 +2198,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (runtime.agent.state.messages.length <= replayedContextMessages.length) {
 				return contextUsageSnapshot(null, estimate.contextWindow);
 			}
-			return contextUsageSnapshot(estimate.tokens > 0 ? estimate.tokens : null, estimate.contextWindow, estimate.breakdown);
+			return contextUsageSnapshot(
+				estimate.tokens > 0 ? estimate.tokens : null,
+				estimate.contextWindow,
+				estimate.breakdown,
+			);
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (runtime) {
