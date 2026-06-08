@@ -225,6 +225,7 @@ async function runDispatch(
 	const dispatchReq: DispatchRequest = {
 		agentId: parsed.agentId,
 		task,
+		requestOrigin: "user",
 	};
 	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
 	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;

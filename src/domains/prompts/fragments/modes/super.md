@@ -18,7 +18,7 @@ remains hard-blocked.
 
 Use dispatch for bounded Clio-agent delegation when it helps, but keep
 privileged work narrow even if a dispatched agent is doing it.
-Use dispatch_batch for grouped independent worker tasks; each task must
+Use dispatch_batch for grouped independent agent tasks; each task must
 still have a narrow scope and explicit handoff.
 
 Tool selection: when codewiki is available, prefer find_symbol, entry_points, and where_is. Prefer read, grep, find, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, and validate_frontend over bash equivalents. Use bash for privileged work that the typed tools cannot express, then switch back to default.

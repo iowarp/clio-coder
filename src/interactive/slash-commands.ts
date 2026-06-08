@@ -1,5 +1,6 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -111,6 +112,7 @@ export async function handleRun(
 		const request = {
 			agentId,
 			task,
+			requestOrigin: "user" as const,
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
 			...(options.endpoint ? { endpoint: options.endpoint } : {}),
@@ -148,6 +150,7 @@ export async function handleDelegate(agentId: string, task: string, deps: Handle
 		const handle = await dispatch.dispatch({
 			agentId,
 			delegationAgentId: agentId,
+			requestOrigin: "user",
 			task,
 		});
 		for await (const event of handle.events) {
@@ -267,6 +270,7 @@ export interface SlashCommandContext {
 	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	listAgents: () => ReadonlyArray<AgentSpec>;
 	listDelegationAgents: () => ReadonlyArray<{
 		id: string;
 		command: string;
@@ -580,27 +584,39 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "agents",
-		description: "List ACP delegation agents",
+		description: "List Clio agents and ACP delegation agents",
 		kinds: ["agents"],
 		match(trimmed) {
 			return trimmed === "/agents" ? { kind: "agents" } : null;
 		},
 		handle(_command, ctx) {
-			const agents = ctx.listDelegationAgents();
-			if (agents.length === 0) {
-				ctx.io.stdout("\nACP delegation agents: none configured\n");
-				return;
+			const sections: string[] = [];
+			const clioAgents = ctx.listAgents();
+			if (clioAgents.length > 0) {
+				const rows = clioAgents.map((agent) => {
+					const skills = agent.skills.length > 0 ? ` skills=${agent.skills.join(",")}` : "";
+					return `  ${agent.id.padEnd(16)} ${agent.audience.padEnd(6)} ${agent.category.padEnd(10)} ${agent.capabilityClass.padEnd(14)} ${agent.description}${skills}`;
+				});
+				sections.push(`Clio fleet agents:\n${rows.join("\n")}`);
+			} else {
+				sections.push("Clio fleet agents: none");
 			}
-			const rows = agents.map((agent) => {
-				const labels =
-					agent.labels && Object.keys(agent.labels).length > 0
-						? ` labels=${Object.entries(agent.labels)
-								.map(([key, value]) => `${key}:${value}`)
-								.join(",")}`
-						: "";
-				return `  ${agent.id.padEnd(18)} ${agent.command} ${agent.args.join(" ")} governance=${agent.toolGovernance ?? "clio-policy"}${labels}`;
-			});
-			ctx.io.stdout(`\nACP delegation agents:\n${rows.join("\n")}\n`);
+			const delegationAgents = ctx.listDelegationAgents();
+			if (delegationAgents.length > 0) {
+				const rows = delegationAgents.map((agent) => {
+					const labels =
+						agent.labels && Object.keys(agent.labels).length > 0
+							? ` labels=${Object.entries(agent.labels)
+									.map(([key, value]) => `${key}:${value}`)
+									.join(",")}`
+							: "";
+					return `  ${agent.id.padEnd(18)} ${agent.command} ${agent.args.join(" ")} governance=${agent.toolGovernance ?? "clio-policy"}${labels}`;
+				});
+				sections.push(`ACP delegation agents:\n${rows.join("\n")}`);
+			} else {
+				sections.push("ACP delegation agents: none configured");
+			}
+			ctx.io.stdout(`\n${sections.join("\n\n")}\n`);
 		},
 	},
 	{

@@ -9,7 +9,7 @@ import { isToolProfileName, type ToolProfileName } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
-const DEFAULT_AGENT_ID = "implementer";
+const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
 const VALID_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -241,12 +241,10 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch a bounded task to a configured Clio agent from the fleet. Defaults to agent_id='implementer' and the configured fleet default target/model when target/model are omitted. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch a bounded task to a configured Clio agent from the fleet. Defaults to agent_id='coder' and the configured fleet default target/model when target/model are omitted. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			task: Type.String({ description: "Concrete agent task. Include expected output, constraints, and handoff format." }),
-			agent_id: Type.Optional(
-				Type.String({ description: "Agent recipe id from the fleet catalog. Defaults to implementer." }),
-			),
+			agent_id: Type.Optional(Type.String({ description: "Agent recipe id from the fleet catalog. Defaults to coder." })),
 			target: Type.Optional(Type.String({ description: "Target id, such as dynamo. Omit for the fleet default." })),
 			model: Type.Optional(Type.String({ description: "Model override. Omit for the target/profile default." })),
 			thinking_level: Type.Optional(

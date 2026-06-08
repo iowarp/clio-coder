@@ -2,6 +2,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
+import {
+	isAgentAudience,
+	isAgentCapabilityClass,
+	isAgentCategory,
+	isAgentLatencyClass,
+	isShadowAgent,
+	normalizeAgentSpec,
+} from "./spec.js";
+
+const RESERVED_CUSTOM_AGENT_IDS = new Set(["worker", "delegate"]);
 
 function parseMode(value: unknown): AgentRecipe["mode"] {
 	if (value === "advise" || value === "default" || value === "super") return value;
@@ -65,6 +75,13 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		if (typeof frontmatter.endpoint === "string") recipe.endpoint = frontmatter.endpoint;
 		const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
 		if (thinking) recipe.thinkingLevel = thinking;
+		if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
+		if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
+		if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;
+		if (isAgentAudience(frontmatter.audience)) recipe.audience = frontmatter.audience;
+		const tags = parseStringArray(frontmatter.tags);
+		if (tags) recipe.tags = tags;
+		if (typeof frontmatter.output === "string") recipe.output = frontmatter.output;
 		recipes.push(recipe);
 	}
 
@@ -74,8 +91,27 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 
 export function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): ReadonlyArray<AgentRecipe> {
 	const byId = new Map<string, AgentRecipe>();
+	const builtinById = new Map<string, AgentRecipe>();
 	for (const group of sources) {
 		for (const recipe of group) {
+			if (recipe.source === "builtin") builtinById.set(recipe.id, recipe);
+		}
+	}
+	for (const group of sources) {
+		for (const recipe of group) {
+			if (recipe.source !== "builtin" && RESERVED_CUSTOM_AGENT_IDS.has(recipe.id)) {
+				process.stderr.write(`[clio:agents] ignore id=${recipe.id} by=${recipe.source} reason=reserved-agent-id\n`);
+				continue;
+			}
+			const builtin = builtinById.get(recipe.id);
+			if (recipe.source === "user" && builtin && isShadowAgent(normalizeAgentSpec(builtin))) {
+				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=user reason=reserved-shadow\n`);
+				continue;
+			}
+			if (recipe.source === "project" && builtin) {
+				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=project reason=reserved-builtin\n`);
+				continue;
+			}
 			if (byId.has(recipe.id)) {
 				process.stderr.write(`[clio:agents] override id=${recipe.id} by=${recipe.source}\n`);
 			}

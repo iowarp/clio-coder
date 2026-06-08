@@ -1,6 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { RunKind, RunStatus } from "../domains/dispatch/types.js";
+import type { AgentAudience } from "../domains/agents/spec.js";
+import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 
 export type DispatchBoardStatus =
@@ -11,6 +12,8 @@ export type DispatchBoardStatus =
 export interface DispatchBoardRow {
 	runId: string;
 	agentId: string;
+	agentAudience?: AgentAudience;
+	requestOrigin?: DispatchRequestOrigin;
 	runtimeKind: RunKind;
 	runtimeId: string;
 	endpointId: string;
@@ -32,6 +35,8 @@ interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
 interface DispatchEventBase {
 	runId?: unknown;
 	agentId?: unknown;
+	agentAudience?: unknown;
+	requestOrigin?: unknown;
 	endpointId?: unknown;
 	wireModelId?: unknown;
 	runtimeId?: unknown;
@@ -156,9 +161,15 @@ function runtimeCell(row: DispatchBoardRow): string {
 	return row.runtimeKind === "acp-delegation" ? `acp:${row.runtimeId}` : `${row.runtimeKind}:${row.runtimeId}`;
 }
 
+export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
+	if (row.agentAudience === "shadow") return `sh:${row.agentId}`;
+	if (row.agentAudience === "internal") return `in:${row.agentId}`;
+	return row.agentId;
+}
+
 function renderRowContent(row: DispatchBoardRow): string {
 	return buildContentLine([
-		leftCell(row.agentId, AGENT_WIDTH),
+		leftCell(agentDisplayLabel(row), AGENT_WIDTH),
 		leftCell(runtimeCell(row), RUNTIME_WIDTH),
 		leftCell(endpointModelCell(row), ENDPOINT_MODEL_WIDTH),
 		leftCell(row.status, STATUS_WIDTH),
@@ -180,7 +191,7 @@ function statusGlyph(status: DispatchBoardStatus): string {
 function renderTaskIslandRow(row: DispatchBoardRow): string {
 	return buildContentLine([
 		statusGlyph(row.status),
-		leftCell(row.agentId, 9),
+		leftCell(agentDisplayLabel(row), 9),
 		leftCell(endpointModelCell(row), 17),
 		rightCell(formatElapsedMs(row.elapsedMs), 7),
 		rightCell(formatTokenCount(row.tokenCount), 6),
@@ -197,6 +208,19 @@ function parseText(value: unknown, fallback: string): string {
 
 function parseRuntimeKind(value: unknown): RunKind {
 	return value === "acp-delegation" ? "acp-delegation" : "http";
+}
+
+function parseAgentAudience(value: unknown, fallback: AgentAudience | undefined): AgentAudience | undefined {
+	if (value === "base" || value === "shadow" || value === "custom" || value === "internal") return value;
+	return fallback;
+}
+
+function parseRequestOrigin(
+	value: unknown,
+	fallback: DispatchRequestOrigin | undefined,
+): DispatchRequestOrigin | undefined {
+	if (value === "user" || value === "agent" || value === "internal") return value;
+	return fallback;
 }
 
 function parseFiniteNumber(value: unknown, fallback: number): number {
@@ -246,6 +270,8 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 	return {
 		runId: entry.runId,
 		agentId: entry.agentId,
+		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
+		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.requestOrigin } : {}),
 		runtimeKind: entry.runtimeKind,
 		runtimeId: entry.runtimeId,
 		endpointId: entry.endpointId,
@@ -305,9 +331,13 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		const runId = parseRunId(raw.runId);
 		if (!runId) return null;
 		const previous = entries.get(runId);
+		const agentAudience = parseAgentAudience(raw.agentAudience, previous?.agentAudience);
+		const requestOrigin = parseRequestOrigin(raw.requestOrigin, previous?.requestOrigin);
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
+			...(agentAudience !== undefined ? { agentAudience } : {}),
+			...(requestOrigin !== undefined ? { requestOrigin } : {}),
 			runtimeKind: parseRuntimeKind(raw.runtimeKind ?? previous?.runtimeKind),
 			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
 			endpointId: parseText(raw.endpointId, previous?.endpointId ?? "-"),
