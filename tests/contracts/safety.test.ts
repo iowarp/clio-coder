@@ -10,6 +10,7 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import { createModesBundle } from "../../src/domains/modes/extension.js";
 import { isActionAllowed, isToolVisible } from "../../src/domains/modes/matrix.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import { compilePathPolicy, evaluatePathPolicy } from "../../src/domains/safety/path-policy.js";
 import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
@@ -56,6 +57,15 @@ describe("contracts/safety", () => {
 
 		// Execute tools
 		strictEqual(classify({ tool: "bash", args: { command: "ls -la" } }).actionClass, "execute");
+	});
+
+	it("suppresses finish-contract advisories for explicit read-only recall/status drills", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Reads complete; ready for next instruction.",
+			currentUserText: "Use read only. Recall the sentinel and report status check only.",
+		});
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "read_only_status_turn");
 	});
 
 	it("evaluates safety scope subsets", () => {

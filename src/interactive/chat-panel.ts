@@ -159,7 +159,10 @@ function extractAssistantThinking(message: unknown): string {
 function extractAssistantTerminalError(message: unknown): string {
 	if (!message || typeof message !== "object" || !("role" in message) || message.role !== "assistant") return "";
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
-	if (stopReason !== "error" && stopReason !== "aborted") return "";
+	if (stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length") return "";
+	if (stopReason === "length") {
+		return "[stopped: length] Provider stopped because the output/context limit was reached before a complete assistant response. Try /compact, narrower reads, or a smaller turn.";
+	}
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
 	const reason = typeof raw === "string" && raw.length > 0 ? raw : "unknown error";
 	return stopReason === "aborted" ? `[aborted] ${reason}` : `[error] ${reason}`;

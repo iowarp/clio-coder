@@ -15,7 +15,7 @@ import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
 import { resolveToolPalette } from "../../src/tools/palette.js";
-import { readTool } from "../../src/tools/read.js";
+import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -266,6 +266,28 @@ describe("contracts/tools result shaping and truncation", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("Line 1 is"));
 			ok(result.output.includes("Showing the UTF-8 prefix"));
+		}
+	});
+
+	it("applies an aggregate per-turn observation budget across large reads", async () => {
+		const root = scratchDir();
+		const first = join(root, "first.txt");
+		const second = join(root, "second.txt");
+		writeFileSync(first, `${"a".repeat(100)}\n`.repeat(420), "utf8");
+		writeFileSync(second, `${"b".repeat(100)}\n`.repeat(420), "utf8");
+
+		const options = { sessionId: "s-read-budget", turnId: `turn-${Date.now()}` };
+		const r1 = await readTool.run({ path: first }, options);
+		const r2 = await readTool.run({ path: second }, options);
+
+		strictEqual(r1.kind, "ok");
+		strictEqual(r2.kind, "ok");
+		if (r1.kind === "ok" && r2.kind === "ok") {
+			ok(Buffer.byteLength(r1.output, "utf8") > 30_000);
+			ok(Buffer.byteLength(r1.output + r2.output, "utf8") < DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES + 8_000);
+			ok(r2.output.includes("Per-turn read observation budget"));
+			const budget = r2.details?.observationBudget as { limited?: unknown } | undefined;
+			strictEqual(budget?.limited, true);
 		}
 	});
 });

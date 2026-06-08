@@ -182,7 +182,8 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 	const obj = payloadObject(entry.payload);
 	const content = cloneContentBlocks(obj?.content, maxTextChars);
 	const text = truncateReplayText(extractTurnText(entry.payload), maxTextChars);
-	if (!content && text.length === 0 && !messageFailure(entry)) return null;
+	const stopReason = typeof obj?.stopReason === "string" ? obj.stopReason : undefined;
+	if (!content && text.length === 0 && !messageFailure(entry) && stopReason !== "length") return null;
 	const message: Record<string, unknown> = {
 		role: entry.role,
 		content: content ?? [{ type: "text", text }],
@@ -190,7 +191,7 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 	};
 	if (entry.role === "assistant") {
 		const failure = messageFailure(entry);
-		message.stopReason = failure?.stopReason ?? (typeof obj?.stopReason === "string" ? obj.stopReason : "stop");
+		message.stopReason = failure?.stopReason ?? stopReason ?? "stop";
 		if (failure) message.errorMessage = failure.errorMessage;
 		for (const key of [
 			"usage",
@@ -530,6 +531,67 @@ function latestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
 	return -1;
 }
 
+function toolCallIdsInEntry(entry: SessionEntry): string[] {
+	if (entry.kind !== "message") return [];
+	if (entry.role === "tool_call") return [extractToolCall(entry).id];
+	if (entry.role !== "assistant") return [];
+	const obj = payloadObject(entry.payload);
+	if (!Array.isArray(obj?.content)) return [];
+	const ids: string[] = [];
+	for (const block of obj.content) {
+		if (!block || typeof block !== "object") continue;
+		const record = block as Record<string, unknown>;
+		if (record.type !== "toolCall") continue;
+		if (typeof record.id === "string" && record.id.length > 0) ids.push(record.id);
+	}
+	return ids;
+}
+
+function toolResultIdInEntry(entry: SessionEntry): string | null {
+	if (entry.kind !== "message" || entry.role !== "tool_result") return null;
+	return extractToolResult(entry).id;
+}
+
+function findPriorToolCallEntry(
+	entries: ReadonlyArray<SessionEntry>,
+	toolCallId: string,
+	endExclusive: number,
+): SessionEntry | null {
+	for (let index = Math.min(endExclusive, entries.length) - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (!entry) continue;
+		if (toolCallIdsInEntry(entry).includes(toolCallId)) return entry;
+	}
+	return null;
+}
+
+function repairToolResultOrphans(
+	allEntries: ReadonlyArray<SessionEntry>,
+	selected: ReadonlyArray<SessionEntry>,
+	compactionIndex: number,
+): SessionEntry[] {
+	const out: SessionEntry[] = [];
+	const seenToolCalls = new Set<string>();
+	const emittedTurnIds = new Set<string>();
+	const remember = (entry: SessionEntry): void => {
+		emittedTurnIds.add(entry.turnId);
+		for (const id of toolCallIdsInEntry(entry)) seenToolCalls.add(id);
+	};
+	for (const entry of selected) {
+		const resultId = toolResultIdInEntry(entry);
+		if (resultId !== null && !seenToolCalls.has(resultId)) {
+			const dependency = findPriorToolCallEntry(allEntries, resultId, compactionIndex);
+			if (dependency !== null && !emittedTurnIds.has(dependency.turnId)) {
+				out.push(dependency);
+				remember(dependency);
+			}
+		}
+		out.push(entry);
+		remember(entry);
+	}
+	return out;
+}
+
 /**
  * Normalize a heterogeneous session JSONL stream into the entry sequence the
  * replay surfaces should show. When the slice contains a compaction boundary,
@@ -553,7 +615,7 @@ export function selectReplayEntries(
 		selected.push(...entries.slice(firstKeptIndex, compactionIndex));
 	}
 	selected.push(...entries.slice(compactionIndex + 1));
-	return dropLegacyToolResultAssistantDuplicates(selected);
+	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, compactionIndex));
 }
 
 function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {

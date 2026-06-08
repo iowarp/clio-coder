@@ -7,7 +7,8 @@ import {
 import { applyProgressiveCompaction } from "../../src/domains/session/compaction/progressive.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
-import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
+import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
+import { formatProgressiveCompactionNotice } from "../../src/interactive/chat-loop.js";
 
 function entryBase(id: string, parentTurnId: string | null = null): Pick<SessionEntry, "turnId" | "parentTurnId" | "timestamp"> {
 	return {
@@ -99,6 +100,51 @@ describe("contracts/context compaction stages", () => {
 		const replayMessages = buildReplayAgentMessagesFromTurns(result.entries);
 		const estimated = estimateAgentContextTokens({ messages: replayMessages });
 		ok(estimated < 10_000, `expected invalidated usage anchor to fall back to projection, got ${estimated}`);
+	});
+
+	it("formats progressive notices with the same live accounting source as the footer", () => {
+		const entries: SessionEntry[] = [
+			user("01", "old"),
+			toolResult("02", "call-1", "large observation ".repeat(500), "01"),
+			user("03", "recent", "02"),
+		];
+		const result = applyProgressiveCompaction({ entries, stage: "prune_observations", excludeLastTurns: 1 });
+		const notice = formatProgressiveCompactionNotice(result, { tokensBefore: 58_596, tokensAfter: 7_864 });
+		ok(notice.includes("~58596 tokens -> ~7864 tokens"), notice);
+	});
+
+	it("repairs tool_result dependencies when a compaction summary starts at a result", () => {
+		const entries: SessionEntry[] = [
+			user("01", "read something"),
+			toolCall("02", "call-1", "01"),
+			toolResult("03", "call-1", "observation", "02"),
+			{
+				kind: "compactionSummary",
+				...entryBase("04", "03"),
+				summary: "older context summarized",
+				tokensBefore: 1234,
+				firstKeptTurnId: "03",
+				trigger: "auto",
+			},
+		];
+		const selected = selectReplayEntries(entries);
+		const selectedIds = selected.map((entry) => entry.turnId);
+		ok(selectedIds.indexOf("02") >= 0, `expected matching tool_call to be retained, got ${selectedIds}`);
+		ok(selectedIds.indexOf("02") < selectedIds.indexOf("03"));
+
+		const replay = buildReplayAgentMessagesFromTurns(entries) as Array<{ role?: string; toolCallId?: string; content?: unknown }>;
+		const callIndex = replay.findIndex(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some(
+					(block) => !!block && typeof block === "object" && (block as { id?: unknown }).id === "call-1",
+				),
+		);
+		const resultIndex = replay.findIndex(
+			(message) => message.role === "toolResult" && message.toolCallId === "call-1",
+		);
+		ok(callIndex >= 0 && resultIndex > callIndex, `callIndex=${callIndex} resultIndex=${resultIndex}`);
 	});
 
 	it("prunes older observations and masks dialogue without deleting tool calls", () => {

@@ -3,8 +3,8 @@
  *
  * Two output shapes live here:
  *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop
- *      emits to stdout after an auto-compaction or `/compact` run. It is
- *      the pre-slice-4/6 shape and stays intact for that caller.
+ *      emits after an auto-compaction or `/compact` run. It uses the same
+ *      `[context engine] <stage>:` shape as graduated pruning notices.
  *   2. `renderCompactionSummaryEntry` renders a persisted
  *      `CompactionSummaryEntry` as a framed, indented block the chat panel
  *      can splice into a replayed transcript. The block visually marks the
@@ -40,13 +40,13 @@ export interface CompactionSummaryLineInput {
 
 /**
  * One-line notice the `/compact` handler writes to stdout. Example:
- *   [compacted: 42 messages → 1823 chars (~31420 tokens before)]
+ *   [context engine] llm_summary: 42 messages summarized to 1823 chars; ~31420 tokens before
  * Split-turn runs carry a `(split turn)` suffix so the user knows the cut
  * landed mid-turn and upstream context may need a re-read.
  */
 export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): string {
 	const tail = input.isSplitTurn ? " (split turn)" : "";
-	return `[compacted: ${input.messagesSummarized} messages → ${input.summaryChars} chars (~${input.tokensBefore} tokens before)${tail}]`;
+	return `[context engine] llm_summary: ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars; ~${input.tokensBefore} tokens before${tail}]`;
 }
 
 export interface RenderCompactionSummaryOptions {
