@@ -32,6 +32,70 @@ Default data subdirectories include sessions, audit, state, agents, prompts, rec
 
 ---
 
+## First-run flow
+
+From a source checkout:
+
+```bash
+git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
+npm ci
+npm run build
+npm link
+clio --version
+```
+
+Then start from the repository you want Clio to work on:
+
+```bash
+cd /path/to/your/repo
+clio doctor --fix
+clio configure --list
+```
+
+Start one local runtime and register exactly one target first. Common local runtime ids and default URLs are:
+
+| Runtime | Target runtime id | Example local URL |
+| --- | --- | --- |
+| LM Studio | `lmstudio-native` | `http://localhost:1234` |
+| Ollama | `ollama-native` | `http://localhost:11434` |
+| llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
+| vLLM | `vllm` | `http://localhost:8000` |
+| SGLang | `sglang` | `http://localhost:30000` |
+
+Example registration:
+
+```bash
+clio configure \
+  --id local-lmstudio \
+  --runtime lmstudio-native \
+  --url http://localhost:1234 \
+  --model your-model-id \
+  --set-orchestrator \
+  --set-fleet-default
+```
+
+Use the id you chose, probe it, then launch the TUI:
+
+```bash
+clio targets use local-lmstudio
+clio targets --probe
+clio models --probe --target local-lmstudio
+clio
+```
+
+Inside the TUI, verify the local surface with:
+
+```text
+/targets
+/agents
+/skills
+```
+
+Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
+
+---
+
 ## Settings shape
 
 On disk, configured model targets live under `targets:`. When loaded in code, the historical internal name is `endpoints`.
@@ -53,30 +117,31 @@ defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
 targets:
-  - id: local-qwen
-    runtime: llamacpp
-    url: http://127.0.0.1:8080
-    defaultModel: AgenticQwen-30B-A3B-i1-Q4_K_M
+  - id: local-lmstudio
+    runtime: lmstudio-native
+    url: http://localhost:1234
+    defaultModel: your-model-id
     capabilities:
-      contextWindow: 262144
-      maxTokens: 65536
-      reasoning: true
+      reasoning: true       # optional; only if your model/runtime supports it
 
 runtimePlugins: []
 
 orchestrator:
-  target: local-qwen
-  model: AgenticQwen-30B-A3B-i1-Q4_K_M
+  target: local-lmstudio
+  model: your-model-id
   thinkingLevel: off
 
 workers:
   default:
-    target: local-qwen
-    model: AgenticQwen-30B-A3B-i1-Q4_K_M
+    target: local-lmstudio
+    model: your-model-id
     thinkingLevel: off
   profiles: {}
 
 scope: []
+modelSelector:
+  favorites: []
+  recentLimit: 12
 budget:
   sessionCeilingUsd: 5
   concurrency: auto
@@ -88,8 +153,14 @@ keybindings: {}
 skills:
   trustProjectCompatRoots: false
 compaction:
-  threshold: 0.8
   auto: true
+  excludeLastTurns: 6
+  thresholds:
+    warning: 0.7
+    maskObservations: 0.8
+    pruneObservations: 0.85
+    maskDialogue: 0.9
+    llmSummary: 0.99
 retry:
   enabled: true
   maxRetries: 3
@@ -120,16 +191,15 @@ Register non-interactively:
 
 ```bash
 clio configure \
-  --id local-qwen \
+  --id local-llamacpp \
   --runtime llamacpp \
   --url http://127.0.0.1:8080 \
-  --model AgenticQwen-30B-A3B-i1-Q4_K_M \
-  --context-window 262144 \
-  --max-tokens 65536 \
-  --reasoning true \
+  --model your-model-id \
   --set-orchestrator \
   --set-fleet-default
 ```
+
+Add capability overrides such as `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only when live probes cannot infer the right values for your runtime/model.
 
 Useful flags:
 
@@ -168,12 +238,11 @@ clio targets rename <old> <new>
 ### Local reasoning-token budgets
 
 Some local reasoning models can spend most of a small output budget on hidden
-thinking before emitting visible text. Nemotron-Cascade-2-30B on Dynamo
-through LM Studio is one observed case: very small `max_tokens` smoke tests can
-finish with reasoning tokens and no visible answer. For those targets, keep the
-configured `maxTokens`/output budget high enough for both reasoning and final
-text, or set the orchestrator/fleet `thinkingLevel` to `off` when a terse
-visible answer matters more than reasoning traces.
+thinking before emitting visible text. If a smoke test finishes with reasoning
+tokens and no visible answer, keep the configured `maxTokens`/output budget high
+enough for both reasoning and final text, or set the orchestrator/fleet
+`thinkingLevel` to `off` when a terse visible answer matters more than reasoning
+traces.
 
 ---
 
