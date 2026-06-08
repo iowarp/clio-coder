@@ -88,6 +88,12 @@ export interface SessionContract {
 	 * branchSummary, modelChange, etc.). Old callers keep using `append`.
 	 */
 	appendEntry(entry: SessionEntryInput): SessionEntry;
+	/**
+	 * Atomically replace the current session's rich entry list. Used by
+	 * progressive context compaction to mask/prune persisted payload bodies
+	 * without changing turn ids or tree shape.
+	 */
+	replaceEntries(entries: ReadonlyArray<SessionEntry>): void;
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */

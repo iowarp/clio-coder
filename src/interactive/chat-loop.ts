@@ -30,8 +30,19 @@ import {
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
 import { assessFinishContract } from "../domains/safety/finish-contract.js";
-import { AutoCompactionTrigger, shouldCompact } from "../domains/session/compaction/auto.js";
+import {
+	AutoCompactionTrigger,
+	type ContextCompactionStage,
+	normalizeContextCompactionThresholds,
+	shouldCompact,
+} from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
+import {
+	applyProgressiveCompaction,
+	isProgressiveCompactionStage,
+	shouldAnnounceStage,
+	type ProgressiveCompactionResult,
+} from "../domains/session/compaction/progressive.js";
 import {
 	type ContextUsageSnapshot,
 	contextUsageSnapshot,
@@ -754,8 +765,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
+	const progressiveCompactionTrigger = new AutoCompactionTrigger<ProgressiveCompactionResult | null>();
 	let runtime: AgentRuntime | null = null;
 	let lastTurnId: string | null = null;
+	const lastContextStageBySession = new Map<string, ContextCompactionStage>();
 	let streaming = false;
 	let currentThinkingLevel: ThinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 	let replayedContextMessages: AgentMessage[] = [];
@@ -1681,17 +1694,45 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	const sessionStageKey = (): string => deps.session?.current()?.id ?? "__no_session__";
+
+	const formatPressure = (pressure: number | null): string =>
+		pressure === null ? "unknown pressure" : `${Math.round(pressure * 100)}% context pressure`;
+
+	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
+		const refreshedEntries = deps.readSessionEntries?.() ?? [];
+		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries);
+		replayedContextMessages = [];
+		return refreshedEntries;
+	};
+
+	const maybeNoticeStage = (stage: ContextCompactionStage, message: string): void => {
+		const key = sessionStageKey();
+		const previous = lastContextStageBySession.get(key);
+		if (!shouldAnnounceStage(previous, stage)) return;
+		lastContextStageBySession.set(key, stage);
+		emitNotice(message);
+	};
+
+	const progressiveNotice = (result: ProgressiveCompactionResult): string => {
+		const before = result.tokensBefore > 0 ? `~${result.tokensBefore} tokens` : "unknown tokens";
+		const after = result.tokensAfter > 0 ? `~${result.tokensAfter} tokens` : "unknown tokens";
+		const actions: string[] = [];
+		if (result.maskedObservations > 0) actions.push(`${result.maskedObservations} observations masked`);
+		if (result.prunedObservations > 0) actions.push(`${result.prunedObservations} observations pruned`);
+		if (result.maskedDialogue > 0) actions.push(`${result.maskedDialogue} dialogue messages masked`);
+		const actionText = actions.length > 0 ? actions.join(", ") : "no eligible stale entries";
+		return `[context engine] ${result.stage}: ${actionText}; ${before} -> ${after}`;
+	};
+
 	/**
-	 * Evaluate the auto-compaction trigger against the current session and,
-	 * when it fires, rebuild `agent.state.messages` from the live session view
-	 * so the agent state mirrors the compaction summary plus the kept suffix.
-	 * Returns true when compaction ran AND produced a non-empty summary; false
-	 * otherwise (no deps wired, threshold not crossed, no-op compaction, etc.).
-	 * Throws are caller-contained.
+	 * Evaluate the graduated context engine against the current session and
+	 * rebuild `agent.state.messages` whenever a stage mutates persisted
+	 * entries. Stage 5 delegates to the existing pi-style LLM compaction path:
+	 * append a compaction summary entry, then replay from the session view.
 	 *
-	 * `force = true` bypasses the threshold check. Used for:
-	 *   - CLIO_FORCE_COMPACT=1 (deterministic drills / e2e tests).
-	 *   - The overflow-recovery retry path after a ContextOverflowError.
+	 * `force = true` bypasses graduated pressure and executes Stage 5 directly.
+	 * Used for `/compact`, CLIO_FORCE_COMPACT=1, and overflow recovery.
 	 */
 	const runAutoCompact = async (
 		agentRuntime: AgentRuntime,
@@ -1706,10 +1747,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 
+		let selectedStage: ContextCompactionStage = "llm_summary";
+		let pressure: number | null = null;
 		if (!force) {
 			const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
 			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
-			const threshold = typeof cfg?.threshold === "number" ? cfg.threshold : 0.8;
+			const thresholds = normalizeContextCompactionThresholds(cfg?.thresholds, cfg?.threshold);
 			const estimateInput = {
 				systemPrompt: agentRuntime.agent.state.systemPrompt,
 				messages: agentRuntime.agent.state.messages,
@@ -1717,10 +1760,60 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...(pendingUserText !== undefined ? { pendingUserText } : {}),
 			};
 			const tokens = estimateAgentContextTokens(estimateInput);
-			if (!shouldCompact(tokens, threshold, contextWindow)) return false;
+			const verdict = shouldCompact(tokens, thresholds, contextWindow);
+			if (verdict.stage === null) return false;
+			selectedStage = verdict.stage;
+			pressure = verdict.pressure;
 		}
 
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
+		if (!force && selectedStage === "warning") {
+			deps.bus?.emit(BusChannels.ContextWarning, {
+				stage: selectedStage,
+				pressure,
+				trigger,
+				at: Date.now(),
+			});
+			maybeNoticeStage(
+				selectedStage,
+				`[context engine] ${formatPressure(pressure)}; consider /compact if the next turn needs more room`,
+			);
+			return false;
+		}
+
+		if (!force && isProgressiveCompactionStage(selectedStage)) {
+			if (!deps.session?.current()) return false;
+			const result = await progressiveCompactionTrigger.fire(async () =>
+				applyProgressiveCompaction({
+					entries: deps.readSessionEntries?.() ?? [],
+					stage: selectedStage,
+					excludeLastTurns: cfg?.excludeLastTurns ?? 6,
+				}),
+			);
+			if (!result || !result.changed) {
+				maybeNoticeStage(
+					selectedStage,
+					`[context engine] ${selectedStage} reached at ${formatPressure(pressure)}, but no stale entries were eligible`,
+				);
+				return false;
+			}
+			deps.session.replaceEntries(result.entries);
+			refreshAgentMessagesFromSession(agentRuntime);
+			deps.bus?.emit(BusChannels.ContextPruned, {
+				stage: result.stage,
+				pressure,
+				tokensBefore: result.tokensBefore,
+				tokensAfter: result.tokensAfter,
+				maskedObservations: result.maskedObservations,
+				prunedObservations: result.prunedObservations,
+				maskedDialogue: result.maskedDialogue,
+				trigger,
+				at: Date.now(),
+			});
+			maybeNoticeStage(selectedStage, progressiveNotice(result));
+			return true;
+		}
+
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 		let result: CompactResult | null = null;
 		try {
@@ -1738,8 +1831,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// contract. The replay builder also filters out error-stopReason
 		// assistant entries, which subsumes the pre-compaction prune of failed
 		// assistant tails on the overflow path.
-		const refreshedEntries = deps.readSessionEntries();
-		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries);
+		refreshAgentMessagesFromSession(agentRuntime);
+		lastContextStageBySession.set(sessionStageKey(), "llm_summary");
 
 		emitNotice(
 			renderCompactionSummaryLine({

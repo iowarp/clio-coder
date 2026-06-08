@@ -1141,6 +1141,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const unsubscribeModeTheme = deps.bus.on(BusChannels.ModeChanged, () => {
 		tui.requestRender();
 	});
+	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, () => {
+		footer.refresh();
+		tui.requestRender();
+	});
+	const unsubscribeContextPruned = deps.bus.on(BusChannels.ContextPruned, () => {
+		footer.refresh();
+		tui.requestRender();
+	});
 
 	let activeEditorBash: AbortController | null = null;
 
@@ -2312,6 +2320,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeAbortedProgress();
 		unsubscribeFooterTokens();
 		unsubscribeModeTheme();
+		unsubscribeContextPressure();
+		unsubscribeContextPruned();
 		unsubscribeSuperRequired();
 		agentProgress.stop();
 		deps.chat.dispose();

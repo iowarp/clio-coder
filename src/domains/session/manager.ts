@@ -99,3 +99,10 @@ export function appendEntry(state: SessionManagerState, input: SessionEntryInput
 	state.writer.appendEntry(entry);
 	return entry;
 }
+
+export function replaceEntries(state: SessionManagerState, entries: ReadonlyArray<SessionEntry>): void {
+	for (const entry of entries) {
+		if (!isSessionEntry(entry)) throw new Error("session.replaceEntries: invalid entry");
+	}
+	state.writer.replaceEntries(entries);
+}

@@ -1,13 +1,11 @@
 /**
  * Compaction settings: user-visible defaults (Phase 12 slice 12c).
  *
- * The public settings block documented in the plan is intentionally tiny:
- * `threshold` (fraction of contextWindow at which auto-compaction fires),
- * `auto` (master switch), and two optional overrides: `model` and
- * `systemPrompt`. The structural type lives in `src/core/defaults.ts`
- * alongside the rest of the settings tree so core code stays free of a
- * backward domain dependency; this module pairs that type with the value
- * the DEFAULT_SETTINGS tree and the chat-loop read at runtime.
+ * The public settings block uses graduated pressure thresholds for warning,
+ * progressive pruning, and final LLM compaction. The structural type lives in
+ * `src/core/defaults.ts` alongside the rest of the settings tree so core code
+ * stays free of a backward domain dependency; this module pairs that type with
+ * the value the DEFAULT_SETTINGS tree and the chat-loop read at runtime.
  */
 
 import type { CompactionSettings } from "../../../core/defaults.js";
@@ -15,8 +13,15 @@ import type { CompactionSettings } from "../../../core/defaults.js";
 export type { CompactionSettings } from "../../../core/defaults.js";
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
-	threshold: 0.8,
+	thresholds: {
+		warning: 0.7,
+		maskObservations: 0.8,
+		pruneObservations: 0.85,
+		maskDialogue: 0.9,
+		llmSummary: 0.99,
+	},
 	auto: true,
+	excludeLastTurns: 6,
 };
 
 /**

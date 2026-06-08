@@ -124,11 +124,46 @@ export function buildSettingItems(
 			description: "Auto-compact before a turn when context crosses threshold.",
 		},
 		{
-			id: "compaction.threshold",
-			label: "compaction.threshold",
-			currentValue: formatThreshold(compaction.threshold),
-			values: ["0.6", "0.7", "0.8", "0.9", "0.95"],
-			description: "Fraction of context window that triggers auto-compaction.",
+			id: "compaction.excludeLastTurns",
+			label: "compaction.excludeLastTurns",
+			currentValue: String(compaction.excludeLastTurns),
+			values: ["3", "6", "10", "15"],
+			description: "Recent user turns protected from progressive masking.",
+		},
+		{
+			id: "compaction.thresholds.warning",
+			label: "ctx.warning",
+			currentValue: formatThreshold(compaction.thresholds.warning),
+			values: ["0.6", "0.7", "0.75"],
+			description: "Warn without modifying context.",
+		},
+		{
+			id: "compaction.thresholds.maskObservations",
+			label: "ctx.maskObservations",
+			currentValue: formatThreshold(compaction.thresholds.maskObservations),
+			values: ["0.75", "0.8", "0.85"],
+			description: "Mask older tool-result bodies.",
+		},
+		{
+			id: "compaction.thresholds.pruneObservations",
+			label: "ctx.pruneObservations",
+			currentValue: formatThreshold(compaction.thresholds.pruneObservations),
+			values: ["0.8", "0.85", "0.9"],
+			description: "Prune older tool-result bodies.",
+		},
+		{
+			id: "compaction.thresholds.maskDialogue",
+			label: "ctx.maskDialogue",
+			currentValue: formatThreshold(compaction.thresholds.maskDialogue),
+			values: ["0.85", "0.9", "0.95"],
+			description: "Mask older dialogue while preserving tool calls.",
+		},
+		{
+			id: "compaction.thresholds.llmSummary",
+			label: "ctx.llmSummary",
+			currentValue: formatThreshold(compaction.thresholds.llmSummary),
+			values: ["0.95", "0.98", "0.99"],
+			description: "Run full LLM compaction summary.",
 		},
 		{
 			id: "retry.enabled",
@@ -213,9 +248,34 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "compaction.auto":
 			if (value === "true" || value === "false") settings.compaction.auto = value === "true";
 			return;
-		case "compaction.threshold": {
+		case "compaction.excludeLastTurns":
+			applyNonNegativeInteger(value, (next) => {
+				if (next > 0) settings.compaction.excludeLastTurns = next;
+			});
+			return;
+		case "compaction.thresholds.warning": {
 			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.threshold = parsed;
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.warning = parsed;
+			return;
+		}
+		case "compaction.thresholds.maskObservations": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.maskObservations = parsed;
+			return;
+		}
+		case "compaction.thresholds.pruneObservations": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.pruneObservations = parsed;
+			return;
+		}
+		case "compaction.thresholds.maskDialogue": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.maskDialogue = parsed;
+			return;
+		}
+		case "compaction.thresholds.llmSummary": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.llmSummary = parsed;
 			return;
 		}
 		case "retry.enabled":

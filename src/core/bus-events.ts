@@ -28,6 +28,8 @@ export const BusChannels = {
 	DispatchFailed: "dispatch.failed",
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
+	ContextWarning: "context.warning",
+	ContextPruned: "context.pruned",
 	AgentStatusChanged: "agent.status.changed",
 	RunAborted: "run.aborted",
 	BudgetAlert: "budget.alert",

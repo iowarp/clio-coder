@@ -102,6 +102,8 @@ export interface ClioSessionWriter {
 	 * entries off the tree and revisits in 12b when /fork lands.
 	 */
 	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void;
+	/** Atomically replace current.jsonl entries while preserving the session header. */
+	replaceEntries(entries: ReadonlyArray<unknown>): void;
 	persistTree(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -518,6 +520,20 @@ function createWriter(
 			writeJsonlFileAtomic(paths.current, nextEntries);
 			fileEntries.push(entry);
 			if (opts?.treeNode) tree.push(opts.treeNode);
+		},
+		replaceEntries(entries: ReadonlyArray<unknown>): void {
+			if (closed) throw new Error("session writer closed");
+			const existingHeader = fileEntries.find(isSessionJsonlHeader);
+			const body = entries.filter((entry) => !isSessionJsonlHeader(entry));
+			const nextEntries = existingHeader ? [existingHeader, ...body] : ensureSessionHeader(meta, body, headerOptions);
+			writeJsonlFileAtomic(paths.current, nextEntries);
+			fileEntries.length = 0;
+			fileEntries.push(...nextEntries);
+			const recoveredTree = treeFromFileEntries(nextEntries);
+			if (recoveredTree.length > 0) {
+				tree.length = 0;
+				tree.push(...recoveredTree);
+			}
 		},
 		async persistTree(): Promise<void> {
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));

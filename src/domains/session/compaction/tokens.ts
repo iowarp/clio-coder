@@ -123,7 +123,8 @@ function usageTotalTokens(usage: Usage): number {
 
 function extractUsage(payload: unknown): Usage | undefined {
 	if (!payload || typeof payload !== "object") return undefined;
-	const p = payload as { usage?: unknown; stopReason?: unknown };
+	const p = payload as { usage?: unknown; stopReason?: unknown; contextUsageInvalidated?: unknown };
+	if (p.contextUsageInvalidated === true) return undefined;
 	if (p.stopReason === "aborted" || p.stopReason === "error") return undefined;
 	const u = p.usage;
 	if (!u || typeof u !== "object") return undefined;
