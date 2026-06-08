@@ -39,7 +39,7 @@ the current test suite.
 | `clio reset [--state\|--auth\|--config\|--all]` | Reset selected Clio Coder state. |
 | `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
-| `clio agents` | List discovered agent recipes. |
+| `clio agents` | List discovered agent specs. |
 | `clio components [--json]` | List behavior-affecting harness components. |
 | `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio components diff --from <a> --to <b>` | Compare component snapshots. |
@@ -158,34 +158,36 @@ the mode matrix, tool registry, safety policy engine, and dispatch admission.
 
 ## Dispatch and Built-In Agents
 
-Fleet dispatch runs focused agent recipes through configured targets. Built-in
-recipes include:
+Fleet dispatch runs focused agent recipes through configured targets. The final agent fleet includes:
 
-| Agent | Use it for |
-| --- | --- |
-| `scout` | Read-only repository exploration and context assembly. |
-| `planner` | Turning a goal into a reviewable implementation plan. |
-| `researcher` | Documentation, literature, and web-grounded investigation. |
-| `reviewer` | Reviewing work against a plan or coding standard. |
-| `delegate` | Decomposing work into clear handoffs. |
-| `context-builder` | Building focused context bundles for downstream agents. |
-| `implementer` | Bounded implementation and repair tasks. |
-| `memory-curator` | Proposing scoped memory records from evidence artifacts. |
-| `debugger` | Explaining a failing run, session, or evidence id. |
-| `regression-scout` | Finding likely regressions and targeted negative tests. |
-| `middleware-author` | Drafting declarative middleware rules for review. |
-| `attributor` | Mapping eval changes to keep, rollback, or inconclusive calls. |
-| `evolver` | Drafting change manifests and minimal implementation plans. |
-| `benchmark-runner` | Running eval suites and summarizing budget and failures. |
-| `scientific-validator` | Drafting validation contracts for scientific artifacts. |
+| Agent | Category / Audience | Use it for |
+| --- | --- | --- |
+| `architect` | `plan` / `base` | Mapping boundaries, contracts, and migration slices. |
+| `coder` | `implement` / `base` | Bounded implementation, repairs, and behavior-preserving refactors. |
+| `debugger` | `quality` / `base` | Explaining a failing run, test failure, or session evidence without edits. |
+| `documenter` | `implement` / `base` | Updating developer-facing docs, examples, and operational runbooks. |
+| `tester` | `quality` / `base` | Focused tests for regressions and verification gaps. |
+| `verifier` | `quality` / `base` | Independent test, lint, build, and quality gate reports. |
+| `scout` | `explore` / `shadow` | Read-only repository exploration, symbol mapping, and context assembly. |
+| `researcher` | `research` / `shadow` | Documentation, literature, and web-grounded investigation. |
+| `provenance` | `operations` / `shadow` | Reading evidence files, receipts, diffs, and telemetry for handoffs. |
 
 Examples:
 
 ```bash
-clio run --agent scout "Find the main build, test, and lint commands."
-clio run --agent planner "Plan a minimal change to add JSON output to the CLI."
-clio run --agent reviewer "Review the current diff for correctness and regressions."
+clio run --agent coder "Find the main build, test, and lint commands."
+clio run --agent architect "Plan a minimal change to add JSON output to the CLI."
+clio run --agent verifier "Run tests and confirm the build passes."
 ```
+
+Shadow agents (`scout`, `researcher`, `provenance`) are internal orchestration
+helpers. They appear in `clio agents --all` and the main prompt catalog, but
+user-origin `/run` and `clio run --agent` requests are rejected for them.
+
+Agent recipes are the Markdown source files. The normalized agent spec is the
+catalog/runtime view: category, capability class, latency class, tags, mode, and
+tool set. This keeps Clio's product vocabulary stable while dispatch continues
+to execute through the existing Pi-backed worker path.
 
 ## Verification Lanes
 

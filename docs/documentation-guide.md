@@ -45,7 +45,7 @@ Classify claims clearly:
 | [evidence-and-memory.md](evidence-and-memory.md) | `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, `src/cli/memory.ts` | Evidence corpus layout, memory lifecycle and prompt injection. |
 | [middleware-and-components.md](middleware-and-components.md) | `src/domains/components/**`, `src/domains/middleware/**`, `src/cli/components.ts` | Component snapshots and experimental middleware hook contract. |
 | [evolution.md](evolution.md) | `src/domains/evolution/**`, `src/cli/evolve.ts` | Change manifest JSON schema and workflow. |
-| [scientific-validation.md](scientific-validation.md) | `src/domains/agents/builtins/scientific-validator.md`, `src/domains/scheduling/**` | Advisory scientific validation contracts and future scheduler integration. |
+| [scientific-validation.md](scientific-validation.md) | `docs/scientific-validation.md` | Advisory scientific validation contracts for developers and custom project agents. |
 
 ---
 

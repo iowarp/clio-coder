@@ -9,17 +9,31 @@ The source of truth is `src/domains/agents/**`.
 
 ---
 
-## Recipe discovery and precedence
+## Agent Architecture Semantics
 
-At startup the agents domain loads recipes from three roots:
+Clio's agent architecture distinguishes between authoring configurations and runtime policies:
+
+*   **Recipe**: An authored Markdown file containing frontmatter configuration and an instruction body.
+*   **AgentSpec**: The normalized runtime and catalog policy object derived from a recipe.
+*   **audience**: Determines visibility and routing (`base` | `shadow` | `custom` | `internal`).
+*   **source**: Origin of the recipe (`builtin` | `user` | `project`).
+
+### Discovery, Overrides, and Precedence
+At startup, Clio loads recipes from three roots:
 
 | Source | Root | Notes |
 | --- | --- | --- |
-| Built-in | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. |
-| User | `<dataDir>/agents/*.md` | Per-user recipes. `<dataDir>` follows Clio's XDG/platform data directory or `CLIO_DATA_DIR`. |
-| Project | `.clio/agents/*.md` under the current repo | Repository-local overrides and additions. |
+| **Built-in** | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. |
+| **User** | `<dataDir>/agents/*.md` | Per-user recipes. `<dataDir>` follows Clio's XDG/platform data directory. |
+| **Project** | `.clio/agents/*.md` under the current repo | Repository-local overrides and additions (custom/domain agents). |
 
-Recipe IDs come from filenames (`planner.md` -> `planner`). Recipes must live directly in the root, not nested directories. Merge order is built-in, then user, then project, so later sources override earlier recipes with the same ID.
+Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Recipes must live directly under their respective directories.
+
+*   **Customization**: User-level agents can override/customize shipped base agents.
+*   **Shadow Protection**: User or project agents can **never** override shadow or internal agents.
+*   **Built-in Protection**: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.
+*   **Reserved IDs**: The IDs `worker` and `delegate` are strictly reserved for custom/internal contexts and cannot be registered as custom agent IDs.
+*   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
 
 ---
 
@@ -27,69 +41,79 @@ Recipe IDs come from filenames (`planner.md` -> `planner`). Recipes must live di
 
 Current built-ins under `src/domains/agents/builtins/`:
 
-| Agent ID | Mode | Primary tools | Purpose |
-| --- | --- | --- | --- |
-| `attributor` | `advise` | read/search | Recommend keep vs. rollback from eval deltas. |
-| `benchmark-runner` | `default` | read/write/edit, safe exec, git | Run/analyze local eval and benchmark tasks. |
-| `context-builder` | `advise` | read/search/web | Assemble compact context bundles. |
-| `debugger` | `advise` | read/search | Root-cause evidence, run, or session failures. |
-| `delegate` | `default` | read | Plan delegation and handoffs. |
-| `evolver` | `advise` | read/search/write_plan | Draft change manifests and minimal plans. |
-| `implementer` | `default` | edit, safe exec, frontend validation, git | Concrete implementation and repair work. |
-| `memory-curator` | `advise` | read/search | Propose evidence-linked memory candidates. |
-| `middleware-author` | `advise` | read/search/write_plan | Draft middleware-rule designs and safety notes. |
-| `planner` | `advise` | read/web/write_plan | Produce reviewable technical plans. |
-| `regression-scout` | `advise` | read/search | Find likely regression paths and negative tests. |
-| `researcher` | `advise` | read/web/write_plan | External/API research synthesis. |
-| `reviewer` | `advise` | read/search/write_review | Review diffs and plans against project standards. |
-| `scientific-validator` | `advise` | read/search | Draft scientific validation contracts and HPC assumptions. |
-| `scout` | `advise` | read/search/web | Read-only workspace reconnaissance. |
-| `worker` | `default` | edit, safe exec, frontend validation, git | Internal default execution recipe; not usually presented as product vocabulary. |
+### Shipped Base Agents
+User-facing agents visible in `clio agents` and `/agents`.
 
-> [!NOTE]
-> The `worker` recipe is runtime terminology used by dispatch internals. User-facing workflows should prefer named agents such as `scout`, `planner`, `reviewer`, and `implementer`.
+| Agent ID | Mode | Primary tools | Purpose | Capability | Latency |
+| --- | --- | --- | --- | --- | --- |
+| `architect` | `advise` | read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
+| `coder` | `default` | read, write, edit, grep, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
+| `debugger` | `default` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
+| `documenter` | `default` | read, write, edit, grep, glob, ls, git_status, git_diff, run_lint, run_build | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `tester` | `default` | read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
+| `verifier` | `default` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
+
+### Shipped Shadow Agents
+Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
+
+| Agent ID | Mode | Primary tools | Purpose | Capability | Latency |
+| --- | --- | --- | --- | --- | --- |
+| `scout` | `advise` | read, grep, glob, ls, workspace_context, find_symbol, entry_points, where_is, git_status, git_diff, git_log | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
+| `researcher` | `advise` | read, web_fetch, read_skill | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
+| `provenance` | `advise` | read, grep, glob, ls, git_status, git_diff, git_log | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
 ---
 
 ## Frontmatter schema
 
-`src/domains/agents/registry.ts` parses a conservative subset of frontmatter fields:
+`src/domains/agents/registry.ts` parses frontmatter fields from recipe markdown:
 
 ```yaml
 ---
-name: Implementer                 # string; defaults to recipe id when absent
-description: Concrete edits       # string; defaults to empty string
+name: Coder                       # string; defaults to recipe id when absent
+description: Bounded code changes # string; defaults to empty string
 mode: default                     # advise | default | super
 tools: [read, edit, run_tests]    # string array; filtered by mode and dispatch admission
 model: null                       # string only when set; null is ignored
 endpoint: null                    # string only when set; target/endpoint hint
 thinkingLevel: off                # off | minimal | low | medium | high | xhigh
-runtime: native                   # legacy recipe hint only; target/profile selection chooses the actual runtime
-skills: []                        # legacy recipe metadata; skills are loaded through the skills catalog and CLI flags
+category: implement               # explore | plan | research | implement | quality | science | evolution | operations | internal
+capabilityClass: workspace-edit    # read-only | artifact-write | workspace-edit | verification | orchestration | internal
+latencyClass: balanced             # fast | balanced | deep
+tags: [implementation, repair]    # short lowercase routing hints for catalog display
+skills: []                        # knowledge attachments; requiring read_skill, never expands tool authority
+output: null                      # optional expected artifact name (e.g. PLAN.md)
 ---
-
-Markdown body becomes the agent's system instructions.
 ```
 
-Current built-ins still carry legacy `provider: null`, `runtime: native`, and `skills: []` fields in some frontmatter. The loader does not use those fields to select a runtime or activate skills; use `endpoint`, target configuration, fleet profiles, dispatch flags, and the skills catalog instead.
+### Skills
+Skills are knowledge attachments declared under `skills: [...]` in the YAML frontmatter.
+*   They are injected compactly into the prompt/catalog.
+*   They require the `read_skill` tool to be accessible.
+*   They **never** expand the agent's tool authority; they act purely as static knowledge context.
 
 ---
 
 ## Dispatching agents
 
+*   **Visibility**: Normal `clio agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio agents --all` includes shadow/internal specs reserved for Clio orchestration.
+*   **Invocation limits**: User-origin `/run` and `clio run --agent` **cannot** invoke shadow/internal agents.
+*   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents (e.g., using `dispatch` or `dispatch_batch` tools).
+*   **TUI rendering**: Shadow dispatch rows are marked with an `sh:` prefix in the dispatch board and footer so users can see when Clio is using internal orchestration helpers.
+*   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
+
 Interactive TUI:
 
 ```text
-/run scout summarize the repository layout
-/run --target local-qwen --model qwen3-coder implementer fix the failing unit test
-/run --agent-profile cheap --tool-profile minimal-local reviewer inspect the current diff
+/run coder implement the new command
+/run --target local-qwen --model qwen3-coder coder fix the failing unit test
+/run --agent-profile cheap --tool-profile minimal-local verifier run the regression tests
 ```
 
 Headless CLI:
 
 ```bash
-clio run --agent scout "Summarize the repository layout."
-clio run --agent implementer --target local-qwen --tool-profile science-local "Fix the failing test."
+clio run --agent coder "Refactor the parser."
 ```
 
 Dispatch admission enforces three gates:
@@ -97,8 +121,6 @@ Dispatch admission enforces three gates:
 1. The recipe's requested tools must be visible in the requested mode.
 2. The requested action classes must be allowed by the agent's scope.
 3. The worker scope must be a subset of the orchestrator's active scope.
-
-Use `clio agents` to list loaded recipes and their resolved source.
 
 ---
 
@@ -112,7 +134,6 @@ name: My Agent
 description: Focused local review helper.
 mode: advise
 tools: [read, grep, glob, ls, git_diff, write_review]
-# Optional: endpoint/model/thinkingLevel can hint dispatch defaults.
 ---
 
 You are My Agent. Inspect only the requested area. Never edit files. End by writing a concise review artifact with risks, evidence, and follow-up tests.
@@ -124,5 +145,3 @@ Then run:
 clio agents
 clio run --agent my-agent "Review the parser change."
 ```
-
-Keep project agents small and auditable. If a recipe needs write or execute tools, explain why in the body and keep validation expectations explicit.

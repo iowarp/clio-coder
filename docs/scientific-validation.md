@@ -11,7 +11,7 @@ Clio Coder introduces **Scientific Validation Contracts**: declarative, typed YA
 
 ## 📋 The Validation Contract Schema
 
-A validation contract is stored as a YAML document (matching version `1` schema). The `scientific-validator` agent drafts these contracts, which are then committed next to the research code.
+A validation contract is stored as a YAML document (matching version `1` schema). A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio/agents/`) or the developer drafts these contracts, which are then committed next to the research code.
 
 ### Example netCDF / Slurm validation contract:
 ```yaml
@@ -93,4 +93,4 @@ Clio Coder’s domain logic categorizes scientific output files into a set of ca
 Scheduler-driven runs require distinct validation handling compared to local unit tests:
 - **Queue status is not validation:** Checking if `sbatch` exits successfully only proves that the Slurm scheduler accepted the script. The validation contract is designed to execute *post-completion*, checking the actual simulation artifacts inside `out/` or `ckpt/`.
 - **Environment module loading:** The `runtime.modules` array lists the exact software stack dependencies (e.g., `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
-- **Validator execution:** In the current alpha version, contract validation is **advisory**. The `scientific-validator` agent reads the contract to guide developers and write out verification receipts, while automated in-harness contract execution is scheduled for future milestones.
+- **Validator execution:** In the current alpha version, contract validation is **advisory**. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.

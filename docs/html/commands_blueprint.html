@@ -1025,9 +1025,9 @@
           
           <div class="presets-title">Presets & Examples (Click to load)</div>
           <div class="presets-list">
-            <button class="preset-btn" onclick="loadPreset('clio run --agent scout &quot;audit dependencies&quot;')">clio run --agent scout ...</button>
+            <button class="preset-btn" onclick="loadPreset('clio run --agent coder &quot;audit dependencies&quot;')">clio run --agent coder ...</button>
             <button class="preset-btn" onclick="loadPreset('clio targets use cloud-target')">clio targets use ...</button>
-            <button class="preset-btn" onclick="loadPreset('/run planner &quot;refactor main.ts&quot; --thinking high')">/run planner ...</button>
+            <button class="preset-btn" onclick="loadPreset('/run architect &quot;refactor main.ts&quot; --thinking high')">/run architect ...</button>
             <button class="preset-btn" onclick="loadPreset('/model agentic-qwen:medium')">/model agentic-qwen...</button>
             <button class="preset-btn" onclick="loadPreset('clio reset --state')">clio reset --state</button>
             <button class="preset-btn" onclick="loadPreset('clio run --thinking custom')">clio run [invalid option]</button>
@@ -1044,7 +1044,7 @@
             <div class="term-body">
               <div class="prompt-line">
                 <span>clio &gt;</span>
-                <input type="text" id="sandboxInput" class="prompt-input" placeholder="Type command here..." oninput="analyzeCommand()" value="clio run --agent scout &quot;audit dependencies&quot;">
+                <input type="text" id="sandboxInput" class="prompt-input" placeholder="Type command here..." oninput="analyzeCommand()" value="clio run --agent coder &quot;audit dependencies&quot;">
               </div>
               
               <div class="analysis-panel">
@@ -1066,7 +1066,7 @@
                   
                   <div class="analysis-card" style="grid-column: span 2;">
                     <div class="analysis-label">Parsed Options / Flags</div>
-                    <div class="analysis-val" id="valFlags">--agent="scout"</div>
+                    <div class="analysis-val" id="valFlags">--agent="coder"</div>
                   </div>
                   
                   <div class="analysis-card" style="grid-column: span 2;">
@@ -1366,7 +1366,7 @@
           <!-- Inputs -->
           <rect x="20" y="60" width="130" height="50" class="svg-node purple" />
           <text x="85" y="85" class="svg-text svg-text-header">TUI Editor Input</text>
-          <text x="85" y="100" class="svg-text-mono">e.g. /run planner ...</text>
+          <text x="85" y="100" class="svg-text-mono">e.g. /run architect ...</text>
 
           <rect x="20" y="230" width="130" height="50" class="svg-node cyan" />
           <text x="85" y="255" class="svg-text svg-text-header">CLI Headless Arg</text>
@@ -1703,7 +1703,8 @@
     }
 
     // Real-time Command Parser & Validator Simulator
-    const validAgents = ['scout', 'planner', 'researcher', 'reviewer', 'delegate', 'context-builder', 'implementer', 'memory-curator', 'debugger', 'regression-scout', 'middleware-author', 'attributor', 'evolver', 'benchmark-runner', 'scientific-validator'];
+    const validAgents = ['architect', 'coder', 'debugger', 'documenter', 'tester', 'verifier'];
+    const shadowAgents = ['provenance', 'researcher', 'scout'];
     const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
     const validTools = ['minimal-local', 'science-local', 'full-agent'];
 
@@ -1761,10 +1762,13 @@
           valArgs.textContent = `Agent: ${agent || '(missing)'}, Task: ${task || '(missing)'}`;
           
           if (!agent) {
-            errors.push("Missing fleet agent recipe id (e.g. scout)");
+            errors.push("Missing fleet agent recipe id (e.g. coder)");
+            isValid = false;
+          } else if (shadowAgents.includes(agent)) {
+            errors.push(`Shadow agent "${agent}" is reserved for Clio internal orchestration; user-origin /run requests must use a base or custom agent.`);
             isValid = false;
           } else if (!validAgents.includes(agent)) {
-            errors.push(`Unknown agent recipe id: "${agent}". Known recipes: ${validAgents.join(', ')}`);
+            errors.push(`Unknown user-visible agent recipe id: "${agent}". Known recipes: ${validAgents.join(', ')}`);
             isValid = false;
           }
           if (!task) {
@@ -1881,8 +1885,11 @@
               errors.push(`Invalid tool profile "${options['--tool-profile']}". Must be: ${validTools.join('|')}`);
               isValid = false;
             }
-            if (options['--agent'] && !validAgents.includes(options['--agent'])) {
-              errors.push(`Unknown fleet agent recipe id: "${options['--agent']}"`);
+            if (options['--agent'] && shadowAgents.includes(options['--agent'])) {
+              errors.push(`Shadow agent "${options['--agent']}" is reserved for Clio internal orchestration; use a base or custom agent here.`);
+              isValid = false;
+            } else if (options['--agent'] && !validAgents.includes(options['--agent'])) {
+              errors.push(`Unknown user-visible fleet agent recipe id: "${options['--agent']}"`);
               isValid = false;
             }
 
