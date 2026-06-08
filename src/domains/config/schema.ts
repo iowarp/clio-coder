@@ -100,15 +100,24 @@ const WorkerTargetSchema = Type.Object({
 	thinkingLevel: ThinkingLevelSchema,
 });
 
+const CompactionThresholdsSchema = Type.Object({
+	warning: Type.Number({ minimum: 0, maximum: 1 }),
+	maskObservations: Type.Number({ minimum: 0, maximum: 1 }),
+	pruneObservations: Type.Number({ minimum: 0, maximum: 1 }),
+	maskDialogue: Type.Number({ minimum: 0, maximum: 1 }),
+	llmSummary: Type.Number({ minimum: 0, maximum: 1 }),
+});
+
 /**
- * Compaction controls (Phase 12 slice 12c). Matches the shape of
- * `CompactionSettings` in src/core/defaults.ts: threshold (0..1) gates the
- * auto trigger, `auto` is the master switch, and the two optional fields
- * let power users override the summarization model or system prompt.
+ * Graduated compaction controls. `threshold` remains optional only so older
+ * settings files can validate while core/config.ts migrates it to
+ * thresholds.llmSummary in memory.
  */
 const CompactionSchema = Type.Object({
-	threshold: Type.Number({ minimum: 0, maximum: 1 }),
+	thresholds: CompactionThresholdsSchema,
 	auto: Type.Boolean(),
+	excludeLastTurns: Type.Integer({ minimum: 1 }),
+	threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 	systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
 });

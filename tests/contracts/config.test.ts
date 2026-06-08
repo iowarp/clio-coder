@@ -108,10 +108,22 @@ describe("contracts/config", () => {
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);
 		next.compaction.auto = false;
-		next.compaction.threshold = 0.9;
+		next.compaction.thresholds.llmSummary = 0.98;
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
-		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
+		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.thresholds.llmSummary"]);
+	});
+
+	it("migrates legacy compaction threshold to the final LLM stage", () => {
+		const normalized = normalizeSettings({
+			compaction: {
+				threshold: 0.92,
+				auto: true,
+			},
+		});
+		strictEqual(normalized.compaction.thresholds.llmSummary, 0.92);
+		strictEqual(normalized.compaction.thresholds.maskObservations, DEFAULT_SETTINGS.compaction.thresholds.maskObservations);
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
 
 	it("skips targets whose runtime is unregistered or non-http in scoped cycling", () => {

@@ -110,6 +110,28 @@ function positiveInteger(value: unknown, fallback: number): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
+function positiveIntegerAtLeast(value: unknown, fallback: number, minimum: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= minimum ? Math.floor(value) : fallback;
+}
+
+function thresholdValue(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
+}
+
+function normalizeCompactionThresholds(
+	value: unknown,
+	fallback: ClioSettings["compaction"]["thresholds"],
+): ClioSettings["compaction"]["thresholds"] {
+	const record = isPlainObject(value) ? value : {};
+	return {
+		warning: thresholdValue(record.warning, fallback.warning),
+		maskObservations: thresholdValue(record.maskObservations, fallback.maskObservations),
+		pruneObservations: thresholdValue(record.pruneObservations, fallback.pruneObservations),
+		maskDialogue: thresholdValue(record.maskDialogue, fallback.maskDialogue),
+		llmSummary: thresholdValue(record.llmSummary, fallback.llmSummary),
+	};
+}
+
 function normalizeDelegationToolGovernance(
 	value: unknown,
 	fallback: ClioSettings["delegation"]["defaults"]["toolGovernance"],
@@ -715,15 +737,25 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	}
 
 	if (isPlainObject(raw.compaction)) {
-		if (
-			typeof raw.compaction.threshold === "number" &&
-			Number.isFinite(raw.compaction.threshold) &&
-			raw.compaction.threshold >= 0 &&
-			raw.compaction.threshold <= 1
-		) {
-			settings.compaction.threshold = raw.compaction.threshold;
+		settings.compaction.thresholds = normalizeCompactionThresholds(
+			raw.compaction.thresholds,
+			settings.compaction.thresholds,
+		);
+		// Backward compatibility for settings.yaml files written before
+		// graduated stages existed. The old threshold was the full LLM
+		// compaction trigger, so map it only to the final stage.
+		if (!isPlainObject(raw.compaction.thresholds)) {
+			settings.compaction.thresholds.llmSummary = thresholdValue(
+				raw.compaction.threshold,
+				settings.compaction.thresholds.llmSummary,
+			);
 		}
 		if (typeof raw.compaction.auto === "boolean") settings.compaction.auto = raw.compaction.auto;
+		settings.compaction.excludeLastTurns = positiveIntegerAtLeast(
+			raw.compaction.excludeLastTurns,
+			settings.compaction.excludeLastTurns,
+			1,
+		);
 		const model = trimString(raw.compaction.model);
 		const systemPrompt = trimString(raw.compaction.systemPrompt);
 		if (model) settings.compaction.model = model;

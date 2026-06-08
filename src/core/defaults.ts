@@ -26,19 +26,32 @@ export type WorkerProfiles = Record<string, WorkerTarget>;
  * the compaction engine in src/domains/session/compaction/defaults.ts.
  *
  * Fields:
- *   - threshold: fraction (0..1) of the orchestrator's contextWindow at
- *     which auto-compaction fires. 12c persists it; 12d wires the check.
+ *   - thresholds: graduated pressure thresholds (0..1) for warning,
+ *     progressive masking/pruning, and final LLM compaction.
  *   - auto: master switch for the chat-loop's pre-request trigger. Manual
  *     /compact still runs when auto=false.
+ *   - excludeLastTurns: number of recent user turns protected from
+ *     progressive masking/pruning.
  *   - model: optional pattern (e.g. "openai/gpt-5-mini") used to resolve
  *     a dedicated summarization model. Falls back to the orchestrator
  *     target when absent.
  *   - systemPrompt: optional path to a prompt-override file; resolved to
  *     text at call time, not at settings load.
  */
+export interface CompactionThresholdSettings {
+	warning: number;
+	maskObservations: number;
+	pruneObservations: number;
+	maskDialogue: number;
+	llmSummary: number;
+}
+
 export interface CompactionSettings {
-	threshold: number;
+	thresholds: CompactionThresholdSettings;
 	auto: boolean;
+	excludeLastTurns: number;
+	/** Deprecated compatibility input. New settings should use thresholds.llmSummary. */
+	threshold?: number;
 	model?: string;
 	systemPrompt?: string;
 }
@@ -153,8 +166,15 @@ export const DEFAULT_SETTINGS = {
 		recentModels: [] as string[],
 	},
 	compaction: {
-		threshold: 0.8,
+		thresholds: {
+			warning: 0.7,
+			maskObservations: 0.8,
+			pruneObservations: 0.85,
+			maskDialogue: 0.9,
+			llmSummary: 0.99,
+		},
 		auto: true,
+		excludeLastTurns: 6,
 	} as CompactionSettings,
 	retry: {
 		enabled: true,
@@ -321,20 +341,25 @@ state:
   lastMode: default
   recentModels: []
 
-# Context compaction controls (Phase 12).
-#   threshold    fraction (0..1) of the orchestrator's contextWindow at which
-#                auto-compaction fires. 0.8 leaves 20% headroom for the next
-#                assistant turn before trimming.
-#   auto         master switch. true ⇒ the chat loop may compact on threshold;
-#                false disables the pre-request trigger (manual /compact still
-#                works).
-#   model        optional pattern (e.g. openai/gpt-5-mini) for a dedicated
-#                summarization model. Absent ⇒ the engine uses the orchestrator
-#                target.
-#   systemPrompt optional path to a prompt-override file.
+# Context compaction controls.
+#   auto              master switch for pre-request graduated context pressure.
+#                     Manual /compact always runs the LLM summary stage.
+#   excludeLastTurns  recent user turns protected from progressive masking.
+#   thresholds        pressure = estimated_tokens / context_window.
+#                     Earlier stages reclaim context without an LLM call;
+#                     llmSummary is the final full summarization stage.
+#   model             optional pattern (e.g. openai/gpt-5-mini) for a dedicated
+#                     summarization model. Absent ⇒ orchestrator target.
+#   systemPrompt      optional path to a prompt-override file.
 compaction:
-  threshold: 0.8
   auto: true
+  excludeLastTurns: 6
+  thresholds:
+    warning: 0.7
+    maskObservations: 0.8
+    pruneObservations: 0.85
+    maskDialogue: 0.9
+    llmSummary: 0.99
   # model: openai/gpt-5-mini
   # systemPrompt: ~/.config/clio/prompts/compaction.md
 

@@ -11,6 +11,7 @@ import {
 	appendTurn,
 	newTurnId,
 	persistSessionMeta,
+	replaceEntries,
 	resumeSessionState,
 	type SessionManagerState,
 	startSession,
@@ -118,6 +119,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		appendEntry(entry: SessionEntryInput) {
 			if (!state) throw new Error("session.appendEntry: no current session");
 			return appendEntry(state, entry);
+		},
+		replaceEntries(entries) {
+			if (!state) throw new Error("session.replaceEntries: no current session");
+			replaceEntries(state, entries);
 		},
 		recordSkillActivation(activation) {
 			if (!state) throw new Error("session.recordSkillActivation: no current session");

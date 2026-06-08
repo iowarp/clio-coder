@@ -269,7 +269,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				used: contextUsage?.tokens ?? null,
 				contextWindow: contextUsage?.contextWindow ?? null,
 				toolSchemaTokens: contextUsage?.breakdown?.toolSchemaTokens ?? null,
-				compactionThreshold: settings?.compaction?.threshold ?? null,
+				compactionThreshold: settings?.compaction?.thresholds?.llmSummary ?? null,
 				compactionAuto: settings?.compaction?.auto ?? null,
 				compactionActive,
 				clioMd: formatClioMdState(contextState?.clioMd),

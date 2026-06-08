@@ -103,10 +103,15 @@ function usageTotalTokens(usage: unknown): number | null {
 	return sum > 0 ? sum : null;
 }
 
+function usageInvalidated(message: AgentMessage): boolean {
+	return (message as { contextUsageInvalidated?: unknown }).contextUsageInvalidated === true;
+}
+
 function latestUsableAssistantUsage(messages: ReadonlyArray<AgentMessage>): { index: number; tokens: number } | null {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i] as AgentMessage | undefined;
 		if (!message || message.role !== "assistant") continue;
+		if (usageInvalidated(message)) continue;
 		const stopReason = (message as { stopReason?: unknown }).stopReason;
 		if (stopReason === "error" || stopReason === "aborted") continue;
 		const tokens = usageTotalTokens((message as { usage?: Usage }).usage);
