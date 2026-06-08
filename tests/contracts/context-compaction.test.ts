@@ -9,6 +9,7 @@ import { estimateAgentContextTokens } from "../../src/domains/session/context-ac
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { formatProgressiveCompactionNotice } from "../../src/interactive/chat-loop.js";
+import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
 function entryBase(id: string, parentTurnId: string | null = null): Pick<SessionEntry, "turnId" | "parentTurnId" | "timestamp"> {
 	return {
@@ -111,6 +112,27 @@ describe("contracts/context compaction stages", () => {
 		const result = applyProgressiveCompaction({ entries, stage: "prune_observations", excludeLastTurns: 1 });
 		const notice = formatProgressiveCompactionNotice(result, { tokensBefore: 58_596, tokensAfter: 7_864 });
 		ok(notice.includes("~58596 tokens -> ~7864 tokens"), notice);
+	});
+
+	it("formats LLM summary notices without a stray closing bracket", () => {
+		strictEqual(
+			renderCompactionSummaryLine({
+				messagesSummarized: 43,
+				summaryChars: 3833,
+				tokensBefore: 73_901,
+				isSplitTurn: true,
+			}),
+			"[context engine] llm_summary: 43 messages summarized to 3833 chars; ~73901 tokens before (split turn)",
+		);
+		strictEqual(
+			renderCompactionSummaryLine({
+				messagesSummarized: 4,
+				summaryChars: 512,
+				tokensBefore: 12_345,
+				isSplitTurn: false,
+			}),
+			"[context engine] llm_summary: 4 messages summarized to 512 chars; ~12345 tokens before",
+		);
 	});
 
 	it("repairs tool_result dependencies when a compaction summary starts at a result", () => {

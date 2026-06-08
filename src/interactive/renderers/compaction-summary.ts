@@ -46,7 +46,7 @@ export interface CompactionSummaryLineInput {
  */
 export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): string {
 	const tail = input.isSplitTurn ? " (split turn)" : "";
-	return `[context engine] llm_summary: ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars; ~${input.tokensBefore} tokens before${tail}]`;
+	return `[context engine] llm_summary: ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars; ~${input.tokensBefore} tokens before${tail}`;
 }
 
 export interface RenderCompactionSummaryOptions {
