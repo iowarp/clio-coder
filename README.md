@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.1-00d4db?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.2-00d4db?style=flat-square" /></a>
   <a href="#install-from-source"><img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.19-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-deterministic-147366?style=flat-square" /></a>
@@ -31,12 +31,13 @@
 ## Status
 
 Clio Coder is an **experimental alpha**. The current public release is
-**v0.2.1**.
+**v0.2.2**.
 
-v0.2.1 is a source-checkout alpha patch for local model operators. It improves
-local harness feedback with throughput telemetry, clearer context pressure,
-prompt-envelope reuse, narrower tool exposure, bounded tool results, safer
-headless CLI behavior, and smaller-terminal dashboard controls.
+v0.2.2 is a source-checkout alpha patch for local model operators. It adds a
+reliable local install/uninstall path, neutral first-run configuration examples,
+ACP interop, curated skills, stronger skill activation, and recent harness
+improvements for throughput telemetry, prompt-envelope reuse, bounded tool
+results, and smaller-terminal dashboard controls.
 
 It builds on the v0.2.0 community alpha foundations: durable sessions,
 `CLIO.md` project context adoption, target-first runtime routing, fleet
@@ -83,27 +84,49 @@ Requirements:
 - A model target, such as a local OpenAI-compatible gateway, Ollama, LM Studio,
   llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API.
 
-Recommended alpha install:
+Recommended alpha source install:
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run build
-npm link
+npm run install:local
+hash -r
 clio --version
 ```
 
-`npm link` exposes the `clio` binary from `dist/`. If you edit TypeScript
-source, run `npm run build` again before testing the linked command. For a
-reproducible release checkout after v0.2.1 is published, `main` and tag
-`v0.2.1` should point at the same commit.
+`npm run install:local` runs dependency/build checks and installs a deterministic
+symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`. It warns if that bin dir is
+not on `PATH`. If you edit TypeScript source, run `npm run build` again before
+testing `clio`; the local symlink points at `dist/cli/index.js`. For a
+reproducible release checkout after v0.2.2 is published, `main` and tag
+`v0.2.2` should point at the same commit.
 
 ## npm Status
 
-`@iowarp/clio-coder` is not published on npm for v0.2.1. Use the source install
+`@iowarp/clio-coder` is not published on npm for v0.2.2. Use the source install
 path above unless a future release note explicitly announces registry
 availability.
+
+## Uninstall Local Source Install
+
+Preview first, then remove the local symlink and Clio state:
+
+```bash
+npm run uninstall:local -- --dry-run
+npm run uninstall:local -- --force
+hash -r
+```
+
+To remove sessions/cache while keeping only the active `settings.yaml` and
+`credentials.yaml` files, use:
+
+```bash
+npm run uninstall:local -- --force --keep-settings-auth
+```
+
+Use `--keep-state` for binary-only unlinking. The script refuses to remove a
+`clio` symlink unless it points into the current checkout or an explicitly
+accepted path.
 
 ## First Run
 
@@ -210,17 +233,17 @@ CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
 ```
 
-Manual v0.2.1 release-prep evidence also covered the interactive TUI, a
-`dispatch_batch` run with Dynamo-backed workers, destructive-delete refusal,
-and a Mini/llama.cpp live smoke returning `clio-live-ok`. Treat those as
-operator-run release checks, not guarantees that every local model behaves the
+Manual v0.2.2 release-prep evidence covers deterministic CI commands, local
+source install/uninstall smoke checks, interactive TUI checks, dispatch work,
+destructive-delete refusal, and opt-in live model smoke. Treat live checks as
+operator-run release evidence, not guarantees that every local model behaves the
 same way.
 
 ## Troubleshooting
 
 | Problem | Try this |
 | --- | --- |
-| `clio: command not found` | Run `npm run build && npm link` from the Clio Coder source tree. |
+| `clio: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
 | No model target is available | Run `clio configure`, then `clio targets --probe`. |
 | Local model does not respond | Confirm the local runtime is running and the target URL is correct. |
 | Cloud model auth fails | Check `clio auth status <target>` and verify the relevant API key or login flow. |

@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, join, relative } from "node:path";
 
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { printError, printHeader, printOk } from "./shared.js";
@@ -72,10 +74,51 @@ function containsPath(parent: string, child: string): boolean {
 	return rel.length > 0 && !rel.startsWith("..") && !rel.startsWith("/");
 }
 
+function findClioOnPath(): string | null {
+	const names = process.platform === "win32" ? ["clio.cmd", "clio.ps1", "clio.exe", "clio"] : ["clio"];
+	for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+		if (!dir) continue;
+		for (const name of names) {
+			const candidate = join(dir, name);
+			if (existsSync(candidate)) return candidate;
+		}
+	}
+	return null;
+}
+
+function readNpmPrefix(): string | null {
+	try {
+		const result = spawnSync("npm", ["config", "get", "prefix"], {
+			encoding: "utf8",
+			timeout: 5000,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		if (result.status !== 0) return null;
+		const prefix = result.stdout.trim();
+		return prefix.length > 0 ? prefix : null;
+	} catch {
+		return null;
+	}
+}
+
 function printRemovalGuidance(): void {
-	process.stdout.write("\nRemove the package with the same package manager you used to install Clio Coder:\n");
-	process.stdout.write("  npm uninstall -g @iowarp/clio-coder\n");
-	process.stdout.write("  npm unlink @iowarp/clio-coder\n");
+	const pathClio = findClioOnPath();
+	const npmPrefix = readNpmPrefix();
+	const localLink = join(homedir(), ".local", "bin", "clio");
+	const currentLauncher = process.argv[1];
+
+	process.stdout.write("\nBinary removal guidance (state removal above does not delete the executable):\n");
+	if (currentLauncher) process.stdout.write(`  current launcher: ${currentLauncher}\n`);
+	process.stdout.write(`  PATH lookup:      ${pathClio ?? "not currently found"}\n`);
+	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
+	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
+	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
+	process.stdout.write("  source checkout: npm run uninstall:local -- --force\n");
+	process.stdout.write("  npm global:      npm uninstall -g @iowarp/clio-coder\n");
+	process.stdout.write("  npm link:        npm unlink -g @iowarp/clio-coder\n");
+	process.stdout.write("\nAfter removing or replacing a clio link, clear shell command caches:\n");
+	process.stdout.write("  hash -r   # Bash\n");
+	process.stdout.write("  rehash    # Zsh\n");
 }
 
 export function runUninstallCommand(argv: ReadonlyArray<string>): number {

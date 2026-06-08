@@ -1,7 +1,7 @@
 # Configuration, Targets, Runtimes, and Auth
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.1).
+> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.2).
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native/pi-ai-backed runtimes.
 
@@ -39,9 +39,8 @@ From a source checkout:
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run build
-npm link
+npm run install:local
+hash -r
 clio --version
 ```
 

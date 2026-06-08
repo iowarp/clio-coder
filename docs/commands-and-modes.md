@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.2).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command
@@ -241,7 +241,7 @@ clio -nc run --agent scout "..."
 
 | Problem | Try this |
 | --- | --- |
-| `clio: command not found` | Run `npm run build && npm link` from the source tree. |
+| `clio: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
 | No model target is available | Run `clio configure`, then `clio targets --probe`. |
 | Local model does not respond | Confirm the runtime is running and the target URL is correct. |
 | Cloud model auth fails | Check `clio auth status <target>` and verify the relevant API key or login flow. |

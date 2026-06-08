@@ -50,6 +50,10 @@ rather than hidden subprocess shims.
   prompts, context/bootstrap, and harness changes are ordinary local source work
   when requested, while publishing, pushing, releases, PRs, and registry
   contribution still require explicit user intent.
+- Added deterministic local source install and uninstall scripts. `npm run
+  install:local` links `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio` to the built
+  checkout, and `npm run uninstall:local` removes that symlink plus selected
+  Clio state with dry-run and settings/auth preservation options.
 
 ### Changed
 
@@ -126,9 +130,8 @@ rather than hidden subprocess shims.
   files, primarily SVGs without titles and buttons without explicit `type`
   attributes. `npm run ci:release` will remain blocked until those docs are
   fixed or the release gate is intentionally scoped.
-- Before final release prep, bump package/docs from 0.2.1 to 0.2.2, date this
-  changelog section, rebuild `dist`, and run the full `npm run ci:release` plus
-  packaging sanity checks.
+- Before final tagging, date this changelog section, rebuild `dist`, and run the
+  full `npm run ci:release` plus packaging sanity checks.
 
 ## 0.2.1 - 2026-06-05
 
