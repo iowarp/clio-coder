@@ -1488,7 +1488,7 @@
     "agents": {
       name: "agents",
       path: "src/domains/agents/",
-      desc: "Maintains templates for built-in and user fleet agents (scout, researcher, evolver, reviewer, scientific-validator). Spawns specialized workers.",
+      desc: "Maintains templates for built-in and user fleet agents (scout, researcher, architect, coder, verifier). Spawns specialized workers.",
       dependsOn: ["config", "modes"],
       dependents: ["dispatch"],
       contract: `interface AgentsContract {
@@ -2052,7 +2052,7 @@
       html += `
         <div class="form-group">
           <label class="form-label">Target Agent ID</label>
-          <input type="text" id="field-agentId" class="form-input" value="scientific-validator">
+           <input type="text" id="field-agentId" class="form-input" value="verifier">
         </div>
         <div class="form-group">
           <label class="form-label">Task Context Description</label>

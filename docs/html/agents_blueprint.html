@@ -469,9 +469,9 @@ h1 {
               <label>Select Dispatch Recipe</label>
               <select id="sim-recipe" onchange="loadRecipeIntoSim()">
                 <option value="scout">scout (Mode: advise)</option>
-                <option value="implementer" selected>implementer (Mode: default)</option>
-                <option value="reviewer">reviewer (Mode: advise)</option>
-                <option value="worker">worker (Mode: default)</option>
+                <option value="coder" selected>coder (Mode: default)</option>
+                <option value="architect">architect (Mode: advise)</option>
+                <option value="verifier">verifier (Mode: default)</option>
                 <option value="custom">-- Custom Recipe --</option>
               </select>
             </div>
@@ -505,7 +505,7 @@ h1 {
           <!-- Console Output -->
           <div class="outcome-panel">
             <div class="outcome-header">
-              <span class="recipe-name" style="font-size: 1.1rem;" id="sim-active-title">implementer</span>
+              <span class="recipe-name" style="font-size: 1.1rem;" id="sim-active-title">coder</span>
               <div class="status-badge status-pass" id="sim-status-badge">
                 <span id="sim-status-text">ADMISSION PASSED</span>
               </div>
@@ -671,42 +671,42 @@ h1 {
       scout: {
         id: "scout",
         name: "Scout",
-        description: "Read-only reconnaissance across a workspace.",
+        description: "Shadow fast codebase reconnaissance, symbol mapping, and codewiki context.",
         mode: "advise",
-        tools: ["read", "grep", "glob", "ls", "web_fetch"],
+        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log", "workspace_context", "find_symbol", "entry_points", "where_is"],
         thinkingLevel: "off",
         filepath: "src/domains/agents/builtins/scout.md",
-        body: "You are Scout, a read-only reconnaissance agent for Clio.\nPrefer direct file reads and targeted searches over broad sweeps.\nUse glob and ls to map the terrain before drilling into files."
+        body: "You are Scout, a shadow reconnaissance agent for fast codebase orientation."
       },
-      implementer: {
-        id: "implementer",
-        name: "Implementer",
-        description: "Concrete code implementation, test verification, and lint corrections.",
+      coder: {
+        id: "coder",
+        name: "Coder",
+        description: "Implements bounded code changes, repairs, and behavior-preserving refactors.",
         mode: "default",
-        tools: ["read", "grep", "glob", "ls", "edit", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend", "git_diff", "git_status", "git_log"],
-        thinkingLevel: "low",
-        filepath: "src/domains/agents/builtins/implementer.md",
-        body: "You are Implementer. Perform direct code edits and verify using unit tests.\nAlways check compile/build and lint statuses before finishing your work."
-      },
-      reviewer: {
-        id: "reviewer",
-        name: "Reviewer",
-        description: "Quality reviews and verification audits.",
-        mode: "advise",
-        tools: ["read", "grep", "glob", "ls", "git_diff", "git_status", "write_review"],
+        tools: ["read", "write", "edit", "grep", "glob", "ls", "web_fetch", "git_status", "git_diff", "git_log", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"],
         thinkingLevel: "medium",
-        filepath: "src/domains/agents/builtins/reviewer.md",
-        body: "You are Reviewer. Review code diffs and safety rule compliance.\nDo not write plans or run write commands."
+        filepath: "src/domains/agents/builtins/coder.md",
+        body: "You are Coder, the base implementation agent.\nStart by restating the assigned coding task and the finished-state criteria."
       },
-      worker: {
-        id: "worker",
-        name: "Worker",
-        description: "Default internal execution recipe.",
+      architect: {
+        id: "architect",
+        name: "Architect",
+        description: "Designs coding changes across boundaries, contracts, migrations, and validation gates.",
+        mode: "advise",
+        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "write_plan", "find_symbol", "entry_points", "where_is"],
+        thinkingLevel: "high",
+        filepath: "src/domains/agents/builtins/architect.md",
+        body: "You are Architect, the base design agent for coding work.\nStart by restating the requested change, the affected modules, and the decision the operator needs."
+      },
+      verifier: {
+        id: "verifier",
+        name: "Verifier",
+        description: "Independently runs and reports test, lint, build, review, and release gates.",
         mode: "default",
-        tools: ["read", "grep", "glob", "ls", "edit", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend", "git_diff", "git_status", "git_log"],
-        thinkingLevel: "off",
-        filepath: "src/domains/agents/builtins/worker.md",
-        body: "You are the Worker recipe. Execute tasks as requested."
+        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"],
+        thinkingLevel: "low",
+        filepath: "src/domains/agents/builtins/verifier.md",
+        body: "You are Verifier, the base independent quality agent.\nStart by restating the artifact, diff, command, or release gate you are validating."
       }
     };
 
