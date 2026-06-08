@@ -1,6 +1,6 @@
 # Installation and Lifecycle Operations
 
-Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`).
+Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). The supported alpha install path is a source checkout with a deterministic local symlink, not a fragile npm-global prefix link.
 
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html). You can open it directly in any web browser to view details dynamically.
@@ -33,8 +33,8 @@ All files are created automatically during the first run. The configuration dire
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
-| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Kept on uninstall unless specified. |
-| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Kept on uninstall unless specified. |
+| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by full uninstall; restored only with `--keep-settings-auth` or retained by `clio uninstall --keep-config`. |
+| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by full uninstall; restored only with `--keep-settings-auth` or retained by `clio uninstall --keep-config`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **Data** | `install.json` | Platform-specific install metadata (Clio version, node, platform, date). | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
 | **Data** | `state/migrations.json` | Log of successfully applied schema/state migrations. | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
@@ -54,7 +54,43 @@ When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `
 
 ---
 
-## 4. Lifecycle Commands
+## 4. Source Checkout Install
+
+Use the local source installer from the cloned repository:
+
+```bash
+git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
+npm run install:local
+hash -r
+clio --version
+```
+
+`scripts/install-local.sh` is idempotent and auditable:
+
+- verifies `node` satisfies `package.json` `engines.node`;
+- runs `npm ci` unless `node_modules` satisfies the lockfile or `--skip-deps` is passed;
+- runs `npm run build` unless `--no-build` is passed;
+- verifies `dist/cli/index.js` exists and is executable;
+- creates `${CLIO_BIN_DIR:-$HOME/.local/bin}` and links `clio` there;
+- warns if that bin dir is not on `PATH`;
+- recommends `clio doctor --fix` (or runs it with `--run-doctor`).
+
+First-run target setup after install:
+
+```bash
+clio doctor --fix
+clio configure --list
+clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
+clio targets use <id>
+clio targets --probe
+clio
+```
+
+If a shell still tries an old removed path such as `~/.local/bin/clio`, clear
+its command cache with `hash -r` in Bash or `rehash` in Zsh.
+
+## 5. Lifecycle Commands
 
 Clio Coder provides CLI utilities to manage operations safely.
 
@@ -70,9 +106,10 @@ Updates package installations and database states.
 ```bash
 clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 ```
-1.  **Phase 1 (Binary Upgrade):** Spawns your package manager to fetch the upgraded package (`npm install -g @iowarp/clio-coder@<channel>`).
-2.  **Phase 2 (Post-Install Schema Migrations):** Spawns the new execution context to run pending schema/data migrations (configured in `src/domains/lifecycle/migrations/`).
-3.  **Phase 3 (Diagnostic Sweep):** Executes `clio doctor --fix` to update configuration files, rewrite permission schemas, and refresh `install.json` metadata.
+The current source-checkout release is not published to npm, so source users
+should update with `git pull`, `npm run install:local`, `hash -r`, and
+`clio doctor --fix`. The `clio upgrade` npm-global path is retained for future
+registry availability.
 
 ### C. System Resets (`clio reset`)
 Selective recovery wipes:
@@ -84,27 +121,59 @@ clio reset [--state | --auth | --config | --all] --force
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.
 *   `--all`: Wipes all config, data, and cache folders. Automatically calls initialization to boot up a fresh environment.
 
-### D. Uninstallation (`clio uninstall`)
-Removes all local files:
+### D. Local Source Uninstallation (`npm run uninstall:local`)
+Preview first:
+
+```bash
+npm run uninstall:local -- --dry-run
+```
+
+Full local source uninstall:
+
+```bash
+npm run uninstall:local -- --force
+hash -r
+```
+
+This removes the `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio` symlink only when it
+points into the current checkout, then removes Clio config/data/cache. To keep
+only the active settings and credentials files, not old backups or other config
+residue, run:
+
+```bash
+npm run uninstall:local -- --force --keep-settings-auth
+```
+
+Use `--keep-state` for binary-only unlinking. Use `--preserve-settings-auth
+<dir>` to copy active `settings.yaml` and `credentials.yaml` to an explicit
+operator-chosen directory before restoring them. Credential contents are never
+printed.
+
+### E. CLI State Uninstallation (`clio uninstall`)
+`clio uninstall` removes selected state but does not remove the binary:
+
 ```bash
 clio uninstall [--keep-config] [--keep-data] --force
 ```
-*   Removes configuration, data, and cache directories based on flags.
-*   Does not delete the global binary itself; it prints guidelines for global removal:
-    *   *NPM global checkouts:* `npm uninstall -g @iowarp/clio-coder`
-    *   *Local source links:* `npm unlink @iowarp/clio-coder`
+
+It prints binary-removal guidance for the active launcher, npm-global installs,
+npm links, and the local source symlink. Prefer `npm run uninstall:local` for
+source checkouts because it handles both the symlink and state in one audited
+path.
 
 ---
 
-## 5. Residues Checklist for Manual Purging
+## 6. Residues Checklist for Manual Purging
 
-If you are removing Clio Coder completely from your system, verify that all three categories of residues are removed:
+If you are removing Clio Coder completely from your system, verify that all categories of residues are removed:
 
 1.  **System Roots**:
     *   `~/.config/clio`
     *   `~/.local/share/clio`
     *   `~/.cache/clio`
-2.  **Git Hooks**:
+2.  **Local Source Bin Link**:
+    *   `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`
+3.  **Git Hooks**:
     *   If you ran `npm run hooks:install` inside a cloned repository, delete the hook at: `<repo-root>/.git/hooks/pre-commit`
-3.  **Global Bin Links**:
-    *   `clio` executable in your global NPM path (e.g. `/usr/local/bin/clio` or `~/.npm-global/bin/clio`).
+4.  **Global Bin Links**:
+    *   `clio` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).

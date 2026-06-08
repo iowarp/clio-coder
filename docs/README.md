@@ -5,9 +5,9 @@
 # Clio Coder Documentation
 
 Clio Coder is an experimental community alpha. These docs describe the current
-`v0.2.1` source-build release for early adopters, including local harness
-telemetry, prompt-envelope reuse, bounded tool outputs, headless validation
-fixes, and smaller-terminal TUI controls.
+`v0.2.2` source-build release for early adopters, including reliable local
+install/uninstall scripts, ACP interop, curated skills, local harness telemetry,
+prompt-envelope reuse, bounded tool outputs, and headless validation fixes.
 
 These pages are source-aligned guides, not production-stability promises. When
 docs drift, prefer the current source, tests, `CHANGELOG.md`, and release
@@ -38,23 +38,22 @@ receipts over older prose.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run build
-npm link
+npm run install:local
+hash -r
 clio --version
 ```
 
-The linked CLI executes from `dist/`. If you edit TypeScript files under
-`src/`, run `npm run build` again or keep `npm run dev` running.
+The local symlink executes `dist/cli/index.js`. If you edit TypeScript files
+under `src/`, run `npm run build` again or keep `npm run dev` running.
 
 ## Current Release Notes
 
 The public release entry point is [../README.md](../README.md), and detailed
 release history lives in [../CHANGELOG.md](../CHANGELOG.md).
 
-For v0.2.1:
+For v0.2.2:
 
-- source checkout is the supported install path;
+- source checkout is the supported install path through `npm run install:local`;
 - npm registry publication is not part of this release;
 - deterministic release verification is `npm run ci:release`;
 - live model smoke validation is manual and opt-in through `npm run test:live`;
