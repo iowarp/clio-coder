@@ -20,7 +20,7 @@ export interface FinishContractEvidence {
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason: "no_completion_claim" | "validation_evidence" | "explicit_limitation";
+			reason: "no_completion_claim" | "validation_evidence" | "explicit_limitation" | "read_only_status_turn";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 	  }
 	| {
@@ -34,6 +34,8 @@ export interface FinishContractInput {
 	sessionEntries?: ReadonlyArray<unknown>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
+	/** Optional explicit current user prompt; otherwise derived from sessionEntries. */
+	currentUserText?: string | null;
 }
 
 interface ToolCallEvidenceCandidate {
@@ -79,9 +81,16 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		return { kind: "ok", reason: "no_completion_claim", evidence: [] };
 	}
 
+	const sessionEntries = input.sessionEntries ?? [];
+	const assistantTurnId = input.assistantTurnId ?? null;
+	const userText = input.currentUserText ?? currentUserText(sessionEntries, assistantTurnId);
+	if (userText !== null && isReadOnlyStatusRecallPrompt(userText)) {
+		return { kind: "ok", reason: "read_only_status_turn", evidence: [] };
+	}
+
 	const evidence = collectRecentEvidence(
-		input.sessionEntries ?? [],
-		input.assistantTurnId ?? null,
+		sessionEntries,
+		assistantTurnId,
 		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
 	);
 	if (evidence.length > 0) {
@@ -105,6 +114,24 @@ export function hasExplicitLimitation(text: string): boolean {
 	const normalized = text.trim();
 	if (normalized.length === 0) return false;
 	return LIMITATION_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function isReadOnlyStatusRecallPrompt(text: string): boolean {
+	const normalized = text.trim().toLowerCase();
+	if (normalized.length === 0) return false;
+	const readOnlySignal =
+		/\bread\s+only\b/.test(normalized) ||
+		/\buse\s+read\s+only\b/.test(normalized) ||
+		/\bdo\s+not\s+use\s+tools\b/.test(normalized) ||
+		/\brecall\b/.test(normalized) ||
+		/\bstate\s+check\b/.test(normalized) ||
+		/\bstatus\s+check\b/.test(normalized) ||
+		/\balignment\b/.test(normalized);
+	if (!readOnlySignal) return false;
+	const workRequest =
+		/\b(implement|fix|resolve|change|modify|edit|write|create|delete|remove|add|build|ship)\b/.test(normalized) ||
+		/\b(run|execute)\s+(tests?|lint|typecheck|build|validation)\b/.test(normalized);
+	return !workRequest;
 }
 
 function collectRecentEvidence(

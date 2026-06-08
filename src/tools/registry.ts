@@ -88,7 +88,7 @@ export interface ToolSpec {
 	 */
 	executionMode?: ToolExecutionMode;
 	/** Execute the tool. Only called after admission. */
-	run(args: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<ToolResult>;
+	run(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
 }
 
 export type ToolResultDetails = Record<string, unknown>;

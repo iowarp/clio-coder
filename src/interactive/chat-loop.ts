@@ -358,6 +358,39 @@ function terminalFailureFromAssistantMessage(message: AgentMessage | undefined):
 	return { stopReason, errorMessage, message };
 }
 
+function isLengthStopAssistantMessage(message: AgentMessage | undefined): boolean {
+	return (
+		!!message &&
+		typeof message === "object" &&
+		message !== null &&
+		"role" in message &&
+		message.role === "assistant" &&
+		(message as { stopReason?: unknown }).stopReason === "length"
+	);
+}
+
+function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {
+	const usage = (message as { usage?: unknown }).usage;
+	const metadata: Record<string, unknown> = {
+		kind: "provider_length_stop",
+		stopReason: "length",
+		message:
+			"Provider stopped because its output/context limit was reached before a complete assistant response. This often means the prompt plus tool observations exhausted the reported context window.",
+	};
+	if (usage && typeof usage === "object") {
+		const u = usage as Record<string, unknown>;
+		for (const [from, to] of [
+			["input", "inputTokens"],
+			["output", "outputTokens"],
+			["totalTokens", "totalTokens"],
+		] as const) {
+			const value = u[from];
+			if (typeof value === "number" && Number.isFinite(value)) metadata[to] = value;
+		}
+	}
+	return metadata;
+}
+
 function finalAssistantStopMessage(messages: ReadonlyArray<AgentMessage>): AgentMessage | null {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index];
@@ -714,6 +747,7 @@ function assistantSessionPayload(
 	} else {
 		const stopReason = raw.stopReason;
 		if (stopReason !== undefined) payload.stopReason = stopReason;
+		if (stopReason === "length") payload.contextExhaustion = lengthStopMetadata(message);
 	}
 	return payload;
 }
@@ -723,6 +757,7 @@ function hasPersistableAssistantContent(
 	failure: TerminalAssistantFailure | null,
 ): boolean {
 	if (failure) return true;
+	if (payload.stopReason === "length") return true;
 	if (typeof payload.text === "string" && payload.text.trim().length > 0) return true;
 	if (typeof payload.thinking === "string" && payload.thinking.trim().length > 0) return true;
 	if (Array.isArray(payload.content) && payload.content.length > 0) return true;
@@ -759,6 +794,27 @@ function toolResultSummary(result: unknown): Record<string, unknown> {
 		...(typeof size?.policy === "string" ? { policy: size.policy } : {}),
 		...(typeof size?.followUpHint === "string" ? { followUpHint: size.followUpHint } : {}),
 	};
+}
+
+export interface ProgressiveCompactionNoticeAccounting {
+	tokensBefore?: number | null;
+	tokensAfter?: number | null;
+}
+
+export function formatProgressiveCompactionNotice(
+	result: ProgressiveCompactionResult,
+	accounting: ProgressiveCompactionNoticeAccounting = {},
+): string {
+	const beforeTokens = accounting.tokensBefore ?? result.tokensBefore;
+	const afterTokens = accounting.tokensAfter ?? result.tokensAfter;
+	const before = beforeTokens && beforeTokens > 0 ? `~${beforeTokens} tokens` : "unknown tokens";
+	const after = afterTokens && afterTokens > 0 ? `~${afterTokens} tokens` : "unknown tokens";
+	const actions: string[] = [];
+	if (result.maskedObservations > 0) actions.push(`${result.maskedObservations} observations masked`);
+	if (result.prunedObservations > 0) actions.push(`${result.prunedObservations} observations pruned`);
+	if (result.maskedDialogue > 0) actions.push(`${result.maskedDialogue} dialogue messages masked`);
+	const actionText = actions.length > 0 ? actions.join(", ") : "no eligible stale entries";
+	return `[context engine] ${result.stage}: ${actionText}; ${before} -> ${after}`;
 }
 
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
@@ -832,6 +888,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!message || message.role !== "assistant") return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		if (isLengthStopAssistantMessage(message) && runtime) {
+			const contextExhaustion = recordValue(payload.contextExhaustion);
+			const contextWindow = runtime.runtimeResolution.capabilityDecisions.contextWindow;
+			if (contextExhaustion && contextWindow > 0) contextExhaustion.contextWindow = contextWindow;
+		}
 		if (currentPromptDiagnostics) payload.promptDiagnostics = currentPromptDiagnostics;
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
@@ -1258,6 +1319,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtimeResolution: target.runtimeResolution,
 			lastSessionShellHash: null,
 		};
+		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => postToolContinuationGuard(localRuntime, signal);
 
 		let streamStartedAt: number | null = null;
 		let firstAssistantDeltaAt: number | null = null;
@@ -1699,6 +1761,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const formatPressure = (pressure: number | null): string =>
 		pressure === null ? "unknown pressure" : `${Math.round(pressure * 100)}% context pressure`;
 
+	const liveContextEstimate = (
+		agentRuntime: AgentRuntime,
+		pendingUserText?: string,
+	): { tokens: number; contextWindow: number; breakdown: ReturnType<typeof estimateAgentContextBreakdown> } => {
+		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
+		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+		const estimateInput = {
+			systemPrompt: agentRuntime.agent.state.systemPrompt,
+			messages: agentRuntime.agent.state.messages,
+			tools: agentRuntime.agent.state.tools,
+			...(pendingUserText !== undefined ? { pendingUserText } : {}),
+		};
+		return {
+			tokens: estimateAgentContextTokens(estimateInput),
+			contextWindow,
+			breakdown: estimateAgentContextBreakdown(estimateInput),
+		};
+	};
+
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
 		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries);
@@ -1712,17 +1793,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!shouldAnnounceStage(previous, stage)) return;
 		lastContextStageBySession.set(key, stage);
 		emitNotice(message);
-	};
-
-	const progressiveNotice = (result: ProgressiveCompactionResult): string => {
-		const before = result.tokensBefore > 0 ? `~${result.tokensBefore} tokens` : "unknown tokens";
-		const after = result.tokensAfter > 0 ? `~${result.tokensAfter} tokens` : "unknown tokens";
-		const actions: string[] = [];
-		if (result.maskedObservations > 0) actions.push(`${result.maskedObservations} observations masked`);
-		if (result.prunedObservations > 0) actions.push(`${result.prunedObservations} observations pruned`);
-		if (result.maskedDialogue > 0) actions.push(`${result.maskedDialogue} dialogue messages masked`);
-		const actionText = actions.length > 0 ? actions.join(", ") : "no eligible stale entries";
-		return `[context engine] ${result.stage}: ${actionText}; ${before} -> ${after}`;
 	};
 
 	/**
@@ -1749,18 +1819,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		let selectedStage: ContextCompactionStage = "llm_summary";
 		let pressure: number | null = null;
+		let liveTokensBefore: number | null = null;
 		if (!force) {
-			const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
-			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
+			liveTokensBefore = estimate.tokens;
 			const thresholds = normalizeContextCompactionThresholds(cfg?.thresholds, cfg?.threshold);
-			const estimateInput = {
-				systemPrompt: agentRuntime.agent.state.systemPrompt,
-				messages: agentRuntime.agent.state.messages,
-				tools: agentRuntime.agent.state.tools,
-				...(pendingUserText !== undefined ? { pendingUserText } : {}),
-			};
-			const tokens = estimateAgentContextTokens(estimateInput);
-			const verdict = shouldCompact(tokens, thresholds, contextWindow);
+			const verdict = shouldCompact(estimate.tokens, thresholds, estimate.contextWindow);
 			if (verdict.stage === null) return false;
 			selectedStage = verdict.stage;
 			pressure = verdict.pressure;
@@ -1799,18 +1863,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			deps.session.replaceEntries(result.entries);
 			refreshAgentMessagesFromSession(agentRuntime);
+			const liveTokensAfter = liveContextEstimate(agentRuntime).tokens;
+			const tokensBefore = liveTokensBefore ?? result.tokensBefore;
 			deps.bus?.emit(BusChannels.ContextPruned, {
 				stage: result.stage,
 				pressure,
-				tokensBefore: result.tokensBefore,
-				tokensAfter: result.tokensAfter,
+				tokensBefore,
+				tokensAfter: liveTokensAfter,
 				maskedObservations: result.maskedObservations,
 				prunedObservations: result.prunedObservations,
 				maskedDialogue: result.maskedDialogue,
 				trigger,
 				at: Date.now(),
 			});
-			maybeNoticeStage(selectedStage, progressiveNotice(result));
+			maybeNoticeStage(
+				selectedStage,
+				formatProgressiveCompactionNotice(result, { tokensBefore, tokensAfter: liveTokensAfter }),
+			);
 			return true;
 		}
 
@@ -1843,6 +1912,53 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}),
 		);
 		return true;
+	};
+
+	const toolResultTail = (agentRuntime: AgentRuntime): boolean => {
+		const messages = agentRuntime.agent.state.messages;
+		const tail = messages[messages.length - 1] as AgentMessage | undefined;
+		return !!tail && typeof tail === "object" && tail !== null && "role" in tail && tail.role === "toolResult";
+	};
+
+	const continuationContextUpdate = (agentRuntime: AgentRuntime) => ({
+		context: {
+			systemPrompt: agentRuntime.agent.state.systemPrompt,
+			messages: [...agentRuntime.agent.state.messages],
+			tools: [...agentRuntime.agent.state.tools],
+		},
+		model: agentRuntime.agent.state.model,
+		thinkingLevel: agentRuntime.agent.state.thinkingLevel,
+	});
+
+	const postToolContinuationGuard = async (agentRuntime: AgentRuntime, signal?: AbortSignal) => {
+		if (signal?.aborted || !toolResultTail(agentRuntime)) return undefined;
+		const before = liveContextEstimate(agentRuntime);
+		if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
+
+		const settings = deps.getSettings();
+		const thresholds = normalizeContextCompactionThresholds(
+			settings.compaction?.thresholds,
+			settings.compaction?.threshold,
+		);
+		const verdict = shouldCompact(before.tokens, thresholds, before.contextWindow);
+		let compacted = false;
+		if (verdict.stage !== null) {
+			try {
+				compacted = await runAutoCompact(agentRuntime, false, undefined, "auto");
+			} catch (err) {
+				throw new Error(
+					`[Clio Coder] post-tool context guard could not compact before continuation: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
+
+		const after = liveContextEstimate(agentRuntime);
+		if (after.tokens >= after.contextWindow) {
+			throw new Error(
+				`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /compact, narrower reads, or a follow-up turn with smaller observations.`,
+			);
+		}
+		return compacted ? continuationContextUpdate(agentRuntime) : undefined;
 	};
 
 	const appendSubmittedUserTurn = (
@@ -2078,19 +2194,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		contextUsage(): ContextUsageSnapshot {
 			if (!runtime) return contextUsageSnapshot(null, 0);
-			const modelState = runtime.agent.state.model as { contextWindow?: number } | undefined;
-			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+			const estimate = liveContextEstimate(runtime);
 			if (runtime.agent.state.messages.length <= replayedContextMessages.length) {
-				return contextUsageSnapshot(null, contextWindow);
+				return contextUsageSnapshot(null, estimate.contextWindow);
 			}
-			const estimateInput = {
-				systemPrompt: runtime.agent.state.systemPrompt,
-				messages: runtime.agent.state.messages,
-				tools: runtime.agent.state.tools,
-			};
-			const tokens = estimateAgentContextTokens(estimateInput);
-			const breakdown = estimateAgentContextBreakdown(estimateInput);
-			return contextUsageSnapshot(tokens > 0 ? tokens : null, contextWindow, breakdown);
+			return contextUsageSnapshot(estimate.tokens > 0 ? estimate.tokens : null, estimate.contextWindow, estimate.breakdown);
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (runtime) {

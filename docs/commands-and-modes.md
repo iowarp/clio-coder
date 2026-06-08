@@ -142,6 +142,8 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Ctrl+D` | Exit. |
 | `Esc` | Cancel a stream, close an active overlay, or collapse the dashboard. |
 
+When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
+
 ## Modes
 
 Clio Coder has three operator modes. See [safety-model.md](safety-model.md)
