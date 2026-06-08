@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { AgentAudience, AgentCapabilityClass, AgentCategory, AgentLatencyClass } from "./spec.js";
 
 export type RecipeThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -14,6 +15,12 @@ export interface AgentRecipe {
 	/** Legacy recipe hint only; dispatch target selection comes from configured worker targets/profiles. */
 	runtime?: "native" | "cli";
 	skills?: ReadonlyArray<string>;
+	category?: AgentCategory;
+	capabilityClass?: AgentCapabilityClass;
+	latencyClass?: AgentLatencyClass;
+	audience?: AgentAudience;
+	tags?: ReadonlyArray<string>;
+	output?: string;
 	source: "builtin" | "user" | "project";
 	filepath: string;
 	body: string;

@@ -2,18 +2,19 @@ import chalk from "chalk";
 import { loadDomains } from "../core/domain-loader.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
-import type { AgentRecipe } from "../domains/agents/recipe.js";
+import { type AgentSpec, isUserVisibleAgent } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { ModesDomainModule } from "../domains/modes/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 
-const HELP = `clio agents [--json]
+const HELP = `clio agents [--json] [--all]
 
-List discovered agent recipes (id, mode, description) from built-in and project agent fragments.
+List user-facing agent specs from built-in, user, and project recipes.
 
 Flags:
-  --json   emit recipes as JSON instead of the formatted table
+  --json   emit specs as JSON instead of the formatted table
+  --all    include shadow/internal specs reserved for Clio orchestration
 `;
 
 export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<number> {
@@ -22,6 +23,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 		return 0;
 	}
 	const json = args.includes("--json");
+	const all = args.includes("--all");
 	ensureClioState();
 	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, ModesDomainModule, AgentsDomainModule]);
 	const agents = result.getContract<AgentsContract>("agents");
@@ -30,21 +32,25 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 		await result.stop();
 		return 1;
 	}
-	const recipes = agents.list().filter((recipe) => recipe.id !== "worker");
+	const specs = all ? agents.listSpecs() : agents.listSpecs().filter(isUserVisibleAgent);
 	if (json) {
-		const withoutBody = recipes.map(({ body: _body, ...rest }) => rest);
+		const withoutBody = specs.map(({ body: _body, ...rest }) => rest);
 		process.stdout.write(`${JSON.stringify(withoutBody, null, 2)}\n`);
 	} else {
-		for (const r of recipes) {
-			renderLine(r);
+		for (const spec of specs) {
+			renderLine(spec);
 		}
 	}
 	await result.stop();
 	return 0;
 }
 
-function renderLine(r: AgentRecipe): void {
-	const mode = r.mode ?? "default";
+function renderLine(spec: AgentSpec): void {
+	const mode = spec.mode;
 	const modeColored = mode === "super" ? chalk.red(mode) : mode === "advise" ? chalk.yellow(mode) : chalk.green(mode);
-	process.stdout.write(`${r.id.padEnd(18)} ${modeColored.padEnd(16)} ${r.description}\n`);
+	const shape = `${spec.audience}/${spec.category}/${spec.capabilityClass}/${spec.latencyClass}`;
+	const skills = spec.skills.length > 0 ? ` skills=${spec.skills.join(",")}` : "";
+	process.stdout.write(
+		`${spec.id.padEnd(20)} ${modeColored.padEnd(16)} ${shape.padEnd(48)} ${spec.description}${skills}\n`,
+	);
 }

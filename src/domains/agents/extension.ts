@@ -6,9 +6,11 @@ import type { AgentsContract } from "./contract.js";
 import { parseFleet } from "./fleet-parser.js";
 import type { AgentRecipe } from "./recipe.js";
 import { loadRecipesFromDir, mergeRecipes } from "./registry.js";
+import { type AgentSpec, normalizeAgentSpec } from "./spec.js";
 
 export function createAgentsBundle(_context: DomainContext): DomainBundle<AgentsContract> {
 	let recipes: ReadonlyArray<AgentRecipe> = [];
+	let specs: ReadonlyArray<AgentSpec> = [];
 
 	function discover(): void {
 		const builtinDir = path.join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
@@ -18,6 +20,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		const user = loadRecipesFromDir({ dir: userDir, source: "user" });
 		const project = loadRecipesFromDir({ dir: projectDir, source: "project" });
 		recipes = mergeRecipes(builtin, user, project);
+		specs = recipes.map(normalizeAgentSpec);
 	}
 
 	const extension: DomainExtension = {
@@ -33,6 +36,12 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		},
 		get(id: string): AgentRecipe | null {
 			return recipes.find((r) => r.id === id) ?? null;
+		},
+		listSpecs() {
+			return specs;
+		},
+		getSpec(id: string): AgentSpec | null {
+			return specs.find((r) => r.id === id) ?? null;
 		},
 		reload() {
 			discover();

@@ -14,7 +14,7 @@ import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
-import type { ToolName } from "../../core/tool-names.js";
+import { isBuiltinToolName, type ToolName } from "../../core/tool-names.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -28,6 +28,7 @@ import {
 } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
+import { type AgentAudience, assertAgentSpecPolicy, isUserVisibleAgent, normalizeAgentSpec } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import type { ModesContract } from "../modes/contract.js";
@@ -57,6 +58,7 @@ import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { type Ledger, openLedger } from "./state.js";
 import { countToolCalls, recordToolFinish, snapshotToolStats } from "./tool-stats.js";
 import type {
+	DispatchRequestOrigin,
 	RunEnvelope,
 	RunKind,
 	RunReceipt,
@@ -79,6 +81,8 @@ interface ActiveRun {
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
+	agentAudience?: AgentAudience;
+	requestOrigin?: DispatchRequestOrigin;
 	agentId: string;
 	task: string;
 	cwd: string;
@@ -100,6 +104,10 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
+
+function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
+	return req.requestOrigin ?? "agent";
+}
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -201,8 +209,23 @@ export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | nu
 
 export function buildStableSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
 	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
-	const guardedBase = base.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${base}` : DISPATCH_TASK_CONTRACT;
+	const skillBlock = recipe && req.noSkills !== true ? renderAgentSkillPrompt(recipe) : "";
+	const body = [base, skillBlock].filter((part) => part.trim().length > 0).join("\n\n");
+	const guardedBase = body.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${body}` : DISPATCH_TASK_CONTRACT;
 	return guardedBase;
+}
+
+function renderAgentSkillPrompt(recipe: AgentRecipe): string {
+	const skills = recipe.skills ?? [];
+	if (skills.length === 0) return "";
+	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
+	return [
+		"# Agent-Bound Skills",
+		`This recipe declares preferred skills: ${skillList}.`,
+		"Use `read_skill` only when one of those skills matches the assigned task.",
+		"Skills provide reusable know-how and resources; they never expand your tool authority.",
+		"If a declared skill is unavailable, continue with the assigned task and report the missing skill.",
+	].join("\n");
 }
 
 export function buildDynamicPromptMessages(req: DispatchRequest): WorkerPromptMessage[] {
@@ -277,6 +300,8 @@ interface DispatchLifecycleStage {
 	toolSignature: string;
 	apiKey: string | undefined;
 	runtimeKind: RunKind;
+	agentAudience: AgentAudience;
+	requestOrigin: DispatchRequestOrigin;
 	runtimeLimitations: string[];
 }
 
@@ -294,6 +319,7 @@ interface AcpDelegationLifecycleStage {
 	promptSignature: string | null;
 	toolSignature: string;
 	runtimeLimitations: string[];
+	requestOrigin: DispatchRequestOrigin;
 }
 
 function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
@@ -372,6 +398,15 @@ function resolveDispatchAdmissionStage(
 	const candidateTools =
 		recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : Array.from(visibleTools);
 	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
+	assertAgentSpecPolicy(normalizeAgentSpec(recipe));
+	const unavailableTools = allowedTools.filter(
+		(tool) => isBuiltinToolName(tool) && !MODE_MATRIX[workerMode].tools.has(tool),
+	);
+	if (unavailableTools.length > 0) {
+		throw new Error(
+			`dispatch: admission denied: agent '${req.agentId}' mode ${workerMode} cannot expose tools: ${unavailableTools.join(", ")}`,
+		);
+	}
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
 	const orchScope = pickOrchestratorScope(safety, currentMode);
 	if (orchScope === null) {
@@ -636,6 +671,8 @@ export function createDispatchBundle(
 			wireModelId: run.wireModelId,
 			runtimeId: run.runtimeId,
 			runtimeKind: run.runtimeKind,
+			...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+			...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
 			event: {
 				type: "heartbeat_status",
 				status,
@@ -721,6 +758,12 @@ export function createDispatchBundle(
 		if (!recipe) {
 			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
 		}
+		const spec = normalizeAgentSpec(recipe);
+		if (req.requestOrigin === "user" && !isUserVisibleAgent(spec)) {
+			throw new Error(
+				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
+			);
+		}
 		const currentMode = modes.current();
 		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
 		const targets = readWorkerTargets(config?.get());
@@ -763,6 +806,8 @@ export function createDispatchBundle(
 			toolSignature: currentToolSignature,
 			apiKey,
 			runtimeKind,
+			agentAudience: spec.audience,
+			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: limitations,
 		};
 	}
@@ -802,6 +847,7 @@ export function createDispatchBundle(
 			dynamicHash,
 			promptSignature: compiledPromptHash,
 			toolSignature: currentToolSignature,
+			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: acpRuntimeLimitations(),
 		};
 	}
@@ -931,6 +977,7 @@ export function createDispatchBundle(
 		const ledgerRef = requireLedger();
 		const envelope = ledgerRef.create({
 			agentId: req.agentId,
+			requestOrigin: lifecycle.requestOrigin,
 			task: req.task,
 			endpointId,
 			wireModelId,
@@ -952,6 +999,7 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
 			agentId: req.agentId,
+			requestOrigin: lifecycle.requestOrigin,
 			endpointId,
 			wireModelId,
 			runtimeId,
@@ -960,6 +1008,7 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchStarted, {
 			runId: envelope.id,
 			agentId: req.agentId,
+			requestOrigin: lifecycle.requestOrigin,
 			endpointId,
 			wireModelId,
 			runtimeId,
@@ -978,6 +1027,7 @@ export function createDispatchBundle(
 			wireModelId,
 			runtimeId,
 			runtimeKind: "acp-delegation",
+			requestOrigin: lifecycle.requestOrigin,
 			agentId: req.agentId,
 			task: req.task,
 			cwd: lifecycle.cwd,
@@ -1007,6 +1057,7 @@ export function createDispatchBundle(
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
+				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				endpointId,
 				wireModelId,
@@ -1073,6 +1124,7 @@ export function createDispatchBundle(
 			const payload = {
 				runId: envelope.id,
 				agentId: req.agentId,
+				requestOrigin: lifecycle.requestOrigin,
 				endpointId,
 				wireModelId,
 				runtimeId,
@@ -1289,6 +1341,8 @@ export function createDispatchBundle(
 		const ledgerRef = requireLedger();
 		const envelope = ledgerRef.create({
 			agentId: req.agentId,
+			agentAudience: lifecycle.agentAudience,
+			requestOrigin: lifecycle.requestOrigin,
 			task: req.task,
 			endpointId: lifecycle.target.endpoint.id,
 			wireModelId: lifecycle.target.wireModelId,
@@ -1312,6 +1366,8 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
 			agentId: req.agentId,
+			agentAudience: lifecycle.agentAudience,
+			requestOrigin: lifecycle.requestOrigin,
 			endpointId: lifecycle.target.endpoint.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
@@ -1320,6 +1376,8 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchStarted, {
 			runId: envelope.id,
 			agentId: req.agentId,
+			agentAudience: lifecycle.agentAudience,
+			requestOrigin: lifecycle.requestOrigin,
 			endpointId: lifecycle.target.endpoint.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
@@ -1339,6 +1397,8 @@ export function createDispatchBundle(
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
 			runtimeKind: lifecycle.runtimeKind,
+			agentAudience: lifecycle.agentAudience,
+			requestOrigin: lifecycle.requestOrigin,
 			agentId: req.agentId,
 			task: req.task,
 			cwd: lifecycle.cwd,
@@ -1368,6 +1428,8 @@ export function createDispatchBundle(
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
+				agentAudience: lifecycle.agentAudience,
+				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				endpointId: lifecycle.target.endpoint.id,
 				wireModelId: lifecycle.target.wireModelId,
@@ -1421,6 +1483,8 @@ export function createDispatchBundle(
 			const payload = {
 				runId: envelope.id,
 				agentId: req.agentId,
+				agentAudience: lifecycle.agentAudience,
+				requestOrigin: lifecycle.requestOrigin,
 				endpointId: lifecycle.target.endpoint.id,
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,

@@ -1,11 +1,13 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
+import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
+import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ModesContract } from "../../src/domains/modes/contract.js";
@@ -15,6 +17,7 @@ import type { EndpointDescriptor } from "../../src/domains/providers/types/endpo
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
+import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -36,7 +39,9 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
-function stubContext(options: { endpoint?: EndpointDescriptor; runtime?: RuntimeDescriptor } = {}): DomainContext {
+function stubContext(
+	options: { endpoint?: EndpointDescriptor; runtime?: RuntimeDescriptor; recipes?: ReadonlyArray<AgentRecipe> } = {},
+): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const endpoint: EndpointDescriptor = options.endpoint ?? {
 		id: "default",
@@ -128,7 +133,7 @@ function stubContext(options: { endpoint?: EndpointDescriptor; runtime?: Runtime
 		audit: { recordCount: () => 0 },
 	};
 
-	const recipes = [
+	const recipes: ReadonlyArray<AgentRecipe> = options.recipes ?? [
 		{
 			id: "coder",
 			name: "coder",
@@ -141,6 +146,11 @@ function stubContext(options: { endpoint?: EndpointDescriptor; runtime?: Runtime
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		listSpecs: () => recipes.map(normalizeAgentSpec),
+		getSpec: (id) => {
+			const recipe = recipes.find((entry) => entry.id === id);
+			return recipe ? normalizeAgentSpec(recipe) : null;
+		},
 		reload: () => {},
 		parseFleet: () => ({ steps: [] }),
 	};
@@ -314,6 +324,106 @@ describe("contracts/dispatch", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+
+	it("rejects recipe tools that are not visible in the declared worker mode", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					id: "bad-validator",
+					name: "Bad Validator",
+					description: "Invalid validation recipe.",
+					mode: "advise",
+					tools: ["read", "run_tests"],
+					source: "builtin",
+					filepath: "/test/bad-validator.md",
+					body: "# Bad Validator",
+				},
+			],
+		});
+		const bundle = createDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() => bundle.contract.dispatch({ agentId: "bad-validator", task: "run tests" }),
+				/mode advise cannot expose tools: run_tests/,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("blocks user-origin dispatches to shadow agents while allowing internal orchestration", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					id: "scout",
+					name: "Scout",
+					description: "Shadow scout.",
+					mode: "advise",
+					tools: ["read"],
+					audience: "shadow",
+					source: "builtin",
+					filepath: "/test/scout.md",
+					body: "# Scout",
+				},
+			],
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let spawned = false;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				return {
+					pid: 7777,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() => bundle.contract.dispatch({ agentId: "scout", task: "map files", requestOrigin: "user" }),
+				/reserved for Clio internal orchestration/,
+			);
+			const handle = await bundle.contract.dispatch({ agentId: "scout", task: "map files" });
+			strictEqual(spawned, true);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(receipt.agentAudience, "shadow");
+			strictEqual(receipt.requestOrigin, "agent");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("marks shadow dispatch rows distinctly for the TUI", () => {
+		strictEqual(agentDisplayLabel({ agentId: "scout", agentAudience: "shadow" }), "sh:scout");
+		strictEqual(agentDisplayLabel({ agentId: "coder", agentAudience: "base" }), "coder");
+	});
+
+	it("injects declared skills as compact prompt guidance", () => {
+		const recipe: AgentRecipe = {
+			id: "researcher",
+			name: "Researcher",
+			description: "Docs researcher.",
+			mode: "advise",
+			tools: ["read", "read_skill"],
+			skills: ["context7-docs", "pdf-reader"],
+			source: "builtin",
+			filepath: "/test/researcher.md",
+			body: "# Researcher\nUse sources.",
+		};
+		const prompt = buildStableSystemPrompt({ agentId: "researcher", task: "check docs" }, recipe);
+		match(prompt, /# Agent-Bound Skills/);
+		match(prompt, /`context7-docs`, `pdf-reader`/);
+		match(prompt, /Skills provide reusable know-how and resources; they never expand your tool authority\./);
+		const noSkillsPrompt = buildStableSystemPrompt({ agentId: "researcher", task: "check docs", noSkills: true }, recipe);
+		strictEqual(noSkillsPrompt.includes("# Agent-Bound Skills"), false);
 	});
 
 	it("releases the gate and creates receipt with exit code on worker failure", async () => {

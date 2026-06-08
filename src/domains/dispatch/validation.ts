@@ -6,6 +6,7 @@
  */
 
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
+import type { DispatchRequestOrigin } from "./types.js";
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -25,6 +26,7 @@ export interface JobSpec {
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	requestOrigin?: DispatchRequestOrigin;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -45,8 +47,10 @@ const KNOWN_KEYS = new Set([
 	"noSkills",
 	"skillPaths",
 	"trustProjectCompatRoots",
+	"requestOrigin",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -153,6 +157,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
+		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
+			errors.push("requestOrigin must be one of: user|agent|internal");
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -176,5 +186,8 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
 	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
+	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
+		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;
+	}
 	return { ok: true, spec: out };
 }

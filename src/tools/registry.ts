@@ -449,7 +449,7 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 }
 
 const DISPATCH_GUARD_TURN_LIMIT = 32;
-const DISPATCH_DEFAULT_AGENT_ID = "implementer";
+const DISPATCH_DEFAULT_AGENT_ID = "coder";
 
 function dispatchDuplicateBlock(
 	successfulDispatchesByTurn: Map<string, Set<string>>,

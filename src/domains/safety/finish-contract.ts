@@ -254,7 +254,7 @@ function dispatchEvidenceCall(entry: unknown): ToolCallEvidenceCandidate | null 
 	if (toolName !== "dispatch") return null;
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
 	const task = typeof args?.task === "string" ? args.task.trim() : "";
-	const agentId = stringFromFirst(args ?? {}, ["agent_id", "agentId", "agent"]) ?? "implementer";
+	const agentId = stringFromFirst(args ?? {}, ["agent_id", "agentId", "agent"]) ?? "coder";
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const candidate: ToolCallEvidenceCandidate = {

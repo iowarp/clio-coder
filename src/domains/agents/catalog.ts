@@ -1,7 +1,7 @@
 import type { AgentRecipe } from "./recipe.js";
+import { type AgentSpec, isUserVisibleAgent, normalizeAgentSpec } from "./spec.js";
 
-const INTERNAL_AGENT_IDS = new Set(["worker"]);
-const DEFAULT_DISPATCH_AGENT_ID = "implementer";
+const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
 export interface AgentCatalogSections {
 	stable: string;
@@ -9,30 +9,49 @@ export interface AgentCatalogSections {
 }
 
 export function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
-	const publicRecipes = recipes
-		.filter((recipe) => !INTERNAL_AGENT_IDS.has(recipe.id))
+	const specs = recipes
+		.map(normalizeAgentSpec)
 		.slice()
-		.sort((a, b) => a.id.localeCompare(b.id));
+		.sort((a, b) => {
+			const category = a.category.localeCompare(b.category);
+			return category === 0 ? a.id.localeCompare(b.id) : category;
+		});
+	const publicSpecs = specs.filter(isUserVisibleAgent);
+	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow");
 
 	const lines: string[] = [
-		"Clio manages a fleet of custom agents. Use the `dispatch` tool to invoke one by `agent_id` when delegation helps.",
+		"Clio manages a small fleet of coding agents. Recipes are Markdown files; normalized specs carry audience, category, capability, tools, skills, and latency hints.",
+		"Use the `dispatch` tool to invoke one by `agent_id` when delegation helps.",
 		`Default dispatch agent: ${DEFAULT_DISPATCH_AGENT_ID}.`,
-		"`worker` is internal runtime terminology; do not present it as the product concept.",
+		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
+		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"After a dispatch succeeds, use that receipt/output as evidence and synthesize the answer instead of repeating the same dispatch.",
 	];
 
-	if (publicRecipes.length === 0) return { stable: lines.join("\n"), volatile: "" };
-
-	lines.push("", "Available agents:");
-	for (const recipe of publicRecipes) {
-		const mode = recipe.mode ?? "default";
-		const source = recipe.source;
-		const description = recipe.description.trim();
-		const suffix = description.length > 0 ? ` - ${description}` : "";
-		lines.push(`- ${recipe.id} (${mode}, ${source})${suffix}`);
+	if (publicSpecs.length > 0) {
+		lines.push("", "User-facing agents:");
+		for (const spec of publicSpecs) {
+			const description = spec.description.trim();
+			const suffix = description.length > 0 ? ` - ${description}` : "";
+			lines.push(formatSpecLine(spec, suffix));
+		}
+	}
+	if (shadowSpecs.length > 0) {
+		lines.push("", "Shadow agents for internal orchestration:");
+		for (const spec of shadowSpecs) {
+			const description = spec.description.trim();
+			const suffix = description.length > 0 ? ` - ${description}` : "";
+			lines.push(formatSpecLine(spec, suffix));
+		}
 	}
 
 	return { stable: lines.join("\n"), volatile: "" };
+}
+
+function formatSpecLine(spec: AgentSpec, suffix: string): string {
+	const tags = spec.tags.length > 0 ? `, tags=${spec.tags.join("/")}` : "";
+	const skills = spec.skills.length > 0 ? `, skills=${spec.skills.join("/")}` : "";
+	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.mode}, ${spec.source}${tags}${skills})${suffix}`;
 }
 
 export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {

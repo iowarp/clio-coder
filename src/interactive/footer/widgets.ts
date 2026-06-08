@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
-import type { DispatchBoardRow, DispatchBoardStatus } from "../dispatch-board.js";
+import { agentDisplayLabel, type DispatchBoardRow, type DispatchBoardStatus } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import {
 	type ClioTheme,
@@ -258,7 +258,7 @@ function formatElapsed(value: number): string {
 
 export function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
 	const glyph = theme.fg(statusToken(row.status), statusGlyph(row.status));
-	return `${glyph} ${theme.fg("muted", row.agentId)} ${theme.fg("dim", `${row.status} ${formatElapsed(row.elapsedMs)}`)}`;
+	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${row.status} ${formatElapsed(row.elapsedMs)}`)}`;
 }
 
 export function agentQuadrant(facts: AgentWorkFacts, options: { maxWorkers?: number } = {}): string[] {

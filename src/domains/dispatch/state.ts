@@ -256,6 +256,8 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			const envelope: RunEnvelope = {
 				id: newRunId(),
 				agentId: input.agentId,
+				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
+				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
 				task: input.task,
 				endpointId: input.endpointId,
 				wireModelId: input.wireModelId,

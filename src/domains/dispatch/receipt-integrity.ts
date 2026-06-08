@@ -77,6 +77,12 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 		toolStats: receipt.toolStats,
 		sessionId: receipt.sessionId,
 	};
+	if (receipt.agentAudience !== undefined) {
+		draft.agentAudience = receipt.agentAudience;
+	}
+	if (receipt.requestOrigin !== undefined) {
+		draft.requestOrigin = receipt.requestOrigin;
+	}
 	if (receipt.failureMessage !== undefined) {
 		draft.failureMessage = receipt.failureMessage;
 	}
@@ -191,6 +197,8 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 	const sharedFields: Array<[string, unknown, unknown]> = [
 		["runId", receipt.runId, envelope.id],
 		["agentId", receipt.agentId, envelope.agentId],
+		["agentAudience", receipt.agentAudience, envelope.agentAudience],
+		["requestOrigin", receipt.requestOrigin, envelope.requestOrigin],
 		["task", receipt.task, envelope.task],
 		["endpointId", receipt.endpointId, envelope.endpointId],
 		["wireModelId", receipt.wireModelId, envelope.wireModelId],

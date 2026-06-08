@@ -668,6 +668,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		modes,
 		providers,
 		dispatch,
+		...(agents ? { agents } : {}),
 		observability,
 		chat,
 		...(initialNotices.length > 0 ? { initialNotices } : {}),

@@ -8,6 +8,7 @@
 
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
+import type { AgentAudience } from "../agents/spec.js";
 import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
@@ -18,6 +19,7 @@ export type RunStatus = "queued" | "running" | "completed" | "failed" | "interru
  * harnesses that Clio supervises as delegated coding agents.
  */
 export type RunKind = "http" | "acp-delegation";
+export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
 	version: 1;
@@ -28,6 +30,8 @@ export interface RunReceiptIntegrity {
 export interface RunEnvelope {
 	id: string;
 	agentId: string;
+	agentAudience?: AgentAudience;
+	requestOrigin?: DispatchRequestOrigin;
 	task: string;
 	endpointId: string;
 	wireModelId: string;
@@ -152,6 +156,8 @@ export interface RunReceiptUpstreamResponse {
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
+	agentAudience?: AgentAudience;
+	requestOrigin?: DispatchRequestOrigin;
 	task: string;
 	endpointId: string;
 	wireModelId: string;

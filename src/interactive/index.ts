@@ -6,6 +6,8 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { type SkillActivation, skillActivationFromSource } from "../core/skill-activation.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
+import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -121,6 +123,7 @@ export interface InteractiveDeps {
 	modes: ModesContract;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
+	agents?: AgentsContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
@@ -1248,6 +1251,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
 		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
+		listAgents: () => deps.agents?.listSpecs().filter(isUserVisibleAgent) ?? [],
 		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
 		exportShareArchive: (outPath) => {
 			if (!deps.share) throw new Error("share domain is not loaded");
