@@ -80,13 +80,14 @@ type TranscriptEntry =
 			role: "assistant";
 			segments: AssistantSegment[];
 			/**
-			 * Raw thinking content from `thinking_delta` events plus any
-			 * `thinking` blocks captured on `message_end`. Rendered as a dim
-			 * one-line marker by default once the turn settles; expanded into
-			 * a rail-prefixed body via `toggleLastThinking()` (Ctrl+T). Stays
-			 * suppressed while `pending === true` so streaming chain-of-thought
-			 * does not flicker into the visible stream before the turn
-			 * finalizes (Row 47 of the TUI rubric).
+			 * Raw thinking content from `thinking_delta` events plus
+			 * `thinking` blocks captured on `message_end`. Renders live while
+			 * the turn is pending: a folded `Thinking (N tokens)…` marker by
+			 * default, or the tail of the reasoning down a dim `│ ` rail if
+			 * expanded via `toggleLastThinking()` (Ctrl+T). Once the turn
+			 * settles it collapses to a static `Thinking...` marker (folded) or
+			 * a head-anchored rail (expanded), mirroring the pi-coding-agent
+			 * reference which streams thinking from the partial message.
 			 */
 			thinking: string;
 			/**
@@ -348,10 +349,11 @@ function renderEntryLines(
 	const lines: string[] = [];
 	// Thinking renders BEFORE assistant text/tool segments so the folded marker
 	// or expanded rail sits above the response, matching the order the
-	// pi-coding-agent reference uses. Suppressed while `pending === true` so
-	// streaming `thinking_delta` events do not flicker into the visible
-	// stream before the turn finalizes (see Row 47 of the TUI rubric and the
-	// existing "filters thinking_delta out of the visible chat stream" test).
+	// pi-coding-agent reference uses. It streams live while `pending === true`
+	// (folded shows a dynamic token count; expanded tail-anchors the tail) and
+	// collapses to a static marker / head-anchored rail once the turn settles.
+	// The generic "thinking" status verb is suppressed while this marker is
+	// active so only one indicator shows (see `shouldRenderStatus` below).
 	if (entry.thinking.length > 0) {
 		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width, entry.pending));
 	}
