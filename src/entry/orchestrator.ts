@@ -66,7 +66,7 @@ import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
-import { startInteractive } from "../interactive/index.js";
+import { type RunIo, startInteractive } from "../interactive/index.js";
 import {
 	detectPlatformKeybindingWarnings,
 	detectTerminalKeySupport,
@@ -711,18 +711,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						adopt?: boolean;
 						includeGlobalImports?: boolean;
 						heuristic?: boolean;
-					}) => {
+					}, runIo?: RunIo) => {
 						// Interactive context-init explores the repo with the configured target by
 						// default, grounded in the freshly built codewiki, and falls back to the
 						// deterministic heuristic when no target is reachable. --heuristic and
 						// --preview skip model generation.
 						const useModel = options.heuristic !== true && options.preview !== true;
+						const bootstrapIo = runIo ?? {
+							stdout: (s: string) => process.stdout.write(s),
+							stderr: (s: string) => process.stderr.write(s),
+						};
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),
-							io: {
-								stdout: (s) => process.stdout.write(s),
-								stderr: (s) => process.stderr.write(s),
-							},
+							io: bootstrapIo,
 							confirmGitignore: () => true,
 							...(options.preview === undefined ? {} : { preview: options.preview }),
 							// Adopt project agent context (AGENTS.md/CLAUDE.md/.codex/...) by default;
@@ -733,7 +734,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								? {
 										generate: modelBootstrapGenerate({
 											onFallback: (err) =>
-												process.stderr.write(
+												bootstrapIo.stderr(
 													`clio context-init: model exploration unavailable, using heuristic (${err.message})\n`,
 												),
 										}),
