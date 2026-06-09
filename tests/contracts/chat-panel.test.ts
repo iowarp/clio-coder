@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 
 describe("chat-panel live thinking streaming", () => {
@@ -7,14 +8,19 @@ describe("chat-panel live thinking streaming", () => {
 		const panel = createChatPanel();
 
 		// Apply thinking_delta (pending = true)
-		panel.applyEvent({ type: "thinking_delta", delta: "Thinking step 1. Thinking step 2." } as any);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "Thinking step 1. Thinking step 2.",
+			partialThinking: "Thinking step 1. Thinking step 2.",
+		} as ChatLoopEvent);
 		let rendered = panel.render(80).join("\n");
 		ok(rendered.includes("Thinking ("));
 		ok(rendered.includes("tokens)"));
 		ok(!rendered.includes("Thinking step 1"));
 
 		// Apply agent_end (pending = false)
-		panel.applyEvent({ type: "agent_end" } as any);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		rendered = panel.render(80).join("\n");
 		ok(rendered.includes("Thinking..."));
 		ok(!rendered.includes("tokens"));
@@ -32,7 +38,12 @@ describe("chat-panel live thinking streaming", () => {
 			text += `thinking line ${i}\n`;
 		}
 		// Apply thinking_delta
-		panel.applyEvent({ type: "thinking_delta", delta: text.trim() } as any);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: text.trim(),
+			partialThinking: text.trim(),
+		} as ChatLoopEvent);
 
 		let rendered = panel.render(80).join("\n");
 
@@ -47,7 +58,7 @@ describe("chat-panel live thinking streaming", () => {
 		strictEqual(occurrences, 1);
 
 		// Now settle it by ending agent turn
-		panel.applyEvent({ type: "agent_end" } as any);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		rendered = panel.render(80).join("\n");
 
 		// When settled: it should show the first 12 lines and a trailing hidden lines note

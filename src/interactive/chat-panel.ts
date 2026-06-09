@@ -248,9 +248,7 @@ function renderThinkingLines(thinking: string, expanded: boolean, width: number,
 	const dimWrap = (s: string): string => `${DIM}${s}${RESET}`;
 	if (!expanded) {
 		const lineBudget = Math.max(1, width);
-		const label = streaming
-			? `Thinking (${estimateThinkingTokens(thinking)} tokens)…`
-			: THINKING_HIDDEN_LABEL;
+		const label = streaming ? `Thinking (${estimateThinkingTokens(thinking)} tokens)…` : THINKING_HIDDEN_LABEL;
 		return [dimWrap(truncateToWidth(label, lineBudget, "...", false))];
 	}
 	const splitLines = thinking.split("\n");
