@@ -631,30 +631,46 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (options.headless) {
-		const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());
-		const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.headless.prompt;
-		const skillActivations = skillExpansion?.expanded
-			? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
-			: [];
-		const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
-		const fileExpansion = await expandInlineFileReferencesAsync(
-			promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
-			{
-				cwd: process.cwd(),
-				includeImages: true,
-				missing: "leave",
-			},
-		);
-		const images = [...(options.headless.images ?? []), ...fileExpansion.images];
-		const code = await runHeadlessMainAgent(chat, {
-			prompt: fileExpansion.text,
-			...(images.length > 0 ? { images } : {}),
-			...(skillActivations.length > 0 ? { skillActivations } : {}),
-			mode: options.headless.mode ?? "text",
-			getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
+		const headlessPermissionReason =
+			"clio run cannot confirm permission requests; rerun interactively to approve this action.";
+		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision) => {
+			bus.emit(BusChannels.PermissionResolved, {
+				status: "denied",
+				tool: call.tool,
+				actionClass: decision.classification.actionClass,
+				reason: headlessPermissionReason,
+				requestedBy: "headless",
+			});
+			toolRegistry.cancelParkedCalls(headlessPermissionReason);
 		});
-		await termination.shutdown(code);
-		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+		try {
+			const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());
+			const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.headless.prompt;
+			const skillActivations = skillExpansion?.expanded
+				? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
+				: [];
+			const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
+			const fileExpansion = await expandInlineFileReferencesAsync(
+				promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
+				{
+					cwd: process.cwd(),
+					includeImages: true,
+					missing: "leave",
+				},
+			);
+			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
+			const code = await runHeadlessMainAgent(chat, {
+				prompt: fileExpansion.text,
+				...(images.length > 0 ? { images } : {}),
+				...(skillActivations.length > 0 ? { skillActivations } : {}),
+				mode: options.headless.mode ?? "text",
+				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
+			});
+			await termination.shutdown(code);
+			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+		} finally {
+			unsubscribeHeadlessPermission();
+		}
 	}
 
 	await startInteractive({
