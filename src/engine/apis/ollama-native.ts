@@ -119,17 +119,27 @@ function userToOllama(content: string | (TextContent | ImageContent)[]): OllamaM
 	return out;
 }
 
-function assistantToOllama(content: AssistantMessage["content"]): OllamaMessage {
+export function assistantToOllama(content: AssistantMessage["content"]): OllamaMessage {
 	const textParts: string[] = [];
 	const toolCalls: OllamaToolCall[] = [];
+	const thinkingParts: string[] = [];
 	for (const block of content) {
-		if (block.type === "text") textParts.push(block.text);
-		else if (block.type === "toolCall") {
+		if (block.type === "text") {
+			textParts.push(block.text);
+		} else if (block.type === "toolCall") {
 			toolCalls.push({ function: { name: block.name, arguments: block.arguments } });
+		} else if (block.type === "thinking") {
+			const thinkingVal = (block as ThinkingContent).thinking;
+			if (thinkingVal) {
+				thinkingParts.push(thinkingVal);
+			}
 		}
 	}
 	const out: OllamaMessage = { role: "assistant", content: textParts.join("\n") };
 	if (toolCalls.length > 0) out.tool_calls = toolCalls;
+	if (thinkingParts.length > 0) {
+		out.thinking = thinkingParts.join("\n");
+	}
 	return out;
 }
 
