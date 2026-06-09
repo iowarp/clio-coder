@@ -1,7 +1,6 @@
 ---
 name: Coder
 description: Implements bounded code changes, repairs, and behavior-preserving refactors.
-mode: default
 tools: [read, write, edit, grep, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend]
 audience: base
 category: implement

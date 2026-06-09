@@ -9,10 +9,8 @@ import { compileDamageControlRules } from "./rule-compiler.js";
  * `damage-control-rules.yaml` at the repo root and compiled once at load. Slice
  * 3 wires the matcher into dispatch; this module is pure data + matching.
  *
- * The on-disk file is layered into named rule packs (schema v2). For
- * backward compatibility this module exposes a flat ruleset built from the
- * `base` pack only; consumers that need the dev or super packs use
- * `src/domains/safety/rule-pack-loader.ts`.
+ * The on-disk file stores a named `base` rule pack (schema v2). For backward
+ * compatibility this module exposes a flat ruleset built from that pack.
  */
 
 export interface DamageControlRule {

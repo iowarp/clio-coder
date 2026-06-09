@@ -51,7 +51,7 @@ export function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>):
 function formatSpecLine(spec: AgentSpec, suffix: string): string {
 	const tags = spec.tags.length > 0 ? `, tags=${spec.tags.join("/")}` : "";
 	const skills = spec.skills.length > 0 ? `, skills=${spec.skills.join("/")}` : "";
-	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.mode}, ${spec.source}${tags}${skills})${suffix}`;
+	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills})${suffix}`;
 }
 
 export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {

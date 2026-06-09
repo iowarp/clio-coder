@@ -4,8 +4,6 @@ import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectPromptContext } from "../context/index.js";
-import type { ModesContract } from "../modes/contract.js";
-import type { ModeName } from "../modes/index.js";
 import type { ResourcesContract } from "../resources/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileForTurnInput, ProjectContextPolicyInput, PromptsContract } from "./contract.js";
@@ -29,10 +27,6 @@ export function createPromptsBundle(
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
-	}
-
-	function modes(): ModesContract | undefined {
-		return context.getContract<ModesContract>("modes");
 	}
 
 	function contextDomain(): ContextContract | undefined {
@@ -65,9 +59,7 @@ export function createPromptsBundle(
 			if (table.byId.size === 0) {
 				throw new Error("prompts: no fragments loaded, check startup logs");
 			}
-			const modesContract = modes();
 			const configContract = config();
-			const currentMode: ModeName = input.overrideMode ?? modesContract?.current() ?? "default";
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.safetyLevel ?? settings?.safetyLevel ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
@@ -92,7 +84,7 @@ export function createPromptsBundle(
 			};
 			return compile(table, {
 				identity: "identity.clio",
-				mode: `modes.${currentMode}`,
+				operatingContract: "operating.contract",
 				safety: `safety.${safety}`,
 				dynamicInputs,
 				additionalFragments: clioRepoAwarenessFragments(cwd),

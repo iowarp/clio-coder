@@ -18,7 +18,6 @@ describe("contracts/agents", () => {
 					"---",
 					"name: Scientific Validator",
 					"description: HPC artifact validation planner.",
-					"mode: advise",
 					"tools: [read, grep, glob, ls, read_skill]",
 					"audience: custom",
 					"category: science",
@@ -54,7 +53,6 @@ describe("contracts/agents", () => {
 			id: "bad-scout",
 			name: "Bad Scout",
 			description: "Invalid read-only recipe.",
-			mode: "default",
 			tools: ["read", "edit"],
 			category: "explore",
 			capabilityClass: "read-only",
@@ -74,7 +72,6 @@ describe("contracts/agents", () => {
 				id: "verifier",
 				name: "Verifier",
 				description: "Run gates.",
-				mode: "default",
 				tools: ["read", "run_tests"],
 				category: "quality",
 				capabilityClass: "verification",
@@ -89,7 +86,6 @@ describe("contracts/agents", () => {
 				id: "scout",
 				name: "Scout",
 				description: "Map code.",
-				mode: "advise",
 				tools: ["read", "grep"],
 				category: "explore",
 				capabilityClass: "read-only",
@@ -103,9 +99,9 @@ describe("contracts/agents", () => {
 
 		match(catalog, /normalized specs carry audience, category, capability/);
 		match(catalog, /User-facing agents:/);
-		match(catalog, /verifier \(base, quality, verification, fast, default, builtin, tags=tests\)/);
+		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests\)/);
 		match(catalog, /Shadow agents for internal orchestration:/);
-		match(catalog, /scout \(shadow, explore, read-only, fast, advise, builtin\)/);
+		match(catalog, /scout \(shadow, explore, read-only, fast, builtin\)/);
 	});
 
 	it("keeps shadow agents hidden from user-visible lists", () => {
@@ -201,7 +197,6 @@ describe("contracts/agents", () => {
 			id: "skillful",
 			name: "Skillful",
 			description: "Invalid skill recipe.",
-			mode: "advise",
 			tools: ["read"],
 			skills: ["missing-tool"],
 			category: "research",

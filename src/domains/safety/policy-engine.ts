@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
-import type { ModeName } from "../modes/matrix.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
 import { DEFAULT_DAMAGE_CONTROL_PATH_POLICY, mergePathPolicyInputs } from "./default-path-policy.js";
@@ -19,15 +18,13 @@ import {
 } from "./project-policy.js";
 import { extractCommandDeleteTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
-import { applicablePacks, getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
+import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 
 export type SafetyPolicySource =
 	| "damage-control:base"
-	| "damage-control:super"
 	| "project-policy"
 	| "project-policy-invalid"
 	| "builtin-command-allowlist"
-	| "mode-elevation"
 	| "none";
 
 export interface SafetyPolicyDecision {
@@ -40,11 +37,10 @@ export interface SafetyPolicyDecision {
 	reasonCode: string;
 	command?: string;
 	cwd: string;
-	mode?: string;
+	posture?: string;
 	policySource: SafetyPolicySource;
 	policyHash?: string;
 	projectPolicyPath?: string;
-	elevationMode?: ModeName;
 	match?: DamageControlMatch;
 	rejection?: RejectionMessage;
 }
@@ -62,8 +58,8 @@ export interface SafetyPolicyMetadata {
 }
 
 export interface SafetyPolicyEngine {
-	evaluate(call: ClassifierCall, mode?: string): SafetyPolicyDecision;
-	metadata(mode?: string): SafetyPolicyMetadata;
+	evaluate(call: ClassifierCall, posture?: string): SafetyPolicyDecision;
+	metadata(posture?: string): SafetyPolicyMetadata;
 }
 
 export interface SafetyPolicyEngineOptions {
@@ -107,46 +103,29 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
 	const pathPolicy = compilePathPolicy(pathPolicyInput, projectPolicyRoot);
 
-	function rulesFor(mode: string | undefined): SourcedRule[] {
-		const safetyMode = mode ?? "default";
+	function rulesFor(_posture: string | undefined): SourcedRule[] {
 		const base: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
-		const superRules: SourcedRule[] =
-			safetyMode === "super" ? packs.super.rules.map((rule) => ({ rule, source: "damage-control:super" })) : [];
-		return [...base, ...superRules];
+		return base;
 	}
 
 	return {
-		evaluate(call, mode) {
-			const classification = classify(call);
+		evaluate(call, posture) {
+			const rawClassification = classify(call);
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
 			const scan = serializeArgs(call.args);
-			const hit = scan ? matchSourcedRule(scan, rulesFor(mode)) : null;
+			const hit = scan ? matchSourcedRule(scan, rulesFor(posture)) : null;
+			const classification = effectiveClassification(rawClassification, hit?.match);
 
-			const base = baseDecision(call, classification, callCwd, mode, command);
-			if (hit?.match.ask === true && mode !== "super") {
-				return askDecision(base, {
-					ruleId: hit.match.ruleId,
-					reasonCode: `damage-control:${hit.match.ruleId}`,
-					reasons: [...classification.reasons, hit.match.reason, "damage-control rule requires confirmation"],
-					policySource: hit.source,
-					elevationMode: "super",
-					match: hit.match,
-				});
-			}
-			if (hit?.match.ask === true && mode === "super") {
-				return allowDecision(base, {
-					ruleId: hit.match.ruleId,
-					reasonCode: `damage-control:${hit.match.ruleId}`,
-					reasons: [...classification.reasons, hit.match.reason, "damage-control rule confirmed by super mode"],
-					policySource: hit.source,
-					match: hit.match,
-				});
-			}
-			if ((classification.actionClass === "git_destructive" && hit?.match.ask !== true) || hit?.match.block === true) {
+			const base = baseDecision(call, classification, callCwd, posture, command);
+			if (
+				classification.actionClass === "git_destructive" ||
+				hit?.match.actionClass === "git_destructive" ||
+				hit?.match.block === true
+			) {
 				const blockInput: Omit<
 					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 				> = {
 					reasonCode: hit ? `damage-control:${hit.match.ruleId}` : "classification:git_destructive",
 					reasons: [...classification.reasons, ...(hit ? [hit.match.reason] : [])],
@@ -157,10 +136,29 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return blockDecision(base, blockInput);
 			}
 
+			if (hit?.match.ask === true && posture !== "confirmed") {
+				return askDecision(base, {
+					ruleId: hit.match.ruleId,
+					reasonCode: `damage-control:${hit.match.ruleId}`,
+					reasons: [...classification.reasons, hit.match.reason, "damage-control rule requires confirmation"],
+					policySource: hit.source,
+					match: hit.match,
+				});
+			}
+			if (hit?.match.ask === true && posture === "confirmed") {
+				return allowDecision(base, {
+					ruleId: hit.match.ruleId,
+					reasonCode: `damage-control:${hit.match.ruleId}`,
+					reasons: [...classification.reasons, hit.match.reason, "damage-control rule confirmed by operator"],
+					policySource: hit.source,
+					match: hit.match,
+				});
+			}
+
 			if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
 				const blockInput: Omit<
 					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 				> = {
 					ruleId: "project-policy-invalid",
 					reasonCode: "project-policy-invalid",
@@ -177,7 +175,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (pathBlock !== null) {
 					const blockInput: Omit<
 						SafetyPolicyDecision,
-						"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+						"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 					> = {
 						ruleId: pathBlock.reasonCode,
 						reasonCode: pathBlock.reasonCode,
@@ -191,7 +189,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
-				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, cwd, mode, projectPolicy);
+				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, cwd, posture, projectPolicy);
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -199,7 +197,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 
 			const allowInput: Omit<
 				SafetyPolicyDecision,
-				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 			> = {
 				reasonCode: "allowed",
 				reasons: classification.reasons,
@@ -209,8 +207,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (hit?.match !== undefined) allowInput.match = hit.match;
 			return allowDecision(base, allowInput);
 		},
-		metadata(mode) {
-			const rules = rulesFor(mode);
+		metadata(posture) {
+			const rules = rulesFor(posture);
 			return {
 				version: 1,
 				rulePackHash: rulePackHash(packs),
@@ -276,12 +274,9 @@ function evaluateDefaultDenyBash(
 	command: string,
 	callCwd: string,
 	workspaceRoot: string,
-	mode: string | undefined,
+	posture: string | undefined,
 	policy: LoadedProjectSafetyPolicy,
-): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"> {
-	if (mode === "super") {
-		return { kind: "allow", reasonCode: "super-allows-bash", reasons: [], policySource: "mode-elevation" };
-	}
+): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> {
 	if (command.trim().length === 0) {
 		return {
 			kind: "block",
@@ -295,7 +290,7 @@ function evaluateDefaultDenyBash(
 	if (projectMatch) {
 		const base: Omit<
 			SafetyPolicyDecision,
-			"kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"
+			"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 		> = {
 			ruleId: projectMatch.id,
 			reasonCode: `project-policy:${projectMatch.id}`,
@@ -304,11 +299,10 @@ function evaluateDefaultDenyBash(
 		};
 		if (policy.hash !== null) base.policyHash = policy.hash;
 		if (policy.path !== null) base.projectPolicyPath = policy.path;
-		if (projectMatch.requireConfirmation && mode !== "super") {
+		if (projectMatch.requireConfirmation && posture !== "confirmed") {
 			return {
 				...base,
 				kind: "ask",
-				elevationMode: "super",
 				reasons: [...base.reasons, "project policy requires confirmation"],
 			};
 		}
@@ -330,7 +324,7 @@ function evaluateDefaultDenyBash(
 			kind: "block",
 			ruleId: "bash-shell-operators-denied",
 			reasonCode: "bash-shell-operators-denied",
-			reasons: ["default mode denies shell operators; use typed tools or an explicit project policy command"],
+			reasons: ["shell operators require a structured tool or an explicit project policy command"],
 			policySource: "builtin-command-allowlist",
 		};
 	}
@@ -349,7 +343,7 @@ function evaluateDefaultDenyBash(
 		kind: "block",
 		ruleId: "bash-default-deny",
 		reasonCode: "bash-default-deny",
-		reasons: ["default mode denies arbitrary bash; use typed tools, project safety policy, or super elevation"],
+		reasons: ["arbitrary bash requires a structured tool or explicit project safety policy"],
 		policySource: "builtin-command-allowlist",
 	};
 }
@@ -358,52 +352,52 @@ function baseDecision(
 	call: ClassifierCall,
 	classification: Classification,
 	cwd: string,
-	mode: string | undefined,
+	posture: string | undefined,
 	command: string | null,
-): Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"> {
-	const out: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command"> = {
+): Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> {
+	const out: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> = {
 		classification,
 		tool: call.tool,
 		actionClass: classification.actionClass,
 		cwd,
 	};
-	if (mode !== undefined) out.mode = mode;
+	if (posture !== undefined) out.posture = posture;
 	if (command !== null) out.command = command;
 	return out;
 }
 
 function allowDecision(
-	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
-	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
+	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
+	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
 ): SafetyPolicyDecision {
 	return { ...base, ...input, kind: "allow" };
 }
 
 function askDecision(
-	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
-	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
+	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
+	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
 ): SafetyPolicyDecision {
 	const rejectionInput: Parameters<typeof formatRejection>[0] = {
 		tool: base.tool,
 		actionClass: base.classification.actionClass,
 		reasons: input.reasons,
 	};
-	if (base.mode !== undefined) rejectionInput.mode = base.mode;
+	if (base.posture !== undefined) rejectionInput.posture = base.posture;
 	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
 	const rejection = formatRejection(rejectionInput);
 	return { ...base, ...input, kind: "ask", rejection };
 }
 
 function blockDecision(
-	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
-	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "mode" | "command">,
+	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
+	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
 ): SafetyPolicyDecision {
 	const rejectionInput: Parameters<typeof formatRejection>[0] = {
 		tool: base.tool,
 		actionClass: base.classification.actionClass,
 		reasons: input.reasons,
 	};
-	if (base.mode !== undefined) rejectionInput.mode = base.mode;
+	if (base.posture !== undefined) rejectionInput.posture = base.posture;
 	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
 	const rejection = formatRejection(rejectionInput);
 	return { ...base, ...input, kind: "block", rejection };
@@ -423,6 +417,28 @@ function matchSourcedRule(commandString: string, rules: ReadonlyArray<SourcedRul
 		}
 	}
 	return null;
+}
+
+const ACTION_CLASSES = new Set<ActionClass>([
+	"read",
+	"write",
+	"execute",
+	"system_modify",
+	"git_destructive",
+	"dispatch",
+]);
+
+function effectiveClassification(
+	classification: Classification,
+	match: DamageControlMatch | undefined,
+): Classification {
+	if (!match || !ACTION_CLASSES.has(match.actionClass as ActionClass)) return classification;
+	const actionClass = match.actionClass as ActionClass;
+	if (actionClass === classification.actionClass) return classification;
+	return {
+		actionClass,
+		reasons: [...classification.reasons, `damage-control:${match.ruleId}`],
+	};
 }
 
 function matchingProjectCommand(
@@ -485,7 +501,6 @@ function serializeArgs(args?: Record<string, unknown>): string {
 function rulePackHash(packs: RulePacks): string {
 	const payload: Record<PackId, Array<Record<string, unknown>>> = {
 		base: packPayload(packs.base.rules),
-		super: packPayload(packs.super.rules),
 	};
 	return createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex");
 }
@@ -503,7 +518,7 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 
 export function activeDamageControlRulesForMetadata(
 	packs: RulePacks,
-	options: { safetyMode: string },
+	_options?: { posture?: string },
 ): ReadonlyArray<DamageControlRule> {
-	return applicablePacks(packs, options);
+	return packs.base.rules;
 }

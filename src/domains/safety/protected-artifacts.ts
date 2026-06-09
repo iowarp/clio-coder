@@ -165,7 +165,7 @@ export function detectValidationCommand(command: string): ValidationCommandDetec
  * filesystem targets.
  *
  * Used by the action classifier to escalate bash calls that write to a
- * system root or out-of-cwd path through the same super-mode gate as the
+ * system root or out-of-cwd path through the same confirmation gate as the
  * write tool. The classifier is the only safety lever for these patterns;
  * pi-mono executes the bash command verbatim, so the registry-side check
  * has to happen before the shell runs.

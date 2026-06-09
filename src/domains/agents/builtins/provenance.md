@@ -1,7 +1,6 @@
 ---
 name: Provenance
 description: Shadow evidence, receipt, diff, and telemetry reader for source-backed handoffs.
-mode: advise
 tools: [read, grep, glob, ls, git_status, git_diff, git_log]
 audience: shadow
 category: operations

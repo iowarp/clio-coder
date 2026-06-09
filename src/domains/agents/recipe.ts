@@ -7,7 +7,6 @@ export interface AgentRecipe {
 	id: string;
 	name: string;
 	description: string;
-	mode?: "advise" | "default" | "super";
 	tools?: ReadonlyArray<string>;
 	model?: string;
 	endpoint?: string;

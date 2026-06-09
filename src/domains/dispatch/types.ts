@@ -74,7 +74,7 @@ export interface ToolCallStat {
 
 export interface SafetyBlockedAttempt {
 	tool: string;
-	mode?: string;
+	posture?: string;
 	actionClass?: string;
 	ruleId?: string;
 	reasonCode?: string;
@@ -118,11 +118,9 @@ export interface RunReceiptSafetySummary {
 	decisions: {
 		allowed: number;
 		blocked: number;
-		elevated: number;
+		permissionRequested: number;
 	};
 	blockedAttempts: SafetyBlockedAttempt[];
-	dispatchScope: "any" | "readonly" | "none";
-	workerMode: string;
 	requestedActions: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
 	runtimeLimitations: ReadonlyArray<string>;

@@ -390,5 +390,3 @@ packs:
         class: system_modify
         block: false
         ask: true
-  - id: super
-    rules: []

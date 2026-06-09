@@ -48,13 +48,6 @@ export function buildSettingItems(
 		: (["off"] as string[]);
 	return [
 		{
-			id: "defaultMode",
-			label: "defaultMode",
-			currentValue: settings.defaultMode,
-			values: ["default", "advise", "super"],
-			description: "Mode the TUI boots into.",
-		},
-		{
 			id: "safetyLevel",
 			label: "safetyLevel",
 			currentValue: settings.safetyLevel,
@@ -236,9 +229,6 @@ function applyNonNegativeInteger(value: string, set: (next: number) => void): vo
  */
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
 	switch (id) {
-		case "defaultMode":
-			if (value === "default" || value === "advise" || value === "super") settings.defaultMode = value;
-			return;
 		case "safetyLevel":
 			if (value === "suggest" || value === "auto-edit" || value === "full-auto") settings.safetyLevel = value;
 			return;

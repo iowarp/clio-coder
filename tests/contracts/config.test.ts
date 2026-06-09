@@ -72,6 +72,23 @@ describe("contracts/config", () => {
 		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
 
+	it("tolerates stale mode settings without preserving them", () => {
+		const normalized = normalizeSettings({
+			defaultMode: "super",
+			state: {
+				lastMode: "advise",
+				recentModels: ["model-a"],
+			},
+		});
+		const record = normalized as unknown as Record<string, unknown>;
+		const state = normalized.state as unknown as Record<string, unknown>;
+
+		strictEqual("defaultMode" in record, false);
+		strictEqual("lastMode" in state, false);
+		deepStrictEqual(normalized.state.recentModels, []);
+		strictEqual(Value.Check(SettingsSchema, normalized), true);
+	});
+
 	it("normalizes skills trust settings and treats them as next-turn changes", () => {
 		const normalized = normalizeSettings({
 			skills: {

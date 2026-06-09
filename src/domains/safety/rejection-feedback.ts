@@ -8,7 +8,7 @@
 export interface RejectionContext {
 	tool: string;
 	actionClass: string;
-	mode?: string;
+	posture?: string;
 	reasons: ReadonlyArray<string>;
 	ruleId?: string;
 }
@@ -22,8 +22,8 @@ export interface RejectionMessage {
 const HARD_BLOCK_CLASSES: ReadonlyArray<string> = ["git_destructive"];
 
 function buildShort(ctx: RejectionContext): string {
-	const modeSuffix = ctx.mode ? ` in ${ctx.mode}` : "";
-	return `${ctx.tool} blocked: ${ctx.actionClass}${modeSuffix}`;
+	const postureSuffix = ctx.posture ? ` in ${ctx.posture}` : "";
+	return `${ctx.tool} blocked: ${ctx.actionClass}${postureSuffix}`;
 }
 
 function buildDetail(ctx: RejectionContext): string {
@@ -41,11 +41,11 @@ function buildHints(ctx: RejectionContext): string[] {
 	const hints: string[] = [];
 	const hardBlock = HARD_BLOCK_CLASSES.includes(ctx.actionClass) || ctx.ruleId !== undefined;
 	if (hardBlock) {
-		hints.push("This is a hard block; no mode allows it.");
+		hints.push("This is a hard block; confirmation cannot override it.");
 		return hints;
 	}
-	if (ctx.mode === "default" && ctx.actionClass === "system_modify") {
-		hints.push("Switch to super mode (Alt+S) to unblock this class.");
+	if (ctx.actionClass === "system_modify") {
+		hints.push("Operator confirmation is required for this action.");
 	}
 	return hints;
 }

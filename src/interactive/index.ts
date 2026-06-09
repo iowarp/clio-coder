@@ -12,8 +12,6 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import type { SuperModeConfirmation } from "../domains/modes/contract.js";
-import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	getRuntimeRegistry,
@@ -24,6 +22,8 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import type { ClassifierCall } from "../domains/safety/action-classifier.js";
+import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
@@ -80,6 +80,7 @@ import {
 	resolveThinkingLabeler,
 } from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
+import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
@@ -97,7 +98,6 @@ import {
 	spinnerFrame,
 	type TurnSummary,
 } from "./status/index.js";
-import { createSuperOverlayBody, SUPER_OVERLAY_WIDTH, superOverlayTitleForOrigin } from "./super-overlay.js";
 import { abbreviateModelId } from "./theme/index.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
@@ -120,7 +120,6 @@ export {
 
 export interface InteractiveDeps {
 	bus: SafeEventBus;
-	modes: ModesContract;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
 	agents?: AgentsContract;
@@ -132,11 +131,11 @@ export interface InteractiveDeps {
 	extensions?: ExtensionsContract;
 	share?: ShareContract;
 	/**
-	 * Shared tool registry. When wired, the super overlay opens automatically
-	 * whenever a tool call is parked waiting for super admission, and the
+	 * Shared tool registry. When wired, the permission overlay opens automatically
+	 * whenever a tool call is parked waiting for operator confirmation, and the
 	 * confirm / cancel overlay handlers drive `resumeParkedCalls` /
 	 * `cancelParkedCalls` so blocked bash batches run (or reject cleanly)
-	 * after the mode transition rather than stalling indefinitely.
+	 * after the permission decision rather than stalling indefinitely.
 	 */
 	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
@@ -254,7 +253,7 @@ export function expandInteractiveSubmitText(
 
 export type OverlayState =
 	| "closed"
-	| "super-confirm"
+	| "permission-confirm"
 	| "dispatch-board"
 	| "providers"
 	| "auth"
@@ -277,10 +276,8 @@ export interface KeyBindingDeps {
 	 * substitute a narrower matcher via createKeybindingManagerForTesting.
 	 */
 	matches: (data: string, id: ClioKeybinding) => boolean;
-	cycleMode: () => void;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
-	requestSuper: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
 	openModelSelector: () => void;
@@ -318,10 +315,9 @@ export interface LeaderKeyRouteResult {
 export const LEADER_TIMEOUT_MS = 1500;
 export const IDLE_LEADER_STATE: LeaderKeyState = { status: "idle" };
 
-export interface SuperOverlayKeyDeps {
-	cancelSuper: () => void;
-	confirmSuper: (conf: SuperModeConfirmation) => void;
-	now: () => number;
+export interface PermissionOverlayKeyDeps {
+	cancelPermission: () => void;
+	confirmPermission: () => void;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -385,7 +381,7 @@ export interface HotkeysOverlayKeyDeps {
 }
 
 export interface OverlayKeyDeps
-	extends SuperOverlayKeyDeps,
+	extends PermissionOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
 		ProvidersOverlayKeyDeps,
 		AuthOverlayKeyDeps,
@@ -468,17 +464,11 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.thinking.expand":
 			deps.toggleThinkingExpansion();
 			return true;
-		case "clio.super.request":
-			deps.requestSuper();
-			return true;
 		case "clio.status.toggle":
 			deps.toggleStatus();
 			return true;
 		case "clio.thinking.cycle":
 			deps.cycleThinking();
-			return true;
-		case "clio.mode.cycle":
-			deps.cycleMode();
 			return true;
 		case "clio.session.tree":
 			deps.openTree();
@@ -506,10 +496,8 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 /** Pure key router: returns true when the input was consumed. */
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
 	const order: ClioKeybinding[] = [
-		"clio.super.request",
 		"clio.status.toggle",
 		"clio.thinking.cycle",
-		"clio.mode.cycle",
 		"clio.session.tree",
 		"clio.dispatchBoard.toggle",
 		"clio.model.select",
@@ -546,17 +534,14 @@ export function routeLeaderKey(data: string, state: LeaderKeyState, deps: Leader
 	return { state: { status: "pending", expiresAt: deps.now + timeoutMs }, consumed: true };
 }
 
-/** Pure overlay key router: returns true when the input was consumed. */
-export function routeSuperOverlayKey(data: string, deps: SuperOverlayKeyDeps): boolean {
+/** Pure permission overlay key router: returns true when the input was consumed. */
+export function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
 	if (data === ENTER) {
-		deps.confirmSuper({
-			requestedBy: "keybind",
-			acceptedAt: deps.now(),
-		});
+		deps.confirmPermission();
 		return true;
 	}
 	if (data === ESC) {
-		deps.cancelSuper();
+		deps.cancelPermission();
 		return true;
 	}
 	return false;
@@ -761,8 +746,8 @@ export function routeOverlayKey(
 		deps.requestShutdown();
 		return true;
 	}
-	if (overlayState === "super-confirm") {
-		routeSuperOverlayKey(data, deps);
+	if (overlayState === "permission-confirm") {
+		routePermissionOverlayKey(data, deps);
 		return true;
 	}
 	if (overlayState === "providers") {
@@ -895,7 +880,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const banner = createWelcomeDashboard({
-		modes: deps.modes,
 		providers: deps.providers,
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
@@ -953,7 +937,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		notifications.add(key ? { level, text, key } : { level, text });
 	};
 	footer = buildFooterDashboard({
-		modes: deps.modes,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getAgentStatus: () => statusController.current(),
@@ -1013,13 +996,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				"off"
 			);
 		},
-		getMode: () => deps.modes.current().toLowerCase(),
 	});
 	editor.focused = true;
 	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider());
 
-	// The super-confirm overlay is rebuilt per open because its body and title
-	// depend on the origin (keybind vs tool).
+	// The permission overlay is rebuilt per open because its body depends on
+	// the parked tool call.
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
 	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const taskIsland = new Text("", 0, 0);
@@ -1136,9 +1118,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (event.type !== "message_end" && event.type !== "agent_end") return;
 		if (event.type === "agent_end") refreshLiveWorkspaceGit(true);
 		footer.refresh();
-		tui.requestRender();
-	});
-	const unsubscribeModeTheme = deps.bus.on(BusChannels.ModeChanged, () => {
 		tui.requestRender();
 	});
 	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, () => {
@@ -1464,18 +1443,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		);
 		leaderTimer.unref?.();
 	};
-	// Tracks how the super-confirm overlay was opened so the confirm handler
-	// can choose the correct lifecycle. `keybind` (Alt+S) flips the persistent
-	// mode to super; `tool` (parked admission) issues a one-shot grant that
-	// resumes the parked queue without changing `modes.current()`. The flag is
-	// set on every `openSuperOverlay(...)` call and cleared in `closeOverlay`.
-	type SuperConfirmOrigin = "keybind" | "tool";
-	let superConfirmOrigin: SuperConfirmOrigin | null = null;
-	// Set true between `confirmSuper` and `closeOverlay` so the close path can
-	// tell a one-shot confirm apart from an Esc/Ctrl-C dismissal. Without this
-	// the close path would have to inspect `modes.current()`, which by design
-	// stays at the prior value for one-shot grants.
-	let superConfirmJustFired = false;
+	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision } | null = null;
+	let permissionConfirmJustFired = false;
 	process.removeAllListeners("SIGINT");
 	const taskIslandHandle = tui.showOverlay(taskIsland, {
 		anchor: "top-right",
@@ -1524,75 +1493,39 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
-		// Centralize the parked-call lifecycle here so every super-overlay
-		// dismissal (Enter, Esc, Ctrl+C, shutdown) drives the registry to a
-		// terminal verdict. The path splits on origin:
-		//   - keybind: confirm flips the persistent mode (legacy semantics);
-		//     close inspects `modes.current()` to tell confirm from cancel.
-		//   - tool: confirm issues a one-shot grant via the registry without
-		//     touching `modes.current()`, so close uses
-		//     `superConfirmJustFired` rather than the mode flag.
-		if (leaving === "super-confirm") {
-			const origin = superConfirmOrigin;
-			const confirmed = origin === "tool" ? superConfirmJustFired : deps.modes.current() === "super";
-			const cancelled = !confirmed;
-			if (cancelled) {
-				// Emit a clear cancellation audit row. For keybind this matches
-				// the legacy "request_cancelled" reason; for tool we use a
-				// distinct reason so /audit consumers can tell a one-shot
-				// rejection apart from a persistent-request rejection.
-				const current = deps.modes.current();
-				deps.bus.emit(BusChannels.ModeChanged, {
-					from: current,
-					to: current,
-					reason: origin === "tool" ? "one_shot_cancelled" : "request_cancelled",
-					...(origin ? { requestedBy: origin } : {}),
+		if (leaving === "permission-confirm") {
+			const permission = pendingPermission;
+			const confirmed = permissionConfirmJustFired;
+			if (confirmed && permission) {
+				deps.bus.emit(BusChannels.PermissionResolved, {
+					status: "granted",
+					tool: permission.call.tool,
+					actionClass: permission.decision.classification.actionClass,
+					requestedBy: "tool",
 					at: Date.now(),
 				});
+				void deps.toolRegistry?.resumeParkedCalls({
+					actionClass: permission.decision.classification.actionClass,
+					requestedBy: "tool:one_shot",
+				});
+			} else {
+				deps.bus.emit(BusChannels.PermissionResolved, {
+					status: "denied",
+					...(permission ? { tool: permission.call.tool } : {}),
+					...(permission ? { actionClass: permission.decision.classification.actionClass } : {}),
+					reason: "operator cancelled",
+					requestedBy: "tool",
+					at: Date.now(),
+				});
+				deps.toolRegistry?.cancelParkedCalls(
+					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
+				);
 			}
-			if (deps.toolRegistry) {
-				if (cancelled) {
-					deps.toolRegistry.cancelParkedCalls(
-						"User cancelled this tool call from the super-mode confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
-					);
-				} else if (origin === "tool") {
-					const current = deps.modes.current();
-					deps.bus.emit(BusChannels.ModeChanged, {
-						from: current,
-						to: current,
-						reason: "one_shot_granted",
-						requestedBy: "tool",
-						at: Date.now(),
-					});
-					// One-shot grant. Resume the parked queue under
-					// super-equivalent admission for this single pass; the
-					// persistent mode is unchanged. Subsequent invocations
-					// re-enter the live mode gate normally.
-					void deps.toolRegistry.resumeParkedCalls({ mode: "super", requestedBy: "tool:one_shot" });
-				} else {
-					// Persistent escalation already flipped the mode; resume
-					// the parked queue under the live (now super) mode.
-					void deps.toolRegistry.resumeParkedCalls();
-				}
-			}
-			// Keybind cancellation keeps the legacy stream-cancel behavior.
-			// Tool-origin cancellation resolves the parked call as a blocked
-			// tool result so pi-agent-core can surface the denial to the model
-			// instead of losing it behind an immediate abort.
-			if (cancelled && origin !== "tool" && deps.chat.isStreaming()) {
-				cancelActiveRun();
-			}
-			// Reset the per-open trackers so a stale origin/confirm flag
-			// cannot leak into the next overlay.
-			superConfirmOrigin = null;
-			superConfirmJustFired = false;
+			pendingPermission = null;
+			permissionConfirmJustFired = false;
 		}
-		// If a parked call arrived while an unrelated overlay was open, the
-		// onSuperRequired listener's attempt to open the super overlay was a
-		// no-op. Re-check on every overlay close so the user sees the
-		// confirmation prompt as soon as the competing overlay dismisses.
-		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
-			openSuperOverlay("tool");
+		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
+			openPermissionOverlay(pendingPermission.call, pendingPermission.decision);
 		}
 		renderTaskIsland();
 		tui.requestRender();
@@ -1901,54 +1834,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openSuperOverlay = (requestedBy: string = "keybind"): void => {
+	const openPermissionOverlay = (call: ClassifierCall, decision: SafetyDecision): void => {
 		if (overlayState !== "closed") return;
-		// Distinguish keybind (Alt+S) opens from tool-driven (parked admission)
-		// opens. Only keybind opens are persistent mode requests; tool opens
-		// resolve to a one-shot grant in the confirm handler and never call
-		// `requestSuper`/`confirmSuper`, which would otherwise flip the global
-		// mode behind the user's back. The mapping here is from the second
-		// argument to `requestedBy` strings used elsewhere (`tool`, `keybind`).
-		const origin: SuperConfirmOrigin = requestedBy === "tool" ? "tool" : "keybind";
-		superConfirmOrigin = origin;
-		superConfirmJustFired = false;
-		if (origin === "keybind") {
-			// Persistent escalation path. The pending guard inside modes ensures
-			// confirmSuper only flips to super when this request preceded it.
-			deps.modes.requestSuper(requestedBy);
-		} else {
-			// One-shot path. Surface the request on the bus for audit/metrics
-			// without arming the persistent mode flip or reporting a live mode
-			// transition to downstream consumers.
-			const current = deps.modes.current();
-			deps.bus.emit(BusChannels.ModeChanged, {
-				from: current,
-				to: current,
-				reason: "one_shot_request",
-				requestedBy,
-				requiresConfirmation: true,
-				at: Date.now(),
-			});
-		}
-		overlayState = "super-confirm";
-		overlayHandle = showClioOverlayFrame(tui, createSuperOverlayBody(origin), {
+		pendingPermission = { call, decision };
+		permissionConfirmJustFired = false;
+		overlayState = "permission-confirm";
+		overlayHandle = showClioOverlayFrame(tui, createPermissionOverlayBody(call, decision), {
 			anchor: "center",
-			width: SUPER_OVERLAY_WIDTH,
-			title: superOverlayTitleForOrigin(origin),
+			width: PERMISSION_OVERLAY_WIDTH,
+			title: permissionOverlayTitle(),
 		});
 		tui.requestRender();
 	};
 
-	// Subscribe to registry parking so the super overlay opens automatically
-	// whenever a tool call (typically a privileged bash batch) stalls waiting
-	// for super admission. The resume/cancel handlers on the overlay drive the
-	// registry back to a terminal verdict so pi-agent-core sees either a real
-	// result or a clean rejection instead of a hung promise.
-	const unsubscribeSuperRequired =
-		deps.toolRegistry?.onSuperRequired(() => {
-			deps.bus.emit(BusChannels.SuperRequired, { requestedBy: "tool", at: Date.now() });
-			if (overlayState === "super-confirm") return;
-			openSuperOverlay("tool");
+	const unsubscribePermissionRequired =
+		deps.toolRegistry?.onPermissionRequired((call, decision) => {
+			if (overlayState === "permission-confirm") return;
+			pendingPermission = { call, decision };
+			openPermissionOverlay(call, decision);
 		}) ?? (() => {});
 
 	const openProvidersOverlayState = (): void => {
@@ -2319,10 +2222,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeProgress();
 		unsubscribeAbortedProgress();
 		unsubscribeFooterTokens();
-		unsubscribeModeTheme();
 		unsubscribeContextPressure();
 		unsubscribeContextPruned();
-		unsubscribeSuperRequired();
+		unsubscribePermissionRequired();
 		agentProgress.stop();
 		deps.chat.dispose();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
@@ -2370,11 +2272,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const keyActionDeps = (): KeyBindingDeps => ({
 		matches: (input, id) => keybindings.matches(input, id),
-		cycleMode: () => {
-			deps.modes.cycleNormal();
-			footer.refresh();
-			tui.requestRender();
-		},
 		cycleThinking: () => {
 			const settings = deps.getSettings?.();
 			const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
@@ -2389,9 +2286,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		requestShutdown: () => {
 			void shutdown();
-		},
-		requestSuper: () => {
-			openSuperOverlay();
 		},
 		toggleStatus: () => {
 			toggleFooterDashboardState();
@@ -2500,24 +2394,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			data,
 			overlayState,
 			{
-				cancelSuper: () => {
+				cancelPermission: () => {
 					closeOverlay();
 				},
-				confirmSuper: (conf) => {
-					// Origin-aware confirm. Tool-driven opens issue a one-shot
-					// grant inside `closeOverlay` and never call
-					// `modes.confirmSuper`, so the persistent mode stays put.
-					// Keybind opens (Alt+S) keep the legacy persistent flip.
-					if (superConfirmOrigin === "tool") {
-						superConfirmJustFired = true;
-					} else {
-						deps.modes.confirmSuper(conf);
-					}
+				confirmPermission: () => {
+					permissionConfirmJustFired = true;
 					closeOverlay();
 					footer.refresh();
 					tui.requestRender();
 				},
-				now: () => Date.now(),
 				closeOverlay,
 				requestShutdown: () => {
 					void shutdown();

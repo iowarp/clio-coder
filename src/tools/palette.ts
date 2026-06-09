@@ -1,5 +1,4 @@
 import { type ToolName, ToolNames } from "../core/tool-names.js";
-import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 
 export type ToolPaletteGroup =
@@ -11,7 +10,7 @@ export type ToolPaletteGroup =
 	| "delegate"
 	| "external"
 	| "skills"
-	| "advise"
+	| "artifact"
 	| "escape_hatch";
 
 export type ToolPaletteIntent =
@@ -21,13 +20,11 @@ export type ToolPaletteIntent =
 	| "validation"
 	| "delegation"
 	| "external_research"
-	| "skill_work"
-	| "advise";
+	| "skill_work";
 
-export type ToolPalettePhase = "initial" | "inspection" | "editing" | "post_edit" | "validation" | "advise";
+export type ToolPalettePhase = "initial" | "inspection" | "editing" | "post_edit" | "validation";
 
 export interface ResolveToolPaletteInput {
-	mode: ModeName;
 	providerSupportsTools: boolean;
 	userText: string;
 	availableTools?: ReadonlyArray<ToolName>;
@@ -42,7 +39,7 @@ export interface ToolPaletteResult {
 	phase: ToolPalettePhase;
 	groups: ReadonlyArray<ToolPaletteGroup>;
 	providerSupportsTools: boolean;
-	mode: ModeName;
+	posture: "operating";
 	omittedToolCount: number;
 }
 
@@ -61,7 +58,7 @@ export const TOOL_GROUPS: Readonly<Record<ToolPaletteGroup, ReadonlyArray<ToolNa
 	delegate: [ToolNames.Dispatch, ToolNames.DispatchBatch],
 	external: [ToolNames.WebFetch],
 	skills: [ToolNames.ReadSkill, ToolNames.CreateSkill],
-	advise: [ToolNames.WritePlan, ToolNames.WriteReview],
+	artifact: [ToolNames.WritePlan, ToolNames.WriteReview],
 	escape_hatch: [ToolNames.Bash],
 };
 
@@ -74,7 +71,7 @@ const GROUP_ORDER: ReadonlyArray<ToolPaletteGroup> = [
 	"delegate",
 	"external",
 	"skills",
-	"advise",
+	"artifact",
 	"escape_hatch",
 ];
 
@@ -110,7 +107,7 @@ function unique(tools: Iterable<ToolName>): ToolName[] {
 	return out;
 }
 
-function classifyIntent(text: string, mode: ModeName): ToolPaletteIntent {
+function classifyIntent(text: string): ToolPaletteIntent {
 	const trimmed = text.trim();
 	const asksNoTools = NO_TOOL_RE.test(trimmed);
 	const asksToolMeta = TOOL_META_RE.test(trimmed);
@@ -127,7 +124,6 @@ function classifyIntent(text: string, mode: ModeName): ToolPaletteIntent {
 		asksEdit ||
 		asksValidation ||
 		(asksInspection && (!asksToolMeta || WORK_CONTEXT_RE.test(trimmed)));
-	if (mode === "advise") return "advise";
 	if (trimmed.length === 0 || GREETING_RE.test(trimmed)) return "small_talk";
 	if (asksNoTools) return "small_talk";
 	if (asksToolMeta && !hasWorkIntent) return "small_talk";
@@ -149,7 +145,6 @@ function resolvePhase(
 	text: string,
 	recentTools: ReadonlyArray<ToolName> | undefined,
 ): ToolPalettePhase {
-	if (intent === "advise") return "advise";
 	if (VALIDATE_RE.test(text)) return "validation";
 	if (hasRecentEdit(recentTools)) return "post_edit";
 	if (intent === "coding" || intent === "skill_work") return "editing";
@@ -160,12 +155,12 @@ function resolvePhase(
 function requestedGroups(intent: ToolPaletteIntent, phase: ToolPalettePhase, text: string): ToolPaletteGroup[] {
 	if (intent === "small_talk") return [];
 	const groups: ToolPaletteGroup[] = ["orientation", "locate", "inspect"];
-	if (intent === "advise") groups.push("advise");
 	if (intent === "coding" || intent === "skill_work") groups.push("mutate");
 	if (intent === "validation" || phase === "post_edit" || phase === "validation") groups.push("validate");
 	if (intent === "delegation" || DISPATCH_RE.test(text)) groups.push("delegate");
 	if (intent === "external_research" || EXTERNAL_RE.test(text)) groups.push("external");
 	if (intent === "skill_work" || SKILL_RE.test(text)) groups.push("skills");
+	if (/\b(?:plan|review|PLAN\.md|REVIEW\.md)\b/i.test(text)) groups.push("artifact");
 	if (SHELL_RE.test(text) && !AVOID_SHELL_RE.test(text)) groups.push("escape_hatch");
 	return uniqueGroups(groups);
 }
@@ -193,13 +188,13 @@ function expandGroups(groups: ReadonlyArray<ToolPaletteGroup>, text: string): To
 }
 
 export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteResult {
-	const modeTools = input.availableTools ?? Array.from(MODE_MATRIX[input.mode].tools);
+	const modeTools = input.availableTools ?? [];
 	const profileTools = applyToolProfile(modeTools, input.toolProfile);
 	const constrained = input.workerAllowedTools
 		? profileTools.filter((tool) => input.workerAllowedTools?.includes(tool))
 		: profileTools;
-	const candidates = unique(constrained.filter((tool) => MODE_MATRIX[input.mode].tools.has(tool)));
-	const intent = classifyIntent(input.userText, input.mode);
+	const candidates = unique(constrained);
+	const intent = classifyIntent(input.userText);
 	const phase = resolvePhase(intent, input.userText, input.recentToolNames);
 	if (!input.providerSupportsTools) {
 		return {
@@ -208,7 +203,7 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 			phase,
 			groups: [],
 			providerSupportsTools: false,
-			mode: input.mode,
+			posture: "operating",
 			omittedToolCount: candidates.length,
 		};
 	}
@@ -221,7 +216,7 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 		phase,
 		groups,
 		providerSupportsTools: true,
-		mode: input.mode,
+		posture: "operating",
 		omittedToolCount: Math.max(0, candidates.length - activeTools.length),
 	};
 }

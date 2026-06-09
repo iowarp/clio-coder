@@ -169,7 +169,6 @@ const DelegationSchema = Type.Object({
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
-	defaultMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
 	safetyLevel: Type.Union([Type.Literal("suggest"), Type.Literal("auto-edit"), Type.Literal("full-auto")]),
 	endpoints: Type.Array(EndpointDescriptorSchema),
 	runtimePlugins: Type.Array(Type.String({ minLength: 1 })),
@@ -192,7 +191,7 @@ export const SettingsSchema = Type.Object({
 	// in core/config.ts normalizes legacy single-string entries on read.
 	keybindings: Type.Record(Type.String(), Type.Union([Type.String(), Type.Array(Type.String())])),
 	state: Type.Object({
-		lastMode: Type.Union([Type.Literal("default"), Type.Literal("advise"), Type.Literal("super")]),
+		recentModels: Type.Optional(Type.Array(Type.String())),
 	}),
 	compaction: CompactionSchema,
 	retry: RetrySchema,

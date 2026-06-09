@@ -55,26 +55,27 @@ describe("contracts/prompts compiler logic", () => {
 		const table = loadFragments();
 		const a = compile(table, {
 			identity: "identity.clio",
-			mode: "modes.default",
+			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
 			dynamicInputs: { provider: "p", model: "m" },
 		});
 		const b = compile(table, {
 			identity: "identity.clio",
-			mode: "modes.default",
+			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
 			dynamicInputs: { provider: "p", model: "m" },
 		});
 
 		strictEqual(a.renderedPromptHash, b.renderedPromptHash);
 		ok(a.systemPrompt.length > 0);
+		ok(a.segmentManifest.some((segment) => segment.id === "operating-contract"));
 	});
 
 	it("trims session-shell tool guidance when no tools are active", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
-			mode: "modes.default",
+			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
 			dynamicInputs: {
 				provider: "stub",
@@ -97,7 +98,7 @@ describe("contracts/prompts compiler logic", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
-			mode: "modes.default",
+			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
 			dynamicInputs: {
 				provider: "stub",
@@ -116,7 +117,7 @@ describe("contracts/prompts compiler logic", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
-			mode: "modes.default",
+			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
 			dynamicInputs: {
 				provider: "stub",

@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
-import type { ModesContract } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	type CapabilityFlags,
@@ -34,7 +33,6 @@ import {
 } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
-	modes: ModesContract;
 	providers: ProvidersContract;
 	observability: ObservabilityContract;
 	getContextUsage?: () => ContextUsageSnapshot;
@@ -49,7 +47,6 @@ export interface WelcomeDashboardStats {
 	targetLabel: string;
 	modelLabel: string;
 	thinkingLevel: string;
-	modeLabel: string;
 	cwd: string;
 	workspace: WorkspaceSnapshot | null;
 	currentAvailable: boolean;
@@ -129,14 +126,6 @@ function healthReadout(status: EndpointStatus | null): string | null {
 	return reason && reason !== status.health.status ? `${status.health.status}: ${reason}` : status.health.status;
 }
 
-function modeReadout(modes: ModesContract): string {
-	try {
-		return modes.current().toLowerCase();
-	} catch {
-		return "default";
-	}
-}
-
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
@@ -162,7 +151,6 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		targetLabel,
 		modelLabel,
 		thinkingLevel,
-		modeLabel: modeReadout(deps.modes),
 		cwd,
 		workspace,
 		currentAvailable,
@@ -249,7 +237,6 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 
 	const title = theme.style("title", `${GLYPH.agent} Clio Coder`, { bold: true });
 	const versionTag = theme.fg("dim", `v${readClioVersion()}`);
-	const mode = theme.fg("muted", stats.modeLabel);
 	const endpoint = theme.fg("accent", stats.targetLabel);
 	const model = abbreviateModelId(stats.modelLabel);
 	const think = thinkingChip(theme, stats.thinkingLevel);
@@ -259,11 +246,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	// Dashboard toggle is Alt+U; the live workspace/git ownership moved to the
 	// footer so the branch is never duplicated between header and footer.
 	const affordance = keyHint(theme, "Alt+U", "dashboard");
-	const identity = joinColumns(
-		joinChips(theme, [title, versionTag]),
-		joinChips(theme, [mode, onlineChip(theme, stats)]),
-		safeWidth,
-	);
+	const identity = joinColumns(joinChips(theme, [title, versionTag]), onlineChip(theme, stats), safeWidth);
 
 	let lines: string[];
 	if (safeWidth >= WIDE_MIN) {
@@ -283,7 +266,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		];
 	} else {
 		lines = [
-			joinChips(theme, [title, versionTag, mode]),
+			joinChips(theme, [title, versionTag]),
 			joinChips(theme, [endpoint, model, think]),
 			joinChips(theme, [...capabilityChips(theme, stats, 2), theme.fg("accentDeep", "Alt+U")]),
 		];

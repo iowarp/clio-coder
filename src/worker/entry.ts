@@ -16,8 +16,6 @@ import { resolveWorkerRuntime } from "./runtime-registry.js";
 import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
 
-type WorkerMode = NonNullable<WorkerRunInput["mode"]>;
-
 async function main(): Promise<number> {
 	const demux = createWorkerStdinDemux();
 	process.stdin.setEncoding("utf8");
@@ -28,7 +26,6 @@ async function main(): Promise<number> {
 
 	const spec = await demux.readSpec();
 	const stopHeartbeat = startWorkerHeartbeat();
-	const mode = (spec.mode ?? "default") as WorkerMode;
 
 	const runtime = await resolveWorkerRuntime(spec.runtimeId);
 	if (!runtime) {
@@ -51,7 +48,6 @@ async function main(): Promise<number> {
 		endpoint: spec.endpoint,
 		runtime,
 		wireModelId: spec.wireModelId,
-		mode,
 		allowedTools: spec.allowedTools,
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),

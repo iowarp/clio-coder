@@ -19,9 +19,7 @@ import { TUI_KEYBINDINGS } from "../../engine/tui.js";
  */
 export interface ClioAppKeybindings {
 	"clio.thinking.cycle": true;
-	"clio.mode.cycle": true;
 	"clio.exit": true;
-	"clio.super.request": true;
 	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
@@ -67,17 +65,9 @@ export const CLIO_APP_KEYBINDINGS = {
 		defaultKeys: "shift+tab",
 		description: "Cycle orchestrator thinking level",
 	},
-	"clio.mode.cycle": {
-		defaultKeys: "alt+m",
-		description: "Cycle between default and advise modes",
-	},
 	"clio.exit": {
 		defaultKeys: "ctrl+d",
 		description: "Exit the TUI",
-	},
-	"clio.super.request": {
-		defaultKeys: "alt+s",
-		description: "Request super mode (requires confirmation)",
 	},
 	"clio.status.toggle": {
 		defaultKeys: "alt+u",

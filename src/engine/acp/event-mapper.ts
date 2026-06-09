@@ -1,4 +1,3 @@
-import type { ModeName } from "../../domains/modes/matrix.js";
 import type { AgentEvent, AgentMessage } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import type { AcpPromptResponse, AcpSessionUpdateParams, AcpToolCallUpdate } from "./types.js";
@@ -42,8 +41,6 @@ export class AcpEventMapper {
 	private assistantText = "";
 	private assistantThinking = "";
 	private readonly toolStarts = new Map<string, number>();
-
-	constructor(private readonly mode: ModeName) {}
 
 	mapUpdate(params: unknown): Array<AgentEvent | ClioWorkerEvent> {
 		const record = isRecord(params) ? (params as AcpSessionUpdateParams) : {};
@@ -113,7 +110,7 @@ export class AcpEventMapper {
 				type: "clio_tool_start",
 				payload: {
 					tool: update.kind ?? title,
-					mode: this.mode,
+					posture: "operating",
 					startedAt: this.toolStarts.get(toolCallId) ?? Date.now(),
 				},
 			});
@@ -140,7 +137,7 @@ export class AcpEventMapper {
 				type: "clio_tool_finish",
 				payload: {
 					tool: update.kind ?? title,
-					mode: this.mode,
+					posture: "operating",
 					durationMs: Math.max(0, Date.now() - startedAt),
 					outcome: isError ? "error" : "ok",
 					decision: "allowed",

@@ -31,8 +31,6 @@ import type { AgentRecipe } from "../agents/recipe.js";
 import { type AgentAudience, assertAgentSpecPolicy, isUserVisibleAgent, normalizeAgentSpec } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
-import type { ModesContract } from "../modes/contract.js";
-import { MODE_MATRIX, type ModeName } from "../modes/matrix.js";
 import {
 	type CapabilityFlags,
 	type EndpointDescriptor,
@@ -178,18 +176,13 @@ const DISPATCH_TASK_CONTRACT = [
 	"Use tools only when they are necessary for the assigned task and allowed by the configured tool profile.",
 ].join("\n");
 
-export function pickOrchestratorScope(safety: SafetyContract, mode: ModeName): ScopeSpec | null {
-	const dispatchScope = MODE_MATRIX[mode].dispatchScope;
-	if (dispatchScope === "none") return null;
-	if (dispatchScope === "readonly") return safety.scopes.readonly;
-	if (mode === "super") return safety.scopes.super;
-	return safety.scopes.default;
+export function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
+	return safety.scopes.workspace;
 }
 
-function pickWorkerScope(safety: SafetyContract, mode: ModeName): ScopeSpec {
-	if (mode === "advise") return safety.scopes.advise;
-	if (mode === "super") return safety.scopes.super;
-	return safety.scopes.default;
+function pickWorkerScope(safety: SafetyContract, requestedActions: ReadonlyArray<ActionClass>): ScopeSpec {
+	if (requestedActions.every((action) => action === "read")) return safety.scopes.readonly;
+	return safety.scopes.workspace;
 }
 
 export function deriveRequestedActions(
@@ -264,8 +257,6 @@ interface WorkerTargets {
 }
 
 interface DispatchAdmissionStage {
-	currentMode: ModeName;
-	workerMode: ModeName;
 	allowedTools: ReadonlyArray<ToolName>;
 	requestedActions: ReadonlyArray<ActionClass>;
 	toolProfile?: ToolProfileName;
@@ -286,7 +277,6 @@ interface DispatchWorkerSpecInput {
 
 interface DispatchLifecycleStage {
 	recipe: AgentRecipe | null;
-	currentMode: ModeName;
 	admission: DispatchAdmissionStage;
 	target: ResolvedTarget;
 	cwd: string;
@@ -306,7 +296,6 @@ interface DispatchLifecycleStage {
 }
 
 interface AcpDelegationLifecycleStage {
-	currentMode: ModeName;
 	admission: DispatchAdmissionStage;
 	agentConfig: ReturnType<ConfigContract["get"]>["delegation"]["agents"][number];
 	cwd: string;
@@ -389,30 +378,21 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 function resolveDispatchAdmissionStage(
 	req: DispatchRequest,
 	recipe: AgentRecipe,
-	currentMode: ModeName,
-	visibleTools: ReadonlyArray<ToolName>,
 	safety: SafetyContract,
 ): DispatchAdmissionStage {
-	const workerMode = recipe.mode ?? currentMode;
 	const recipeTools = recipe.tools;
-	const candidateTools =
-		recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : Array.from(visibleTools);
+	const candidateTools = recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : [];
 	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
 	assertAgentSpecPolicy(normalizeAgentSpec(recipe));
-	const unavailableTools = allowedTools.filter(
-		(tool) => isBuiltinToolName(tool) && !MODE_MATRIX[workerMode].tools.has(tool),
-	);
+	const unavailableTools = allowedTools.filter((tool) => isBuiltinToolName(tool) && !candidateTools.includes(tool));
 	if (unavailableTools.length > 0) {
 		throw new Error(
-			`dispatch: admission denied: agent '${req.agentId}' mode ${workerMode} cannot expose tools: ${unavailableTools.join(", ")}`,
+			`dispatch: admission denied: agent '${req.agentId}' cannot expose undeclared tools: ${unavailableTools.join(", ")}`,
 		);
 	}
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
-	const orchScope = pickOrchestratorScope(safety, currentMode);
-	if (orchScope === null) {
-		throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow dispatch`);
-	}
-	const workerScope = pickWorkerScope(safety, workerMode);
+	const orchScope = pickOrchestratorScope(safety);
+	const workerScope = pickWorkerScope(safety, requestedActions);
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
@@ -426,27 +406,17 @@ function resolveDispatchAdmissionStage(
 		throw new Error(`dispatch: admission denied: ${verdict.reason}`);
 	}
 	return {
-		currentMode,
-		workerMode,
 		allowedTools,
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
 	};
 }
 
-function resolveDelegationAdmissionStage(
-	req: DispatchRequest,
-	currentMode: ModeName,
-	visibleTools: ReadonlyArray<ToolName>,
-	safety: SafetyContract,
-): DispatchAdmissionStage {
-	const allowedTools = applyToolProfile(Array.from(visibleTools), req.toolProfile);
+function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyContract): DispatchAdmissionStage {
+	const allowedTools = applyToolProfile([], req.toolProfile);
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
-	const orchScope = pickOrchestratorScope(safety, currentMode);
-	if (orchScope === null) {
-		throw new Error(`dispatch: admission denied: mode ${currentMode} does not allow delegation`);
-	}
-	const workerScope = pickWorkerScope(safety, currentMode);
+	const orchScope = pickOrchestratorScope(safety);
+	const workerScope = pickWorkerScope(safety, requestedActions);
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
@@ -460,8 +430,6 @@ function resolveDelegationAdmissionStage(
 		throw new Error(`dispatch: delegation admission denied: ${verdict.reason}`);
 	}
 	return {
-		currentMode,
-		workerMode: currentMode,
 		allowedTools,
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
@@ -483,7 +451,6 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		wireModelId: input.target.wireModelId,
 		thinkingLevel: input.target.thinkingLevel,
 		allowedTools: input.admission.allowedTools,
-		mode: input.admission.workerMode,
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
@@ -623,17 +590,14 @@ export function createDispatchBundle(
 ): DomainBundle<DispatchContract> {
 	const maybeSafety = context.getContract<SafetyContract>("safety");
 	const maybeAgents = context.getContract<AgentsContract>("agents");
-	const maybeModes = context.getContract<ModesContract>("modes");
 	const maybeProviders = context.getContract<ProvidersContract>("providers");
 	const maybeMiddleware = context.getContract<MiddlewareContract>("middleware");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
-	if (!maybeModes) throw new Error("dispatch domain requires 'modes' contract");
 	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
 	if (!maybeMiddleware) throw new Error("dispatch domain requires 'middleware' contract");
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
-	const modes: ModesContract = maybeModes;
 	const providers: ProvidersContract = maybeProviders;
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const config = context.getContract<ConfigContract>("config");
@@ -764,8 +728,7 @@ export function createDispatchBundle(
 				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
 			);
 		}
-		const currentMode = modes.current();
-		const admission = resolveDispatchAdmissionStage(req, recipe, currentMode, Array.from(modes.visibleTools()), safety);
+		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(config?.get());
 		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
 		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
@@ -792,7 +755,6 @@ export function createDispatchBundle(
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
 			recipe,
-			currentMode,
 			admission,
 			target,
 			cwd,
@@ -818,15 +780,16 @@ export function createDispatchBundle(
 		if (req.agentId && maybeAgents) {
 			const spec = maybeAgents.getSpec(req.agentId);
 			if (spec && (spec.audience === "shadow" || spec.audience === "internal")) {
-				throw new Error(`dispatch: shadow or internal agent '${req.agentId}' cannot run on external ACP agent '${agentId}'`);
+				throw new Error(
+					`dispatch: shadow or internal agent '${req.agentId}' cannot run on external ACP agent '${agentId}'`,
+				);
 			}
 		}
 		const settings = config?.get();
 		if (!settings) throw new Error("dispatch: config domain required for ACP delegation");
 		const configured = settings.delegation.agents.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
-		const currentMode = modes.current();
-		const admission = resolveDelegationAdmissionStage(req, currentMode, Array.from(modes.visibleTools()), safety);
+		const admission = resolveDelegationAdmissionStage(req, safety);
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, null);
 		const dynamicPromptMessages = buildDynamicPromptMessages(req);
@@ -836,14 +799,9 @@ export function createDispatchBundle(
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const currentToolSignature = toolSignature(admission.allowedTools);
-		const agentConfig =
-			currentMode === "advise" && configured.toolGovernance !== "deny-all"
-				? { ...configured, toolGovernance: "deny-all" as const }
-				: configured;
 		return {
-			currentMode,
 			admission,
-			agentConfig,
+			agentConfig: configured,
 			cwd,
 			systemPrompt,
 			dynamicPromptMessages,
@@ -901,7 +859,6 @@ export function createDispatchBundle(
 				systemPrompt: lifecycle.systemPrompt,
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
-				mode: lifecycle.admission.workerMode,
 				safety,
 				clientVersion: readClioVersion(),
 			});
@@ -911,7 +868,7 @@ export function createDispatchBundle(
 		}
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
@@ -931,10 +888,10 @@ export function createDispatchBundle(
 					};
 					payload?: {
 						tool?: string;
-						mode?: string;
+						posture?: string;
 						durationMs?: number;
 						outcome?: "ok" | "error" | "blocked";
-						decision?: "allowed" | "blocked" | "elevated";
+						decision?: "allowed" | "blocked" | "permission_requested";
 						actionClass?: string;
 						ruleId?: string;
 						reasonCode?: string;
@@ -964,10 +921,9 @@ export function createDispatchBundle(
 					recordToolFinish(toolStats, event.payload);
 					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
 					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-					else if (event.payload.decision === "elevated") safetyDecisionCounts.elevated += 1;
+					else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
 					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
 						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-						if (event.payload.mode !== undefined) attempt.mode = event.payload.mode;
 						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
 						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
 						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
@@ -1056,7 +1012,7 @@ export function createDispatchBundle(
 			tokenMeter.reasoningTokens += result.usage.reasoningTokens;
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
-			const safetyMetadata = safety.policy?.metadata(lifecycle.currentMode) ?? null;
+			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
@@ -1097,8 +1053,6 @@ export function createDispatchBundle(
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
-					dispatchScope: MODE_MATRIX[lifecycle.currentMode].dispatchScope,
-					workerMode: lifecycle.admission.workerMode,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
@@ -1248,7 +1202,7 @@ export function createDispatchBundle(
 		}
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, elevated: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const spec = buildDispatchWorkerSpec(
 			{
@@ -1297,10 +1251,10 @@ export function createDispatchBundle(
 					};
 					payload?: {
 						tool?: string;
-						mode?: string;
+						posture?: string;
 						durationMs?: number;
 						outcome?: "ok" | "error" | "blocked";
-						decision?: "allowed" | "blocked" | "elevated";
+						decision?: "allowed" | "blocked" | "permission_requested";
 						actionClass?: string;
 						ruleId?: string;
 						reasonCode?: string;
@@ -1334,10 +1288,9 @@ export function createDispatchBundle(
 					}
 					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
 					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-					else if (event.payload.decision === "elevated") safetyDecisionCounts.elevated += 1;
+					else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
 					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
 						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-						if (event.payload.mode !== undefined) attempt.mode = event.payload.mode;
 						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
 						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
 						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
@@ -1434,7 +1387,7 @@ export function createDispatchBundle(
 					(tokenMeter.cacheReadTokens * (pricing.cacheRead ?? 0)) / 1_000_000 +
 					(tokenMeter.cacheWriteTokens * (pricing.cacheWrite ?? 0)) / 1_000_000
 				: 0;
-			const safetyMetadata = safety.policy?.metadata(lifecycle.currentMode) ?? null;
+			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			return {
@@ -1476,8 +1429,6 @@ export function createDispatchBundle(
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
-					dispatchScope: MODE_MATRIX[lifecycle.currentMode].dispatchScope,
-					workerMode: lifecycle.admission.workerMode,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,

@@ -168,7 +168,6 @@ function addTree(
 
 function settingsFragment(settings: Readonly<ClioSettings>): Record<string, unknown> {
 	return {
-		defaultMode: settings.defaultMode,
 		safetyLevel: settings.safetyLevel,
 		scope: settings.scope,
 		budget: settings.budget,
@@ -427,7 +426,6 @@ function mergeSettingsFragment(buffer: Buffer): void {
 	const current = readSettings();
 	const next = structuredClone(current) as ClioSettings;
 	for (const key of [
-		"defaultMode",
 		"safetyLevel",
 		"scope",
 		"budget",

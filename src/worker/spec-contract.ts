@@ -1,6 +1,5 @@
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
-import type { ModeName } from "../domains/modes/matrix.js";
 import type {
 	CapabilityFlags,
 	EndpointDescriptor,
@@ -43,7 +42,6 @@ export interface WorkerSpec {
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
-	mode?: ModeName;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
@@ -87,7 +85,6 @@ const THINKING_LEVELS = [
 	"high",
 	"xhigh",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
-const MODE_NAMES = ["default", "advise", "super"] as const satisfies ReadonlyArray<ModeName>;
 const ENDPOINT_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = [
 	"before_model",
@@ -360,7 +357,6 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
-	readOptionalEnum(spec, "mode", "WorkerSpec", MODE_NAMES);
 	validateAllowedTools(spec.allowedTools);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.modelCapabilities !== undefined)

@@ -1,7 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
-import type { ModesContract } from "../../domains/modes/index.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
@@ -54,7 +53,6 @@ export type { ToolTallySnapshot } from "./widgets.js";
 export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
-	modes: ModesContract;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
 	getAgentStatus?: () => AgentStatus;
@@ -189,7 +187,7 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 function headerLine(session: SessionFacts, width: number): string {
 	const theme = clioTheme();
 	const left = theme.style("title", `${GLYPH.agent} CLIO DASHBOARD`, { bold: true });
-	const right = `${theme.fg("muted", session.mode)}${theme.fg("dim", " · ")}${theme.fg("dim", `v${session.version}`)}`;
+	const right = theme.fg("dim", `v${session.version}`);
 	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
 	return fitDashboardLine(`${left}${" ".repeat(gap)}${right}`, width);
 }
@@ -256,7 +254,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			session: {
 				name: sessionInfo.name,
 				id: sessionInfo.id,
-				mode: deps.modes.current().toLowerCase(),
 				version: readClioVersion(),
 				turns: sessionInfo.turns,
 				tokens: tokensLabel,

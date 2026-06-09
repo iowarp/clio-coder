@@ -2,7 +2,7 @@ import type { ClioSettings } from "../../core/config.js";
 
 /**
  * Classifies a settings change into one of three buckets per spec §13:
- *   - hotReload   : theme, keybindings, safety rules, mode defaults, prompt fragments,
+ *   - hotReload   : theme, keybindings, safety rules, prompt fragments,
  *                   audit verbosity. Apply immediately (≤100ms).
  *   - nextTurn    : model selection, thinking level, budget ceiling. Apply before the
  *                   next turn starts.
@@ -21,7 +21,7 @@ export interface ConfigDiff {
 	restartRequired: string[];
 }
 
-const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "safetyLevel", "defaultMode", "state.lastMode"]);
+const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "safetyLevel"]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
 	"endpoints",

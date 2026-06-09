@@ -1,7 +1,6 @@
 ---
 name: Architect
 description: Designs coding changes across boundaries, contracts, migrations, and validation gates.
-mode: advise
 tools: [read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan]
 audience: base
 category: plan

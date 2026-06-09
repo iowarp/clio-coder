@@ -4,7 +4,7 @@
  * Converts Clio `ToolSpec` registrations into pi-agent-core `AgentTool`
  * instances the agent can execute. Every wrapper routes through a
  * `ToolRegistry.invoke(...)` call so interactive and worker runs share the
- * same safety + mode admission path instead of calling `spec.run(...)`
+ * same safety + confirmation admission path instead of calling `spec.run(...)`
  * directly.
  *
  * Validation runs exactly once per tool call. Inside the agent loop pi-ai's
@@ -19,8 +19,6 @@ import { type SkillActivation, skillActivationFromToolDetails } from "../core/sk
 import type { ToolName } from "../core/tool-names.js";
 import { ToolNames } from "../core/tool-names.js";
 import { createMiddlewareContractFromSnapshot, type MiddlewareSnapshot } from "../domains/middleware/index.js";
-import type { ModesContract } from "../domains/modes/contract.js";
-import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import {
@@ -30,7 +28,7 @@ import {
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
-import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../domains/safety/scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type ToolInvokeOptions, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
@@ -52,19 +50,19 @@ export type ToolOutcome = "ok" | "error" | "blocked";
 
 export interface ToolStartEvent {
 	tool: string;
-	mode: ModeName;
+	posture: "operating";
 	startedAt: number;
 }
 
 export interface ToolFinishEvent {
 	tool: string;
-	mode: ModeName;
+	posture: "operating";
 	durationMs: number;
 	outcome: ToolOutcome;
 	terminate?: boolean;
 	reason?: string;
 	actionClass?: string;
-	decision?: "allowed" | "blocked" | "elevated";
+	decision?: "allowed" | "blocked" | "permission_requested";
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
@@ -74,7 +72,6 @@ export interface ToolFinishEvent {
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
 	allowedTools?: ReadonlyArray<ToolName>;
-	mode: ModeName;
 	toolProfile?: ToolProfileName;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: () => Partial<ToolInvokeOptions>;
@@ -83,7 +80,6 @@ export interface ResolveAgentToolsInput {
 export interface InvokeWorkerToolOptions {
 	signal?: AbortSignal;
 	telemetry?: ToolTelemetry;
-	mode?: ModeName;
 }
 
 type WorkerAgentToolResult = AgentToolResult<{ kind: "ok" } | { kind: "error" }>;
@@ -97,16 +93,15 @@ interface RunValidatedToolCallInput {
 	spec: ToolSpec;
 	args: Record<string, unknown>;
 	registry: ToolRegistry;
-	mode: ModeName;
 	signal?: AbortSignal;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: Partial<ToolInvokeOptions>;
 }
 
 async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<WorkerAgentToolResult> {
-	const { spec, args, registry, mode, signal, telemetry } = input;
+	const { spec, args, registry, signal, telemetry } = input;
 	const startedAt = Date.now();
-	telemetry?.onStart?.({ tool: spec.name, mode, startedAt });
+	telemetry?.onStart?.({ tool: spec.name, posture: "operating", startedAt });
 	const invokeOpts: ToolInvokeOptions = {};
 	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
 	if (signal) invokeOpts.signal = signal;
@@ -115,25 +110,25 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	try {
 		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
-		emitFinish(telemetry, spec.name, mode, startedAt, "error", { reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAt, "error", { reason: errorMessage(err) });
 		throw err;
 	}
 	let verdict: Awaited<typeof verdictPromise>;
 	try {
 		verdict = await verdictPromise;
 	} catch (err) {
-		emitFinish(telemetry, spec.name, mode, startedAt, "error", { reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAt, "error", { reason: errorMessage(err) });
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
-		emitFinish(telemetry, spec.name, mode, startedAt, "blocked", {
+		emitFinish(telemetry, spec.name, startedAt, "blocked", {
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
 		});
 		throw new Error(verdict.reason);
 	}
 	if (verdict.result.kind === "error") {
-		emitFinish(telemetry, spec.name, mode, startedAt, "error", {
+		emitFinish(telemetry, spec.name, startedAt, "error", {
 			reason: verdict.result.message,
 			decision: verdict.decision,
 		});
@@ -148,13 +143,13 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok", {
+		emitFinish(telemetry, spec.name, startedAt, "ok", {
 			terminate: true,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
 	} else {
-		emitFinish(telemetry, spec.name, mode, startedAt, "ok", {
+		emitFinish(telemetry, spec.name, startedAt, "ok", {
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
@@ -165,7 +160,6 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 function emitFinish(
 	telemetry: ToolTelemetry | undefined,
 	tool: string,
-	mode: ModeName,
 	startedAt: number,
 	outcome: ToolOutcome,
 	extra?: { reason?: string; terminate?: boolean; decision?: SafetyDecision; skillActivation?: SkillActivation },
@@ -173,7 +167,7 @@ function emitFinish(
 	if (!telemetry?.onFinish) return;
 	const event: ToolFinishEvent = {
 		tool,
-		mode,
+		posture: "operating",
 		durationMs: Date.now() - startedAt,
 		outcome,
 	};
@@ -181,7 +175,8 @@ function emitFinish(
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;
-		event.decision = extra.decision.kind === "allow" ? "allowed" : extra.decision.kind === "ask" ? "elevated" : "blocked";
+		event.decision =
+			extra.decision.kind === "allow" ? "allowed" : extra.decision.kind === "ask" ? "permission_requested" : "blocked";
 		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
 		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
@@ -199,7 +194,6 @@ function errorMessage(err: unknown): string {
 function toAgentTool(
 	spec: ToolSpec,
 	registry: ToolRegistry,
-	mode: ModeName,
 	telemetry: ToolTelemetry | undefined,
 	invokeOptions: (() => Partial<ToolInvokeOptions>) | undefined,
 ): AgentTool<TSchema> {
@@ -215,7 +209,6 @@ function toAgentTool(
 				spec,
 				args: params as Record<string, unknown>,
 				registry,
-				mode,
 			};
 			if (signal) callInput.signal = signal;
 			if (telemetry) callInput.telemetry = telemetry;
@@ -225,24 +218,6 @@ function toAgentTool(
 	};
 	if (spec.executionMode) tool.executionMode = spec.executionMode;
 	return tool;
-}
-
-function createWorkerModes(mode: ModeName): ModesContract {
-	const profile = MODE_MATRIX[mode];
-	return {
-		current: () => mode,
-		setMode: () => mode,
-		cycleNormal: () => mode,
-		visibleTools: () => profile.tools,
-		isToolVisible: (tool) => profile.tools.has(tool),
-		isActionAllowed: (action) => profile.allowedActions.has(action),
-		requestSuper: () => {},
-		confirmSuper: () => mode,
-		// Workers have no Alt+S pathway; parking requires interactive
-		// confirmation. Returning null forces the registry to reject
-		// mode-gate blocks synchronously.
-		elevatedModeFor: () => null,
-	};
 }
 
 /**
@@ -256,8 +231,8 @@ export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContra
 	const policyEngine = createSafetyPolicyEngine(options);
 	return {
 		classify: (call) => classifyAction(call),
-		evaluate(call, mode) {
-			const policy = policyEngine.evaluate(call, mode);
+		evaluate(call, posture) {
+			const policy = policyEngine.evaluate(call, posture);
 			const classification = policy.classification;
 			if (policy.kind === "block") {
 				const decision: SafetyDecision = {
@@ -276,7 +251,6 @@ export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContra
 					rejection: policy.rejection ?? fallbackRejection(policy),
 					policy,
 				};
-				if (policy.elevationMode !== undefined) decision.elevationMode = policy.elevationMode;
 				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
 				return decision;
 			}
@@ -287,9 +261,9 @@ export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContra
 			loopState = next;
 			return verdict;
 		},
-		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: SUPER_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
-		policy: { metadata: (mode) => policyEngine.metadata(mode) },
+		policy: { metadata: (posture) => policyEngine.metadata(posture) },
 		audit: { recordCount: () => 0 },
 	};
 }
@@ -466,14 +440,12 @@ export function createWorkerLoopGuard(opts: CreateWorkerLoopGuardOptions): Worke
 }
 
 export function createWorkerToolRegistry(
-	mode: ModeName,
 	middlewareSnapshot?: MiddlewareSnapshot,
 	safety: SafetyContract = createWorkerSafety(),
 	skillLoaderOptions?: { noSkills?: boolean; skillPaths?: string[]; trustProjectCompatRoots?: boolean },
 ): ToolRegistry {
 	const registry = createRegistry({
 		safety,
-		modes: createWorkerModes(mode),
 		...(middlewareSnapshot ? { middleware: createMiddlewareContractFromSnapshot(middlewareSnapshot) } : {}),
 	});
 	registerAllTools(registry, {
@@ -493,28 +465,26 @@ export function createWorkerToolRegistry(
  * registered tool set plus:
  *
  *   1. the explicit `allowedTools` list (typically from the agent recipe)
- *   2. the active `mode`
- *   3. an optional `telemetry` sink for `onStart`/`onFinish` events
+ *   2. an optional `telemetry` sink for `onStart`/`onFinish` events
  *
  * The returned tool set is the intersection of:
  *   1. tools registered on the supplied registry
- *   2. tools whose allowedModes admits `mode`
- *   3. tools whose id appears in `allowedTools`
+ *   2. tools whose id appears in `allowedTools`
  *
  * When `allowedTools` is undefined, step 3 is skipped.
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
-	const modeIds = new Set(applyToolProfile(input.registry.listForMode(input.mode), input.toolProfile));
+	const toolIds = new Set(applyToolProfile(input.registry.listRegistered(), input.toolProfile));
 	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
 	const specs: ToolSpec[] = [];
-	for (const name of modeIds) {
+	for (const name of toolIds) {
 		if (allowed && !allowed.has(name)) continue;
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
 	return specs.map((spec) =>
-		toAgentTool(spec, input.registry, input.mode, input.telemetry, input.invokeOptions),
+		toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions),
 	) as unknown as AgentTool[];
 }
 
@@ -543,7 +513,6 @@ export async function invokeWorkerTool(
 		spec,
 		args: validated,
 		registry,
-		mode: opts?.mode ?? "default",
 	};
 	if (opts?.signal) callInput.signal = opts.signal;
 	if (opts?.telemetry) callInput.telemetry = opts.telemetry;

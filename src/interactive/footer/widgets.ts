@@ -32,7 +32,6 @@ export interface WorkspaceFacts {
 export interface SessionFacts {
 	name: string | null;
 	id: string | null;
-	mode: string;
 	version: string;
 	turns: number | null;
 	tokens: string | null;
@@ -136,7 +135,7 @@ export function collapseRemote(remote: string | null): string | null {
 
 /**
  * Compact primary row: workspace identity on the left, session resources on the
- * right. Carries no model/mode/thinking — the editor rail owns those — and the
+ * right. Carries no model/thinking — the editor rail owns those — and the
  * branch appears here (and only here) across the whole screen.
  */
 export function compactPrimaryLine(workspace: WorkspaceFacts, session: SessionFacts, width: number): string {
@@ -195,7 +194,7 @@ export function sessionQuadrant(facts: SessionFacts): string[] {
 	const title = facts.name ?? facts.id ?? "no session";
 	return quadrantBlock(theme, "accent", "Session", [
 		theme.fg("accent", title),
-		`${labeledChip(theme, "mode", facts.mode, "muted")} ${theme.fg("dim", `v${facts.version}`)}`,
+		theme.fg("dim", `v${facts.version}`),
 		facts.turns !== null ? labeledChip(theme, "turns", String(facts.turns), "muted") : null,
 		facts.tokens ? labeledChip(theme, "tok", facts.tokens.replace(/^tok\s+/, ""), "muted") : null,
 		facts.throughput ? labeledChip(theme, "speed", facts.throughput, "success") : null,

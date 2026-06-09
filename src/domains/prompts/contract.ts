@@ -1,4 +1,3 @@
-import type { ModeName } from "../modes/index.js";
 import type { CompileResult, DynamicInputs } from "./compiler.js";
 
 export interface ProjectContextPolicyInput {
@@ -11,7 +10,6 @@ export interface ProjectContextPolicyInput {
 
 export interface CompileForTurnInput {
 	dynamicInputs: DynamicInputs;
-	overrideMode?: ModeName;
 	safetyLevel?: string;
 	cwd?: string;
 	contextPolicy?: ProjectContextPolicyInput;

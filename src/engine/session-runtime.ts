@@ -1,5 +1,4 @@
 import type { ToolName } from "../core/tool-names.js";
-import type { ModeName } from "../domains/modes/matrix.js";
 import type { EndpointDescriptor, RuntimeDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import type { AgentEvent, AgentMessage } from "./types.js";
 
@@ -16,7 +15,6 @@ export interface SessionRuntimeStartInput {
 	endpoint: EndpointDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
-	mode?: ModeName;
 	thinkingLevel?: ThinkingLevel;
 	allowedTools?: ReadonlyArray<ToolName>;
 	signal?: AbortSignal;
@@ -27,7 +25,6 @@ export interface SessionRuntimeSendTurnInput {
 	task: string;
 	dynamicPromptMessages?: ReadonlyArray<SessionRuntimePromptMessage>;
 	wireModelId?: string;
-	mode?: ModeName;
 }
 
 export interface SessionRuntimeTurnHandle {
@@ -45,7 +42,6 @@ export interface SessionRuntimeSession {
 	threadId: string;
 	runtimeId: string;
 	model: string;
-	permissionMode?: string;
 	resumeSessionId?: string;
 	startedAt: number;
 }

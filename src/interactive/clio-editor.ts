@@ -22,17 +22,16 @@ export interface EditorChrome {
 	getModelLabel: () => string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
-	getMode: () => string;
 }
 
 /**
  * Compose the single editor rail label. The editor rail is the one place that
- * owns model identity (target/provider · model · thinking · mode); the footer
+ * owns model identity (target/provider · model · thinking); the footer
  * deliberately does not repeat any of these.
  */
 export function composeRailLabel(chrome: EditorChrome): string {
 	const think = chrome.getThinkingLabel();
-	return `${chrome.getModelLabel()} · think ${think} · ${chrome.getMode()}`;
+	return `${chrome.getModelLabel()} · think ${think}`;
 }
 
 export class ClioEditor extends Editor {

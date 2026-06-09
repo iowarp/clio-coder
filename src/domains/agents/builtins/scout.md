@@ -1,7 +1,6 @@
 ---
 name: Scout
 description: Shadow fast codebase reconnaissance, symbol mapping, and codewiki context.
-mode: advise
 tools: [read, grep, glob, ls, workspace_context, find_symbol, entry_points, where_is, git_status, git_diff, git_log]
 audience: shadow
 category: explore

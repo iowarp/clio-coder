@@ -403,10 +403,11 @@ function extractSettingsRules(provider: AdoptionProvider, content: string): stri
 		if (isRecord(permissions)) {
 			const allow = stringArray(permissions.allow);
 			const deny = stringArray(permissions.deny);
-			const defaultMode = stringField(permissions, "defaultMode");
+			const claudePermissionSetting = stringField(permissions, "defaultMode");
 			if (allow.length > 0) rules.push(`Claude Code allows tools: ${formatShortList(allow)}.`);
 			if (deny.length > 0) rules.push(`Claude Code denies tools: ${formatShortList(deny)}.`);
-			if (defaultMode) rules.push(`Claude Code uses permission mode \`${defaultMode}\` for this project.`);
+			if (claudePermissionSetting)
+				rules.push(`Claude Code declares permission setting \`${claudePermissionSetting}\` for this project.`);
 		}
 		if (parsed.enableAllProjectMcpServers === true) rules.push("Claude Code enables all project MCP servers.");
 	}

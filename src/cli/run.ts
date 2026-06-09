@@ -11,7 +11,6 @@ import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { ModesDomainModule } from "../domains/modes/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -171,7 +170,6 @@ async function runDispatch(
 		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
-		ModesDomainModule,
 		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
 		AgentsDomainModule,
 		MiddlewareDomainModule,

@@ -29,10 +29,6 @@ const TICK_INTERVAL_MS = 1000;
 const SETTLE_MS = 5000;
 const STATUS_EMIT_THROTTLE_MS = 100;
 
-function payloadObject(payload: unknown): Record<string, unknown> {
-	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
-}
-
 function statusMetadata(status: AgentStatus): AgentStatusChangedPayload["metadata"] {
 	if (status.tool) return { toolName: status.tool.toolName };
 	if (status.retry) return { attempt: status.retry.attempt };
@@ -162,15 +158,8 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 
 	if (deps.bus) {
 		unsubscribes.push(
-			deps.bus.on(BusChannels.SuperRequired, () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
-			deps.bus.on(BusChannels.ModeChanged, (payload) => {
-				const p = payloadObject(payload);
-				const reason = typeof p.reason === "string" ? p.reason : null;
-				const oneShotResolved = reason === "one_shot_granted" || reason === "one_shot_cancelled";
-				if (oneShotResolved || (p.to === "super" && p.from !== "super" && reason !== "one_shot_request")) {
-					apply({ type: "overlay_pop", overlay: "tool_blocked" }, true);
-				}
-			}),
+			deps.bus.on(BusChannels.PermissionRequested, () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
+			deps.bus.on(BusChannels.PermissionResolved, () => apply({ type: "overlay_pop", overlay: "tool_blocked" }, true)),
 			deps.bus.on(BusChannels.CompactionBegin, () => apply({ type: "overlay_push", overlay: "compacting" }, true)),
 			deps.bus.on(BusChannels.CompactionEnd, () => apply({ type: "overlay_pop", overlay: "compacting" }, true)),
 			deps.bus.on(BusChannels.DispatchStarted, (payload) =>

@@ -12,7 +12,8 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  *
  * Records are a discriminated union over `kind`:
  *   - `tool_call`: emitted by safety.evaluate() for every classified tool call.
- *   - `mode_change`: emitted on every BusChannels.ModeChanged transition.
+ *   - `permission`: emitted for one-shot tool/action confirmation requests
+ *     and resolutions.
  *   - `abort`: emitted on every BusChannels.RunAborted event so /audit consumers
  *     can reconstruct who cancelled which run and how long it ran first.
  *   - `session_park`: emitted on every BusChannels.SessionParked event so /audit
@@ -33,8 +34,8 @@ export interface ToolCallAuditRecord {
 	correlationId: string;
 	tool: string;
 	actionClass: string;
-	decision: "allowed" | "blocked" | "elevated" | "classified";
-	mode?: string;
+	decision: "allowed" | "blocked" | "permission_requested" | "classified";
+	posture?: string;
 	reasons: ReadonlyArray<string>;
 	ruleId?: string;
 	reasonCode?: string;
@@ -45,15 +46,15 @@ export interface ToolCallAuditRecord {
 	args?: unknown;
 }
 
-export interface ModeChangeAuditRecord {
-	kind: "mode_change";
+export interface PermissionAuditRecord {
+	kind: "permission";
 	ts: string;
 	correlationId: string;
-	from: string | null;
-	to: string;
-	reason: string | null;
+	status: "requested" | "granted" | "denied";
+	tool?: string;
+	actionClass?: string;
+	reason?: string;
 	requestedBy?: string;
-	requiresConfirmation?: boolean;
 }
 
 export type AbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel";
@@ -103,7 +104,7 @@ export interface AgentStatusChangeAuditRecord {
 
 export type AuditRecord =
 	| ToolCallAuditRecord
-	| ModeChangeAuditRecord
+	| PermissionAuditRecord
 	| AbortAuditRecord
 	| SessionParkAuditRecord
 	| SessionResumeAuditRecord
@@ -165,8 +166,8 @@ function redactArgs(value: unknown, depth = 0): unknown {
 export function buildAuditRecord(input: {
 	tool: string;
 	classification: { actionClass: string; reasons: ReadonlyArray<string> };
-	decision: "allowed" | "blocked" | "elevated" | "classified";
-	mode?: string;
+	decision: "allowed" | "blocked" | "permission_requested" | "classified";
+	posture?: string;
 	args?: unknown;
 	policy?: SafetyPolicyDecision;
 	now?: Date;
@@ -181,7 +182,7 @@ export function buildAuditRecord(input: {
 		decision: input.decision,
 		reasons: input.policy?.reasons ?? input.classification.reasons,
 	};
-	if (input.mode !== undefined) record.mode = input.mode;
+	if (input.posture !== undefined) record.posture = input.posture;
 	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;
 	if (input.policy?.reasonCode !== undefined) record.reasonCode = input.policy.reasonCode;
 	if (input.policy?.policySource !== undefined) record.policySource = input.policy.policySource;
@@ -244,25 +245,25 @@ export function buildSessionResumeAuditRecord(input: {
 	};
 }
 
-export function buildModeChangeAuditRecord(input: {
-	from: string | null;
-	to: string;
-	reason: string | null;
+export function buildPermissionAuditRecord(input: {
+	status: PermissionAuditRecord["status"];
+	tool?: string;
+	actionClass?: string;
+	reason?: string;
 	requestedBy?: string;
-	requiresConfirmation?: boolean;
 	now?: Date;
-}): ModeChangeAuditRecord {
+}): PermissionAuditRecord {
 	const now = input.now ?? new Date();
-	const record: ModeChangeAuditRecord = {
-		kind: "mode_change",
+	const record: PermissionAuditRecord = {
+		kind: "permission",
 		ts: now.toISOString(),
 		correlationId: newCorrelationId(),
-		from: input.from,
-		to: input.to,
-		reason: input.reason,
+		status: input.status,
 	};
+	if (input.tool !== undefined) record.tool = input.tool;
+	if (input.actionClass !== undefined) record.actionClass = input.actionClass;
+	if (input.reason !== undefined) record.reason = input.reason;
 	if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;
-	if (input.requiresConfirmation !== undefined) record.requiresConfirmation = input.requiresConfirmation;
 	return record;
 }
 

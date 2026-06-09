@@ -599,9 +599,6 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 
 	const identity = trimString(raw.identity);
 	if (identity) settings.identity = identity;
-	if (raw.defaultMode === "default" || raw.defaultMode === "advise" || raw.defaultMode === "super") {
-		settings.defaultMode = raw.defaultMode;
-	}
 	if (raw.safetyLevel === "suggest" || raw.safetyLevel === "auto-edit" || raw.safetyLevel === "full-auto") {
 		settings.safetyLevel = raw.safetyLevel;
 	}
@@ -727,9 +724,6 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 	}
 
 	if (isPlainObject(raw.state)) {
-		if (raw.state.lastMode === "default" || raw.state.lastMode === "advise" || raw.state.lastMode === "super") {
-			settings.state.lastMode = raw.state.lastMode;
-		}
 		settings.state.recentModels = normalizeModelRefs(raw.state.recentModels, settings.endpoints).slice(
 			0,
 			settings.modelSelector.recentLimit,

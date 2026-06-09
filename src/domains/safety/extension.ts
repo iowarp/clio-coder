@@ -8,7 +8,7 @@ import {
 	buildAbortAuditRecord,
 	buildAgentStatusChangeAuditRecord,
 	buildAuditRecord,
-	buildModeChangeAuditRecord,
+	buildPermissionAuditRecord,
 	buildSessionParkAuditRecord,
 	buildSessionResumeAuditRecord,
 	openAuditWriter,
@@ -18,23 +18,26 @@ import {
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
-import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "./scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
 
-interface ModeChangedPayload {
-	from: string | null;
-	to: string;
-	reason: string | null;
-	at?: number;
+interface PermissionResolvedPayload {
+	status: "granted" | "denied";
+	tool?: string;
+	actionClass?: string;
+	reason?: string;
 	requestedBy?: string;
-	requiresConfirmation?: boolean;
+	at?: number;
 }
 
-function isModeChangedPayload(value: unknown): value is ModeChangedPayload {
+function isPermissionResolvedPayload(value: unknown): value is PermissionResolvedPayload {
 	if (!value || typeof value !== "object") return false;
 	const p = value as Record<string, unknown>;
-	const fromOk = p.from === null || typeof p.from === "string";
-	const reasonOk = p.reason === null || typeof p.reason === "string";
-	return fromOk && typeof p.to === "string" && reasonOk;
+	if (p.status !== "granted" && p.status !== "denied") return false;
+	if (p.tool !== undefined && typeof p.tool !== "string") return false;
+	if (p.actionClass !== undefined && typeof p.actionClass !== "string") return false;
+	if (p.reason !== undefined && typeof p.reason !== "string") return false;
+	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
+	return true;
 }
 
 interface RunAbortedPayload {
@@ -129,7 +132,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let recordCount = 0;
-	let unsubscribeModeChanged: (() => void) | null = null;
+	let unsubscribePermissionResolved: (() => void) | null = null;
 	let unsubscribeRunAborted: (() => void) | null = null;
 	let unsubscribeSessionParked: (() => void) | null = null;
 	let unsubscribeSessionResumed: (() => void) | null = null;
@@ -145,16 +148,17 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
 			writer = openAuditWriter();
-			unsubscribeModeChanged = context.bus.on(BusChannels.ModeChanged, (payload) => {
-				if (!isModeChangedPayload(payload)) return;
-				const recordInput: Parameters<typeof buildModeChangeAuditRecord>[0] = {
-					from: payload.from,
-					to: payload.to,
-					reason: payload.reason,
-				};
-				if (payload.requestedBy !== undefined) recordInput.requestedBy = payload.requestedBy;
-				if (payload.requiresConfirmation !== undefined) recordInput.requiresConfirmation = payload.requiresConfirmation;
-				writeAudit(buildModeChangeAuditRecord(recordInput));
+			unsubscribePermissionResolved = context.bus.on(BusChannels.PermissionResolved, (payload) => {
+				if (!isPermissionResolvedPayload(payload)) return;
+				writeAudit(
+					buildPermissionAuditRecord({
+						status: payload.status,
+						...(payload.tool !== undefined ? { tool: payload.tool } : {}),
+						...(payload.actionClass !== undefined ? { actionClass: payload.actionClass } : {}),
+						...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+						...(payload.requestedBy !== undefined ? { requestedBy: payload.requestedBy } : {}),
+					}),
+				);
 			});
 			unsubscribeRunAborted = context.bus.on(BusChannels.RunAborted, (payload) => {
 				if (!isRunAbortedPayload(payload)) return;
@@ -190,8 +194,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			});
 		},
 		async stop() {
-			unsubscribeModeChanged?.();
-			unsubscribeModeChanged = null;
+			unsubscribePermissionResolved?.();
+			unsubscribePermissionResolved = null;
 			unsubscribeRunAborted?.();
 			unsubscribeRunAborted = null;
 			unsubscribeSessionParked?.();
@@ -209,8 +213,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		classify(call) {
 			return classifyCall(call);
 		},
-		evaluate(call, mode) {
-			const policy = (policyEngine ?? createSafetyPolicyEngine()).evaluate(call, mode);
+		evaluate(call, posture) {
+			const policy = (policyEngine ?? createSafetyPolicyEngine()).evaluate(call, posture);
 			const classification = policy.classification;
 
 			context.bus.emit(BusChannels.SafetyClassified, {
@@ -218,7 +222,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				actionClass: classification.actionClass,
 				reasons: classification.reasons,
 				ruleId: policy.ruleId,
-				mode,
+				posture,
 				policySource: policy.policySource,
 				reasonCode: policy.reasonCode,
 			});
@@ -231,14 +235,14 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					args: call.args,
 					policy,
 				};
-				if (mode !== undefined) auditInput.mode = mode;
+				if (posture !== undefined) auditInput.posture = posture;
 				const record = buildAuditRecord(auditInput);
 				writeAudit(record);
 				context.bus.emit(BusChannels.SafetyBlocked, {
 					tool: call.tool,
 					actionClass: classification.actionClass,
 					ruleId: policy.ruleId,
-					mode,
+					posture,
 					rejection: policy.rejection,
 					policySource: policy.policySource,
 					reasonCode: policy.reasonCode,
@@ -256,21 +260,20 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				const auditInput: Parameters<typeof buildAuditRecord>[0] = {
 					tool: call.tool,
 					classification,
-					decision: "elevated",
+					decision: "permission_requested",
 					args: call.args,
 					policy,
 				};
-				if (mode !== undefined) auditInput.mode = mode;
+				if (posture !== undefined) auditInput.posture = posture;
 				writeAudit(buildAuditRecord(auditInput));
-				context.bus.emit(BusChannels.SafetyBlocked, {
+				context.bus.emit(BusChannels.PermissionRequested, {
 					tool: call.tool,
 					actionClass: classification.actionClass,
 					ruleId: policy.ruleId,
-					mode,
+					posture,
 					rejection: policy.rejection,
 					policySource: policy.policySource,
 					reasonCode: policy.reasonCode,
-					elevationMode: policy.elevationMode,
 				});
 				const decision: SafetyDecision = {
 					kind: "ask",
@@ -278,7 +281,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					rejection: policy.rejection ?? fallbackRejection(policy),
 					policy,
 				};
-				if (policy.elevationMode !== undefined) decision.elevationMode = policy.elevationMode;
 				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
 				return decision;
 			}
@@ -290,13 +292,13 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				args: call.args,
 				policy,
 			};
-			if (mode !== undefined) auditInput.mode = mode;
+			if (posture !== undefined) auditInput.posture = posture;
 			const record = buildAuditRecord(auditInput);
 			writeAudit(record);
 			context.bus.emit(BusChannels.SafetyAllowed, {
 				tool: call.tool,
 				actionClass: classification.actionClass,
-				mode,
+				posture,
 				ruleId: policy.ruleId,
 				policySource: policy.policySource,
 				reasonCode: policy.reasonCode,
@@ -308,9 +310,9 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			loopState = next;
 			return verdict;
 		},
-		scopes: { default: DEFAULT_SCOPE, readonly: READONLY_SCOPE, advise: ADVISE_SCOPE, super: SUPER_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
-		policy: { metadata: (mode) => (policyEngine ?? createSafetyPolicyEngine()).metadata(mode) },
+		policy: { metadata: (posture) => (policyEngine ?? createSafetyPolicyEngine()).metadata(posture) },
 		audit: { recordCount: () => recordCount },
 	};
 

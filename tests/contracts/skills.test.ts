@@ -3,9 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
-import type { ModesContract } from "../../src/domains/modes/contract.js";
 import {
 	createResourcesLoader,
 	expandSkillInvocationInput,
@@ -16,7 +15,7 @@ import {
 	type SkillRoot,
 } from "../../src/domains/resources/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { expandInteractiveSubmit } from "../../src/interactive/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { createReadSkillTool, createSkillTool } from "../../src/tools/skills.js";
@@ -52,28 +51,12 @@ function allowAllSafety(): SafetyContract {
 		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
 		scopes: {
-			default: DEFAULT_SCOPE,
-			readonly: DEFAULT_SCOPE,
-			advise: DEFAULT_SCOPE,
-			super: DEFAULT_SCOPE,
+			readonly: READONLY_SCOPE,
+			workspace: WORKSPACE_SCOPE,
+			confirmed: CONFIRMED_SCOPE,
 		},
 		isSubset,
 		audit: { recordCount: () => 0 },
-	};
-}
-
-function readSkillModes(): ModesContract {
-	const visible = new Set<ToolName>([ToolNames.ReadSkill]);
-	return {
-		current: () => "default",
-		setMode: () => "default",
-		cycleNormal: () => "default",
-		visibleTools: () => visible,
-		isToolVisible: (tool) => visible.has(tool),
-		isActionAllowed: () => true,
-		requestSuper: () => {},
-		confirmSuper: () => "super",
-		elevatedModeFor: () => null,
 	};
 }
 
@@ -474,7 +457,6 @@ describe("contracts/skills tools", () => {
 		}> = [];
 		const registry = createRegistry({
 			safety: allowAllSafety(),
-			modes: readSkillModes(),
 			onSkillActivation: (activation) => activations.push(activation),
 		});
 		registry.register(createReadSkillTool({ getCwd: () => cwd }));

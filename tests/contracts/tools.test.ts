@@ -16,11 +16,12 @@ import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
 import { resolveToolPalette } from "../../src/tools/palette.js";
 import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
-import type { ToolSpec } from "../../src/tools/registry.js";
+import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
+const ALL_TOOLS = Object.values(ToolNames) as ToolName[];
 
 function scratchDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-tools-basic-"));
@@ -201,16 +202,16 @@ describe("contracts/tools basic happy paths", () => {
 describe("contracts/tools palette", () => {
 	it("keeps create_skill hidden for install/update skill requests", () => {
 		const install = resolveToolPalette({
-			mode: "default",
 			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
 			userText: "install a local skill folder for this project",
 		});
 		ok(install.activeTools.includes(ToolNames.ReadSkill));
 		strictEqual(install.activeTools.includes(ToolNames.CreateSkill), false);
 
 		const update = resolveToolPalette({
-			mode: "default",
 			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
 			userText: "update the skill catalog and tell me what exists",
 		});
 		ok(update.activeTools.includes(ToolNames.ReadSkill));
@@ -219,8 +220,8 @@ describe("contracts/tools palette", () => {
 
 	it("exposes create_skill only for authoring intent", () => {
 		const palette = resolveToolPalette({
-			mode: "default",
 			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
 			userText: "create a skill for reviewing MPI tests",
 		});
 		ok(palette.activeTools.includes(ToolNames.ReadSkill));
@@ -229,18 +230,81 @@ describe("contracts/tools palette", () => {
 
 	it("keeps bash out unless shell intent is explicit", () => {
 		const palette = resolveToolPalette({
-			mode: "default",
 			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
 			userText: "fix the TypeScript test failure",
 		});
 		strictEqual(palette.activeTools.includes(ToolNames.Bash), false);
 
 		const shell = resolveToolPalette({
-			mode: "default",
 			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
 			userText: "run this bash command after inspecting the repo",
 		});
 		ok(shell.activeTools.includes(ToolNames.Bash));
+	});
+});
+
+describe("contracts/tools permission sequencing", () => {
+	it("confirms only the oldest parked call and re-emits permission for the next one", async () => {
+		const executed: string[] = [];
+		const spec: ToolSpec = {
+			name: ToolNames.Write,
+			description: "confirmable write",
+			parameters: Type.Object({}),
+			baseActionClass: "write",
+			run: async (args) => {
+				executed.push(String(args.path));
+				return { kind: "ok", output: String(args.path) };
+			},
+		};
+		const registry = createRegistry({
+			safety: {
+				classify: () => ({ actionClass: "write", reasons: [] }),
+				evaluate: (_call, posture) =>
+					posture === "confirmed"
+						? { kind: "allow", classification: { actionClass: "write", reasons: ["confirmed"] } }
+						: {
+								kind: "ask",
+								classification: { actionClass: "write", reasons: ["needs confirmation"] },
+								rejection: { short: "confirm write", detail: "confirm write", hints: [] },
+							},
+				observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+				scopes: {
+					readonly: { allowedActions: new Set(["read"]), allowedWriteRoots: [], allowNetwork: true, allowDispatch: false },
+					workspace: {
+						allowedActions: new Set(["read", "write"]),
+						allowedWriteRoots: [process.cwd()],
+						allowNetwork: true,
+						allowDispatch: true,
+					},
+					confirmed: {
+						allowedActions: new Set(["read", "write", "system_modify"]),
+						allowedWriteRoots: [process.cwd()],
+						allowNetwork: true,
+						allowDispatch: true,
+					},
+				},
+				isSubset: () => true,
+				audit: { recordCount: () => 0 },
+			},
+		});
+		registry.register(spec);
+		const requested: string[] = [];
+		registry.onPermissionRequired((call) => requested.push(String(call.args?.path)));
+
+		const first = registry.invoke({ tool: ToolNames.Write, args: { path: "one" } });
+		const second = registry.invoke({ tool: ToolNames.Write, args: { path: "two" } });
+
+		strictEqual(requested.join(","), "one,two");
+		await registry.resumeParkedCalls({ actionClass: "write", requestedBy: "test" });
+		strictEqual((await first).kind, "ok");
+		strictEqual(executed.join(","), "one");
+		strictEqual(requested.join(","), "one,two,two");
+
+		await registry.resumeParkedCalls({ actionClass: "write", requestedBy: "test" });
+		strictEqual((await second).kind, "ok");
+		strictEqual(executed.join(","), "one,two");
 	});
 });
 

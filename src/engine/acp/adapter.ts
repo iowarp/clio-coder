@@ -1,5 +1,4 @@
 import type { DelegationAgentConfig } from "../../core/defaults.js";
-import type { ModeName } from "../../domains/modes/matrix.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
@@ -17,7 +16,6 @@ export interface AcpDelegationRunInput {
 	systemPrompt?: string;
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
-	mode: ModeName;
 	safety: SafetyContract;
 	signal?: AbortSignal;
 	clientVersion?: string;
@@ -144,7 +142,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const heartbeatAt = { current: Date.now() };
 	const queue = new AsyncEventQueue<AcpRunEvent>();
 	const usage = emptyUsage();
-	const mapper = new AcpEventMapper(input.mode);
+	const mapper = new AcpEventMapper();
 	const transportOptions: { cwd?: string; env?: Record<string, string> } = { cwd: input.agent.cwd ?? input.cwd };
 	if (input.agent.env !== undefined) transportOptions.env = input.agent.env;
 	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);
@@ -153,7 +151,6 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	let aborted = false;
 	const mediator = new AcpToolMediator({
 		safety: input.safety,
-		mode: input.mode,
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-policy",
 	});

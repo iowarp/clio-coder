@@ -10,7 +10,6 @@
 
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
-import type { ModeName } from "../domains/modes/matrix.js";
 import type {
 	CapabilityFlags,
 	EndpointDescriptor,
@@ -55,8 +54,6 @@ export interface WorkerRunInput {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
-	/** Mode matrix the worker runs under. Defaults to "default". */
-	mode?: ModeName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
 	signal?: AbortSignal;
@@ -172,11 +169,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// runtime (lmstudio-native, ollama-native).
 	registerClioApiProviders();
 	const fauxModel = registerFauxFromEnv();
-	const mode: ModeName = input.mode ?? "default";
 	const workerPalette = resolveToolPalette({
-		mode,
 		providerSupportsTools: workerProviderSupportsTools(input),
 		userText: input.task,
+		availableTools: input.allowedTools,
 		workerAllowedTools: input.allowedTools,
 	});
 	const activeWorkerTools = workerPalette.activeTools;
@@ -194,7 +190,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// the registry would create its own state and the beforeToolCall hook would
 	// be unable to observe repetition that already triggered admission.
 	const safety = createWorkerSafety({ cwd: process.cwd() });
-	const registry = createWorkerToolRegistry(mode, input.middlewareSnapshot, safety, {
+	const registry = createWorkerToolRegistry(input.middlewareSnapshot, safety, {
 		...(input.noSkills !== undefined ? { noSkills: input.noSkills } : {}),
 		...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
 		...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
@@ -210,14 +206,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	const tools = resolveAgentTools({
 		registry,
-		mode,
 		telemetry,
 		allowedTools: activeWorkerTools,
 	});
 	if (tools.length === 0 && input.allowedTools.length > 0 && workerPalette.groups.length > 0) {
-		process.stderr.write(
-			`[worker] warning: no tools resolved for mode=${mode} allowed=[${activeWorkerTools.join(",")}]\n`,
-		);
+		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);
 	}
 	const effectiveThinkingLevel = clampThinkingLevelForModel(
 		model,

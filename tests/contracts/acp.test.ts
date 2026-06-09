@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -341,10 +341,9 @@ const safety: SafetyContract = {
 	evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
 	observeLoop: () => ({ looping: false, key: "test", count: 0 }),
 	scopes: {
-		default: DEFAULT_SCOPE,
-		readonly: DEFAULT_SCOPE,
-		advise: DEFAULT_SCOPE,
-		super: DEFAULT_SCOPE,
+		readonly: READONLY_SCOPE,
+		workspace: WORKSPACE_SCOPE,
+		confirmed: CONFIRMED_SCOPE,
 	},
 	isSubset,
 	audit: { recordCount: () => 0 },
@@ -352,7 +351,7 @@ const safety: SafetyContract = {
 
 describe("contracts/acp", () => {
 	it("maps agent thought chunks from ACP agents that use the OpenCode update name", () => {
-		const mapper = new AcpEventMapper("default");
+		const mapper = new AcpEventMapper();
 		const events = mapper.mapUpdate({
 			sessionId: "sess-1",
 			update: {
@@ -369,7 +368,6 @@ describe("contracts/acp", () => {
 	it("mediates ACP permission requests through configured governance", async () => {
 		const mediator = new AcpToolMediator({
 			safety,
-			mode: "default",
 			cwd: process.cwd(),
 			toolGovernance: "clio-policy",
 		});
@@ -437,7 +435,6 @@ rl.on("line", (line) => {
 				},
 				task: "say hello",
 				cwd: scratch,
-				mode: "default",
 				safety,
 			});
 			const events: unknown[] = [];

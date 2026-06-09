@@ -13,11 +13,6 @@ import {
 
 const RESERVED_CUSTOM_AGENT_IDS = new Set(["worker", "delegate"]);
 
-function parseMode(value: unknown): AgentRecipe["mode"] {
-	if (value === "advise" || value === "default" || value === "super") return value;
-	return undefined;
-}
-
 function parseRuntime(value: unknown): AgentRecipe["runtime"] {
 	if (value === "native" || value === "cli") return value;
 	return undefined;
@@ -63,8 +58,6 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 			filepath,
 			body,
 		};
-		const mode = parseMode(frontmatter.mode);
-		if (mode) recipe.mode = mode;
 		const runtime = parseRuntime(frontmatter.runtime);
 		if (runtime) recipe.runtime = runtime;
 		const tools = parseStringArray(frontmatter.tools);

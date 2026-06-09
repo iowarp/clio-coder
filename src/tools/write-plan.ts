@@ -9,7 +9,7 @@ const ALLOWED_BASENAME = "PLAN.md";
 export const writePlanTool: ToolSpec = {
 	name: ToolNames.WritePlan,
 	description:
-		"Write a planning document to PLAN.md at the project root. Any other path is rejected. This is the advise-mode terminal action.",
+		"Write a planning document to PLAN.md at the project root. Any other path is rejected. This terminal action completes the turn.",
 	parameters: Type.Object({
 		content: Type.String({ description: "Full plan contents in Markdown. Must be non-empty." }),
 		path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "PLAN.md" at the project root.' })),
@@ -33,10 +33,9 @@ export const writePlanTool: ToolSpec = {
 		}
 		try {
 			writeFileSync(expected, content, "utf8");
-			// write_plan is advise-mode only (see src/tools/bootstrap.ts). Writing
-			// PLAN.md is the whole turn; set `terminate: true` so pi-agent-core
-			// skips the follow-up LLM call that would otherwise summarize what
-			// was just written.
+			// Writing PLAN.md is the whole turn; set `terminate: true` so
+			// pi-agent-core skips the follow-up LLM call that would otherwise
+			// summarize what was just written.
 			return {
 				kind: "ok",
 				output: `wrote ${Buffer.byteLength(content, "utf8")}B to ${ALLOWED_BASENAME}`,

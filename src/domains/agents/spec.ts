@@ -1,5 +1,4 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
-import type { ModeName } from "../modes/matrix.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
 import type { AgentRecipe } from "./recipe.js";
 
@@ -58,9 +57,8 @@ export interface AgentSpec {
 	id: string;
 	name: string;
 	description: string;
-	source: AgentRecipe["source"];
+	source: AgentRecipe["source"] | "custom";
 	filepath: string;
-	mode: ModeName;
 	tools: ReadonlyArray<ToolName>;
 	category: AgentCategory;
 	capabilityClass: AgentCapabilityClass;
@@ -156,7 +154,6 @@ function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
 
 export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 	const tools = normalizeTools(recipe);
-	const mode = recipe.mode ?? "default";
 	const category = recipe.category ?? inferCategory(recipe, tools);
 	const capabilityClass = recipe.capabilityClass ?? inferCapabilityClass(recipe, tools);
 	const latencyClass = recipe.latencyClass ?? inferLatencyClass(category, capabilityClass);
@@ -166,7 +163,6 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		description: recipe.description,
 		source: recipe.source,
 		filepath: recipe.filepath,
-		mode,
 		tools,
 		category,
 		capabilityClass,

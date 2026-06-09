@@ -114,7 +114,6 @@ export interface DelegationSettings {
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
-	defaultMode: "default" as "default" | "advise" | "super",
 	safetyLevel: "auto-edit" as "suggest" | "auto-edit" | "full-auto",
 	endpoints: [] as EndpointDescriptor[],
 	runtimePlugins: [] as string[],
@@ -162,7 +161,6 @@ export const DEFAULT_SETTINGS = {
 	// keybindings.ts).
 	keybindings: {} as Record<string, string | string[]>,
 	state: {
-		lastMode: "default" as "default" | "advise" | "super",
 		recentModels: [] as string[],
 	},
 	compaction: {
@@ -216,7 +214,6 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 
 version: 1
 identity: clio
-defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
 # Inference targets. Each entry becomes selectable for chat and workers.
@@ -325,7 +322,6 @@ keybindings: {}
 
 # Transient session state. Clio Coder rewrites this block; do not hand-edit.
 state:
-  lastMode: default
   recentModels: []
 
 # Context compaction controls.
