@@ -6,34 +6,14 @@ import type {
 	ProvidersContract,
 	RuntimeResolutionDiagnostic,
 } from "../domains/providers/index.js";
-import { type Component, Loader, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
-import {
-	brandedBottomBorder,
-	brandedRuntimeResolutionDiagnosticRow,
-	brandedTextRow,
-	brandedTopBorder,
-	FocusBox,
-	IDENTITY,
-} from "./overlay-frame.js";
+import { type Component, Loader, matchesKey, type OverlayHandle, type TUI } from "../engine/tui.js";
+import { FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
-const TITLE = "─ Targets ";
 const HINT = "[r] probe selected  [R] probe all  [Esc] close";
 
 export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 export const PROVIDERS_OVERLAY_DISCOVERED_PREVIEW = 4;
-
-function topBorder(contentWidth: number): string {
-	const innerWidth = contentWidth + 2;
-	if (innerWidth <= TITLE.length) {
-		return brandedTopBorder("─ ", innerWidth);
-	}
-	return brandedTopBorder(TITLE, innerWidth);
-}
-
-function bottomBorder(contentWidth: number): string {
-	return brandedBottomBorder(contentWidth + 2);
-}
 
 function healthTag(status: EndpointStatus): string {
 	switch (status.health.status) {
@@ -104,8 +84,8 @@ function formatDiscoveredRow(status: EndpointStatus): string {
 	return `    models: ${preview}${suffix}`;
 }
 
-function resolveContentWidth(contentWidth?: number): number {
-	return Math.max(1, contentWidth ?? DEFAULT_CONTENT_WIDTH);
+function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {
+	return `${diagnostic.severity}: ${diagnostic.code}: ${diagnostic.message}`;
 }
 
 function probeDiagnostic(err: unknown): RuntimeResolutionDiagnostic {
@@ -116,38 +96,34 @@ function probeDiagnostic(err: unknown): RuntimeResolutionDiagnostic {
 	};
 }
 
-function formatProvidersOverlayLines(
+function formatProvidersOverlayBodyLines(
 	statuses: ReadonlyArray<EndpointStatus>,
 	options?: {
 		error?: RuntimeResolutionDiagnostic | null;
 		selectedId?: string | null;
-		contentWidth?: number;
 		authByEndpoint?: ReadonlyMap<string, string>;
 	},
 ): string[] {
-	const contentWidth = resolveContentWidth(options?.contentWidth);
-	const lines: string[] = [topBorder(contentWidth)];
+	const lines: string[] = [];
 	if (options?.error) {
-		lines.push(brandedRuntimeResolutionDiagnosticRow(options.error, contentWidth));
-		lines.push(brandedTextRow("", contentWidth));
+		lines.push(formatRuntimeResolutionDiagnostic(options.error));
+		lines.push("");
 	}
 	if (statuses.length === 0) {
-		lines.push(brandedTextRow("no targets configured (run clio configure)", contentWidth));
+		lines.push("no targets configured (run clio configure)");
 	} else {
 		for (const status of statuses) {
 			const marker = options?.selectedId === status.endpoint.id ? "▸" : " ";
-			lines.push(brandedTextRow(`${marker}${formatHeaderRow(status)}`, contentWidth));
-			lines.push(brandedTextRow(formatLocationRow(status), contentWidth));
-			lines.push(brandedTextRow(formatHealthRow(status), contentWidth));
-			lines.push(brandedTextRow(formatAuthRow(options?.authByEndpoint?.get(status.endpoint.id) ?? "-"), contentWidth));
-			lines.push(brandedTextRow(formatCapabilitiesRow(status.capabilities), contentWidth));
-			lines.push(brandedTextRow(formatReasonRow(status), contentWidth));
-			lines.push(brandedTextRow(formatDiscoveredRow(status), contentWidth));
-			lines.push(brandedTextRow("", contentWidth));
+			lines.push(`${marker}${formatHeaderRow(status)}`);
+			lines.push(formatLocationRow(status));
+			lines.push(formatHealthRow(status));
+			lines.push(formatAuthRow(options?.authByEndpoint?.get(status.endpoint.id) ?? "-"));
+			lines.push(formatCapabilitiesRow(status.capabilities));
+			lines.push(formatReasonRow(status));
+			lines.push(formatDiscoveredRow(status));
+			lines.push("");
 		}
 	}
-	lines.push(brandedTextRow(HINT, contentWidth));
-	lines.push(bottomBorder(contentWidth));
 	return lines;
 }
 
@@ -161,15 +137,11 @@ class ProvidersOverlayView implements Component {
 		},
 	) {}
 
-	render(width: number): string[] {
-		if (width <= 4) {
-			return [truncateToWidth("Targets", width, "", true)];
-		}
+	render(_width: number): string[] {
 		const { statuses, error, selectedId, authByEndpoint } = this.getState();
-		return formatProvidersOverlayLines(statuses, {
+		return formatProvidersOverlayBodyLines(statuses, {
 			error,
 			selectedId,
-			contentWidth: width - 4,
 			authByEndpoint,
 		});
 	}
@@ -287,9 +259,11 @@ export function openProvidersOverlay(
 	const loader = new Loader(tui, IDENTITY, IDENTITY, "Probing targets...");
 	box.clear();
 	box.addChild(loader);
-	const handle = tui.showOverlay(box, {
+	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: PROVIDERS_OVERLAY_WIDTH,
+		title: "Targets",
+		footerHint: HINT,
 	});
 
 	const unsubscribeHealth = options?.bus?.on(BusChannels.ProviderHealth, () => {

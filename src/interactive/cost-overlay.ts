@@ -1,11 +1,10 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
-import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
-import { brandedBottomBorder, brandedDividerRow, brandedTextRow, brandedTopBorder } from "./overlay-frame.js";
+import { type OverlayHandle, Text, type TUI } from "../engine/tui.js";
+import { showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
-const TITLE_PREFIX = "─ Session usage";
 const HINT = "[Esc] close";
 
 export const COST_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
@@ -22,24 +21,6 @@ export interface CostRow {
 	reasoningTokens: number;
 	apiCalls: number;
 	usd: number;
-}
-
-function topBorder(contentWidth: number, sessionId: string | null): string {
-	const innerWidth = contentWidth + 2;
-	const label = sessionId && sessionId.length > 0 ? `${TITLE_PREFIX} (${sessionId}) ` : `${TITLE_PREFIX} `;
-	if (innerWidth <= label.length) {
-		const truncated = truncateToWidth(label, innerWidth, "...", true);
-		return brandedTopBorder(truncated, innerWidth);
-	}
-	return brandedTopBorder(label, innerWidth);
-}
-
-function bottomBorder(contentWidth: number): string {
-	return brandedBottomBorder(contentWidth + 2);
-}
-
-function dividerRow(contentWidth: number): string {
-	return brandedDividerRow(contentWidth);
 }
 
 function formatTokens(n: number): string {
@@ -136,36 +117,27 @@ function formatRowLines(row: CostRow): string[] {
 	];
 }
 
-export interface FormatCostOverlayOptions {
-	sessionId?: string | null;
-	contentWidth?: number;
-}
-
-export function formatCostOverlayLines(
+export function formatCostOverlayBodyLines(
 	totalUsd: number,
 	totalTokens: number,
 	rows: ReadonlyArray<CostRow>,
-	options?: FormatCostOverlayOptions,
+	contentWidth: number,
 ): string[] {
-	const contentWidth = Math.max(1, options?.contentWidth ?? DEFAULT_CONTENT_WIDTH);
-	const lines: string[] = [topBorder(contentWidth, options?.sessionId ?? null)];
+	const lines: string[] = [];
 	for (const line of formatSummaryLines(totalUsd, totalTokens, rows)) {
-		lines.push(brandedTextRow(line, contentWidth));
+		lines.push(line);
 	}
-	lines.push(dividerRow(contentWidth));
+	lines.push("─".repeat(contentWidth));
 	if (rows.length === 0) {
-		lines.push(brandedTextRow("no token usage recorded for this session", contentWidth));
+		lines.push("no token usage recorded for this session");
 	} else {
 		for (const [index, row] of rows.entries()) {
-			if (index > 0) lines.push(brandedTextRow("", contentWidth));
+			if (index > 0) lines.push("");
 			for (const line of formatRowLines(row)) {
-				lines.push(brandedTextRow(line, contentWidth));
+				lines.push(line);
 			}
 		}
 	}
-	lines.push(brandedTextRow("", contentWidth));
-	lines.push(brandedTextRow(HINT, contentWidth));
-	lines.push(bottomBorder(contentWidth));
 	return lines;
 }
 
@@ -188,12 +160,6 @@ export function buildCostSnapshot(observability: ObservabilityContract, sessionI
 	};
 }
 
-function snapshotLines(snapshot: CostSnapshot): string[] {
-	return formatCostOverlayLines(snapshot.totalUsd, snapshot.totalTokens, snapshot.rows, {
-		sessionId: snapshot.sessionId,
-	});
-}
-
 export interface OpenCostOverlayOptions {
 	bus?: SafeEventBus;
 	sessionId?: string | null;
@@ -212,12 +178,23 @@ export function openCostOverlay(
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
 	const initial = buildCostSnapshot(observability, sessionId);
-	const text = new Text(snapshotLines(initial).join("\n"), 0, 0);
-	const handle = tui.showOverlay(text, { anchor: "center", width: COST_OVERLAY_WIDTH });
+	const text = new Text(
+		formatCostOverlayBodyLines(initial.totalUsd, initial.totalTokens, initial.rows, DEFAULT_CONTENT_WIDTH).join("\n"),
+		0,
+		0,
+	);
+	const handle = showClioOverlayFrame(tui, text, {
+		anchor: "center",
+		width: COST_OVERLAY_WIDTH,
+		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
+		footerHint: HINT,
+	});
 
 	const refresh = (): void => {
 		const snapshot = buildCostSnapshot(observability, sessionId);
-		text.setText(snapshotLines(snapshot).join("\n"));
+		text.setText(
+			formatCostOverlayBodyLines(snapshot.totalUsd, snapshot.totalTokens, snapshot.rows, DEFAULT_CONTENT_WIDTH).join("\n"),
+		);
 		text.invalidate();
 		tui.requestRender();
 	};

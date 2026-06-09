@@ -87,5 +87,10 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		deps.onClose();
 	};
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: CWD_FALLBACK_OVERLAY_WIDTH, title: "Session cwd" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: CWD_FALLBACK_OVERLAY_WIDTH,
+		title: "Session cwd",
+		footerHint: "[Enter] select    [Esc] cancel",
+	});
 }

@@ -95,7 +95,12 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 			list.handleInput(data);
 		},
 	});
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: SCOPED_OVERLAY_WIDTH, title: "Scoped models" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: SCOPED_OVERLAY_WIDTH,
+		title: "Scoped models",
+		footerHint: "[Space] toggle    [Enter] commit    [Esc] cancel",
+	});
 }
 
 export function extractScopeFromSettings(settings: Readonly<ClioSettings>): string[] {

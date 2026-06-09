@@ -68,13 +68,34 @@ function padAnsi(text: string, width: number): string {
 }
 
 export function brandedTopBorder(label: string, innerWidth: number): string {
-	const clipped = visibleWidth(label) > innerWidth ? truncateToWidth(label, innerWidth, "...", true) : label;
+	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
+	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
+	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
 	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
-	return `${clioFrame("┌")}${clioTitle(clipped)}${clioFrame(fill)}${clioFrame("┐")}`;
+	const cleanIndex = clipped.indexOf(clean);
+	if (cleanIndex !== -1) {
+		const prefix = clipped.slice(0, cleanIndex);
+		const suffix = clipped.slice(cleanIndex + clean.length);
+		return `${clioFrame("┌")}${clioFrame(prefix)}${clioTitle(clean)}${clioFrame(suffix)}${clioFrame(fill)}${clioFrame("┐")}`;
+	}
+	return `${clioFrame("┌")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┐")}`;
 }
 
-export function brandedBottomBorder(innerWidth: number): string {
-	return `${clioFrame("└")}${clioFrame("─".repeat(innerWidth))}${clioFrame("┘")}`;
+export function brandedBottomBorder(innerWidth: number, hint?: string): string {
+	if (!hint || hint.trim().length === 0) {
+		return `${clioFrame("└")}${clioFrame("─".repeat(innerWidth))}${clioFrame("┘")}`;
+	}
+	const clean = hint.trim();
+	const formatted = `─ ${clean} `;
+	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
+	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
+	const cleanIndex = clipped.indexOf(clean);
+	if (cleanIndex !== -1) {
+		const prefix = clipped.slice(0, cleanIndex);
+		const suffix = clipped.slice(cleanIndex + clean.length);
+		return `${clioFrame("└")}${clioFrame(prefix)}${clioTheme().fg("dim", clean)}${clioFrame(suffix)}${clioFrame(fill)}${clioFrame("┘")}`;
+	}
+	return `${clioFrame("└")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┘")}`;
 }
 
 export function brandedDividerRow(contentWidth: number): string {
@@ -116,16 +137,18 @@ export class ClioOverlayFrame implements Component {
 	constructor(
 		private readonly child: Component,
 		private readonly title: string,
+		private readonly footerHint?: string | (() => string | undefined),
 	) {}
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, width - 4);
 		const childLines = this.child.render(contentWidth);
 		const label = this.title.length > 0 ? `─ ${this.title} ` : "─ ";
+		const hint = typeof this.footerHint === "function" ? this.footerHint() : this.footerHint;
 		return [
 			brandedTopBorder(label, contentWidth + 2),
 			...childLines.map((line) => `${clioFrame("│")} ${padAnsi(line, contentWidth)} ${clioFrame("│")}`),
-			brandedBottomBorder(contentWidth + 2),
+			brandedBottomBorder(contentWidth + 2, hint),
 		];
 	}
 
@@ -141,8 +164,8 @@ export class ClioOverlayFrame implements Component {
 export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
-	options: OverlayOptions & { title: string },
+	options: OverlayOptions & { title: string; footerHint?: string | (() => string | undefined) },
 ): OverlayHandle {
-	const { title, ...overlayOptions } = options;
-	return tui.showOverlay(new ClioOverlayFrame(child, title), overlayOptions);
+	const { title, footerHint, ...overlayOptions } = options;
+	return tui.showOverlay(new ClioOverlayFrame(child, title, footerHint), overlayOptions);
 }

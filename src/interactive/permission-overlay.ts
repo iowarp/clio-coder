@@ -34,7 +34,5 @@ export function createPermissionOverlayBody(call: ClassifierCall, decision: Safe
 		"",
 		"Allowing resumes only this parked tool call.",
 		"Hard-blocked actions remain blocked.",
-		"",
-		"[Enter] allow once    [Esc] cancel",
 	]);
 }

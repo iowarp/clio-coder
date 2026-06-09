@@ -259,5 +259,10 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),
 	);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: SESSION_OVERLAY_WIDTH, title: "Resume" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: SESSION_OVERLAY_WIDTH,
+		title: "Resume",
+		footerHint: "[type] search    [Enter] resume    [Esc] cancel",
+	});
 }

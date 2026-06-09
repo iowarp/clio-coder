@@ -5,9 +5,110 @@ import {
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
-import { type OverlayHandle, type SettingItem, SettingsList, type TUI } from "../../engine/tui.js";
+import {
+	type Component,
+	Input,
+	type OverlayHandle,
+	SelectList,
+	type SettingItem,
+	SettingsList,
+	type TUI,
+} from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
-import { DEFAULT_SETTINGS_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { DEFAULT_SELECT_THEME, DEFAULT_SETTINGS_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioTheme } from "../theme/index.js";
+import { modelsForEndpoint } from "./model-selector.js";
+
+class SubmenuWrapper implements Component {
+	constructor(
+		private readonly title: string,
+		private readonly child: Component,
+		private readonly hint: string = "[Enter] confirm    [Esc] cancel",
+	) {}
+
+	render(width: number): string[] {
+		const theme = clioTheme();
+		const lines: string[] = [];
+		lines.push(theme.style("title", `  ${this.title}`, { bold: true }));
+		lines.push("");
+		lines.push(...this.child.render(width).map((line) => `  ${line}`));
+		lines.push("");
+		lines.push(theme.fg("dim", `  ${this.hint}`));
+		return lines;
+	}
+
+	handleInput(data: string): void {
+		this.child.handleInput?.(data);
+	}
+
+	invalidate(): void {
+		this.child.invalidate?.();
+	}
+}
+
+function selectEndpointSubmenu(providers: ProvidersContract) {
+	return (_currentValue: string, done: (val?: string) => void) => {
+		const statuses = providers.list();
+		const items = statuses.map((status) => ({
+			value: status.endpoint.id,
+			label: `${status.endpoint.id} (${status.endpoint.url ?? "no url"})`,
+		}));
+		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done();
+		return new SubmenuWrapper("Select target endpoint", list);
+	};
+}
+
+function selectModelSubmenu(providers: ProvidersContract, getActiveEndpoint: () => string | undefined) {
+	return (currentValue: string, done: (val?: string) => void) => {
+		const endpointId = getActiveEndpoint();
+		const status = providers.list().find((s) => s.endpoint.id === endpointId);
+		const models = status ? modelsForEndpoint(status) : [];
+		if (models.length === 0) {
+			const input = new Input();
+			input.setValue(currentValue);
+			input.focused = true;
+			input.onSubmit = (val) => done(val);
+			input.onEscape = () => done();
+			return new SubmenuWrapper("Type model name", input);
+		}
+		const items = models.map((m) => ({ value: m, label: m }));
+		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done();
+		return new SubmenuWrapper(`Select model for ${endpointId}`, list);
+	};
+}
+
+function editTextSubmenu(title: string) {
+	return (currentValue: string, done: (val?: string) => void) => {
+		const input = new Input();
+		input.setValue(currentValue);
+		input.focused = true;
+		input.onSubmit = (val) => done(val);
+		input.onEscape = () => done();
+		return new SubmenuWrapper(title, input);
+	};
+}
+
+function editNumberSubmenu(title: string) {
+	return (currentValue: string, done: (val?: string) => void) => {
+		const input = new Input();
+		input.setValue(currentValue);
+		input.focused = true;
+		input.onSubmit = (val) => {
+			const num = Number(val);
+			if (Number.isFinite(num) && num >= 0) {
+				done(val);
+			} else {
+				done();
+			}
+		};
+		input.onEscape = () => done();
+		return new SubmenuWrapper(title, input, "[Enter] confirm    [Esc] cancel    (positive numbers only)");
+	};
+}
 
 export const SETTINGS_OVERLAY_WIDTH = 84;
 const VISIBLE_ROWS = 12;
@@ -65,25 +166,33 @@ export function buildSettingItems(
 			id: "orchestrator.endpoint",
 			label: "orchestrator.target",
 			currentValue: settings.orchestrator.endpoint ?? "(unset)",
-			description: "Active target id. Edit via /model.",
+			description: "Active target id.",
+			...(options?.providers ? { submenu: selectEndpointSubmenu(options.providers) } : {}),
 		},
 		{
 			id: "orchestrator.model",
 			label: "orchestrator.model",
 			currentValue: settings.orchestrator.model ?? "(unset)",
-			description: "Active wire model id. Edit via /model.",
+			description: "Active wire model id.",
+			...(options?.providers
+				? { submenu: selectModelSubmenu(options.providers, () => settings.orchestrator.endpoint ?? undefined) }
+				: {}),
 		},
 		{
 			id: "workers.default.endpoint",
 			label: "fleet.default.target",
 			currentValue: settings.workers.default.endpoint ?? "(unset)",
-			description: "/run target id. Edit settings.yaml.",
+			description: "/run target id.",
+			...(options?.providers ? { submenu: selectEndpointSubmenu(options.providers) } : {}),
 		},
 		{
 			id: "workers.default.model",
 			label: "fleet.default.model",
 			currentValue: settings.workers.default.model ?? "(unset)",
-			description: "/run wire model id. Edit settings.yaml.",
+			description: "/run wire model id.",
+			...(options?.providers
+				? { submenu: selectModelSubmenu(options.providers, () => settings.workers.default.endpoint ?? undefined) }
+				: {}),
 		},
 		{
 			id: "workers.profiles",
@@ -101,13 +210,15 @@ export function buildSettingItems(
 			id: "budget.sessionCeilingUsd",
 			label: "budget.sessionCeilingUsd",
 			currentValue: String(settings.budget.sessionCeilingUsd),
-			description: "Per-session cost cap. Edit settings.yaml.",
+			description: "Per-session cost cap.",
+			submenu: editNumberSubmenu("Edit session cost ceiling USD"),
 		},
 		{
 			id: "scope",
 			label: "scope",
 			currentValue: scopeText,
-			description: "Ctrl+P cycle set. Edit via /scoped-models.",
+			description: "Ctrl+P cycle set.",
+			submenu: editTextSubmenu("Edit model cycle scope (comma-separated list)"),
 		},
 		{
 			id: "compaction.auto",
@@ -289,6 +400,29 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "terminal.showTerminalProgress":
 			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
 			return;
+		case "orchestrator.endpoint":
+			settings.orchestrator.endpoint = value === "(unset)" || value === "" ? null : value;
+			return;
+		case "orchestrator.model":
+			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
+			return;
+		case "workers.default.endpoint":
+			settings.workers.default.endpoint = value === "(unset)" || value === "" ? null : value;
+			return;
+		case "workers.default.model":
+			settings.workers.default.model = value === "(unset)" || value === "" ? null : value;
+			return;
+		case "scope":
+			settings.scope = value
+				.split(",")
+				.map((v) => v.trim())
+				.filter(Boolean);
+			return;
+		case "budget.sessionCeilingUsd": {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0) settings.budget.sessionCeilingUsd = parsed;
+			return;
+		}
 	}
 }
 
@@ -319,5 +453,10 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 		() => deps.onClose(),
 	);
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: SETTINGS_OVERLAY_WIDTH, title: "Settings" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: SETTINGS_OVERLAY_WIDTH,
+		title: "Settings",
+		footerHint: "[Enter/Space] edit/cycle    [Esc] cancel",
+	});
 }

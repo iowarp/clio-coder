@@ -2,7 +2,12 @@ import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
-import type { ProvidersContract } from "../../domains/providers/index.js";
+import {
+	type CapabilityFlags,
+	type ProvidersContract,
+	resolveModelCapabilities,
+	resolveModelRuntimeCapabilitiesForProviders,
+} from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import { Text, visibleWidth } from "../../engine/tui.js";
@@ -17,15 +22,29 @@ import {
 	throughputSegment,
 	tokensSegment,
 } from "../footer-panel.js";
-import type { AgentStatus } from "../status/index.js";
+import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
-import { barSep, clioTheme, collapseHomePath, GLYPH, rule } from "../theme/index.js";
+import { abbreviateModelId, barSep, clioTheme, collapseHomePath, GLYPH, rule } from "../theme/index.js";
 import {
 	formatNotificationBadge,
 	formatNotificationPanel,
 	type Notification,
 	type NotificationCenter,
 } from "./notifications.js";
+
+function capabilityLabels(caps: CapabilityFlags | null): string[] {
+	if (!caps) return [];
+	const out: string[] = [];
+	if (caps.tools) out.push("tools");
+	if (caps.reasoning) out.push("reasoning");
+	if (caps.vision) out.push("vision");
+	if (caps.fim) out.push("fim");
+	if (caps.embeddings) out.push("embed");
+	if (typeof caps.contextWindow === "number" && caps.contextWindow > 0)
+		out.push(`${Math.round(caps.contextWindow / 1000)}k ctx`);
+	return out.slice(0, 5);
+}
+
 import {
 	type AgentWorkFacts,
 	agentQuadrant,
@@ -65,6 +84,7 @@ export interface FooterDashboardDeps {
 	getToolCounts?: () => ToolTallySnapshot;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getSessionInfo?: () => { id: string | null; name: string | null; turns: number | null };
+	getLastTurnSummary?: () => TurnSummary | null;
 	getExtensionStats?: () => { active: number; installed: number };
 	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
@@ -249,6 +269,44 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
 		const contextState = deps.getContextState?.() ?? null;
 		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
+
+		const statuses = deps.providers.list();
+		const current = settings?.orchestrator?.endpoint
+			? (statuses.find((s) => s.endpoint.id === settings.orchestrator?.endpoint) ?? null)
+			: null;
+
+		const targetLabel = settings?.orchestrator?.endpoint ?? "none";
+		const modelLabel = settings?.orchestrator?.model ?? "none";
+		const target = `${targetLabel}·${abbreviateModelId(modelLabel)}`;
+
+		const resolution = resolveModelRuntimeCapabilitiesForProviders(
+			deps.providers,
+			settings?.orchestrator?.endpoint,
+			settings?.orchestrator?.model,
+			settings?.orchestrator?.thinkingLevel ?? "off",
+		);
+
+		const thinking = resolution?.thinking.display ?? settings?.orchestrator?.thinkingLevel ?? "off";
+
+		const wireModelId = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? null;
+		const detectedReasoning =
+			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
+				? deps.providers.getDetectedReasoning(settings?.orchestrator?.endpoint ?? "", wireModelId)
+				: null;
+		const caps = current
+			? resolveModelCapabilities(current, wireModelId, deps.providers.knowledgeBase, { detectedReasoning })
+			: null;
+		const capabilities = capabilityLabels(caps);
+
+		const safety = settings?.safetyLevel ?? "auto-edit";
+		const supportsTools = resolution?.capabilities.tools === true;
+		const sendPolicy = !supportsTools
+			? "no-tools-fallback"
+			: settings?.orchestrator?.endpoint === "llamacpp"
+				? "prefix-cache-deterministic"
+				: "reduced-repeated-envelope";
+		const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
+
 		return {
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
@@ -260,6 +318,12 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				throughput,
 				throughputDetail,
 				cost: costSegment(deps.getSessionCost?.()),
+				target,
+				thinking,
+				capabilities,
+				safety,
+				sendPolicy,
+				toolProfile,
 			},
 			context: {
 				label: contextSegment(contextUsage),
@@ -278,6 +342,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				dispatchSummary: dispatchSegment(dispatch),
 				toolTally: formatToolTally(tools),
 				dispatchRows: dispatch,
+				lastTurn: deps.getLastTurnSummary?.() ?? null,
 			},
 			notices: deps.getNotifications?.() ?? [],
 		};

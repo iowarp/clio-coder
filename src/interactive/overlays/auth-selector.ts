@@ -20,5 +20,10 @@ export function openAuthSelectorOverlay(tui: TUI, deps: OpenAuthSelectorDeps): O
 		deps.onClose();
 	};
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: AUTH_SELECTOR_WIDTH, title: "Connection" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: AUTH_SELECTOR_WIDTH,
+		title: "Connection",
+		footerHint: "[Enter] select    [Esc] cancel",
+	});
 }

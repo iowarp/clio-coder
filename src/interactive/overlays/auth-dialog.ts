@@ -20,16 +20,17 @@ function createAuthDialogController(
 ): {
 	box: FocusBox;
 	controller: AuthDialogHandle["controller"];
+	getHint: () => string;
 } {
 	const titleView = new Text("");
 	const bodyView = new Text("");
 	const promptView = new Text("");
 	const input = new Input();
-	const hintView = new Text("");
 	let lines: string[] = [];
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
+	let currentHint = "[Esc] cancel";
 
 	titleView.setText(title);
 	const box = new FocusBox([], {
@@ -63,6 +64,7 @@ function createAuthDialogController(
 			cancel,
 			dismiss,
 		},
+		getHint: () => currentHint,
 	};
 
 	function rebuild(): void {
@@ -72,13 +74,11 @@ function createAuthDialogController(
 		box.addChild(bodyView);
 		if (promptLabel) {
 			promptView.setText(promptLabel);
-			hintView.setText("[Enter] submit  [Esc] cancel");
+			currentHint = "[Enter] submit  [Esc] cancel";
 			box.addChild(promptView);
 			box.addChild(input);
-			box.addChild(hintView);
 		} else {
-			hintView.setText("[Esc] cancel");
-			box.addChild(hintView);
+			currentHint = "[Esc] cancel";
 		}
 		box.invalidate();
 	}
@@ -125,8 +125,13 @@ function createAuthDialogController(
 }
 
 export function openAuthDialog(tui: TUI, title: string, onCancel: () => void): AuthDialogHandle {
-	const { box, controller } = createAuthDialogController(title, onCancel);
-	const handle = showClioOverlayFrame(tui, box, { anchor: "center", width: AUTH_DIALOG_WIDTH, title: "Auth" });
+	const { box, controller, getHint } = createAuthDialogController(title, onCancel);
+	const handle = showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: AUTH_DIALOG_WIDTH,
+		title: "Auth",
+		footerHint: getHint,
+	});
 	return {
 		handle,
 		controller,

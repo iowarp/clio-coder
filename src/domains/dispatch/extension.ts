@@ -1454,6 +1454,8 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				tokenCount: receipt.tokenCount,
+				inputTokenCount: receipt.inputTokenCount ?? 0,
+				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,

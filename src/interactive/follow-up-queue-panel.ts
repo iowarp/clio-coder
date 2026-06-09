@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, truncateToWidth } from "../engine/tui.js";
 import { clioTheme } from "./theme/index.js";
 
 export interface FollowUpQueuePanel extends Component {
@@ -9,8 +9,11 @@ export interface FollowUpQueuePanelOptions {
 	getDequeueKey?: () => string | undefined;
 }
 
-function dim(text: string): string {
-	return clioTheme().fg("dim", text);
+function leftCell(text: string, width: number): string {
+	const w = Math.max(0, width);
+	if (text.length <= w) return text.padEnd(w);
+	if (w <= 3) return text.slice(0, w);
+	return `${text.slice(0, w - 3)}...`;
 }
 
 export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}): FollowUpQueuePanel {
@@ -31,16 +34,22 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 			return cachedLines;
 		}
 
-		const bodyWidth = Math.max(1, width);
+		const bodyWidth = Math.max(12, width - 4);
 		const lines: string[] = [];
 		for (const message of messages) {
-			const preview = truncateToWidth(message.replace(/\s+/g, " "), Math.max(12, bodyWidth - 18), "...", false);
-			lines.push(...wrapTextWithAnsi(dim(`follow-up queued: ${preview}`), bodyWidth));
+			const preview = truncateToWidth(message.replace(/\s+/g, " "), Math.max(12, bodyWidth - 8), "...", false);
+			lines.push(`queued: ${preview}`);
 		}
 		const restoreKey = key && key.length > 0 ? key : "alt+up";
-		lines.push(...wrapTextWithAnsi(dim(`${restoreKey} restores queued follow-ups to the editor`), bodyWidth));
+		lines.push(`[${restoreKey}] restores to editor`);
 
-		cachedLines = lines;
+		const theme = clioTheme();
+		const titleStr = "Follow-up Queue";
+		const top = `${theme.fg("frame", "┌─")}${theme.style("title", titleStr, { bold: true })}${theme.fg("frame", "─".repeat(Math.max(0, bodyWidth - titleStr.length)))}${theme.fg("frame", "┐")}`;
+		const body = lines.map((line) => `${theme.fg("frame", "│")} ${leftCell(line, bodyWidth)} ${theme.fg("frame", "│")}`);
+		const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(bodyWidth + 2))}${theme.fg("frame", "┘")}`;
+
+		cachedLines = [top, ...body, bottom];
 		cachedWidth = width;
 		cachedKey = key;
 		dirty = false;

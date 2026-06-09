@@ -2,7 +2,8 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
-import { clioTheme, frame, GLYPH } from "./theme/index.js";
+import { truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type ClioTheme, clioTheme, GLYPH, spinnerFrame } from "./theme/index.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -22,6 +23,9 @@ export interface DispatchBoardRow {
 	elapsedMs: number;
 	tokenCount: number;
 	costUsd: number;
+	inputTokens: number;
+	outputTokens: number;
+	ttftMs: number | null;
 }
 
 interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
@@ -48,6 +52,8 @@ interface DispatchTerminalPayload extends DispatchEventBase {
 	costUsd?: unknown;
 	durationMs?: unknown;
 	reason?: unknown;
+	inputTokenCount?: unknown;
+	outputTokenCount?: unknown;
 }
 
 interface DispatchProgressPayload extends DispatchEventBase {
@@ -73,17 +79,8 @@ interface AssistantMessageShape {
 	stopReason?: unknown;
 }
 
-const AGENT_WIDTH = 10;
-const RUNTIME_WIDTH = 10;
-const ENDPOINT_MODEL_WIDTH = 28;
-const STATUS_WIDTH = 9;
-const ELAPSED_WIDTH = 9;
-const TOKENS_WIDTH = 10;
-const USD_WIDTH = 10;
 export const TASK_ISLAND_WIDTH = 44;
-
-const EMPTY_MESSAGE = "No dispatch runs yet.";
-const HINT_MESSAGE = "[Esc] close";
+const _EMPTY_MESSAGE = "No dispatch runs yet.";
 
 const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,
@@ -96,69 +93,21 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
 
-function leftCell(text: string, width: number): string {
-	if (text.length <= width) return text.padEnd(width);
-	if (width <= 3) return text.slice(0, width);
-	return `${text.slice(0, width - 3)}...`;
+function padAnsi(text: string, width: number): string {
+	const clipped = truncateToWidth(text, width, "", true);
+	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
-
-function rightCell(text: string, width: number): string {
-	if (text.length <= width) return text.padStart(width);
-	if (width <= 3) return text.slice(text.length - width);
-	return `...${text.slice(text.length - (width - 3))}`;
-}
-
-function buildContentLine(parts: ReadonlyArray<string>): string {
-	return parts.join(" ");
-}
-
-function buildHeaderLine(): string {
-	return buildContentLine([
-		leftCell("agent", AGENT_WIDTH),
-		leftCell("runtime", RUNTIME_WIDTH),
-		leftCell("endpoint/model", ENDPOINT_MODEL_WIDTH),
-		leftCell("status", STATUS_WIDTH),
-		rightCell("elapsed", ELAPSED_WIDTH),
-		rightCell("tokens", TOKENS_WIDTH),
-		rightCell("usd", USD_WIDTH),
-	]);
-}
-
-function buildSeparatorLine(): string {
-	return buildContentLine([
-		"-".repeat(AGENT_WIDTH),
-		"-".repeat(RUNTIME_WIDTH),
-		"-".repeat(ENDPOINT_MODEL_WIDTH),
-		"-".repeat(STATUS_WIDTH),
-		"-".repeat(ELAPSED_WIDTH),
-		"-".repeat(TOKENS_WIDTH),
-		"-".repeat(USD_WIDTH),
-	]);
-}
-
-const HEADER_LINE = buildHeaderLine();
-const SEPARATOR_LINE = buildSeparatorLine();
-const CONTENT_WIDTH = Math.max(HEADER_LINE.length, EMPTY_MESSAGE.length, HINT_MESSAGE.length);
 
 function formatElapsedMs(value: number): string {
 	return `${Math.max(0, Math.round(value))}ms`;
 }
 
-function formatTokenCount(value: number): string {
+function _formatTokenCount(value: number): string {
 	return String(Math.max(0, Math.round(value)));
 }
 
 function formatUsd(value: number): string {
 	return `$${Math.max(0, value).toFixed(6)}`;
-}
-
-function endpointModelCell(row: DispatchBoardRow): string {
-	if (row.runtimeKind === "acp-delegation") return `acp/${row.wireModelId}`;
-	return `${row.endpointId}/${row.wireModelId}`;
-}
-
-function runtimeCell(row: DispatchBoardRow): string {
-	return row.runtimeKind === "acp-delegation" ? `acp:${row.runtimeId}` : `${row.runtimeKind}:${row.runtimeId}`;
 }
 
 export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
@@ -167,35 +116,154 @@ export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agent
 	return row.agentId;
 }
 
-function renderRowContent(row: DispatchBoardRow): string {
-	return buildContentLine([
-		leftCell(agentDisplayLabel(row), AGENT_WIDTH),
-		leftCell(runtimeCell(row), RUNTIME_WIDTH),
-		leftCell(endpointModelCell(row), ENDPOINT_MODEL_WIDTH),
-		leftCell(row.status, STATUS_WIDTH),
-		rightCell(formatElapsedMs(row.elapsedMs), ELAPSED_WIDTH),
-		rightCell(formatTokenCount(row.tokenCount), TOKENS_WIDTH),
-		rightCell(formatUsd(row.costUsd), USD_WIDTH),
-	]);
+export function renderDispatchCard(row: DispatchBoardRow, width: number): string[] {
+	const theme = clioTheme();
+	const agentLabel = agentDisplayLabel(row);
+	const elapsed = formatElapsedMs(row.elapsedMs);
+	const cost = formatUsd(row.costUsd);
+
+	let statusStr = "";
+	if (row.status === "running") {
+		const spinner = spinnerFrame(Math.floor(Date.now() / 100));
+		statusStr = theme.style("accent", `${spinner} running`);
+	} else if (row.status === "completed") {
+		statusStr = theme.fg("success", `${GLYPH.ok} completed`);
+	} else if (row.status === "failed") {
+		statusStr = theme.fg("error", `${GLYPH.error} failed`);
+	} else if (row.status === "aborted") {
+		statusStr = theme.fg("dim", `${GLYPH.cancelled} aborted`);
+	} else if (row.status === "stale") {
+		statusStr = theme.fg("warning", `! stale`);
+	} else {
+		statusStr = theme.fg("dim", `+ ${row.status}`);
+	}
+
+	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
+	const target = `${row.runtimeKind}:${row.endpointId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
+
+	const prefix = `┌── ${agentLabel} `;
+	const suffix = ` ${elapsed} ──┐`;
+	const middleWidth = Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix));
+	const topBorder = `${theme.fg("frame", prefix)}${theme.fg("frame", "─".repeat(middleWidth))}${theme.fg("frame", suffix)}`;
+
+	const targetLineContent = `Target: ${target}`;
+	const targetLine = `${theme.fg("frame", "│")} ${padAnsi(targetLineContent, width - 4)} ${theme.fg("frame", "│")}`;
+
+	const statusLineContent = `Status: ${statusStr}  ${theme.fg("dim", "•")}  TTFT: ${theme.fg("accentDeep", ttft)}  ${theme.fg("dim", "•")}  Cost: ${theme.fg("warning", cost)}`;
+	const statusLine = `${theme.fg("frame", "│")} ${padAnsi(statusLineContent, width - 4)} ${theme.fg("frame", "│")}`;
+
+	const elapsedSec = row.elapsedMs / 1000;
+	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
+	const telemetryContent = `Telemetry: ${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", String(row.tokenCount))}`;
+	const telemetryLine = `${theme.fg("frame", "│")} ${padAnsi(telemetryContent, width - 4)} ${theme.fg("frame", "│")}`;
+
+	const bottomBorder = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(width - 2))}${theme.fg("frame", "┘")}`;
+
+	return [topBorder, targetLine, statusLine, telemetryLine, bottomBorder];
 }
 
-function statusGlyph(status: DispatchBoardStatus): string {
-	if (status === "running") return GLYPH.running;
-	if (status === "stale") return "!";
-	if (status === "enqueued") return "+";
-	if (status === "completed") return GLYPH.ok;
-	if (status === "aborted") return GLYPH.cancelled;
-	return GLYPH.error;
+function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
+	const theme = clioTheme();
+	const agentLabel = agentDisplayLabel(row);
+	const elapsed = formatElapsedMs(row.elapsedMs);
+	const cost = formatUsd(row.costUsd);
+
+	let statusStr = "";
+	if (row.status === "running") {
+		const spinner = spinnerFrame(Math.floor(Date.now() / 100));
+		statusStr = theme.style("accent", `${spinner} running`);
+	} else if (row.status === "completed") {
+		statusStr = theme.fg("success", `${GLYPH.ok} done`);
+	} else if (row.status === "failed") {
+		statusStr = theme.fg("error", `${GLYPH.error} fail`);
+	} else if (row.status === "aborted") {
+		statusStr = theme.fg("dim", `${GLYPH.cancelled} abort`);
+	} else if (row.status === "stale") {
+		statusStr = theme.fg("warning", `! stale`);
+	} else {
+		statusStr = theme.fg("dim", `+ ${row.status}`);
+	}
+
+	const line1 = `${theme.style("accent", agentLabel, { bold: true })} ${theme.fg("dim", "•")} ${statusStr} ${theme.fg("dim", "•")} ${theme.fg("info", elapsed)}`;
+
+	const elapsedSec = row.elapsedMs / 1000;
+	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
+	const telemetry = `${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("warning", cost)}`;
+
+	return [padAnsi(line1, width), padAnsi(telemetry, width)];
 }
 
-function renderTaskIslandRow(row: DispatchBoardRow): string {
-	return buildContentLine([
-		statusGlyph(row.status),
-		leftCell(agentDisplayLabel(row), 9),
-		leftCell(endpointModelCell(row), 17),
-		rightCell(formatElapsedMs(row.elapsedMs), 7),
-		rightCell(formatTokenCount(row.tokenCount), 6),
-	]);
+export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>, width = 76): string[] {
+	if (rows.length === 0) {
+		const theme = clioTheme();
+		const lines = [
+			"",
+			"                    No active dispatches                     ",
+			"         Ready to orchestrate your agent workloads.          ",
+			"",
+			"       Run tasks in parallel, trace telemetry in real time,  ",
+			"        or manage tool calls with safety-net admission.      ",
+			"",
+		];
+		return lines.map((line) => {
+			const padding = Math.max(0, Math.floor((width - 4 - visibleWidth(line)) / 2));
+			return theme.fg("dim", " ".repeat(padding) + line);
+		});
+	}
+
+	const cards = rows.map((row) => renderDispatchCard(row, width));
+	const body: string[] = [];
+	for (const card of cards) {
+		if (body.length > 0) body.push("");
+		body.push(...card);
+	}
+	return body;
+}
+
+export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
+	const visibleRows = rows.slice(0, Math.max(1, maxRows));
+	const body: string[] = [];
+
+	if (visibleRows.length === 0) {
+		const theme = clioTheme();
+		body.push(theme.fg("dim", "No active tasks."));
+		body.push(theme.fg("dim", "Use /dispatch to spawn agents."));
+	} else {
+		for (let i = 0; i < visibleRows.length; i++) {
+			const row = visibleRows[i];
+			if (!row) continue;
+			if (i > 0) {
+				body.push(clioTheme().fg("frame", "╌".repeat(TASK_ISLAND_WIDTH)));
+			}
+			body.push(...renderTaskIslandRow(row, TASK_ISLAND_WIDTH));
+		}
+		const hidden = rows.length - visibleRows.length;
+		if (hidden > 0) {
+			body.push(clioTheme().fg("frame", "╌".repeat(TASK_ISLAND_WIDTH)));
+			body.push(clioTheme().fg("dim", `+ ${hidden} more`));
+		}
+	}
+
+	// Body lines are already ANSI-padded to TASK_ISLAND_WIDTH by the row
+	// renderer (or are fixed-width separators/empty-state lines). `frame`
+	// re-pads each line ANSI-aware via padAnsi, so passing the styled lines
+	// through directly avoids an escape-corrupting truncation pass.
+	return frame(clioTheme(), "Tasks", body, TASK_ISLAND_WIDTH + 4);
+}
+
+function frame(theme: ClioTheme, title: string, body: string[], width: number): string[] {
+	const bodyWidth = Math.max(1, width - 4);
+	const label = title.length > 0 ? `─ ${title} ` : "─ ";
+	// Total top width must equal the body rows (`│ … │` => bodyWidth + 4) and
+	// the bottom border. `┌─` and `┐` contribute 3 columns, so the fill spans
+	// bodyWidth + 1 - visibleWidth(label) to keep the right corners aligned.
+	const fill = Math.max(0, bodyWidth - visibleWidth(label) + 1);
+	const top = `${theme.fg("frame", "┌─")}${theme.style("title", label, { bold: true })}${theme.fg("frame", "─".repeat(fill))}${theme.fg("frame", "┐")}`;
+	const formattedBody = body.map(
+		(line) => `${theme.fg("frame", "│")} ${padAnsi(line, bodyWidth)} ${theme.fg("frame", "│")}`,
+	);
+	const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(bodyWidth + 2))}${theme.fg("frame", "┘")}`;
+	return [top, ...formattedBody, bottom];
 }
 
 function parseRunId(value: unknown): string | null {
@@ -280,6 +348,9 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		elapsedMs: resolveElapsedMs(entry, now),
 		tokenCount: entry.tokenCount,
 		costUsd: entry.costUsd,
+		inputTokens: entry.inputTokens,
+		outputTokens: entry.outputTokens,
+		ttftMs: entry.ttftMs,
 	};
 }
 
@@ -303,20 +374,6 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 		if (entries.size <= MAX_DISPATCH_BOARD_ROWS) break;
 		entries.delete(entry.runId);
 	}
-}
-
-export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>): string[] {
-	const body = rows.length > 0 ? rows.map(renderRowContent) : [EMPTY_MESSAGE];
-	return frame(clioTheme(), "Dispatch Board", [HEADER_LINE, SEPARATOR_LINE, ...body, HINT_MESSAGE], CONTENT_WIDTH + 4);
-}
-
-export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
-	const visibleRows = rows.slice(0, Math.max(1, maxRows));
-	const body = visibleRows.length > 0 ? visibleRows.map(renderTaskIslandRow) : ["No dispatch runs"];
-	const hidden = rows.length - visibleRows.length;
-	if (hidden > 0) body.push(`+ ${hidden} more`);
-	const content = body.map((line) => leftCell(line, TASK_ISLAND_WIDTH));
-	return frame(clioTheme(), "Tasks", content, TASK_ISLAND_WIDTH + 4);
 }
 
 export function createDispatchBoardStore(bus: SafeEventBus): {
@@ -350,6 +407,9 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			startedAtMs: previous?.startedAtMs ?? null,
 			finishedAtMs: previous?.finishedAtMs ?? null,
 			durationMs: previous?.durationMs ?? null,
+			inputTokens: previous?.inputTokens ?? 0,
+			outputTokens: previous?.outputTokens ?? 0,
+			ttftMs: previous?.ttftMs ?? null,
 		};
 		entries.set(runId, entry);
 		pruneEntries(entries);
@@ -378,6 +438,12 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			if (typeof payload.inputTokenCount === "number") {
+				entry.inputTokens = payload.inputTokenCount;
+			}
+			if (typeof payload.outputTokenCount === "number") {
+				entry.outputTokens = payload.outputTokenCount;
+			}
 		}),
 		bus.on(BusChannels.DispatchFailed, (raw) => {
 			const now = Date.now();
@@ -389,15 +455,18 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			if (typeof payload.inputTokenCount === "number") {
+				entry.inputTokens = payload.inputTokenCount;
+			}
+			if (typeof payload.outputTokenCount === "number") {
+				entry.outputTokens = payload.outputTokenCount;
+			}
 		}),
 		bus.on(BusChannels.DispatchProgress, (raw) => {
 			const payload = (raw ?? {}) as DispatchProgressPayload;
 			const runId = parseRunId(payload.runId);
 			if (!runId) return;
 			const entry = entries.get(runId);
-			// Progress events before we've seen DispatchEnqueued/Started are out of
-			// order; leave them alone so the row reflects the lifecycle the
-			// dispatch domain actually emitted.
 			if (!entry) return;
 			const workerEvent = (payload.event ?? {}) as WorkerEventShape;
 			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
@@ -409,14 +478,28 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 				if (status === "dead") entry.finishedAtMs ??= Date.now();
 				return;
 			}
+			if (type === "agent_start") {
+				entry.startedAtMs = Date.now();
+			}
+			if (type === "message_update") {
+				const assistantEvent = (workerEvent as any).assistantMessageEvent || {};
+				const hasDelta =
+					assistantEvent.type === "text_delta" ||
+					assistantEvent.type === "thinking_delta" ||
+					assistantEvent.type === "toolcall_start" ||
+					assistantEvent.type === "toolcall_delta";
+				if (hasDelta && entry.ttftMs === null && entry.startedAtMs !== null) {
+					entry.ttftMs = Date.now() - entry.startedAtMs;
+				}
+			}
 			if (isTerminalStatus(entry.status)) return;
 			if (type === "message_end" && workerEvent.message?.role === "assistant") {
 				const usage = workerEvent.message.usage;
-				entry.tokenCount +=
-					parseFiniteNumberOrZero(usage?.input) +
-					parseFiniteNumberOrZero(usage?.output) +
-					parseFiniteNumberOrZero(usage?.cacheRead) +
-					parseFiniteNumberOrZero(usage?.cacheWrite);
+				const input = parseFiniteNumberOrZero(usage?.input) + parseFiniteNumberOrZero(usage?.cacheRead);
+				const output = parseFiniteNumberOrZero(usage?.output);
+				entry.inputTokens += input;
+				entry.outputTokens += output;
+				entry.tokenCount += input + output + parseFiniteNumberOrZero(usage?.cacheWrite);
 			}
 			if (type === "agent_end") {
 				const status = resolveAgentEndStatus(workerEvent.messages);

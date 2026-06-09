@@ -1,7 +1,7 @@
 import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
 import type { ClioKeybindingManager, PlatformKeybindingWarning } from "../keybinding-manager.js";
-import { brandedBottomBorder, brandedTextRow, brandedTopBorder } from "../overlay-frame.js";
-import { formatKeybindingDetailLines } from "./keybinding-detail.js";
+import { showClioOverlayFrame } from "../overlay-frame.js";
+import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 
 export const HOTKEYS_OVERLAY_WIDTH = 74;
 
@@ -90,36 +90,31 @@ function fitCell(text: string, width: number): string {
 }
 
 /** @internal */
-export function formatHotkeysLines(
+export function formatHotkeysBodyLines(
 	entries: ReadonlyArray<HotkeyEntry>,
-	contentWidth: number = HOTKEYS_OVERLAY_WIDTH - 4,
+	contentWidth: number,
 	options: { selectedIndex?: number; warnings?: ReadonlyArray<PlatformKeybindingWarning> } = {},
 ): string[] {
 	const keysCol = 24;
 	const actionCol = Math.max(10, contentWidth - keysCol - 5);
 	const lines: string[] = [];
-	lines.push(brandedTopBorder(" Hotkeys ", contentWidth + 2));
 	for (const warning of options.warnings ?? []) {
 		const keys = warning.keys.map(formatKey).join(" / ");
-		lines.push(
-			brandedTextRow(`! ${warning.id}: ${keys} may not fire (${warning.terminal}: ${warning.reason})`, contentWidth),
-		);
+		lines.push(`! ${warning.id}: ${keys} may not fire (${warning.terminal}: ${warning.reason})`);
 	}
 	if ((options.warnings ?? []).length > 0) {
-		lines.push(brandedTextRow("", contentWidth));
+		lines.push("");
 	}
 	let lastScope: string | null = null;
 	entries.forEach((hk, index) => {
 		if (hk.scope !== lastScope) {
 			lastScope = hk.scope;
-			lines.push(brandedTextRow(`── ${hk.scope.toUpperCase()}`, contentWidth));
+			lines.push(`── ${hk.scope.toUpperCase()}`);
 		}
 		const marker = index === options.selectedIndex ? ">" : " ";
 		const row = `${marker} ${fitCell(hk.keys, keysCol)}  ${fitCell(hk.action, actionCol)}`;
-		lines.push(brandedTextRow(row, contentWidth));
+		lines.push(row);
 	});
-	lines.push(brandedTextRow("[Up/Down] select  [E] details  [Esc] close", contentWidth));
-	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }
 
@@ -133,8 +128,11 @@ class HotkeysView implements Component {
 		private readonly onChange: () => void,
 	) {}
 
+	getHint(): string {
+		return this.detailEntry ? "[Backspace/Q] back    [Esc] close" : "[Up/Down] select  [Enter/E] details  [Esc] close";
+	}
+
 	render(width: number): string[] {
-		const contentWidth = Math.max(10, width - 4);
 		if (this.detailEntry) {
 			const warnings = this.warnings
 				.filter((warning) => warning.id === this.detailEntry?.id)
@@ -145,12 +143,12 @@ class HotkeysView implements Component {
 				action: this.detailEntry.action,
 				warnings,
 			};
-			return formatKeybindingDetailLines(
+			return formatKeybindingDetailBodyLines(
 				this.detailEntry.source ? { ...detail, source: this.detailEntry.source } : detail,
-				contentWidth,
+				width,
 			);
 		}
-		return formatHotkeysLines(this.entries, contentWidth, {
+		return formatHotkeysBodyLines(this.entries, width, {
 			selectedIndex: this.selectedIndex,
 			warnings: this.warnings,
 		});
@@ -184,11 +182,11 @@ class HotkeysView implements Component {
 }
 
 export function openHotkeysOverlay(tui: TUI, manager: ClioKeybindingManager): OverlayHandle {
-	return tui.showOverlay(
-		new HotkeysView(buildHotkeyEntries(manager), manager.platformWarnings(), () => tui.requestRender()),
-		{
-			anchor: "center",
-			width: HOTKEYS_OVERLAY_WIDTH,
-		},
-	);
+	const view = new HotkeysView(buildHotkeyEntries(manager), manager.platformWarnings(), () => tui.requestRender());
+	return showClioOverlayFrame(tui, view, {
+		anchor: "center",
+		width: HOTKEYS_OVERLAY_WIDTH,
+		title: "Hotkeys",
+		footerHint: () => view.getHint(),
+	});
 }
