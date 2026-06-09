@@ -56,7 +56,12 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 		deps.onClose();
 	};
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: THINKING_OVERLAY_WIDTH, title: "Thinking" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: THINKING_OVERLAY_WIDTH,
+		title: "Thinking",
+		footerHint: "[Enter] select    [Esc] cancel",
+	});
 }
 
 /** Current thinking level persisted under settings.orchestrator.thinkingLevel. */

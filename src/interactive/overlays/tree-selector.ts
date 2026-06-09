@@ -211,14 +211,15 @@ class TreeOverlayView implements Component {
 				lines.push("");
 			}
 		}
-		lines.push("─".repeat(contentWidth));
-		const footer = this.footerText();
-		lines.push(truncateToWidth(footer, contentWidth, "", true));
 		if (this.status) {
 			const status = truncateToWidth(this.status, contentWidth, "", true);
 			lines.push(this.statusKind === "error" ? clioError(status) : status);
 		}
 		return lines;
+	}
+
+	getHint(): string {
+		return this.footerText();
 	}
 
 	private footerText(): string {
@@ -415,7 +416,12 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 	const initial = loadInitialSnapshot(deps.session);
 	const view = new TreeOverlayView(deps, initial);
 	const box = new FocusBox(view);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: TREE_OVERLAY_WIDTH, title: "Tree" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: TREE_OVERLAY_WIDTH,
+		title: "Tree",
+		footerHint: () => view.getHint(),
+	});
 }
 
 /** @internal Construct the overlay view without mounting a TUI. Testing hook only. */

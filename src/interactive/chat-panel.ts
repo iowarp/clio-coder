@@ -99,7 +99,6 @@ type TranscriptEntry =
 			expandedThinking?: boolean;
 			pending: boolean;
 			statusLine?: AssistantStatusLine | null | undefined;
-			summaryLine?: string | null | undefined;
 			isError: boolean;
 	  }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
@@ -109,7 +108,6 @@ export interface ChatPanel extends Component {
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
 	setStatusLine(line: AssistantStatusLine | null): void;
-	setSummaryLine(line: string | null): void;
 	toggleLastToolExpanded(): boolean;
 	/**
 	 * Flip thinking-bearing assistant turns between the one-line dim marker
@@ -388,9 +386,6 @@ function renderEntryLines(
 	} else if (shouldRenderStatus) {
 		lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
 	}
-	if (entry.summaryLine && !entry.pending) {
-		lines.push(truncateToWidth(`  ${DIM}· ${entry.summaryLine}${RESET}`, width, "...", true));
-	}
 	return lines;
 }
 
@@ -667,20 +662,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const last = transcript[transcript.length - 1];
 			if (last && last.role === "assistant") {
 				last.statusLine = null;
-				markDirty();
-			}
-		},
-		setSummaryLine(line): void {
-			if (line) {
-				const assistant = ensureAssistant();
-				assistant.pending = false;
-				assistant.summaryLine = line;
-				markDirty();
-				return;
-			}
-			const last = transcript[transcript.length - 1];
-			if (last && last.role === "assistant") {
-				last.summaryLine = null;
 				markDirty();
 			}
 		},

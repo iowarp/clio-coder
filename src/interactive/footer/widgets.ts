@@ -1,6 +1,7 @@
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { agentDisplayLabel, type DispatchBoardRow, type DispatchBoardStatus } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
+import type { TurnSummary } from "../status/index.js";
 import {
 	type ClioTheme,
 	type ClioToken,
@@ -28,7 +29,6 @@ export interface WorkspaceFacts {
 	remote: string | null;
 }
 
-/** Session identity + resource totals. */
 export interface SessionFacts {
 	name: string | null;
 	id: string | null;
@@ -38,6 +38,12 @@ export interface SessionFacts {
 	throughput: string | null;
 	throughputDetail: string | null;
 	cost: string | null;
+	target: string | null;
+	thinking: string | null;
+	capabilities: string[] | null;
+	safety: string | null;
+	sendPolicy: string | null;
+	toolProfile: string | null;
 }
 
 /** Context engine telemetry. */
@@ -60,6 +66,8 @@ export interface AgentWorkFacts {
 	dispatchSummary: string | null;
 	toolTally: string;
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
+	/** Metrics for the most recent completed turn, surfaced when the agent is idle. */
+	lastTurn: TurnSummary | null;
 }
 
 /** Expanded-footer responsive bands. */
@@ -159,7 +167,9 @@ export function compactSecondaryLine(context: ContextEngineFacts, agent: AgentWo
 	const theme = clioTheme();
 	const activity = agent.statusText
 		? theme.fg("accent", `${GLYPH.running} ${agent.statusText}`)
-		: theme.fg("muted", "run idle");
+		: agent.lastTurn
+			? formatLastTurn(theme, agent.lastTurn)
+			: theme.fg("muted", "run idle");
 	const left = joinChips(theme, [context.label ? theme.fg("info", context.label) : null, activity]);
 	const right = joinChips(theme, [
 		agent.dispatchSummary ? theme.fg("accent", agent.dispatchSummary) : null,
@@ -195,6 +205,14 @@ export function sessionQuadrant(facts: SessionFacts): string[] {
 	return quadrantBlock(theme, "accent", "Session", [
 		theme.fg("accent", title),
 		theme.fg("dim", `v${facts.version}`),
+		facts.target ? labeledChip(theme, "target", facts.target, "accent") : null,
+		facts.thinking ? labeledChip(theme, "think", facts.thinking, "reason") : null,
+		facts.capabilities && facts.capabilities.length > 0
+			? labeledChip(theme, "caps", facts.capabilities.join(","), "muted")
+			: null,
+		facts.safety ? labeledChip(theme, "safety", facts.safety, "accentDeep") : null,
+		facts.sendPolicy ? labeledChip(theme, "policy", facts.sendPolicy, "muted") : null,
+		facts.toolProfile ? labeledChip(theme, "profile", facts.toolProfile, "muted") : null,
 		facts.turns !== null ? labeledChip(theme, "turns", String(facts.turns), "muted") : null,
 		facts.tokens ? labeledChip(theme, "tok", facts.tokens.replace(/^tok\s+/, ""), "muted") : null,
 		facts.throughput ? labeledChip(theme, "speed", facts.throughput, "success") : null,
@@ -255,6 +273,38 @@ function formatElapsed(value: number): string {
 		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
 }
 
+function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
+	if (reason === "error") return { glyph: GLYPH.error, token: "error" };
+	if (reason === "aborted" || reason === "cancelled") return { glyph: GLYPH.cancelled, token: "dim" };
+	if (reason === "length") return { glyph: GLYPH.warn, token: "warning" };
+	return { glyph: GLYPH.ok, token: "success" };
+}
+
+/**
+ * Elegant single-line readout of the most recent completed turn. This is the
+ * footer home for the metrics that used to print faintly under each assistant
+ * reply: stop outcome, wall time, token in/out, reasoning, and tool work. The
+ * model is intentionally omitted because the editor rail already carries it.
+ */
+export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
+	const stop = stopReasonStyle(summary.stopReason);
+	const parts: string[] = [
+		theme.fg(stop.token, `${stop.glyph} ${formatElapsed(summary.elapsedMs)}`),
+		theme.fg("muted", `${GLYPH.up}${summary.inputTokens} ${GLYPH.down}${summary.outputTokens}`),
+	];
+	if (typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0) {
+		parts.push(theme.fg("reason", `r${summary.reasoningTokens}`));
+	}
+	if (summary.toolCount > 0) {
+		const label = `${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}`;
+		const errors = summary.toolErrorCount > 0 ? theme.fg("error", ` ${summary.toolErrorCount}${GLYPH.error}`) : "";
+		parts.push(`${theme.fg("muted", label)}${errors}`);
+	}
+	if (summary.watchdogPeak >= 2) parts.push(theme.fg("warning", "slow"));
+	if (summary.truncated) parts.push(theme.fg("warning", "trunc"));
+	return parts.join(theme.fg("dim", " · "));
+}
+
 export function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
 	const glyph = theme.fg(statusToken(row.status), statusGlyph(row.status));
 	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${row.status} ${formatElapsed(row.elapsedMs)}`)}`;
@@ -265,7 +315,9 @@ export function agentQuadrant(facts: AgentWorkFacts, options: { maxWorkers?: num
 	const maxWorkers = Math.max(0, options.maxWorkers ?? 3);
 	const activity = facts.statusText
 		? theme.fg("accent", `${GLYPH.running} ${facts.statusText}`)
-		: theme.fg("muted", "idle");
+		: facts.lastTurn
+			? formatLastTurn(theme, facts.lastTurn)
+			: theme.fg("muted", "idle");
 	const rows: Array<string | null> = [
 		activity,
 		facts.dispatchSummary ? theme.fg("warning", facts.dispatchSummary) : theme.fg("dim", "no workers"),

@@ -201,14 +201,12 @@ export function openReceiptsOverlay(
 	if (selectList && options?.onSelect) {
 		selectList.onSelect = (item: SelectItem): void => options.onSelect?.(item.value);
 	}
-	const box = new FocusBox(
-		[selectList ?? new Text("no dispatch runs yet", 0, 0), new Text("", 0, 0), new Text(RECEIPTS_OVERLAY_HINT, 0, 0)],
-		{ inputTarget: selectList },
-	);
+	const box = new FocusBox([selectList ?? new Text("no dispatch runs yet", 0, 0)], { inputTarget: selectList });
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: RECEIPTS_OVERLAY_WIDTH,
 		title: formatReceiptsHeader(envelopes.length).replace(/^─\s*/, "").replace(/\s*─$/, ""),
+		footerHint: RECEIPTS_OVERLAY_HINT,
 	});
 }
 

@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
+import { readCodewiki } from "../domains/context/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	type CapabilityFlags,
@@ -20,17 +21,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import {
-	abbreviateModelId,
-	type ClioTheme,
-	type ClioToken,
-	clioTheme,
-	GLYPH,
-	joinChips,
-	keyHint,
-	rule,
-	sectionTag,
-} from "./theme/index.js";
+import { abbreviateModelId, type ClioTheme, clioTheme, GLYPH } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -53,6 +44,14 @@ export interface WelcomeDashboardStats {
 	targetHealthLabel: string | null;
 	activeCapabilities: string[];
 	extensions: { active: number; installed: number } | null;
+	safetyLevel: string;
+	sendPolicy: string;
+	toolProfile: string;
+	compactionThreshold: string;
+	clioMdStatus: string;
+	codewikiCount: number;
+	handoffCount: number;
+	handoffFreshness: string;
 }
 
 function stripAnsi(text: string): string {
@@ -94,7 +93,7 @@ function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	return out.slice(0, 5);
 }
 
-function contextCapability(labels: ReadonlyArray<string>): string {
+function _contextCapability(labels: ReadonlyArray<string>): string {
 	return labels.find((label) => label.endsWith(" ctx")) ?? "ctx unknown";
 }
 
@@ -113,9 +112,6 @@ function selectedModelCapabilities(
 }
 
 function healthReadout(status: EndpointStatus | null): string | null {
-	// Health is only worth a chip once a probe has produced a real verdict.
-	// Unprobed ("unknown") and unconfigured targets render nothing rather than
-	// noise like "unknown" or "not configured".
 	if (!status || status.health.status === "unknown") return null;
 	const latency =
 		typeof status.health.latencyMs === "number" && Number.isFinite(status.health.latencyMs)
@@ -124,6 +120,22 @@ function healthReadout(status: EndpointStatus | null): string | null {
 	if (activeStatus(status)) return `${status.health.status}${latency}`;
 	const reason = status.health.lastError ?? status.reason;
 	return reason && reason !== status.health.status ? `${status.health.status}: ${reason}` : status.health.status;
+}
+
+function formatRelativeTime(mtimeMs: number, now = Date.now()): string {
+	const diffMs = now - mtimeMs;
+	if (diffMs < 0) return "just now";
+	const sec = Math.floor(diffMs / 1000);
+	if (sec < 5) return "just now";
+	if (sec < 60) return `${sec}s ago`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m ago`;
+	const hr = Math.floor(min / 60);
+	if (hr < 24) return `${hr}h ago`;
+	const day = Math.floor(hr / 24);
+	if (day === 1) return "yesterday";
+	if (day < 7) return `${day}d ago`;
+	return new Date(mtimeMs).toISOString().slice(0, 10);
 }
 
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
@@ -145,6 +157,62 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		)?.thinking.display ??
 		settings?.orchestrator?.thinkingLevel ??
 		"off";
+
+	const safetyLevel = settings?.safetyLevel ?? "auto-edit";
+
+	const resolution = resolveModelRuntimeCapabilitiesForProviders(
+		deps.providers,
+		settings?.orchestrator?.endpoint,
+		settings?.orchestrator?.model,
+		settings?.orchestrator?.thinkingLevel ?? "off",
+	);
+	const supportsTools = resolution?.capabilities.tools === true;
+	const sendPolicy = !supportsTools
+		? "no-tools-fallback"
+		: settings?.orchestrator?.endpoint === "llamacpp"
+			? "prefix-cache-deterministic"
+			: "reduced-repeated-envelope";
+
+	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
+	const compactionThreshold = settings?.compaction?.thresholds?.llmSummary
+		? `${Math.round(settings.compaction.thresholds.llmSummary * 100)}%`
+		: "99%";
+
+	let clioMdStatus = "none";
+	let codewikiCount = 0;
+	let handoffCount = 0;
+	let handoffFreshness = "none";
+
+	const clioMdPath = join(cwd, "CLIO.md");
+	if (existsSync(clioMdPath)) {
+		clioMdStatus = "ok";
+	}
+
+	const codewiki = readCodewiki(cwd);
+	if (codewiki) {
+		codewikiCount = codewiki.entries.length;
+	}
+
+	const handoffsDir = join(cwd, ".clio", "handoffs");
+	if (existsSync(handoffsDir)) {
+		try {
+			const files = readdirSync(handoffsDir).filter((f) => f.startsWith("handoff-") && f.endsWith(".md"));
+			handoffCount = files.length;
+			if (files.length > 0) {
+				let newestMtime = 0;
+				for (const file of files) {
+					const mtime = statSync(join(handoffsDir, file)).mtimeMs;
+					if (mtime > newestMtime) newestMtime = mtime;
+				}
+				if (newestMtime > 0) {
+					handoffFreshness = formatRelativeTime(newestMtime);
+				}
+			}
+		} catch {
+			// Ignore
+		}
+	}
+
 	return {
 		activeTargets: statuses.filter(activeStatus).length,
 		totalTargets: statuses.length,
@@ -157,10 +225,17 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		targetHealthLabel: healthReadout(current),
 		activeCapabilities,
 		extensions: deps.getExtensionStats?.() ?? null,
+		safetyLevel,
+		sendPolicy,
+		toolProfile,
+		compactionThreshold,
+		clioMdStatus,
+		codewikiCount,
+		handoffCount,
+		handoffFreshness,
 	};
 }
 
-/** Welcome header responsive bands. */
 const WIDE_MIN = 90;
 const MID_MIN = 64;
 const LOGO_ASSET_PATH = "assets/clio-coder-logo-128.webp";
@@ -191,87 +266,100 @@ function createLogoImage(theme: ClioTheme): Component | null {
 	});
 }
 
-function joinColumns(left: string, right: string, width: number): string {
-	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-	return truncateToWidth(`${left}${" ".repeat(gap)}${right}`, Math.max(1, width), "", true);
+function padAnsi(text: string, width: number): string {
+	const clipped = truncateToWidth(text, width, "", true);
+	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-function capabilityChips(theme: ClioTheme, stats: WelcomeDashboardStats, limit: number): string[] {
-	return stats.activeCapabilities
-		.filter((label) => !label.endsWith(" ctx"))
-		.slice(0, Math.max(0, limit))
-		.map((cap) => theme.fg("accentDeep", cap));
+// Draw the top border so the panel is exactly `safeWidth` columns wide
+// regardless of the rendered title. The title carries ANSI styling and a
+// variable-width version suffix, so the fill is derived from the title's
+// visible width rather than a hardcoded reference string.
+function framedTopBorder(title: string, safeWidth: number, theme: ClioTheme): string {
+	const prefix = "┌── ";
+	const suffix = "──┐";
+	const fill = Math.max(0, safeWidth - visibleWidth(prefix) - visibleWidth(title) - visibleWidth(suffix));
+	return `${theme.fg("frame", prefix)}${title}${theme.fg("frame", "─".repeat(fill))}${theme.fg("frame", suffix)}`;
 }
 
-function extensionChip(theme: ClioTheme, stats: WelcomeDashboardStats): string | null {
-	// Hide entirely when nothing is installed; "ext 0/0" is pure noise.
-	if (!stats.extensions || stats.extensions.installed <= 0) return null;
-	return theme.fg("muted", `ext ${stats.extensions.active}/${stats.extensions.installed}`);
-}
-
-function healthChip(theme: ClioTheme, label: string | null): string | null {
-	if (!label) return null;
-	const token: ClioToken = label.startsWith("healthy") ? "success" : label.startsWith("down") ? "error" : "warning";
-	return theme.fg(token, label);
-}
-
-function thinkingChip(theme: ClioTheme, level: string): string {
-	const active = level !== "off" && level !== "none";
-	const glyph = theme.fg(active ? "reason" : "dim", active ? GLYPH.thinkOn : GLYPH.thinkOff);
-	return `think ${glyph} ${theme.fg("muted", level)}`;
-}
-
-function onlineChip(theme: ClioTheme, stats: WelcomeDashboardStats): string {
-	const allOnline = stats.totalTargets > 0 && stats.activeTargets >= stats.totalTargets;
-	const dot = theme.fg(allOnline ? "success" : "warning", GLYPH.running);
-	return `${dot} ${theme.fg("muted", `${stats.activeTargets}/${stats.totalTargets} online`)}`;
-}
-
-function section(theme: ClioTheme, token: ClioToken, label: string, content: string): string {
-	return ` ${sectionTag(theme, token, label, 6)} ${content}`;
+function framedBottomBorder(safeWidth: number, theme: ClioTheme): string {
+	return `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(Math.max(0, safeWidth - 2)))}${theme.fg("frame", "┘")}`;
 }
 
 export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: number): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 
-	const title = theme.style("title", `${GLYPH.agent} Clio Coder`, { bold: true });
-	const versionTag = theme.fg("dim", `v${readClioVersion()}`);
-	const endpoint = theme.fg("accent", stats.targetLabel);
-	const model = abbreviateModelId(stats.modelLabel);
-	const think = thinkingChip(theme, stats.thinkingLevel);
-	const context = theme.fg("info", contextCapability(stats.activeCapabilities));
-	const health = healthChip(theme, stats.targetHealthLabel);
-	const ext = extensionChip(theme, stats);
-	// Dashboard toggle is Alt+U; the live workspace/git ownership moved to the
-	// footer so the branch is never duplicated between header and footer.
-	const affordance = keyHint(theme, "Alt+U", "dashboard");
-	const identity = joinColumns(joinChips(theme, [title, versionTag]), onlineChip(theme, stats), safeWidth);
+	const title = `${theme.fg("frame", GLYPH.agent)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
 
-	let lines: string[];
-	if (safeWidth >= WIDE_MIN) {
-		const caps = joinChips(theme, [...capabilityChips(theme, stats, 4), ext]);
-		lines = [
-			identity,
-			rule(theme, safeWidth),
-			section(theme, "accent", "target", joinChips(theme, [endpoint, model, think, context, health])),
-			joinColumns(section(theme, "reason", "caps", caps), affordance, safeWidth),
-		];
-	} else if (safeWidth >= MID_MIN) {
-		const caps = joinChips(theme, [...capabilityChips(theme, stats, 3), ext]);
-		lines = [
-			identity,
-			section(theme, "accent", "target", joinChips(theme, [endpoint, model, think, context])),
-			joinColumns(section(theme, "reason", "caps", caps), affordance, safeWidth),
-		];
+	const targetVal = `${theme.fg("accent", stats.targetLabel)}/${abbreviateModelId(stats.modelLabel)}`;
+	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
+
+	let clioMdStr = `CLIO.md ${stats.clioMdStatus}`;
+	if (stats.clioMdStatus === "ok") {
+		clioMdStr = `${theme.fg("success", "CLIO.md ok")}`;
+	} else if (stats.clioMdStatus === "stale") {
+		clioMdStr = `${theme.fg("warning", "CLIO.md stale")}`;
 	} else {
-		lines = [
-			joinChips(theme, [title, versionTag]),
-			joinChips(theme, [endpoint, model, think]),
-			joinChips(theme, [...capabilityChips(theme, stats, 2), theme.fg("accentDeep", "Alt+U")]),
-		];
+		clioMdStr = `${theme.fg("dim", "CLIO.md none")}`;
 	}
-	return lines.map((line) => truncateToWidth(line, safeWidth, "", true));
+
+	const codewikiStr =
+		stats.codewikiCount > 0
+			? `${theme.fg("info", `${stats.codewikiCount} modules`)}`
+			: `${theme.fg("dim", "no codewiki")}`;
+
+	const handoffStr =
+		stats.handoffCount > 0
+			? `${theme.fg("muted", `handoff ${stats.handoffFreshness}`)}`
+			: `${theme.fg("dim", "no handoff")}`;
+
+	const safetyStr = `safety ${theme.fg("accentDeep", stats.safetyLevel)}`;
+	const policyStr = `policy ${theme.fg("dim", stats.sendPolicy)}`;
+	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
+	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
+
+	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context-init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
+
+	if (safeWidth >= WIDE_MIN) {
+		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
+		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
+		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${policyStr} · ${profileStr} · ${compactStr}`;
+		const hintLine = `  ${theme.fg("muted", "Hint:")}     ${hintStr}`;
+
+		const innerWidth = safeWidth - 4;
+		const body = [
+			`${theme.fg("frame", "│")} ${padAnsi(targetLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(contextLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(settingsLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(hintLine, innerWidth)} ${theme.fg("frame", "│")}`,
+		];
+
+		return [framedTopBorder(title, safeWidth, theme), ...body, framedBottomBorder(safeWidth, theme)];
+	} else if (safeWidth >= MID_MIN) {
+		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
+		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
+		const hintLine = `  ${theme.fg("muted", "Hint:")}    ${hintStr}`;
+
+		const innerWidth = safeWidth - 4;
+		const body = [
+			`${theme.fg("frame", "│")} ${padAnsi(targetLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(contextLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(configLine, innerWidth)} ${theme.fg("frame", "│")}`,
+			`${theme.fg("frame", "│")} ${padAnsi(hintLine, innerWidth)} ${theme.fg("frame", "│")}`,
+		];
+
+		return [framedTopBorder(title, safeWidth, theme), ...body, framedBottomBorder(safeWidth, theme)];
+	} else {
+		return [
+			title,
+			`  ${targetVal} · ${thinkVal}`,
+			`  ${clioMdStr} · ${codewikiStr}`,
+			`  ${safetyStr} · ${theme.fg("accent", "Alt+U")} toggle`,
+		].map((line) => truncateToWidth(line, safeWidth, "", true));
+	}
 }
 
 export class WelcomeDashboard implements Component {

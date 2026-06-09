@@ -92,13 +92,7 @@ import {
 	type RunIo,
 	type SlashCommandContext,
 } from "./slash-commands.js";
-import {
-	createStatusController,
-	formatStatusElapsed,
-	resolveInlineVerb,
-	spinnerFrame,
-	type TurnSummary,
-} from "./status/index.js";
+import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
 import { abbreviateModelId } from "./theme/index.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
@@ -926,6 +920,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const footerActiveTools = new Set<string>();
 	let footerToolErrors = 0;
 	let footerToolTruncatedResults = 0;
+	// Metrics for the most recent completed turn. The faint per-turn summary no
+	// longer prints under the assistant reply; it lives in the footer instead so
+	// the transcript stays calm and the footer carries the live telemetry.
+	let lastTurnSummary: TurnSummary | null = null;
 	// Dedicated harness→user surface. Boot hints and live connect/probe notices
 	// route here (anchored in the footer region) instead of into the transcript,
 	// so they never leak into VT scrollback.
@@ -975,6 +973,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				turns: liveSessionTurns(),
 			};
 		},
+		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
 		dismissKeyLabel,
 	});
@@ -1006,8 +1005,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	// The permission overlay is rebuilt per open because its body depends on
 	// the parked tool call.
-	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"), 0, 0);
-	const dispatchBoardWidth = formatDispatchBoardLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
+	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"), 0, 0);
 	const taskIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
@@ -1057,38 +1055,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		chatRenderer.applyEvent(event);
 	});
 	let statusInlineFrame = 0;
-	const formatSummaryLine = (summary: TurnSummary): string => {
-		const stopGlyph =
-			summary.stopReason === "stop" || summary.stopReason === "toolUse" || summary.stopReason === "length"
-				? "✓"
-				: summary.stopReason === "cancelled" || summary.stopReason === "aborted"
-					? "⊘"
-					: "✗";
-		const tools =
-			summary.toolCount > 0
-				? ` · ${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}${
-						summary.toolErrorCount > 0 ? ` (${summary.toolErrorCount} ✗)` : ""
-					}`
-				: "";
-		const slow = summary.watchdogPeak >= 2 ? " · slow turn" : "";
-		const reasoning =
-			typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0
-				? ` · reasoning:${summary.reasoningTokens}`
-				: "";
-		const model =
-			summary.endpointId.length > 0 || summary.modelId.length > 0
-				? `${summary.endpointId || "endpoint"}/${abbreviateModelId(summary.modelId || "model")}`
-				: "unknown-model";
-		return `${formatStatusElapsed(summary.elapsedMs)} · ${model} · ↑${summary.inputTokens} ↓${summary.outputTokens}${reasoning}${tools} ${stopGlyph}${slow}`;
-	};
 	const unsubscribeStatus = statusController.subscribe((status) => {
 		if (status.phase === "idle") {
 			chatPanel.setStatusLine(null);
 		} else if (status.phase === "ended") {
+			// Park the completed turn's metrics on the footer rather than printing
+			// a faint summary line under the reply. Keeps the transcript calm.
 			chatPanel.setStatusLine(null);
-			chatPanel.setSummaryLine(status.summary ? formatSummaryLine(status.summary) : null);
+			if (status.summary) lastTurnSummary = status.summary;
 		} else {
-			chatPanel.setSummaryLine(null);
 			const verb = resolveInlineVerb(status, Date.now(), terminal.columns);
 			if (verb) {
 				const frame = terminal.columns < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
@@ -1478,7 +1453,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	taskIslandHandle.setHidden(true);
 
 	const renderDispatchBoard = (): void => {
-		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows()).join("\n"));
+		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"));
 		dispatchBoard.invalidate();
 	};
 
@@ -1865,6 +1840,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			anchor: "center",
 			width: PERMISSION_OVERLAY_WIDTH,
 			title: permissionOverlayTitle(),
+			footerHint: "[Enter] allow once    [Esc] cancel",
 		});
 		tui.requestRender();
 	};
@@ -2219,9 +2195,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		renderDispatchBoard();
 		overlayState = "dispatch-board";
-		overlayHandle = tui.showOverlay(dispatchBoard, {
+		overlayHandle = showClioOverlayFrame(tui, dispatchBoard, {
+			title: "Dispatch Board",
+			footerHint: "[Esc] close",
 			anchor: "center",
-			width: dispatchBoardWidth,
+			width: 80,
 		});
 		startDispatchBoardTicker();
 		tui.requestRender();

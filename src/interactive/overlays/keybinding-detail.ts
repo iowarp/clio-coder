@@ -1,5 +1,4 @@
 import { truncateToWidth } from "../../engine/tui.js";
-import { brandedBottomBorder, brandedTextRow, brandedTopBorder } from "../overlay-frame.js";
 
 export const KEYBINDING_DETAIL_OVERLAY_WIDTH = 74;
 
@@ -37,32 +36,26 @@ function row(label: string, value: string, width: number): string[] {
 	return lines.map((line) => truncateToWidth(line, width, "", true));
 }
 
-export function formatKeybindingDetailLines(
-	entry: KeybindingDetailEntry,
-	contentWidth: number = KEYBINDING_DETAIL_OVERLAY_WIDTH - 4,
-): string[] {
+export function formatKeybindingDetailBodyLines(entry: KeybindingDetailEntry, contentWidth: number): string[] {
 	const lines: string[] = [];
-	lines.push(brandedTopBorder(" Keybinding ", contentWidth + 2));
-	lines.push(brandedTextRow(`Action    ${entry.action}`, contentWidth));
-	lines.push(brandedTextRow(`Id        ${entry.id}`, contentWidth));
-	lines.push(brandedTextRow(`Keys      ${entry.keys}`, contentWidth));
-	lines.push(brandedTextRow(`Source    ${entry.source ?? "static"}`, contentWidth));
-	lines.push(brandedTextRow("", contentWidth));
+	lines.push(`Action    ${entry.action}`);
+	lines.push(`Id        ${entry.id}`);
+	lines.push(`Keys      ${entry.keys}`);
+	lines.push(`Source    ${entry.source ?? "static"}`);
+	lines.push("");
 	for (const detail of row(
 		"Change",
 		"Edit settings.yaml > keybindings, then restart Clio or reopen the TUI.",
 		contentWidth,
 	)) {
-		lines.push(brandedTextRow(detail, contentWidth));
+		lines.push(detail);
 	}
 	if (entry.id.startsWith("clio.")) {
 		const example = `${entry.id}: "alt+<key>"`;
-		lines.push(brandedTextRow(`Example   ${example}`, contentWidth));
+		lines.push(`Example   ${example}`);
 	}
 	for (const warning of entry.warnings ?? []) {
-		lines.push(brandedTextRow(`Warning   ${warning}`, contentWidth));
+		lines.push(`Warning   ${warning}`);
 	}
-	lines.push(brandedTextRow("[Esc] close", contentWidth));
-	lines.push(brandedBottomBorder(contentWidth + 2));
 	return lines;
 }

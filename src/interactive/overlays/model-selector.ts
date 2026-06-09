@@ -782,14 +782,6 @@ function renderModelOverlayLines(input: {
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
 	else lines.push(fitLine("no selected model", width), "");
-	lines.push(
-		clioFrame(
-			fitLine(
-				"[type] search  [Tab] focus/all  [r] refresh target  [R] refresh all  [*] fav  [Enter] use  [Esc] close",
-				width,
-			),
-		),
-	);
 	return lines.map((line) => fitLine(line, width));
 }
 
@@ -1030,7 +1022,12 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		view.replaceItems(build());
 		tui.requestRender();
 	});
-	const handle = showClioOverlayFrame(tui, view, { anchor: "center", width: overlayWidth, title: "Models" });
+	const handle = showClioOverlayFrame(tui, view, {
+		anchor: "center",
+		width: overlayWidth,
+		title: "Models",
+		footerHint: "[type] search  [Tab] focus/all  [r] refresh target  [R] refresh all  [*] fav  [Enter] use  [Esc] close",
+	});
 	return {
 		...handle,
 		hide(): void {

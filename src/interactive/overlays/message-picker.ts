@@ -118,5 +118,10 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		deps.onClose();
 	};
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, { anchor: "center", width: MESSAGE_PICKER_OVERLAY_WIDTH, title: "Fork" });
+	return showClioOverlayFrame(tui, box, {
+		anchor: "center",
+		width: MESSAGE_PICKER_OVERLAY_WIDTH,
+		title: "Fork",
+		footerHint: "[Enter] select    [Esc] cancel",
+	});
 }
