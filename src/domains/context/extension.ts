@@ -221,11 +221,23 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-init", at: Date.now(), ...event });
 				input?.onProgress?.(event);
 			};
-			const result = await runBootstrap(input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress });
-			const cwd = input?.cwd ?? process.cwd();
-			contextState.invalidate(cwd);
-			if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
-			return result;
+			try {
+				const result = await runBootstrap(
+					input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress },
+				);
+				const cwd = input?.cwd ?? process.cwd();
+				contextState.invalidate(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+				return result;
+			} catch (err) {
+				emitProgress({
+					phase: "done",
+					status: "failed",
+					message: "context-init failed",
+					detail: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
 		},
 		async runContextClear(input) {
 			const result = await runContextClear(input);

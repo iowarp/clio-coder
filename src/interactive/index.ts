@@ -973,6 +973,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
+		getContextActivity: () => contextActivityStore.current(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
 			errors: footerToolErrors,
@@ -1334,7 +1335,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			}
 			activeContextInit = true;
-			io.stdout("[/context-init] bootstrapping project context...\n");
 			void Promise.resolve()
 				.then(() => onInit(options, io))
 				.then(() => {
@@ -1538,9 +1538,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		taskIsland.invalidate();
 	};
 
+	let contextIslandVisible = false;
 	const renderContextIsland = (): void => {
 		const activity = contextActivityStore.current();
-		contextIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || !activity);
+		contextIslandVisible = Boolean(activity) && overlayState === "closed" && !footer.isExpanded();
+		contextIslandHandle.setHidden(!contextIslandVisible);
 		if (activity) contextIsland.setText(formatContextActivityIslandLines(activity).join("\n"));
 		contextIsland.invalidate();
 	};
@@ -1569,7 +1571,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const startContextIslandTicker = (): void => {
 		stopContextIslandTicker();
 		contextIslandTicker = setInterval(() => {
-			if (!contextActivityStore.active()) return;
+			if (!contextActivityStore.active() && !contextIslandVisible) return;
 			renderContextIsland();
 			renderTaskIsland();
 			tui.requestRender();
