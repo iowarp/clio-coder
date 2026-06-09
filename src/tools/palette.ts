@@ -35,6 +35,13 @@ export interface ResolveToolPaletteInput {
 
 export interface ToolPaletteResult {
 	activeTools: ReadonlyArray<ToolName>;
+	/**
+	 * Every tool this target could call this session after profile and worker
+	 * constraints, regardless of whether the current turn activated its schema.
+	 * Drives the always-present Tool Catalog so the model stays aware of its
+	 * full surface even when no schema is attached this turn.
+	 */
+	availableTools: ReadonlyArray<ToolName>;
 	intent: ToolPaletteIntent;
 	phase: ToolPalettePhase;
 	groups: ReadonlyArray<ToolPaletteGroup>;
@@ -74,6 +81,20 @@ const GROUP_ORDER: ReadonlyArray<ToolPaletteGroup> = [
 	"artifact",
 	"escape_hatch",
 ];
+
+/** One-line purpose per group, rendered in the always-present Tool Catalog. */
+const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
+	orientation: "workspace snapshot, git status, entry points",
+	locate: "find files and symbols",
+	inspect: "read, grep, list, git diff/log",
+	mutate: "edit and write files",
+	validate: "run tests, lint, build, package scripts",
+	delegate: "dispatch bounded fleet sub-agents",
+	external: "fetch web content",
+	skills: "load or author reusable SKILL.md playbooks",
+	artifact: "write PLAN.md / REVIEW.md artifacts",
+	escape_hatch: "raw shell via bash",
+};
 
 const GREETING_RE = /^(?:hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|ping)[.!?\s]*$/i;
 const EDIT_RE =
@@ -187,6 +208,24 @@ function expandGroups(groups: ReadonlyArray<ToolPaletteGroup>, text: string): To
 	return unique(tools);
 }
 
+/**
+ * Render a compact, names-only catalog of the tools available this session,
+ * grouped by purpose. This is cheap (one line per non-empty group) and stable
+ * across turns, so it lives in the prefix-cacheable session shell and keeps the
+ * model aware of its full surface even on turns where no tool schema is
+ * attached. Schemas remain progressively disclosed via the active palette.
+ */
+export function renderToolCatalog(availableTools: ReadonlyArray<ToolName>): string {
+	const available = new Set(availableTools);
+	const lines: string[] = [];
+	for (const group of GROUP_ORDER) {
+		const tools = TOOL_GROUPS[group].filter((tool) => available.has(tool));
+		if (tools.length === 0) continue;
+		lines.push(`- ${group} (${GROUP_PURPOSE[group]}): ${tools.join(", ")}`);
+	}
+	return lines.join("\n");
+}
+
 export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteResult {
 	const modeTools = input.availableTools ?? [];
 	const profileTools = applyToolProfile(modeTools, input.toolProfile);
@@ -199,6 +238,7 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 	if (!input.providerSupportsTools) {
 		return {
 			activeTools: [],
+			availableTools: [],
 			intent,
 			phase,
 			groups: [],
@@ -212,6 +252,7 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 	const activeTools = candidates.filter((tool) => requested.has(tool));
 	return {
 		activeTools,
+		availableTools: candidates,
 		intent,
 		phase,
 		groups,

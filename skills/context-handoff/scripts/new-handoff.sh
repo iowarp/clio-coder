@@ -4,7 +4,8 @@
 #
 #   new-handoff.sh [slug]
 #
-# Honors CLIO_HANDOFF_DIR; defaults to <repo-root>/.clio/handoffs (gitignored).
+# Honors CLIO_HANDOFF_DIR; defaults to <repo-root>/.clio/handoffs.
+# The default .gitignore policy ignores this machine-local context directory.
 set -euo pipefail
 
 slug="${1:-}"

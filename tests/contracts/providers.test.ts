@@ -259,6 +259,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 				parseWorkerSpec({
 					specVersion: WORKER_SPEC_VERSION,
 					systemPrompt: "",
+					agentId: "coder",
 					task: "t",
 					endpoint: { id: "target", runtime: "legacy-sdk" },
 					runtime: {

@@ -249,6 +249,8 @@ describe("contracts/dispatch", () => {
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
 			const spec = capturedSpec as unknown as WorkerSpec;
+			strictEqual(spec.agentId, "coder");
+			strictEqual(spec.task, `run ${id}`);
 			strictEqual(spec.runtimeId, id);
 			strictEqual(spec.runtime.kind, "http");
 		} finally {
@@ -605,6 +607,7 @@ rl.once("line", () => {
 				{
 					specVersion: WORKER_SPEC_VERSION,
 					systemPrompt: "",
+					agentId: "coder",
 					task: "t",
 					endpoint: { id: "e", runtime: "x" } as never,
 					runtime: {

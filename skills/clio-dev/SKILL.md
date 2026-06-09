@@ -85,7 +85,7 @@ From `CLIO.md`. Follow it in order:
   check consumers, not just the file you edited.
 - `CLIO.md` is the audited constitution; codewiki and the `.clio/state.json`
   fingerprint are mutable hints. **Never trust a stale summary over the source.**
-  If source topology changed, refresh `/init` so the fingerprint and codewiki
+  If source topology changed, refresh `/context-init` so the fingerprint and codewiki
   move with it — but a regenerated `CLIO.md` is a contribution-adjacent artifact;
   don't commit it without intent.
 

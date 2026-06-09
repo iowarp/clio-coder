@@ -382,7 +382,7 @@ function resolveDispatchAdmissionStage(
 ): DispatchAdmissionStage {
 	const recipeTools = recipe.tools;
 	const candidateTools = recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : [];
-	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
+	const allowedTools = applyToolProfile(candidateTools, req.toolProfile, { agentId: req.agentId, task: req.task });
 	assertAgentSpecPolicy(normalizeAgentSpec(recipe));
 	const unavailableTools = allowedTools.filter((tool) => isBuiltinToolName(tool) && !candidateTools.includes(tool));
 	if (unavailableTools.length > 0) {
@@ -444,6 +444,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		...(input.promptSignature !== null ? { promptSignature: input.promptSignature } : {}),
 		toolSignature: input.toolSignature,
 		...(input.dynamicHash !== null ? { dynamicHash: input.dynamicHash } : {}),
+		agentId: input.req.agentId,
 		task: input.req.task,
 		endpoint: input.target.endpoint,
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),

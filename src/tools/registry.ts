@@ -106,6 +106,8 @@ export interface RegistryDeps {
 	protectedArtifacts?: ProtectedArtifactState;
 	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
 	onSkillActivation?: (activation: SkillActivation) => void;
+	/** Fired after a successful file-mutating tool so the codewiki can refresh incrementally. */
+	onFileMutation?: (event: { paths: ReadonlyArray<string>; toolName: ToolName }) => void;
 }
 
 export interface ToolInvokeOptions {
@@ -232,6 +234,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
 			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects));
 			emitSkillActivation(deps, spec, finalResult, options);
+			emitFileMutation(deps, spec, call, finalResult);
 			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
@@ -520,6 +523,17 @@ function emitProtectedArtifactEvent(deps: RegistryDeps, event: ProtectedArtifact
 	} catch {
 		// Protection state is already live in memory. Persistence hooks are
 		// best-effort and must not change tool execution semantics.
+	}
+}
+
+function emitFileMutation(deps: RegistryDeps, spec: ToolSpec, call: ClassifierCall, result: ToolResult): void {
+	if (!deps.onFileMutation || result.kind !== "ok") return;
+	const paths = toolMutationPaths(spec, call.args);
+	if (paths.length === 0) return;
+	try {
+		deps.onFileMutation({ paths, toolName: spec.name });
+	} catch {
+		// Incremental indexing is best-effort and must not change tool execution.
 	}
 }
 

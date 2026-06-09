@@ -85,6 +85,7 @@ import { openProvidersOverlay } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import {
+	type ContextClearCommandOptions,
 	dispatchSlashCommand,
 	type InitCommandOptions,
 	parseSlashCommand,
@@ -107,6 +108,7 @@ import { createWelcomeDashboard } from "./welcome-dashboard.js";
 export {
 	BUILTIN_SLASH_COMMANDS,
 	type BuiltinSlashCommand,
+	type ContextClearCommandOptions,
 	dispatchSlashCommand,
 	type HandleRunDeps,
 	handleRun,
@@ -187,8 +189,10 @@ export interface InteractiveDeps {
 	 * hook; 12d adds the auto-trigger and overflow-recovery path.
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
-	/** Run /init for the current working directory. */
+	/** Run /context-init for the current working directory. */
 	onInit?: (options: InitCommandOptions) => Promise<void>;
+	/** Run /context-clear for the current working directory. */
+	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -1296,14 +1300,32 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		runInit: (options) => {
 			if (!deps.onInit) {
-				io.stderr("[/init] init not wired; pass onInit to startInteractive\n");
+				io.stderr("[/context-init] context-init not wired; pass onInit to startInteractive\n");
 				return;
 			}
 			void deps
 				.onInit(options)
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/init] ${msg}\n`);
+					io.stderr(`[/context-init] ${msg}\n`);
+				})
+				.finally(() => tui.requestRender());
+		},
+		runContextClear: (options) => {
+			if (!deps.onContextClear) {
+				io.stderr("[/context-clear] context clear not wired; pass onContextClear to startInteractive\n");
+				return;
+			}
+			if (options.confirmed !== true) {
+				const suffix = options.all === true ? " --all --confirm --confirm-all" : " --confirm";
+				io.stdout(`[/context-clear] rerun /context-clear${suffix} to remove accumulated context artifacts.\n`);
+				return;
+			}
+			void deps
+				.onContextClear(options)
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/context-clear] ${msg}\n`);
 				})
 				.finally(() => tui.requestRender());
 		},

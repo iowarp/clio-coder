@@ -1,12 +1,14 @@
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
-import type { BootstrapStructuredOutput } from "./bootstrap.js";
+import { type BootstrapStructuredOutput, codewikiEntryPoints } from "./bootstrap.js";
+import type { Codewiki } from "./codewiki/indexer.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to produce a single CLIO.md file for the project at <cwd>. CLIO.md is a lean, project-specific context file that the clio-coder coding agent loads on every session.
 
 You will be given:
 - The detected project type.
+- A structural digest from the codewiki index: module count, entry points, and top directories. Ground the identity and any architecture sections in this real structure; do not invent files.
 - A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.
 
@@ -40,6 +42,39 @@ export interface BootstrapPromptInput {
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
+	codewiki?: Codewiki;
+}
+
+/**
+ * Compact structural digest of the codewiki for the bootstrap prompt: module
+ * count, entry points, and the top directories by file count. Grounds the model
+ * in the real source tree without dumping the full index.
+ */
+function topTwoSegments(path: string): string {
+	const dirParts = path.split("/").slice(0, -1);
+	if (dirParts.length === 0) return ".";
+	return dirParts.slice(0, 2).join("/");
+}
+
+function summarizeCodewiki(codewiki: Codewiki): Record<string, unknown> {
+	const dirCounts = new Map<string, number>();
+	for (const entry of codewiki.entries) {
+		const top = topTwoSegments(entry.path);
+		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
+	}
+	const topDirs = [...dirCounts.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.slice(0, 8)
+		.map(([dir, count]) => `${dir} (${count})`);
+	return {
+		moduleCount: codewiki.entries.length,
+		entryPoints: codewikiEntryPoints(codewiki, 8),
+		entryPointSummaries: codewiki.entries
+			.filter((entry) => entry.kind === "entry-point" && entry.summary)
+			.slice(0, 8)
+			.map((entry) => ({ path: entry.path, summary: entry.summary })),
+		topDirectories: topDirs,
+	};
 }
 
 function truncate(value: string, max: number): string {
@@ -58,6 +93,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 	const payload = {
 		cwd: input.cwd,
 		projectType: input.projectType,
+		...(input.codewiki ? { structure: summarizeCodewiki(input.codewiki) } : {}),
 		siblingFiles: input.siblingFiles.map(sourceSummary),
 		adoption: {
 			includeGlobal: input.adoption.includeGlobal,

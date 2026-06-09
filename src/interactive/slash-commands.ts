@@ -21,6 +21,7 @@ export type SlashCommand =
 	| { kind: "quit" }
 	| { kind: "help" }
 	| { kind: "init"; options: InitCommandOptions }
+	| { kind: "context-clear"; options: ContextClearCommandOptions }
 	| { kind: "skills"; query?: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
@@ -63,6 +64,14 @@ export interface InitCommandOptions {
 	preview?: boolean;
 	adopt?: boolean;
 	includeGlobalImports?: boolean;
+	/** Skip model-driven exploration and use the deterministic heuristic generator. */
+	heuristic?: boolean;
+}
+
+export interface ContextClearCommandOptions {
+	all?: boolean;
+	confirmed?: boolean;
+	confirmedAll?: boolean;
 }
 
 export interface RunCommandOptions {
@@ -182,9 +191,22 @@ function parseInitCommand(rest: string): SlashCommand {
 		if (part === "--preview") options.preview = true;
 		else if (part === "--adopt") options.adopt = true;
 		else if (part === "--global" || part === "--include-global") options.includeGlobalImports = true;
-		else return { kind: "unknown", text: `/init ${rest}`.trim() };
+		else if (part === "--heuristic" || part === "--no-generate") options.heuristic = true;
+		else return { kind: "unknown", text: `/context-init ${rest}`.trim() };
 	}
 	return { kind: "init", options };
+}
+
+function parseContextClearCommand(rest: string): SlashCommand {
+	const options: ContextClearCommandOptions = {};
+	const parts = rest.split(/\s+/).filter(Boolean);
+	for (const part of parts) {
+		if (part === "--all") options.all = true;
+		else if (part === "--confirm") options.confirmed = true;
+		else if (part === "--confirm-all") options.confirmedAll = true;
+		else return { kind: "unknown", text: `/context-clear ${rest}`.trim() };
+	}
+	return { kind: "context-clear", options };
 }
 
 function parseRunCommand(rest: string): SlashCommand {
@@ -267,6 +289,7 @@ export interface SlashCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
+	runContextClear: (options: ContextClearCommandOptions) => void;
 	listSkills: () => ResourceList<Skill>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
@@ -365,17 +388,35 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "init",
-		description: "Bootstrap, preview, or adopt agent configs into CLIO.md",
-		argumentHint: "[--preview] [--adopt] [--global]",
+		name: "context-init",
+		description: "Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff",
+		argumentHint: "[--preview]",
 		kinds: ["init"],
 		match(trimmed) {
-			if (trimmed === "/init") return { kind: "init", options: {} };
-			return trimmed.startsWith("/init ") ? parseInitCommand(trimmed.slice("/init ".length).trim()) : null;
+			if (trimmed === "/context-init") return { kind: "init", options: {} };
+			if (trimmed.startsWith("/context-init ")) return parseInitCommand(trimmed.slice("/context-init ".length).trim());
+			return null;
 		},
 		handle(command, ctx) {
 			if (command.kind !== "init") return;
 			ctx.runInit(command.options);
+		},
+	},
+	{
+		name: "context-clear",
+		description: "Clear accumulated project context artifacts",
+		argumentHint: "[--all] --confirm [--confirm-all]",
+		kinds: ["context-clear"],
+		match(trimmed) {
+			if (trimmed === "/context-clear") return { kind: "context-clear", options: {} };
+			if (trimmed.startsWith("/context-clear ")) {
+				return parseContextClearCommand(trimmed.slice("/context-clear ".length).trim());
+			}
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "context-clear") return;
+			ctx.runContextClear(command.options);
 		},
 	},
 	{

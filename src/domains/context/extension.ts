@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir } from "../../core/xdg.js";
@@ -6,16 +7,63 @@ import { loadMemoryRecordsSync } from "../memory/index.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
+import { runContextClear } from "./clear.js";
 import {
 	type ParsedClioMd,
 	renderProjectContextFragment,
 	renderProjectTypeFragment,
 	tryReadClioMd,
 } from "./clio-md.js";
-import { buildCodewiki, codewikiPath, writeCodewiki } from "./codewiki/indexer.js";
+import { buildCodewiki, codewikiPath, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";
 import type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
 import { computeFingerprint, isStale } from "./fingerprint.js";
-import { readClioState, writeClioState } from "./state.js";
+import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
+
+/**
+ * Persist the current Clio state for `cwd`, preserving bootstrap-time fields and
+ * stamping the supplied fingerprint and index time. Shared by the session-start
+ * freshness check, in-session incremental updates, and session stop.
+ */
+function persistState(
+	cwd: string,
+	fingerprint: ClioProjectState["fingerprint"],
+	indexedAt: string,
+	prev: ClioProjectState | null,
+): void {
+	writeClioState(cwd, {
+		version: 1,
+		projectType: prev?.projectType ?? detectProjectType(cwd),
+		fingerprint,
+		...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+		lastSessionAt: prev?.lastSessionAt ?? new Date().toISOString(),
+		lastIndexedAt: indexedAt,
+	});
+}
+
+/**
+ * Rebuild the codewiki when it is missing or the working tree has drifted since
+ * the last full index. Runs once at session start (catches branch switches, git
+ * pulls, and out-of-session edits) and again at stop. Skips projects that were
+ * never indexed so we never index an arbitrary directory unprompted.
+ */
+function ensureCodewikiFresh(cwd: string): void {
+	// The bootstrap model-generation child runs a headless session purely to draft
+	// CLIO.md; it must not re-index while the parent context-init owns the rebuild.
+	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
+	const state = readClioState(cwd);
+	if (!state && !existsSync(codewikiPath(cwd))) return;
+	const fingerprint = computeFingerprint(cwd);
+	const stale =
+		!state || state.fingerprint.treeHash !== fingerprint.treeHash || !existsSync(codewikiPath(cwd)) || !readCodewiki(cwd);
+	if (!stale) return;
+	const indexedAt = new Date().toISOString();
+	const projectType = state?.projectType ?? detectProjectType(cwd);
+	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
+	persistState(cwd, fingerprint, indexedAt, state);
+}
 
 function renderPromptContext(cwd: string): ProjectPromptContext {
 	const projectType = detectProjectType(cwd);
@@ -28,10 +76,10 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 		pieces.push(renderProjectContextFragment(clio.value));
 	}
 	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
-	if (existsSync(codewikiPath(cwd))) {
+	if (readCodewiki(cwd)) {
 		const state = readClioState(cwd);
 		const stale = state ? state.fingerprint.treeHash !== computeFingerprint(cwd).treeHash : true;
-		const suffix = stale ? " (stale; run /init to refresh)" : "";
+		const suffix = stale ? " (stale; run /context-init to refresh)" : "";
 		pieces.push(`<codewiki>available${suffix}; use find_symbol, entry_points, where_is</codewiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
@@ -79,23 +127,23 @@ function collectStartupHints(cwd: string): string[] {
 	}
 	const clio = tryReadClioMd(cwd);
 	if (!clio && projectType !== "unknown") {
-		hints.push("clio: No CLIO.md detected. Run /init or `clio init` to bootstrap.");
+		hints.push("clio: No CLIO.md detected. Run /context-init to explore the repo and bootstrap context.");
 	}
 	if (clio && !clio.ok) {
 		hints.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
 	}
 	if (clio?.ok && clio.value.firstInit) {
-		hints.push("clio: CLIO.md has no fingerprint footer. Run /init to refresh.");
+		hints.push("clio: CLIO.md has no fingerprint footer. Run /context-init to refresh.");
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
 	const reference = state.bootstrapFingerprint ?? state.fingerprint;
 	const current = computeFingerprint(cwd);
 	if (isStale(reference, current)) {
-		hints.push("clio: CLIO.md fingerprint differs from current project state. Run /init to refresh.");
+		hints.push("clio: CLIO.md fingerprint differs from current project state. Run /context-init to refresh.");
 	}
 	if (state.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
-		hints.push("clio: Imported agent context changed. Run /init --adopt to refresh.");
+		hints.push("clio: Imported agent context changed. Run /context-init --adopt to refresh.");
 	}
 	return hints;
 }
@@ -106,9 +154,31 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 	const contextState = createContextStateReader();
 	const onStart = (): void => {
 		lastCwd = process.cwd();
+		try {
+			ensureCodewikiFresh(lastCwd);
+		} catch {
+			// Indexing is best-effort; a failed refresh must not block session start.
+		}
 		startupHints = collectStartupHints(lastCwd);
 		if (process.env.CLIO_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
+	};
+
+	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
+		try {
+			if (paths.length === 0) return;
+			const codewiki = readCodewiki(cwd);
+			if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
+			const rel = paths
+				.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
+				.filter((p) => p.length > 0 && !p.startsWith(".."));
+			const updated = updateCodewikiPaths(cwd, codewiki, rel);
+			if (updated === codewiki) return; // No indexable file actually changed.
+			writeCodewiki(cwd, updated);
+			persistState(cwd, computeFingerprint(cwd), updated.generatedAt, readClioState(cwd));
+		} catch {
+			// Best-effort: never let incremental indexing surface as a tool error.
+		}
 	};
 
 	const extension: DomainExtension = {
@@ -120,7 +190,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 			const state = readClioState(lastCwd);
 			const fingerprint = computeFingerprint(lastCwd);
 			let lastIndexedAt = state?.lastIndexedAt;
-			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !existsSync(codewikiPath(lastCwd))) {
+			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !readCodewiki(lastCwd)) {
 				lastIndexedAt = new Date().toISOString();
 				writeCodewiki(lastCwd, buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
 			}
@@ -140,9 +210,11 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 
 	const contract: ContextContract = {
 		runBootstrap,
+		runContextClear,
 		renderPromptContext,
 		contextState,
 		startupHints: () => [...startupHints],
+		noteFileChanges,
 	};
 
 	return { extension, contract };

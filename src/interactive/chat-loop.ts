@@ -65,7 +65,7 @@ import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
-import { resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
+import { renderToolCatalog, resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
@@ -518,6 +518,7 @@ function promptDiagnostics(
 			phase: "inspection",
 			groups: [],
 			activeTools: [],
+			availableTools: [],
 			omittedToolCount: 0,
 			providerSupportsTools: tools.length > 0,
 			posture: "operating",
@@ -1682,6 +1683,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(currentToolPalette && activeToolNames
 				? {
 						activeToolNames,
+						toolCatalog: renderToolCatalog(currentToolPalette.availableTools),
 						toolPaletteIntent: currentToolPalette.intent,
 						toolPalettePhase: currentToolPalette.phase,
 						toolPaletteGroups: currentToolPalette.groups.map((group) => String(group)),

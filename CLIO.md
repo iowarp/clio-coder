@@ -31,9 +31,9 @@ Treat `src/tools/**` as the model-visible action surface. Tool names and profile
 
 `CLIO.md` is the stable, human-audited constitution. It should encode repository-specific constraints, architecture traps, workflow strategy, and failure modes that are expensive for an agent to rediscover. It should not repeat generic language advice, obvious script names, raw file trees, secrets, caches, or long copied policy files.
 
-`/init` and `clio init` should produce compact, verifiable guidance from evidence: package metadata, README summaries, existing agent configs, and codewiki signals. Adoption is provenance-preserving: imported rules are summarized with sources and conflicts rather than concatenated. Global imports only enter when explicitly requested.
+`/context-init` and `clio context-init` should produce compact, verifiable guidance from evidence: package metadata, README summaries, existing agent configs, and codewiki signals. Adoption is provenance-preserving: imported rules are summarized with sources and conflicts rather than concatenated. Global imports only enter when explicitly requested.
 
-Codewiki is the mutable retrieval layer. Do not bloat `CLIO.md` with symbol inventories. Tell agents which boundaries matter, then rely on `entry_points`, `where_is`, and `find_symbol` for exact TypeScript structure. If source topology changes, refresh `/init` so the fingerprint and codewiki move together.
+Codewiki is the mutable retrieval layer. Do not bloat `CLIO.md` with symbol inventories. Tell agents which boundaries matter, then rely on `entry_points`, `where_is`, and `find_symbol` for exact TypeScript structure. If source topology changes, refresh `/context-init` so the fingerprint and codewiki move together.
 
 ## Workflow for changing Clio itself
 

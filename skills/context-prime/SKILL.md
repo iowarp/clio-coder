@@ -45,6 +45,8 @@ Work top to bottom; stop early once you have enough to state where things stand.
 
 4. **Active signals.** Check `.clio/state.json` and codewiki freshness if
    present. Treat stale summaries as hints, never as authority over source.
+   A v1 or missing `.clio/codewiki.json` may rebuild on demand through
+   codewiki tools, but source files remain authoritative.
 
 5. **Skills.** The `# Skills` catalog is already in context. Note any the
    handoff suggested for the next step; do not scan the filesystem for them.
