@@ -39,6 +39,7 @@ import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJso
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import { formatThinkingForReplay } from "./thinking-replay.js";
 
 const EMPTY_TOOL_ARGUMENTS_ERROR =
 	"LM Studio SDK returned empty tool-call arguments; this model's chat template may not be compatible. Try the openai-compat runtime against the same gateway.";
@@ -303,8 +304,9 @@ async function userMessage(
 	return { role: "user", content: parts };
 }
 
-function assistantMessage(content: AssistantMessage["content"]): ChatMessageData {
+export function assistantMessage(content: AssistantMessage["content"], opts?: { harmony?: boolean }): ChatMessageData {
 	const parts: AssistantPart[] = [];
+	const thinkingParts: string[] = [];
 	for (const block of content) {
 		if (block.type === "text") {
 			parts.push({ type: "text", text: block.text });
@@ -316,10 +318,17 @@ function assistantMessage(content: AssistantMessage["content"]): ChatMessageData
 			};
 			if (block.id) req.id = block.id;
 			parts.push({ type: "toolCallRequest", toolCallRequest: req });
+		} else if (block.type === "thinking") {
+			const thinkingVal = (block as ThinkingContent).thinking;
+			if (thinkingVal) {
+				thinkingParts.push(thinkingVal);
+			}
 		}
-		// ThinkingContent blocks are intentionally skipped on replay: LM Studio's
-		// chat protocol has no thinking part, and re-sending the raw chain of
-		// thought as text would confuse the model on the next turn.
+	}
+	if (thinkingParts.length > 0) {
+		const joined = thinkingParts.join("\n");
+		const harmony = opts?.harmony ?? false;
+		parts.unshift({ type: "text", text: formatThinkingForReplay(joined, { harmony }) });
 	}
 	return { role: "assistant", content: parts };
 }
@@ -337,7 +346,11 @@ function toolResultMessage(msg: Extract<Message, { role: "toolResult" }>): ChatM
 	return { role: "tool", content: [result] };
 }
 
-async function buildChatHistory(client: Pick<LmStudioRunClient, "files">, context: Context): Promise<ChatHistoryData> {
+async function buildChatHistory(
+	client: Pick<LmStudioRunClient, "files">,
+	context: Context,
+	opts?: { harmony?: boolean },
+): Promise<ChatHistoryData> {
 	const messages: ChatMessageData[] = [];
 	const imageCounter = { next: 0 };
 	if (context.systemPrompt && context.systemPrompt.length > 0) {
@@ -345,7 +358,7 @@ async function buildChatHistory(client: Pick<LmStudioRunClient, "files">, contex
 	}
 	for (const msg of context.messages) {
 		if (msg.role === "user") messages.push(await userMessage(client, msg.content, imageCounter));
-		else if (msg.role === "assistant") messages.push(assistantMessage(msg.content));
+		else if (msg.role === "assistant") messages.push(assistantMessage(msg.content, opts));
 		else if (msg.role === "toolResult") messages.push(toolResultMessage(msg));
 	}
 	return { messages };
@@ -1002,7 +1015,8 @@ export function runStream(
 				if (samplingProfile.repeatPenalty !== undefined) predictionOpts.repeatPenalty = samplingProfile.repeatPenalty;
 			}
 			if (options?.temperature !== undefined) predictionOpts.temperature = options.temperature;
-			const history = await buildChatHistory(client, context);
+			const harmony = resolved.response.parser === "harmony";
+			const history = await buildChatHistory(client, context, { harmony });
 			if (aborted) throw new Error("Request was aborted");
 			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
