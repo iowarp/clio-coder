@@ -44,23 +44,23 @@ Current built-ins under `src/domains/agents/builtins/`:
 ### Shipped Base Agents
 User-facing agents visible in `clio agents` and `/agents`.
 
-| Agent ID | Mode | Primary tools | Purpose | Capability | Latency |
-| --- | --- | --- | --- | --- | --- |
-| `architect` | `advise` | read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
-| `coder` | `default` | read, write, edit, grep, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
-| `debugger` | `default` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
-| `documenter` | `default` | read, write, edit, grep, glob, ls, git_status, git_diff, run_lint, run_build | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
-| `tester` | `default` | read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | `default` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
+| Agent ID | Primary tools | Purpose | Capability | Latency |
+| --- | --- | --- | --- | --- |
+| `architect` | read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
+| `coder` | read, write, edit, grep, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
+| `debugger` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
+| `documenter` | read, write, edit, grep, glob, ls, git_status, git_diff, run_lint, run_build | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `tester` | read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
+| `verifier` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
 
 ### Shipped Shadow Agents
 Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
 
-| Agent ID | Mode | Primary tools | Purpose | Capability | Latency |
-| --- | --- | --- | --- | --- | --- |
-| `scout` | `advise` | read, grep, glob, ls, workspace_context, find_symbol, entry_points, where_is, git_status, git_diff, git_log | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
-| `researcher` | `advise` | read, web_fetch, read_skill | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
-| `provenance` | `advise` | read, grep, glob, ls, git_status, git_diff, git_log | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| Agent ID | Primary tools | Purpose | Capability | Latency |
+| --- | --- | --- | --- | --- |
+| `scout` | read, grep, glob, ls, workspace_context, find_symbol, entry_points, where_is, git_status, git_diff, git_log | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
+| `researcher` | read, web_fetch, read_skill | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
+| `provenance` | read, grep, glob, ls, git_status, git_diff, git_log | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
 ---
 
@@ -72,8 +72,7 @@ Internal orchestration helpers. They are hidden from default displays (but visib
 ---
 name: Coder                       # string; defaults to recipe id when absent
 description: Bounded code changes # string; defaults to empty string
-mode: default                     # advise | default | super
-tools: [read, edit, run_tests]    # string array; filtered by mode and dispatch admission
+tools: [read, edit, run_tests]    # string array; filtered by target capabilities and dispatch admission
 model: null                       # string only when set; null is ignored
 endpoint: null                    # string only when set; target/endpoint hint
 thinkingLevel: off                # off | minimal | low | medium | high | xhigh
@@ -102,6 +101,17 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 *   **TUI rendering**: Shadow dispatch rows are marked with an `sh:` prefix in the dispatch board and footer so users can see when Clio is using internal orchestration helpers.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
+### ACP Delegation Agents as First-Class Workers
+
+ACP delegation agents (registered under `delegation.agents` in `settings.yaml`) are integrated as first-class workers:
+- **Automatic Routing:** When a task is dispatched to an agent ID matching a configured ACP delegation agent, the dispatch engine automatically routes the execution to that delegation agent.
+- **Dynamic Spec Discovery:** The agent registry automatically synthesizes complete AgentSpecs for configured ACP delegation agents. They are visible via `clio agents` and in slash command menus.
+
+### Restricted Shadow Agent Delegation
+
+To ensure security and proper boundary isolation, shadow and internal agents are restricted from being delegated:
+- **shadow/internal Restriction:** The dispatch engine rejects any attempt to run a shadow or internal agent on an external ACP delegation worker, throwing a validation error.
+
 Interactive TUI:
 
 ```text
@@ -118,7 +128,7 @@ clio run --agent coder "Refactor the parser."
 
 Dispatch admission enforces three gates:
 
-1. The recipe's requested tools must be visible in the requested mode.
+1. The recipe's requested tools must be supported by target capabilities.
 2. The requested action classes must be allowed by the agent's scope.
 3. The worker scope must be a subset of the orchestrator's active scope.
 
@@ -132,7 +142,6 @@ Create `.clio/agents/my-agent.md`:
 ---
 name: My Agent
 description: Focused local review helper.
-mode: advise
 tools: [read, grep, glob, ls, git_diff, write_review]
 ---
 

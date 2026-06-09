@@ -203,9 +203,9 @@ The README is only the release entry point. Detailed docs live under [docs/](doc
 
 | Need | Read |
 | --- | --- |
-| Commands, slash commands, modes, keybindings, dispatch, verification, and troubleshooting | [docs/commands-and-modes.md](docs/commands-and-modes.md) |
+| Commands, slash commands, operating posture, keybindings, dispatch, verification, and troubleshooting | [docs/commands-and-modes.md](docs/commands-and-modes.md) |
 | Runtime targets, local model configuration, fleet profiles, and auth | [docs/configuration-and-targets.md](docs/configuration-and-targets.md) |
-| Safety modes, default-deny Bash, project policy, and typed validation | [docs/safety-model.md](docs/safety-model.md) |
+| Safety posture, default-deny Bash, project policy, and typed validation | [docs/safety-model.md](docs/safety-model.md) |
 | Built-in agent recipes and dispatch admission | [docs/built-in-agents.md](docs/built-in-agents.md) |
 | Prompt envelopes, tool palettes, and bounded tool results | [docs/prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
 | Sessions, receipts, evidence, and memory | [docs/evidence-and-memory.md](docs/evidence-and-memory.md) |

@@ -177,3 +177,14 @@ If you are removing Clio Coder completely from your system, verify that all cate
     *   If you ran `npm run hooks:install` inside a cloned repository, delete the hook at: `<repo-root>/.git/hooks/pre-commit`
 4.  **Global Bin Links**:
     *   `clio` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
+
+---
+
+## 7. Headless and CI Execution Behavior
+
+Clio Coder supports headless operation for automation and continuous integration.
+
+When executing tasks headlessly using `clio run`, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:
+- **Auto-Denial:** Any action requiring operator authorization is immediately and deterministically denied by the runtime.
+- **Rejection Reason:** Rejections carry a standard message indicating that the action must be executed in interactive mode to approve.
+- **Fail-Safe Exit:** The engine cancels all pending and parked tool calls, and exits immediately with an error status. This prevents silent script stalls or unsafe mutations during CI builds.

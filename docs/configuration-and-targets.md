@@ -112,7 +112,6 @@ Terminology used in code and receipts:
 ```yaml
 version: 1
 identity: clio
-defaultMode: default        # default | advise | super
 safetyLevel: auto-edit      # suggest | auto-edit | full-auto
 
 targets:

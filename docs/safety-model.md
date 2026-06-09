@@ -3,9 +3,9 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.2).
 
-Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by the mode matrix, tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
+Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
 
-Source of truth: `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/palette.ts`, and `damage-control-rules.yaml`.
 
 ---
 
@@ -14,8 +14,8 @@ Source of truth: `src/domains/modes/matrix.ts`, `src/domains/safety/**`, `src/to
 ```mermaid
 graph TD
     user[User request] --> palette[Tool palette / provider capability]
-    palette --> mode[Mode matrix]
-    mode --> registry[Tool registry admission]
+    palette --> posture[Single operating posture]
+    posture --> registry[Tool registry admission]
     registry --> safety[Safety policy engine]
     safety --> path[Path/project policy]
     path --> middleware[Middleware + protected artifacts]
@@ -24,17 +24,13 @@ graph TD
     shape --> receipt[Receipts, audit, evidence]
 ```
 
-Key principle: a tool hidden by mode or target capability is not shown to the model; a tool that is shown still must pass registry and safety admission before it can run.
+Key principle: a tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass registry and safety admission before it can run.
 
 ---
 
-## Modes and visible tools
+## Operating Posture and Visible Tools
 
-| Mode | Tool/action posture |
-| --- | --- |
-| `advise` | Read/search/web/git inspection, `write_plan`, `write_review`, `dispatch`, and `read_skill`. Dispatch scope is readonly. |
-| `default` | Read/write/edit/search/web/git inspection, typed validation tools, `bash`, `dispatch`, and skills. Allowed actions are read, write, execute, dispatch. |
-| `super` | Same visible tool set as default, plus `system_modify` action-class admission. Git-destructive actions remain hard-blocked unless a damage-control rule explicitly asks and is confirmed. |
+Clio operates under a single operating posture with a standard, unified visible toolset. This posture provides the model with read, write, edit, and execution capabilities.
 
 Representative built-in tools:
 
@@ -64,13 +60,12 @@ Safety policy metadata records active rule IDs and hashes so receipts/evidence c
 
 ## Default-deny Bash
 
-In `default` mode, arbitrary Bash is denied. A Bash call can run when it matches one of these paths:
+Arbitrary Bash is denied by default. A Bash call can run when it matches one of these paths:
 
 1. a valid `.clio/safety.yaml` command entry;
-2. a narrow built-in allowlist such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`;
-3. super-mode elevation.
+2. a narrow built-in allowlist such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`.
 
-Default mode denies shell operators such as `&&`, `||`, `;`, pipes, redirects, command substitution, and newlines unless an exact project-policy entry opts in.
+Clio denies shell operators such as `&&`, `||`, `;`, pipes, redirects, command substitution, and newlines unless an exact project-policy entry opts in.
 
 Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
 
@@ -152,6 +147,25 @@ Prefer typed tools over Bash:
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
 Dispatch workers run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs their tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+
+---
+
+## Permissions and Headless Behavior
+
+The safety policy engine classifies actions as allowed, blocked, or requiring permission. When an action requires operator confirmation, the handling depends on whether Clio is running interactively or headlessly:
+
+### Interactive TUI Behavior
+
+In interactive mode, a permission request opens a queued overlay prompt immediately in the TUI.
+- **Queued Overlays:** If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue.
+- **Operator Options:** The operator can grant permission once, which resumes only the parked tool call without changing the overall operating posture. Cancelling or denying the prompt cancels the parked tool call cleanly.
+
+### Deterministic Headless Behavior
+
+When executing tasks in headless mode through `clio run`, there is no terminal operator to prompt.
+- **Deterministic Denials:** Any action that requires permission is automatically and deterministically denied by the engine.
+- **Rejection Message:** The engine assigns a standard rejection reason to the denied action: `"clio run cannot confirm permission requests; rerun interactively to approve this action."`
+- **Cancellation of Parked Calls:** Upon a headless denial, all associated parked calls in the tool registry are immediately cancelled, and the headless run exits with an error code, protecting the workspace from unauthorized mutations.
 
 ---
 

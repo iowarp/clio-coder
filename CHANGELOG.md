@@ -16,6 +16,10 @@ rather than hidden subprocess shims.
 
 ### Added
 
+- Added the Context Engine featuring context window resolution, per-model probe capabilities, unified character-based token accounting, per-turn context snapshots, and a persisted snapshot ledger.
+- Added graduated context compaction supporting progressive stages (warning, masking tool observations, pruning tool observations, masking earlier dialogues, and LLM-driven summaries) with pre-submit checks, preflight overflow guards, and post-tool continuation guards.
+- Added an event-driven `/context-view` overlay visualizer, a context meter, and compact footer telemetry.
+- Added signal-based intent classification and explicit tool suppression in the tool palette.
 - Added `clio acp`, a stdio Agent Client Protocol v1 server surface for ACP
   frontends. The server maps Clio chat events, tool-call updates, cancellation,
   usage metadata, cwd-aware session creation, and optional session close support
@@ -57,6 +61,9 @@ rather than hidden subprocess shims.
 
 ### Changed
 
+- Simplified Clio Coder to a single, unified operating posture, removing old advice, default, and super modes along with the legacy mode matrix.
+- Integrated ACP delegation agents as first-class workers and restricted shadow agent delegation to external ACP workers.
+- Hardened permissions handling with queued permission overlays and deterministic headless permission denials during `clio run`.
 - Replaced the split worker/orchestrator runtime eligibility vocabulary with a
   single `isTargetEligibleRuntime` policy used by chat, print, dispatch, target
   listing, and worker-spec validation.

@@ -36,7 +36,7 @@ Important domain directories include:
 | eval/evidence/memory | `src/domains/eval/**`, `src/domains/evidence/**`, `src/domains/memory/**` | Local evals, evidence corpora, approved memory. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, auth. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, prompt envelope, hashes. |
-| safety/modes | `src/domains/safety/**`, `src/domains/modes/**` | Mode matrix, path policy, project policy, damage control. |
+| safety | `src/domains/safety/**` | Safety policy, path policy, project policy, damage control. |
 | session | `src/domains/session/**` | JSONL sessions, resume/fork/tree/compaction. |
 | extensions/share | `src/domains/extensions/**`, `src/domains/share/**` | Extension packages and portable share archives. |
 
@@ -78,7 +78,7 @@ graph TD
     LOOP --> PROMPTS[prompts compiler]
     LOOP --> TOOLS[tool registry]
     LOOP --> ENGINE[engine runtime]
-    TOOLS --> SAFETY[safety + modes]
+    TOOLS --> SAFETY[safety policy]
     TOOLS --> MIDDLEWARE[middleware hook boundary]
     ENGINE --> PROVIDERS[provider runtime descriptors]
     DISPATCH[dispatch domain] --> WORKER[worker subprocess]
@@ -89,7 +89,7 @@ Core data paths:
 
 1. CLI or TUI boot initializes config/data/cache directories through `src/core/init.ts`.
 2. The domain loader starts domains according to each `manifest.ts` dependency list.
-3. The chat loop resolves model/runtime state and visible tools for the current mode.
+3. The chat loop resolves model/runtime state and visible tools for the selected target and request intent.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
 5. Tool calls enter `src/tools/registry.ts`, which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
 6. Fleet dispatch writes run ledger entries and receipts; evidence/memory/eval domains consume those artifacts later.
@@ -100,7 +100,7 @@ Core data paths:
 
 Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
-- `src/domains/modes/matrix.ts` controls which tools/actions are visible by mode.
+- `src/tools/palette.ts` and provider capability resolution decide which tool schemas are visible to the model for a turn.
 - `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy.
 - `src/tools/registry.ts` is the admission point for every tool invocation.
 - `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
