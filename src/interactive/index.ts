@@ -1496,6 +1496,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (leaving === "permission-confirm") {
 			const permission = pendingPermission;
 			const confirmed = permissionConfirmJustFired;
+			pendingPermission = null;
+			permissionConfirmJustFired = false;
 			if (confirmed && permission) {
 				deps.bus.emit(BusChannels.PermissionResolved, {
 					status: "granted",
@@ -1521,8 +1523,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
 				);
 			}
-			pendingPermission = null;
-			permissionConfirmJustFired = false;
 		}
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
 			openPermissionOverlay(pendingPermission.call, pendingPermission.decision);
