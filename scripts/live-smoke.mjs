@@ -237,7 +237,15 @@ async function main() {
 
 		// 5. clio run --agent opencode "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."
 		console.log("Running opencode complex delegation live validation...");
-		const r5 = await runCommand(["run", "--agent", "opencode", "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."], 120_000);
+		const r5 = await runCommand(
+			[
+				"run",
+				"--agent",
+				"opencode",
+				"Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it.",
+			],
+			120_000,
+		);
 		console.log(`Exit code: ${r5.code}`);
 		const cleanStdout5 = redact(r5.stdout);
 		console.log("Stdout:\n", cleanStdout5);
@@ -260,7 +268,15 @@ async function main() {
 
 		// 7. clio run --agent copilot "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."
 		console.log("Running copilot complex delegation live validation...");
-		const r7 = await runCommand(["run", "--agent", "copilot", "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."], 120_000);
+		const r7 = await runCommand(
+			[
+				"run",
+				"--agent",
+				"copilot",
+				"Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it.",
+			],
+			120_000,
+		);
 		console.log(`Exit code: ${r7.code}`);
 		const cleanStdout7 = redact(r7.stdout);
 		console.log("Stdout:\n", cleanStdout7);

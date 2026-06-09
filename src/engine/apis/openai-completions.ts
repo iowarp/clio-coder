@@ -5,7 +5,6 @@ import {
 	type AssistantMessageEvent,
 	type Context,
 	createAssistantMessageEventStream,
-	type Message,
 	type Model,
 	type OpenAICompletionsOptions,
 	type SimpleStreamOptions,
@@ -254,8 +253,6 @@ function withRemainingContextBudget<TOptions extends StreamOptions>(
 		),
 	} as TOptions;
 }
-
-
 
 function requiredToolArguments(tool: Tool): ReadonlyArray<string> {
 	const schema = tool.parameters as unknown;
@@ -533,11 +530,7 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
-					streamSimpleOpenAICompletions(
-						model,
-						context,
-						withRemainingContextBudget(model, context, withSamplers),
-					),
+					streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, withSamplers)),
 					resolved,
 				),
 			),
