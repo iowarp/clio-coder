@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
-import { runBootstrap, runContextClear } from "../../src/domains/context/index.js";
+import { fallbackBootstrapOutput, runBootstrap, runContextClear } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
 const fingerprint = {
@@ -143,6 +143,54 @@ describe("contracts/bootstrap", () => {
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "typescript");
 		strictEqual(state?.lastIndexedAt, "2026-05-01T00:00:00.000Z");
+	});
+
+	it("preserves existing CLIO.md when model generation falls back", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		writeFileSync(
+			join(scratch, "CLIO.md"),
+			serializeClioMd({
+				projectName: "Rich Context",
+				identity: "Rich Context is a TypeScript project with curated agent guidance.",
+				conventions: ["Keep the curated convention intact."],
+				invariants: ["Never erase custom CLIO.md sections during a bootstrap fallback."],
+				sections: [
+					{
+						title: "Architecture traps",
+						body: "Preserve this section when scout or model generation is unavailable.",
+					},
+				],
+				fingerprint,
+			}),
+			"utf8",
+		);
+		const phases: string[] = [];
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			onProgress: (event) => phases.push(`${event.phase}:${event.status}`),
+			generate: (input) => {
+				const fallback = fallbackBootstrapOutput(input);
+				strictEqual(fallback.mode, "existing");
+				return fallback.output;
+			},
+		});
+
+		const parsed = parseClioMd(readFileSync(join(scratch, "CLIO.md"), "utf8"));
+		ok(parsed.ok);
+		if (parsed.ok) {
+			strictEqual(parsed.value.projectName, "Rich Context");
+			strictEqual(parsed.value.conventions[0], "Keep the curated convention intact.");
+			strictEqual(parsed.value.sections[0]?.title, "Architecture traps");
+			strictEqual(parsed.value.sections[0]?.body, "Preserve this section when scout or model generation is unavailable.");
+		}
+		ok(phases.includes("codewiki:completed"));
+		ok(phases.includes("clio-md:completed"));
+		ok(phases.includes("done:completed"));
 	});
 
 	it("invalidates cached context state after contract bootstrap", async () => {

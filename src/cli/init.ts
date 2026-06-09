@@ -61,8 +61,10 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			...(useModel
 				? {
 						generate: modelBootstrapGenerate({
-							onFallback: (err) =>
-								process.stderr.write(`clio context-init: model exploration unavailable, using heuristic (${err.message})\n`),
+							onFallback: (err, mode) =>
+								process.stderr.write(
+									`clio context-init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
+								),
 						}),
 						modelId: "configured-clio-target",
 					}

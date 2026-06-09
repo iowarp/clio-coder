@@ -28,6 +28,7 @@ export const BusChannels = {
 	DispatchFailed: "dispatch.failed",
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
+	ContextActivity: "context.activity",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
 	AgentStatusChanged: "agent.status.changed",
@@ -63,6 +64,29 @@ export interface ContextPressureWarningPayload {
 }
 
 export type ContextWarningPayload = ContextWindowWarningPayload | ContextPressureWarningPayload;
+
+export type ContextActivityKind = "context-init" | "context-clear" | "context-prime" | "context-handoff" | "compaction";
+export type ContextActivityPhase =
+	| "scan"
+	| "codewiki"
+	| "generate"
+	| "clio-md"
+	| "state"
+	| "handoff"
+	| "done";
+export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
+
+/** Structured progress for context operations. Interactive renders this as a live context island. */
+export interface ContextActivityPayload {
+	kind: ContextActivityKind;
+	phase: ContextActivityPhase;
+	status: ContextActivityStatus;
+	message: string;
+	at: number;
+	current?: number;
+	total?: number;
+	detail?: string;
+}
 
 /** Payload published on {@link BusChannels.ContextPruned} after any compaction stage reclaims tokens. */
 export interface ContextPrunedPayload {
