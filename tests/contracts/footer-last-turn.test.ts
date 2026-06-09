@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	type AgentWorkFacts,
-	agentQuadrant,
+	activityQuadrant,
 	type ContextEngineFacts,
 	compactSecondaryLine,
 	formatLastTurn,
@@ -45,7 +45,7 @@ const idleContext: ContextEngineFacts = {
 };
 
 function idleAgent(lastTurn: TurnSummary | null): AgentWorkFacts {
-	return { statusText: null, dispatchSummary: null, toolTally: "no tools · 0✗", dispatchRows: [], lastTurn };
+	return { statusText: null, dispatchSummary: null, toolTally: "none · 0✗", dispatchRows: [], lastTurn };
 }
 
 describe("footer last-turn metrics", () => {
@@ -77,10 +77,11 @@ describe("footer last-turn metrics", () => {
 		ok(!withoutTurn.includes("✓ 4.0s"));
 	});
 
-	it("agent quadrant surfaces last-turn metrics on the activity row when idle", () => {
-		const joined = strip(agentQuadrant(idleAgent(makeSummary())).join("\n"));
+	it("activity quadrant surfaces last-turn metrics below the harness state when idle", () => {
+		const joined = strip(activityQuadrant(idleAgent(makeSummary())).join("\n"));
+		ok(joined.includes("ACTIVITY"));
+		ok(joined.includes("◌ idle"));
 		ok(joined.includes("✓ 4.0s"));
 		ok(joined.includes("↑11 ↓339"));
-		ok(!joined.includes("idle"));
 	});
 });

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { UsageBreakdown } from "../../src/domains/observability/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { type FooterDashboardRenderState, renderFooterStatusLines } from "../../src/interactive/footer/dashboard.js";
 import {
 	type AgentWorkFacts,
 	buildHarnessStatePill,
@@ -332,16 +333,16 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		throughput: "⚡50/s",
 		throughputDetail: "ttft 200ms",
 		cost: "$1.20",
-		target: "mock-endpoint·model",
+		target: "mock-endpoint · model",
 		thinking: "high",
-		capabilities: ["tools", "reasoning"],
+		capabilities: ["tools", "reason", "vision", "ctx 262k"],
 		safety: "auto-edit",
-		sendPolicy: "policy",
+		sendPolicy: "reduced-repeated-envelope",
 		toolProfile: "profile",
 	};
 
 	const context: ContextEngineFacts = {
-		label: "ctx [████░░░░] 50%",
+		label: "ctx ░░░░░ 50%",
 		used: 5000,
 		contextWindow: 10000,
 		toolSchemaTokens: 1000,
@@ -524,5 +525,137 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		ok(stripped.includes("sys"), "legend should contain sys");
 		ok(stripped.includes("tools"), "legend should contain tools");
 		ok(stripped.includes("chat"), "legend should contain chat");
+		ok(stripped.includes("free"), "legend should contain free");
+		ok(!strip(quad.join("\n")).includes("ctx ░"), "expanded context should not use the old flat ctx label");
+	});
+
+	it("renders expanded dashboard without overflowing responsive widths", () => {
+		const state = expandedRenderState({
+			workspace,
+			session,
+			context,
+			agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+			status: { ...status, phase: "idle" },
+		});
+		for (const w of [70, 80, 100, 119, 120, 134]) {
+			const lines = renderFooterStatusLines(state, w);
+			for (const line of lines) {
+				ok(visibleWidth(line) <= w, `width ${w} line "${strip(line)}" overflowed with ${visibleWidth(line)}`);
+			}
+		}
+	});
+
+	it("uses four deliberate wide sections and renames AGENT to ACTIVITY", () => {
+		const lines = renderFooterStatusLines(
+			expandedRenderState({
+				workspace,
+				session,
+				context,
+				agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+				status: { ...status, phase: "idle" },
+			}),
+			134,
+		);
+		const headerRow = strip(lines.find((line) => strip(line).includes("WORKSPACE")) ?? "");
+		ok(headerRow.includes("WORKSPACE"), `wide header should include WORKSPACE, got "${headerRow}"`);
+		ok(headerRow.includes("SESSION"), `wide header should include SESSION, got "${headerRow}"`);
+		ok(headerRow.includes("CONTEXT"), `wide header should include CONTEXT, got "${headerRow}"`);
+		ok(headerRow.includes("ACTIVITY"), `wide header should include ACTIVITY, got "${headerRow}"`);
+		ok(!headerRow.includes("AGENT"), `wide header should not include AGENT, got "${headerRow}"`);
+		strictEqual(headerRow.split("│").length, 4, `wide header should have four columns, got "${headerRow}"`);
+	});
+
+	it("keeps expanded context segmented and removes old awkward labels", () => {
+		const joined = strip(
+			renderFooterStatusLines(
+				expandedRenderState({
+					workspace,
+					session,
+					context,
+					agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+					status: { ...status, phase: "idle" },
+				}),
+				134,
+			).join("\n"),
+		);
+		ok(joined.includes("50.0%"), `expanded context should include segmented percent, got "${joined}"`);
+		ok(joined.includes("▰ sys"), "expanded context should include segmented legend");
+		ok(joined.includes("▱ free"), "expanded context should include free legend");
+		ok(!joined.includes("ctx ░"), `expanded dashboard should not include old ctx bar, got "${joined}"`);
+		ok(!joined.includes("tools no tools"), `expanded dashboard should not say tools no tools, got "${joined}"`);
+		ok(/\btools\s+none · 0✗/.test(joined), `expanded activity should say tools none, got "${joined}"`);
+	});
+
+	it("keeps live telemetry out of SESSION and in ACTIVITY", () => {
+		const lines = renderFooterStatusLines(
+			expandedRenderState({
+				workspace,
+				session,
+				context,
+				agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+				status: { ...status, phase: "idle" },
+			}),
+			134,
+		);
+		const sessionText = wideColumnText(lines, 1);
+		const activityText = wideColumnText(lines, 3);
+		ok(sessionText.includes("target"), `SESSION should include target, got "${sessionText}"`);
+		ok(sessionText.includes("caps"), `SESSION should include caps, got "${sessionText}"`);
+		ok(sessionText.includes("reduced envelope"), `SESSION should abbreviate policy, got "${sessionText}"`);
+		ok(!sessionText.includes("speed"), `SESSION should not include speed, got "${sessionText}"`);
+		ok(!sessionText.includes("cost"), `SESSION should not include cost, got "${sessionText}"`);
+		ok(!sessionText.includes("tok"), `SESSION should not include token rows, got "${sessionText}"`);
+		ok(!sessionText.includes("v0.2.2"), `SESSION should not duplicate version, got "${sessionText}"`);
+		ok(activityText.includes("last"), `ACTIVITY should include last-turn row, got "${activityText}"`);
+		ok(activityText.includes("turn"), `ACTIVITY should include turn metrics, got "${activityText}"`);
+		ok(activityText.includes("cost"), `ACTIVITY should include cost, got "${activityText}"`);
 	});
 });
+
+function expandedRenderState(parts: {
+	workspace: WorkspaceFacts;
+	session: SessionFacts;
+	context: ContextEngineFacts;
+	agent: AgentWorkFacts;
+	status: AgentStatus;
+}): FooterDashboardRenderState {
+	const sessionTokens: UsageBreakdown = {
+		input: 1000,
+		output: 200,
+		totalTokens: 1200,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoningTokens: 100,
+	};
+	return {
+		workspace: parts.workspace,
+		session: parts.session,
+		context: parts.context,
+		agent: parts.agent,
+		notices: [],
+		status: parts.status,
+		toolCounts: { tools: {}, errors: 0, active: 0 },
+		dispatchRows: parts.agent.dispatchRows,
+		throughput: {
+			tokensPerSecond: 99,
+			outputTokens: 140,
+			durationMs: 1600,
+			ttftMs: 171,
+			providerId: "mini",
+			modelId: "model",
+			recordedAt: 1000,
+		},
+		sessionTokens,
+		sessionCost: 1.2,
+		tick: 0,
+		now: 2000,
+	};
+}
+
+function wideColumnText(lines: readonly string[], column: number): string {
+	return lines
+		.map(strip)
+		.filter((line) => line.includes("│"))
+		.map((line) => line.split("│")[column]?.trim() ?? "")
+		.join("\n");
+}

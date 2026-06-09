@@ -35,6 +35,7 @@ export type SlashCommand =
 	| { kind: "connect"; target?: string }
 	| { kind: "disconnect"; target?: string }
 	| { kind: "cost" }
+	| { kind: "context-view" }
 	| { kind: "status" }
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
@@ -307,6 +308,8 @@ export interface SlashCommandContext {
 	openConnect: (target?: string) => void;
 	openDisconnect: (target?: string) => void;
 	openCost: () => void;
+	/** Open the read-only `/context` overlay: categorized context-window ledger. */
+	openContextView: () => void;
 	/** Legacy /status hook. The live dashboard itself is toggled only by Alt+U. */
 	openStatus: () => void;
 	openReceipts: () => void;
@@ -716,6 +719,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.openCost();
+		},
+	},
+	{
+		name: "context-view",
+		description: "Visualize the active context window and its breakdown",
+		kinds: ["context-view"],
+		match(trimmed) {
+			return trimmed === "/context-view" || trimmed === "/context" || trimmed === "/ctx" ? { kind: "context-view" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openContextView();
 		},
 	},
 	{

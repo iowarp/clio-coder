@@ -9,12 +9,12 @@ import {
 	resolveModelRuntimeCapabilitiesForProviders,
 } from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
+import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import { Text, visibleWidth } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import {
-	contextSegment,
 	dispatchSegment,
 	type FooterPanel,
 	formatFooterTokens,
@@ -36,18 +36,18 @@ function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
 	const out: string[] = [];
 	if (caps.tools) out.push("tools");
-	if (caps.reasoning) out.push("reasoning");
+	if (caps.reasoning) out.push("reason");
 	if (caps.vision) out.push("vision");
 	if (caps.fim) out.push("fim");
 	if (caps.embeddings) out.push("embed");
 	if (typeof caps.contextWindow === "number" && caps.contextWindow > 0)
-		out.push(`${Math.round(caps.contextWindow / 1000)}k ctx`);
+		out.push(`ctx ${Math.round(caps.contextWindow / 1000)}k`);
 	return out.slice(0, 5);
 }
 
 import {
 	type AgentWorkFacts,
-	agentQuadrant,
+	activityQuadrant,
 	type ContextEngineFacts,
 	compactPrimaryLine,
 	compactSecondaryLine,
@@ -80,6 +80,7 @@ export interface FooterDashboardDeps {
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
 	getSessionCost?: () => number;
 	getContextUsage?: () => ContextUsageSnapshot;
+	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	getToolCounts?: () => ToolTallySnapshot;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
@@ -172,8 +173,8 @@ export function renderFooterDashboardLines(
 
 /**
  * Expanded footer: responsive quadrants.
- * Widths at 100 columns and above use four horizontal sections.
- * Widths from 80 to 99 columns use a two by two grid.
+ * Widths at 120 columns and above use four weighted horizontal sections.
+ * Widths from 80 to 119 columns use a two by two grid.
  * Widths below 80 columns use a vertical stack with all sections retained.
  */
 export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
@@ -183,15 +184,23 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 
 	if (safeWidth >= EXPANDED_ULTRAWIDE) {
 		const sep = barSep(theme);
-		const sepWidth = visibleWidth(sep) * 3;
-		const available = safeWidth - sepWidth;
-		const baseWidth = Math.floor(available / 4);
-		const widths = [baseWidth, baseWidth, baseWidth, available - baseWidth * 3];
+		const widths = expandedWideColumnWidths(safeWidth, visibleWidth(sep) * 3);
 		const blocks = [
-			workspaceQuadrant(state.workspace),
-			sessionQuadrant(state.session),
-			contextQuadrant(state.context),
-			agentQuadrant(state.agent, { maxWorkers: 4 }),
+			workspaceQuadrant(state.workspace, { width: widths[0] }),
+			sessionQuadrant(state.session, { width: widths[1] }),
+			contextQuadrant(state.context, { width: widths[2] }),
+			activityQuadrant(state.agent, {
+				width: widths[3],
+				maxWorkers: 4,
+				status: state.status,
+				toolCounts: state.toolCounts,
+				throughput: state.throughput,
+				sessionTokens: state.sessionTokens,
+				sessionCost: state.sessionCost,
+				contextUsed: state.context.used,
+				tick: state.tick,
+				now: state.now,
+			}),
 		];
 		return [header, rule(theme, safeWidth), ...zipColumnBlocks(blocks, widths, sep)].map((line) =>
 			fitDashboardLine(line, safeWidth),
@@ -200,35 +209,81 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 
 	if (safeWidth >= EXPANDED_WIDE) {
 		const sep = barSep(theme);
-		const sepWidth = 3;
-		const leftWidth = Math.floor((safeWidth - sepWidth) / 2);
-		const rightWidth = safeWidth - sepWidth - leftWidth;
+		const [topLeftWidth, topRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep), "session");
+		const [bottomLeftWidth, bottomRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep), "context");
 		const top = zipColumns(
-			workspaceQuadrant(state.workspace),
-			sessionQuadrant(state.session),
-			leftWidth,
-			rightWidth,
+			workspaceQuadrant(state.workspace, { width: topLeftWidth }),
+			sessionQuadrant(state.session, { width: topRightWidth }),
+			topLeftWidth,
+			topRightWidth,
 			sep,
 		);
 		const bottom = zipColumns(
-			contextQuadrant(state.context),
-			agentQuadrant(state.agent, { maxWorkers: 4 }),
-			leftWidth,
-			rightWidth,
+			contextQuadrant(state.context, { width: bottomLeftWidth }),
+			activityQuadrant(state.agent, {
+				width: bottomRightWidth,
+				maxWorkers: 4,
+				status: state.status,
+				toolCounts: state.toolCounts,
+				throughput: state.throughput,
+				sessionTokens: state.sessionTokens,
+				sessionCost: state.sessionCost,
+				contextUsed: state.context.used,
+				tick: state.tick,
+				now: state.now,
+			}),
+			bottomLeftWidth,
+			bottomRightWidth,
 			sep,
 		);
 		return [header, rule(theme, safeWidth), ...top, "", ...bottom].map((line) => fitDashboardLine(line, safeWidth));
 	}
 
 	const blocks = [
-		workspaceQuadrant(state.workspace),
-		sessionQuadrant(state.session),
-		contextQuadrant(state.context),
-		agentQuadrant(state.agent, { maxWorkers: safeWidth >= EXPANDED_MID ? 3 : 2 }),
+		workspaceQuadrant(state.workspace, { width: safeWidth }),
+		sessionQuadrant(state.session, { width: safeWidth }),
+		contextQuadrant(state.context, { width: safeWidth }),
+		activityQuadrant(state.agent, {
+			width: safeWidth,
+			maxWorkers: safeWidth >= EXPANDED_MID ? 3 : 2,
+			status: state.status,
+			toolCounts: state.toolCounts,
+			throughput: state.throughput,
+			sessionTokens: state.sessionTokens,
+			sessionCost: state.sessionCost,
+			contextUsed: state.context.used,
+			tick: state.tick,
+			now: state.now,
+		}),
 	];
 	return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
 		fitDashboardLine(line, safeWidth),
 	);
+}
+
+function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
+	const available = Math.max(0, width - totalSepWidth);
+	const widths: [number, number, number, number] = [27, 29, 31, 24];
+	let remaining = Math.max(0, available - widths.reduce((sum, item) => sum + item, 0));
+	const max: [number, number, number, number] = [30, 34, 36, Number.POSITIVE_INFINITY];
+	const order = [2, 1, 3, 0] as const;
+	let cursor = 0;
+	while (remaining > 0) {
+		const index = order[cursor % order.length] ?? 3;
+		if (widths[index] < max[index]) {
+			widths[index] += 1;
+			remaining -= 1;
+		}
+		cursor += 1;
+	}
+	return widths;
+}
+
+function expandedPairWidths(width: number, sepWidth: number, priority: "session" | "context"): [number, number] {
+	const available = Math.max(0, width - sepWidth);
+	const leftWeight = priority === "context" ? 0.53 : 0.47;
+	const left = Math.floor(available * leftWeight);
+	return [left, available - left];
 }
 
 function headerLine(session: SessionFacts, width: number): string {
@@ -292,6 +347,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const throughput = throughputSegment(throughputMetric);
 		const throughputDetail = throughputDetailSegment(throughputMetric);
 		const contextUsage = deps.getContextUsage?.();
+		const contextLedger = deps.getContextLedger?.() ?? null;
 		const settings = deps.getSettings?.();
 		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
 		const contextState = deps.getContextState?.() ?? null;
@@ -304,7 +360,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const targetLabel = settings?.orchestrator?.endpoint ?? "none";
 		const modelLabel = settings?.orchestrator?.model ?? "none";
-		const target = `${targetLabel}·${abbreviateModelId(modelLabel)}`;
+		const target = `${targetLabel} · ${abbreviateModelId(modelLabel)}`;
 
 		const resolution = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
@@ -353,7 +409,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				toolProfile,
 			},
 			context: {
-				label: contextSegment(contextUsage),
+				label: null,
 				used: contextUsage?.tokens ?? null,
 				contextWindow: contextUsage?.contextWindow ?? null,
 				toolSchemaTokens: contextUsage?.breakdown?.toolSchemaTokens ?? null,
@@ -364,6 +420,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				memory: formatMemoryState(contextState?.memoryCount),
 				extensions: deps.getExtensionStats?.() ?? null,
 				breakdown: contextUsage?.breakdown ?? null,
+				ledger: contextLedger,
 			},
 			agent: {
 				statusText: statusText(status, now(), width, frame),

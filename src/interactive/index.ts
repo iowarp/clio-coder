@@ -53,6 +53,7 @@ import {
 } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
+import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
@@ -256,6 +257,7 @@ export type OverlayState =
 	| "providers"
 	| "auth"
 	| "cost"
+	| "context-view"
 	| "receipts"
 	| "thinking"
 	| "model"
@@ -759,6 +761,11 @@ export function routeOverlayKey(
 		routeCostOverlayKey(data, deps);
 		return true;
 	}
+	if (overlayState === "context-view") {
+		// Read-only overlay; same policy as /cost: Esc closes, all else swallowed.
+		routeCostOverlayKey(data, deps);
+		return true;
+	}
 	if (overlayState === "receipts") {
 		// Do not swallow arrow keys or Enter; the focused SelectList needs them.
 		return routeReceiptsOverlayKey(data, deps);
@@ -947,6 +954,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getTokenThroughput: () => deps.observability.latestTokenThroughput(),
 		getSessionCost: () => deps.observability.sessionCost(),
 		getContextUsage: () => deps.chat.contextUsage(),
+		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
@@ -1245,6 +1253,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openConnect: (target) => openConnectOverlayState(target),
 		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
+		openContextView: () => openContextViewOverlayState(),
 		openStatus: () => toggleStatusFooterState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
@@ -1866,6 +1875,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			bus: deps.bus,
 			sessionId: deps.getSessionId?.() ?? null,
 		});
+		tui.requestRender();
+	};
+
+	const openContextViewOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "context-view";
+		overlayHandle = openContextOverlay(tui, () => deps.chat.contextLedger(), { bus: deps.bus });
 		tui.requestRender();
 	};
 
