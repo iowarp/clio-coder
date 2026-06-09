@@ -5,7 +5,7 @@
 
 Clio Coder separates what the model is told from what the runtime is allowed to execute. The prompt compiler builds a hashed prompt envelope, the engine delivers provider tool schemas, and the registry remains the execution gate.
 
-Source of truth: `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/registry.ts`, `src/engine/worker-tools.ts`, and `src/domains/modes/matrix.ts`.
+Source of truth: `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/palette.ts`, `src/tools/registry.ts`, and `src/engine/worker-tools.ts`.
 
 ---
 
@@ -19,7 +19,7 @@ The prompt compiler returns both legacy full text and structured delivery pieces
 | `systemPrompt` | Provider-facing prompt made from stable static and session-level content. |
 | `dynamicPromptFragments` | Turn-level user-role context messages injected before the real user request. |
 | `renderedPromptHash` | SHA-256 over the full rendered text. |
-| `staticShellHash` | Hash over stable identity, mode, and safety content. |
+| `staticShellHash` | Hash over stable identity, operating contract, and safety content. |
 | `sessionShellHash` | Hash over the provider-facing session shell. |
 | `dynamicHash` | Hash over dynamic turn fragments. |
 | `promptEnvelope` | Versioned summary of prompt parts, hashes, token estimates, and inclusion flags. |
@@ -76,7 +76,7 @@ The prompt compiler emits a `# Tool Contract` block. It describes whether the cu
 
 This contract is guidance only. The actual tool surface comes from:
 
-1. the mode matrix in `src/domains/modes/matrix.ts`;
+1. the single operating posture;
 2. provider/runtime capability resolution in `src/domains/providers/**`;
 3. tool schema conversion in `src/engine/worker-tools.ts`;
 4. registry admission in `src/tools/registry.ts`;
@@ -93,7 +93,7 @@ Every tool invocation enters `src/tools/registry.ts`. The registry checks:
 | Gate | Source |
 | --- | --- |
 | Registration | Tool name exists in the registry. |
-| Visibility | Tool is visible in the current mode. |
+| Visibility | Tool is visible for the target capabilities and current request intent. |
 | Classification | Requested action class matches the tool and arguments. |
 | Safety | Damage-control rules, Bash policy, project path policy, and protected artifacts. |
 | Middleware | `before_tool` / `after_tool` hooks and structured effects. |
@@ -116,6 +116,29 @@ These diagnostics help debug local-model behavior and audit which prompt section
 
 ---
 
+## Tool Palette Intent Signals
+
+The tool palette employs a signal-based intent classification system to control tool visibility dynamically. The palette evaluates the operator's prompt text using `detectIntentSignals` and maps it to a set of `IntentSignals` flags.
+
+Based on these flags, the engine classifies the primary user intent using `classifyIntent` into one of several categories:
+- `small_talk`: Basic conversation and greeting.
+- `tool_meta`: Discovered when `signals.toolMeta` matches and no active work intent is detected.
+- `delegation`: Triggers ACP fleet dispatch actions.
+- `skill_work`: Triggers custom skill executions.
+- `coding`: Prompts edits, problem reports, and code modifications.
+- `validation`: Drives code quality and frontend validation workflows.
+- `repo_inspection`: Drives read-only search and files inspection.
+
+### Explicit Tool Suppression
+
+When the user's prompt matches a strict text block indicating that no tools should be offered, the `noTools` signal is set to true. The engine then suppresses all tool deliveries, passing an empty tool schema list to the provider model.
+
+### Diagnostics Integration
+
+Fired intent signals are saved within the `ToolPaletteResult` and surfaced directly inside the `promptDiagnostics` payload. This payload is emitted over the event bus as a `prompt_diagnostics` event, allowing developers to trace exactly which intent signals triggered specific tool exclusions or inclusions during a turn.
+
+---
+
 ## Documentation guidance
 
 When documenting prompt/tool behavior, distinguish:
@@ -126,4 +149,4 @@ When documenting prompt/tool behavior, distinguish:
 - **safety policy**: whether the call is allowed, parked, or blocked;
 - **receipts/evidence**: what persisted after the run.
 
-Do not imply that prompt text alone enforces safety. In Clio, enforcement lives in the mode matrix, registry, safety policy engine, and worker dispatch admission.
+Do not imply that prompt text alone enforces safety. In Clio, enforcement lives in the single operating posture, registry, safety policy engine, and worker dispatch admission.

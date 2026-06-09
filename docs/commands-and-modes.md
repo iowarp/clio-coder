@@ -9,8 +9,7 @@ reference, interaction modes, dispatch surface, verification lanes, and common
 operator guidance out of the README so the release entry point stays short.
 
 Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
-`src/domains/modes/**`, `src/domains/dispatch/**`, `src/tools/registry.ts`, and
-the current test suite.
+`src/domains/dispatch/**`, `src/tools/registry.ts`, and the current test suite.
 
 ## CLI Commands
 
@@ -124,8 +123,6 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | Binding | Action |
 | --- | --- |
 | `Shift+Tab` | Cycle thinking level. |
-| `Alt+M` | Cycle mode: `default` / `advise`. |
-| `Alt+S` | Open the super-mode confirmation overlay. |
 | `Alt+T` | Open the session tree navigator. |
 | `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
 | `Alt+L` | Open the model and targets selector. |
@@ -144,19 +141,15 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
 
-## Modes
+## Operating Posture
 
-Clio Coder has three operator modes. See [safety-model.md](safety-model.md)
-for the detailed enforcement model.
+Clio Coder operates under a single, unified operating posture. There are no separate read-only, default-deny, or privileged modes, and no user-facing mode toggles.
 
-| Mode | Behavior |
-| --- | --- |
-| `default` | Read, write, edit, search, typed git/test/build tools, and default-deny Bash. Bash only admits the curated allowlist or audited project policy entries. |
-| `advise` | Read-oriented analysis, planning, and review. Dispatch admission is readonly. Recipes that need write or execute scope are rejected. |
-| `super` | Explicit operator elevation for one-shot privileged calls. Base hard blocks still apply. |
+Tool and command execution is governed entirely by:
+- **Target Capabilities:** What the selected model target actually supports (such as tools, streaming, and vision).
+- **Safety Policy Engine:** Granular rule packs loaded from `damage-control-rules.yaml`, project policies, and protected artifact paths. See [safety-model.md](safety-model.md) for details on safety gates and default-deny Bash behaviors.
 
-`safetyLevel` in settings shifts prompt posture, but enforcement still lives in
-the mode matrix, tool registry, safety policy engine, and dispatch admission.
+When an action requires confirmation, the safety engine registers an authorization demand and pauses execution. The TUI displays a queued permission confirmation dialog. The operator can then approve or deny that single action without changing the overall operating posture.
 
 ## Dispatch and Built-In Agents
 
@@ -236,6 +229,23 @@ To skip project context for one invocation:
 clio --no-context-files
 clio -nc run --agent scout "..."
 ```
+
+## Reasoning and Live Thinking Controls
+
+Clio Coder features direct, interactive controls for model reasoning and thinking streams:
+
+- **Thinking Level (`Shift+Tab`):** Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.
+- **Thinking Blocks Toggle (`Alt+R`):** Toggles assistant thinking blocks between a compact, single-line folded marker and an expanded, full-body view.
+- **Live Streaming:** During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment.
+- **Thinking Replay:** When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.
+
+## TUI Surface Refinements
+
+The Clio TUI has been enhanced to maximize readability and command discovery:
+
+- **Redesigned Compact Footer:** The footer dashboard displays real-time token, cost, and target indicators in a single-row layout. Use `Alt+U` to toggle the footer between compact and expanded widgets.
+- **Relocated Telemetry:** Per-turn telemetry is surfaced in the footer activity area, keeping token consumption and execution costs visible without adding extra transcript noise.
+- **Overlay Navigation:** Standardized overlays are available for settings, model selection, hotkey references, target health, and session tracking.
 
 ## Troubleshooting
 
