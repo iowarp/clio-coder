@@ -401,7 +401,7 @@ function installPermissionBridge(input: {
 							sessionUpdate: "tool_call",
 							toolCallId,
 							title: call.tool,
-							kind: call.tool,
+							kind: toolKind(call.tool),
 							status: "pending",
 							rawInput: rawToolInput(call),
 						},

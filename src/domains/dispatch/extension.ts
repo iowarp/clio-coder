@@ -815,6 +815,12 @@ export function createDispatchBundle(
 	function resolveAcpDelegationLifecycle(req: DispatchRequest): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
+		if (req.agentId && maybeAgents) {
+			const spec = maybeAgents.getSpec(req.agentId);
+			if (spec && (spec.audience === "shadow" || spec.audience === "internal")) {
+				throw new Error(`dispatch: shadow or internal agent '${req.agentId}' cannot run on external ACP agent '${agentId}'`);
+			}
+		}
 		const settings = config?.get();
 		if (!settings) throw new Error("dispatch: config domain required for ACP delegation");
 		const configured = settings.delegation.agents.find((entry) => entry.id === agentId);
@@ -1198,6 +1204,12 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
+		const settings = config?.get();
+		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
+		if (isAcpAgent && !req.delegationAgentId) {
+			req.delegationAgentId = req.agentId;
+		}
+
 		const { systemPrompt: _sp, ...jobSpec } = req;
 		const validated = validateJobSpec(jobSpec);
 		if (!validated.ok) {

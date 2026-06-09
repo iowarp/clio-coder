@@ -77,8 +77,11 @@ mkdirSync(clioCacheDir, { recursive: true });
 const settings = {
 	version: 1,
 	identity: "clio",
-	defaultMode: "default",
-	safetyLevel: "auto-edit",
+	defaultMode: "super",
+	safetyLevel: "full-auto",
+	state: {
+		lastMode: "super",
+	},
 	targets: [
 		{
 			id: targetId,
@@ -101,6 +104,30 @@ const settings = {
 			thinkingLevel: "off",
 		},
 		profiles: {},
+	},
+	delegation: {
+		defaults: {
+			connectTimeoutMs: 30000,
+			turnTimeoutMs: 300000,
+			permissionTimeoutMs: 120000,
+			toolGovernance: "clio-policy",
+		},
+		agents: [
+			{
+				id: "opencode",
+				command: "opencode",
+				args: ["acp", "--cwd", "."],
+				toolGovernance: "clio-policy",
+				labels: { specialty: "coding" },
+			},
+			{
+				id: "copilot",
+				command: "copilot",
+				args: ["--acp"],
+				toolGovernance: "clio-policy",
+				labels: { specialty: "coding" },
+			},
+		],
 	},
 };
 
@@ -193,6 +220,52 @@ async function main() {
 
 		if (!cleanStdout.toLowerCase().includes("clio-live-ok")) {
 			throw new Error("Validation prompt response did not contain 'clio-live-ok'");
+		}
+
+		// 4. clio run --agent opencode "Reply with exactly: clio-opencode-ok"
+		console.log("Running opencode delegation live validation...");
+		const r4 = await runCommand(["run", "--agent", "opencode", "Reply with exactly: clio-opencode-ok"], 120_000);
+		console.log(`Exit code: ${r4.code}`);
+		const cleanStdout4 = redact(r4.stdout);
+		console.log("Stdout:\n", cleanStdout4);
+		if (r4.code !== 0) {
+			throw new Error(`clio run --agent opencode failed with code ${r4.code}`);
+		}
+		if (!cleanStdout4.toLowerCase().includes("clio-opencode-ok")) {
+			throw new Error("Validation prompt response did not contain 'clio-opencode-ok'");
+		}
+
+		// 5. clio run --agent opencode "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."
+		console.log("Running opencode complex delegation live validation...");
+		const r5 = await runCommand(["run", "--agent", "opencode", "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."], 120_000);
+		console.log(`Exit code: ${r5.code}`);
+		const cleanStdout5 = redact(r5.stdout);
+		console.log("Stdout:\n", cleanStdout5);
+		if (r5.code !== 0) {
+			throw new Error(`clio run --agent opencode (complex) failed with code ${r5.code}`);
+		}
+
+		// 6. clio run --agent copilot "Reply with exactly: clio-copilot-ok"
+		console.log("Running copilot delegation live validation...");
+		const r6 = await runCommand(["run", "--agent", "copilot", "Reply with exactly: clio-copilot-ok"], 120_000);
+		console.log(`Exit code: ${r6.code}`);
+		const cleanStdout6 = redact(r6.stdout);
+		console.log("Stdout:\n", cleanStdout6);
+		if (r6.code !== 0) {
+			throw new Error(`clio run --agent copilot failed with code ${r6.code}`);
+		}
+		if (!cleanStdout6.toLowerCase().includes("clio-copilot-ok")) {
+			throw new Error("Validation prompt response did not contain 'clio-copilot-ok'");
+		}
+
+		// 7. clio run --agent copilot "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."
+		console.log("Running copilot complex delegation live validation...");
+		const r7 = await runCommand(["run", "--agent", "copilot", "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."], 120_000);
+		console.log(`Exit code: ${r7.code}`);
+		const cleanStdout7 = redact(r7.stdout);
+		console.log("Stdout:\n", cleanStdout7);
+		if (r7.code !== 0) {
+			throw new Error(`clio run --agent copilot (complex) failed with code ${r7.code}`);
 		}
 
 		console.log("Live smoke validation: SUCCESS");
