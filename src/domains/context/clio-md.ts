@@ -50,6 +50,16 @@ function normalizeSource(source: string): string {
 		.trimStart();
 }
 
+function normalizeInline(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeNestedMarkdown(value: string): string {
+	return normalizeSource(value)
+		.trim()
+		.replace(/^(#{1,2})(\s+)/gm, "###$2");
+}
+
 function charLen(value: string): number {
 	return [...value].length;
 }
@@ -246,19 +256,21 @@ function validateForSerialization(input: SerializeClioMdInput): void {
 }
 
 function renderWithoutParse(input: SerializeClioMdInput): string {
-	const lines: string[] = [`# ${input.projectName.trim()}`, "", input.identity.trim()];
-	if (input.conventions.length > 0) {
-		lines.push("", "## Conventions", "", ...input.conventions.map((item) => `- ${item.trim()}`));
+	const lines: string[] = [`# ${normalizeInline(input.projectName)}`, "", normalizeInline(input.identity)];
+	const conventions = input.conventions.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
+	if (conventions.length > 0) {
+		lines.push("", "## Conventions", "", ...conventions.map((item) => `- ${item}`));
 	}
-	if (input.invariants.length > 0) {
-		lines.push("", "## Hard invariants", "", ...input.invariants.map((item, index) => `${index + 1}. ${item.trim()}`));
+	const invariants = input.invariants.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
+	if (invariants.length > 0) {
+		lines.push("", "## Hard invariants", "", ...invariants.map((item, index) => `${index + 1}. ${item}`));
 	}
 	for (const section of input.sections ?? []) {
-		const title = section.title.trim();
-		const body = section.body.trim();
+		const title = normalizeInline(section.title);
+		const body = normalizeNestedMarkdown(section.body);
 		if (title.length > 0 && body.length > 0) lines.push("", `## ${title}`, "", body);
 	}
-	const imported = input.importedAgentContext?.trim();
+	const imported = input.importedAgentContext ? normalizeNestedMarkdown(input.importedAgentContext) : undefined;
 	if (imported && imported.length > 0) {
 		lines.push("", "## Imported agent context", "", imported);
 	}

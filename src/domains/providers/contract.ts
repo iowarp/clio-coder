@@ -33,6 +33,8 @@ export interface EndpointStatus {
 	capabilities: CapabilityFlags;
 	/** Probe-only capabilities preserved separately for per-model synthesis in the UI. */
 	probeCapabilities?: Partial<CapabilityFlags> | null;
+	/** Probe-only capabilities keyed by wire model id for selected-model resolution. */
+	probeModelCapabilities?: Readonly<Record<string, Partial<CapabilityFlags>>> | null;
 	/** Wire model id the probe-only capabilities were read from, when known. */
 	probeModelId?: string | null;
 	/** Diagnostic notes from the last probe (e.g. wire-model mismatch warnings). */

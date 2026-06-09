@@ -17,6 +17,7 @@
  */
 
 import type { Usage } from "../../../engine/types.js";
+import { ceilChars, contentChars, estimateAgentMessageTokens } from "../context-accounting.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -32,59 +33,21 @@ export interface TokenEstimator {
 	calculateContextTokens(entries: ReadonlyArray<SessionEntry>, lastUsage?: Usage): number;
 }
 
-/** Image blocks cost ~1200 tokens regardless of resolution; match pi-coding-agent. */
-const IMAGE_ESTIMATE_CHARS = 4800;
-
-/**
- * Measure the character load of an arbitrary payload. Walks text, thinking,
- * image, and toolCall blocks exactly like the pi-coding-agent port; plain
- * strings and object payloads fall through to `JSON.stringify` so an unknown
- * shape still contributes a conservative estimate.
- */
-function payloadChars(payload: unknown): number {
-	if (typeof payload === "string") return payload.length;
-	if (Array.isArray(payload)) {
-		let total = 0;
-		for (const block of payload) {
-			if (!block || typeof block !== "object") continue;
-			const b = block as Record<string, unknown>;
-			if (b.type === "text" && typeof b.text === "string") total += b.text.length;
-			else if (b.type === "thinking" && typeof b.thinking === "string") total += b.thinking.length;
-			else if (b.type === "image") total += IMAGE_ESTIMATE_CHARS;
-			else if (b.type === "toolCall") {
-				if (typeof b.name === "string") total += b.name.length;
-				if (b.arguments !== undefined) total += JSON.stringify(b.arguments).length;
-			}
-		}
-		return total;
-	}
-	if (payload && typeof payload === "object") {
-		const p = payload as Record<string, unknown>;
-		if (Array.isArray(p.content)) {
-			const contentChars = payloadChars(p.content);
-			if (contentChars > 0) return contentChars;
-		}
-		if (typeof p.text === "string") return p.text.length;
-		return JSON.stringify(payload).length;
-	}
-	return 0;
-}
-
 function estimateMessage(entry: MessageEntry): number {
-	return Math.ceil(payloadChars(entry.payload) / 4);
+	return estimateAgentMessageTokens(entry);
 }
 
 function estimateBashExecution(entry: BashExecutionEntry): number {
-	return Math.ceil((entry.command.length + entry.output.length) / 4);
+	return ceilChars(entry.command.length + entry.output.length);
 }
 
 function estimateCustom(entry: CustomEntry): number {
 	if (entry.data === undefined) return 0;
-	return Math.ceil(payloadChars(entry.data) / 4);
+	return ceilChars(contentChars(entry.data));
 }
 
 function estimateSummary(entry: BranchSummaryEntry | CompactionSummaryEntry): number {
-	return Math.ceil(entry.summary.length / 4);
+	return ceilChars(entry.summary.length);
 }
 
 /**
@@ -102,7 +65,7 @@ export function estimateTokens(entry: SessionEntry): number {
 		case "custom":
 			return estimateCustom(entry);
 		case "skillActivation":
-			return Math.ceil(JSON.stringify(entry.activation).length / 4);
+			return ceilChars(JSON.stringify(entry.activation).length);
 		case "branchSummary":
 		case "compactionSummary":
 			return estimateSummary(entry);

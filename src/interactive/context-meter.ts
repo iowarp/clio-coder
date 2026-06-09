@@ -20,6 +20,7 @@ export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, Clio
 	pending: "accentDeep",
 	reserve: "dim",
 	free: "frame",
+	streaming: "accent",
 };
 
 export function contextCategoryGlyph(category: ContextLedgerCategory): string {

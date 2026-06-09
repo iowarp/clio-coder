@@ -35,6 +35,7 @@ import {
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import { ceilChars } from "../../domains/session/context-accounting.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
@@ -783,7 +784,7 @@ export function runStream(
 				// When we have an upstream token count from the SDK use it; otherwise
 				// approximate at 1 token per 4 chars (the same chars/4 estimator the
 				// openai-compat wrapper uses for streamed thinking content).
-				reasoningTokensAccum += tokensHint ?? Math.ceil(chunk.length / 4);
+				reasoningTokensAccum += tokensHint ?? ceilChars(chunk.length);
 				stream.push({
 					type: "thinking_delta",
 					contentIndex: activeThinkingRef.idx,

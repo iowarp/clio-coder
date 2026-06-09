@@ -15,6 +15,7 @@ export type ToolPaletteGroup =
 
 export type ToolPaletteIntent =
 	| "small_talk"
+	| "tool_meta"
 	| "repo_inspection"
 	| "coding"
 	| "validation"
@@ -45,6 +46,14 @@ export interface ToolPaletteResult {
 	intent: ToolPaletteIntent;
 	phase: ToolPalettePhase;
 	groups: ReadonlyArray<ToolPaletteGroup>;
+	/**
+	 * Names of the classifier signals that fired on this turn, in a stable
+	 * order. Surfaced in prompt diagnostics so palette decisions stay
+	 * auditable: the active groups are a pure function of these signals.
+	 */
+	signals: ReadonlyArray<string>;
+	/** True when the user explicitly asked for a tool-free answer. */
+	toolsSuppressed: boolean;
 	providerSupportsTools: boolean;
 	posture: "operating";
 	omittedToolCount: number;
@@ -98,24 +107,120 @@ const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
 
 const GREETING_RE = /^(?:hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|ping)[.!?\s]*$/i;
 const EDIT_RE =
-	/\b(?:implement|fix|edit|modify|change|update|add|remove|delete|refactor|rewrite|create|scaffold|patch|repair|wire|migrate)\b/i;
+	/\b(?:implement|fix|edit|modify|change|update|add|remove|delete|refactor|rewrite|create|scaffold|patch|repair|wire|migrate|resolve|address|handle|improve|optimi[sz]e|rename|extract|bump|upgrade|downgrade|revert|apply|configure|correct)\b|\bclean\s*up\b|\bset\s+up\b|\bhook\s+up\b|\bmake\b.{0,40}\b(?:pass|work|compile|build|green)\b/i;
 const INSPECT_RE =
 	/\b(?:inspect|audit|review|explain|summari[sz]e|understand|find|where|locate|read|show|list|search|grep|status|diff|log|trace|map)\b/i;
+/** Problem statements ("the build is broken") imply a debug-and-fix workflow. */
+const PROBLEM_RE =
+	/\b(?:bug|broken|crash(?:es|ing|ed)?|fail(?:s|ing|ure|ures|ed)?|error|exception|regression|flaky|leak(?:s|ing)?|hang(?:s|ing)?|stack\s*trace|segfault)\b/i;
+/** Question-form prompts want diagnosis first, not immediate mutation. */
+const QUESTION_RE = /^(?:why|what|how|when|where|who|which|is|are|does|do|can|could|should|did)\b|\?\s*$/i;
 const VALIDATE_RE = /\b(?:test|tests|lint|typecheck|build|verify|validation|validate|ci|precommit)\b/i;
 const DISPATCH_RE =
 	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet)\b/i;
-const EXTERNAL_RE = /\b(?:web|http|https|url|fetch|browse|internet|online|external research|latest|current|today)\b/i;
+const EXTERNAL_RE =
+	/\bhttps?:\/\/|\b(?:web\s*search|search\s+the\s+web|browse|internet|online\s+docs?|external\s+research|webpage|web\s+page|url)\b|\bfetch\s+(?:the\s+)?(?:url|page|site|website|docs?|documentation)\b|\blatest\s+(?:version|release|docs?|documentation|news)\b|\bwhat'?s\s+new\s+in\b/i;
 const SKILL_RE = /\b(?:skill|skills|SKILL\.md)\b/i;
 const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
 const SHELL_RE = /\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
+/** Mentions of concrete CLI invocations that the curated tools do not cover. */
+const COMMAND_MENTION_RE =
+	/`[^`]+`|\b(?:npm|pnpm|yarn|npx|git|docker|make|cargo|pip|uv|kubectl)\s+(?:install|publish|push|pull|fetch|rebase|cherry-pick|stash|clone|compose|exec|run|apply)\b/i;
 const AVOID_SHELL_RE =
 	/\b(?:(?:do\s+not|don't)\s+(?:use\s+)?|(?:without|no)\s+(?:using\s+)?)\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
 const TOOL_META_RE =
 	/\b(?:what|which)\s+(?:tools?|tool\s+calls?)\b|\b(?:list|show|describe)\s+(?:all\s+)?(?:the\s+)?(?:tools?l?(?!-)|tool\s+calls?)\b|\btools?\s+(?:do|can)\s+you\s+(?:have|use|access)\b|\btool\s+(?:access|surface|palette)\b/i;
 const NO_TOOL_RE =
-	/\b(?:do\s+not|don't)\s+use\s+(?:tools?|tool\s+calls?)\b|\b(?:without|no)\s+(?:tools|tool\s+calls?)\b|\bno\s+tool\s+(?:use|calls?)\b/i;
+	/\b(?:do\s+not|don't)\s+use\s+(?:any\s+)?(?:tools?|tool\s+calls?)\b|\b(?:without|no)\s+(?:tools|tool\s+calls?)\b|\bno\s+tool\s+(?:use|calls?)\b|\bjust\s+(?:answer|explain|tell\s+me)\b.{0,40}\bno\s+tools?\b/i;
 const WORK_CONTEXT_RE =
 	/\b(?:repo(?:sitory)?|workspace|project|code|source|files?|director(?:y|ies)|src\/|tests?\/|package\.json|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html|py|rs|go|c|cpp|h|hpp|toml|ya?ml))\b/i;
+const ARTIFACT_RE = /\b(?:plan|review|PLAN\.md|REVIEW\.md)\b/i;
+
+/**
+ * Every named classifier signal, computed once per turn. Both the primary
+ * intent and the requested groups derive from this single struct, so the
+ * decision is deterministic and each activation can be traced to the signal
+ * that caused it.
+ */
+export interface IntentSignals {
+	empty: boolean;
+	greeting: boolean;
+	noTools: boolean;
+	noShell: boolean;
+	toolMeta: boolean;
+	dispatch: boolean;
+	skill: boolean;
+	skillAuthoring: boolean;
+	external: boolean;
+	edit: boolean;
+	problemReport: boolean;
+	questionForm: boolean;
+	validation: boolean;
+	inspection: boolean;
+	shell: boolean;
+	commandMention: boolean;
+	workContext: boolean;
+	artifact: boolean;
+}
+
+export function detectIntentSignals(text: string): IntentSignals {
+	const trimmed = text.trim();
+	return {
+		empty: trimmed.length === 0,
+		greeting: GREETING_RE.test(trimmed),
+		noTools: NO_TOOL_RE.test(trimmed),
+		noShell: AVOID_SHELL_RE.test(trimmed),
+		toolMeta: TOOL_META_RE.test(trimmed),
+		dispatch: DISPATCH_RE.test(trimmed),
+		skill: SKILL_RE.test(trimmed),
+		skillAuthoring: CREATE_SKILL_RE.test(trimmed),
+		external: EXTERNAL_RE.test(trimmed),
+		edit: EDIT_RE.test(trimmed),
+		problemReport: PROBLEM_RE.test(trimmed),
+		questionForm: QUESTION_RE.test(trimmed),
+		validation: VALIDATE_RE.test(trimmed),
+		inspection: INSPECT_RE.test(trimmed),
+		shell: SHELL_RE.test(trimmed),
+		commandMention: COMMAND_MENTION_RE.test(trimmed),
+		workContext: WORK_CONTEXT_RE.test(trimmed),
+		artifact: ARTIFACT_RE.test(trimmed),
+	};
+}
+
+function firedSignalNames(signals: IntentSignals): string[] {
+	return (Object.keys(signals) as Array<keyof IntentSignals>).filter((key) => signals[key]);
+}
+
+function hasWorkIntent(signals: IntentSignals): boolean {
+	return (
+		signals.dispatch ||
+		signals.skill ||
+		signals.external ||
+		signals.edit ||
+		signals.problemReport ||
+		signals.validation ||
+		(signals.inspection && (!signals.toolMeta || signals.workContext))
+	);
+}
+
+/**
+ * Pick the single primary intent from the fired signals. Multi-intent prompts
+ * keep all of their signals; group expansion unions over every signal, so the
+ * primary label only decides phase defaults and prompt wording, never access.
+ */
+export function classifyIntent(signals: IntentSignals): ToolPaletteIntent {
+	if (signals.empty || signals.greeting) return "small_talk";
+	if (signals.toolMeta && !hasWorkIntent(signals)) return "tool_meta";
+	if (signals.dispatch) return "delegation";
+	if (signals.skill) return "skill_work";
+	if (signals.external) return "external_research";
+	if (signals.edit) return "coding";
+	// A problem statement implies a fix workflow, but question-form prompts
+	// ("why does the build fail?") want diagnosis first.
+	if (signals.problemReport && !signals.questionForm) return "coding";
+	if (signals.validation) return "validation";
+	return "repo_inspection";
+}
 
 function unique(tools: Iterable<ToolName>): ToolName[] {
 	const seen = new Set<ToolName>();
@@ -128,61 +233,44 @@ function unique(tools: Iterable<ToolName>): ToolName[] {
 	return out;
 }
 
-function classifyIntent(text: string): ToolPaletteIntent {
-	const trimmed = text.trim();
-	const asksNoTools = NO_TOOL_RE.test(trimmed);
-	const asksToolMeta = TOOL_META_RE.test(trimmed);
-	const asksDispatch = DISPATCH_RE.test(trimmed);
-	const asksSkill = SKILL_RE.test(trimmed);
-	const asksExternal = EXTERNAL_RE.test(trimmed);
-	const asksEdit = EDIT_RE.test(trimmed);
-	const asksValidation = VALIDATE_RE.test(trimmed);
-	const asksInspection = INSPECT_RE.test(trimmed);
-	const hasWorkIntent =
-		asksDispatch ||
-		asksSkill ||
-		asksExternal ||
-		asksEdit ||
-		asksValidation ||
-		(asksInspection && (!asksToolMeta || WORK_CONTEXT_RE.test(trimmed)));
-	if (trimmed.length === 0 || GREETING_RE.test(trimmed)) return "small_talk";
-	if (asksNoTools) return "small_talk";
-	if (asksToolMeta && !hasWorkIntent) return "small_talk";
-	if (asksDispatch) return "delegation";
-	if (asksSkill) return "skill_work";
-	if (asksExternal) return "external_research";
-	if (asksEdit) return "coding";
-	if (asksValidation) return "validation";
-	if (asksInspection) return "repo_inspection";
-	return "repo_inspection";
-}
-
 function hasRecentEdit(tools: ReadonlyArray<ToolName> | undefined): boolean {
 	return tools?.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write) ?? false;
 }
 
 function resolvePhase(
 	intent: ToolPaletteIntent,
-	text: string,
+	signals: IntentSignals,
 	recentTools: ReadonlyArray<ToolName> | undefined,
 ): ToolPalettePhase {
-	if (VALIDATE_RE.test(text)) return "validation";
+	if (signals.validation) return "validation";
 	if (hasRecentEdit(recentTools)) return "post_edit";
 	if (intent === "coding" || intent === "skill_work") return "editing";
-	if (intent === "small_talk") return "initial";
+	if (intent === "small_talk" || intent === "tool_meta") return "initial";
 	return "inspection";
 }
 
-function requestedGroups(intent: ToolPaletteIntent, phase: ToolPalettePhase, text: string): ToolPaletteGroup[] {
-	if (intent === "small_talk") return [];
+function requestedGroups(
+	intent: ToolPaletteIntent,
+	phase: ToolPalettePhase,
+	signals: IntentSignals,
+): ToolPaletteGroup[] {
+	if (intent === "small_talk" || intent === "tool_meta") return [];
 	const groups: ToolPaletteGroup[] = ["orientation", "locate", "inspect"];
-	if (intent === "coding" || intent === "skill_work") groups.push("mutate");
-	if (intent === "validation" || phase === "post_edit" || phase === "validation") groups.push("validate");
-	if (intent === "delegation" || DISPATCH_RE.test(text)) groups.push("delegate");
-	if (intent === "external_research" || EXTERNAL_RE.test(text)) groups.push("external");
-	if (intent === "skill_work" || SKILL_RE.test(text)) groups.push("skills");
-	if (/\b(?:plan|review|PLAN\.md|REVIEW\.md)\b/i.test(text)) groups.push("artifact");
-	if (SHELL_RE.test(text) && !AVOID_SHELL_RE.test(text)) groups.push("escape_hatch");
+	if (intent === "coding" || intent === "skill_work" || signals.edit) groups.push("mutate");
+	if (
+		signals.validation ||
+		signals.problemReport ||
+		phase === "post_edit" ||
+		phase === "validation" ||
+		intent === "validation"
+	) {
+		groups.push("validate");
+	}
+	if (signals.dispatch) groups.push("delegate");
+	if (signals.external) groups.push("external");
+	if (signals.skill) groups.push("skills");
+	if (signals.artifact) groups.push("artifact");
+	if ((signals.shell || signals.commandMention) && !signals.noShell) groups.push("escape_hatch");
 	return uniqueGroups(groups);
 }
 
@@ -197,11 +285,11 @@ function uniqueGroups(groups: Iterable<ToolPaletteGroup>): ToolPaletteGroup[] {
 	return out.sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b));
 }
 
-function expandGroups(groups: ReadonlyArray<ToolPaletteGroup>, text: string): ToolName[] {
+function expandGroups(groups: ReadonlyArray<ToolPaletteGroup>, signals: IntentSignals): ToolName[] {
 	const tools: ToolName[] = [];
 	for (const group of groups) {
 		for (const tool of TOOL_GROUPS[group]) {
-			if (tool === ToolNames.CreateSkill && !CREATE_SKILL_RE.test(text)) continue;
+			if (tool === ToolNames.CreateSkill && !signals.skillAuthoring) continue;
 			tools.push(tool);
 		}
 	}
@@ -233,8 +321,10 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 		? profileTools.filter((tool) => input.workerAllowedTools?.includes(tool))
 		: profileTools;
 	const candidates = unique(constrained);
-	const intent = classifyIntent(input.userText);
-	const phase = resolvePhase(intent, input.userText, input.recentToolNames);
+	const signals = detectIntentSignals(input.userText);
+	const intent = classifyIntent(signals);
+	const phase = resolvePhase(intent, signals, input.recentToolNames);
+	const signalNames = firedSignalNames(signals);
 	if (!input.providerSupportsTools) {
 		return {
 			activeTools: [],
@@ -242,13 +332,18 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 			intent,
 			phase,
 			groups: [],
+			signals: signalNames,
+			toolsSuppressed: signals.noTools,
 			providerSupportsTools: false,
 			posture: "operating",
 			omittedToolCount: candidates.length,
 		};
 	}
-	const groups = requestedGroups(intent, phase, input.userText);
-	const requested = new Set(expandGroups(groups, input.userText));
+	// An explicit tool-free request suppresses every schema this turn while
+	// keeping the truthful intent label; the Tool Catalog still tells the
+	// model what it could use if the user changes their mind.
+	const groups = signals.noTools ? [] : requestedGroups(intent, phase, signals);
+	const requested = new Set(expandGroups(groups, signals));
 	const activeTools = candidates.filter((tool) => requested.has(tool));
 	return {
 		activeTools,
@@ -256,6 +351,8 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 		intent,
 		phase,
 		groups,
+		signals: signalNames,
+		toolsSuppressed: signals.noTools,
 		providerSupportsTools: true,
 		posture: "operating",
 		omittedToolCount: Math.max(0, candidates.length - activeTools.length),

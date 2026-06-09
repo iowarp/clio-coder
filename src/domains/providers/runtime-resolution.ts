@@ -1,7 +1,8 @@
 import { targetRequiresAuth } from "./auth/index.js";
+import { getCatalogModelForRuntime } from "./catalog.js";
 import type { EndpointStatus, ProvidersContract } from "./contract.js";
 import { isTargetEligibleRuntime } from "./eligibility.js";
-import { resolveModelCapabilities } from "./model-capabilities.js";
+import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
 	resolveEndpointRuntimeCapabilities,
@@ -9,6 +10,7 @@ import {
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
+import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type {
 	RuntimeApiFamily,
 	RuntimeAuth,
@@ -16,6 +18,30 @@ import type {
 	RuntimeKind,
 	RuntimeTier,
 } from "./types/runtime-descriptor.js";
+
+export interface ContextWindowDetails {
+	/** Best static knowledge of the model's window (hint > KB > catalog > runtime default). */
+	declaredContextWindow: number;
+	/** Raw probe result, when the endpoint was probed. */
+	probedContextWindow: number | null;
+	/** Context actually loaded server-side; only LM Studio reports this. */
+	loadedContextWindow: number | null;
+	/** What Clio wants for coding: 128k floor on local-native tiers, declared elsewhere. */
+	desiredContextWindow: number;
+	/** What the target actually offers; probe/loaded beats config beats declared knowledge. */
+	effectiveContextWindow: number;
+	/** Where `effectiveContextWindow` came from. */
+	contextWindowSource:
+		| "catalog"
+		| "probe"
+		| "loaded"
+		| "endpoint-override"
+		| "model-hint"
+		| "descriptor-default"
+		| "local-native-default"
+		| "unknown";
+	warning: string | null;
+}
 
 export type RuntimeResolutionUse = "orchestrator" | "print" | "dispatch";
 export type RuntimeResolutionSeverity = "info" | "warning" | "error";
@@ -55,6 +81,7 @@ export interface ResolvedRuntimeTarget {
 	modelReasoningAuthoritative: boolean;
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
+	contextWindowDetails: ContextWindowDetails;
 }
 
 export interface RuntimeTargetSnapshot {
@@ -217,18 +244,8 @@ interface ModelCapabilitiesResolution {
 	reasoningAuthoritative: boolean;
 }
 
-function normalizedModelId(value: string | null | undefined): string | null {
-	const trimmed = value?.trim();
-	return trimmed ? trimmed : null;
-}
-
 function probeReasoningApplies(status: EndpointStatus, wireModelId: string): boolean {
-	if (status.probeCapabilities?.reasoning === undefined) return false;
-	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
-	const probeModelId = normalizedModelId(status.probeModelId);
-	if (probeModelId !== null) return modelId !== null && probeModelId === modelId;
-	const defaultModelId = normalizedModelId(status.endpoint.defaultModel);
-	return modelId !== null && defaultModelId !== null && modelId === defaultModelId;
+	return probeCapabilitiesForModel(status, wireModelId)?.reasoning !== undefined;
 }
 
 function modelCapabilitiesFor(
@@ -298,6 +315,16 @@ export function resolveRuntimeTarget(
 	const requestedThinkingLevel = input.requestedThinkingLevel ?? "off";
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);
 	const capabilities = capabilityResolution.capabilities;
+	const probedContextWindow = probeCapabilitiesForModel(status, wireModelId)?.contextWindow ?? null;
+	const contextWindowDetails = resolveContextWindowDetails(
+		endpoint,
+		runtime,
+		wireModelId,
+		providers.knowledgeBase,
+		probedContextWindow,
+	);
+	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
+
 	const modelRuntime = resolveEndpointRuntimeCapabilities(
 		endpoint,
 		runtime,
@@ -329,6 +356,7 @@ export function resolveRuntimeTarget(
 		modelRuntime,
 		modelReasoningAuthoritative: capabilityResolution.reasoningAuthoritative,
 		diagnostics,
+		contextWindowDetails,
 	};
 	if (runtime.tier !== undefined) target.runtimeTier = runtime.tier;
 	return { ok: true, target, diagnostics };
@@ -362,10 +390,32 @@ function withoutStaleRuntimeDiagnostics(
 export function refineRuntimeTargetWithModelHints(
 	target: ResolvedRuntimeTarget,
 	model: unknown,
+	knowledgeBase?: KnowledgeBase | null,
 ): ResolvedRuntimeTarget {
 	const patch = modelHintPatch(target, model);
-	if (Object.keys(patch).length === 0) return target;
+	const hintRecord = model && typeof model === "object" ? (model as Record<string, unknown>) : undefined;
+	const modelHintContextWindow = nonNegativeFiniteNumber(hintRecord?.contextWindow);
+	// The capability patch ignores the hint window once a target carries any
+	// effective window (it always does now), so the hint must independently
+	// force a re-resolution: a live model reporting a smaller loaded window
+	// than the local-native floor would otherwise be silently ignored and
+	// compaction would trigger too late.
+	const windowHintDiffers =
+		modelHintContextWindow !== undefined &&
+		modelHintContextWindow > 0 &&
+		modelHintContextWindow !== target.contextWindowDetails.effectiveContextWindow;
+	if (Object.keys(patch).length === 0 && !windowHintDiffers) return target;
 	const capabilities: CapabilityFlags = { ...target.capabilities, ...patch };
+	const contextWindowDetails = resolveContextWindowDetails(
+		target.endpoint,
+		target.runtime,
+		target.wireModelId,
+		knowledgeBase ?? null,
+		target.contextWindowDetails.probedContextWindow,
+		modelHintContextWindow,
+	);
+	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
+
 	const modelRuntime = resolveModelRuntimeCapabilities({
 		targetId: target.targetId,
 		runtimeId: target.runtimeId,
@@ -385,6 +435,7 @@ export function refineRuntimeTargetWithModelHints(
 		modelRuntime,
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
 		diagnostics,
+		contextWindowDetails,
 	};
 }
 
@@ -418,4 +469,103 @@ export function runtimeTargetSnapshot(target: ResolvedRuntimeTarget): RuntimeTar
 
 export function firstRuntimeResolutionError(diagnostics: ReadonlyArray<RuntimeResolutionDiagnostic>): string | null {
 	return diagnostics.find((entry) => entry.severity === "error")?.message ?? null;
+}
+
+/** Recommended minimum context for coding against a local-native runtime. */
+const LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW = 128000;
+/** Last-resort window when nothing declares one. */
+const FALLBACK_CONTEXT_WINDOW = 8192;
+
+function positiveWindow(value: number | null | undefined): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Resolve the three context-window figures a target carries:
+ *
+ *  - `declared`: best static knowledge of the model's window
+ *    (live model hint > knowledge base > catalog > runtime default > 8192).
+ *  - `desired`: what Clio wants for coding. Local-native tiers get a 128k
+ *    floor regardless of what KB/catalog declare; elsewhere desired follows
+ *    the declared window.
+ *  - `effective`: what the target actually offers, most live source first:
+ *    probe/loaded > endpoint config override > model-specific knowledge >
+ *    the local-native floor (we ask local runtimes to load that much) >
+ *    runtime descriptor default. `contextWindowSource` labels whichever won.
+ *
+ * Warns when a local-native target ends up below the 128k recommendation.
+ */
+export function resolveContextWindowDetails(
+	endpoint: EndpointDescriptor,
+	runtime: RuntimeDescriptor,
+	wireModelId: string,
+	knowledgeBase: KnowledgeBase | null,
+	probedContextWindow: number | null,
+	modelHintContextWindow?: number,
+): ContextWindowDetails {
+	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
+	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
+
+	// Model-specific knowledge, most live first.
+	let modelDeclared: number | undefined;
+	let modelDeclaredSource: ContextWindowDetails["contextWindowSource"] = "unknown";
+	const hintWindow = positiveWindow(modelHintContextWindow);
+	const kbWindow = positiveWindow(kbHit?.entry.capabilities?.contextWindow);
+	const catalogWindow = positiveWindow(catalogModel?.contextWindow);
+	if (hintWindow !== undefined) {
+		modelDeclared = hintWindow;
+		modelDeclaredSource = "model-hint";
+	} else if (kbWindow !== undefined) {
+		modelDeclared = kbWindow;
+		modelDeclaredSource = "catalog";
+	} else if (catalogWindow !== undefined) {
+		modelDeclared = catalogWindow;
+		modelDeclaredSource = "catalog";
+	}
+
+	const declaredContextWindow =
+		modelDeclared ?? positiveWindow(runtime.defaultCapabilities?.contextWindow) ?? FALLBACK_CONTEXT_WINDOW;
+
+	const desired =
+		runtime.tier === "local-native"
+			? Math.max(declaredContextWindow, LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW)
+			: declaredContextWindow;
+
+	const probeWindow = positiveWindow(probedContextWindow);
+	const overrideWindow = positiveWindow(endpoint.capabilities?.contextWindow);
+	let effective: number;
+	let source: ContextWindowDetails["contextWindowSource"];
+	if (probeWindow !== undefined) {
+		effective = probeWindow;
+		source = runtime.id === "lmstudio-native" ? "loaded" : "probe";
+	} else if (overrideWindow !== undefined) {
+		effective = overrideWindow;
+		source = "endpoint-override";
+	} else if (modelDeclared !== undefined) {
+		effective = modelDeclared;
+		source = modelDeclaredSource;
+	} else if (runtime.tier === "local-native") {
+		// No live or model-specific signal; plan for the floor we ask local
+		// runtimes to load.
+		effective = desired;
+		source = "local-native-default";
+	} else {
+		effective = declaredContextWindow;
+		source = "descriptor-default";
+	}
+
+	let warning: string | null = null;
+	if (runtime.tier === "local-native" && effective < LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW) {
+		warning = `Connected target offers ${effective} tokens, which is below the recommended 128k for local coding.`;
+	}
+
+	return {
+		declaredContextWindow,
+		probedContextWindow,
+		loadedContextWindow: runtime.id === "lmstudio-native" ? probedContextWindow : null,
+		desiredContextWindow: desired,
+		effectiveContextWindow: effective,
+		contextWindowSource: source,
+		warning,
+	};
 }

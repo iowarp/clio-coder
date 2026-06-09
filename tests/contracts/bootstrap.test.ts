@@ -64,6 +64,39 @@ describe("contracts/bootstrap", () => {
 		}
 	});
 
+	it("demotes nested generated headings so CLIO.md keeps one H1", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: ["Use the local test runner.\n# Do not create another top-level heading."],
+				invariants: [],
+				sections: [
+					{
+						title: "Architecture notes",
+						body: "# Boundary\n\n## Trap\n\nKeep nested headings inside the section body.",
+					},
+				],
+				importedAgentContext: "# Imported\n\n## Source provenance\n\n- Synthetic import for regression coverage.",
+			}),
+		});
+
+		const text = readFileSync(join(scratch, "CLIO.md"), "utf8");
+		const h1Count = [...text.matchAll(/^#\s+/gm)].length;
+		strictEqual(h1Count, 1, text);
+		ok(text.includes("### Boundary"), text);
+		ok(text.includes("### Trap"), text);
+		ok(text.includes("### Imported"), text);
+		const parsed = parseClioMd(text);
+		ok(parsed.ok);
+	});
+
 	it("rejects more than six convention bullets", () => {
 		const bullets = Array.from({ length: 7 }, (_, index) => `- rule ${index}`).join("\n");
 		const parsed = parseClioMd(`# Sample\n\nSample is a project with too many rules.\n\n## Conventions\n\n${bullets}\n`);

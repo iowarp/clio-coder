@@ -1,4 +1,9 @@
-import { BusChannels } from "../core/bus-events.js";
+import {
+	BusChannels,
+	type ContextPressureWarningPayload,
+	type ContextPrunedPayload,
+	type ContextWindowWarningPayload,
+} from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { SkillActivation } from "../core/skill-activation.js";
@@ -43,11 +48,22 @@ import {
 	shouldAnnounceStage,
 } from "../domains/session/compaction/progressive.js";
 import {
+	appendContextSnapshot,
+	type CaptureContextSnapshotInput,
+	type ContextSnapshot,
+	type ContextUsageBreakdown,
 	type ContextUsageSnapshot,
+	captureContextSnapshot,
+	ceilChars,
+	contentChars,
 	contextUsageSnapshot,
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	extractReasoningTokens,
+	getLatestContextSnapshot,
+	reconcileSnapshot,
+	snapshotInputTokens,
+	toolSchemaChars,
 } from "../domains/session/context-accounting.js";
 import { buildContextLedger, type ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -63,8 +79,9 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { evictOtherOllamaModels } from "../engine/apis/ollama-native.js";
+import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
-import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import { renderToolCatalog, resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
@@ -272,6 +289,8 @@ export interface PromptDiagnostics {
 		phase: ToolPaletteResult["phase"];
 		groups: ReadonlyArray<string>;
 		activeTools: ReadonlyArray<string>;
+		signals: ReadonlyArray<string>;
+		toolsSuppressed: boolean;
 		omittedToolCount: number;
 		providerSupportsTools: boolean;
 		posture: string;
@@ -504,10 +523,11 @@ function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
 	}
 	schemas.sort((a, b) => a.name.localeCompare(b.name));
 	const serialized = canonicalJson(schemas);
+	const toolSchemaTokenEstimate = tools.reduce((sum: number, tool) => sum + ceilChars(toolSchemaChars(tool)), 0);
 	return {
 		toolSignature: sha256(serialized),
 		toolCount: schemas.length,
-		toolSchemaTokenEstimate: Math.ceil(serialized.length / 4),
+		toolSchemaTokenEstimate,
 	};
 }
 
@@ -527,6 +547,8 @@ function promptDiagnostics(
 			groups: [],
 			activeTools: [],
 			availableTools: [],
+			signals: [],
+			toolsSuppressed: false,
 			omittedToolCount: 0,
 			providerSupportsTools: tools.length > 0,
 			posture: "operating",
@@ -545,6 +567,8 @@ function promptDiagnostics(
 			phase: palette.phase,
 			groups: [...palette.groups],
 			activeTools: palette.activeTools.map((tool) => String(tool)),
+			signals: [...palette.signals],
+			toolsSuppressed: palette.toolsSuppressed,
 			omittedToolCount: palette.omittedToolCount,
 			providerSupportsTools: palette.providerSupportsTools,
 			posture: palette.posture,
@@ -840,6 +864,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let currentTurnHash: string | null = null;
 	let currentPromptDiagnostics: PromptDiagnostics | null = null;
 	let currentToolPalette: ToolPaletteResult | null = null;
+	let currentContextSnapshot: ContextSnapshot | null = null;
+	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
 	const queuedFollowUps: string[] = [];
@@ -851,6 +877,94 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		for (const listener of listeners) {
 			listener(event);
 		}
+	};
+
+	/**
+	 * Capture a context snapshot from the runtime's live agent state. All
+	 * capture sites (turn submit, both compaction paths) flow through this
+	 * helper so window resolution and category decomposition stay identical.
+	 */
+	const captureRuntimeContextSnapshot = (
+		agentRuntime: AgentRuntime,
+		turnId: string,
+		compactionThreshold: number | null,
+		extra: Partial<CaptureContextSnapshotInput> = {},
+	): ContextSnapshot => {
+		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		return captureContextSnapshot({
+			sessionId: agentRuntime.agent.sessionId ?? "unknown",
+			turnId,
+			providerId: agentRuntime.endpointId,
+			runtimeId: agentRuntime.runtimeId,
+			modelId: agentRuntime.wireModelId,
+			systemPrompt: agentRuntime.agent.state.systemPrompt,
+			conversationMessages: agentRuntime.agent.state.messages,
+			activeToolSchemas: agentRuntime.agent.state.tools,
+			desiredContextWindow: details.desiredContextWindow,
+			effectiveContextWindow: details.effectiveContextWindow,
+			contextWindowSource: details.contextWindowSource,
+			compactionThreshold,
+			...extra,
+		});
+	};
+
+	/**
+	 * True when the in-memory snapshot has been reconciled against provider
+	 * usage since it was last persisted. A tool-calling turn reconciles once
+	 * per API call; only the final reconciled state is written to the JSONL
+	 * ledger, when the run settles. Any persist (turn submit, compaction,
+	 * flush) clears the flag because it writes the current snapshot state.
+	 */
+	let snapshotPersistPending = false;
+
+	const persistContextSnapshot = (snapshot: ContextSnapshot): void => {
+		const currentSession = deps.session?.current();
+		if (currentSession) appendContextSnapshot(currentSession, snapshot);
+		snapshotPersistPending = false;
+	};
+
+	const flushReconciledSnapshot = (): void => {
+		if (!snapshotPersistPending || !currentContextSnapshot) return;
+		persistContextSnapshot(currentContextSnapshot);
+	};
+
+	/**
+	 * Output tokens of the in-flight response. While streaming, estimate from
+	 * the partial assistant tail; once the turn settles, the reconciled
+	 * snapshot carries the provider-reported value.
+	 */
+	const liveStreamingOutputTokens = (): number => {
+		if (!runtime) return 0;
+		if (streaming) {
+			const messages = runtime.agent.state.messages;
+			const lastMsg = messages[messages.length - 1] as { role?: string; payload?: unknown; content?: unknown } | undefined;
+			if (lastMsg && lastMsg.role === "assistant") {
+				return ceilChars(contentChars(lastMsg.payload ?? lastMsg.content));
+			}
+			return 0;
+		}
+		return currentContextSnapshot?.categories.streaming || 0;
+	};
+
+	/**
+	 * Tokens for the submitted text that the snapshot has not yet counted.
+	 * The turn snapshot is captured before the user message joins the
+	 * conversation, so until the provider reconciles (or a fresh capture sees
+	 * the text in the conversation) the pending input occupies window space
+	 * that no category covers. Zero once reconciled or once the text landed.
+	 */
+	const pendingUserInputTokens = (): number => {
+		const snapshot = currentContextSnapshot;
+		if (!snapshot?.pendingUserInput) return 0;
+		if (snapshot.sources.total === "reconciled") return 0;
+		if (snapshot.turnId !== "pending") {
+			const pending = snapshot.pendingUserInput;
+			const landed = (snapshot.conversationMessages ?? []).some(
+				(message) => extractUserText(message as AgentMessage) === pending,
+			);
+			if (landed) return 0;
+		}
+		return ceilChars(snapshot.pendingUserInput.length);
 	};
 
 	const emitQueueUpdate = (): void => {
@@ -1132,10 +1246,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 	};
 
+	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
+		const settings = deps.getSettings();
+		const endpointId = settings.orchestrator.endpoint?.trim();
+		const wireModelId = settings.orchestrator.model?.trim();
+		if (!endpointId || !wireModelId) return;
+		const endpoint = deps.providers.getEndpoint(endpointId);
+		if (!endpoint) return;
+		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
+		if (runtimeDesc?.tier !== "local-native") return;
+		await deps.providers.probeEndpoint(endpointId);
+	};
+
 	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
 		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
-		target.runtimeResolution = refineRuntimeTargetWithModelHints(target.runtimeResolution, synth);
+		target.runtimeResolution = refineRuntimeTargetWithModelHints(
+			target.runtimeResolution,
+			synth,
+			deps.providers.knowledgeBase,
+		);
 		const mutable = synth as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
 		const caps = target.runtimeResolution.capabilities;
 		mutable.contextWindow = caps.contextWindow;
@@ -1143,7 +1273,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		mutable.reasoning = caps.reasoning;
 		return synth as unknown as Model<never>;
 	};
-
 	const ensureReasoningProbe = (target: ChatLoopTarget): void => {
 		if (deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId) !== null) return;
 		void deps.providers
@@ -1168,7 +1297,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						| { contextWindow?: number; maxTokens?: number; reasoning?: boolean }
 						| undefined;
 					const runtimeResolution = liveModel
-						? refineRuntimeTargetWithModelHints(refreshed.target, liveModel)
+						? refineRuntimeTargetWithModelHints(refreshed.target, liveModel, deps.providers.knowledgeBase)
 						: refreshed.target;
 					if (liveModel) {
 						const caps = runtimeResolution.capabilities;
@@ -1217,9 +1346,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	/**
+	 * Publish the window-resolution warning only on transitions (appeared,
+	 * changed, cleared). ensureRuntime runs on every submit; re-emitting the
+	 * same state each turn would spam every ContextWarning subscriber.
+	 */
+	let lastContextWindowWarning: string | null = null;
+	const emitContextWindowWarningTransition = (warning: string | null): void => {
+		if (warning === lastContextWindowWarning) return;
+		lastContextWindowWarning = warning;
+		deps.bus?.emit(BusChannels.ContextWarning, { warning } satisfies ContextWindowWarningPayload);
+	};
+
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
+		emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownEndpoints().has(target.endpoint.id)) {
 			throw new Error(
 				`[Clio Coder] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
@@ -1236,7 +1378,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// or Alt+T); reconcile the clamped level so the next prompt
 			// dispatches under the current intent without forcing a rebuild.
 			ensureReasoningProbe(target);
-			const runtimeResolution = refineRuntimeTargetWithModelHints(target.runtimeResolution, runtime.agent.state.model);
+			const runtimeResolution = refineRuntimeTargetWithModelHints(
+				target.runtimeResolution,
+				runtime.agent.state.model,
+				deps.providers.knowledgeBase,
+			);
 			const desiredLevel = runtimeResolution.effectiveThinkingLevel;
 			if (runtime.agent.state.thinkingLevel !== desiredLevel) {
 				runtime.agent.state.thinkingLevel = desiredLevel;
@@ -1445,6 +1591,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (enrichedEvent.type === "message_end") {
 				appendQueuedUserTurn(enrichedEvent.message);
 				appendAssistantTurn(enrichedEvent.message);
+				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
+				if (usage && currentContextSnapshot) {
+					// Reconcile in memory on every API call so the live meters
+					// track usage; persistence waits for the run to settle.
+					currentContextSnapshot = reconcileSnapshot(currentContextSnapshot, usage);
+					snapshotPersistPending = true;
+				}
 			}
 			if (enrichedEvent.type === "tool_execution_start") {
 				appendToolCallTurn(enrichedEvent);
@@ -1453,6 +1606,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				appendToolResultTurn(enrichedEvent);
 			}
 			if (enrichedEvent.type === "agent_end") {
+				flushReconciledSnapshot();
 				emitFinishContractAdvisory(publicEvent?.type === "agent_end" ? publicEvent.messages : enrichedEvent.messages);
 			}
 		});
@@ -1769,8 +1923,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		agentRuntime: AgentRuntime,
 		pendingUserText?: string,
 	): { tokens: number; contextWindow: number; breakdown: ReturnType<typeof estimateAgentContextBreakdown> } => {
-		const modelState = agentRuntime.agent.state.model as { contextWindow?: number } | undefined;
-		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : 0;
+		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
 			messages: agentRuntime.agent.state.messages,
@@ -1821,6 +1974,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 
+		const compactionThreshold = cfg?.thresholds?.llmSummary ?? null;
+
 		let selectedStage: ContextCompactionStage = "llm_summary";
 		let pressure: number | null = null;
 		let liveTokensBefore: number | null = null;
@@ -1837,11 +1992,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
 		if (!force && selectedStage === "warning") {
 			deps.bus?.emit(BusChannels.ContextWarning, {
-				stage: selectedStage,
+				stage: "warning",
 				pressure,
 				trigger,
 				at: Date.now(),
-			});
+			} satisfies ContextPressureWarningPayload);
 			maybeNoticeStage(
 				selectedStage,
 				`[context engine] ${formatPressure(pressure)}; consider /compact if the next turn needs more room`,
@@ -1851,6 +2006,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		if (!force && isProgressiveCompactionStage(selectedStage)) {
 			if (!deps.session?.current()) return false;
+			const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 			const result = await progressiveCompactionTrigger.fire(async () =>
 				applyProgressiveCompaction({
 					entries: deps.readSessionEntries?.() ?? [],
@@ -1867,8 +2023,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			deps.session.replaceEntries(result.entries);
 			refreshAgentMessagesFromSession(agentRuntime);
-			const liveTokensAfter = liveContextEstimate(agentRuntime).tokens;
+
+			const postCompactSnapshot = captureRuntimeContextSnapshot(
+				agentRuntime,
+				activeUserTurnId || "compaction",
+				compactionThreshold,
+			);
+			currentContextSnapshot = postCompactSnapshot;
+			persistContextSnapshot(postCompactSnapshot);
+
+			const liveTokensAfter = snapshotInputTokens(postCompactSnapshot);
 			const tokensBefore = liveTokensBefore ?? result.tokensBefore;
+			lastCompactionEvent = {
+				stage: result.stage,
+				tokensBefore,
+				tokensAfter: liveTokensAfter,
+				trigger,
+			};
 			deps.bus?.emit(BusChannels.ContextPruned, {
 				stage: result.stage,
 				pressure,
@@ -1878,8 +2049,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				prunedObservations: result.prunedObservations,
 				maskedDialogue: result.maskedDialogue,
 				trigger,
+				snapshotIdBefore: beforeSnapshotId,
+				snapshotIdAfter: postCompactSnapshot.snapshotId,
 				at: Date.now(),
-			});
+			} satisfies ContextPrunedPayload);
 			maybeNoticeStage(
 				selectedStage,
 				formatProgressiveCompactionNotice(result, { tokensBefore, tokensAfter: liveTokensAfter }),
@@ -1889,6 +2062,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 		let result: CompactResult | null = null;
+		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 		try {
 			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
 		} finally {
@@ -1896,16 +2070,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		if (!result || result.summary.length === 0) return false;
 
-		// Rebuild agent state from the live session view. The orchestrator's
-		// compaction flow already appended a `compactionSummary` entry; reading
-		// the entries again and feeding them through `buildReplayAgentMessagesFromTurns`
-		// produces the canonical [summary-as-context, ...kept suffix] message
-		// list, mirroring pi-coding-agent's `agent.replaceMessages(buildSessionContext().messages)`
-		// contract. The replay builder also filters out error-stopReason
-		// assistant entries, which subsumes the pre-compaction prune of failed
-		// assistant tails on the overflow path.
 		refreshAgentMessagesFromSession(agentRuntime);
 		lastContextStageBySession.set(sessionStageKey(), "llm_summary");
+
+		const postCompactSnapshot = captureRuntimeContextSnapshot(
+			agentRuntime,
+			activeUserTurnId || "compaction",
+			compactionThreshold,
+		);
+		currentContextSnapshot = postCompactSnapshot;
+		persistContextSnapshot(postCompactSnapshot);
+
+		const tokensAfter = snapshotInputTokens(postCompactSnapshot);
+		lastCompactionEvent = {
+			stage: "llm_summary",
+			tokensBefore: result.tokensBefore,
+			tokensAfter,
+			trigger,
+		};
+		deps.bus?.emit(BusChannels.ContextPruned, {
+			stage: "llm_summary",
+			tokensBefore: result.tokensBefore,
+			tokensAfter,
+			trigger,
+			snapshotIdBefore: beforeSnapshotId,
+			snapshotIdAfter: postCompactSnapshot.snapshotId,
+			at: Date.now(),
+		} satisfies ContextPrunedPayload);
 
 		emitNotice(
 			renderCompactionSummaryLine({
@@ -2058,6 +2249,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			let agentRuntime: AgentRuntime | null;
 			try {
+				await ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = ensureRuntime();
 			} catch (err) {
 				emitNotice(err instanceof Error ? err.message : String(err));
@@ -2069,21 +2261,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 
-			// Recompile the prompt before every turn so safety level, provider,
-			// and model changes since the last turn flow into `state.systemPrompt`.
-			// Sets `currentTurnHash` as a side-effect so the user + assistant
-			// appends below stamp it.
+			// 1. Resolve tools once
 			const resolvedTools = resolveToolsForRuntime(agentRuntime, deps, text, recentToolNames, currentToolInvokeOptions);
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;
-			const pendingSkillActivations = options.skillActivations ?? [];
-			const compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
 
-			// Pre-submit auto-compaction trigger. CLIO_FORCE_COMPACT=1 bypasses
-			// the threshold so /compact integration tests and live drills can
-			// force a run without driving real token usage. Compaction failures
-			// here are non-fatal: the user's turn still goes through, possibly
-			// oversized; the overflow-recovery path will catch that.
+			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
 			try {
 				await runAutoCompact(agentRuntime, forceNow, undefined, undefined, text);
@@ -2091,21 +2274,70 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
+			// 3. Compile prompt
+			const pendingSkillActivations = options.skillActivations ?? [];
+			let compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
+
+			// 4. Preflight overflow check, before the user turn is committed.
+			// A blocked request must not leave a dangling user entry that the
+			// next replay would treat as an unanswered turn.
+			const compactionThreshold = deps.getSettings().compaction?.thresholds?.llmSummary ?? null;
+			const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
+				captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
+					promptSegments: compileResult?.segmentManifest
+						? compileResult.segmentManifest.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate }))
+						: undefined,
+					dynamicPromptMessages: compileResult?.dynamicPromptFragments
+						? [...compileResult.dynamicPromptFragments]
+						: undefined,
+					pendingUserInput: text,
+					images,
+					promptHash: currentTurnHash ?? undefined,
+					toolSignature: currentPromptDiagnostics?.toolSignature ?? undefined,
+				});
+
+			const reservedOutput = resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens);
+			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+			const pendingInputTokens = ceilChars(text.length);
+			let turnSnapshot = captureTurnSnapshot("pending");
+			const totalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
+
+			if (effectiveWindow > 0 && totalEstimate > effectiveWindow) {
+				emitNotice(
+					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${snapshotInputTokens(turnSnapshot) + pendingInputTokens} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
+				);
+				const compacted = await runAutoCompact(agentRuntime, true, undefined, undefined, text);
+				if (!compacted) {
+					emitNotice(
+						"[Clio Coder] Compaction could not reclaim enough space. Request blocked; trim the prompt, reduce active tools, or start a fresh session.",
+					);
+					return;
+				}
+				refreshAgentMessagesFromSession(agentRuntime);
+				compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
+				turnSnapshot = captureTurnSnapshot("pending");
+				const postTotalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
+				if (postTotalEstimate > effectiveWindow) {
+					emitNotice(
+						`[Clio Coder] Request still exceeds the effective window after compaction (${postTotalEstimate} > ${effectiveWindow}). Request blocked.`,
+					);
+					return;
+				}
+				emitNotice(
+					`[Clio Coder] Context budget check passed post-compaction (${postTotalEstimate} <= ${effectiveWindow}). Proceeding.`,
+				);
+			}
+
+			// 5. Append the user turn, then stamp and persist the snapshot.
 			const userTurnId = appendSubmittedUserTurn(agentRuntime, text, images);
 			recordSubmittedSkillActivations(pendingSkillActivations, userTurnId);
 			if (currentPromptDiagnostics) {
 				emit({ type: "prompt_diagnostics", promptDiagnostics: currentPromptDiagnostics });
 			}
+			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
+			currentContextSnapshot = turnSnapshot;
+			persistContextSnapshot(turnSnapshot);
 
-			const finalResolvedTools = resolveToolsForRuntime(
-				agentRuntime,
-				deps,
-				text,
-				recentToolNames,
-				currentToolInvokeOptions,
-			);
-			agentRuntime.agent.state.tools = finalResolvedTools.tools;
-			currentToolPalette = finalResolvedTools.palette;
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 			toolProseAbortReason = null;
@@ -2164,6 +2396,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
 				currentToolPalette = null;
+				// Safety net for thrown paths where agent_end never delivered;
+				// no-op when the agent_end flush already ran.
+				flushReconciledSnapshot();
 			}
 		},
 		cancel(): void {
@@ -2198,15 +2433,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		contextUsage(): ContextUsageSnapshot {
 			if (!runtime) return contextUsageSnapshot(null, 0);
-			const estimate = liveContextEstimate(runtime);
-			if (runtime.agent.state.messages.length <= replayedContextMessages.length) {
-				return contextUsageSnapshot(null, estimate.contextWindow);
+			const effectiveWindow = runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+			if (!currentContextSnapshot) {
+				return contextUsageSnapshot(null, effectiveWindow);
 			}
-			return contextUsageSnapshot(
-				estimate.tokens > 0 ? estimate.tokens : null,
-				estimate.contextWindow,
-				estimate.breakdown,
-			);
+
+			const pendingTokens = pendingUserInputTokens();
+			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + liveStreamingOutputTokens();
+			const breakdown: ContextUsageBreakdown = {
+				systemPromptTokens: currentContextSnapshot.categories.system,
+				messageTokens: currentContextSnapshot.categories.messages,
+				pendingUserTokens: pendingTokens,
+				toolSchemaTokens: currentContextSnapshot.categories.tools,
+			};
+			return contextUsageSnapshot(totalUsed > 0 ? totalUsed : null, effectiveWindow, breakdown);
 		},
 		contextLedger(): ContextLedger {
 			const settings = deps.getSettings();
@@ -2221,34 +2461,48 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					compactionAuto,
 				});
 			}
-			const estimate = liveContextEstimate(runtime);
-			const diagnostics = currentPromptDiagnostics;
-			const promptSegments = diagnostics
-				? diagnostics.tiers.map((tier) => ({ id: tier.id, tokenEstimate: tier.tokenEstimate }))
-				: [];
-			const hasConversation = runtime.agent.state.messages.length > replayedContextMessages.length;
-			const measured =
-				hasConversation &&
-				runtime.agent.state.messages.some((message) => {
-					if ((message as { role?: string }).role !== "assistant") return false;
-					const usage = (message as { usage?: { totalTokens?: number; input?: number; output?: number } }).usage;
-					if (!usage) return false;
-					return (usage.totalTokens ?? 0) > 0 || (usage.input ?? 0) + (usage.output ?? 0) > 0;
+			const effectiveWindow = runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+
+			const provider = runtime.endpointId ?? settings.orchestrator?.endpoint ?? null;
+			const model = runtime.wireModelId ?? settings.orchestrator?.model ?? null;
+
+			if (!currentContextSnapshot) {
+				return buildContextLedger({
+					provider,
+					model,
+					contextWindow: effectiveWindow,
+					toolCount: runtime.agent.state.tools.length,
+					compactionThreshold,
+					compactionAuto,
 				});
+			}
+
+			const streamingOutput = liveStreamingOutputTokens();
+			const pendingTokens = pendingUserInputTokens();
+			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + streamingOutput;
+			const measured = currentContextSnapshot.sources.total === "reconciled";
+
 			return buildContextLedger({
-				provider: runtime.endpointId ?? settings.orchestrator?.endpoint ?? null,
-				model: runtime.wireModelId ?? settings.orchestrator?.model ?? null,
-				contextWindow: estimate.contextWindow,
-				promptSegments,
-				systemPromptTokens: estimate.breakdown.systemPromptTokens,
-				toolSchemaTokens: diagnostics?.toolSchemaTokenEstimate ?? estimate.breakdown.toolSchemaTokens,
-				toolCount: diagnostics?.toolCount ?? runtime.agent.state.tools.length,
-				messageTokens: estimate.breakdown.messageTokens,
-				pendingTokens: estimate.breakdown.pendingUserTokens,
-				liveTotalTokens: hasConversation && estimate.tokens > 0 ? estimate.tokens : null,
-				measured,
+				provider,
+				model,
+				contextWindow: effectiveWindow,
 				compactionThreshold,
 				compactionAuto,
+				systemPromptTokens: currentContextSnapshot.categories.system,
+				toolSchemaTokens: currentContextSnapshot.categories.tools,
+				// Persisted snapshots strip the captured schemas; fall back to
+				// the live agent state after a session resume.
+				toolCount: currentContextSnapshot.activeToolSchemas?.length ?? runtime.agent.state.tools.length,
+				messageTokens: currentContextSnapshot.categories.messages,
+				agentsTokens: currentContextSnapshot.categories.agents,
+				skillsTokens: currentContextSnapshot.categories.skills,
+				memoryTokens: currentContextSnapshot.categories.memory,
+				projectTokens: currentContextSnapshot.categories.project,
+				pendingTokens,
+				streamingTokens: streamingOutput,
+				liveTotalTokens: totalUsed > 0 ? totalUsed : null,
+				measured,
+				lastCompaction: lastCompactionEvent,
 			});
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
@@ -2263,6 +2517,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			emitQueueUpdate();
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
+			const session = deps.session?.current();
+			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];
 			if (runtime) {
 				runtime.agent.state.messages = [...replayedContextMessages];
@@ -2298,6 +2554,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			let agentRuntime: AgentRuntime | null;
 			try {
+				await ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = ensureRuntime();
 			} catch (err) {
 				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);

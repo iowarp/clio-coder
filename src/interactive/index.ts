@@ -1,7 +1,7 @@
 import { exec } from "node:child_process";
 import { resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
-import { BusChannels } from "../core/bus-events.js";
+import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
@@ -1107,11 +1107,33 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, () => {
+	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, (payload) => {
+		const evt = payload as ContextWarningPayload | null | undefined;
+		if (evt && typeof evt === "object") {
+			if ("warning" in evt) {
+				if (evt.warning !== null) notify("warning", evt.warning, "context-low-warning");
+				else notifications.dismiss("context-low-warning");
+			} else if (evt.stage === "warning") {
+				notify(
+					"warning",
+					`[Context Pressure] Context is ${Math.round((evt.pressure ?? 0) * 100)}% full. Consider running /compact soon.`,
+					"context-pressure-warning",
+				);
+			}
+		}
 		footer.refresh();
 		tui.requestRender();
 	});
-	const unsubscribeContextPruned = deps.bus.on(BusChannels.ContextPruned, () => {
+	const unsubscribeContextPruned = deps.bus.on(BusChannels.ContextPruned, (payload) => {
+		const evt = payload as ContextPrunedPayload | null | undefined;
+		if (evt && typeof evt === "object" && typeof evt.tokensBefore === "number" && typeof evt.tokensAfter === "number") {
+			notify(
+				"info",
+				`[Compaction] Reclaimed context: ${evt.tokensBefore} -> ${evt.tokensAfter} tokens (${evt.stage})`,
+				"compaction-notice",
+			);
+			notifications.dismiss("context-pressure-warning");
+		}
 		footer.refresh();
 		tui.requestRender();
 	});
@@ -1881,7 +1903,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openContextViewOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "context-view";
-		overlayHandle = openContextOverlay(tui, () => deps.chat.contextLedger(), { bus: deps.bus });
+		overlayHandle = openContextOverlay(tui, () => deps.chat.contextLedger(), { bus: deps.bus, chat: deps.chat });
 		tui.requestRender();
 	};
 

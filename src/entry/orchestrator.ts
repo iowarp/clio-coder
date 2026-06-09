@@ -47,7 +47,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
-import { estimateAgentContextTokens } from "../domains/session/context-accounting.js";
+import { ceilChars, estimateAgentContextTokens } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
@@ -323,8 +323,7 @@ function estimateTokensFromSummary(summary: string): number {
 	// uses for unmeasured payloads. Kept inline because this is the only
 	// caller; pi-mono's token estimator is provider-specific and we do not
 	// have a model handle at the persistence layer.
-	if (summary.length === 0) return 0;
-	return Math.max(1, Math.ceil(summary.length / 4));
+	return Math.max(1, ceilChars(summary.length));
 }
 
 function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
