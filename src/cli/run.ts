@@ -262,13 +262,23 @@ async function runDispatch(
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
 
+		let accumulatedText = "";
 		for await (const event of handle.events) {
 			if (parsed.json) {
 				process.stdout.write(`${JSON.stringify(event)}\n`);
 				continue;
 			}
-			const e = event as { type?: string };
-			if (e.type && e.type !== "heartbeat") process.stderr.write(`${e.type}\n`);
+			const e = event as { type?: string; text?: string };
+			if (e.type === "text_delta" && typeof e.text === "string") {
+				accumulatedText += e.text;
+			}
+			if (e.type && e.type !== "heartbeat" && e.type !== "text_delta") {
+				process.stderr.write(`${e.type}\n`);
+			}
+		}
+
+		if (!parsed.json) {
+			process.stdout.write(accumulatedText);
 		}
 
 		const receipt = await handle.finalPromise;

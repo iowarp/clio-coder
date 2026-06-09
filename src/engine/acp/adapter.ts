@@ -168,6 +168,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			for (const event of mapper.mapUpdate(params)) emit(event);
 		}),
 		transport.onRequest("session/request_permission", (params) => mediator.handle(params)),
+		transport.onStderr((chunk) => {
+			if (process.env.CLIO_INTERACTIVE !== "1") {
+				process.stderr.write(chunk);
+			}
+		}),
 	];
 
 	const abort = (): void => {

@@ -196,15 +196,18 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	}
 
 	private handleLine(line: string): void {
+		const trimmed = line.trimStart();
+		if (!trimmed.startsWith("{")) {
+			return;
+		}
 		let parsed: unknown;
 		try {
-			parsed = JSON.parse(line);
+			parsed = JSON.parse(trimmed);
 		} catch (err) {
 			this.failAll(new AcpProtocolError(`ACP stdout contained invalid JSON: ${errorMessage(err)}`, { line }));
 			return;
 		}
 		if (!isRecord(parsed) || parsed.jsonrpc !== "2.0") {
-			this.failAll(new AcpProtocolError("ACP stdout contained a non JSON-RPC message", parsed));
 			return;
 		}
 		if (isSuccess(parsed) || isFailure(parsed)) {
