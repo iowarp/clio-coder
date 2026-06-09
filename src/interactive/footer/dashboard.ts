@@ -82,6 +82,11 @@ export interface FooterDashboardDeps {
 	getContextUsage?: () => ContextUsageSnapshot;
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
+	getContextActivity?: () => {
+		message: string;
+		detail: string | null;
+		status: "started" | "running" | "completed" | "failed";
+	} | null;
 	getToolCounts?: () => ToolTallySnapshot;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getSessionInfo?: () => { id: string | null; name: string | null; turns: number | null };
@@ -427,6 +432,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				dispatchSummary: dispatchSegment(dispatch),
 				toolTally: formatToolTally(tools),
 				dispatchRows: dispatch,
+				contextActivity: deps.getContextActivity?.() ?? null,
 				lastTurn: deps.getLastTurnSummary?.() ?? null,
 			},
 			notices: deps.getNotifications?.() ?? [],

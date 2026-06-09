@@ -72,6 +72,7 @@ export interface AgentWorkFacts {
 	dispatchSummary: string | null;
 	toolTally: string;
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
+	contextActivity?: { message: string; detail: string | null; status: "started" | "running" | "completed" | "failed" } | null;
 	/** Metrics for the most recent completed turn, surfaced when the agent is idle. */
 	lastTurn: TurnSummary | null;
 }
@@ -730,6 +731,16 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 			),
 		),
 	];
+	if (facts.contextActivity) {
+		const token =
+			facts.contextActivity.status === "failed"
+				? "error"
+				: facts.contextActivity.status === "completed"
+					? "success"
+					: "accent";
+		rows.push(kv("context", facts.contextActivity.message, token));
+		if (facts.contextActivity.detail) rows.push(kv("ctx detail", facts.contextActivity.detail, "dim"));
+	}
 	if (isStreaming && facts.statusText) rows.push(kv("state", facts.statusText, "accent"));
 	if (isStreaming) {
 		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));

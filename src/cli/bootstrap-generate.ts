@@ -55,10 +55,52 @@ function textDeltaFromEvent(event: unknown): string {
 	return typeof event.text === "string" ? event.text : "";
 }
 
-async function collectDispatchAssistantText(events: AsyncIterable<unknown>): Promise<string> {
+function toolNameFromEvent(event: unknown): string | null {
+	if (!isRecord(event)) return null;
+	const payload = event.payload;
+	if (!isRecord(payload)) return null;
+	return typeof payload.tool === "string" && payload.tool.length > 0 ? payload.tool : null;
+}
+
+function toolOutcomeFromEvent(event: unknown): string | null {
+	if (!isRecord(event)) return null;
+	const payload = event.payload;
+	if (!isRecord(payload)) return null;
+	return typeof payload.outcome === "string" && payload.outcome.length > 0 ? payload.outcome : null;
+}
+
+async function collectDispatchAssistantText(
+	events: AsyncIterable<unknown>,
+	input: BootstrapGenerateInput,
+): Promise<string> {
 	let streamedText = "";
 	let lastAssistantText = "";
 	for await (const event of events) {
+		if (isRecord(event) && event.type === "agent_start") {
+			input.progress?.({ phase: "generate", status: "running", message: "scout started repository exploration" });
+		}
+		if (isRecord(event) && event.type === "clio_tool_start") {
+			const tool = toolNameFromEvent(event);
+			if (tool) {
+				input.progress?.({
+					phase: "generate",
+					status: "running",
+					message: `scout running ${tool}`,
+					detail: "read-only repository exploration",
+				});
+			}
+		}
+		if (isRecord(event) && event.type === "clio_tool_finish") {
+			const tool = toolNameFromEvent(event);
+			const outcome = toolOutcomeFromEvent(event) ?? "done";
+			if (tool) {
+				input.progress?.({
+					phase: "generate",
+					status: "running",
+					message: `scout ${tool} ${outcome}`,
+				});
+			}
+		}
 		streamedText += textDeltaFromEvent(event);
 		if (isRecord(event) && event.type === "message_end") {
 			const text = assistantTextFromMessage(event.message);
@@ -95,7 +137,7 @@ export async function generateBootstrapWithScout(
 		noSkills: true,
 	});
 	try {
-		const text = await collectDispatchAssistantText(handle.events);
+		const text = await collectDispatchAssistantText(handle.events, input);
 		const receipt = await handle.finalPromise;
 		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
 		const output = parseBootstrapModelOutput(text);
