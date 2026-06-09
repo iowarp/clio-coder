@@ -25,8 +25,6 @@ import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
 import type { MiddlewareContract } from "../domains/middleware/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import type { ModesContract } from "../domains/modes/index.js";
-import { ModesDomainModule } from "../domains/modes/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -434,7 +432,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ContextDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
-		ModesDomainModule,
 		createPromptsDomainModule({
 			noContextFiles: options.noContextFiles === true,
 		}),
@@ -494,7 +491,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}
 
-	const modes = result.getContract<ModesContract>("modes");
 	const middleware = result.getContract<MiddlewareContract>("middleware");
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
@@ -506,9 +502,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const share = result.getContract<ShareContract>("share");
 	const contextDomain = result.getContract<ContextContract>("context");
 	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
-	if (!modes || !providers || !dispatch || !observability || !safety || !middleware) {
+	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
-			"Clio Coder: chat mode requires safety + modes + middleware + providers + dispatch + observability contracts; aborting.\n",
+			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
@@ -528,7 +524,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const toolRegistry = createRegistry({
 		safety,
-		modes,
 		middleware,
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
@@ -588,7 +583,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const chat = createChatLoop({
 		getSettings: getCurrentSettings,
-		modes,
 		providers,
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
@@ -665,7 +659,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	await startInteractive({
 		bus,
-		modes,
 		providers,
 		dispatch,
 		...(agents ? { agents } : {}),

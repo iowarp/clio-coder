@@ -1,7 +1,6 @@
 ---
 name: Researcher
 description: Shadow docs and external-source researcher for coding decisions.
-mode: advise
 tools: [read, web_fetch, read_skill]
 audience: shadow
 category: research

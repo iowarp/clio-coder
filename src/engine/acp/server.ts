@@ -384,7 +384,7 @@ function installPermissionBridge(input: {
 	if (!input.toolRegistry) return () => {};
 	let sequence = 0;
 	let chain = Promise.resolve();
-	return input.toolRegistry.onSuperRequired((call) => {
+	return input.toolRegistry.onPermissionRequired((call, decision) => {
 		const run = async (): Promise<void> => {
 			const sessionId = input.activeSessionId();
 			if (!sessionId) {
@@ -413,7 +413,10 @@ function installPermissionBridge(input: {
 					input.permissionTimeoutMs,
 				);
 				if (response.outcome.outcome === "selected" && response.outcome.optionId.startsWith("allow")) {
-					await input.toolRegistry?.resumeParkedCalls({ mode: "super", requestedBy: "acp-client" });
+					await input.toolRegistry?.resumeParkedCalls({
+						actionClass: decision.classification.actionClass,
+						requestedBy: "acp-client",
+					});
 					return;
 				}
 				input.toolRegistry?.cancelParkedCalls("ACP client denied this tool call");

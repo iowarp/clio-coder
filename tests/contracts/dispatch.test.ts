@@ -10,12 +10,11 @@ import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
-import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { ADVISE_SCOPE, DEFAULT_SCOPE, isSubset } from "../../src/domains/safety/scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 
@@ -124,10 +123,9 @@ function stubContext(
 		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
 		scopes: {
-			default: DEFAULT_SCOPE,
-			readonly: DEFAULT_SCOPE,
-			advise: ADVISE_SCOPE,
-			super: DEFAULT_SCOPE,
+			readonly: READONLY_SCOPE,
+			workspace: WORKSPACE_SCOPE,
+			confirmed: CONFIRMED_SCOPE,
 		},
 		isSubset,
 		audit: { recordCount: () => 0 },
@@ -155,17 +153,6 @@ function stubContext(
 		parseFleet: () => ({ steps: [] }),
 	};
 
-	const modes: ModesContract = {
-		current: () => "default",
-		setMode: () => "default",
-		cycleNormal: () => "default",
-		visibleTools: () => new Set(),
-		isToolVisible: () => false,
-		isActionAllowed: () => true,
-		requestSuper: () => {},
-		confirmSuper: () => "super",
-		elevatedModeFor: () => null,
-	};
 	const middleware = createMiddlewareBundle().contract;
 
 	const bus = createSafeEventBus();
@@ -173,7 +160,6 @@ function stubContext(
 		if (name === "config") return config;
 		if (name === "safety") return safety;
 		if (name === "agents") return agents;
-		if (name === "modes") return modes;
 		if (name === "scheduling")
 			return {
 				ceilingUsd: () => 5,
@@ -326,15 +312,15 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
-	it("rejects recipe tools that are not visible in the declared worker mode", async () => {
+	it("rejects recipe tools that contradict declared capability class", async () => {
 		const context = stubContext({
 			recipes: [
 				{
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
-					mode: "advise",
 					tools: ["read", "run_tests"],
+					capabilityClass: "read-only",
 					source: "builtin",
 					filepath: "/test/bad-validator.md",
 					body: "# Bad Validator",
@@ -346,7 +332,7 @@ describe("contracts/dispatch", () => {
 		try {
 			await rejects(
 				() => bundle.contract.dispatch({ agentId: "bad-validator", task: "run tests" }),
-				/mode advise cannot expose tools: run_tests/,
+				/read-only agent 'bad-validator' requests execute tools/,
 			);
 		} finally {
 			await bundle.extension.stop?.();
@@ -360,7 +346,6 @@ describe("contracts/dispatch", () => {
 					id: "scout",
 					name: "Scout",
 					description: "Shadow scout.",
-					mode: "advise",
 					tools: ["read"],
 					audience: "shadow",
 					source: "builtin",
@@ -411,7 +396,6 @@ describe("contracts/dispatch", () => {
 			id: "researcher",
 			name: "Researcher",
 			description: "Docs researcher.",
-			mode: "advise",
 			tools: ["read", "read_skill"],
 			skills: ["context7-docs", "pdf-reader"],
 			source: "builtin",

@@ -1,7 +1,6 @@
 ---
 name: Verifier
 description: Independently runs and reports test, lint, build, review, and release gates.
-mode: default
 tools: [read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend]
 audience: base
 category: quality

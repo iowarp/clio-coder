@@ -80,12 +80,12 @@ describe("boundaries", () => {
 				'import { loadPluginRuntimes } from "../domains/providers/plugins.js";',
 				'import { getRuntimeRegistry } from "../domains/providers/registry.js";',
 				'import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";',
-				'import type { ModeName } from "../domains/modes/matrix.js";',
+				'import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";',
 			].join("\n"),
 			"src/domains/providers/plugins.ts": "",
 			"src/domains/providers/registry.ts": "",
 			"src/domains/providers/runtimes/builtins.ts": "",
-			"src/domains/modes/matrix.ts": "",
+			"src/domains/providers/types/endpoint-descriptor.ts": "",
 		});
 
 		strictEqual(runBoundaryCheck(root).violations.length, 0);
@@ -93,8 +93,8 @@ describe("boundaries", () => {
 
 	it("rejects worker value imports from non-provider domains", () => {
 		const root = fixtureProject({
-			"src/worker/entry.ts": 'import { MODE_MATRIX } from "../domains/modes/matrix.js";',
-			"src/domains/modes/matrix.ts": "export const MODE_MATRIX = {};",
+			"src/worker/entry.ts": 'import { createConfigBundle } from "../domains/config/extension.js";',
+			"src/domains/config/extension.ts": "export const createConfigBundle = {};",
 		});
 
 		const result = runBoundaryCheck(root);
@@ -121,8 +121,8 @@ describe("boundaries", () => {
 
 	it("treats mixed type/value imports as value imports", () => {
 		const root = fixtureProject({
-			"src/worker/entry.ts": 'import { type ModeName, MODE_MATRIX } from "../domains/modes/matrix.js";',
-			"src/domains/modes/matrix.ts": "export type ModeName = string;\nexport const MODE_MATRIX = {};",
+			"src/worker/entry.ts": 'import { type ConfigContract, createConfigBundle } from "../domains/config/extension.js";',
+			"src/domains/config/extension.ts": "export type ConfigContract = {};\nexport const createConfigBundle = {};",
 		});
 
 		const result = runBoundaryCheck(root);

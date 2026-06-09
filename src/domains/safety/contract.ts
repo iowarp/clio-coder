@@ -13,7 +13,6 @@ export type SafetyDecision =
 			match?: DamageControlMatch;
 			rejection: RejectionMessage;
 			policy?: SafetyPolicyDecision;
-			elevationMode?: string;
 	  }
 	| {
 			kind: "block";
@@ -30,26 +29,25 @@ export interface SafetyContract {
 	/**
 	 * Full evaluation: classify + damage-control match + decision. Writes an
 	 * audit record AND emits on safety.classified + (safety.allowed | safety.blocked).
-	 * `mode` is optional context carried into the audit entry.
+	 * `posture` is optional context carried into the audit entry.
 	 */
-	evaluate(call: ClassifierCall, mode?: string): SafetyDecision;
+	evaluate(call: ClassifierCall, posture?: string): SafetyDecision;
 
 	/** Observe a call for loop detection. Returns the updated verdict. */
 	observeLoop(key: string, now?: number): LoopVerdict;
 
 	/** Read-only exposure of canonical scope specs. */
 	scopes: {
-		readonly default: ScopeSpec;
 		readonly readonly: ScopeSpec;
-		readonly advise: ScopeSpec;
-		readonly super: ScopeSpec;
+		readonly workspace: ScopeSpec;
+		readonly confirmed: ScopeSpec;
 	};
 
 	/** Subset check used by dispatch admission (Phase 6). */
 	isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean;
 
 	/** Immutable safety policy metadata for receipts, audit, and replay. */
-	readonly policy?: { metadata(mode?: string): SafetyPolicyMetadata };
+	readonly policy?: { metadata(posture?: string): SafetyPolicyMetadata };
 
 	/** Exposed only so diag scripts can read the last N records. Not for domain consumption. */
 	readonly audit: { recordCount(): number };

@@ -171,7 +171,7 @@ export function classify(call: ClassifierCall): Classification {
 		// Apply the same path-class gate we use for the write tool to every
 		// shell write-target the command exposes (redirects, tee, cp/mv
 		// destinations). Without this the model can dodge the write tool's
-		// super-mode gate by emitting `echo X > /tmp/foo.txt` after the user
+		// confirmation gate by emitting `echo X > /tmp/foo.txt` after the user
 		// cancels the original write call. Relative write targets are
 		// resolved against the bash call's explicit cwd argument when
 		// supplied so a model cannot launder a write outside the workspace

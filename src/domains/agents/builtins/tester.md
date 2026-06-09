@@ -1,7 +1,6 @@
 ---
 name: Tester
 description: Adds focused deterministic tests for regressions and missing coverage.
-mode: default
 tools: [read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build]
 audience: base
 category: quality

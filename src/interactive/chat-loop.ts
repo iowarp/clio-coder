@@ -3,7 +3,6 @@ import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { SkillActivation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
-import type { ModesContract } from "../domains/modes/contract.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type {
 	CompileResult,
@@ -164,7 +163,6 @@ export interface ChatLoop {
 
 export interface CreateChatLoopDeps {
 	getSettings: () => Readonly<ClioSettings>;
-	modes: ModesContract;
 	providers: ProvidersContract;
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
@@ -176,7 +174,7 @@ export interface CreateChatLoopDeps {
 	session?: SessionContract;
 	/**
 	 * Prompt compiler. When wired, every `submit()` re-runs
-	 * `prompts.compileForTurn` with the current mode + safety level, writes the
+	 * `prompts.compileForTurn` with the current safety level, writes the
 	 * compiled text into `state.systemPrompt`, and threads the resulting
 	 * `renderedPromptHash` onto the user + assistant session entries.
 	 *
@@ -210,8 +208,8 @@ export interface CreateChatLoopDeps {
 	observability?: ObservabilityContract;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
-	 * through `ToolRegistry.invoke(...)` so safety classification and mode
-	 * admission happen on the actual execution path.
+	 * through `ToolRegistry.invoke(...)` so safety classification and
+	 * confirmation admission happen on the actual execution path.
 	 */
 	toolRegistry?: ToolRegistry;
 	/**
@@ -268,7 +266,7 @@ export interface PromptDiagnostics {
 		activeTools: ReadonlyArray<string>;
 		omittedToolCount: number;
 		providerSupportsTools: boolean;
-		mode: string;
+		posture: string;
 	};
 	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
 	skillActivations?: ReadonlyArray<SkillActivation>;
@@ -522,7 +520,7 @@ function promptDiagnostics(
 			activeTools: [],
 			omittedToolCount: 0,
 			providerSupportsTools: tools.length > 0,
-			mode: "default",
+			posture: "operating",
 		} satisfies ToolPaletteResult);
 	return {
 		renderedPromptHash: result.renderedPromptHash,
@@ -540,7 +538,7 @@ function promptDiagnostics(
 			activeTools: palette.activeTools.map((tool) => String(tool)),
 			omittedToolCount: palette.omittedToolCount,
 			providerSupportsTools: palette.providerSupportsTools,
-			mode: palette.mode,
+			posture: palette.posture,
 		},
 		tiers: result.segmentManifest.map((segment) => ({
 			id: segment.id,
@@ -592,18 +590,15 @@ function resolveRuntimeTools(
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
 	if (!deps.toolRegistry) return { tools: [], palette: null };
-	const mode = deps.modes.current();
 	const palette = resolveToolPalette({
-		mode,
 		providerSupportsTools: runtimeSupportsTools(agentRuntime),
 		userText,
-		availableTools: deps.toolRegistry.listForMode(mode),
+		availableTools: deps.toolRegistry.listRegistered(),
 		recentToolNames,
 	});
 	const input = {
 		registry: deps.toolRegistry,
 		allowedTools: palette.activeTools,
-		mode,
 	};
 	return {
 		tools: resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input),
@@ -1720,7 +1715,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			const result = await deps.prompts.compileForTurn({
 				dynamicInputs,
-				overrideMode: deps.modes.current(),
 				safetyLevel,
 				cwd: process.cwd(),
 				contextPolicy: {
@@ -2065,10 +2059,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 
-			// Recompile the prompt before every turn so mode (/mode, Alt+M),
-			// safety level, provider, and model changes since the last turn
-			// flow into `state.systemPrompt`. Sets `currentTurnHash` as a
-			// side-effect so the user + assistant appends below stamp it.
+			// Recompile the prompt before every turn so safety level, provider,
+			// and model changes since the last turn flow into `state.systemPrompt`.
+			// Sets `currentTurnHash` as a side-effect so the user + assistant
+			// appends below stamp it.
 			const resolvedTools = resolveToolsForRuntime(agentRuntime, deps, text, recentToolNames, currentToolInvokeOptions);
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;

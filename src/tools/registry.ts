@@ -3,8 +3,6 @@ import { type SkillActivation, skillActivationFromToolDetails } from "../core/sk
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
-import type { ModesContract } from "../domains/modes/contract.js";
-import { MODE_MATRIX, type ModeName } from "../domains/modes/matrix.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import {
@@ -18,11 +16,10 @@ import {
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
- * Tool registry. Admission point for every tool call. Filters visible tools
- * by current mode, delegates classification + hard-block decisions to the
- * safety domain, then enforces the per-mode action-class policy gate before
- * running the tool body. Never throws on safety rejections; the caller (agent
- * loop in Phase 4) surfaces the rejection message back to the model.
+ * Tool registry. Admission point for every tool call. Delegates classification
+ * and policy decisions to the safety domain, parks one-shot confirmation asks,
+ * and runs admitted tool bodies. Never throws on safety rejections; the caller
+ * surfaces the rejection message back to the model.
  */
 
 /**
@@ -76,12 +73,6 @@ export interface ToolSpec {
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
 	/**
-	 * Modes in which this tool is admissible. When undefined, every mode is
-	 * allowed (the mode matrix remains authoritative for visibility). When set,
-	 * `invoke` rejects with `not_visible` for any mode outside this list.
-	 */
-	allowedModes?: ReadonlyArray<ModeName>;
-	/**
 	 * Per-tool execution mode. Read-only tools set `"parallel"` so the model
 	 * can batch scans; mutating or filesystem-racing tools set `"sequential"`
 	 * so two `bash` or `edit` calls in the same batch never run concurrently.
@@ -102,9 +93,8 @@ export type ToolResult =
 			 * Early-termination hint propagated to pi-agent-core's
 			 * `AgentToolResult.terminate`. When every finalized tool result in
 			 * the current batch sets this to true, the agent loop stops without
-			 * a follow-up LLM call. Used by terminal advise-mode writers
-			 * (write_plan, write_review) where writing the artifact is the
-			 * whole turn.
+			 * a follow-up LLM call. Used by terminal artifact writers where
+			 * writing the artifact is the whole turn.
 			 */
 			terminate?: boolean;
 	  }
@@ -112,7 +102,6 @@ export type ToolResult =
 
 export interface RegistryDeps {
 	safety: SafetyContract;
-	modes: ModesContract;
 	middleware?: MiddlewareContract;
 	protectedArtifacts?: ProtectedArtifactState;
 	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
@@ -141,39 +130,33 @@ export interface ProtectedArtifactRegistryEvent {
 
 /**
  * One-shot elevation grant. The interactive layer issues this when the user
- * confirms a single parked tool call without escalating the persistent mode.
+ * confirms a single parked tool call without changing persistent posture.
  * The registry consumes the grant on the next `resumeParkedCalls` pass so
  * exactly one parked call receives elevated admission; subsequent calls go
- * back through the normal mode gate.
+ * back through the normal safety gate.
  */
 export interface OneShotGrant {
-	/** Mode used for the single admission pass. Equivalent of "as if current mode were this". */
-	mode: ModeName;
+	/** Parked action class approved for this single admission pass. */
+	actionClass: ActionClass;
 	/** Free-form origin tag carried into audit (`tool`, `keybind:single`, ...). */
 	requestedBy: string;
 }
 
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
-	/** Tools visible to the current mode. Models only see these. */
+	/** Tools visible in the single operating posture. Models only see these. */
 	listVisible(): ReadonlyArray<ToolSpec>;
-	/** Tools registered overall, regardless of mode. For /audit, /doctor. */
+	/** Tools registered overall. For /audit, /doctor. */
 	listAll(): ReadonlyArray<ToolSpec>;
 	/** Lookup by tool id. */
 	get(name: ToolName): ToolSpec | undefined;
-	/**
-	 * Tool names admissible in `mode`. A tool qualifies only when the mode
-	 * matrix exposes it and its per-spec `allowedModes` permits that mode.
-	 * Workers use this primitive to resolve per-run tools without a live
-	 * ModesContract, so the matrix must stay authoritative here too.
-	 */
-	listForMode(mode: ModeName): ReadonlyArray<ToolName>;
+	/** Tool names registered in the single operating posture. */
+	listRegistered(): ReadonlyArray<ToolName>;
 	/**
 	 * Admission point. Classifies, evaluates safety, and either runs or
 	 * returns a rejection. Never throws on safety rejections. When the
-	 * injected `modes.elevatedModeFor(action)` reports an elevation target
-	 * and the current mode denies the action, the returned promise stays
-	 * pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
+	 * a safety ask or confirmable action is encountered, the returned promise
+	 * stays pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
 	 */
 	invoke(call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict>;
 	/** Current protected-artifact snapshot, cloned for callers. */
@@ -181,33 +164,29 @@ export interface ToolRegistry {
 	/** Replace the protected-artifact snapshot, typically after a session switch. */
 	replaceProtectedArtifacts(state: ProtectedArtifactState): void;
 	/**
-	 * True while at least one call awaits mode elevation. The interactive
-	 * layer reads this from `closeOverlay()` to re-open the super overlay
+	 * True while at least one call awaits operator confirmation. The interactive
+	 * layer reads this from `closeOverlay()` to re-open the confirmation overlay
 	 * whenever an unrelated overlay closes with a parked call still pending.
 	 */
 	hasParkedCalls(): boolean;
 	/**
 	 * Re-run admission for every parked call. When `grant` is provided the
-	 * admission gate uses the grant mode for its action-allow check instead
-	 * of the live mode, so the user can confirm a single tool call without
-	 * flipping the persistent mode (one-shot escalation). Calls admitted on
-	 * retry execute and their original promise resolves with the result.
-	 * Calls still blocked only by the mode gate (with no grant or with a
-	 * grant that does not cover their action class) stay parked.
+	 * grant covers the oldest parked action class. Calls admitted on retry
+	 * execute and their original promise resolves with the result. Calls still
+	 * waiting for confirmation stay parked.
 	 */
 	resumeParkedCalls(grant?: OneShotGrant): Promise<void>;
 	/**
 	 * Resolve every parked call with a `blocked` verdict carrying `reason`.
-	 * Used when the super overlay is cancelled so the agent loop sees a
+	 * Used when the confirmation overlay is cancelled so the agent loop sees a
 	 * clean rejection instead of an indefinitely pending tool call.
 	 */
 	cancelParkedCalls(reason: string): void;
 	/**
-	 * Subscribe to the signal fired when a call is parked awaiting super
-	 * confirmation. The interactive layer wires this to open the super
-	 * overlay. Returns an unsubscribe handle.
+	 * Subscribe to the signal fired when a call is parked awaiting permission
+	 * confirmation. Returns an unsubscribe handle.
 	 */
-	onSuperRequired(listener: (call: ClassifierCall) => void): () => void;
+	onPermissionRequired(listener: (call: ClassifierCall, decision: SafetyDecision) => void): () => void;
 }
 
 export type RegistryVerdict =
@@ -225,7 +204,7 @@ interface ParkedCall {
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
 	const parked: ParkedCall[] = [];
-	const superListeners = new Set<(call: ClassifierCall) => void>();
+	const permissionListeners = new Set<(call: ClassifierCall, decision: SafetyDecision) => void>();
 	let protectedArtifactState = cloneProtectedArtifactState(deps.protectedArtifacts ?? { artifacts: [] });
 	const successfulDispatchesByTurn = new Map<string, Set<string>>();
 
@@ -273,8 +252,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		result?: ToolResult,
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
-		return deps.middleware.runHook(buildToolHookInput(hook, spec, call, decision, deps.modes.current(), options, result))
-			.effects;
+		return deps.middleware.runHook(buildToolHookInput(hook, spec, call, decision, "operating", options, result)).effects;
 	};
 
 	const applyProtectPathEffects = (
@@ -318,43 +296,24 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (!spec) {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
-		const visible = deps.modes.visibleTools();
-		if (!visible.has(spec.name)) {
-			return {
-				kind: "terminal",
-				verdict: { kind: "not_visible", reason: `tool ${spec.name} not in current mode's allowlist` },
-			};
-		}
-		const currentMode = deps.modes.current();
-		const safetyMode = grant?.mode ?? currentMode;
-		if (spec.allowedModes && !spec.allowedModes.includes(currentMode)) {
-			return {
-				kind: "terminal",
-				verdict: { kind: "not_visible", reason: `tool ${spec.name} not allowed in mode ${currentMode}` },
-			};
-		}
-		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, safetyMode), spec);
+		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, grant ? "confirmed" : undefined), spec);
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
 		}
 		if (decision.kind === "ask") {
+			if (grant?.actionClass === decision.classification.actionClass) return { kind: "execute", spec, decision };
 			return { kind: "park", decision };
 		}
 		const actionClass = decision.classification.actionClass;
-		// Action gate: a one-shot grant lets a parked call execute as if the
-		// current mode were `grant.mode`, without flipping the persistent mode.
-		// Tool-name visibility (above) still uses the live mode so a one-shot
-		// grant can never expose a tool that the live mode hides.
-		const grantAllows = grant !== undefined && MODE_MATRIX[grant.mode].allowedActions.has(actionClass);
-		if (!deps.modes.isActionAllowed(actionClass) && !grantAllows) {
-			if (deps.modes.elevatedModeFor(actionClass) !== null) {
-				return { kind: "park", decision };
-			}
+		if (actionClass === "system_modify" && grant?.actionClass !== "system_modify") {
+			return { kind: "park", decision };
+		}
+		if (actionClass === "git_destructive") {
 			return {
 				kind: "terminal",
 				verdict: {
 					kind: "blocked",
-					reason: `action ${actionClass} not allowed in mode ${currentMode}`,
+					reason: `action ${actionClass} is hard-blocked`,
 					decision,
 				},
 			};
@@ -362,10 +321,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return { kind: "execute", spec, decision };
 	};
 
-	const notifySuperRequired = (call: ClassifierCall): void => {
-		for (const listener of superListeners) {
+	const notifyPermissionRequired = (call: ClassifierCall, decision: SafetyDecision): void => {
+		for (const listener of permissionListeners) {
 			try {
-				listener(call);
+				listener(call, decision);
 			} catch {
 				// Listener errors never abort admission; they are surfaced via
 				// whatever observability the caller wires up.
@@ -383,14 +342,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		replaceProtectedArtifacts(state) {
 			protectedArtifactState = cloneProtectedArtifactState(state);
 		},
-		listForMode: (mode) =>
-			Array.from(tools.values())
-				.filter((t) => MODE_MATRIX[mode].tools.has(t.name) && (!t.allowedModes || t.allowedModes.includes(mode)))
-				.map((t) => t.name),
-		listVisible: () => {
-			const visible = deps.modes.visibleTools();
-			return Array.from(tools.values()).filter((t) => visible.has(t.name));
-		},
+		listRegistered: () => Array.from(tools.keys()),
+		listVisible: () => Array.from(tools.values()),
 		async invoke(call, options) {
 			const outcome = admit(call);
 			if (outcome.kind === "terminal") return outcome.verdict;
@@ -399,7 +352,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const parkedCall: ParkedCall = { call, decision: outcome.decision, resolve };
 				if (options !== undefined) parkedCall.options = options;
 				parked.push(parkedCall);
-				notifySuperRequired(call);
+				notifyPermissionRequired(call, outcome.decision);
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
@@ -422,6 +375,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, entry.options));
 			}
+			const next = parked[0];
+			if (next) notifyPermissionRequired(next.call, next.decision);
 		},
 		cancelParkedCalls(reason) {
 			if (parked.length === 0) return;
@@ -430,10 +385,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				entry.resolve({ kind: "blocked", reason, decision: entry.decision });
 			}
 		},
-		onSuperRequired(listener) {
-			superListeners.add(listener);
+		onPermissionRequired(listener) {
+			permissionListeners.add(listener);
 			return () => {
-				superListeners.delete(listener);
+				permissionListeners.delete(listener);
 			};
 		},
 	};
@@ -590,12 +545,12 @@ function buildToolHookInput(
 	spec: ToolSpec,
 	call: ClassifierCall,
 	decision: SafetyDecision,
-	mode: ModeName,
+	posture: string,
 	options: ToolInvokeOptions | undefined,
 	result: ToolResult | undefined,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
-		mode,
+		posture,
 		actionClass: decision.classification.actionClass,
 		decisionKind: decision.kind,
 	};

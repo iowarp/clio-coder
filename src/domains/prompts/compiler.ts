@@ -4,7 +4,7 @@ import { sha256 } from "./hash.js";
 
 export interface CompileInputs {
 	identity: string;
-	mode: string;
+	operatingContract: string;
 	safety: string;
 	dynamicInputs: DynamicInputs;
 	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
@@ -388,9 +388,9 @@ function buildPromptEnvelope(
 /**
  * Compile a Clio prompt from the supplied fragment table and inputs.
  *
- * Identity and the active mode render verbatim from disk fragments. Safety
- * renders a single one-line directive followed by the active mode's safety
- * fragment body. Everything else renders inline from typed DynamicInputs:
+ * Identity and the operating contract render verbatim from disk fragments.
+ * Safety renders a single one-line directive followed by the safety fragment
+ * body. Everything else renders inline from typed DynamicInputs:
  * runtime metadata (provider, model, context window, thinking mechanism,
  * thinking applied/notice/guidance, family guidance), skills catalog, memory,
  * project context, and session state.
@@ -401,14 +401,22 @@ function buildPromptEnvelope(
  */
 export function compile(table: FragmentTable, inputs: CompileInputs): CompileResult {
 	const identity = lookupFragment(table, inputs.identity, "identity");
-	const mode = lookupFragment(table, inputs.mode, "mode");
+	const operatingContract = lookupFragment(table, inputs.operatingContract, "operating contract");
 	const safety = lookupFragment(table, inputs.safety, "safety");
 
 	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
 	const parts: string[] = [];
 	const segmentManifest: PromptSegmentManifestEntry[] = [];
 	pushSegment(segmentManifest, parts, "identity", identity.body, false, "static-shell", "pinnedHarness");
-	pushSegment(segmentManifest, parts, "mode", mode.body, false, "static-shell", "pinnedHarness");
+	pushSegment(
+		segmentManifest,
+		parts,
+		"operating-contract",
+		operatingContract.body,
+		false,
+		"static-shell",
+		"pinnedHarness",
+	);
 	pushSegment(
 		segmentManifest,
 		parts,
@@ -512,7 +520,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		dynamicHash,
 	});
 
-	const manifestFragments: LoadedFragment[] = [identity, mode, safety];
+	const manifestFragments: LoadedFragment[] = [identity, operatingContract, safety];
 	const fragmentManifest: FragmentManifestEntry[] = manifestFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,

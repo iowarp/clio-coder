@@ -9,7 +9,7 @@ const ALLOWED_BASENAME = "REVIEW.md";
 export const writeReviewTool: ToolSpec = {
 	name: ToolNames.WriteReview,
 	description:
-		"Write a review document to REVIEW.md at the project root. Any other path is rejected. This is the advise-mode terminal action.",
+		"Write a review document to REVIEW.md at the project root. Any other path is rejected. This terminal action completes the turn.",
 	parameters: Type.Object({
 		content: Type.String({ description: "Full review contents in Markdown. Must be non-empty." }),
 		path: Type.Optional(Type.Literal(ALLOWED_BASENAME, { description: 'Must be "REVIEW.md" at the project root.' })),
@@ -33,7 +33,6 @@ export const writeReviewTool: ToolSpec = {
 		}
 		try {
 			writeFileSync(expected, content, "utf8");
-			// write_review is advise-mode only (see src/tools/bootstrap.ts).
 			// Writing REVIEW.md is the whole turn; set `terminate: true` so
 			// pi-agent-core skips the follow-up LLM call that would otherwise
 			// summarize what was just written.

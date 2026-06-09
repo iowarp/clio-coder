@@ -2,7 +2,6 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { ModesContract } from "../../src/domains/modes/contract.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
@@ -28,20 +27,6 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 	];
 	value.compaction = { ...value.compaction, ...overrides };
 	return value;
-}
-
-function modes(): ModesContract {
-	return {
-		current: () => "default",
-		setMode: () => "default",
-		cycleNormal: () => "default",
-		visibleTools: () => new Set(),
-		isToolVisible: () => false,
-		isActionAllowed: () => true,
-		requestSuper: () => {},
-		confirmSuper: () => "super",
-		elevatedModeFor: () => null,
-	};
 }
 
 function providers(): ProvidersContract {
@@ -244,7 +229,6 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 						llmSummary: 0.5,
 					},
 				}),
-			modes: modes(),
 			providers: providers(),
 			knownEndpoints: () => new Set(["test-target"]),
 			session: createSession(entries),
@@ -304,7 +288,6 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		const panel = createChatPanel();
 		const loop = createChatLoop({
 			getSettings: () => settings(),
-			modes: modes(),
 			providers: providers(),
 			knownEndpoints: () => new Set(["test-target"]),
 			session: createSession(entries),

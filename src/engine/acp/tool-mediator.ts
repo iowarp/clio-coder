@@ -1,7 +1,6 @@
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
-import type { ModeName } from "../../domains/modes/matrix.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -12,7 +11,6 @@ import type {
 
 interface MediatorInput {
 	safety: SafetyContract;
-	mode: ModeName;
 	cwd: string;
 	toolGovernance: DelegationToolGovernance;
 }
@@ -140,14 +138,14 @@ export class AcpToolMediator {
 		if (this.input.toolGovernance === "agent-managed") {
 			decision = "approved";
 			reason = "agent-managed governance";
-		} else if (this.input.toolGovernance === "deny-all" || this.input.mode === "advise") {
+		} else if (this.input.toolGovernance === "deny-all") {
 			decision = "denied";
-			reason = this.input.mode === "advise" ? "advise mode denies ACP tool execution" : "deny-all governance";
+			reason = "deny-all governance";
 		} else if (!mapped.known) {
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
-			safetyDecision = this.input.safety.evaluate({ tool: mapped.tool, args: mapped.args }, this.input.mode);
+			safetyDecision = this.input.safety.evaluate({ tool: mapped.tool, args: mapped.args });
 			if (safetyDecision.kind === "allow") {
 				decision = "approved";
 				reason = safetyDecision.policy?.reasonCode ?? "allowed";

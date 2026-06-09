@@ -1,7 +1,6 @@
 ---
 name: Documenter
 description: Updates developer-facing docs, examples, and concise operational runbooks.
-mode: default
 tools: [read, write, edit, grep, glob, ls, git_status, git_diff, run_lint, run_build]
 audience: base
 category: implement

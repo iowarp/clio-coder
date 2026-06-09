@@ -1,9 +1,7 @@
 /**
  * Layered rule pack loader for damage-control-rules.yaml (schema v2).
  *
- * v2 splits the flat v1 rule list into named packs:
- *   - base: always-on hard blocks (rm -rf /, dd of=/dev/, fork bombs, ...).
- *   - super: privileged-mode extras (currently empty placeholder).
+ * v2 stores the always-on hard blocks in a named base pack.
  *
  * v1 schema is tolerated for backward compatibility: a top-level `rules:`
  * array is mapped to packs[base].
@@ -16,11 +14,10 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { DamageControlRule, DamageControlRuleset } from "./damage-control.js";
 import { compileDamageControlRule } from "./rule-compiler.js";
 
-export type PackId = "base" | "super";
+export type PackId = "base";
 
 export interface RulePacks {
 	base: DamageControlRuleset;
-	super: DamageControlRuleset;
 }
 
 interface RawPack {
@@ -55,11 +52,10 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 	const version = typeof parsed.version === "number" ? parsed.version : 0;
 
 	if (version === 1) {
-		// v1: flat `rules:` becomes the base pack; dev and super are empty.
+		// v1: flat `rules:` becomes the base pack.
 		const baseRules = compilePackRules(parsed.rules, "base");
 		return {
 			base: { version: 1, rules: baseRules },
-			super: emptyRuleset(1),
 		};
 	}
 
@@ -72,11 +68,10 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 	}
 	const out: RulePacks = {
 		base: emptyRuleset(2),
-		super: emptyRuleset(2),
 	};
 	for (const rawPack of parsed.packs as RawPack[]) {
 		const packId = rawPack.id;
-		if (packId !== "base" && packId !== "super") {
+		if (packId !== "base") {
 			throw new Error(`damage-control rules at ${yamlPath}: unknown pack id ${String(packId)}`);
 		}
 		const rules = compilePackRules(rawPack.rules, packId);
@@ -87,21 +82,6 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 
 export function loadDefaultRulePacks(): RulePacks {
 	return loadRulePacks(join(resolvePackageRoot(), "damage-control-rules.yaml"));
-}
-
-export interface ApplicablePacksOptions {
-	safetyMode: "default" | "advise" | "super" | string;
-}
-
-/**
- * Combine the rules from each active pack into a single flat list.
- * The base pack always applies. The super pack applies when the active
- * safety mode is `super`.
- */
-export function applicablePacks(packs: RulePacks, options: ApplicablePacksOptions): DamageControlRule[] {
-	const out: DamageControlRule[] = [...packs.base.rules];
-	if (options.safetyMode === "super") out.push(...packs.super.rules);
-	return out;
 }
 
 let cachedPacks: RulePacks | null = null;

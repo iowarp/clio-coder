@@ -47,7 +47,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				description: `External ACP delegation agent: ${agent.command} ${(agent.args ?? []).join(" ")}`,
 				source: "custom" as const,
 				filepath: "settings.yaml",
-				mode: "default" as const,
 				tools: [],
 				category: "explore" as const,
 				capabilityClass: "orchestration" as const,
@@ -55,6 +54,8 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				audience: "custom" as const,
 				tags: ["delegation", "acp"],
 				skills: [],
+				output: null,
+				body: "",
 			}));
 			return [...specs, ...delegationSpecs];
 		},
@@ -70,7 +71,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					description: `External ACP delegation agent: ${agent.command} ${(agent.args ?? []).join(" ")}`,
 					source: "custom" as const,
 					filepath: "settings.yaml",
-					mode: "default" as const,
 					tools: [],
 					category: "explore" as const,
 					capabilityClass: "orchestration" as const,
@@ -78,6 +78,8 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					audience: "custom" as const,
 					tags: ["delegation", "acp"],
 					skills: [],
+					output: null,
+					body: "",
 				};
 			}
 			return null;

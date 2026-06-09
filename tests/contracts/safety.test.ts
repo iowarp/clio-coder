@@ -7,13 +7,12 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
-import { createModesBundle } from "../../src/domains/modes/extension.js";
-import { isActionAllowed, isToolVisible } from "../../src/domains/modes/matrix.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import { compilePathPolicy, evaluatePathPolicy } from "../../src/domains/safety/path-policy.js";
-import { DEFAULT_SCOPE, isSubset, READONLY_SCOPE, SUPER_SCOPE } from "../../src/domains/safety/scope.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 
 describe("contracts/safety", () => {
 	const ORIGINAL_ENV = { ...process.env };
@@ -69,10 +68,10 @@ describe("contracts/safety", () => {
 	});
 
 	it("evaluates safety scope subsets", () => {
-		strictEqual(isSubset(READONLY_SCOPE, DEFAULT_SCOPE), true);
-		strictEqual(isSubset(READONLY_SCOPE, SUPER_SCOPE), true);
-		strictEqual(isSubset(SUPER_SCOPE, DEFAULT_SCOPE), false); // SUPER requires more permissions than DEFAULT
-		strictEqual(isSubset(DEFAULT_SCOPE, SUPER_SCOPE), true);
+		strictEqual(isSubset(READONLY_SCOPE, WORKSPACE_SCOPE), true);
+		strictEqual(isSubset(READONLY_SCOPE, CONFIRMED_SCOPE), true);
+		strictEqual(isSubset(CONFIRMED_SCOPE, WORKSPACE_SCOPE), false);
+		strictEqual(isSubset(WORKSPACE_SCOPE, CONFIRMED_SCOPE), true);
 	});
 
 	it("compiles and enforces path policies", () => {
@@ -110,35 +109,27 @@ describe("contracts/safety", () => {
 		strictEqual(verdict.count, 3);
 	});
 
-	it("evaluates mode tool visibility and action permissions", () => {
-		// default mode visibility
-		strictEqual(isToolVisible("default", ToolNames.Write), true);
-		strictEqual(isToolVisible("advise", ToolNames.Write), false);
-
-		// action allowances
-		strictEqual(isActionAllowed("default", "system_modify"), false);
-		strictEqual(isActionAllowed("super", "system_modify"), true);
-		strictEqual(isActionAllowed("advise", "execute"), false);
-	});
-
-	it("supports super elevation and modes lifecycle", () => {
+	it("asks once for confirmable actions and resumes them with confirmed posture", () => {
 		const bus = createSafeEventBus();
 		const mockContext: DomainContext = { bus, getContract: () => undefined };
-		const bundle = createModesBundle(mockContext);
+		const bundle = createSafetyBundle(mockContext);
 		const contract = bundle.contract;
 
-		strictEqual(contract.current(), "default");
+		const call = { tool: ToolNames.Bash, args: { command: "gcloud iam policies lint-condition" } };
+		const first = contract.evaluate(call);
+		strictEqual(first.kind, "ask");
 
-		// Request elevation
-		contract.requestSuper("test-harness");
-		strictEqual(contract.current(), "default"); // still default until confirmed
+		const confirmed = contract.evaluate(call, "confirmed");
+		strictEqual(confirmed.kind, "allow");
+	});
 
-		// Confirm elevation
-		const nextMode = contract.confirmSuper({ requestedBy: "test-harness", acceptedAt: Date.now() });
-		strictEqual(nextMode, "super");
-		strictEqual(contract.current(), "super");
+	it("keeps destructive git as a hard block even when the rule was historically confirmable", () => {
+		const bus = createSafeEventBus();
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
+		const bundle = createSafetyBundle(mockContext);
+		const decision = bundle.contract.evaluate({ tool: ToolNames.Bash, args: { command: "git stash drop" } });
 
-		// elevatedModeFor checks
-		strictEqual(contract.elevatedModeFor("system_modify"), null); // already super
+		strictEqual(decision.kind, "block");
+		strictEqual(decision.classification.actionClass, "git_destructive");
 	});
 });

@@ -1,7 +1,6 @@
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { ALL_MODES, type ModeName } from "../domains/modes/index.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
@@ -206,14 +205,14 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_slow",
 	},
 	[ToolNames.WritePlan]: {
-		objective: "Write a terminal advise-mode plan artifact.",
+		objective: "Write a terminal plan artifact.",
 		uiLabel: "Plan",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
 	},
 	[ToolNames.WriteReview]: {
-		objective: "Write a terminal advise-mode review artifact.",
+		objective: "Write a terminal review artifact.",
 		uiLabel: "Review",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
@@ -295,106 +294,75 @@ function builtin<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
 }
 
 /**
- * Registers every tool on the supplied registry with its admissible mode set.
- * The mode matrix (domains/modes/matrix.ts) remains authoritative for visibility;
- * `allowedModes` provides defence-in-depth at the per-spec layer so invoke paths
- * never admit a tool outside its intended modes even if the matrix drifts.
- *
- * The `workspace_context` tool registers only when a session contract is
- * supplied; workers (which have no session) skip it.
+ * Registers every tool on the supplied registry. The `workspace_context` tool
+ * registers only when a session contract is supplied; workers skip it.
  */
 export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps = {}): void {
-	const everyMode: ReadonlyArray<ModeName> = [...ALL_MODES];
-	const defaultAndSuper: ReadonlyArray<ModeName> = ["default", "super"];
-	const adviseOnly: ReadonlyArray<ModeName> = ["advise"];
-
 	registry.register({
 		...builtin(readTool, { path: "src/tools/read.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(writeTool, { path: "src/tools/write.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(editTool, { path: "src/tools/edit.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(findTool, { path: "src/tools/find.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(globTool, { path: "src/tools/glob.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(gitStatusTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(gitDiffTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(gitLogTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(runTestsTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(runLintTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(runBuildTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	registry.register({
 		...builtin(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
-		allowedModes: adviseOnly,
 	});
 	registry.register({
 		...builtin(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
-		allowedModes: adviseOnly,
 	});
 	registry.register({
 		...builtin(findSymbolTool, { path: "src/tools/codewiki/find-symbol.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(entryPointsTool, { path: "src/tools/codewiki/entry-points.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
@@ -402,11 +370,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	};
 	registry.register({
 		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
-		allowedModes: everyMode,
 	});
 	registry.register({
 		...builtin(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
-		allowedModes: defaultAndSuper,
 	});
 	if (deps.dispatch) {
 		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };
@@ -415,14 +381,12 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				path: "src/tools/dispatch.ts",
 				scope: "core",
 			}),
-			allowedModes: everyMode,
 		});
 		registry.register({
 			...builtin(createDispatchBatchTool(dispatchToolDeps), {
 				path: "src/tools/dispatch.ts",
 				scope: "core",
 			}),
-			allowedModes: everyMode,
 		});
 	}
 
@@ -441,7 +405,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				}),
 			),
 			sourceInfo: { path: "src/tools/workspace-context.ts", scope: "core" },
-			allowedModes: everyMode,
 		});
 	}
 

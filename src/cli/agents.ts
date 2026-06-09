@@ -1,11 +1,9 @@
-import chalk from "chalk";
 import { loadDomains } from "../core/domain-loader.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { type AgentSpec, isUserVisibleAgent } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import { ModesDomainModule } from "../domains/modes/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 
 const HELP = `clio agents [--json] [--all]
@@ -25,7 +23,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 	const json = args.includes("--json");
 	const all = args.includes("--all");
 	ensureClioState();
-	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, ModesDomainModule, AgentsDomainModule]);
+	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, AgentsDomainModule]);
 	const agents = result.getContract<AgentsContract>("agents");
 	if (!agents) {
 		process.stderr.write("agents: domain not loaded\n");
@@ -46,11 +44,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 }
 
 function renderLine(spec: AgentSpec): void {
-	const mode = spec.mode;
-	const modeColored = mode === "super" ? chalk.red(mode) : mode === "advise" ? chalk.yellow(mode) : chalk.green(mode);
 	const shape = `${spec.audience}/${spec.category}/${spec.capabilityClass}/${spec.latencyClass}`;
 	const skills = spec.skills.length > 0 ? ` skills=${spec.skills.join(",")}` : "";
-	process.stdout.write(
-		`${spec.id.padEnd(20)} ${modeColored.padEnd(16)} ${shape.padEnd(48)} ${spec.description}${skills}\n`,
-	);
+	process.stdout.write(`${spec.id.padEnd(20)} ${shape.padEnd(48)} ${spec.description}${skills}\n`);
 }
