@@ -49,6 +49,7 @@ import {
 	estimateAgentContextTokens,
 	extractReasoningTokens,
 } from "../domains/session/context-accounting.js";
+import { buildContextLedger, type ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
@@ -140,6 +141,13 @@ export interface ChatLoop {
 	getSessionId(): string | null;
 	isStreaming(): boolean;
 	contextUsage(): ContextUsageSnapshot;
+	/**
+	 * Categorized context-window ledger for the `/context` overlay: where every
+	 * occupied token lives (system prompt, tools, agents, skills, memory,
+	 * messages), the autocompact reserve, and free space. Composes the live
+	 * estimate with the current turn's prompt segment manifest.
+	 */
+	contextLedger(): ContextLedger;
 	/**
 	 * Force-run the compaction flow for the current session, swap the agent's
 	 * in-memory `state.messages` for a single bridge message carrying the
@@ -2199,6 +2207,49 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				estimate.contextWindow,
 				estimate.breakdown,
 			);
+		},
+		contextLedger(): ContextLedger {
+			const settings = deps.getSettings();
+			const compactionThreshold = settings.compaction?.thresholds?.llmSummary ?? null;
+			const compactionAuto = settings.compaction?.auto !== false;
+			if (!runtime) {
+				return buildContextLedger({
+					provider: settings.orchestrator?.endpoint ?? null,
+					model: settings.orchestrator?.model ?? null,
+					contextWindow: 0,
+					compactionThreshold,
+					compactionAuto,
+				});
+			}
+			const estimate = liveContextEstimate(runtime);
+			const diagnostics = currentPromptDiagnostics;
+			const promptSegments = diagnostics
+				? diagnostics.tiers.map((tier) => ({ id: tier.id, tokenEstimate: tier.tokenEstimate }))
+				: [];
+			const hasConversation = runtime.agent.state.messages.length > replayedContextMessages.length;
+			const measured =
+				hasConversation &&
+				runtime.agent.state.messages.some((message) => {
+					if ((message as { role?: string }).role !== "assistant") return false;
+					const usage = (message as { usage?: { totalTokens?: number; input?: number; output?: number } }).usage;
+					if (!usage) return false;
+					return (usage.totalTokens ?? 0) > 0 || (usage.input ?? 0) + (usage.output ?? 0) > 0;
+				});
+			return buildContextLedger({
+				provider: runtime.endpointId ?? settings.orchestrator?.endpoint ?? null,
+				model: runtime.wireModelId ?? settings.orchestrator?.model ?? null,
+				contextWindow: estimate.contextWindow,
+				promptSegments,
+				systemPromptTokens: estimate.breakdown.systemPromptTokens,
+				toolSchemaTokens: diagnostics?.toolSchemaTokenEstimate ?? estimate.breakdown.toolSchemaTokens,
+				toolCount: diagnostics?.toolCount ?? runtime.agent.state.tools.length,
+				messageTokens: estimate.breakdown.messageTokens,
+				pendingTokens: estimate.breakdown.pendingUserTokens,
+				liveTotalTokens: hasConversation && estimate.tokens > 0 ? estimate.tokens : null,
+				measured,
+				compactionThreshold,
+				compactionAuto,
+			});
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (runtime) {

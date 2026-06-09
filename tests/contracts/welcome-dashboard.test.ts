@@ -194,7 +194,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(joined.includes("SESSION"));
 		ok(joined.includes("CONTEXT"));
 		ok(joined.includes("WORKSPACE"));
-		ok(joined.includes("AGENT"));
+		ok(joined.includes("ACTIVITY"));
 
 		// Target should be formatted inside the Session facts
 		ok(joined.includes("mock-endpoint"));
