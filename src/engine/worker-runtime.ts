@@ -43,6 +43,7 @@ export interface WorkerRunInput {
 	sessionId?: string;
 	systemPrompt: string;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
+	agentId: string;
 	task: string;
 	endpoint: EndpointDescriptor;
 	runtime: RuntimeDescriptor;
@@ -208,6 +209,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry,
 		telemetry,
 		allowedTools: activeWorkerTools,
+		agentId: input.agentId,
+		task: input.task,
 	});
 	if (tools.length === 0 && input.allowedTools.length > 0 && workerPalette.groups.length > 0) {
 		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);

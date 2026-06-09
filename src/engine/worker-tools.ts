@@ -73,6 +73,8 @@ export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
 	allowedTools?: ReadonlyArray<ToolName>;
 	toolProfile?: ToolProfileName;
+	agentId?: string;
+	task?: string;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: () => Partial<ToolInvokeOptions>;
 }
@@ -474,7 +476,11 @@ export function createWorkerToolRegistry(
  * When `allowedTools` is undefined, step 3 is skipped.
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
-	const toolIds = new Set(applyToolProfile(input.registry.listRegistered(), input.toolProfile));
+	const profileContext = {
+		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+		...(input.task !== undefined ? { task: input.task } : {}),
+	};
+	const toolIds = new Set(applyToolProfile(input.registry.listRegistered(), input.toolProfile, profileContext));
 	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
 	const specs: ToolSpec[] = [];
 	for (const name of toolIds) {

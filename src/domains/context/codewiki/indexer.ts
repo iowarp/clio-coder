@@ -8,11 +8,12 @@ export interface CodewikiEntry {
 	path: string;
 	exports: string[];
 	imports: string[];
-	role?: string;
+	kind: "entry-point" | "test" | "module";
+	summary?: string;
 }
 
 export interface Codewiki {
-	version: 1;
+	version: 2;
 	generatedAt: string;
 	language: ProjectType;
 	entries: CodewikiEntry[];
@@ -150,13 +151,37 @@ function firstJsDoc(text: string): string | null {
 	return cleaned.length > 0 ? cleaned.slice(0, 160) : null;
 }
 
-function roleFor(relPath: string, text: string): string | undefined {
-	const doc = firstJsDoc(text);
-	if (doc) return doc;
+function kindFor(relPath: string): CodewikiEntry["kind"] {
 	const lower = relPath.toLowerCase();
-	if (/(^|\/)(index|main|cli|orchestrator|bootstrap)\.tsx?$/.test(lower)) return "entry point";
+	if (/(^|\/)(index|main|cli|orchestrator|bootstrap)\.tsx?$/.test(lower)) return "entry-point";
 	if (lower.includes("/test") || lower.endsWith(".test.ts") || lower.endsWith(".test.tsx")) return "test";
-	return undefined;
+	return "module";
+}
+
+function isIndexablePath(relPath: string): boolean {
+	if (relPath.endsWith(".d.ts")) return false;
+	if (!TYPESCRIPT_EXTENSIONS.has(extensionOf(relPath))) return false;
+	return !relPath.split("/").some((segment) => EXCLUDED_DIRS.has(segment));
+}
+
+/** Index one source file into a codewiki entry, or null if it is gone or unreadable. */
+function buildEntry(cwd: string, relPath: string): CodewikiEntry | null {
+	let text: string;
+	try {
+		text = readFileSync(join(cwd, relPath), "utf8");
+	} catch {
+		return null;
+	}
+	const source = ts.createSourceFile(relPath, text, ts.ScriptTarget.Latest, true);
+	const entry: CodewikiEntry = {
+		path: relPath,
+		exports: exportedNames(source),
+		imports: importEdges(cwd, relPath, source),
+		kind: kindFor(relPath),
+	};
+	const summary = firstJsDoc(text);
+	if (summary) entry.summary = summary;
+	return entry;
 }
 
 export function buildCodewiki(input: BuildCodewikiInput): Codewiki {
@@ -165,29 +190,41 @@ export function buildCodewiki(input: BuildCodewikiInput): Codewiki {
 	files.sort((a, b) => a.localeCompare(b));
 	const entries: CodewikiEntry[] = [];
 	for (const relPath of files) {
-		const absPath = join(input.cwd, relPath);
-		let text: string;
-		try {
-			text = readFileSync(absPath, "utf8");
-		} catch {
-			continue;
-		}
-		const source = ts.createSourceFile(relPath, text, ts.ScriptTarget.Latest, true);
-		const entry: CodewikiEntry = {
-			path: relPath,
-			exports: exportedNames(source),
-			imports: importEdges(input.cwd, relPath, source),
-		};
-		const role = roleFor(relPath, text);
-		if (role) entry.role = role;
-		entries.push(entry);
+		const entry = buildEntry(input.cwd, relPath);
+		if (entry) entries.push(entry);
 	}
 	return {
-		version: 1,
+		version: 2,
 		generatedAt: input.generatedAt ?? new Date().toISOString(),
 		language: input.language,
 		entries,
 	};
+}
+
+/**
+ * Apply an in-place, incremental update for a set of changed paths without
+ * re-walking the whole tree. Re-indexes indexable files that still exist, drops
+ * entries for deleted or moved-away files, and keeps the entry list sorted.
+ * Returns a new Codewiki (the input is not mutated). Cheap relative to a full
+ * `buildCodewiki`: it parses only the changed files.
+ */
+export function updateCodewikiPaths(cwd: string, codewiki: Codewiki, paths: ReadonlyArray<string>): Codewiki {
+	const byPath = new Map(codewiki.entries.map((entry) => [entry.path, entry] as const));
+	let changed = false;
+	for (const rawPath of paths) {
+		const relPath = rawPath.split("\\").join("/").replace(/^\.\//, "");
+		if (!isIndexablePath(relPath)) continue;
+		const entry = buildEntry(cwd, relPath);
+		if (entry) {
+			byPath.set(relPath, entry);
+			changed = true;
+		} else if (byPath.delete(relPath)) {
+			changed = true;
+		}
+	}
+	if (!changed) return codewiki;
+	const entries = [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+	return { ...codewiki, generatedAt: new Date().toISOString(), entries };
 }
 
 export function codewikiPath(cwd: string): string {
@@ -217,7 +254,7 @@ export function readCodewiki(cwd: string): Codewiki | null {
 function isCodewiki(value: unknown): value is Codewiki {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
-	if (obj.version !== 1 || typeof obj.generatedAt !== "string" || typeof obj.language !== "string") return false;
+	if (obj.version !== 2 || typeof obj.generatedAt !== "string" || typeof obj.language !== "string") return false;
 	if (!Array.isArray(obj.entries)) return false;
 	return obj.entries.every(isCodewikiEntry);
 }
@@ -228,6 +265,7 @@ function isCodewikiEntry(value: unknown): value is CodewikiEntry {
 	if (typeof obj.path !== "string") return false;
 	if (!Array.isArray(obj.exports) || obj.exports.some((item) => typeof item !== "string")) return false;
 	if (!Array.isArray(obj.imports) || obj.imports.some((item) => typeof item !== "string")) return false;
-	if ("role" in obj && typeof obj.role !== "string") return false;
+	if (obj.kind !== "entry-point" && obj.kind !== "test" && obj.kind !== "module") return false;
+	if ("summary" in obj && typeof obj.summary !== "string") return false;
 	return true;
 }

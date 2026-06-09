@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
@@ -9,7 +9,7 @@ import {
 	scanAgentConfigs,
 } from "./adoption.js";
 import { type ClioMdFingerprintFooter, type ClioMdSection, parseClioMd, serializeClioMd } from "./clio-md.js";
-import { buildCodewiki, writeCodewiki } from "./codewiki/indexer.js";
+import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import { readClioState, statePath as resolveStatePath, writeClioState } from "./state.js";
@@ -28,6 +28,23 @@ export interface BootstrapIo {
 	stderr: (s: string) => void;
 }
 
+/**
+ * Input handed to a CLIO.md generator. Carries the adoption scan plus the freshly
+ * built codewiki so generators can ground their output in the real repository
+ * structure (entry points, key modules) instead of guessing from prose alone.
+ */
+export interface BootstrapGenerateInput {
+	cwd: string;
+	projectType: ProjectType;
+	siblingFiles: ReadonlyArray<SiblingContextFile>;
+	adoption: AdoptionScanResult;
+	codewiki: Codewiki;
+}
+
+export type BootstrapGenerate = (
+	input: BootstrapGenerateInput,
+) => BootstrapStructuredOutput | Promise<BootstrapStructuredOutput>;
+
 export interface RunBootstrapInput {
 	cwd?: string;
 	io?: BootstrapIo;
@@ -38,12 +55,7 @@ export interface RunBootstrapInput {
 	adopt?: boolean;
 	includeGlobalImports?: boolean;
 	homeDir?: string;
-	generate?: (input: {
-		cwd: string;
-		projectType: ProjectType;
-		siblingFiles: ReadonlyArray<SiblingContextFile>;
-		adoption: AdoptionScanResult;
-	}) => BootstrapStructuredOutput | Promise<BootstrapStructuredOutput>;
+	generate?: BootstrapGenerate;
 }
 
 export interface RunBootstrapResult {
@@ -258,19 +270,20 @@ function inferInvariants(files: ReadonlyArray<SiblingContextFile>): string[] {
 	return invariants.slice(0, 3);
 }
 
-function defaultGenerate(input: {
-	cwd: string;
-	projectType: ProjectType;
-	siblingFiles: ReadonlyArray<SiblingContextFile>;
-	adoption: AdoptionScanResult;
-}): BootstrapStructuredOutput {
+/**
+ * Deterministic CLIO.md generator. Distills identity, conventions, and invariants
+ * from sibling agent-context files and package metadata without a model. Used as
+ * the offline path and as the fallback when model-driven generation is
+ * unavailable or fails.
+ */
+export const heuristicBootstrapOutput: BootstrapGenerate = (input) => {
 	return {
 		projectName: projectName(input.cwd),
 		identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
 		conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
 		invariants: inferInvariants(input.siblingFiles),
 	};
-}
+};
 
 function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContextFile[] {
 	return adoption.sources.map((source) => ({
@@ -332,7 +345,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "previewed") {
 		const adoptionLine = formatAdoptionLine(summary);
 		return [
-			"clio init preview",
+			"clio context-init preview",
 			`  ${contextLine}; codewiki would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
@@ -340,11 +353,42 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	}
 	const adoptionLine = formatAdoptionLine(summary);
 	return [
-		`clio init ${summary.action} CLIO.md`,
+		`clio context-init ${summary.action} CLIO.md`,
 		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; fingerprint updated; ${dirtyLine}`,
+		"  git policy: .clio/ stays ignored by default; CLIO.md stays versioned. Force-add .clio assets only when you explicitly intend to share them.",
 		...(adoptionLine ? [adoptionLine] : []),
 		"",
 	].join("\n");
+}
+
+const CLIO_GITIGNORE_LINE = ".clio/";
+const CLIO_GITIGNORE_DYNAMIC_LINES = new Set<string>([".clio/codewiki.json", ".clio/state.json", ".clio/handoffs/"]);
+
+function normalizedGitignoreLines(content: string): string[] {
+	return content.split(/\r?\n/).map((line) => line.trim());
+}
+
+function hasBlanketClioIgnore(content: string): boolean {
+	return normalizedGitignoreLines(content).some((line) => line === ".clio" || line === ".clio/");
+}
+
+function hasDynamicOnlyClioIgnore(content: string): boolean {
+	const lines = new Set(normalizedGitignoreLines(content));
+	for (const line of CLIO_GITIGNORE_DYNAMIC_LINES) {
+		if (!lines.has(line)) return false;
+	}
+	return true;
+}
+
+function migrateClioGitignore(content: string): string {
+	const lines = content.split(/\r?\n/);
+	const kept = lines.filter((line) => {
+		const trimmed = line.trim();
+		return trimmed !== ".clio" && trimmed !== ".clio/" && !CLIO_GITIGNORE_DYNAMIC_LINES.has(trimmed);
+	});
+	while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") kept.pop();
+	const prefix = kept.length > 0 ? [...kept, ""] : [];
+	return `${[...prefix, CLIO_GITIGNORE_LINE].join("\n")}\n`;
 }
 
 async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<void> {
@@ -355,14 +399,23 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 	} catch {
 		content = "";
 	}
-	if (/^\.clio\/?$/m.test(content)) return;
-	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
-	if (!confirmed) {
-		warn(input.io, "clio init: .clio/ is not gitignored; local indices may leak into commits.\n");
+	if (hasBlanketClioIgnore(content)) {
+		if (hasDynamicOnlyClioIgnore(content)) writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 		return;
 	}
-	const prefix = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
-	writeFileSync(gitignorePath, `${content}${prefix}.clio/\n`, "utf8");
+	if (hasDynamicOnlyClioIgnore(content)) {
+		writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
+		return;
+	}
+	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
+	if (!confirmed) {
+		warn(
+			input.io,
+			"clio context-init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n",
+		);
+		return;
+	}
+	writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 }
 
 function writeArtifacts(
@@ -429,6 +482,63 @@ function summarizeAdoption(
 	};
 }
 
+/**
+ * Top entry-point modules from the codewiki, used to orient a fresh session.
+ * Entries the indexer tagged as "entry point" come first; otherwise the most
+ * imported modules (highest in-degree) stand in as the structural anchors.
+ */
+export function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
+	const tagged = codewiki.entries.filter((entry) => entry.kind === "entry-point").map((entry) => entry.path);
+	if (tagged.length >= limit) return tagged.slice(0, limit);
+	const inDegree = new Map<string, number>();
+	for (const entry of codewiki.entries) {
+		for (const target of entry.imports) inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
+	}
+	const ranked = [...inDegree.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.map(([path]) => path)
+		.filter((path) => !tagged.includes(path));
+	return [...tagged, ...ranked].slice(0, limit);
+}
+
+/**
+ * Seed the context engine's read side. Writes a starter handoff that
+ * `context-prime` consumes on the next session so a fresh agent reconstructs
+ * intent instead of cold-starting. Never clobbers handoffs written by
+ * `context-handoff`: it only seeds when no handoff exists yet.
+ */
+function seedInitialHandoff(cwd: string, output: BootstrapStructuredOutput, codewiki: Codewiki, now: Date): void {
+	const dir = join(cwd, ".clio", "handoffs");
+	try {
+		if (existsSync(dir) && readdirSync(dir).some((name) => /^handoff-.*\.md$/.test(name))) return;
+	} catch {
+		// Unreadable dir is treated as empty; the write below recreates it.
+	}
+	const date = now.toISOString().slice(0, 10);
+	const entryPoints = codewikiEntryPoints(codewiki);
+	const lines = [
+		`# Handoff ${date}: context-init`,
+		"",
+		`**Project:** ${output.projectName}`,
+		"",
+		"## Focus",
+		"Fresh repository orientation. No work in progress yet; CLIO.md and the codewiki were just bootstrapped.",
+		"",
+		"## Where things stand",
+		`- Identity: ${output.identity}`,
+		`- Codewiki indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"} (use entry_points, where_is, find_symbol).`,
+		...(entryPoints.length > 0 ? ["- Entry points:", ...entryPoints.map((path) => `  - ${path}`)] : []),
+		"",
+		"## Suggested first step",
+		"Read CLIO.md for conventions and invariants, then state the task before changing code.",
+		"",
+		"_Seeded by /context-init. context-handoff overwrites this with a real brief at the end of a working session._",
+		"",
+	];
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, `handoff-${date}-context-init.md`), lines.join("\n"), "utf8");
+}
+
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
 	const cwd = input.cwd ?? process.cwd();
 	const projectType = detectProjectType(cwd);
@@ -438,14 +548,22 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		includeGlobal: input.includeGlobalImports === true,
 	});
 	const siblingFiles = loadBootstrapSiblingFiles(adoption);
-	let output = await (input.generate ?? defaultGenerate)({ cwd, projectType, siblingFiles, adoption });
+	const now = input.now?.() ?? new Date();
+	const indexedAt = now.toISOString();
+	// Index the repository before generation so the generator can ground CLIO.md
+	// in the real structure (entry points, key modules), not just sibling prose.
+	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	let output = await (input.generate ?? heuristicBootstrapOutput)({
+		cwd,
+		projectType,
+		siblingFiles,
+		adoption,
+		codewiki,
+	});
 	if (input.adopt === true) {
 		const importedAgentContext = renderImportedAgentContext(adoption);
 		if (importedAgentContext.length > 0) output = { ...output, importedAgentContext };
 	}
-	const now = input.now?.() ?? new Date();
-	const indexedAt = now.toISOString();
-	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
@@ -475,6 +593,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	writeCodewiki(cwd, codewiki);
 	const state = readClioState(cwd);
 	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
+	seedInitialHandoff(cwd, output, codewiki, now);
 
 	const postStatus = gitStatus(cwd);
 	const summary: RunBootstrapSummary = {

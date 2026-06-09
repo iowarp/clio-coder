@@ -23,6 +23,12 @@ export interface DynamicInputs {
 	thinkingGuidance?: string | null;
 	familyGuidance?: string | null;
 	activeToolNames?: ReadonlyArray<string>;
+	/**
+	 * Compact, names-only catalog of every tool the target can use this session.
+	 * Rendered verbatim into the always-present Tool Catalog block so the model
+	 * knows its full surface even on turns with no active schema.
+	 */
+	toolCatalog?: string | null;
 	toolPaletteIntent?: string | null;
 	toolPalettePhase?: string | null;
 	toolPaletteGroups?: ReadonlyArray<string>;
@@ -197,8 +203,10 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		lines.push("This target cannot call tools; answer from the visible user request and compact context only.");
 	} else if (activeToolNames && activeToolNames.length === 0) {
-		lines.push("Active tools this turn: none.");
-		lines.push("Answer directly. Do not claim repository facts that require inspection.");
+		lines.push("Active tools this turn: none (small talk or a tool/meta question).");
+		lines.push(
+			"The Tool Catalog below lists everything you can use. Describe your real capabilities from it; never invent tool names or claim a tool channel you lack. To inspect or change the repository, say what you will do and the matching tools attach on the next turn.",
+		);
 	} else if (activeToolNames) {
 		lines.push(`Active tools this turn: ${activeToolNames.join(", ")}.`);
 		const intent = inputs.toolPaletteIntent?.trim();
@@ -208,15 +216,37 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 		}
 		lines.push("Only call tools in the active list, and only for concrete inspection or changes that the task requires.");
 		lines.push(
-			"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+			"The Tool Catalog below lists the full surface; if the task needs a tool that is not active yet, name the next step and it attaches next turn.",
 		);
+		lines.push(
+			"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+		);
+		if (
+			activeToolNames.includes("entry_points") ||
+			activeToolNames.includes("where_is") ||
+			activeToolNames.includes("find_symbol")
+		) {
+			lines.push("Use entry_points, where_is, and find_symbol for indexed TypeScript navigation when they are active.");
+		}
 	} else {
 		lines.push("Use tool calls only for concrete inspection or changes that the task requires.");
 		lines.push(
-			"Prefer workspace_context, entry_points, where_is, find_symbol, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+			"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 		);
 	}
 	return lines.join("\n");
+}
+
+function renderToolCatalogBlock(inputs: DynamicInputs): string {
+	if (inputs.providerSupportsTools === false) return "";
+	const catalog = inputs.toolCatalog?.trim() ?? "";
+	if (catalog.length === 0) return "";
+	return [
+		"# Tool Catalog",
+		"Every tool you can use this session, grouped by purpose. Schemas are attached only for the active subset above; this catalog is the authoritative list of what exists. Use it to answer capability questions accurately.",
+		"",
+		catalog,
+	].join("\n");
 }
 
 function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
@@ -232,7 +262,7 @@ function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Repository structure and CLIO.md contents are not preloaded every turn.",
-		"Use workspace_context for a quick workspace snapshot, codewiki tools for indexed TypeScript structure, and grep/read for exact file evidence.",
+		"Use workspace_context for a quick workspace snapshot. Use codewiki tools for indexed TypeScript structure when entry_points, where_is, or find_symbol are active. Use grep/read for exact file evidence.",
 		"Do not infer mutable repo details from the pinned prompt envelope.",
 	].join("\n");
 }
@@ -440,6 +470,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		parts,
 		"tool-contract",
 		renderToolContractBlock(inputs.dynamicInputs),
+		true,
+		"session-shell",
+		"pinnedToolContract",
+	);
+	pushSegment(
+		segmentManifest,
+		parts,
+		"tool-catalog",
+		renderToolCatalogBlock(inputs.dynamicInputs),
 		true,
 		"session-shell",
 		"pinnedToolContract",

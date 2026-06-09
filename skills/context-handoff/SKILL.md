@@ -18,8 +18,8 @@ Distinct from two things it is often confused with:
 
 - `/compact` summarizes *within* the current session; it is ephemeral and lost
   when the process exits. A handoff is a file that outlives the session.
-- `/resume` restores a session's transcript. A handoff carries *intent* —
-  decisions, rationale, blockers — that a transcript alone makes expensive to
+- `/resume` restores a session's transcript. A handoff carries *intent*:
+  decisions, rationale, and blockers that a transcript alone makes expensive to
   recover.
 
 ## When to use
@@ -51,11 +51,12 @@ Distinct from two things it is often confused with:
    removed.
 
 7. **Suggest skills** from the in-context `# Skills` catalog (do not scan the
-   filesystem): name 2–5 the next session should invoke, one line each, tied to
+   filesystem): name two to five the next session should invoke, one line each, tied to
    the next focus or the work in progress. Always include `context-prime` as the
    first step.
 
-8. **Write** to `.clio/handoffs/handoff-YYYY-MM-DD[-slug].md`. Use
+8. **Write** to `.clio/handoffs/handoff-YYYY-MM-DD[-slug].md`. `.clio/` is
+   intentionally ignored by default unless the user force-adds something. Use
    `scripts/new-handoff.sh [slug]` (relative to this skill's base_dir) to
    resolve the date, ensure the directory exists, and print the target path.
 
@@ -65,7 +66,7 @@ Distinct from two things it is often confused with:
 ## Template
 
 ```markdown
-# Handoff — [YYYY-MM-DD]
+# Handoff [YYYY-MM-DD]: [focus]
 
 ## Context
 - **Project**: [name / repo] · branch `[branch]`
@@ -76,13 +77,13 @@ Distinct from two things it is often confused with:
 - [Overall objective]
 
 ## Work completed
-- [Done] — [path or commit]
+- [Done]: [path or commit]
 
 ## Work in progress
-- [WIP] — pick up at: [file:line or task]
+- [WIP]: pick up at [file:line or task]
 
 ## Decisions & rationale
-- [Decision] — because [reason]
+- [Decision]: because [reason]
 
 ## Blockers & open questions
 - [Needs human input]
@@ -91,11 +92,11 @@ Distinct from two things it is often confused with:
 - [Notable failure and what was tried]
 
 ## Suggested skills
-- context-prime — orient before acting
-- [skill] — [why]
+- context-prime: orient before acting
+- [skill]: [why]
 
 ## References
-- [path or URL] — [one line]
+- [path or URL]: [one line]
 ```
 
 ## Helper

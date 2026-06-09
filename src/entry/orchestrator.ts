@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { modelBootstrapGenerate } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
@@ -528,6 +529,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),
+		...(contextDomain ? { onFileMutation: (event) => contextDomain.noteFileChanges(event.paths) } : {}),
 	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
@@ -705,7 +707,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(contextDomain
 			? {
 					getContextState: (cwd?: string) => contextDomain.contextState(cwd),
-					onInit: async (options: { preview?: boolean; adopt?: boolean; includeGlobalImports?: boolean }) => {
+					onInit: async (options: {
+						preview?: boolean;
+						adopt?: boolean;
+						includeGlobalImports?: boolean;
+						heuristic?: boolean;
+					}) => {
+						// Interactive context-init explores the repo with the configured target by
+						// default, grounded in the freshly built codewiki, and falls back to the
+						// deterministic heuristic when no target is reachable. --heuristic and
+						// --preview skip model generation.
+						const useModel = options.heuristic !== true && options.preview !== true;
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),
 							io: {
@@ -714,8 +726,33 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							},
 							confirmGitignore: () => true,
 							...(options.preview === undefined ? {} : { preview: options.preview }),
-							...(options.adopt === undefined ? {} : { adopt: options.adopt }),
+							// Adopt project agent context (AGENTS.md/CLAUDE.md/.codex/...) by default;
+							// context-init folds it in so the agent inherits sibling-tool guidance.
+							adopt: options.adopt !== false,
 							...(options.includeGlobalImports === undefined ? {} : { includeGlobalImports: options.includeGlobalImports }),
+							...(useModel
+								? {
+										generate: modelBootstrapGenerate({
+											onFallback: (err) =>
+												process.stderr.write(
+													`clio context-init: model exploration unavailable, using heuristic (${err.message})\n`,
+												),
+										}),
+										modelId: "configured-clio-target",
+									}
+								: {}),
+						});
+					},
+					onContextClear: async (options: { all?: boolean; confirmed?: boolean; confirmedAll?: boolean }) => {
+						await contextDomain.runContextClear({
+							cwd: process.cwd(),
+							all: options.all === true,
+							io: {
+								stdout: (s) => process.stdout.write(s),
+								stderr: (s) => process.stderr.write(s),
+							},
+							confirmContext: () => options.confirmed === true,
+							confirmAll: () => options.confirmedAll === true,
 						});
 					},
 				}

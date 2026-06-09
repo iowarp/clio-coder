@@ -7,6 +7,8 @@ import { Type } from "typebox";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -14,7 +16,8 @@ import { findTool } from "../../src/tools/find.js";
 import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
-import { resolveToolPalette } from "../../src/tools/palette.js";
+import { renderToolCatalog, resolveToolPalette } from "../../src/tools/palette.js";
+import { applyToolProfile } from "../../src/tools/profiles.js";
 import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
@@ -54,6 +57,21 @@ function mockToolSpec(name: ToolName, maxBytes: number): ToolSpec {
 		},
 		run: async () => ({ kind: "ok", output: "" }),
 	};
+}
+
+function testRegistryWithTools(tools: ReadonlyArray<ToolName>) {
+	const registry = createRegistry({
+		safety: {
+			classify: () => ({ actionClass: "read", reasons: [] }),
+			evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
+			observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			isSubset: () => true,
+			audit: { recordCount: () => 0 },
+		},
+	});
+	for (const tool of tools) registry.register(mockToolSpec(tool, 1024));
+	return registry;
 }
 
 function resultSize(value: unknown): { truncated?: boolean } | null {
@@ -242,6 +260,101 @@ describe("contracts/tools palette", () => {
 			userText: "run this bash command after inspecting the repo",
 		});
 		ok(shell.activeTools.includes(ToolNames.Bash));
+	});
+
+	it("exposes the full available surface even when no tools are active this turn", () => {
+		const palette = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "hi",
+		});
+		// Small talk attaches no schemas this turn...
+		strictEqual(palette.activeTools.length, 0);
+		// ...but the model must still know its full surface for accurate answers.
+		strictEqual(palette.availableTools.length, ALL_TOOLS.length);
+		ok(palette.availableTools.includes(ToolNames.Read));
+		ok(palette.availableTools.includes(ToolNames.Dispatch));
+	});
+
+	it("renders a grouped, names-only tool catalog", () => {
+		const catalog = renderToolCatalog(ALL_TOOLS);
+		ok(catalog.includes("orientation"));
+		ok(catalog.includes(ToolNames.WorkspaceContext));
+		ok(catalog.includes(ToolNames.Read));
+		ok(catalog.includes(ToolNames.Dispatch));
+		ok(catalog.includes("skills"));
+		// Drops groups whose tools are not available.
+		const minimal = renderToolCatalog([ToolNames.Read, ToolNames.Grep]);
+		ok(minimal.includes("inspect"));
+		strictEqual(minimal.includes("mutate"), false);
+		strictEqual(renderToolCatalog([]), "");
+	});
+
+	it("keeps codewiki tools scout-owned by default while allowing navigation-heavy non-scout runs", () => {
+		const candidateTools = [
+			ToolNames.Read,
+			ToolNames.WorkspaceContext,
+			ToolNames.EntryPoints,
+			ToolNames.WhereIs,
+			ToolNames.FindSymbol,
+		];
+
+		const scout = applyToolProfile(candidateTools, undefined, { agentId: "scout", task: "summarize the current work" });
+		ok(scout.includes(ToolNames.EntryPoints));
+		ok(scout.includes(ToolNames.WhereIs));
+		ok(scout.includes(ToolNames.FindSymbol));
+
+		const genericArchitect = applyToolProfile(candidateTools, undefined, {
+			agentId: "architect",
+			task: "write a high level implementation plan",
+		});
+		strictEqual(genericArchitect.includes(ToolNames.EntryPoints), false);
+		strictEqual(genericArchitect.includes(ToolNames.WhereIs), false);
+		strictEqual(genericArchitect.includes(ToolNames.FindSymbol), false);
+		ok(genericArchitect.includes(ToolNames.WorkspaceContext));
+
+		const navigationArchitect = applyToolProfile(candidateTools, undefined, {
+			agentId: "architect",
+			task: "map call sites and locate the implementation in src/domains/context/index.ts",
+		});
+		ok(navigationArchitect.includes(ToolNames.EntryPoints));
+		ok(navigationArchitect.includes(ToolNames.WhereIs));
+		ok(navigationArchitect.includes(ToolNames.FindSymbol));
+	});
+
+	it("applies scout codewiki ownership in the worker tool resolver", () => {
+		const registry = testRegistryWithTools([
+			ToolNames.Read,
+			ToolNames.WorkspaceContext,
+			ToolNames.EntryPoints,
+			ToolNames.WhereIs,
+			ToolNames.FindSymbol,
+		]);
+		const genericArchitect = resolveAgentTools({
+			registry,
+			agentId: "architect",
+			task: "write a high level plan",
+		}).map((tool) => tool.name);
+		strictEqual(genericArchitect.includes(ToolNames.EntryPoints), false);
+
+		const scout = resolveAgentTools({
+			registry,
+			agentId: "scout",
+			task: "write a high level plan",
+		}).map((tool) => tool.name);
+		ok(scout.includes(ToolNames.EntryPoints));
+		ok(scout.includes(ToolNames.WhereIs));
+		ok(scout.includes(ToolNames.FindSymbol));
+
+		const navigationArchitect = resolveAgentTools({
+			registry,
+			agentId: "architect",
+			task: "locate the implementation for src/domains/context/index.ts",
+			allowedTools: [ToolNames.EntryPoints, ToolNames.WhereIs, ToolNames.FindSymbol],
+		}).map((tool) => tool.name);
+		ok(navigationArchitect.includes(ToolNames.EntryPoints));
+		ok(navigationArchitect.includes(ToolNames.WhereIs));
+		ok(navigationArchitect.includes(ToolNames.FindSymbol));
 	});
 });
 

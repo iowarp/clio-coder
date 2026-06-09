@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
-import { runBootstrap } from "../../src/domains/context/index.js";
+import { runBootstrap, runContextClear } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
 const fingerprint = {
@@ -70,7 +70,7 @@ describe("contracts/bootstrap", () => {
 		strictEqual(parsed.ok, false);
 	});
 
-	it("bootstraps a directory, generates state, CLIO.md, and ignores .clio in gitignore", async () => {
+	it("bootstraps a directory, generates state, CLIO.md, and ignores .clio by default", async () => {
 		// Dynamically write files to make a mock TypeScript project
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
@@ -91,7 +91,16 @@ describe("contracts/bootstrap", () => {
 		ok(existsSync(join(scratch, "CLIO.md")));
 		ok(existsSync(join(scratch, ".clio", "state.json")));
 		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
-		ok(readFileSync(join(scratch, ".gitignore"), "utf8").includes(".clio/"));
+		const gitignore = readFileSync(join(scratch, ".gitignore"), "utf8");
+		ok(gitignore.split(/\r?\n/).includes(".clio/"));
+		strictEqual(gitignore.includes(".clio/codewiki.json"), false);
+		strictEqual(gitignore.includes(".clio/state.json"), false);
+		strictEqual(gitignore.includes(".clio/handoffs/"), false);
+
+		// context-init seeds a starter handoff so context-prime can orient a fresh session.
+		const handoff = join(scratch, ".clio", "handoffs", "handoff-2026-05-01-context-init.md");
+		ok(existsSync(handoff));
+		ok(readFileSync(handoff, "utf8").includes("Mock Project"));
 
 		strictEqual(result.projectType, "typescript");
 		strictEqual(result.summary.action, "wrote");
@@ -99,6 +108,104 @@ describe("contracts/bootstrap", () => {
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "typescript");
 		strictEqual(state?.lastIndexedAt, "2026-05-01T00:00:00.000Z");
+	});
+
+	it("preserves an existing blanket .clio gitignore entry", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		writeFileSync(join(scratch, ".gitignore"), "node_modules\n.clio/\n", "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => false,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: [],
+				invariants: [],
+			}),
+		});
+
+		const gitignore = readFileSync(join(scratch, ".gitignore"), "utf8");
+		strictEqual(gitignore.includes("node_modules"), true);
+		ok(gitignore.split(/\r?\n/).includes(".clio/"));
+		strictEqual(gitignore.includes(".clio/codewiki.json"), false);
+		strictEqual(gitignore.includes(".clio/state.json"), false);
+		strictEqual(gitignore.includes(".clio/handoffs/"), false);
+	});
+
+	it("migrates a dynamic-only .clio gitignore block back to blanket .clio", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		writeFileSync(
+			join(scratch, ".gitignore"),
+			"node_modules\n.clio/codewiki.json\n.clio/state.json\n.clio/handoffs/\n",
+			"utf8",
+		);
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => false,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: [],
+				invariants: [],
+			}),
+		});
+
+		const gitignore = readFileSync(join(scratch, ".gitignore"), "utf8");
+		ok(gitignore.split(/\r?\n/).includes(".clio/"));
+		strictEqual(gitignore.includes(".clio/codewiki.json"), false);
+		strictEqual(gitignore.includes(".clio/state.json"), false);
+		strictEqual(gitignore.includes(".clio/handoffs/"), false);
+	});
+
+	it("context-clear removes accumulated artifacts while preserving user-authored context assets", async () => {
+		mkdirSync(join(scratch, ".clio", "handoffs"), { recursive: true });
+		mkdirSync(join(scratch, ".clio", "agents"), { recursive: true });
+		mkdirSync(join(scratch, ".clio", "skills"), { recursive: true });
+		writeFileSync(join(scratch, "CLIO.md"), "# Project\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "codewiki.json"), "{}\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "state.json"), "{}\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "handoffs", "handoff-2026-05-01.md"), "handoff\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "agents", "helper.md"), "# Helper\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "skills", "skill.md"), "# Skill\n", "utf8");
+
+		const result = await runContextClear({ cwd: scratch, confirmContext: () => true });
+
+		strictEqual(result.action, "cleared");
+		strictEqual(existsSync(join(scratch, ".clio", "codewiki.json")), false);
+		strictEqual(existsSync(join(scratch, ".clio", "state.json")), false);
+		strictEqual(existsSync(join(scratch, ".clio", "handoffs")), false);
+		strictEqual(existsSync(join(scratch, "CLIO.md")), true);
+		strictEqual(existsSync(join(scratch, ".clio", "agents", "helper.md")), true);
+		strictEqual(existsSync(join(scratch, ".clio", "skills", "skill.md")), true);
+	});
+
+	it("context-clear --all removes CLIO.md only after the extra confirmation", async () => {
+		writeFileSync(join(scratch, "CLIO.md"), "# Project\n", "utf8");
+		let result = await runContextClear({
+			cwd: scratch,
+			all: true,
+			confirmContext: () => true,
+			confirmAll: () => false,
+		});
+		strictEqual(result.action, "cleared");
+		strictEqual(existsSync(join(scratch, "CLIO.md")), true);
+
+		result = await runContextClear({
+			cwd: scratch,
+			all: true,
+			confirmContext: () => true,
+			confirmAll: () => true,
+		});
+		strictEqual(result.action, "cleared");
+		strictEqual(existsSync(join(scratch, "CLIO.md")), false);
 	});
 
 	it("adopts provenance-rich agent context into CLIO.md and records source fingerprints", async () => {

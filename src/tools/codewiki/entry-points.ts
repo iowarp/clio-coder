@@ -39,7 +39,7 @@ function normalizeEntryPath(value: string): string {
 
 function isEntry(entry: CodewikiEntry, packageEntries: ReadonlySet<string>): boolean {
 	if (packageEntries.has(entry.path)) return true;
-	if (entry.role && /entry|main|bootstrap|cli/i.test(entry.role)) return true;
+	if (entry.kind === "entry-point") return true;
 	return /(^|\/)(index|main|cli|orchestrator|bootstrap)\.tsx?$/.test(entry.path);
 }
 

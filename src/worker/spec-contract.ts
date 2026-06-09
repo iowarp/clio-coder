@@ -29,6 +29,7 @@ export interface WorkerSpec {
 	promptSignature?: string;
 	toolSignature?: string;
 	dynamicHash?: string;
+	agentId: string;
 	task: string;
 	endpoint: EndpointDescriptor;
 	runtime: SerializedWorkerRuntimeDescriptor;
@@ -351,6 +352,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "promptSignature", "WorkerSpec");
 	readOptionalString(spec, "toolSignature", "WorkerSpec");
 	readOptionalString(spec, "dynamicHash", "WorkerSpec");
+	readString(spec.agentId, "WorkerSpec.agentId");
 	readString(spec.task, "WorkerSpec.task");
 	validateEndpoint(spec.endpoint, runtimeId);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");

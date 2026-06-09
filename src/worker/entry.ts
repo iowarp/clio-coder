@@ -44,6 +44,7 @@ async function main(): Promise<number> {
 	const input: WorkerRunInput = {
 		systemPrompt: spec.systemPrompt,
 		dynamicPromptMessages: spec.dynamicPromptMessages ?? [],
+		agentId: spec.agentId,
 		task: spec.task,
 		endpoint: spec.endpoint,
 		runtime,

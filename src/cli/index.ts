@@ -4,6 +4,7 @@ import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
 import { runConfigureCommand } from "./configure.js";
+import { runContextClearCommand } from "./context-clear.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
@@ -44,6 +45,7 @@ Usage:
   clio auth list|status|login|logout [target-or-runtime]
   clio doctor [--fix]       diagnose state; --fix creates or repairs it
   clio reset                recover or wipe Clio Coder state
+  clio context-clear [--all]  clear accumulated project context artifacts
   clio uninstall            remove Clio Coder state and print package removal guidance
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
@@ -55,7 +57,7 @@ Usage:
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or create skills
   clio share export|import  export or import Clio project/resource archives
-  clio init [--yes] [--preview|--adopt]  bootstrap or adopt agent configs into CLIO.md
+  clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md, codewiki, and handoff
   clio --help, -h           this message
 `;
 
@@ -116,8 +118,10 @@ async function main(argv: string[]): Promise<number> {
 			return runExportCommand(subArgs);
 		case "import":
 			return runImportCommand(subArgs);
-		case "init":
+		case "context-init":
 			return runInitCommand(subArgs);
+		case "context-clear":
+			return runContextClearCommand(subArgs);
 		case "run":
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":
