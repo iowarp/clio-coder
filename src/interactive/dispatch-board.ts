@@ -482,6 +482,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 				entry.startedAtMs = Date.now();
 			}
 			if (type === "message_update") {
+				// biome-ignore lint/suspicious/noExplicitAny: The assistantMessageEvent property is dynamic on workerEvent.
 				const assistantEvent = (workerEvent as any).assistantMessageEvent || {};
 				const hasDelta =
 					assistantEvent.type === "text_delta" ||

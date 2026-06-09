@@ -98,6 +98,14 @@ export interface FooterDashboardRenderState {
 	context: ContextEngineFacts;
 	agent: AgentWorkFacts;
 	notices: ReadonlyArray<Notification>;
+	status: AgentStatus;
+	toolCounts: ToolTallySnapshot;
+	dispatchRows: ReadonlyArray<DispatchBoardRow>;
+	throughput: TokenThroughputSnapshot | null;
+	sessionTokens: UsageBreakdown | null;
+	sessionCost: number | null;
+	tick: number;
+	now: number;
 }
 
 function statusText(status: AgentStatus | undefined, now: number, width: number, frame: number): string | null {
@@ -115,8 +123,27 @@ function costSegment(value: number | undefined): string | null {
 export function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
 	return [
-		compactPrimaryLine(state.workspace, state.session, safeWidth),
-		compactSecondaryLine(state.context, state.agent, safeWidth),
+		compactPrimaryLine(
+			state.workspace,
+			state.session,
+			safeWidth,
+			undefined, // theme
+			state.status,
+			state.toolCounts,
+			state.dispatchRows,
+			state.tick,
+			state.now,
+		),
+		compactSecondaryLine(
+			state.context,
+			state.agent,
+			safeWidth,
+			undefined, // theme
+			state.status,
+			state.throughput,
+			state.sessionTokens,
+			state.sessionCost,
+		),
 	].map((line) => fitDashboardLine(line, safeWidth));
 }
 
@@ -145,9 +172,9 @@ export function renderFooterDashboardLines(
 
 /**
  * Expanded footer: responsive quadrants.
- *   - >=100: four horizontal sections.
- *   - 80-99: 2x2 sections.
- *   - <80: vertical stack with all sections retained.
+ * Widths at 100 columns and above use four horizontal sections.
+ * Widths from 80 to 99 columns use a two by two grid.
+ * Widths below 80 columns use a vertical stack with all sections retained.
  */
 export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
@@ -336,6 +363,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				clioMd: formatClioMdState(contextState?.clioMd),
 				memory: formatMemoryState(contextState?.memoryCount),
 				extensions: deps.getExtensionStats?.() ?? null,
+				breakdown: contextUsage?.breakdown ?? null,
 			},
 			agent: {
 				statusText: statusText(status, now(), width, frame),
@@ -345,6 +373,21 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				lastTurn: deps.getLastTurnSummary?.() ?? null,
 			},
 			notices: deps.getNotifications?.() ?? [],
+			status: status ?? {
+				phase: "idle",
+				since: 0,
+				lastMeaningfulAt: 0,
+				watchdogTier: 0,
+				watchdogPeak: 0,
+				localRuntime: false,
+			},
+			toolCounts: tools,
+			dispatchRows: dispatch,
+			throughput: throughputMetric ?? null,
+			sessionTokens: usage ?? null,
+			sessionCost: deps.getSessionCost?.() ?? null,
+			tick: frame,
+			now: now(),
 		};
 	};
 	const refresh = (): void => {

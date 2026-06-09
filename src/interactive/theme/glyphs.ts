@@ -13,6 +13,8 @@ export const GLYPH = {
 	rail: "│",
 	barFull: "█",
 	barEmpty: "░",
+	contextFull: "▰",
+	contextFree: "▱",
 	info: "ℹ",
 	warn: "⚠",
 } as const;
