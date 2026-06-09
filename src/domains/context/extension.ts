@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
@@ -217,7 +217,11 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 
 	const contract: ContextContract = {
 		async runBootstrap(input) {
-			const result = await runBootstrap(input);
+			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
+				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-init", at: Date.now(), ...event });
+				input?.onProgress?.(event);
+			};
+			const result = await runBootstrap(input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress });
 			const cwd = input?.cwd ?? process.cwd();
 			contextState.invalidate(cwd);
 			if (cwd === lastCwd) startupHints = collectStartupHints(cwd);

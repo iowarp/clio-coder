@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
+import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
@@ -8,7 +9,13 @@ import {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
-import { type ClioMdFingerprintFooter, type ClioMdSection, parseClioMd, serializeClioMd } from "./clio-md.js";
+import {
+	type ClioMdFingerprintFooter,
+	type ClioMdSection,
+	parseClioMd,
+	serializeClioMd,
+	tryReadClioMd,
+} from "./clio-md.js";
 import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -39,11 +46,22 @@ export interface BootstrapGenerateInput {
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
 	codewiki: Codewiki;
+	progress?: BootstrapProgressSink;
 }
 
 export type BootstrapGenerate = (
 	input: BootstrapGenerateInput,
 ) => BootstrapStructuredOutput | Promise<BootstrapStructuredOutput>;
+
+export type BootstrapProgressEvent = Omit<ContextActivityPayload, "kind" | "at">;
+export type BootstrapProgressSink = (event: BootstrapProgressEvent) => void;
+
+export type BootstrapFallbackMode = "existing" | "heuristic";
+
+export interface BootstrapFallbackResult {
+	mode: BootstrapFallbackMode;
+	output: BootstrapStructuredOutput;
+}
 
 export interface RunBootstrapInput {
 	cwd?: string;
@@ -56,6 +74,7 @@ export interface RunBootstrapInput {
 	includeGlobalImports?: boolean;
 	homeDir?: string;
 	generate?: BootstrapGenerate;
+	onProgress?: BootstrapProgressSink;
 }
 
 export interface RunBootstrapResult {
@@ -94,6 +113,10 @@ function out(io: BootstrapIo | undefined, message: string): void {
 
 function warn(io: BootstrapIo | undefined, message: string): void {
 	io?.stderr(message);
+}
+
+function progress(input: RunBootstrapInput, event: BootstrapProgressEvent): void {
+	input.onProgress?.(event);
 }
 
 function readJsonFile(filePath: string): unknown {
@@ -270,20 +293,117 @@ function inferInvariants(files: ReadonlyArray<SiblingContextFile>): string[] {
 	return invariants.slice(0, 3);
 }
 
+function topTwoSegments(path: string): string {
+	const dirParts = path.split("/").slice(0, -1);
+	if (dirParts.length === 0) return ".";
+	return dirParts.slice(0, 2).join("/");
+}
+
+function topCodewikiDirectories(codewiki: Codewiki, limit = 8): string[] {
+	const dirCounts = new Map<string, number>();
+	for (const entry of codewiki.entries) {
+		const top = topTwoSegments(entry.path);
+		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
+	}
+	return [...dirCounts.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.slice(0, limit)
+		.map(([dir, count]) => `${dir} (${count})`);
+}
+
+function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
+	const sections: ClioMdSection[] = [];
+	const entryPoints = codewikiEntryPoints(input.codewiki, 8);
+	if (entryPoints.length > 0) {
+		sections.push({
+			title: "Context retrieval",
+			body: [
+				`The codewiki currently indexes ${input.codewiki.entries.length} module${input.codewiki.entries.length === 1 ? "" : "s"}.`,
+				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
+				"Use `entry_points`, `where_is`, and `find_symbol` before broad reads when the task is navigational.",
+			].join(" "),
+		});
+	}
+	const topDirs = topCodewikiDirectories(input.codewiki);
+	if (topDirs.length > 0) {
+		sections.push({
+			title: "Repository shape",
+			body: [
+				`Largest indexed areas: ${topDirs.join(", ")}.`,
+				"Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.",
+			].join(" "),
+		});
+	}
+	const invariants = inferInvariants(input.siblingFiles);
+	if (invariants.length > 0) {
+		sections.push({
+			title: "Architecture boundaries",
+			body: invariants.map((item) => `- ${item}`).join("\n"),
+		});
+	}
+	sections.push({
+		title: "Generated context artifacts",
+		body: [
+			"`CLIO.md` is the versioned project context file.",
+			"`.clio/codewiki.json`, `.clio/state.json`, and `.clio/handoffs/` are local generated context-engine artifacts and stay ignored unless explicitly shared.",
+			"Run `/context-init` after branch switches, dependency-shape changes, or context-source changes.",
+		].join(" "),
+	});
+	if (input.adoption.sources.length > 0) {
+		const sourceNames = input.adoption.sources
+			.map((source) => `\`${source.path}\``)
+			.slice(0, 8)
+			.join(", ");
+		sections.push({
+			title: "Sibling agent context",
+			body: [
+				`Bootstrap scanned ${input.adoption.sources.length} sibling context source${input.adoption.sources.length === 1 ? "" : "s"}: ${sourceNames}${input.adoption.sources.length > 8 ? ", ..." : ""}.`,
+				"Imported rules appear in the provenance section only when adoption mode is enabled.",
+			].join(" "),
+		});
+	}
+	return sections.slice(0, 6);
+}
+
 /**
  * Deterministic CLIO.md generator. Distills identity, conventions, and invariants
  * from sibling agent-context files and package metadata without a model. Used as
  * the offline path and as the fallback when model-driven generation is
  * unavailable or fails.
  */
-export const heuristicBootstrapOutput: BootstrapGenerate = (input) => {
+function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapStructuredOutput {
 	return {
 		projectName: projectName(input.cwd),
 		identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
 		conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
 		invariants: inferInvariants(input.siblingFiles),
+		sections: inferHeuristicSections(input),
 	};
-};
+}
+
+export const heuristicBootstrapOutput: BootstrapGenerate = heuristicBootstrapOutputSync;
+
+export function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
+	const parsed = tryReadClioMd(cwd);
+	if (!parsed?.ok) return null;
+	const out: BootstrapStructuredOutput = {
+		projectName: parsed.value.projectName,
+		identity: parsed.value.identity,
+		conventions: [...parsed.value.conventions],
+		invariants: [...parsed.value.invariants],
+	};
+	if (parsed.value.sections.length > 0) {
+		out.sections = parsed.value.sections.map((section) => ({ title: section.title, body: section.body }));
+	}
+	if (parsed.value.importedAgentContext) out.importedAgentContext = parsed.value.importedAgentContext;
+	return out;
+}
+
+export function fallbackBootstrapOutput(input: BootstrapGenerateInput): BootstrapFallbackResult {
+	const existing = existingClioMdBootstrapOutput(input.cwd);
+	if (existing) return { mode: "existing", output: existing };
+	return { mode: "heuristic", output: heuristicBootstrapOutputSync(input) };
+}
 
 function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContextFile[] {
 	return adoption.sources.map((source) => ({
@@ -542,23 +662,58 @@ function seedInitialHandoff(cwd: string, output: BootstrapStructuredOutput, code
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
 	const cwd = input.cwd ?? process.cwd();
 	const projectType = detectProjectType(cwd);
+	progress(input, {
+		phase: "scan",
+		status: "started",
+		message: "scanning project and sibling agent context",
+		detail: projectType,
+	});
 	const adoption = scanAgentConfigs({
 		cwd,
 		...(input.homeDir ? { homeDir: input.homeDir } : {}),
 		includeGlobal: input.includeGlobalImports === true,
 	});
 	const siblingFiles = loadBootstrapSiblingFiles(adoption);
+	progress(input, {
+		phase: "scan",
+		status: "completed",
+		message:
+			siblingFiles.length === 0
+				? "no sibling context files found"
+				: `folded ${siblingFiles.length} sibling context file${siblingFiles.length === 1 ? "" : "s"}`,
+		current: siblingFiles.length,
+		total: siblingFiles.length,
+	});
 	const now = input.now?.() ?? new Date();
 	const indexedAt = now.toISOString();
 	// Index the repository before generation so the generator can ground CLIO.md
 	// in the real structure (entry points, key modules), not just sibling prose.
+	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
 	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	progress(input, {
+		phase: "codewiki",
+		status: "completed",
+		message: `indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"}`,
+		current: codewiki.entries.length,
+		total: codewiki.entries.length,
+	});
+	progress(input, {
+		phase: "generate",
+		status: "started",
+		message: input.generate ? "drafting CLIO.md with scout" : "drafting CLIO.md with heuristic",
+	});
 	let output = await (input.generate ?? heuristicBootstrapOutput)({
 		cwd,
 		projectType,
 		siblingFiles,
 		adoption,
 		codewiki,
+		...(input.onProgress ? { progress: input.onProgress } : {}),
+	});
+	progress(input, {
+		phase: "generate",
+		status: "completed",
+		message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
 	});
 	if (input.adopt === true) {
 		const importedAgentContext = renderImportedAgentContext(adoption);
@@ -567,6 +722,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
+		progress(input, { phase: "clio-md", status: "completed", message: "preview ready; no files written" });
 		const summary: RunBootstrapSummary = {
 			action: "previewed",
 			contextFileCount: readNames.length,
@@ -589,11 +745,30 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 
 	await ensureGitignore(cwd, input);
 	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
+	progress(input, {
+		phase: "clio-md",
+		status: "started",
+		message: hadClioMd ? "refreshing CLIO.md" : "writing CLIO.md",
+	});
 	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output, adoption);
+	progress(input, {
+		phase: "clio-md",
+		status: "completed",
+		message: hadClioMd ? "CLIO.md refreshed" : "CLIO.md written",
+		detail: paths.clioMdPath,
+	});
+	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
 	writeCodewiki(cwd, codewiki);
 	const state = readClioState(cwd);
 	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
+	progress(input, {
+		phase: "state",
+		status: "completed",
+		message: `state updated; ${codewiki.entries.length} codewiki entr${codewiki.entries.length === 1 ? "y" : "ies"}`,
+	});
+	progress(input, { phase: "handoff", status: "started", message: "seeding initial handoff" });
 	seedInitialHandoff(cwd, output, codewiki, now);
+	progress(input, { phase: "handoff", status: "completed", message: "handoff ready" });
 
 	const postStatus = gitStatus(cwd);
 	const summary: RunBootstrapSummary = {
@@ -605,6 +780,11 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		adoption: summarizeAdoption(adoption, input.adopt === true ? "adopt" : "scan"),
 	};
 	out(input.io, formatBootstrapSummary(summary));
+	progress(input, {
+		phase: "done",
+		status: "completed",
+		message: `${summary.action} CLIO.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}`,
+	});
 	return {
 		...paths,
 		siblingFiles,

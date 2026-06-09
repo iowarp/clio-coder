@@ -14,7 +14,20 @@ export {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
-export { type RunBootstrapInput, type RunBootstrapResult, runBootstrap } from "./bootstrap.js";
+export {
+	type BootstrapFallbackMode,
+	type BootstrapFallbackResult,
+	type BootstrapGenerate,
+	type BootstrapGenerateInput,
+	type BootstrapProgressEvent,
+	type BootstrapProgressSink,
+	type BootstrapStructuredOutput,
+	type RunBootstrapInput,
+	type RunBootstrapResult,
+	existingClioMdBootstrapOutput,
+	fallbackBootstrapOutput,
+	runBootstrap,
+} from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
 export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 export { buildCodewiki, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";

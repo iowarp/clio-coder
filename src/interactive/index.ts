@@ -53,6 +53,11 @@ import {
 } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
+import {
+	CONTEXT_ISLAND_WIDTH,
+	createContextActivityStore,
+	formatContextActivityIslandLines,
+} from "./context-activity.js";
 import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
@@ -923,6 +928,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
+	const contextActivityStore = createContextActivityStore(deps.bus);
 	const footerToolCounts = new Map<string, number>();
 	const footerActiveTools = new Set<string>();
 	let footerToolErrors = 0;
@@ -1026,6 +1032,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// the parked tool call.
 	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"), 0, 0);
 	const taskIsland = new Text("", 0, 0);
+	const contextIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 
 	const chatRenderer = createCoalescingChatRenderer({
@@ -1477,6 +1484,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
 	let authDialogDismiss: (() => void) | null = null;
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
+	let contextIslandTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
 	let leaderState: LeaderKeyState = IDLE_LEADER_STATE;
@@ -1508,6 +1516,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		visible: (width, height) => width >= 80 && height >= 18,
 	});
 	taskIslandHandle.setHidden(true);
+	const contextIslandHandle = tui.showOverlay(contextIsland, {
+		anchor: "top-right",
+		width: CONTEXT_ISLAND_WIDTH,
+		margin: { top: 1, right: 1 },
+		nonCapturing: true,
+		visible: (width, height) => width >= 92 && height >= 20,
+	});
+	contextIslandHandle.setHidden(true);
 
 	const renderDispatchBoard = (): void => {
 		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"));
@@ -1516,9 +1532,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const renderTaskIsland = (): void => {
 		const rows = dispatchBoardStore.activeRows();
-		taskIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || rows.length === 0);
+		const contextActive = contextActivityStore.active();
+		taskIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || contextActive || rows.length === 0);
 		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
 		taskIsland.invalidate();
+	};
+
+	const renderContextIsland = (): void => {
+		const activity = contextActivityStore.current();
+		contextIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || !activity);
+		if (activity) contextIsland.setText(formatContextActivityIslandLines(activity).join("\n"));
+		contextIsland.invalidate();
 	};
 
 	const stopDispatchBoardTicker = (): void => {
@@ -1535,6 +1559,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		}, 250);
 	};
+
+	const stopContextIslandTicker = (): void => {
+		if (!contextIslandTicker) return;
+		clearInterval(contextIslandTicker);
+		contextIslandTicker = null;
+	};
+
+	const startContextIslandTicker = (): void => {
+		stopContextIslandTicker();
+		contextIslandTicker = setInterval(() => {
+			if (!contextActivityStore.active()) return;
+			renderContextIsland();
+			renderTaskIsland();
+			tui.requestRender();
+		}, 250);
+		contextIslandTicker.unref?.();
+	};
+	startContextIslandTicker();
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
@@ -1581,6 +1623,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
 			openPermissionOverlay(pendingPermission.call, pendingPermission.decision);
 		}
+		renderContextIsland();
 		renderTaskIsland();
 		tui.requestRender();
 	};
@@ -2278,7 +2321,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (workspaceTicker) clearInterval(workspaceTicker);
 		if (leaderTimer) clearTimeout(leaderTimer);
 		stopDispatchBoardTicker();
+		stopContextIslandTicker();
+		contextIslandHandle.hide();
 		taskIslandHandle.hide();
+		contextActivityStore.unsubscribe();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
 		unsubscribeStatus();
@@ -2432,6 +2478,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			if (overlayState !== "dispatch-board") return;
 			renderDispatchBoard();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.ContextActivity, () => {
+			footer.refresh();
+			renderContextIsland();
+			renderTaskIsland();
 			tui.requestRender();
 		}),
 	];

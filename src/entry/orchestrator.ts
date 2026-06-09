@@ -733,9 +733,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							...(useModel
 								? {
 										generate: modelBootstrapGenerate({
-											onFallback: (err) =>
+											dispatch,
+											onFallback: (err, mode) =>
 												bootstrapIo.stderr(
-													`clio context-init: model exploration unavailable, using heuristic (${err.message})\n`,
+													`clio context-init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
 												),
 										}),
 										modelId: "configured-clio-target",

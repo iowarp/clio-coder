@@ -1,95 +1,171 @@
-import { spawn } from "node:child_process";
+import { loadDomains, type LoadResult } from "../core/domain-loader.js";
+import { AgentsDomainModule } from "../domains/agents/index.js";
+import { ConfigDomainModule } from "../domains/config/index.js";
 import {
+	type BootstrapFallbackMode,
 	type BootstrapGenerate,
 	type BootstrapGenerateInput,
 	type BootstrapStructuredOutput,
-	heuristicBootstrapOutput,
-} from "../domains/context/bootstrap.js";
+	ContextDomainModule,
+	fallbackBootstrapOutput,
+} from "../domains/context/index.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import type { RunReceipt } from "../domains/dispatch/types.js";
+import { MiddlewareDomainModule } from "../domains/middleware/index.js";
+import { createPromptsDomainModule } from "../domains/prompts/index.js";
+import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { ResourcesDomainModule } from "../domains/resources/index.js";
+import { SafetyDomainModule } from "../domains/safety/index.js";
 import { buildBootstrapPrompt, parseBootstrapModelOutput } from "../domains/context/bootstrap-prompt.js";
 
 /**
- * Model-driven CLIO.md generation. Spawns a headless `clio run --json` against
- * the configured orchestrator target with a bootstrap prompt grounded in the
- * codewiki structure, then validates the structured JSON the model returns.
- * Shared by `clio context-init` and the interactive `/context-init` command.
+ * Model-driven CLIO.md generation. Dispatches Clio's internal `scout` shadow
+ * agent with a bootstrap prompt grounded in the codewiki structure, then
+ * validates the structured JSON the model returns. Shared by
+ * `clio context-init` and the interactive `/context-init` command.
  */
 
-function cliEntryPath(): string {
-	const entry = process.argv[1];
-	if (!entry) throw new Error("context-init could not resolve the current CLI entry path");
-	return entry;
+export interface ModelBootstrapGenerateOptions {
+	dispatch?: DispatchContract;
+	onFallback?: (err: Error, mode: BootstrapFallbackMode) => void;
 }
 
-function parseHeadlessJsonOutput(stdout: string): string {
-	let lastText = "";
-	for (const line of stdout.split(/\r?\n/)) {
-		const trimmed = line.trim();
-		if (trimmed.length === 0) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(trimmed);
-		} catch {
-			continue;
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assistantTextFromMessage(message: unknown): string {
+	if (!isRecord(message) || message.role !== "assistant") return "";
+	const content = message.content;
+	if (typeof content === "string") return content.trim();
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => {
+			if (typeof block === "string") return block;
+			if (!isRecord(block)) return "";
+			return typeof block.text === "string" ? block.text : "";
+		})
+		.join("")
+		.trim();
+}
+
+function textDeltaFromEvent(event: unknown): string {
+	if (!isRecord(event) || event.type !== "text_delta") return "";
+	return typeof event.text === "string" ? event.text : "";
+}
+
+async function collectDispatchAssistantText(events: AsyncIterable<unknown>): Promise<string> {
+	let streamedText = "";
+	let lastAssistantText = "";
+	for await (const event of events) {
+		streamedText += textDeltaFromEvent(event);
+		if (isRecord(event) && event.type === "message_end") {
+			const text = assistantTextFromMessage(event.message);
+			if (text.length > 0) lastAssistantText = text;
 		}
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
-		const event = parsed as { type?: unknown; message?: { role?: unknown; content?: unknown } };
-		if (event.type !== "message_end" || event.message?.role !== "assistant") continue;
-		const content = event.message.content;
-		if (!Array.isArray(content)) continue;
-		const text = content
-			.map((block) => {
-				if (typeof block === "string") return block;
-				if (typeof block !== "object" || block === null || Array.isArray(block)) return "";
-				const maybeText = (block as { text?: unknown }).text;
-				return typeof maybeText === "string" ? maybeText : "";
-			})
-			.join("")
-			.trim();
-		if (text.length > 0) lastText = text;
 	}
-	if (lastText.length === 0) throw new Error("bootstrap model did not return an assistant message");
-	return lastText;
+	const text = (lastAssistantText || streamedText).trim();
+	if (text.length === 0) throw new Error("bootstrap scout did not return an assistant response");
+	return text;
 }
 
-export async function generateBootstrapWithConfiguredTarget(
+function receiptFailure(receipt: RunReceipt): string {
+	const detail = receipt.failureMessage ? `: ${receipt.failureMessage}` : "";
+	return `bootstrap scout failed with exit ${receipt.exitCode}${detail}`;
+}
+
+export async function generateBootstrapWithScout(
+	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
 ): Promise<BootstrapStructuredOutput> {
 	const prompt = buildBootstrapPrompt(input);
-	const child = spawn(process.execPath, [cliEntryPath(), "--no-context-files", "run", "--json", prompt], {
+	input.progress?.({
+		phase: "generate",
+		status: "running",
+		message: "dispatching internal scout shadow agent",
+		detail: "agent=scout",
+	});
+	const handle = await dispatch.dispatch({
+		agentId: "scout",
+		task: prompt,
 		cwd: input.cwd,
-		env: { ...process.env, CLIO_BOOTSTRAP_GENERATE_CHILD: "1" },
-		stdio: ["ignore", "pipe", "pipe"],
+		requestOrigin: "internal",
+		thinkingLevel: "off",
+		noSkills: true,
 	});
-	let stdout = "";
-	let stderr = "";
-	child.stdout.setEncoding("utf8");
-	child.stderr.setEncoding("utf8");
-	child.stdout.on("data", (chunk: string) => {
-		stdout += chunk;
-	});
-	child.stderr.on("data", (chunk: string) => {
-		stderr += chunk;
-	});
-	const exit = await new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
-	if (exit !== 0) {
-		const detail = stderr.trim().slice(0, 1000);
-		throw new Error(`bootstrap model generation failed with exit ${exit ?? "signal"}${detail ? `: ${detail}` : ""}`);
+	try {
+		const text = await collectDispatchAssistantText(handle.events);
+		const receipt = await handle.finalPromise;
+		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
+		const output = parseBootstrapModelOutput(text);
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "scout returned structured bootstrap JSON",
+			detail: `${text.length} bytes`,
+		});
+		return output;
+	} catch (err) {
+		dispatch.abort(handle.runId);
+		await handle.finalPromise.catch(() => undefined);
+		throw err;
 	}
-	return parseBootstrapModelOutput(parseHeadlessJsonOutput(stdout));
+}
+
+async function loadBootstrapDispatch(): Promise<{ dispatch: DispatchContract; loaded: LoadResult }> {
+	const loaded = await loadDomains([
+		ConfigDomainModule,
+		ResourcesDomainModule,
+		ContextDomainModule,
+		ProvidersDomainModule,
+		SafetyDomainModule,
+		createPromptsDomainModule({ noContextFiles: true }),
+		AgentsDomainModule,
+		MiddlewareDomainModule,
+		DispatchDomainModule,
+	]);
+	const dispatch = loaded.getContract<DispatchContract>("dispatch");
+	if (!dispatch) {
+		await loaded.stop();
+		throw new Error("bootstrap scout dispatch unavailable");
+	}
+	return { dispatch, loaded };
 }
 
 /**
  * Wrap model-driven generation so any failure (no configured target, offline
- * endpoint, malformed output) degrades cleanly to the deterministic heuristic
- * generator instead of aborting the whole bootstrap.
+ * endpoint, malformed output) degrades cleanly. Existing valid CLIO.md content
+ * is preserved when possible; otherwise the deterministic heuristic is used.
  */
-export function modelBootstrapGenerate(options: { onFallback?: (err: Error) => void } = {}): BootstrapGenerate {
+export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = {}): BootstrapGenerate {
 	return async (input) => {
+		let loaded: LoadResult | null = null;
 		try {
-			return await generateBootstrapWithConfiguredTarget(input);
+			if (options.dispatch) {
+				return await generateBootstrapWithScout(options.dispatch, input);
+			}
+			{
+				const lazy = await loadBootstrapDispatch();
+				loaded = lazy.loaded;
+				return await generateBootstrapWithScout(lazy.dispatch, input);
+			}
 		} catch (err) {
-			options.onFallback?.(err instanceof Error ? err : new Error(String(err)));
-			return heuristicBootstrapOutput(input);
+			const error = err instanceof Error ? err : new Error(String(err));
+			const fallback = fallbackBootstrapOutput(input);
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message:
+					fallback.mode === "existing"
+						? "scout unavailable; preserving existing CLIO.md"
+						: "scout unavailable; using heuristic bootstrap",
+				detail: error.message,
+			});
+			options.onFallback?.(error, fallback.mode);
+			return fallback.output;
+		} finally {
+			if (loaded) await loaded.stop();
 		}
 	};
 }

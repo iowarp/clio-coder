@@ -6,6 +6,8 @@ import type { SiblingContextFile } from "./sibling-files.js";
 
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to produce a single CLIO.md file for the project at <cwd>. CLIO.md is a lean, project-specific context file that the clio-coder coding agent loads on every session.
 
+You are being dispatched through Clio's internal Scout shadow agent. Use Scout's read-only tools only when the structured <bootstrap-input> is insufficient. Do not write files, run tests, or use external sources. For this bootstrap task, the JSON-only response contract below overrides Scout's normal evidence-report format.
+
 You will be given:
 - The detected project type.
 - A structural digest from the codewiki index: module count, entry points, and top directories. Ground the identity and any architecture sections in this real structure; do not invent files.
@@ -20,15 +22,15 @@ Produce a CLIO.md with these possible sections:
 
 3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
 
-4. Custom H2 sections. Zero to four sections, each with a title and markdown body. Use these only for repository-specific architecture boundaries, agent workflow traps, context-retrieval strategy, generated-file policies, or failure modes that are not obvious from the language. Do not add generic "how to build/test" guidance.
+4. Custom H2 sections. Prefer four to eight sections when the repository structure supports them, each with a title and markdown body. Use these for repository-specific architecture boundaries, ownership boundaries, context-retrieval strategy, generated/local artifact policy, workflow traps, failure modes, and verification expectations that are not obvious from the language. Keep each section dense and actionable for a coding agent. Do not add generic "how to build/test" guidance.
 
 5. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
 
-Total CLIO.md size target: 1200-3500 bytes without adoption, or compact and provenance-rich with adoption.
+Total CLIO.md size target: 2500-8000 bytes without adoption, or compact and provenance-rich with adoption.
 
 Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
 
-Return only compact JSON with this exact shape:
+Return one assistant message containing only compact JSON with this exact shape. Do not include markdown fences, prose, explanation, or commentary:
 {
   "projectName": "string",
   "identity": "string",
@@ -159,7 +161,7 @@ function structuredSections(value: unknown): NonNullable<BootstrapStructuredOutp
 			};
 		})
 		.filter((section) => section.title.length > 0 && section.body.length > 0)
-		.slice(0, 4);
+		.slice(0, 8);
 }
 
 export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutput {
