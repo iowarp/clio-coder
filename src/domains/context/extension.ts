@@ -106,14 +106,20 @@ function resolveClioMdState(cwd: string): ContextState["clioMd"] {
 	return isStale(reference, current) ? "stale" : "ok";
 }
 
-function createContextStateReader(): (cwd?: string) => ContextState {
+function createContextStateReader(): { read(cwd?: string): ContextState; invalidate(cwd?: string): void } {
 	let cached: { cwd: string; at: number; state: ContextState } | null = null;
-	return (cwd = process.cwd()): ContextState => {
-		const now = Date.now();
-		if (cached && cached.cwd === cwd && now - cached.at < CONTEXT_STATE_CACHE_TTL_MS) return cached.state;
-		const state: ContextState = { clioMd: resolveClioMdState(cwd), memoryCount: memoryCount() };
-		cached = { cwd, at: now, state };
-		return state;
+	return {
+		read(cwd = process.cwd()): ContextState {
+			const now = Date.now();
+			if (cached && cached.cwd === cwd && now - cached.at < CONTEXT_STATE_CACHE_TTL_MS) return cached.state;
+			const state: ContextState = { clioMd: resolveClioMdState(cwd), memoryCount: memoryCount() };
+			cached = { cwd, at: now, state };
+			return state;
+		},
+		invalidate(cwd) {
+			if (!cached) return;
+			if (!cwd || cached.cwd === cwd) cached = null;
+		},
 	};
 }
 
@@ -176,6 +182,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 			if (updated === codewiki) return; // No indexable file actually changed.
 			writeCodewiki(cwd, updated);
 			persistState(cwd, computeFingerprint(cwd), updated.generatedAt, readClioState(cwd));
+			contextState.invalidate(cwd);
 		} catch {
 			// Best-effort: never let incremental indexing surface as a tool error.
 		}
@@ -209,10 +216,22 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 	};
 
 	const contract: ContextContract = {
-		runBootstrap,
-		runContextClear,
+		async runBootstrap(input) {
+			const result = await runBootstrap(input);
+			const cwd = input?.cwd ?? process.cwd();
+			contextState.invalidate(cwd);
+			if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+			return result;
+		},
+		async runContextClear(input) {
+			const result = await runContextClear(input);
+			const cwd = input?.cwd ?? process.cwd();
+			contextState.invalidate(cwd);
+			if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+			return result;
+		},
 		renderPromptContext,
-		contextState,
+		contextState: contextState.read,
 		startupHints: () => [...startupHints],
 		noteFileChanges,
 	};

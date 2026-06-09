@@ -185,7 +185,7 @@ export interface InteractiveDeps {
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	/** Run /context-init for the current working directory. */
-	onInit?: (options: InitCommandOptions) => Promise<void>;
+	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context-clear for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
@@ -945,6 +945,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const notify = (level: "info" | "warning" | "error", text: string, key?: string): void => {
 		notifications.add(key ? { level, text, key } : { level, text });
 	};
+	const dismissContextBootstrapNotices = (): void => {
+		for (const notice of notifications.list()) {
+			if (
+				/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|CLIO\.md has no fingerprint footer|CLIO\.md fingerprint differs|Imported agent context changed)/.test(
+					notice.text,
+				)
+			) {
+				notifications.dismiss(notice.id);
+			}
+		}
+	};
 	footer = buildFooterDashboard({
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
@@ -1139,6 +1150,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 
 	let activeEditorBash: AbortController | null = null;
+	let activeContextInit = false;
 
 	const ensureSessionForLocalEntry = (): void => {
 		if (!deps.session || deps.session.current()) return;
@@ -1305,17 +1317,31 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			});
 		},
 		runInit: (options) => {
-			if (!deps.onInit) {
+			const onInit = deps.onInit;
+			if (!onInit) {
 				io.stderr("[/context-init] context-init not wired; pass onInit to startInteractive\n");
 				return;
 			}
-			void deps
-				.onInit(options)
+			if (activeContextInit) {
+				io.stderr("[/context-init] bootstrap already running\n");
+				return;
+			}
+			activeContextInit = true;
+			io.stdout("[/context-init] bootstrapping project context...\n");
+			void Promise.resolve()
+				.then(() => onInit(options, io))
+				.then(() => {
+					dismissContextBootstrapNotices();
+					footer.refresh();
+				})
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/context-init] ${msg}\n`);
 				})
-				.finally(() => tui.requestRender());
+				.finally(() => {
+					activeContextInit = false;
+					tui.requestRender();
+				});
 		},
 		runContextClear: (options) => {
 			if (!deps.onContextClear) {

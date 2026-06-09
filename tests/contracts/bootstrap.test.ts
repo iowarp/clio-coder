@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
+import { createContextBundle } from "../../src/domains/context/extension.js";
 import { runBootstrap, runContextClear } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
@@ -141,6 +143,31 @@ describe("contracts/bootstrap", () => {
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "typescript");
 		strictEqual(state?.lastIndexedAt, "2026-05-01T00:00:00.000Z");
+	});
+
+	it("invalidates cached context state after contract bootstrap", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		const bundle = createContextBundle({
+			bus: createSafeEventBus(),
+			getContract: () => undefined,
+		});
+
+		strictEqual(bundle.contract.contextState(scratch).clioMd, "none");
+		await bundle.contract.runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: ["Keep files short."],
+				invariants: [],
+			}),
+		});
+
+		strictEqual(bundle.contract.contextState(scratch).clioMd, "ok");
 	});
 
 	it("preserves an existing blanket .clio gitignore entry", async () => {
