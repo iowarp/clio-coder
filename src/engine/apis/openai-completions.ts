@@ -255,32 +255,7 @@ function withRemainingContextBudget<TOptions extends StreamOptions>(
 	} as TOptions;
 }
 
-/**
- * Drop ThinkingContent blocks from prior assistant messages before they go
- * upstream. Necessary because pi-ai's openai-completions serializer attaches
- * any non-empty thinking back onto the request via
- * `assistantMsg[thinkingSignature] = thinking` (e.g. `reasoning_content` for
- * llama.cpp same-model replays). With a thinking model on llama.cpp this means
- * every prior turn's chain-of-thought is re-sent on every subsequent turn,
- * compounding context use until the request blows past the model's context
- * window. The lmstudio-native adapter strips thinking on replay for the same
- * reason (`assistantMessage` in src/engine/apis/lmstudio-native.ts); this
- * brings the openai-compat path to parity. Tool calls and text content are
- * preserved verbatim. The current in-flight assistant turn is unaffected
- * because pi-ai builds it from streamed events, not from `context.messages`.
- */
-function stripThinkingFromHistory(context: Context): Context {
-	let mutated = false;
-	const messages: Message[] = context.messages.map((message) => {
-		if (message.role !== "assistant") return message;
-		const filtered = message.content.filter((block) => block.type !== "thinking");
-		if (filtered.length === message.content.length) return message;
-		mutated = true;
-		return { ...message, content: filtered } as Message;
-	});
-	if (!mutated) return context;
-	return { ...context, messages };
-}
+
 
 function requiredToolArguments(tool: Tool): ReadonlyArray<string> {
 	const schema = tool.parameters as unknown;
@@ -537,7 +512,6 @@ function resolvedCapabilitiesForModel(
 export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) => {
-		const replayContext = stripThinkingFromHistory(context);
 		// Bare `stream` callers don't communicate thinking state; fall back to
 		// the model's reasoning capability so the catalog still applies.
 		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
@@ -545,16 +519,15 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
-					streamOpenAICompletions(model, replayContext, withRemainingContextBudget(model, replayContext, withSamplers)),
+					streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, withSamplers)),
 					resolved,
 				),
 			),
 			model,
-			replayContext,
+			context,
 		);
 	},
 	streamSimple: (model, context, options?: SimpleStreamOptions) => {
-		const replayContext = stripThinkingFromHistory(context);
 		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
 		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
@@ -562,14 +535,14 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 				stripSentinelsFromStream(
 					streamSimpleOpenAICompletions(
 						model,
-						replayContext,
-						withRemainingContextBudget(model, replayContext, withSamplers),
+						context,
+						withRemainingContextBudget(model, context, withSamplers),
 					),
 					resolved,
 				),
 			),
 			model,
-			replayContext,
+			context,
 		);
 	},
 };
