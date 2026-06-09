@@ -36,8 +36,30 @@ export interface ResolveModelCapabilitiesOptions {
  * result so /thinking and the model picker reflect what the loaded model can
  * actually do, without baking the detection into the runtime defaults.
  */
+type ProbeCapabilityStatus = Pick<
+	EndpointStatus,
+	"endpoint" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
+>;
+
+export function probeCapabilitiesForModel(
+	status: ProbeCapabilityStatus,
+	wireModelId: string | null | undefined,
+): Partial<CapabilityFlags> | null {
+	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
+	if (!modelId) return null;
+	const exact = status.probeModelCapabilities?.[modelId];
+	if (exact) return exact;
+	const probeModelId = normalizedModelId(status.probeModelId);
+	if (probeModelId !== null) return probeModelId === modelId ? (status.probeCapabilities ?? null) : null;
+	const defaultModelId = normalizedModelId(status.endpoint.defaultModel);
+	return defaultModelId !== null && defaultModelId === modelId ? (status.probeCapabilities ?? null) : null;
+}
+
 export function resolveModelCapabilities(
-	status: Pick<EndpointStatus, "endpoint" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelId">,
+	status: Pick<
+		EndpointStatus,
+		"endpoint" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
+	>,
 	wireModelId: string | null | undefined,
 	knowledgeBase: KnowledgeBase | null,
 	options?: ResolveModelCapabilitiesOptions,
@@ -52,7 +74,8 @@ export function resolveModelCapabilities(
 		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
 		modelId ? getCatalogModelForRuntime(status.runtime.id, modelId) : undefined,
 	);
-	if (status.probeCapabilities === undefined) {
+	const hasModernProbeFields = status.probeCapabilities !== undefined || status.probeModelCapabilities !== undefined;
+	if (!hasModernProbeFields) {
 		if (!modelId || modelId === normalizedModelId(status.endpoint.defaultModel)) {
 			return applyDetected(status.capabilities);
 		}
@@ -62,21 +85,11 @@ export function resolveModelCapabilities(
 		);
 	}
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
-	const probeModelId = normalizedModelId(status.probeModelId);
-	const defaultModelId = normalizedModelId(status.endpoint.defaultModel);
-	const probeCapabilities =
-		probeModelId !== null
-			? modelId !== null && probeModelId === modelId
-				? (status.probeCapabilities ?? null)
-				: null
-			: modelId !== null && defaultModelId !== null && modelId === defaultModelId
-				? (status.probeCapabilities ?? null)
-				: null;
 	return applyDetected(
 		mergeCapabilities(
 			baseCapabilities,
 			kbHit?.entry.capabilities ?? null,
-			probeCapabilities,
+			probeCapabilitiesForModel(status, modelId),
 			status.endpoint.capabilities ?? null,
 		),
 	);

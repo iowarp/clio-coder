@@ -90,6 +90,55 @@ describe("contracts/providers", () => {
 		}
 	});
 
+	it("uses live probe capabilities for the selected LM Studio model, not only the endpoint default", () => {
+		const endpoint: EndpointDescriptor = {
+			id: "zbook",
+			runtime: "lmstudio-native",
+			defaultModel: "qwopus3.5-9b-coder",
+		};
+		const runtime = fakeDescriptor("lmstudio-native", {
+			tier: "local-native",
+			apiFamily: "lmstudio-native",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8192, maxTokens: 4096 },
+		});
+		const status: EndpointStatus = {
+			endpoint,
+			runtime,
+			available: true,
+			reason: "test",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: { ...runtime.defaultCapabilities, contextWindow: 262144 },
+			probeCapabilities: { contextWindow: 262144 },
+			probeModelCapabilities: {
+				"qwopus3.5-9b-coder": { contextWindow: 262144, tools: true, vision: true },
+				"lfm2-24b-a2b": { contextWindow: 128000, tools: true, vision: false },
+			},
+			probeModelId: "qwopus3.5-9b-coder",
+			discoveredModels: ["qwopus3.5-9b-coder", "lfm2-24b-a2b"],
+		};
+		const mockProviders: ProvidersContract = {
+			list: () => [status],
+			getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const resolution = resolveRuntimeTarget(mockProviders, {
+			endpointId: "zbook",
+			wireModelId: "lfm2-24b-a2b",
+			requestedThinkingLevel: "off",
+		});
+
+		ok(resolution.ok);
+		if (resolution.ok) {
+			strictEqual(resolution.target.capabilityDecisions.contextWindow, 128000);
+			strictEqual(resolution.target.contextWindowDetails.contextWindowSource, "loaded");
+			strictEqual(resolution.target.contextWindowDetails.loadedContextWindow, 128000);
+			strictEqual(resolution.target.contextWindowDetails.warning, null);
+		}
+	});
+
 	it("produces diagnostics when target is missing or runtime is not registered", () => {
 		const endpoint: EndpointDescriptor = {
 			id: "err-endpoint",

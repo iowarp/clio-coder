@@ -312,7 +312,13 @@ export function compactSecondaryLine(
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
-	const left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
+	let left = "";
+	if (context.ledger) {
+		const percent = context.ledger.percent !== null ? `${Math.round(context.ledger.percent)}%` : "?%";
+		left = `ctx ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
+	} else {
+		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
+	}
 	const maxRightWidth = Math.max(0, safeWidth - visibleWidth(left) - 1);
 	const right = buildMetricStrip(
 		theme,
@@ -459,6 +465,7 @@ const CONTEXT_SHORT_LABEL: Readonly<Record<ContextLedgerCategory, string>> = {
 	pending: "input",
 	reserve: "rsv",
 	free: "free",
+	streaming: "stream",
 };
 
 /** Static-side cost chips (system prompt, tools, agents, skills, memory, project), heaviest first. */

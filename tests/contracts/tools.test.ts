@@ -262,6 +262,45 @@ describe("contracts/tools palette", () => {
 		ok(shell.activeTools.includes(ToolNames.Bash));
 	});
 
+	it("classifies deterministically from named signals", () => {
+		const noTools = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "without tools, explain what src/tools/palette.ts does",
+		});
+		strictEqual(noTools.activeTools.length, 0);
+		strictEqual(noTools.toolsSuppressed, true);
+
+		const toolMeta = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "what tools do you have?",
+		});
+		strictEqual(toolMeta.intent, "tool_meta");
+		strictEqual(toolMeta.activeTools.length, 0);
+
+		// "current diff" must not trip the external-research signal.
+		const repoNotWeb = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "show the current diff in this repo",
+		});
+		strictEqual(repoNotWeb.intent, "repo_inspection");
+		strictEqual(repoNotWeb.activeTools.includes(ToolNames.WebFetch), false);
+
+		// Multi-intent prompts union groups beyond the primary intent.
+		const multi = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "fix the parser bug and run the tests",
+		});
+		strictEqual(multi.intent, "coding");
+		ok(multi.activeTools.includes(ToolNames.Edit));
+		ok(multi.activeTools.includes(ToolNames.RunTests));
+		ok(multi.signals.includes("edit"));
+		ok(multi.signals.includes("validation"));
+	});
+
 	it("exposes the full available surface even when no tools are active this turn", () => {
 		const palette = resolveToolPalette({
 			providerSupportsTools: true,

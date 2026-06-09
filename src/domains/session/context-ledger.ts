@@ -27,7 +27,8 @@ export type ContextLedgerCategory =
 	| "messages"
 	| "pending"
 	| "reserve"
-	| "free";
+	| "free"
+	| "streaming";
 
 /** A compiled-prompt segment with its estimated token cost. */
 export interface ContextLedgerSegment {
@@ -55,6 +56,12 @@ export interface BuildContextLedgerInput {
 	messageTokens?: number;
 	/** Tokens for text the user has typed but not yet submitted. */
 	pendingTokens?: number;
+	/** In-flight streaming output tokens. */
+	streamingTokens?: number;
+	agentsTokens?: number;
+	skillsTokens?: number;
+	memoryTokens?: number;
+	projectTokens?: number;
 	/**
 	 * Authoritative live total, already anchored to the latest provider usage
 	 * when one is available. Acts as the measured floor for `usedTokens`.
@@ -66,6 +73,12 @@ export interface BuildContextLedgerInput {
 	compactionThreshold?: number | null;
 	/** Whether automatic compaction is enabled. */
 	compactionAuto?: boolean;
+	lastCompaction?: {
+		stage: string;
+		tokensBefore: number;
+		tokensAfter: number;
+		trigger: string;
+	} | null;
 }
 
 export interface ContextLedgerGroup {
@@ -98,6 +111,12 @@ export interface ContextLedger {
 	groups: ReadonlyArray<ContextLedgerGroup>;
 	/** Every category including reserve and free, for the proportional meter. */
 	meter: ReadonlyArray<ContextLedgerGroup>;
+	lastCompaction?: {
+		stage: string;
+		tokensBefore: number;
+		tokensAfter: number;
+		trigger: string;
+	} | null;
 }
 
 const DEFAULT_AUTO_THRESHOLD = 0.85;
@@ -131,6 +150,7 @@ export const CONTEXT_CATEGORY_LABEL: Readonly<Record<ContextLedgerCategory, stri
 	pending: "Pending input",
 	reserve: "Autocompact reserve",
 	free: "Free space",
+	streaming: "Streaming output",
 };
 
 /** Display order for the content categories and the meter. */
@@ -143,9 +163,15 @@ const CONTENT_ORDER: ReadonlyArray<ContextLedgerCategory> = [
 	"project",
 	"messages",
 	"pending",
+	"streaming",
 ];
 
-function categoryForSegment(id: string): ContextLedgerCategory {
+/**
+ * Single source of truth for the segment-id → bucket mapping. The snapshot
+ * ledger in `context-accounting.ts` reuses this so the overlay and the
+ * persisted JSONL accounting can never disagree about where a segment lives.
+ */
+export function categoryForSegment(id: string): ContextLedgerCategory {
 	return SEGMENT_CATEGORY[id] ?? "system";
 }
 
@@ -176,6 +202,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		pending: 0,
 		reserve: 0,
 		free: 0,
+		streaming: 0,
 	};
 
 	const segments = input.promptSegments ?? [];
@@ -189,6 +216,11 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 	raw.tools += finiteNonNegative(input.toolSchemaTokens);
 	raw.messages += finiteNonNegative(input.messageTokens);
 	raw.pending += finiteNonNegative(input.pendingTokens);
+	raw.streaming += finiteNonNegative(input.streamingTokens);
+	raw.agents += finiteNonNegative(input.agentsTokens);
+	raw.skills += finiteNonNegative(input.skillsTokens);
+	raw.memory += finiteNonNegative(input.memoryTokens);
+	raw.project += finiteNonNegative(input.projectTokens);
 
 	const decomposed = CONTENT_ORDER.reduce((sum, category) => sum + raw[category], 0);
 	const liveTotal = finiteNonNegative(input.liveTotalTokens);
@@ -260,5 +292,6 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		toolCount: Math.max(0, Math.floor(input.toolCount ?? 0)),
 		groups,
 		meter,
+		lastCompaction: input.lastCompaction ?? null,
 	};
 }

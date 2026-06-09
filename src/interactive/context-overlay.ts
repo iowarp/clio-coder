@@ -1,3 +1,4 @@
+import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
@@ -73,28 +74,99 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 	const footer = toolsLabel ? `${compaction} · ${toolsLabel}` : compaction;
 	lines.push(theme.fg("dim", footer));
 
+	if (ledger.lastCompaction) {
+		const pruneInfo = `last compaction: reclaimed ${formatTokens(ledger.lastCompaction.tokensBefore)} -> ${formatTokens(ledger.lastCompaction.tokensAfter)} tokens (${ledger.lastCompaction.stage})`;
+		lines.push(theme.fg("dim", pruneInfo));
+	}
+
 	return lines;
 }
 
+/** How often the streaming fallback tick repaints the overlay. */
+const STREAMING_FALLBACK_TICK_MS = 1000;
+
 export interface OpenContextOverlayOptions {
 	bus?: SafeEventBus;
+	/**
+	 * Chat event source. When wired, the overlay refreshes as turns settle
+	 * (message_end/agent_end) and runs a slow fallback tick only while a
+	 * response is streaming, so the in-flight output counter stays live.
+	 */
+	chat?: {
+		onEvent(handler: (event: { type: string }) => void): () => void;
+		isStreaming(): boolean;
+	};
 }
 
 /**
- * Mount the read-only `/context-view` overlay. The ledger is snapshotted on
- * open so reopening after a turn refreshes the figures. Esc closes; no other
- * keys are consumed.
+ * Mount the read-only `/context-view` overlay. Event-driven: bus compaction
+ * events and chat turn boundaries trigger repaints; a slow (1s) tick covers
+ * the streaming window where token counts move between events. Esc closes;
+ * no other keys are consumed.
  */
 export function openContextOverlay(
 	tui: TUI,
 	getLedger: () => ContextLedger,
-	_options?: OpenContextOverlayOptions,
+	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
 	const text = new Text(renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH).join("\n"), 0, 0);
-	return showClioOverlayFrame(tui, text, {
+	const handle = showClioOverlayFrame(tui, text, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
 		title: "Context window",
 		footerHint: HINT,
 	});
+
+	const refresh = (): void => {
+		text.setText(renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH).join("\n"));
+		text.invalidate();
+		tui.requestRender();
+	};
+
+	let fallbackTicker: ReturnType<typeof setInterval> | null = null;
+	const stopFallbackTicker = (): void => {
+		if (fallbackTicker === null) return;
+		clearInterval(fallbackTicker);
+		fallbackTicker = null;
+	};
+	const startFallbackTicker = (): void => {
+		if (fallbackTicker !== null) return;
+		fallbackTicker = setInterval(refresh, STREAMING_FALLBACK_TICK_MS);
+		fallbackTicker.unref?.();
+	};
+
+	const unsubscribes: Array<() => void> = [];
+	if (options?.bus) {
+		unsubscribes.push(options.bus.on(BusChannels.ContextPruned, refresh));
+		unsubscribes.push(options.bus.on(BusChannels.ContextWarning, refresh));
+	}
+	if (options?.chat) {
+		unsubscribes.push(
+			options.chat.onEvent((event) => {
+				if (event.type === "agent_start") {
+					startFallbackTicker();
+					refresh();
+				} else if (event.type === "agent_end") {
+					stopFallbackTicker();
+					refresh();
+				} else if (event.type === "message_end") {
+					refresh();
+				}
+			}),
+		);
+		if (options.chat.isStreaming()) startFallbackTicker();
+	} else {
+		// No streaming signal available; keep a slow tick so the overlay does
+		// not freeze for callers that only pass a ledger getter.
+		startFallbackTicker();
+	}
+
+	return {
+		...handle,
+		hide(): void {
+			stopFallbackTicker();
+			for (const off of unsubscribes) off();
+			handle.hide();
+		},
+	};
 }

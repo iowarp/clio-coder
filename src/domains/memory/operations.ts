@@ -1,3 +1,4 @@
+import { ceilChars } from "../session/context-accounting.js";
 import { loadMemoryRecords, pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
 import type { MemoryRecord, MemoryRetrievalOptions } from "./types.js";
 
@@ -61,7 +62,7 @@ export function estimateMemoryTokens(record: MemoryRecord): number {
 		...record.avoidWhen,
 		...(record.regressions ?? []),
 	].join("\n");
-	return Math.max(1, Math.ceil(text.length / 4));
+	return Math.max(1, ceilChars(text.length));
 }
 
 function cloneRecord(record: MemoryRecord): MemoryRecord {

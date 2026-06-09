@@ -53,6 +53,8 @@ export interface ProbeResult {
 	serverVersion?: string;
 	models?: string[];
 	discoveredCapabilities?: Partial<CapabilityFlags>;
+	/** Probe-only capabilities keyed by wire model id when a runtime can list model metadata. */
+	modelCapabilities?: Record<string, Partial<CapabilityFlags>>;
 	/** Wire model id those discovered capabilities describe, when known. */
 	capabilityModelId?: string;
 	/**

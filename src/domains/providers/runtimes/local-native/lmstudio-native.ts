@@ -228,7 +228,19 @@ function capabilitiesFromModelEntry(entry: LmStudioModelSummary | null): Partial
 	if (entry.reasoning !== undefined) caps.reasoning = entry.reasoning;
 	const contextWindow = entry.loadedContextLength ?? entry.maxContextLength;
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
-	return caps;
+	return Object.keys(caps).length > 0 ? caps : undefined;
+}
+
+function modelCapabilitiesFromSummaries(
+	entries: ReadonlyArray<LmStudioModelSummary>,
+): Record<string, Partial<CapabilityFlags>> {
+	const out: Record<string, Partial<CapabilityFlags>> = {};
+	for (const entry of entries) {
+		const caps = capabilitiesFromModelEntry(entry);
+		if (!caps) continue;
+		out[entry.id] = caps;
+	}
+	return out;
 }
 
 function modelsProbeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
@@ -298,8 +310,10 @@ function probeResultFromSummaries(
 	const models = entries.map((entry) => entry.id);
 	const capabilityEntry = selectCapabilityEntry(entries, endpoint);
 	const discoveredCapabilities = capabilitiesFromModelEntry(capabilityEntry);
+	const modelCapabilities = modelCapabilitiesFromSummaries(entries);
 	const out: ProbeResult = { ok: true, models };
 	if (typeof latencyMs === "number") out.latencyMs = latencyMs;
+	if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
 	if (discoveredCapabilities) {
 		out.discoveredCapabilities = discoveredCapabilities;
 		if (capabilityEntry) out.capabilityModelId = capabilityEntry.id;
@@ -330,6 +344,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			if (apiModels.ok) {
 				if (apiModels.models) result.models = apiModels.models;
 				if (apiModels.discoveredCapabilities) result.discoveredCapabilities = apiModels.discoveredCapabilities;
+				if (apiModels.modelCapabilities) result.modelCapabilities = apiModels.modelCapabilities;
 				if (apiModels.capabilityModelId) result.capabilityModelId = apiModels.capabilityModelId;
 			}
 			return result;

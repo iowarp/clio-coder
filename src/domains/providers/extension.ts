@@ -163,6 +163,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				health: previous?.health ?? emptyHealth(),
 				capabilities: previous?.capabilities ?? EMPTY_CAPABILITIES,
 				probeCapabilities: previous?.probeCapabilities ?? null,
+				probeModelCapabilities: previous?.probeModelCapabilities ?? null,
 				probeModelId: previous?.probeModelId ?? null,
 				discoveredModels: previous?.discoveredModels ?? [],
 			};
@@ -175,6 +176,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			probe === null && previous !== undefined && sameProbeIdentity(previous.endpoint, endpoint);
 		const probeCapabilities =
 			probe?.discoveredCapabilities ?? (preservePreviousProbe ? previous.probeCapabilities : null) ?? null;
+		const probeModelCapabilities =
+			probe?.modelCapabilities ?? (preservePreviousProbe ? previous.probeModelCapabilities : null) ?? null;
 		const probeModelId =
 			probe?.discoveredCapabilities !== undefined
 				? (probe.capabilityModelId ?? null)
@@ -204,6 +207,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			health,
 			capabilities,
 			probeCapabilities,
+			probeModelCapabilities,
 			probeModelId,
 			discoveredModels,
 		};
@@ -256,6 +260,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 						probeResult = {
 							...probeResult,
 							discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: result.reasoning },
+							modelCapabilities: {
+								...(probeResult.modelCapabilities ?? {}),
+								[candidateModelId]: {
+									...(probeResult.modelCapabilities?.[candidateModelId] ?? {}),
+									reasoning: result.reasoning,
+								},
+							},
 							capabilityModelId: capabilityModelId ?? candidateModelId,
 						};
 					}

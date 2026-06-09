@@ -1,4 +1,5 @@
 import type { ThinkingMechanism } from "../providers/types/local-model-quirks.js";
+import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 
@@ -345,8 +346,7 @@ function renderSessionBlock(inputs: DynamicInputs): string {
 
 function estimatePromptTokens(text: string): number {
 	const trimmed = text.trim();
-	if (trimmed.length === 0) return 0;
-	return Math.ceil(trimmed.length / 4);
+	return ceilChars(trimmed.length);
 }
 
 function pushSegment(
