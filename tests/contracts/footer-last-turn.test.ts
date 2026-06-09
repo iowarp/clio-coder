@@ -68,14 +68,13 @@ describe("footer last-turn metrics", () => {
 		ok(strip(formatLastTurn(clioTheme(), makeSummary({ stopReason: "aborted" }))).includes("⊘"));
 	});
 
-	it("compact footer shows last-turn metrics in place of 'run idle' when present", () => {
+	it("compact footer shows last-turn metrics when present", () => {
 		const withTurn = strip(compactSecondaryLine(idleContext, idleAgent(makeSummary()), 120));
 		ok(withTurn.includes("✓ 4.0s"));
 		ok(withTurn.includes("↑11 ↓339"));
-		ok(!withTurn.includes("run idle"));
 
 		const withoutTurn = strip(compactSecondaryLine(idleContext, idleAgent(null), 120));
-		ok(withoutTurn.includes("run idle"));
+		ok(!withoutTurn.includes("✓ 4.0s"));
 	});
 
 	it("agent quadrant surfaces last-turn metrics on the activity row when idle", () => {

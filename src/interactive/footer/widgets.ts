@@ -1,7 +1,9 @@
+import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { agentDisplayLabel, type DispatchBoardRow, type DispatchBoardStatus } from "../dispatch-board.js";
-import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
-import type { TurnSummary } from "../status/index.js";
+import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
+import { type AgentStatus, spinnerFrame, type TurnSummary } from "../status/index.js";
 import {
 	type ClioTheme,
 	type ClioToken,
@@ -58,6 +60,7 @@ export interface ContextEngineFacts {
 	clioMd: string | null;
 	memory: string | null;
 	extensions: { active: number; installed: number } | null;
+	breakdown?: ContextUsageBreakdown | null;
 }
 
 /** Dynamic agent work: the live action quadrant. */
@@ -70,7 +73,7 @@ export interface AgentWorkFacts {
 	lastTurn: TurnSummary | null;
 }
 
-/** Expanded-footer responsive bands. */
+/** Responsive bands for the expanded footer. */
 export const EXPANDED_WIDE = 80;
 export const EXPANDED_MID = 70;
 export const EXPANDED_ULTRAWIDE = 100;
@@ -78,20 +81,31 @@ export const EXPANDED_ULTRAWIDE = 100;
 /** Compact footer shows the git section only when there is room for it. */
 const COMPACT_GIT_MIN_WIDTH = 72;
 
-function joinColumns(left: string, right: string, width: number): string {
-	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-	return fitFooterText(`${left}${" ".repeat(gap)}${right}`, width);
-}
-
 export function fitDashboardLine(line: string, width: number): string {
 	return visibleWidth(line) > width ? truncateToWidth(line, width, "", true) : line;
 }
 
-/** Pad/truncate an already-styled string to an exact column width. */
+/** Pad or truncate an already styled string to an exact column width. */
 function cell(text: string, width: number): string {
 	const safe = Math.max(0, width);
 	const clipped = truncateToWidth(text, safe, "", true);
 	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
+}
+
+export function joinColumns(left: string, right: string, width: number): string {
+	const safe = Math.max(0, Math.floor(width));
+	if (safe === 0) return "";
+	if (visibleWidth(right) === 0) return cell(left, safe);
+	const rightWidth = visibleWidth(right);
+	if (rightWidth >= safe) return cell(right, safe);
+	const leftBudget = Math.max(0, safe - rightWidth - 1);
+	const fittedLeft = visibleWidth(left) > leftBudget ? truncateToWidth(left, leftBudget, "", true) : left;
+	const gap = Math.max(1, safe - visibleWidth(fittedLeft) - rightWidth);
+	return cell(`${fittedLeft}${" ".repeat(gap)}${right}`, safe);
+}
+
+function finiteNonNegative(value: number | null | undefined): number {
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined): string {
@@ -143,39 +157,150 @@ export function collapseRemote(remote: string | null): string | null {
 
 /**
  * Compact primary row: workspace identity on the left, session resources on the
- * right. Carries no model/thinking — the editor rail owns those — and the
- * branch appears here (and only here) across the whole screen.
+ * right. The editor rail owns model and thinking labels. The branch appears
+ * here, and only here, across the whole screen.
  */
-export function compactPrimaryLine(workspace: WorkspaceFacts, session: SessionFacts, width: number): string {
-	const theme = clioTheme();
-	const cwd = theme.fg("muted", workspace.cwd);
-	const git = width >= COMPACT_GIT_MIN_WIDTH ? gitChip(theme, workspace.branch, workspace.dirty) : null;
-	const left = joinSections(theme, [cwd, git]);
-	const right = joinChips(theme, [
-		session.tokens ? theme.fg("muted", session.tokens) : null,
-		session.throughput ? theme.fg("success", session.throughput) : null,
-		session.cost ? theme.fg("muted", session.cost) : null,
-	]);
-	return joinColumns(left, right || theme.fg("dim", "tokens idle"), width);
+export function compactPrimaryLine(
+	workspace: WorkspaceFacts,
+	_session: SessionFacts,
+	width: number,
+	theme: ClioTheme = clioTheme(),
+	status: AgentStatus = {
+		phase: "idle",
+		since: 0,
+		lastMeaningfulAt: 0,
+		watchdogTier: 0,
+		watchdogPeak: 0,
+		localRuntime: false,
+	},
+	toolCounts: ToolTallySnapshot = { tools: {}, errors: 0 },
+	dispatchRows: ReadonlyArray<DispatchBoardRow> = [],
+	tick = 0,
+	now = Date.now(),
+): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	let git = safeWidth >= COMPACT_GIT_MIN_WIDTH ? gitChip(theme, workspace.branch, workspace.dirty) : null;
+	let right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, true);
+	let left = joinSections(theme, [theme.fg("muted", workspace.cwd), git]);
+
+	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
+		right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, false);
+	}
+
+	if (git && visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
+		git = null;
+		left = theme.fg("muted", workspace.cwd);
+	}
+
+	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
+		const maxCwdWidth = Math.max(1, safeWidth - visibleWidth(right) - 1);
+		left = theme.fg("muted", truncateToWidth(workspace.cwd, maxCwdWidth, "…", true));
+	}
+
+	return joinColumns(left, right, safeWidth);
 }
 
 /**
  * Compact secondary row: context fill + the single most important activity on
  * the left, dispatch summary + tool tally on the right.
  */
-export function compactSecondaryLine(context: ContextEngineFacts, agent: AgentWorkFacts, width: number): string {
-	const theme = clioTheme();
-	const activity = agent.statusText
-		? theme.fg("accent", `${GLYPH.running} ${agent.statusText}`)
-		: agent.lastTurn
-			? formatLastTurn(theme, agent.lastTurn)
-			: theme.fg("muted", "run idle");
-	const left = joinChips(theme, [context.label ? theme.fg("info", context.label) : null, activity]);
-	const right = joinChips(theme, [
-		agent.dispatchSummary ? theme.fg("accent", agent.dispatchSummary) : null,
-		theme.fg("muted", `tools ${agent.toolTally}`),
-	]);
-	return joinColumns(left || theme.fg("muted", "run idle"), right, width);
+function compactMetricChipLimit(width: number): number {
+	if (width < 48) return 1;
+	if (width < 72) return 2;
+	if (width < 100) return 4;
+	return 6;
+}
+
+function contextBarCellBounds(width: number): { min: number; max: number } {
+	if (width < 48) return { min: 6, max: 6 };
+	if (width < 72) return { min: 8, max: 8 };
+	if (width < 100) return { min: 12, max: 12 };
+	return { min: 14, max: 16 };
+}
+
+function compactContextBarWidth(width: number): number {
+	const bounds = contextBarCellBounds(width);
+	const leftHalfBudget = Math.max(0, Math.floor(width / 2));
+	const budgetCells = Math.max(0, leftHalfBudget - CONTEXT_BAR_LABEL_WIDTH);
+	const wideScale = width >= 100 ? 14 + Math.min(2, Math.max(0, Math.floor((width - 100) / 10))) : bounds.max;
+	return Math.max(bounds.min, Math.min(bounds.max, budgetCells, wideScale));
+}
+
+function contextBreakdownForBar(context: ContextEngineFacts): ContextUsageBreakdown | undefined {
+	const reportedUsed = finiteNonNegative(context.used);
+	const toolTokens = finiteNonNegative(context.toolSchemaTokens);
+	const source = context.breakdown;
+	if (!source) {
+		if (reportedUsed <= 0 && toolTokens <= 0) return undefined;
+		return {
+			systemPromptTokens: 0,
+			toolSchemaTokens: Math.min(toolTokens, reportedUsed),
+			messageTokens: Math.max(0, reportedUsed - toolTokens),
+			pendingUserTokens: 0,
+		};
+	}
+	const system = finiteNonNegative(source.systemPromptTokens);
+	const tools = finiteNonNegative(source.toolSchemaTokens);
+	const conversation = finiteNonNegative(source.messageTokens) + finiteNonNegative(source.pendingUserTokens);
+	const total = system + tools + conversation;
+	if (reportedUsed <= 0 || total <= 0) {
+		return {
+			systemPromptTokens: system,
+			toolSchemaTokens: tools,
+			messageTokens: conversation,
+			pendingUserTokens: 0,
+		};
+	}
+	if (reportedUsed >= total) {
+		return {
+			systemPromptTokens: system,
+			toolSchemaTokens: tools,
+			messageTokens: conversation + (reportedUsed - total),
+			pendingUserTokens: 0,
+		};
+	}
+	const scale = reportedUsed / total;
+	return {
+		systemPromptTokens: system * scale,
+		toolSchemaTokens: tools * scale,
+		messageTokens: conversation * scale,
+		pendingUserTokens: 0,
+	};
+}
+
+export function compactSecondaryLine(
+	context: ContextEngineFacts,
+	agent: AgentWorkFacts,
+	width: number,
+	theme: ClioTheme = clioTheme(),
+	status: AgentStatus = {
+		phase: "idle",
+		since: 0,
+		lastMeaningfulAt: 0,
+		watchdogTier: 0,
+		watchdogPeak: 0,
+		localRuntime: false,
+	},
+	throughput: TokenThroughputSnapshot | null = null,
+	sessionTokens: UsageBreakdown | null = null,
+	sessionCost: number | null = null,
+): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	const barCells = compactContextBarWidth(safeWidth);
+	const left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
+	const maxRightWidth = Math.max(0, safeWidth - visibleWidth(left) - 1);
+	const right = buildMetricStrip(
+		theme,
+		status,
+		throughput,
+		agent.lastTurn,
+		sessionTokens,
+		sessionCost,
+		context.used ?? undefined,
+		maxRightWidth,
+		compactMetricChipLimit(safeWidth),
+	);
+	return joinColumns(left, right, safeWidth);
 }
 
 function quadrantBlock(
@@ -235,6 +360,8 @@ export function contextQuadrant(facts: ContextEngineFacts): string[] {
 		facts.compactionThreshold !== null
 			? `${facts.compactionActive ? "compacting" : "compact"} ${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`
 			: null;
+	const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
+	const legend = `${theme.fg("info", `${filledChar} sys`)} ${theme.fg("warning", `${filledChar} tools`)} ${theme.fg("accent", `${filledChar} chat`)}`;
 	return quadrantBlock(theme, "reason", "Context", [
 		facts.label ? theme.fg("info", facts.label) : theme.fg("dim", "ctx idle"),
 		used ? labeledChip(theme, "used", used, "muted") : null,
@@ -247,6 +374,7 @@ export function contextQuadrant(facts: ContextEngineFacts): string[] {
 		facts.extensions && facts.extensions.installed > 0
 			? labeledChip(theme, "ext", `${facts.extensions.active}/${facts.extensions.installed}`, "muted")
 			: null,
+		legend,
 	]);
 }
 
@@ -354,4 +482,172 @@ export function zipColumnBlocks(blocks: ReadonlyArray<string[]>, widths: Readonl
 		lines.push(cells.join(sep));
 	}
 	return lines;
+}
+
+function formatDurationMs(ms: number): string {
+	const safe = Math.max(0, Math.round(ms));
+	if (safe < 1000) return `${safe}ms`;
+	const seconds = safe / 1000;
+	return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+}
+
+type HarnessPhasePresentation = {
+	glyph: string;
+	label: string;
+	token: ClioToken;
+	live: boolean;
+};
+
+function shortToolLabel(status: AgentStatus, width: number): string {
+	const name = status.tool?.toolName?.trim();
+	if (!name || width < 72) return "tool";
+	const nameWidth = width >= 100 ? 18 : 12;
+	return `tool ${truncateToWidth(name, nameWidth, "…", true)}`;
+}
+
+function harnessPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
+	const ultraNarrow = width < 48;
+	switch (status.phase) {
+		case "idle":
+			return { glyph: "◌", label: "idle", token: "muted", live: false };
+		case "preparing":
+			return { glyph: "◔", label: "prep", token: "info", live: true };
+		case "waiting_model":
+			return { glyph: "◔", label: "waiting", token: "info", live: true };
+		case "thinking":
+			return { glyph: "◐", label: "thinking", token: "reason", live: true };
+		case "writing":
+			return { glyph: "◑", label: "writing", token: "accent", live: true };
+		case "tool_running":
+			return { glyph: "⚙", label: shortToolLabel(status, width), token: "accent", live: true };
+		case "tool_blocked":
+			return { glyph: "⏸", label: "blocked", token: "warning", live: true };
+		case "retrying": {
+			const attempt = status.retry?.attempt ?? 0;
+			const maxAttempts = status.retry?.maxAttempts ?? 0;
+			return {
+				glyph: "↻",
+				label: ultraNarrow ? "retry" : `retry ${attempt}/${maxAttempts}`,
+				token: "warning",
+				live: true,
+			};
+		}
+		case "compacting":
+			return { glyph: "♻", label: "compacting", token: "reason", live: true };
+		case "dispatching":
+			return { glyph: "⇲", label: "dispatch", token: "accent", live: true };
+		case "stuck": {
+			const seconds = Math.max(0, Math.floor((now - status.since) / 1000));
+			return { glyph: "⚠", label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: true };
+		}
+		case "ended":
+			return { glyph: "✓", label: "done", token: "success", live: false };
+	}
+}
+
+function activeWorkerCount(rows: ReadonlyArray<DispatchBoardRow>): number {
+	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued").length;
+}
+
+function harnessBadge(
+	theme: ClioTheme,
+	status: AgentStatus,
+	toolCounts: ToolTallySnapshot,
+	dispatchRows: ReadonlyArray<DispatchBoardRow>,
+): string {
+	const workers = activeWorkerCount(dispatchRows);
+	const activeTools = finiteNonNegative(toolCounts.active);
+	let badgeText: string | null = null;
+	if (workers > 0) badgeText = `fleet ${workers}`;
+	else if (activeTools > 0) badgeText = `tools ${activeTools}`;
+	else if (status.phase === "idle") badgeText = "tools none";
+	return badgeText ? ` ${theme.fg("dim", "·")} ${theme.fg("muted", badgeText)}` : "";
+}
+
+export function buildHarnessStatePill(
+	theme: ClioTheme,
+	status: AgentStatus,
+	toolCounts: ToolTallySnapshot,
+	dispatchRows: ReadonlyArray<DispatchBoardRow>,
+	tick: number,
+	now: number,
+	width: number,
+	showBadge = true,
+): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	const phase = harnessPhasePresentation(status, safeWidth, now);
+	const spinner = phase.live ? `${theme.fg(phase.token, spinnerFrame(tick))} ` : "";
+	const mainPill = theme.style(phase.token, `${phase.glyph} ${phase.label}`);
+	const badge = showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows) : "";
+	return `${spinner}${mainPill}${badge}`;
+}
+
+export function buildMetricStrip(
+	theme: ClioTheme,
+	status: AgentStatus,
+	throughput: TokenThroughputSnapshot | null | undefined,
+	lastTurn: TurnSummary | null | undefined,
+	sessionTokens: UsageBreakdown | null | undefined,
+	sessionCost: number | null | undefined,
+	liveInputTokens: number | null | undefined,
+	maxWidth: number,
+	maxChipsCount = 6,
+): string {
+	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
+	if (safeMaxWidth <= 0) return "";
+	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
+	if (!isStreaming && !lastTurn) return "";
+
+	const candidates: Array<string | null> = [];
+	if (isStreaming) {
+		const tps = finiteNonNegative(throughput?.tokensPerSecond);
+		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
+		candidates.push(rounded !== null ? theme.fg("success", `⚡${rounded}/s`) : null);
+
+		const liveOutput = finiteNonNegative(throughput?.outputTokens);
+		candidates.push(liveOutput > 0 ? theme.fg("success", `${GLYPH.down}${formatFooterTokens(liveOutput)}`) : null);
+
+		const ttftMs = finiteNonNegative(throughput?.ttftMs);
+		candidates.push(ttftMs > 0 ? theme.fg("muted", `ttft ${formatDurationMs(ttftMs)}`) : null);
+
+		const inputTokens =
+			finiteNonNegative(liveInputTokens) ||
+			finiteNonNegative(status.summary?.inputTokens) ||
+			finiteNonNegative(lastTurn?.inputTokens) ||
+			finiteNonNegative(sessionTokens?.input);
+		candidates.push(inputTokens > 0 ? theme.fg("muted", `${GLYPH.up}${formatFooterTokens(inputTokens)}`) : null);
+	} else if (lastTurn) {
+		const stop = stopReasonStyle(lastTurn.stopReason);
+		candidates.push(theme.fg(stop.token, `${stop.glyph} ${formatElapsed(lastTurn.elapsedMs)}`));
+		candidates.push(
+			theme.fg(
+				"muted",
+				`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
+			),
+		);
+		candidates.push(
+			finiteNonNegative(lastTurn.reasoningTokens) > 0
+				? theme.fg("reason", `r${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`)
+				: null,
+		);
+		if (lastTurn.toolCount > 0) {
+			const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;
+			const errors = lastTurn.toolErrorCount > 0 ? theme.fg("error", ` ${lastTurn.toolErrorCount}${GLYPH.error}`) : "";
+			candidates.push(`${theme.fg("muted", label)}${errors}`);
+		} else {
+			candidates.push(null);
+		}
+	}
+
+	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
+	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
+	candidates.push(cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null);
+	candidates.push(finiteNonNegative(sessionCost) > 0 ? theme.fg("muted", formatUsd(sessionCost ?? 0)) : null);
+
+	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
+	const activeChips = candidates
+		.filter((chip): chip is string => typeof chip === "string" && chip.length > 0)
+		.slice(0, chipLimit);
+	while (activeChips.length > 0 && visibleWidth(joinChips(theme, activeChips)) > safeMaxWidth) activeChips.pop();
+	return joinChips(theme, activeChips);
 }
