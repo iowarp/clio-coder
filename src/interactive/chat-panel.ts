@@ -230,6 +230,11 @@ function prefixClioLabel(lines: string[], width: number, prefix: string): string
  */
 const THINKING_HIDDEN_LABEL = "Thinking...";
 const THINKING_LINE_LIMIT = 12;
+const REASONING_CHARS_PER_TOKEN = 4;
+
+function estimateThinkingTokens(thinking: string): number {
+	return Math.max(1, Math.round(thinking.length / REASONING_CHARS_PER_TOKEN));
+}
 
 /**
  * Render the assistant turn's thinking block. Collapsed (default) returns a
@@ -238,18 +243,31 @@ const THINKING_LINE_LIMIT = 12;
  * tail `... N more lines hidden` overflow message. Mirrors the tool toggle's
  * lab-notebook minimalism: no colored glyphs, no boxes.
  */
-function renderThinkingLines(thinking: string, expanded: boolean, width: number): string[] {
+function renderThinkingLines(thinking: string, expanded: boolean, width: number, streaming: boolean): string[] {
 	if (thinking.length === 0) return [];
 	const dimWrap = (s: string): string => `${DIM}${s}${RESET}`;
 	if (!expanded) {
 		const lineBudget = Math.max(1, width);
-		return [dimWrap(truncateToWidth(THINKING_HIDDEN_LABEL, lineBudget, "...", false))];
+		const label = streaming
+			? `Thinking (${estimateThinkingTokens(thinking)} tokens)…`
+			: THINKING_HIDDEN_LABEL;
+		return [dimWrap(truncateToWidth(label, lineBudget, "...", false))];
 	}
 	const splitLines = thinking.split("\n");
-	const visible: string[] =
-		splitLines.length > THINKING_LINE_LIMIT
-			? [...splitLines.slice(0, THINKING_LINE_LIMIT), `... ${splitLines.length - THINKING_LINE_LIMIT} more lines hidden`]
-			: splitLines;
+	let visible: string[];
+	if (streaming) {
+		if (splitLines.length > THINKING_LINE_LIMIT) {
+			const hiddenCount = splitLines.length - THINKING_LINE_LIMIT;
+			visible = [`… ${hiddenCount} earlier lines hidden`, ...splitLines.slice(-THINKING_LINE_LIMIT)];
+		} else {
+			visible = splitLines;
+		}
+	} else {
+		visible =
+			splitLines.length > THINKING_LINE_LIMIT
+				? [...splitLines.slice(0, THINKING_LINE_LIMIT), `... ${splitLines.length - THINKING_LINE_LIMIT} more lines hidden`]
+				: splitLines;
+	}
 	const out: string[] = [];
 	const bodyWidth = Math.max(1, width - 2);
 	for (const raw of visible) {
@@ -336,8 +354,8 @@ function renderEntryLines(
 	// streaming `thinking_delta` events do not flicker into the visible
 	// stream before the turn finalizes (see Row 47 of the TUI rubric and the
 	// existing "filters thinking_delta out of the visible chat stream" test).
-	if (entry.thinking.length > 0 && entry.pending === false) {
-		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width));
+	if (entry.thinking.length > 0) {
+		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width, entry.pending));
 	}
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	let labeled = false;
@@ -360,7 +378,8 @@ function renderEntryLines(
 		entry.pending &&
 		entry.statusLine !== null &&
 		entry.statusLine !== undefined &&
-		!(entry.statusLine.phase === "writing" && hasStreamingText(entry));
+		!(entry.statusLine.phase === "writing" && hasStreamingText(entry)) &&
+		!(entry.statusLine.phase === "thinking" && entry.thinking.length > 0);
 	if (!labeled && !hasVisibleOutput(entry)) {
 		lines.push(clioPrefix.trimEnd());
 		if (shouldRenderStatus) {
