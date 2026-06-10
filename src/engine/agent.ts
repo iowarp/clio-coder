@@ -1,7 +1,7 @@
 /**
- * Thin wrapper over @earendil-works/pi-agent-core 0.78.1's Agent class.
+ * Thin wrapper over Clio's engine Agent class.
  *
- * pi-agent-core's Agent owns its own state (exposed via `agent.state`). There is no
+ * The engine Agent owns its own state (exposed via `agent.state`). There is no
  * separate state factory. AgentOptions drives the construction; the state is derived
  * from options.initialState on instantiation.
  */

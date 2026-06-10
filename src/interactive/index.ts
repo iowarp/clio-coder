@@ -1103,7 +1103,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// OSC 9;4 indeterminate progress around each agent turn. pi-tui 0.78.1
+	// OSC 9;4 indeterminate progress around each agent turn. The terminal engine
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
