@@ -25,7 +25,15 @@ export interface ContextActivitySnapshot {
 interface ContextActivityEntry extends ContextActivitySnapshot {}
 
 export const CONTEXT_ISLAND_WIDTH = 52;
-const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "handoff", "done"];
+const PHASES: ReadonlyArray<ContextActivityPhase> = [
+	"scan",
+	"codewiki",
+	"generate",
+	"clio-md",
+	"state",
+	"handoff",
+	"done",
+];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
 	codewiki: "wiki",
@@ -119,11 +127,7 @@ export function formatContextActivityIslandLines(
 	const theme = clioTheme();
 	const bodyWidth = Math.max(1, width - 4);
 	const title =
-		activity.kind === "context-init"
-			? "Context Init"
-			: activity.kind === "compaction"
-				? "Context Compact"
-				: "Context";
+		activity.kind === "context-init" ? "Context Init" : activity.kind === "compaction" ? "Context Compact" : "Context";
 	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "•")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "•")} ${theme.fg("info", formatElapsed(activity.startedAtMs, activity.completedAtMs ?? now))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);

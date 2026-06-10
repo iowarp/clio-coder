@@ -22,10 +22,10 @@ export {
 	type BootstrapProgressEvent,
 	type BootstrapProgressSink,
 	type BootstrapStructuredOutput,
-	type RunBootstrapInput,
-	type RunBootstrapResult,
 	existingClioMdBootstrapOutput,
 	fallbackBootstrapOutput,
+	type RunBootstrapInput,
+	type RunBootstrapResult,
 	runBootstrap,
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";

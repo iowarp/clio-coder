@@ -1,6 +1,7 @@
-import { loadDomains, type LoadResult } from "../core/domain-loader.js";
+import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import { buildBootstrapPrompt, parseBootstrapModelOutput } from "../domains/context/bootstrap-prompt.js";
 import {
 	type BootstrapFallbackMode,
 	type BootstrapGenerate,
@@ -17,7 +18,6 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
-import { buildBootstrapPrompt, parseBootstrapModelOutput } from "../domains/context/bootstrap-prompt.js";
 
 /**
  * Model-driven CLIO.md generation. Dispatches Clio's internal `scout` shadow

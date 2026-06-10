@@ -66,14 +66,7 @@ export interface ContextPressureWarningPayload {
 export type ContextWarningPayload = ContextWindowWarningPayload | ContextPressureWarningPayload;
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-prime" | "context-handoff" | "compaction";
-export type ContextActivityPhase =
-	| "scan"
-	| "codewiki"
-	| "generate"
-	| "clio-md"
-	| "state"
-	| "handoff"
-	| "done";
+export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "handoff" | "done";
 export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
 
 /** Structured progress for context operations. Interactive renders this as a live context island. */

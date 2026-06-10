@@ -222,9 +222,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				input?.onProgress?.(event);
 			};
 			try {
-				const result = await runBootstrap(
-					input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress },
-				);
+				const result = await runBootstrap(input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress });
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
