@@ -32,6 +32,7 @@ const BODY_INDENT_PLAIN = "│ ";
 const BODY_INDENT_VISIBLE_WIDTH = 2;
 const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
+const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
 const RESULT_PREVIEW_LIMIT = 4000;
 const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
@@ -172,8 +173,18 @@ function capturedPrimaryArg(toolName: string, args: unknown): string | null {
  * truncated JSON dump. Returns an empty string when args are absent so the
  * header renders as `tool: <name>()`.
  */
+function summarizeWebFetchArgs(args: unknown): string {
+	if (!isPlainObject(args)) return summarizeArgs("", args);
+	const compact: Record<string, unknown> = {};
+	for (const key of ["url", "format", "max_bytes", "timeout_ms", "method"] as const) {
+		if (args[key] !== undefined) compact[key] = args[key];
+	}
+	return truncate(jsonStringifySafe(Object.keys(compact).length > 0 ? compact : args), WEB_FETCH_ARG_PREVIEW_LIMIT);
+}
+
 function summarizeArgs(toolName: string, args: unknown): string {
 	if (isEmptyArgs(args)) return "";
+	if (toolName === "web_fetch") return summarizeWebFetchArgs(args);
 	const primary = capturedPrimaryArg(toolName, args);
 	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
@@ -243,7 +254,6 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
 	glob: (args) => buildFieldSublineBody(args, "pattern", "matching ", { wrapInBackticks: true }),
-	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
 };
 
 /**
@@ -251,7 +261,24 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
  * verb-led subline body without the leading glyph and without the trailing
  * status glyph. Unknown tools fall back to the existing `<name>(<arg>)` form.
  */
-function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus): string {
+function webFetchMeta(result: unknown): string | null {
+	if (!isPlainObject(result) || !isPlainObject(result.details)) return null;
+	const status = typeof result.details.status === "number" ? String(result.details.status) : null;
+	const format = typeof result.details.format === "string" ? result.details.format : null;
+	const bytesRead = typeof result.details.bytesRead === "number" ? result.details.bytesRead : null;
+	const truncated = result.details.truncated === true ? "truncated" : null;
+	const bytes = bytesRead === null ? null : bytesRead >= 1024 ? `${(bytesRead / 1024).toFixed(1)}KB` : `${bytesRead}B`;
+	const parts = [status, format, bytes, truncated].filter(
+		(part): part is string => typeof part === "string" && part.length > 0,
+	);
+	return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus, result?: unknown): string {
+	if (toolName === "web_fetch") {
+		const meta = status === undefined ? null : webFetchMeta(result);
+		return `${buildUnknownToolBody(toolName, args)}${meta ? dim(` · ${meta}`) : ""}`;
+	}
 	if (toolName === "bash") {
 		const lead = status === undefined ? "running " : "ran ";
 		return (
@@ -263,8 +290,14 @@ function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus)
 	return buildUnknownToolBody(toolName, args);
 }
 
-function sublineLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args, status));
+function sublineLine(
+	toolName: string,
+	args: unknown,
+	status: HeaderStatus,
+	meta: StatusMeta = {},
+	result?: unknown,
+): string {
+	const body = styleSublineBody(buildSublineBody(toolName, args, status, result));
 	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status, meta)}`;
 }
 
@@ -529,7 +562,10 @@ export function renderToolSubline(
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
 				}
 			: {};
-	const wrapped = wrap(sublineLine(call.toolName, call.args, status, meta), width);
+	const wrapped = wrap(
+		sublineLine(call.toolName, call.args, status, meta, "result" in call ? call.result : undefined),
+		width,
+	);
 	if (status === undefined) return wrapped;
 	if (expandKey === undefined || expandKey.length === 0) return wrapped;
 	if (wrapped.length === 0) return wrapped;

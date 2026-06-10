@@ -109,6 +109,7 @@ export interface ChatPanel extends Component {
 	applyEvent(event: ChatLoopEvent): void;
 	setStatusLine(line: AssistantStatusLine | null): void;
 	toggleLastToolExpanded(): boolean;
+	toggleAllToolsExpanded(): boolean;
 	/**
 	 * Flip thinking-bearing assistant turns between the one-line dim marker
 	 * and the full rail-prefixed body. The target visibility is panel-level
@@ -116,6 +117,7 @@ export interface ChatPanel extends Component {
 	 * like a transcript-level thinking visibility toggle.
 	 */
 	toggleLastThinking(): boolean;
+	toggleAllThinking(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -509,21 +511,46 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			return false;
 		},
+		toggleAllToolsExpanded(): boolean {
+			const tools: ToolSegment[] = [];
+			for (const entry of transcript) {
+				if (entry.role !== "assistant") continue;
+				for (const seg of entry.segments) {
+					if (seg.kind === "tool") tools.push(seg);
+				}
+			}
+			if (tools.length === 0) return false;
+			const expand = tools.some((seg) => !seg.expanded);
+			for (const seg of tools) seg.expanded = expand;
+			markDirty();
+			return true;
+		},
 		toggleLastThinking(): boolean {
-			let found = false;
-			thinkingExpanded = !thinkingExpanded;
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
 				if (entry.thinking.length === 0) continue;
-				found = true;
-				break;
+				entry.expandedThinking = entry.expandedThinking !== true;
+				thinkingExpanded = entry.expandedThinking === true;
+				markDirty();
+				return true;
 			}
+			thinkingExpanded = !thinkingExpanded;
+			return true;
+		},
+		toggleAllThinking(): boolean {
+			const entries: Array<Extract<TranscriptEntry, { role: "assistant" }>> = [];
 			for (const entry of transcript) {
-				if (entry.role !== "assistant" || entry.thinking.length === 0) continue;
-				entry.expandedThinking = thinkingExpanded;
+				if (entry.role === "assistant" && entry.thinking.length > 0) entries.push(entry);
 			}
-			if (found) markDirty();
+			if (entries.length === 0) {
+				thinkingExpanded = !thinkingExpanded;
+				return true;
+			}
+			const expand = entries.some((entry) => entry.expandedThinking !== true);
+			for (const entry of entries) entry.expandedThinking = expand;
+			thinkingExpanded = expand;
+			markDirty();
 			return true;
 		},
 		reset(): void {

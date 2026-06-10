@@ -296,7 +296,9 @@ export interface KeyBindingDeps {
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
 	toggleToolExpansion: () => void;
+	toggleAllToolExpansion: () => void;
 	toggleThinkingExpansion: () => void;
+	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
 	restoreQueuedFollowUps: () => void;
@@ -788,6 +790,15 @@ export function routeOverlayKey(
 		deps.requestShutdown();
 		return true;
 	}
+	if (
+		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
+		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
+		((overlayState === "model" || overlayState === "scoped-models") && matches(data, "clio.model.select")) ||
+		(overlayState === "hotkeys" && matches(data, "clio.leader"))
+	) {
+		deps.closeOverlay();
+		return true;
+	}
 	if (overlayState === "permission-confirm") {
 		routePermissionOverlayKey(data, deps);
 		return true;
@@ -853,13 +864,7 @@ export function routeOverlayKey(
 		return routeHotkeysOverlayKey(data, deps);
 	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
-	// child that needs arrow/Enter, so we consume the dispatchBoard.toggle
-	// keybinding here as "close" so Ctrl+B works as a symmetric toggle,
-	// and Esc still closes via routeDispatchBoardOverlayKey.
-	if (matches(data, "clio.dispatchBoard.toggle")) {
-		deps.closeOverlay();
-		return true;
-	}
+	// child that needs arrow/Enter, so Esc closes via routeDispatchBoardOverlayKey.
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -981,6 +986,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// route here (anchored in the footer region) instead of into the transcript,
 	// so they never leak into VT scrollback.
 	let footer: FooterDashboardPanel;
+	let lastToolExpandAtMs = 0;
+	let lastThinkingExpandAtMs = 0;
+	let lastNotificationDismissAtMs = 0;
 	const dismissKeyLabel = formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]);
 	const notifications = createNotificationCenter({
 		onChange: () => {
@@ -2643,13 +2651,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		},
 		dismissNotifications: () => {
-			notifications.dismissAll();
+			const nowMs = Date.now();
+			const isDoubleTap = lastNotificationDismissAtMs > 0 && nowMs - lastNotificationDismissAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastNotificationDismissAtMs = nowMs;
+			if (isDoubleTap) {
+				notifications.dismissAll();
+				return;
+			}
+			const first = notifications.list()[0];
+			if (first) notifications.dismiss(first.id);
 		},
 		toggleToolExpansion: () => {
-			if (chatPanel.toggleLastToolExpanded()) tui.requestRender();
+			const nowMs = Date.now();
+			const isDoubleTap = lastToolExpandAtMs > 0 && nowMs - lastToolExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastToolExpandAtMs = nowMs;
+			const changed = isDoubleTap ? chatPanel.toggleAllToolsExpanded() : chatPanel.toggleLastToolExpanded();
+			if (changed) tui.requestRender();
+		},
+		toggleAllToolExpansion: () => {
+			if (chatPanel.toggleAllToolsExpanded()) tui.requestRender();
 		},
 		toggleThinkingExpansion: () => {
-			if (chatPanel.toggleLastThinking()) tui.requestRender();
+			const nowMs = Date.now();
+			const isDoubleTap = lastThinkingExpandAtMs > 0 && nowMs - lastThinkingExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastThinkingExpandAtMs = nowMs;
+			const changed = isDoubleTap ? chatPanel.toggleAllThinking() : chatPanel.toggleLastThinking();
+			if (changed) tui.requestRender();
+		},
+		toggleAllThinkingExpansion: () => {
+			if (chatPanel.toggleAllThinking()) tui.requestRender();
 		},
 		openExternalEditor: () => {
 			openExternalEditorForInput();
