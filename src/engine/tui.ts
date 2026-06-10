@@ -1,7 +1,7 @@
 /**
- * Re-export the pi-tui 0.78.1 primitives Clio's interactive layer consumes. Adding a
- * new pi-tui symbol to Clio happens here first (and in the audit document), then the
- * consuming file in src/interactive/ imports it from this module.
+ * Re-export the Clio terminal-engine primitives the interactive layer consumes. Adding a
+ * new terminal-engine symbol to Clio happens here first, then the consuming file in
+ * src/interactive/ imports it from this module.
  */
 
 export type {
@@ -34,8 +34,8 @@ export type {
 } from "@earendil-works/pi-tui";
 
 /**
- * Structural projection of pi-tui's `Terminal` covering just the progress
- * sink. The engine-boundary rules keep pi-tui value imports inside this
+ * Structural projection of the terminal engine covering just the progress
+ * sink. The engine-boundary rules keep terminal-engine value imports inside this
  * module; consumers accept this narrower shape so the helper is unit-testable
  * without a real ProcessTerminal.
  */
@@ -44,8 +44,8 @@ export interface AgentProgressSink {
 }
 
 /**
- * Toggle OSC 9;4 indeterminate progress around an agent run. pi-tui 0.78.1's
- * `Terminal.setProgress` emits the sequence terminals like WezTerm, Ghostty,
+ * Toggle OSC 9;4 indeterminate progress around an agent run. The Clio terminal
+ * engine emits the sequence terminals like WezTerm, Ghostty,
  * Konsole, and Windows Terminal render as a taskbar/tab progress badge.
  *
  * Start/stop are idempotent: repeated calls coalesce so multiple agent_start

@@ -1,8 +1,8 @@
 /**
- * Re-exports of pi SDK 0.78.1 types consumed by Clio.
+ * Re-exports of Clio engine-boundary types consumed by the rest of the codebase.
  *
- * Importing pi-* types from anywhere else in the codebase violates the engine boundary.
- * Add new re-exports here when domains need additional pi types, and update the audit
+ * Importing engine package types from anywhere else in the codebase violates the engine boundary.
+ * Add new re-exports here when domains need additional engine types, and update the audit
  * document in the same commit.
  */
 
@@ -20,7 +20,7 @@ export { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentState as PiAgentState } from "@earendil-works/pi-agent-core";
 
 /**
- * Writable view onto pi-agent-core's AgentState. The public typings mark
+ * Writable view onto the engine AgentState. The public typings mark
  * `errorMessage` as readonly because the agent itself is the canonical
  * mutator, but the chat-loop legitimately needs to clear it before retrying
  * after a recoverable failure (overflow recovery, transient retry chains).

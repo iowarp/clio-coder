@@ -17,7 +17,7 @@ export interface SlashAutocompleteOptions {
 	fdPath?: string | null;
 }
 
-// pi-tui's @-prefix completion only works through `fd`. The Debian/Ubuntu
+// The terminal engine's @-prefix completion only works through `fd`. The Debian/Ubuntu
 // `fd-find` apt package ships the binary as `fdfind` to avoid colliding with
 // an unrelated `fd` package, so we accept either name. Returns an absolute
 // path so spawn() does not depend on PATH at call time.
@@ -64,6 +64,8 @@ function isSlashCommandPrefix(lines: string[], cursorLine: number, cursorCol: nu
 }
 
 class ClioAutocompleteProvider implements AutocompleteProvider {
+	readonly triggerCharacters = ["/", "@"];
+
 	private readonly provider: CombinedAutocompleteProvider;
 
 	constructor(commands: SlashAutocompleteCommand[], basePath: string, fdPath: string | null) {
@@ -79,10 +81,10 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const suggestions = await this.provider.getSuggestions(lines, cursorLine, cursorCol, options);
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (!suggestions || commandPrefix === null) return suggestions;
-		// pi-tui returns fuzzy-ranked matches for slash commands. Clio narrows to
+		// The terminal engine returns fuzzy-ranked matches for slash commands. Clio narrows to
 		// strict prefix matches so /m surfaces /model only, not every command
 		// containing 'm'. Keep this filter even though it overlaps with
-		// pi-tui's own ranking.
+		// the engine's own ranking.
 		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));
 		return items.length > 0 ? { ...suggestions, items } : null;
 	}
