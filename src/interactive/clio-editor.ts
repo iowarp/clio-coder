@@ -51,6 +51,8 @@ export class ClioEditor extends Editor {
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			lines[0] = rule(theme, safeWidth, {
 				right: composeRailLabel(this.chrome),
+				fillToken: "frameStrong",
+				rightToken: "accentDeep",
 			});
 		}
 
