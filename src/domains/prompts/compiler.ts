@@ -1,3 +1,4 @@
+import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ThinkingMechanism } from "../providers/types/local-model-quirks.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
@@ -45,6 +46,7 @@ export interface DynamicInputs {
 	turnCount?: number;
 	clioVersion?: string;
 	piMonoVersion?: string;
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 }
 
 export interface FragmentManifestEntry {
@@ -229,6 +231,16 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 		) {
 			lines.push("Use entry_points, where_is, and find_symbol for indexed TypeScript navigation when they are active.");
 		}
+		if (activeToolNames.includes("read_skill")) {
+			lines.push(
+				"For pending skill requests, first call read_skill for the requested skill before answering, planning, writing files, or inspecting the repository.",
+			);
+		}
+		if (activeToolNames.includes("ask_user")) {
+			lines.push(
+				'Use ask_user for structured operator interviews, confirmations, and choices. ask_user is an active tool, not a skill body or a file protocol. Start or continue the interview with action="ask" and one to four bundled questions. Include options with descriptions when choices are natural and put your recommended answer first. Ask adaptive follow-up rounds only for new necessary information. When the interview has enough information, call ask_user with action="complete", a compact decisions array, and an optional short summary before final prose. If ask_user returns cancelled, continue with defaults and do not ask again.',
+			);
+		}
 	} else {
 		lines.push("Use tool calls only for concrete inspection or changes that the task requires.");
 		lines.push(
@@ -248,6 +260,26 @@ function renderToolCatalogBlock(inputs: DynamicInputs): string {
 		"",
 		catalog,
 	].join("\n");
+}
+
+function renderPendingSkillRequestsBlock(inputs: DynamicInputs): string {
+	const requests = inputs.pendingSkillRequests?.filter((request) => request.name.trim().length > 0) ?? [];
+	if (requests.length === 0) return "";
+	const allowed = [...new Set(requests.map((request) => request.name.trim()).filter(Boolean))];
+	const lines = ["# Pending Skill Request"];
+	for (const request of requests) {
+		const status = request.installed ? "installed" : "not-installed";
+		const args = request.args.trim();
+		lines.push(`- ${request.name} (${status}, source=${request.source})`);
+		if (args.length > 0) lines.push(`  User task: ${args}`);
+	}
+	lines.push(
+		`First call read_skill for: ${allowed.join(", ")}.`,
+		`Only these pending skill names are allowed this turn: ${allowed.join(", ")}.`,
+		"After read_skill succeeds, follow the loaded workflow.",
+		'If that workflow needs an interview, confirmation, or choice and ask_user is active, call ask_user with action="ask" and one to four bundled questions when possible. Adaptive follow-up rounds are allowed only for new, necessary questions. When enough information is collected, call ask_user with action="complete" and compact decisions before final prose. If ask_user is unavailable or cancelled, proceed with defaults and state assumptions.',
+	);
+	return lines.join("\n");
 }
 
 function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
@@ -510,15 +542,21 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		toolIsActive(inputs.dynamicInputs, "dispatch") ? inputs.dynamicInputs.agentCatalogDelta : undefined,
 	);
 	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn", "turnContext");
-	const hasProjectSkills = inputs.dynamicInputs.skillsCatalog?.includes('scope="project"') === true;
 	const skillsCatalog = renderSkillsCatalogBlock(
-		toolIsActive(inputs.dynamicInputs, "read_skill") ||
-		toolIsActive(inputs.dynamicInputs, "create_skill") ||
-		hasProjectSkills
+		toolIsActive(inputs.dynamicInputs, "read_skill") || toolIsActive(inputs.dynamicInputs, "create_skill")
 			? inputs.dynamicInputs.skillsCatalog
 			: undefined,
 	);
 	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell", "pinnedToolContract");
+	pushSegment(
+		segmentManifest,
+		parts,
+		"pending-skill-requests",
+		renderPendingSkillRequestsBlock(inputs.dynamicInputs),
+		true,
+		"dynamic-turn",
+		"turnContext",
+	);
 	pushSegment(
 		segmentManifest,
 		parts,

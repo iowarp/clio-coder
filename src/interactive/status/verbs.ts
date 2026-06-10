@@ -1,3 +1,4 @@
+import { ToolNames } from "../../core/tool-names.js";
 import { spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 import type { AgentStatus } from "./types.js";
 
@@ -44,6 +45,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: "streaming response", toneHint: "normal" };
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
+			if (name === ToolNames.AskUser) return { text: "waiting for user input", toneHint: "normal" };
 			return { text: tier >= 2 ? `still running tool: ${name}` : `running tool: ${name}`, toneHint: "normal" };
 		}
 		case "tool_blocked":

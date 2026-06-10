@@ -7,7 +7,6 @@ import { type ClioSettings, readSettings, writeSettings } from "../core/config.j
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { getSharedBus } from "../core/shared-bus.js";
-import { skillActivationFromSource } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
@@ -74,6 +73,7 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
+import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
 
@@ -530,10 +530,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),
 		...(contextDomain ? { onFileMutation: (event) => contextDomain.noteFileChanges(event.paths) } : {}),
 	});
+	let askUserHandler: AskUserHandler | null = null;
+	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
+		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		dispatch,
 		bus,
+		...(interactive ? { askUser: askUserBridge } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
@@ -645,14 +649,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			toolRegistry.cancelParkedCalls(headlessPermissionReason);
 		});
 		try {
-			const skillExpansion = resources?.expandSkillInvocation(options.headless.prompt, process.cwd());
-			const skillPrompt = skillExpansion?.expanded ? skillExpansion.text : options.headless.prompt;
-			const skillActivations = skillExpansion?.expanded
-				? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
-				: [];
-			const promptExpansion = resources?.expandPromptTemplate(skillPrompt, process.cwd());
+			const parsedSkillRequest = resources?.parsePendingSkillRequests(options.headless.prompt, process.cwd(), {
+				naturalLanguageTriggers: false,
+			}) ?? { text: options.headless.prompt, pendingSkillRequests: [] };
+			const promptExpansion = resources?.expandPromptTemplate(parsedSkillRequest.text, process.cwd());
 			const fileExpansion = await expandInlineFileReferencesAsync(
-				promptExpansion?.expanded ? promptExpansion.text : skillPrompt,
+				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
 					cwd: process.cwd(),
 					includeImages: true,
@@ -663,7 +665,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
 				...(images.length > 0 ? { images } : {}),
-				...(skillActivations.length > 0 ? { skillActivations } : {}),
+				...(parsedSkillRequest.pendingSkillRequests.length > 0
+					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }
+					: {}),
 				mode: options.headless.mode ?? "text",
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
@@ -689,6 +693,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		dataDir: clioDataDir(),
+		registerAskUserHandler: (handler) => {
+			askUserHandler = handler;
+			return () => {
+				if (askUserHandler === handler) askUserHandler = null;
+			};
+		},
 		getSettings: () => config?.get() ?? readSettings(),
 		...(config
 			? {
@@ -706,12 +716,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(contextDomain
 			? {
 					getContextState: (cwd?: string) => contextDomain.contextState(cwd),
-					onInit: async (options: {
-						preview?: boolean;
-						adopt?: boolean;
-						includeGlobalImports?: boolean;
-						heuristic?: boolean;
-					}, _runIo?: RunIo) => {
+					onInit: async (
+						options: {
+							preview?: boolean;
+							adopt?: boolean;
+							includeGlobalImports?: boolean;
+							heuristic?: boolean;
+						},
+						_runIo?: RunIo,
+					) => {
 						// Interactive context-init explores the repo with the configured target by
 						// default, grounded in the freshly built codewiki, and falls back to the
 						// deterministic heuristic when no target is reachable. --heuristic and

@@ -1,3 +1,4 @@
+import { ToolNames } from "../../core/tool-names.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../chat-loop.js";
 import { buildSummary, emptySummary } from "./summary.js";
 import {
@@ -218,6 +219,13 @@ function activePhaseAfterStuck(prev: AgentStatus): StatusPhase {
 	return prev.resumePhase ?? "thinking";
 }
 
+function isWaitingForOperator(prev: AgentStatus): boolean {
+	return (
+		prev.tool?.toolName === ToolNames.AskUser &&
+		(prev.phase === "tool_running" || (prev.phase === "stuck" && prev.resumePhase === "tool_running"))
+	);
+}
+
 function cancelledSummary(prev: AgentStatus, ctx: ReduceContext, stopReason: TurnStopReason, truncated = false) {
 	const start = prev.since > 0 ? prev.since : ctx.now;
 	const model = targetModel(ctx);
@@ -381,6 +389,15 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			};
 		case "watchdog_tick": {
 			if (!isActive(prev.phase)) return prev;
+			if (isWaitingForOperator(prev)) {
+				return {
+					...prev,
+					phase: "tool_running",
+					resumePhase: undefined,
+					watchdogTier: 0,
+					localRuntime: ctx.localRuntime,
+				};
+			}
 			const elapsed = Math.max(0, ctx.now - prev.lastMeaningfulAt);
 			const tier = computeWatchdogTier(elapsed);
 			if (tier === 4 && prev.phase !== "stuck") {
