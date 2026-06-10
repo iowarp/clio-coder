@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	BusChannels,
 	type ContextPressureWarningPayload,
@@ -6,8 +7,8 @@ import {
 } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { SkillActivation } from "../core/skill-activation.js";
-import type { ToolName } from "../core/tool-names.js";
+import type { PendingSkillRequest, PendingSkillToolPolicy, SkillActivation } from "../core/skill-activation.js";
+import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type {
 	CompileResult,
@@ -83,8 +84,9 @@ import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
+import { finalizeAskUserInterview } from "../tools/ask-user.js";
 import { renderToolCatalog, resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
-import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
+import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
@@ -145,6 +147,9 @@ export type ChatLoopEvent =
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
+	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
+	/** @deprecated loaded skill ledger entries; only read_skill should produce these. */
 	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
@@ -400,7 +405,7 @@ function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {
 		kind: "provider_length_stop",
 		stopReason: "length",
 		message:
-			"Provider stopped because its output/context limit was reached before a complete assistant response. This often means the prompt plus tool observations exhausted the reported context window.",
+			"Provider hit its generation/output limit before a complete assistant response. This is not a safety denial; compacting helps only when the prompt and tool observations are also near the context window.",
 	};
 	if (usage && typeof usage === "object") {
 		const u = usage as Record<string, unknown>;
@@ -621,6 +626,7 @@ function resolveRuntimeTools(
 	userText: string,
 	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
+	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
 	if (!deps.toolRegistry) return { tools: [], palette: null };
 	const palette = resolveToolPalette({
@@ -628,6 +634,7 @@ function resolveRuntimeTools(
 		userText,
 		availableTools: deps.toolRegistry.listRegistered(),
 		recentToolNames,
+		pendingSkillRequests,
 	});
 	const input = {
 		registry: deps.toolRegistry,
@@ -654,8 +661,9 @@ function resolveToolsForRuntime(
 	userText: string,
 	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
+	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
-	return resolveRuntimeTools(agentRuntime, deps, userText, recentToolNames, invokeOptions);
+	return resolveRuntimeTools(agentRuntime, deps, userText, recentToolNames, invokeOptions, pendingSkillRequests);
 }
 
 function userTurnCount(entries: ReadonlyArray<SessionEntry>): number {
@@ -674,6 +682,35 @@ function currentVisibleTurnCount(deps: CreateChatLoopDeps): number {
 function activeSkillActivations(deps: CreateChatLoopDeps, pending: ReadonlyArray<SkillActivation>): SkillActivation[] {
 	const prior = deps.session?.current()?.skillActivations ?? [];
 	return [...prior, ...pending];
+}
+
+function createPendingSkillToolPolicy(
+	requests: ReadonlyArray<PendingSkillRequest>,
+): PendingSkillToolPolicy | undefined {
+	const allowedSkillNames = [
+		...new Set(requests.map((request) => request.name.trim()).filter((name) => name.length > 0)),
+	];
+	if (allowedSkillNames.length === 0) return undefined;
+	return { allowedSkillNames, requests: [...requests], loadedSkillNames: new Set<string>() };
+}
+
+function createAskUserToolPolicy(activeTools: ReadonlyArray<{ name: string }>): AskUserToolPolicy | undefined {
+	if (!activeTools.some((tool) => tool.name === ToolNames.AskUser)) return undefined;
+	const now = new Date().toISOString();
+	return {
+		id: randomUUID(),
+		status: "idle",
+		startedAt: now,
+		updatedAt: now,
+		rounds: [],
+		decisions: [],
+		inFlight: false,
+		cancelled: false,
+		answerCount: 0,
+		callCount: 0,
+		maxCalls: 6,
+		askedQuestionKeys: new Set<string>(),
+	};
 }
 
 interface RunUsageSummary {
@@ -872,6 +909,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const persistedUserEchoes: string[] = [];
 	const recentToolNames: ToolName[] = [];
 	const toolStartTimes = new Map<string, number>();
+	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
+	let currentAskUserPolicy: AskUserToolPolicy | undefined;
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -994,6 +1033,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (sessionId) options.sessionId = sessionId;
 		const turnId = activeUserTurnId ?? lastTurnId;
 		if (turnId) options.turnId = turnId;
+		if (currentPendingSkillPolicy) options.pendingSkillPolicy = currentPendingSkillPolicy;
+		if (currentAskUserPolicy) options.askUserPolicy = currentAskUserPolicy;
 		return options;
 	};
 
@@ -1806,6 +1847,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		agentRuntime: AgentRuntime,
 		userText: string,
 		pendingSkillActivations: ReadonlyArray<SkillActivation>,
+		pendingSkillRequests: ReadonlyArray<PendingSkillRequest>,
 	): Promise<CompileResult | null> => {
 		if (!deps.prompts) {
 			currentTurnHash = null;
@@ -1854,6 +1896,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				: {}),
 			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
 			turnCount: 0,
+			...(pendingSkillRequests.length > 0 ? { pendingSkillRequests } : {}),
 		};
 		if (deps.getMemorySection) {
 			try {
@@ -2197,8 +2240,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				deps.session.recordSkillActivation(withTurn);
 			} catch {
-				// The expanded prompt already contains the skill body. Ledger
-				// persistence is best-effort and must not abort the turn.
+				// Legacy caller-provided activations are audit metadata only.
+				// Persistence is best-effort and must not abort the turn.
 			}
 		}
 	};
@@ -2260,11 +2303,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
+			const pendingSkillRequests = options.pendingSkillRequests ?? [];
+			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
 
 			// 1. Resolve tools once
-			const resolvedTools = resolveToolsForRuntime(agentRuntime, deps, text, recentToolNames, currentToolInvokeOptions);
+			const resolvedTools = resolveToolsForRuntime(
+				agentRuntime,
+				deps,
+				text,
+				recentToolNames,
+				currentToolInvokeOptions,
+				pendingSkillRequests,
+			);
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;
+			const askUserPolicy = createAskUserToolPolicy(resolvedTools.tools);
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2276,7 +2329,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 3. Compile prompt
 			const pendingSkillActivations = options.skillActivations ?? [];
-			let compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
+			let compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations, pendingSkillRequests);
 
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
@@ -2314,7 +2367,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					return;
 				}
 				refreshAgentMessagesFromSession(agentRuntime);
-				compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations);
+				compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations, pendingSkillRequests);
 				turnSnapshot = captureTurnSnapshot("pending");
 				const postTotalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
 				if (postTotalEstimate > effectiveWindow) {
@@ -2330,6 +2383,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			const userTurnId = appendSubmittedUserTurn(agentRuntime, text, images);
+			// PendingSkillRequest is intent only. SkillActivation ledger entries are recorded by read_skill success.
 			recordSubmittedSkillActivations(pendingSkillActivations, userTurnId);
 			if (currentPromptDiagnostics) {
 				emit({ type: "prompt_diagnostics", promptDiagnostics: currentPromptDiagnostics });
@@ -2343,6 +2397,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			toolProseAbortReason = null;
 
 			streaming = true;
+			const priorPendingSkillPolicy = currentPendingSkillPolicy;
+			const priorAskUserPolicy = currentAskUserPolicy;
+			currentPendingSkillPolicy = pendingSkillPolicy;
+			currentAskUserPolicy = askUserPolicy;
 			try {
 				const promptMessages = promptMessagesForTurn(compileResult, text, images);
 				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
@@ -2392,7 +2450,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				await runCompactAndRetry(agentRuntime, text, overflow, images);
 			} finally {
+				if (askUserPolicy) {
+					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
+				}
 				streaming = false;
+				currentPendingSkillPolicy = priorPendingSkillPolicy;
+				currentAskUserPolicy = priorAskUserPolicy;
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
 				currentToolPalette = null;

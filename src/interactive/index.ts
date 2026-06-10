@@ -5,7 +5,8 @@ import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } fr
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { type SkillActivation, skillActivationFromSource } from "../core/skill-activation.js";
+import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -22,6 +23,7 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import { getMarketplaceSkills, installMarketplaceSkill } from "../domains/resources/skills/marketplace.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
@@ -42,6 +44,7 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
+import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -69,6 +72,7 @@ import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifica
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
+import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
@@ -159,6 +163,8 @@ export interface InteractiveDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
+	/** Install the TUI-backed ask_user handler for this interactive process. */
+	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
 	/** Live CLIO.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
 	/** Persist a thinking level chosen in the /thinking overlay. */
@@ -208,7 +214,7 @@ const EDITOR_BASH_TIMEOUT_MS = 300_000;
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
-	skillActivations: SkillActivation[];
+	pendingSkillRequests: PendingSkillRequest[];
 }
 
 export function expandInteractiveSubmit(
@@ -216,15 +222,14 @@ export function expandInteractiveSubmit(
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
 ): InteractiveSubmitExpansion {
-	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
-	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
-	const skillActivations = skillExpansion?.expanded
-		? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
-		: [];
-	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
+	const parsed = resources?.parsePendingSkillRequests(text, cwd, { naturalLanguageTriggers: false }) ?? {
+		text,
+		pendingSkillRequests: [],
+	};
+	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
 	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
-	return { text: fileExpansion.text, images: fileExpansion.images, skillActivations };
+	return { text: fileExpansion.text, images: fileExpansion.images, pendingSkillRequests: parsed.pendingSkillRequests };
 }
 
 export async function expandInteractiveSubmitAsync(
@@ -232,19 +237,18 @@ export async function expandInteractiveSubmitAsync(
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
 ): Promise<InteractiveSubmitExpansion> {
-	const skillExpansion = resources?.expandSkillInvocation(text, cwd);
-	const skillText = skillExpansion?.expanded ? skillExpansion.text : text;
-	const skillActivations = skillExpansion?.expanded
-		? [skillActivationFromSource(skillExpansion.skill, "slash-command")]
-		: [];
-	const promptExpansion = resources?.expandPromptTemplate(skillText, cwd);
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : skillText;
+	const parsed = resources?.parsePendingSkillRequests(text, cwd, { naturalLanguageTriggers: false }) ?? {
+		text,
+		pendingSkillRequests: [],
+	};
+	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
 		cwd,
 		includeImages: true,
 		missing: "leave",
 	});
-	return { text: fileExpansion.text, images: fileExpansion.images, skillActivations };
+	return { text: fileExpansion.text, images: fileExpansion.images, pendingSkillRequests: parsed.pendingSkillRequests };
 }
 
 export function expandInteractiveSubmitText(
@@ -272,6 +276,7 @@ export type OverlayState =
 	| "tree"
 	| "message-picker"
 	| "cwd-fallback"
+	| "ask-user"
 	| "hotkeys";
 
 export interface KeyBindingDeps {
@@ -381,6 +386,10 @@ export interface CwdFallbackOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface AskUserOverlayKeyDeps {
+	cancelAskUser: () => void;
+}
+
 export interface HotkeysOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -400,6 +409,7 @@ export interface OverlayKeyDeps
 		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
 		CwdFallbackOverlayKeyDeps,
+		AskUserOverlayKeyDeps,
 		HotkeysOverlayKeyDeps {
 	requestShutdown: () => void;
 }
@@ -703,6 +713,33 @@ export function routeCwdFallbackOverlayKey(_data: string, _deps: CwdFallbackOver
 	return false;
 }
 
+/** Pure overlay key router for ask_user. Esc resolves the tool call as cancelled; input falls through. */
+export function routeAskUserOverlayKey(data: string, deps: AskUserOverlayKeyDeps): boolean {
+	if (data === ESC) {
+		deps.cancelAskUser();
+		return true;
+	}
+	return false;
+}
+
+function recordObject(value: unknown): Record<string, unknown> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function askUserInterviewClosedByToolResult(event: {
+	toolName?: unknown;
+	isError?: unknown;
+	result?: unknown;
+}): boolean {
+	if (event.toolName !== "ask_user" || event.isError === true) return false;
+	const result = recordObject(event.result);
+	const details = recordObject(result?.details);
+	const interview = recordObject(details?.interview);
+	return interview?.status === "complete" || interview?.status === "cancelled";
+}
+
 /**
  * Pure cancel logic for the cwd-fallback overlay. Restores the prior session
  * when one existed and differs from the just-resumed session id; otherwise
@@ -808,6 +845,9 @@ export function routeOverlayKey(
 		// SelectList owns its full keymap including Esc (cancel parity);
 		// routeCwdFallbackOverlayKey is a no-op stub kept for shape symmetry.
 		return routeCwdFallbackOverlayKey(data, deps);
+	}
+	if (overlayState === "ask-user") {
+		return routeAskUserOverlayKey(data, deps);
 	}
 	if (overlayState === "hotkeys") {
 		return routeHotkeysOverlayKey(data, deps);
@@ -1027,7 +1067,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 	});
 	editor.focused = true;
-	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider());
+	editor.setAutocompleteProvider(
+		createSlashCommandAutocompleteProvider({
+			listSkills: () => {
+				const installed = deps.resources?.skills(process.cwd()).items ?? [];
+				const marketplace = getMarketplaceSkills();
+				return { installed, marketplace };
+			},
+		}),
+	);
 
 	// The permission overlay is rebuilt per open because its body depends on
 	// the parked tool call.
@@ -1059,6 +1107,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 			return;
 		}
+		if (askUserSession?.isWaiting() && event.type === "message_update") {
+			const assistantEvent = event.assistantMessageEvent as { type?: unknown };
+			if (assistantEvent.type === "text_delta" || assistantEvent.type === "thinking_delta") closeAskUserSession();
+		}
+		if (event.type === "agent_end") {
+			closeAskUserSession();
+			askUserCancelledForTurn = false;
+		}
 		if (event.type === "tool_execution_start") {
 			if (event.toolName.toLowerCase() === "dispatch") {
 				chatRenderer.applyEvent(event);
@@ -1072,6 +1128,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (event.toolName.toLowerCase() === "dispatch") {
 				chatRenderer.applyEvent(event);
 				return;
+			}
+			if (askUserInterviewClosedByToolResult(event)) {
+				closeAskUserSession();
+				askUserCancelledForTurn = false;
 			}
 			footerActiveTools.delete(event.toolCallId);
 			if (event.isError) footerToolErrors += 1;
@@ -1266,6 +1326,40 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
+		openSkillSelector: () => {
+			const installed = deps.resources?.skills(process.cwd()).items ?? [];
+			const marketplace = getMarketplaceSkills();
+			const options = [
+				...installed.map((s) => ({
+					label: s.name,
+					description: s.description,
+				})),
+				...marketplace
+					.filter((s) => !installed.some((inst) => inst.name === s.name))
+					.map((s) => ({
+						label: `${s.name} (marketplace)`,
+						description: s.description,
+					})),
+			];
+			if (options.length === 0) {
+				io.stdout("No skills available.\n");
+				return;
+			}
+			void openAskUserOverlayState([
+				{
+					question: "Select a skill to activate:",
+					options,
+				},
+			]).then((res) => {
+				if (res.cancelled || !res.answers[0]?.answer) return;
+				let selected = res.answers[0].answer;
+				if (selected.endsWith(" (marketplace)")) {
+					selected = selected.slice(0, -" (marketplace)".length);
+				}
+				editor.setText(`/skill:${selected} `);
+				tui.requestRender();
+			});
+		},
 		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
 		listAgents: () => deps.agents?.listSpecs().filter(isUserVisibleAgent) ?? [],
 		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
@@ -1370,21 +1464,80 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
 		submitChat: (text) => {
+			const runSubmit = (sub: InteractiveSubmitExpansion) => {
+				void (async () => {
+					try {
+						recordSubmittedTurn();
+						footer.refresh();
+						chatPanel.appendUser(sub.text);
+						tui.requestRender();
+						await deps.chat.submit(sub.text, {
+							...(sub.images.length > 0 ? { images: sub.images } : {}),
+							...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+						});
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[interactive] chat failed: ${msg}\n`);
+					} finally {
+						tui.requestRender();
+					}
+				})();
+			};
+
 			void (async () => {
 				try {
 					const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
-					recordSubmittedTurn();
-					footer.refresh();
-					chatPanel.appendUser(submitted.text);
-					tui.requestRender();
-					await deps.chat.submit(submitted.text, {
-						...(submitted.images.length > 0 ? { images: submitted.images } : {}),
-						...(submitted.skillActivations.length > 0 ? { skillActivations: submitted.skillActivations } : {}),
-					});
+					const uninstalled = submitted.pendingSkillRequests.find((r) => !r.installed);
+					if (uninstalled && !uninstalled.marketplaceRef) {
+						io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
+						return;
+					}
+					if (uninstalled) {
+						void openAskUserOverlayState([
+							{
+								question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
+								options: [
+									{
+										label: "Install and run",
+										description: `Install from ${uninstalled.marketplaceRef}`,
+									},
+									{ label: "Cancel", description: "Do not install." },
+								],
+							},
+						]).then((res) => {
+							if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
+								io.stderr("Installation cancelled.\n");
+								return;
+							}
+							void (async () => {
+								try {
+									io.stdout(`Installing skill "${uninstalled.name}"...\n`);
+									let configDir: string | undefined;
+									try {
+										configDir = clioConfigDir();
+									} catch {}
+									await installMarketplaceSkill(uninstalled.name, {
+										cwd: process.cwd(),
+										...(configDir ? { configDir } : {}),
+									});
+									io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
+									await deps.resources?.reload();
+									const postInstallSubmitted = await expandInteractiveSubmitAsync(text, deps.resources);
+									runSubmit(postInstallSubmitted);
+								} catch (err) {
+									io.stderr(
+										`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
+									);
+								}
+							})();
+						});
+						return;
+					}
+
+					runSubmit(submitted);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[interactive] chat failed: ${msg}\n`);
-				} finally {
 					tui.requestRender();
 				}
 			})();
@@ -1507,6 +1660,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision } | null = null;
 	let permissionConfirmJustFired = false;
+	let pendingAskUserCancel: (() => void) | null = null;
+	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
+	let askUserCancelledForTurn = false;
+	let unregisterAskUserHandler: (() => void) | null = null;
 	process.removeAllListeners("SIGINT");
 	const taskIslandHandle = tui.showOverlay(taskIsland, {
 		anchor: "top-right",
@@ -1582,6 +1739,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
+		if (overlayState === "ask-user" && pendingAskUserCancel) {
+			pendingAskUserCancel();
+			return;
+		}
 		const leaving = overlayState;
 		if (overlayState === "auth") {
 			authDialogDismiss?.();
@@ -1953,6 +2114,63 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			pendingPermission = { call, decision };
 			openPermissionOverlay(call, decision);
 		}) ?? (() => {});
+
+	const closeAskUserSession = (): void => {
+		pendingAskUserCancel = null;
+		const session = askUserSession;
+		askUserSession = null;
+		if (session) {
+			session.close();
+			if (overlayHandle === session) overlayHandle = null;
+		} else if (overlayState === "ask-user") {
+			overlayHandle?.hide();
+			overlayHandle = null;
+		}
+		if (overlayState === "ask-user") overlayState = "closed";
+		renderContextIsland();
+		renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const ensureAskUserSession = (): ReturnType<typeof openAskUserOverlay> | null => {
+		if (overlayState !== "closed" && overlayState !== "ask-user") return null;
+		if (askUserSession) return askUserSession;
+		overlayState = "ask-user";
+		askUserSession = openAskUserOverlay(tui, {
+			onCancel: () => {
+				pendingAskUserCancel?.();
+			},
+		});
+		overlayHandle = askUserSession;
+		tui.requestRender();
+		return askUserSession;
+	};
+
+	const cancelAskUserSession = (): void => {
+		askUserCancelledForTurn = true;
+		const session = askUserSession;
+		session?.cancel();
+		closeAskUserSession();
+	};
+
+	const openAskUserOverlayState: AskUserHandler = async (questions, invokeOptions) => {
+		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
+		if (toolBacked && askUserCancelledForTurn) return cancelledAskUserResult();
+		const session = ensureAskUserSession();
+		if (!session) return cancelledAskUserResult();
+		pendingAskUserCancel = cancelAskUserSession;
+		const result = await session.ask(questions);
+		if (result.cancelled === true || !toolBacked) {
+			if (result.cancelled === true) askUserCancelledForTurn = true;
+			closeAskUserSession();
+		} else {
+			renderContextIsland();
+			renderTaskIsland();
+			tui.requestRender();
+		}
+		return result;
+	};
+	unregisterAskUserHandler = deps.registerAskUserHandler?.(openAskUserOverlayState) ?? null;
 
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
@@ -2337,6 +2555,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeContextPressure();
 		unsubscribeContextPruned();
 		unsubscribePermissionRequired();
+		unregisterAskUserHandler?.();
+		unregisterAskUserHandler = null;
+		pendingAskUserCancel?.();
 		agentProgress.stop();
 		deps.chat.dispose();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
@@ -2522,6 +2743,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					tui.requestRender();
 				},
 				closeOverlay,
+				cancelAskUser: () => {
+					pendingAskUserCancel?.();
+				},
 				requestShutdown: () => {
 					void shutdown();
 				},

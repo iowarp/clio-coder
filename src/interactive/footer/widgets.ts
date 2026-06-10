@@ -1,3 +1,4 @@
+import { ToolNames } from "../../core/tool-names.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
@@ -72,7 +73,11 @@ export interface AgentWorkFacts {
 	dispatchSummary: string | null;
 	toolTally: string;
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
-	contextActivity?: { message: string; detail: string | null; status: "started" | "running" | "completed" | "failed" } | null;
+	contextActivity?: {
+		message: string;
+		detail: string | null;
+		status: "started" | "running" | "completed" | "failed";
+	} | null;
 	/** Metrics for the most recent completed turn, surfaced when the agent is idle. */
 	lastTurn: TurnSummary | null;
 }
@@ -819,6 +824,7 @@ type HarnessPhasePresentation = {
 
 function shortToolLabel(status: AgentStatus, width: number): string {
 	const name = status.tool?.toolName?.trim();
+	if (name === ToolNames.AskUser) return width < 72 ? "ask" : "waiting for user";
 	if (!name || width < 72) return "tool";
 	const nameWidth = width >= 100 ? 18 : 12;
 	return `tool ${truncateToWidth(name, nameWidth, "…", true)}`;
