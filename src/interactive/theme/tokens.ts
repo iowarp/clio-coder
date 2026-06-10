@@ -11,7 +11,9 @@ export type ClioToken =
 	| "muted"
 	| "title"
 	| "frame"
-	| "frameStrong";
+	| "frameStrong"
+	| "effortMedium"
+	| "effortHigh";
 
 interface TokenColor {
 	rgb: readonly [number, number, number];
@@ -32,6 +34,8 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	title: { rgb: [70, 229, 208], xterm: 80 },
 	frame: { rgb: [47, 93, 90], xterm: 23 },
 	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
+	effortMedium: { rgb: [36, 132, 124], xterm: 23 },
+	effortHigh: { rgb: [39, 154, 143], xterm: 30 },
 };
 
 export const SGR_RESET = "\u001b[0m";

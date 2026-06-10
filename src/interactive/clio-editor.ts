@@ -51,9 +51,9 @@ function styledThinkingHint(theme: ClioTheme, value: string): string {
 		case "low":
 			return theme.style("accentDeep", hint, { dim: true });
 		case "medium":
-			return theme.fg("accentDeep", hint);
+			return theme.fg("effortMedium", hint);
 		case "high":
-			return theme.style("accent", hint, { bold: true });
+			return theme.fg("effortHigh", hint);
 		case "xhigh":
 		case "max":
 		case "on":
@@ -64,7 +64,7 @@ function styledThinkingHint(theme: ClioTheme, value: string): string {
 }
 
 function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
-	return `${theme.fg("dim", chrome.getModelLabel())} ${theme.fg("dim", "·")} ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
+	return `${theme.fg("dim", chrome.getModelLabel())}  ${theme.fg("dim", "·")}  ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
 }
 
 export class ClioEditor extends Editor {
@@ -86,6 +86,7 @@ export class ClioEditor extends Editor {
 				right: styledRailLabel(theme, this.chrome),
 				fillToken: "frameStrong",
 				rightRaw: true,
+				rightTail: theme.style("frameStrong", "─", { bold: true }),
 			});
 		}
 

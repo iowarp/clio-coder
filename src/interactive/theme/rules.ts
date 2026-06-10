@@ -12,15 +12,15 @@ export interface RuleOptions {
 	fillToken?: ClioToken;
 	rightToken?: ClioToken;
 	rightRaw?: boolean;
+	rightTail?: string;
 }
 
 export function rule(theme: ClioTheme, width: number, options: RuleOptions = {}): string {
 	const safeWidth = Math.max(0, width);
 	if (safeWidth === 0) return "";
 	const left = options.left ? ` ${theme.style("accent", options.left, { bold: true })} ` : "";
-	const right = options.right
-		? ` ${options.rightRaw ? options.right : theme.fg(options.rightToken ?? "muted", options.right)} `
-		: "";
+	const rightBody = options.rightRaw ? options.right : theme.fg(options.rightToken ?? "muted", options.right ?? "");
+	const right = options.right ? ` ${rightBody} ${options.rightTail ?? ""}` : "";
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
 	const fill = theme.style(options.fillToken ?? "frame", "─".repeat(safeWidth - labelsWidth), {
