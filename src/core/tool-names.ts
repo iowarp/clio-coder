@@ -29,6 +29,7 @@ export const ToolNames = {
 	WhereIs: "where_is",
 	Dispatch: "dispatch",
 	DispatchBatch: "dispatch_batch",
+	AskUser: "ask_user",
 	ReadSkill: "read_skill",
 	CreateSkill: "create_skill",
 } as const;

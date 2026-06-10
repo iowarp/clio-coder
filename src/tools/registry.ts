@@ -1,5 +1,9 @@
 import type { TSchema } from "typebox";
-import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
+import {
+	type PendingSkillToolPolicy,
+	type SkillActivation,
+	skillActivationFromToolDetails,
+} from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
@@ -117,6 +121,61 @@ export interface ToolInvokeOptions {
 	turnId?: string;
 	toolCallId?: string;
 	correlationId?: string;
+	pendingSkillPolicy?: PendingSkillToolPolicy;
+	askUserPolicy?: AskUserToolPolicy;
+}
+
+export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";
+
+export interface AskUserTranscriptQuestion {
+	question: string;
+	header?: string;
+	options?: Array<{ label: string; description?: string }>;
+	multi_select?: boolean;
+}
+
+export interface AskUserTranscriptAnswer {
+	question: string;
+	answer: string;
+}
+
+export interface AskUserTranscriptDecision {
+	key: string;
+	value: string;
+	label?: string;
+	rationale?: string;
+	confidence?: "low" | "medium" | "high";
+	source_question?: string;
+	source_questions?: string[];
+}
+
+export interface AskUserTranscriptRound {
+	round: number;
+	requestedAt: string;
+	answeredAt?: string;
+	questions: AskUserTranscriptQuestion[];
+	answers: AskUserTranscriptAnswer[];
+	cancelled?: boolean;
+}
+
+export interface AskUserToolPolicy {
+	id: string;
+	status: AskUserInterviewStatus;
+	startedAt: string;
+	updatedAt: string;
+	endedAt?: string;
+	sessionId?: string;
+	turnId?: string;
+	transcriptPath?: string;
+	summary?: string;
+	rounds: AskUserTranscriptRound[];
+	decisions: AskUserTranscriptDecision[];
+	inFlight: boolean;
+	cancelled: boolean;
+	answerCount: number;
+	callCount: number;
+	maxCalls: number;
+	askedQuestionKeys: Set<string>;
 }
 
 export interface ProtectedArtifactRegistryEvent {
