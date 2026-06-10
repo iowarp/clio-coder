@@ -1,8 +1,22 @@
 ---
 name: context-prime
 description: Use when a coding session begins, when resuming work after a break, or when you land in an unfamiliar or in-progress repository and need to orient before acting. Loads the last handoff, git state, the project constitution, and active-work signals so a fresh agent reconstructs intent instead of guessing. Triggers on "prime", "catch me up", "where were we", "get up to speed", or the first substantive request in a new session.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
+allowed-tools:
+  - read
+  - grep
+  - glob
+  - ls
+  - find
+  - git_status
+  - git_diff
+  - git_log
+  - workspace_context
+  - entry_points
+  - where_is
+  - find_symbol
+  - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/context-prime
 audit: pass
@@ -52,8 +66,10 @@ Work top to bottom; stop early once you have enough to state where things stand.
    handoff suggested for the next step; do not scan the filesystem for them.
 
 6. **Orient.** Produce a short orientation (template below) and **confirm the
-   focus with the user before non-trivial action.** If the handoff and git state
-   disagree, surface the conflict rather than picking silently.
+   focus with the user before non-trivial action** — via `ask_user` with the
+   handoff's suggested focus as the first option when the tool is available,
+   else in plain text. If the handoff and git state disagree, surface the
+   conflict rather than picking silently.
 
 ## Orientation template
 

@@ -32,10 +32,17 @@ auto-loads. That gap is deliberate.
 
 | Skill | Type | Use when |
 |---|---|---|
+| [`grill-me`](grill-me/) | interview | A plan or idea needs stress-testing through a one-question-at-a-time interview before code is written. Ends with a decision log. |
+| [`prd`](prd/) | interview | An idea must become a locked product spec via a phase-gated interview, ending in PRD.md plus milestone prompts. |
+| [`cut-it`](cut-it/) | workflow | A plan, PRD, or milestone must become an executable sprint of dependency-ordered slices with done-when criteria. |
 | [`context-prime`](context-prime/) | workflow | A session begins and you need to load project state, the last handoff, and orientation before acting. |
 | [`context-handoff`](context-handoff/) | workflow | A session is ending and work continues in a new session or another agent. Writes the artifact `context-prime` reads. |
 | [`clio-dev`](clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
 | [`clio-test`](clio-test/) | reference | Writing or verifying changes to Clio against the real v0.2.2 harness (contracts / smoke / boundaries). |
+
+Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
+loads, Clio merges that declaration with host policy; a skill can narrow its
+tool surface but never grant tools the host would not allow.
 
 ## Install (activate a marketplace skill)
 

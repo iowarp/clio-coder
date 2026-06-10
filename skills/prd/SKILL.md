@@ -1,8 +1,23 @@
 ---
 name: prd
 description: Use when the user wants to turn an idea into a product requirements document through a phase-gated interview — each phase locks before the next opens — ending in PRD.md plus per-milestone prompt files ready to drive a coding agent. Triggers on "write a PRD", "spec this out", "help me define this feature/product", or a brain dump that needs structure before planning.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
+allowed-tools:
+  - read
+  - grep
+  - glob
+  - ls
+  - find
+  - git_status
+  - git_log
+  - workspace_context
+  - entry_points
+  - where_is
+  - find_symbol
+  - write
+  - edit
+  - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/prd
 audit: pass

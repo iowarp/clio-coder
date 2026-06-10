@@ -1,8 +1,24 @@
 ---
 name: cut-it
 description: Use when a plan, PRD, or milestone must become an executable sprint — dependency-ordered vertical slices sized for one focused agent run each, with done-when verification per slice. Never fabricates a plan; if none exists or it is too vague to slice, says so and recommends an interview first. Triggers on "cut it", "slice this plan", "make this executable", "turn this into a sprint".
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
+allowed-tools:
+  - read
+  - grep
+  - glob
+  - ls
+  - find
+  - git_status
+  - git_diff
+  - git_log
+  - workspace_context
+  - entry_points
+  - where_is
+  - find_symbol
+  - write
+  - write_plan
+  - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/cut-it
 audit: pass
