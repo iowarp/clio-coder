@@ -52,6 +52,7 @@ async function main(): Promise<number> {
 		allowedTools: spec.allowedTools,
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
+		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;

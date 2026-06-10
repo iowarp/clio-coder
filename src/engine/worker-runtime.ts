@@ -8,7 +8,8 @@
  * is an HTTP/native/pi-ai-backed adapter driven through pi-agent-core.
  */
 
-import type { ToolName } from "../core/tool-names.js";
+import { agentSkillToolPolicy } from "../core/skill-activation.js";
+import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -60,6 +61,8 @@ export interface WorkerRunInput {
 	signal?: AbortSignal;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
+	/** Recipe-bound skill names; read_skill admits exactly these for the run. */
+	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 }
 
@@ -176,7 +179,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		availableTools: input.allowedTools,
 		workerAllowedTools: input.allowedTools,
 	});
-	const activeWorkerTools = workerPalette.activeTools;
+	// Recipe-bound skills: the palette never activates read_skill on its own;
+	// a declared agent skill list is the harness-level grant that does. The
+	// matching per-run policy below restricts read_skill to exactly those names.
+	const agentSkillPolicy =
+		input.allowedTools.includes(ToolNames.ReadSkill) && input.noSkills !== true
+			? agentSkillToolPolicy(input.agentSkills ?? [])
+			: undefined;
+	const activeWorkerTools =
+		agentSkillPolicy && !workerPalette.activeTools.includes(ToolNames.ReadSkill)
+			? [...workerPalette.activeTools, ToolNames.ReadSkill]
+			: workerPalette.activeTools;
 
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);
@@ -212,6 +225,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		agentId: input.agentId,
 		task: input.task,
 		includeInteractiveTools: false,
+		...(agentSkillPolicy ? { invokeOptions: () => ({ pendingSkillPolicy: agentSkillPolicy }) } : {}),
 	});
 	if (tools.length === 0 && input.allowedTools.length > 0 && workerPalette.groups.length > 0) {
 		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);

@@ -3,7 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { mergePendingSkillToolSurface, type SkillDeclaredToolPolicy } from "../../src/core/skill-activation.js";
+import {
+	agentSkillToolPolicy,
+	mergePendingSkillToolSurface,
+	type SkillDeclaredToolPolicy,
+} from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
@@ -786,6 +790,35 @@ describe("contracts/skills tools", () => {
 		ok(skill);
 		strictEqual(skill.metadata.license, "Apache-2.0");
 		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
+	});
+
+	it("read_skill with a recipe-bound policy admits exactly the declared skills", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(join(cwd, ".clio", "skills"), "cut-it", ['name: "cut-it"', 'description: "Slice plans."'], "SLICE");
+		writeSkillDir(join(cwd, ".clio", "skills"), "other", ['name: "other"', 'description: "Other skill."'], "OTHER");
+		const policy = agentSkillToolPolicy(["cut-it"]);
+		ok(policy);
+		strictEqual(policy.toolsExpanded, true);
+		const tool = createReadSkillTool({ getCwd: () => cwd });
+
+		const denied = await tool.run({ name: "other" }, { pendingSkillPolicy: policy });
+		strictEqual(denied.kind, "error");
+		if (denied.kind === "error") {
+			strictEqual(denied.message, "read_skill: this agent run may load only its declared skill(s): cut-it.");
+		}
+
+		const loaded = await tool.run({ name: "cut-it" }, { pendingSkillPolicy: policy });
+		strictEqual(loaded.kind, "ok");
+		if (loaded.kind === "ok") {
+			ok(loaded.output.includes("SLICE"));
+			strictEqual(loaded.output.includes("Pending skill request"), false);
+		}
+
+		const repeated = await tool.run({ name: "cut-it" }, { pendingSkillPolicy: policy });
+		strictEqual(repeated.kind, "error");
+		if (repeated.kind === "error") {
+			strictEqual(repeated.message, "read_skill: skill cut-it is already loaded in this run; continue with its workflow.");
+		}
 	});
 
 	it("read_skill records the skill's declared tool policy on the pending policy", async () => {

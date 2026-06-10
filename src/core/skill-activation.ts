@@ -1,5 +1,5 @@
 export type SkillActivationTrigger = "slash-command" | "tool";
-export type PendingSkillRequestSource = "slash-command" | "selector" | "marketplace";
+export type PendingSkillRequestSource = "slash-command" | "selector" | "marketplace" | "recipe";
 
 export interface PendingSkillRequest {
 	name: string;
@@ -24,6 +24,25 @@ export interface PendingSkillToolPolicy {
 	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
 	/** Set once the harness has widened the run's tool surface after activation. */
 	toolsExpanded: boolean;
+}
+
+/**
+ * Per-run skill policy for a dispatched worker whose agent recipe declares
+ * skills. The worker may read_skill exactly these names; anything else gets
+ * the same deterministic rejection an unrequested skill gets interactively.
+ * Workers resolve their tool surface once at admission, so `toolsExpanded`
+ * starts true and no post-activation widening occurs.
+ */
+export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): PendingSkillToolPolicy | undefined {
+	const allowedSkillNames = [...new Set(skillNames.map((name) => name.trim()).filter((name) => name.length > 0))];
+	if (allowedSkillNames.length === 0) return undefined;
+	return {
+		allowedSkillNames,
+		requests: allowedSkillNames.map((name) => ({ name, args: "", source: "recipe" as const, installed: true })),
+		loadedSkillNames: new Set<string>(),
+		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		toolsExpanded: true,
+	};
 }
 
 /**
