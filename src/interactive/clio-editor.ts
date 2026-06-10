@@ -52,7 +52,7 @@ export class ClioEditor extends Editor {
 			lines[0] = rule(theme, safeWidth, {
 				right: composeRailLabel(this.chrome),
 				fillToken: "frameStrong",
-				rightToken: "accentDeep",
+				rightToken: "dim",
 			});
 		}
 
