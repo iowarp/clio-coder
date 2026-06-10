@@ -39,6 +39,7 @@ auto-loads. That gap is deliberate.
 | [`context-handoff`](context-handoff/) | workflow | A session is ending and work continues in a new session or another agent. Writes the artifact `context-prime` reads. |
 | [`clio-dev`](clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
 | [`clio-test`](clio-test/) | reference | Writing or verifying changes to Clio against the real v0.2.2 harness (contracts / smoke / boundaries). |
+| [`arxiv-literature`](arxiv-literature/) | research | Searching arXiv, summarizing papers, comparing papers, or producing compact literature surveys while protecting main-agent context. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
 loads, Clio merges that declaration with host policy; a skill can narrow its
