@@ -45,7 +45,7 @@ function isEntry(entry: CodewikiEntry, packageEntries: ReadonlySet<string>): boo
 
 export const entryPointsTool: ToolSpec = {
 	name: ToolNames.EntryPoints,
-	description: "Return likely project entry points from the codewiki index.",
+	description: "Return likely project entry points from the codewiki index. Use this tool to locate main entry points or initialization routes in the codebase.",
 	parameters: Type.Object({}),
 	baseActionClass: "read",
 	executionMode: "parallel",

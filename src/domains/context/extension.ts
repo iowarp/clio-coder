@@ -240,11 +240,26 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 			}
 		},
 		async runContextClear(input) {
-			const result = await runContextClear(input);
-			const cwd = input?.cwd ?? process.cwd();
-			contextState.invalidate(cwd);
-			if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
-			return result;
+			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
+				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-clear", at: Date.now(), ...event });
+			};
+			emitProgress({ phase: "done", status: "started", message: "clearing context" });
+			try {
+				const result = await runContextClear(input);
+				const cwd = input?.cwd ?? process.cwd();
+				contextState.invalidate(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+				emitProgress({ phase: "done", status: "completed", message: "context cleared" });
+				return result;
+			} catch (err) {
+				emitProgress({
+					phase: "done",
+					status: "failed",
+					message: "context clear failed",
+					detail: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
 		},
 		renderPromptContext,
 		contextState: contextState.read,

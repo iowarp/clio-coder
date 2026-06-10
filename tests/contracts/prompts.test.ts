@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { workspaceContextTool } from "../../src/tools/workspace-context.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import {
 	buildCodewiki,
 	ContextDomainModule,
@@ -317,5 +320,143 @@ describe("contracts/prompts compiler logic", () => {
 		ok(existsSync(join(staleWiki, ".clio", "codewiki.json")));
 		strictEqual(project.includes("Codewiki: available"), false);
 		strictEqual(project.includes("legacySymbol"), false);
+	});
+});
+
+describe("contracts/prompts grounding, invalidation, and tools policy", () => {
+	it("context-init invalidates or refreshes context for the next turn", async () => {
+		const cwd = scratchProject();
+		writeClioMd(cwd);
+		const bus = createSafeEventBus();
+		const contracts = new Map<string, DomainContract>();
+		const domainContext: DomainContext = {
+			bus,
+			getContract<T extends DomainContract>(name: string): T | undefined {
+				return contracts.get(name) as T | undefined;
+			},
+		};
+		const contextBundle = await ContextDomainModule.createExtension(domainContext);
+		contracts.set("context", contextBundle.contract);
+		const promptsBundle = createPromptsBundle(domainContext);
+		await promptsBundle.extension.start();
+
+		try {
+			// Turn 0: Compile first turn, which caches the context hash
+			const firstRes = await promptsBundle.contract.compileForTurn({
+				cwd,
+				contextPolicy: {
+					providerSupportsTools: true,
+					activeToolCount: 3,
+					userText: "audit the repository context",
+					turnCount: 0,
+				},
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					providerSupportsTools: true,
+					activeToolNames: ["workspace_context", "grep", "read"],
+				},
+			});
+			const projectFrag0 = firstRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
+			ok(projectFrag0.length > 0);
+
+			// Turn 1 with no-repo-aware user text should normally return NO project-context synopsis if cached and turnCount > 0
+			const cacheRes = await promptsBundle.contract.compileForTurn({
+				cwd,
+				contextPolicy: {
+					providerSupportsTools: true,
+					activeToolCount: 3,
+					userText: "hello",
+					turnCount: 1,
+				},
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					providerSupportsTools: true,
+					activeToolNames: ["workspace_context", "grep", "read"],
+				},
+			});
+			const projectFragCache = cacheRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
+			strictEqual(projectFragCache, ""); // Cached and not repo-aware, so empty
+
+			// Emit successful context-init activity completed event on the bus
+			bus.emit(BusChannels.ContextActivity, {
+				kind: "context-init",
+				phase: "done",
+				status: "completed",
+				message: "bootstrap complete",
+				at: Date.now(),
+			});
+
+			// Turn 1 again with same input should now return a FRESH synopsis block because cache was cleared by context-init completion!
+			const freshRes = await promptsBundle.contract.compileForTurn({
+				cwd,
+				contextPolicy: {
+					providerSupportsTools: true,
+					activeToolCount: 3,
+					userText: "hello",
+					turnCount: 1,
+				},
+				dynamicInputs: {
+					provider: "stub",
+					model: "stub-model",
+					providerSupportsTools: true,
+					activeToolNames: ["workspace_context", "grep", "read"],
+				},
+			});
+			const projectFragFresh = freshRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
+			ok(projectFragFresh.length > 0);
+			ok(projectFragFresh.includes("<project-synopsis>"));
+			ok(projectFragFresh.includes("Reason: context-fingerprint-changed"));
+		} finally {
+			await promptsBundle.extension.stop?.();
+		}
+	});
+
+	it("prompt text says project-internal location questions require codewiki/tool grounding", async () => {
+		const cwd = scratchProject();
+		const res = await compileProjectPrompt(cwd);
+		const systemPrompt = res.systemPrompt;
+		ok(systemPrompt.includes("Clio-internal Grounding Policy"));
+		ok(systemPrompt.includes("you MUST inspect local project context or call available lookup tools"));
+		ok(systemPrompt.includes("`workspace_context`"));
+		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
+	});
+
+	it("context-related skills are visible in the compiled prompt even when read_skill is not active", async () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["workspace_context"], // read_skill / create_skill are not active
+				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n  <skill name="context-prime" scope="project" ...>\n  </skill>\n</available_skills>',
+			},
+		});
+
+		ok(result.systemPrompt.includes("# Skills"));
+		ok(result.systemPrompt.includes("available_skills"));
+		ok(result.systemPrompt.includes('scope="project"'));
+	});
+
+	it("workspace_context is not described as automatic and is explicit/manual", () => {
+		const spec = workspaceContextTool({
+			getSnapshot: () => null,
+			probeWorkspace: () => ({} as any),
+			saveSnapshot: () => {},
+			hasSession: () => true,
+		});
+		ok(spec.description.includes("An explicit, manual workspace snapshot tool"));
+		ok(spec.description.includes("Do not assume this tool is run automatically"));
+		strictEqual(spec.description.includes("runs automatically"), false);
+	});
+
+	it("dispatch is not described as context handoff", () => {
+		const spec = createDispatchTool({} as any);
+		strictEqual(spec.description.includes("handoff"), false);
 	});
 });

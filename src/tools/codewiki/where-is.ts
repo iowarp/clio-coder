@@ -37,7 +37,7 @@ function regexFromPattern(pattern: string): RegExp | null {
 export const whereIsTool: ToolSpec = {
 	name: ToolNames.WhereIs,
 	description:
-		"Find codewiki entries whose paths match a glob, regex, or substring. Codewiki indexes TypeScript only, so paths end in .ts or .tsx. Patterns: glob (e.g. src/interactive/*.ts), bare regex (e.g. .*tui.* or ^src/cli/), regex literal (/cli/i), or substring (e.g. tui). Empty entries means zero matches, so broaden the pattern, switch syntax, or use the glob tool.",
+		"Find codewiki entries whose paths match a glob, regex, or substring. Codewiki indexes TypeScript only, so paths end in .ts or .tsx. Patterns: glob (e.g. src/interactive/*.ts), bare regex (e.g. .*tui.* or ^src/cli/), regex literal (/cli/i), or substring (e.g. tui). Use this tool to answer internal codebase or location questions before making assumptions. Empty entries means zero matches, so broaden the pattern, switch syntax, or use the glob tool.",
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Pattern: glob, bare regex like .*tui.*, /regex/flags, or substring." }),
 	}),

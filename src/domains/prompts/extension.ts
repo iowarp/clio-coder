@@ -40,6 +40,7 @@ export function createPromptsBundle(
 	function reload(): void {
 		try {
 			table = loadFragments();
+			lastProjectContextHashByCwd.clear();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[clio:prompts] reload failed: ${msg}\n`);
@@ -107,6 +108,17 @@ export function createPromptsBundle(
 				const paths = diff?.hotReload ?? [];
 				if (!diffTouchesFragments(paths)) return;
 				reload();
+			});
+			context.bus.on(BusChannels.ContextActivity, (payload: unknown) => {
+				const activity = payload as { kind: string; phase: string; status: string } | undefined;
+				if (
+					activity &&
+					(activity.kind === "context-init" || activity.kind === "context-clear") &&
+					activity.phase === "done" &&
+					activity.status === "completed"
+				) {
+					lastProjectContextHashByCwd.clear();
+				}
 			});
 		},
 		async stop() {},
