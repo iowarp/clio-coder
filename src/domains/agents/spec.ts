@@ -50,7 +50,7 @@ export const AGENT_LATENCY_CLASSES: ReadonlyArray<AgentLatencyClass> = ["fast", 
 
 export const AGENT_AUDIENCES: ReadonlyArray<AgentAudience> = ["base", "shadow", "custom", "internal"];
 
-const BUILTIN_SHADOW_AGENT_IDS = new Set(["scout", "researcher", "provenance", "literature"]);
+const BUILTIN_SHADOW_AGENT_IDS = new Set(["scout", "researcher", "provenance"]);
 const BUILTIN_INTERNAL_AGENT_IDS = new Set<string>();
 
 export interface AgentSpec {

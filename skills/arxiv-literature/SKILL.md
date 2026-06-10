@@ -1,6 +1,6 @@
 ---
 name: arxiv-literature
-description: Use when the user asks to search arXiv, summarize an arXiv paper, compare papers, find recent research, or build a compact literature survey. Delegates noisy paper retrieval to the Literature shadow agent when available and returns only citation-ready, source-linked paper cards.
+description: Use when the user asks to search arXiv, summarize an arXiv paper, compare papers, find recent research, or build a compact literature survey. Prefer the Researcher shadow agent for noisy multi-paper retrieval; return only citation-ready, source-linked paper cards.
 version: 0.1.0
 license: Apache-2.0
 allowed-tools:
@@ -19,7 +19,7 @@ audit: pass
 
 Find, summarize, or compare academic papers while protecting the main context window.
 
-Prefer dispatching the `literature` shadow agent for searches, comparisons, and multi-paper synthesis. Use direct `web_fetch` only for a single known paper URL or when dispatch is unavailable.
+Prefer dispatching the `researcher` shadow agent for searches, comparisons, and multi-paper synthesis. Use direct `web_fetch` for a single known paper URL, for a small arXiv Atom query, or when dispatch is unavailable.
 
 ## Route
 
@@ -32,18 +32,18 @@ Prefer dispatching the `literature` shadow agent for searches, comparisons, and 
 
 ### 1. Delegate noisy retrieval
 
-Ask the `literature` shadow agent for a compact result:
+Ask the `researcher` shadow agent for a compact result:
 
 ```text
 Research arXiv literature for: <user goal>.
-Return only compact source-linked paper cards, comparison/synthesis, and read/skim/skip recommendations.
+Return only compact source-linked paper cards, comparison/synthesis, caveats, and read/skim/skip recommendations.
 ```
 
 ### 2. If doing it directly
 
 For paper URLs, call `web_fetch` on the arXiv URL. Clio normalizes arXiv paper pages into structured metadata plus AlphaXiv enrichment when available.
 
-For search, use arXiv Atom API:
+For search, use arXiv Atom API through `web_fetch`; Clio compacts the XML into paper cards:
 
 ```text
 https://export.arxiv.org/api/query?search_query=all:QUERY&sortBy=submittedDate&sortOrder=descending&start=0&max_results=10
@@ -87,7 +87,7 @@ Do not paste raw Atom XML or entire paper text. Return:
 
 ## Gotchas
 
-- arXiv Atom is XML, not JSON.
+- arXiv Atom is XML, not JSON; use `web_fetch` so Clio compacts it.
 - `lastUpdatedDate` can surface old papers with small edits. Use `submittedDate` for newly submitted work.
 - AlphaXiv is AI-generated enrichment; useful for scanning but not authoritative.
 - Fetch/enrich only top candidates. Keep the main context small.

@@ -119,10 +119,7 @@ const PROBLEM_RE =
 const QUESTION_RE = /^(?:why|what|how|when|where|who|which|is|are|does|do|can|could|should|did)\b|\?\s*$/i;
 const VALIDATE_RE = /\b(?:test|tests|lint|typecheck|build|verify|validation|validate|ci|precommit)\b/i;
 const DISPATCH_RE =
-	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet)\b/i;
-const LITERATURE_AGENT_RE = /\bliterature\s+(?:shadow\s+)?agent\b/i;
-const LITERATURE_RE =
-	/\b(?:arxiv|arxiv\.org|alphaxiv|ar5iv|academic\s+literature|literature\s+(?:search|review|survey)|research\s+papers?|papers?\s+(?:on|about|for)|compare\s+(?:these\s+)?papers?|paper\s+(?:summary|summarization|comparison))\b/i;
+	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet|(?:use|ask|run|invoke)\s+(?:the\s+)?[a-z0-9_-]+\s+agent)\b/i;
 const AVOID_DISPATCH_RE =
 	/\b(?:(?:do\s+not|don't)\s+(?:use\s+)?|(?:without|no)\s+(?:using\s+)?)\b(?:dispatch|delegat(?:e|ion)|subagents?|sub-agents?|workers?|fleet|multi-agent|parallel agents?)\b/i;
 const EXTERNAL_RE =
@@ -159,7 +156,6 @@ export interface IntentSignals {
 	toolMeta: boolean;
 	dispatch: boolean;
 	avoidDispatch: boolean;
-	literature: boolean;
 	skill: boolean;
 	skillAuthoring: boolean;
 	askUser: boolean;
@@ -184,12 +180,11 @@ export function detectIntentSignals(text: string): IntentSignals {
 		noShell: AVOID_SHELL_RE.test(trimmed),
 		toolMeta: TOOL_META_RE.test(trimmed),
 		avoidDispatch: AVOID_DISPATCH_RE.test(trimmed),
-		literature: LITERATURE_AGENT_RE.test(trimmed) || LITERATURE_RE.test(trimmed),
-		dispatch: (DISPATCH_RE.test(trimmed) || LITERATURE_AGENT_RE.test(trimmed)) && !AVOID_DISPATCH_RE.test(trimmed),
+		dispatch: DISPATCH_RE.test(trimmed) && !AVOID_DISPATCH_RE.test(trimmed),
 		skill: false,
 		skillAuthoring: CREATE_SKILL_RE.test(trimmed),
 		askUser: ASK_USER_RE.test(trimmed),
-		external: EXTERNAL_RE.test(trimmed) || LITERATURE_RE.test(trimmed),
+		external: EXTERNAL_RE.test(trimmed),
 		edit: EDIT_RE.test(trimmed),
 		problemReport: PROBLEM_RE.test(trimmed),
 		questionForm: QUESTION_RE.test(trimmed),
