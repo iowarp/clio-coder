@@ -1,5 +1,13 @@
 import { resolve } from "node:path";
-import { loadSkills, modelVisibleSkills, type ResourceDiagnostic, type Skill } from "../domains/resources/index.js";
+import {
+	installSkill,
+	loadSkills,
+	modelVisibleSkills,
+	type ResourceDiagnostic,
+	type Skill,
+	type SkillUpdateReport,
+	updateSkills,
+} from "../domains/resources/index.js";
 import { createSkillTool } from "../tools/skills.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
@@ -12,6 +20,9 @@ Commands:
   clio skills inspect <name> [--json]
   clio skills validate [path] [--json]
   clio skills create <name> [--user|--project]
+  clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
+  clio skills update <name> | --all [--force]
+  clio skills sync [--force]
 `;
 
 type SkillCreateScope = "user" | "project";
@@ -22,12 +33,16 @@ interface Parsed {
 	json: boolean;
 	all: boolean;
 	help: boolean;
+	force: boolean;
+	name?: string;
 	scope?: SkillCreateScope;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed | null {
-	const out: Parsed = { positional: [], json: false, all: false, help: false };
-	for (const arg of argv) {
+	const out: Parsed = { positional: [], json: false, all: false, help: false, force: false };
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === undefined) continue;
 		if (!out.command && !arg.startsWith("-")) {
 			out.command = arg;
 			continue;
@@ -39,6 +54,16 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 			case "--all":
 				out.all = true;
 				break;
+			case "--force":
+				out.force = true;
+				break;
+			case "--name": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) return null;
+				out.name = value;
+				i++;
+				break;
+			}
 			case "--user":
 				if (out.scope && out.scope !== "user") return null;
 				out.scope = "user";
@@ -57,6 +82,18 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 		}
 	}
 	return out;
+}
+
+function printUpdateReports(reports: ReadonlyArray<SkillUpdateReport>): number {
+	if (reports.length === 0) {
+		process.stdout.write("skills: nothing to update (no installed skills with source-url provenance)\n");
+		return 0;
+	}
+	for (const report of reports) {
+		const detail = report.detail ? ` (${report.detail})` : "";
+		process.stdout.write(`${report.name}: ${report.status}${detail}\n`);
+	}
+	return reports.some((report) => report.status === "error") ? 1 : 0;
 }
 
 function printDiagnostics(diagnostics: ReadonlyArray<ResourceDiagnostic>): void {
@@ -187,6 +224,50 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			}
 			printOk(result.output.split("\n")[0] ?? `created skill ${name}`);
 			return 0;
+		}
+		case "install": {
+			const source = parsed.positional[0];
+			if (!source || parsed.positional.length !== 1) {
+				process.stderr.write("usage: clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]\n");
+				return 2;
+			}
+			try {
+				const result = installSkill({
+					source,
+					scope: parsed.scope ?? "project",
+					force: parsed.force,
+					...(parsed.name ? { name: parsed.name } : {}),
+				});
+				printOk(`installed ${result.scope} skill ${result.name} at ${result.path}`);
+				for (const warning of result.warnings) process.stderr.write(`warning: ${warning}\n`);
+				process.stdout.write("audit is set to unknown; review the skill and set audit: pass yourself\n");
+				return 0;
+			} catch (err) {
+				printError(err instanceof Error ? err.message : String(err));
+				return 1;
+			}
+		}
+		case "update": {
+			const name = parsed.positional[0];
+			if ((!name && !parsed.all) || parsed.positional.length > 1) {
+				process.stderr.write("usage: clio skills update <name> | --all [--force]\n");
+				return 2;
+			}
+			try {
+				const reports = updateSkills(name ? { name, force: parsed.force } : { all: true, force: parsed.force });
+				return printUpdateReports(reports);
+			} catch (err) {
+				printError(err instanceof Error ? err.message : String(err));
+				return 1;
+			}
+		}
+		case "sync": {
+			try {
+				return printUpdateReports(updateSkills({ all: true, force: parsed.force }));
+			} catch (err) {
+				printError(err instanceof Error ? err.message : String(err));
+				return 1;
+			}
 		}
 		default:
 			printError(`unknown skills command: ${parsed.command}`);
