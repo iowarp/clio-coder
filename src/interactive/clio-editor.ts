@@ -57,14 +57,14 @@ function styledThinkingHint(theme: ClioTheme, value: string): string {
 		case "xhigh":
 		case "max":
 		case "on":
-			return theme.style("frameStrong", hint, { bold: true });
+			return theme.fg("frameStrong", hint);
 		default:
 			return theme.fg("dim", hint);
 	}
 }
 
 function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
-	return `${theme.fg("dim", chrome.getModelLabel())}  ${theme.fg("dim", "·")}  ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
+	return `${theme.fg("dim", chrome.getModelLabel())} ${theme.fg("dim", "·")} ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
 }
 
 export class ClioEditor extends Editor {
