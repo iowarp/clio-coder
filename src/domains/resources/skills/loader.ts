@@ -104,6 +104,8 @@ export interface SkillList {
 export interface SkillExpansionOptions {
 	/** @deprecated Ignored. Skill invocation is explicit slash/selector only. */
 	naturalLanguageTriggers?: boolean;
+	/** Working directory used for marketplace catalog discovery. */
+	cwd?: string;
 }
 
 export interface LoadSkillsInput {
@@ -560,9 +562,15 @@ function loadExplicitSkillPath(inputPath: string, diagnostics: ResourceDiagnosti
 	const skillFile =
 		path.basename(resolved) === "SKILL.md" || resolved.endsWith(".md") ? resolved : path.join(resolved, "SKILL.md");
 	if (!existsSync(skillFile)) {
+		// A directory without its own SKILL.md may be a catalog of skill
+		// packages (for example a repo-level skills/ folder); load every
+		// immediate child package so validation and registry tooling can
+		// operate on the whole catalog with one path.
+		const packages = collectSkills(root, resolved, diagnostics, false);
+		if (packages.length > 0) return packages;
 		diagnostics.push({
 			type: "warning",
-			message: `explicit skill path is not a SKILL.md file or skill directory: ${resolved}`,
+			message: `explicit skill path is not a SKILL.md file, skill directory, or catalog of skill packages: ${resolved}`,
 			path: resolved,
 		});
 		return [];
@@ -773,7 +781,7 @@ export function expandSkillInvocationInput(
 export function parsePendingSkillRequests(
 	input: string,
 	skills: SkillList,
-	_options: SkillExpansionOptions = {},
+	options: SkillExpansionOptions = {},
 ): { text: string; pendingSkillRequests: PendingSkillRequest[] } {
 	const command = parseSkillCommand(input);
 	if (command) {
@@ -795,7 +803,7 @@ export function parsePendingSkillRequests(
 			};
 		}
 		// Check the local marketplace/discovery contract. Empty means unavailable/offline.
-		const marketplaceSkill = getMarketplaceSkills().find((s) => s.name === name);
+		const marketplaceSkill = getMarketplaceSkills(options.cwd ? { cwd: options.cwd } : {}).find((s) => s.name === name);
 		if (marketplaceSkill) {
 			return {
 				text: args,

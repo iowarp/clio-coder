@@ -63,3 +63,13 @@ export {
 	type SkillRoot,
 	type SkillSource,
 } from "./skills/loader.js";
+export {
+	type DiscoverMarketplaceOptions,
+	discoverMarketplaceSkills,
+	getMarketplaceSkills,
+	installMarketplaceSkill,
+	type MarketplaceDiscoveryResult,
+	type MarketplaceSkill,
+	type MarketplaceSkillOrigin,
+	type MarketplaceStatus,
+} from "./skills/marketplace.js";
