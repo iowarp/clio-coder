@@ -13,7 +13,13 @@ const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
 
 /** Frontmatter keys with first-class meaning; everything else lands in metadata. */
-const CORE_FRONTMATTER_KEYS = new Set(["name", "description", "disable-model-invocation"]);
+const CORE_FRONTMATTER_KEYS = new Set([
+	"name",
+	"description",
+	"disable-model-invocation",
+	"allowed-tools",
+	"disallowed-tools",
+]);
 
 /**
  * Semantic origin of a skill root. Distinct from {@link ResourceScope}, which
@@ -62,6 +68,14 @@ export interface Skill {
 	trusted: boolean;
 	/** Collision precedence; higher wins. */
 	precedence: number;
+	/**
+	 * Tools the skill workflow declares it needs (`allowed-tools` frontmatter).
+	 * The harness intersects this with host policy after activation; a skill can
+	 * narrow its surface but never grant tools the host would not allow.
+	 */
+	allowedTools?: ReadonlyArray<string>;
+	/** Tools the skill workflow declares it must not use (`disallowed-tools`). */
+	disallowedTools?: ReadonlyArray<string>;
 	/** Optional frontmatter fields beyond name/description/disable-model-invocation. */
 	metadata: Record<string, unknown>;
 	/** Per-skill diagnostics (also aggregated into the list). */
@@ -318,6 +332,17 @@ function booleanField(frontmatter: Record<string, unknown>, key: string): boolea
 	return frontmatter[key] === true;
 }
 
+/** Parse a frontmatter tool list: a YAML string array; non-strings are dropped. */
+function toolListField(frontmatter: Record<string, unknown>, key: string): string[] | undefined {
+	const raw = frontmatter[key];
+	if (!Array.isArray(raw)) return undefined;
+	const tools = raw
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	return tools.length > 0 ? [...new Set(tools)] : undefined;
+}
+
 function validationSubject(filePath: string): string {
 	return path.basename(filePath) === "SKILL.md" ? path.basename(path.dirname(filePath)) : path.basename(filePath, ".md");
 }
@@ -440,6 +465,8 @@ function loadSkillFile(
 		...(root.origin ? { source: root.origin } : {}),
 	};
 	const provenance = extractProvenance(parsed.frontmatter);
+	const allowedTools = toolListField(parsed.frontmatter, "allowed-tools");
+	const disallowedTools = toolListField(parsed.frontmatter, "disallowed-tools");
 	const skill: Skill = {
 		name,
 		description,
@@ -448,6 +475,8 @@ function loadSkillFile(
 		content: parsed.body.trim(),
 		sourceInfo,
 		disableModelInvocation: booleanField(parsed.frontmatter, "disable-model-invocation"),
+		...(allowedTools ? { allowedTools } : {}),
+		...(disallowedTools ? { disallowedTools } : {}),
 		source: root.source ?? "clio",
 		scope,
 		hash: sha256(raw),

@@ -1,8 +1,9 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { mergePendingSkillToolSurface, type SkillDeclaredToolPolicy } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
@@ -66,6 +67,8 @@ function pendingPolicy(name: string, args = "test task") {
 		allowedSkillNames: [name],
 		requests: [{ name, args, source: "slash-command" as const, installed: true }],
 		loadedSkillNames: new Set<string>(),
+		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		toolsExpanded: false,
 	};
 }
 
@@ -99,7 +102,8 @@ describe("contracts/skills loader normalization", () => {
 		match(skill.hash, /^[0-9a-f]{64}$/);
 		strictEqual(skill.metadata.license, "MIT");
 		strictEqual(skill.metadata.version, "1.2.0");
-		ok(Array.isArray(skill.metadata["allowed-tools"]));
+		deepStrictEqual(skill.allowedTools, ["Read", "Grep"]);
+		strictEqual("allowed-tools" in skill.metadata, false);
 	});
 
 	it("rejects a skill that is missing a description", () => {
@@ -624,6 +628,7 @@ describe("contracts/skills tools", () => {
 		const first = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
 		strictEqual(first.kind, "ok");
 		ok(policy.loadedSkillNames.has("grill-me"));
+		ok(policy.loadedSkillPolicies.has("grill-me"));
 
 		const repeated = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
 		strictEqual(repeated.kind, "error");
@@ -780,7 +785,37 @@ describe("contracts/skills tools", () => {
 		const skill = list.items.find((s) => s.name === "rich-skill");
 		ok(skill);
 		strictEqual(skill.metadata.license, "Apache-2.0");
-		ok(Array.isArray(skill.metadata["allowed-tools"]));
+		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
+	});
+
+	it("read_skill records the skill's declared tool policy on the pending policy", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"narrow",
+			[
+				'name: "narrow"',
+				'description: "Narrow tool surface."',
+				"allowed-tools:",
+				"  - read",
+				"  - grep",
+				"disallowed-tools:",
+				"  - bash",
+			],
+			"NARROW BODY",
+		);
+		const policy = pendingPolicy("narrow");
+		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const result = await tool.run({ name: "narrow" }, { pendingSkillPolicy: policy });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const details = result.details as Record<string, unknown>;
+		deepStrictEqual(details.allowedTools, ["read", "grep"]);
+		deepStrictEqual(details.disallowedTools, ["bash"]);
+		deepStrictEqual(policy.loadedSkillPolicies.get("narrow"), {
+			allowedTools: ["read", "grep"],
+			disallowedTools: ["bash"],
+		});
 	});
 
 	it("diagnostics warn about missing skill requirements", () => {
@@ -795,5 +830,80 @@ describe("contracts/skills tools", () => {
 		strictEqual(list.items.length, 1);
 		const warnings = list.diagnostics.map((d) => d.message);
 		ok(warnings.some((w) => w.includes('requires skill "non-existent-skill"')));
+	});
+});
+
+describe("contracts/skills post-activation tool surface merge", () => {
+	const HOST = ["read", "grep", "edit", "write", "bash", "read_skill", "ask_user"];
+
+	function loadedPolicy(
+		entries: Array<[string, SkillDeclaredToolPolicy]>,
+		allowedSkillNames = entries.map(([name]) => name),
+	) {
+		return {
+			allowedSkillNames,
+			loadedSkillNames: new Set(entries.map(([name]) => name)),
+			loadedSkillPolicies: new Map(entries),
+		};
+	}
+
+	it("returns null before any skill has loaded", () => {
+		strictEqual(
+			mergePendingSkillToolSurface(HOST, {
+				allowedSkillNames: ["grill-me"],
+				loadedSkillNames: new Set(),
+				loadedSkillPolicies: new Map(),
+			}),
+			null,
+		);
+	});
+
+	it("expands to the full host surface when the loaded skill declares no policy", () => {
+		const merged = mergePendingSkillToolSurface(HOST, loadedPolicy([["grill-me", {}]]));
+		deepStrictEqual(merged, ["read", "grep", "edit", "write", "bash", "ask_user"]);
+	});
+
+	it("intersects a declared allowed-tools list with host policy: host always wins", () => {
+		const merged = mergePendingSkillToolSurface(
+			HOST,
+			loadedPolicy([["narrow", { allowedTools: ["read", "grep", "dispatch", "rm_rf_everything"] }]]),
+		);
+		deepStrictEqual(merged, ["read", "grep", "ask_user"]);
+	});
+
+	it("subtracts disallowed-tools as self-restriction", () => {
+		const merged = mergePendingSkillToolSurface(
+			HOST,
+			loadedPolicy([["careful", { disallowedTools: ["bash", "write"] }]]),
+		);
+		deepStrictEqual(merged, ["read", "grep", "edit", "ask_user"]);
+	});
+
+	it("keeps ask_user through allowed-tools narrowing but honors an explicit disallow", () => {
+		const narrowed = mergePendingSkillToolSurface(HOST, loadedPolicy([["narrow", { allowedTools: ["read"] }]]));
+		ok(narrowed?.includes("ask_user"));
+		const disallowed = mergePendingSkillToolSurface(
+			HOST,
+			loadedPolicy([["silent", { allowedTools: ["read"], disallowedTools: ["ask_user"] }]]),
+		);
+		strictEqual(disallowed?.includes("ask_user"), false);
+	});
+
+	it("keeps read_skill only while requested skills remain unloaded", () => {
+		const partial = mergePendingSkillToolSurface(HOST, loadedPolicy([["first", {}]], ["first", "second"]));
+		ok(partial?.includes("read_skill"));
+		const complete = mergePendingSkillToolSurface(HOST, loadedPolicy([["first", {}]]));
+		strictEqual(complete?.includes("read_skill"), false);
+	});
+
+	it("unions declarations when several requested skills loaded", () => {
+		const merged = mergePendingSkillToolSurface(
+			HOST,
+			loadedPolicy([
+				["alpha", { allowedTools: ["read"] }],
+				["beta", { allowedTools: ["grep", "edit"] }],
+			]),
+		);
+		deepStrictEqual(merged, ["read", "grep", "edit", "ask_user"]);
 	});
 });

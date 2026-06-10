@@ -7,7 +7,13 @@ import {
 } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { PendingSkillRequest, PendingSkillToolPolicy, SkillActivation } from "../core/skill-activation.js";
+import {
+	mergePendingSkillToolSurface,
+	type PendingSkillRequest,
+	type PendingSkillToolPolicy,
+	type SkillActivation,
+	type SkillDeclaredToolPolicy,
+} from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type {
@@ -691,7 +697,13 @@ function createPendingSkillToolPolicy(
 		...new Set(requests.map((request) => request.name.trim()).filter((name) => name.length > 0)),
 	];
 	if (allowedSkillNames.length === 0) return undefined;
-	return { allowedSkillNames, requests: [...requests], loadedSkillNames: new Set<string>() };
+	return {
+		allowedSkillNames,
+		requests: [...requests],
+		loadedSkillNames: new Set<string>(),
+		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		toolsExpanded: false,
+	};
 }
 
 function createAskUserToolPolicy(activeTools: ReadonlyArray<{ name: string }>): AskUserToolPolicy | undefined {
@@ -2168,10 +2180,47 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		thinkingLevel: agentRuntime.agent.state.thinkingLevel,
 	});
 
+	/**
+	 * Pending-skill turns start constrained to read_skill (+ ask_user). Once
+	 * read_skill succeeds, widen the rest of the run to the host palette merged
+	 * with the loaded skill's declared tool policy. Host policy always wins:
+	 * the merge filters the host surface; it can never add to it. Runs inside
+	 * prepareNextTurn so the expanded schemas reach the very next provider call.
+	 */
+	const maybeExpandToolsAfterSkillLoad = (agentRuntime: AgentRuntime): boolean => {
+		const policy = currentPendingSkillPolicy;
+		if (!policy || policy.toolsExpanded || policy.loadedSkillNames.size === 0) return false;
+		if (!deps.toolRegistry) return false;
+		const hostTools = currentToolPalette?.availableTools ?? deps.toolRegistry.listRegistered();
+		const merged = mergePendingSkillToolSurface(hostTools, policy);
+		policy.toolsExpanded = true;
+		if (!merged) return false;
+		// The merge only filters hostTools, so every entry is a registered ToolName.
+		const mergedNames = merged as ToolName[];
+		const resolved = resolveAgentTools({
+			registry: deps.toolRegistry,
+			allowedTools: mergedNames,
+			invokeOptions: currentToolInvokeOptions,
+		});
+		agentRuntime.agent.state.tools = resolved;
+		if (currentToolPalette) {
+			currentToolPalette = {
+				...currentToolPalette,
+				activeTools: mergedNames,
+				signals: [...currentToolPalette.signals, "skillActivated"],
+				omittedToolCount: Math.max(0, currentToolPalette.availableTools.length - mergedNames.length),
+			};
+		}
+		return true;
+	};
+
 	const postToolContinuationGuard = async (agentRuntime: AgentRuntime, signal?: AbortSignal) => {
 		if (signal?.aborted || !toolResultTail(agentRuntime)) return undefined;
+		const toolsExpanded = maybeExpandToolsAfterSkillLoad(agentRuntime);
 		const before = liveContextEstimate(agentRuntime);
-		if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
+		if (before.contextWindow <= 0 || before.tokens <= 0) {
+			return toolsExpanded ? continuationContextUpdate(agentRuntime) : undefined;
+		}
 
 		const settings = deps.getSettings();
 		const thresholds = normalizeContextCompactionThresholds(
@@ -2196,7 +2245,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /compact, narrower reads, or a follow-up turn with smaller observations.`,
 			);
 		}
-		return compacted ? continuationContextUpdate(agentRuntime) : undefined;
+		return compacted || toolsExpanded ? continuationContextUpdate(agentRuntime) : undefined;
 	};
 
 	const appendSubmittedUserTurn = (

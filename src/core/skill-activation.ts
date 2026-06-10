@@ -10,10 +10,66 @@ export interface PendingSkillRequest {
 	marketplaceRef?: string;
 }
 
+/** Tool surface a loaded SKILL.md declares for its own workflow. */
+export interface SkillDeclaredToolPolicy {
+	allowedTools?: ReadonlyArray<string>;
+	disallowedTools?: ReadonlyArray<string>;
+}
+
 export interface PendingSkillToolPolicy {
 	allowedSkillNames: ReadonlyArray<string>;
 	requests: ReadonlyArray<PendingSkillRequest>;
 	loadedSkillNames: Set<string>;
+	/** Declared tool policy per successfully loaded skill, recorded by read_skill. */
+	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
+	/** Set once the harness has widened the run's tool surface after activation. */
+	toolsExpanded: boolean;
+}
+
+/**
+ * Tool surface for the remainder of a pending-skill turn after at least one
+ * requested skill loaded successfully. Pure merge with host-wins semantics:
+ *
+ *  - The result is always a subset of `hostTools`; a skill can narrow its
+ *    surface via `allowed-tools` but never grant beyond host policy.
+ *  - A loaded skill with no `allowed-tools` declaration requests the full host
+ *    surface. When several skills loaded, their declared sets union.
+ *  - `disallowed-tools` subtracts after the allowed union (self-restriction).
+ *  - `read_skill` stays active while requested skills remain unloaded, and is
+ *    dropped once every request has loaded.
+ *  - `ask_user` survives `allowed-tools` narrowing when the host offers it
+ *    (the pending skill contract promises the interview channel to loaded
+ *    workflows), but an explicit `disallowed-tools` entry still removes it.
+ *
+ * Returns null when no skill has loaded yet (no expansion).
+ */
+export function mergePendingSkillToolSurface(
+	hostTools: ReadonlyArray<string>,
+	policy: Pick<PendingSkillToolPolicy, "allowedSkillNames" | "loadedSkillNames" | "loadedSkillPolicies">,
+): string[] | null {
+	if (policy.loadedSkillNames.size === 0) return null;
+	const loaded = [...policy.loadedSkillNames];
+	const declarations = loaded.map((name) => policy.loadedSkillPolicies.get(name) ?? {});
+	const everyLoadedDeclares = declarations.every((decl) => (decl.allowedTools?.length ?? 0) > 0);
+	const allowedUnion = new Set(declarations.flatMap((decl) => decl.allowedTools ?? []));
+	const disallowedUnion = new Set(declarations.flatMap((decl) => decl.disallowedTools ?? []));
+	const remainingRequests = policy.allowedSkillNames.some((name) => !policy.loadedSkillNames.has(name));
+	const out: string[] = [];
+	for (const tool of hostTools) {
+		if (out.includes(tool)) continue;
+		if (tool === "read_skill") {
+			if (remainingRequests) out.push(tool);
+			continue;
+		}
+		if (tool === "ask_user") {
+			if (!disallowedUnion.has(tool)) out.push(tool);
+			continue;
+		}
+		if (everyLoadedDeclares && !allowedUnion.has(tool)) continue;
+		if (disallowedUnion.has(tool)) continue;
+		out.push(tool);
+	}
+	return out;
 }
 
 export interface SkillActivation {

@@ -276,7 +276,7 @@ function renderPendingSkillRequestsBlock(inputs: DynamicInputs): string {
 	lines.push(
 		`First call read_skill for: ${allowed.join(", ")}.`,
 		`Only these pending skill names are allowed this turn: ${allowed.join(", ")}.`,
-		"After read_skill succeeds, follow the loaded workflow.",
+		"After read_skill succeeds, follow the loaded workflow. The active tool surface then widens to the skill's declared tools merged with host policy, so load the skill before attempting other tool calls.",
 		'If that workflow needs an interview, confirmation, or choice and ask_user is active, call ask_user with action="ask" and one to four bundled questions when possible. Adaptive follow-up rounds are allowed only for new, necessary questions. When enough information is collected, call ask_user with action="complete" and compact decisions before final prose. If ask_user is unavailable or cancelled, proceed with defaults and state assumptions.',
 	);
 	return lines.join("\n");
