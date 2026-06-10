@@ -7,6 +7,7 @@ import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
+import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 
@@ -23,6 +24,8 @@ export type SlashCommand =
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
 	| { kind: "skills"; query?: string }
+	| { kind: "skill-selector" }
+	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
 	| { kind: "share"; args: string }
@@ -292,6 +295,7 @@ export interface SlashCommandContext {
 	runInit: (options: InitCommandOptions) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
 	listSkills: () => ResourceList<Skill>;
+	openSkillSelector?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
 	listAgents: () => ReadonlyArray<AgentSpec>;
@@ -420,6 +424,31 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "context-clear") return;
 			ctx.runContextClear(command.options);
+		},
+	},
+	{
+		name: "skill",
+		description: "Open interactive skill selector or invoke a skill",
+		argumentHint: "[name] [task]",
+		kinds: ["skill-selector", "skill-invocation"],
+		match(trimmed) {
+			if (trimmed === "/skill" || trimmed === "/skill:" || trimmed === "/skills:") {
+				return { kind: "skill-selector" };
+			}
+			const command = parseSkillCommand(trimmed);
+			if (command) {
+				return { kind: "skill-invocation", text: trimmed };
+			}
+			return null;
+		},
+		handle(command, ctx) {
+			if (command.kind === "skill-selector") {
+				if (ctx.openSkillSelector) {
+					ctx.openSkillSelector();
+				}
+			} else if (command.kind === "skill-invocation") {
+				ctx.submitChat(command.text);
+			}
 		},
 	},
 	{

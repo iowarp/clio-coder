@@ -33,8 +33,11 @@ export function createResourcesBundle(
 		skillsCatalog(cwd) {
 			return loader.skillsCatalog(cwd);
 		},
-		expandSkillInvocation(text, cwd) {
-			return loader.expandSkillInvocation(text, cwd);
+		expandSkillInvocation(text, cwd, options) {
+			return loader.expandSkillInvocation(text, cwd, options);
+		},
+		parsePendingSkillRequests(text, cwd, options) {
+			return loader.parsePendingSkillRequests(text, cwd, options);
 		},
 		prompts(cwd) {
 			return loader.prompts(cwd);

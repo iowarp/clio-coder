@@ -1,3 +1,4 @@
+import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 
@@ -32,6 +33,7 @@ export interface ResolveToolPaletteInput {
 	toolProfile?: ToolProfileName;
 	workerAllowedTools?: ReadonlyArray<ToolName>;
 	recentToolNames?: ReadonlyArray<ToolName>;
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 }
 
 export interface ToolPaletteResult {
@@ -73,7 +75,7 @@ export const TOOL_GROUPS: Readonly<Record<ToolPaletteGroup, ReadonlyArray<ToolNa
 	],
 	delegate: [ToolNames.Dispatch, ToolNames.DispatchBatch],
 	external: [ToolNames.WebFetch],
-	skills: [ToolNames.ReadSkill, ToolNames.CreateSkill],
+	skills: [ToolNames.ReadSkill, ToolNames.AskUser, ToolNames.CreateSkill],
 	artifact: [ToolNames.WritePlan, ToolNames.WriteReview],
 	escape_hatch: [ToolNames.Bash],
 };
@@ -100,7 +102,7 @@ const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
 	validate: "run tests, lint, build, package scripts",
 	delegate: "dispatch bounded fleet sub-agents",
 	external: "fetch web content",
-	skills: "load or author reusable SKILL.md playbooks",
+	skills: "load or author SKILL.md playbooks; ask structured operator questions",
 	artifact: "write PLAN.md / REVIEW.md artifacts",
 	escape_hatch: "raw shell via bash",
 };
@@ -120,8 +122,10 @@ const DISPATCH_RE =
 	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet)\b/i;
 const EXTERNAL_RE =
 	/\bhttps?:\/\/|\b(?:web\s*search|search\s+the\s+web|browse|internet|online\s+docs?|external\s+research|webpage|web\s+page|url)\b|\bfetch\s+(?:the\s+)?(?:url|page|site|website|docs?|documentation)\b|\blatest\s+(?:version|release|docs?|documentation|news)\b|\bwhat'?s\s+new\s+in\b/i;
-const SKILL_RE = /\b(?:skill|skills|SKILL\.md)\b/i;
-const CREATE_SKILL_RE = /\b(?:create|write|add|new|scaffold)\s+(?:a\s+)?skills?\b|\bcreate_skill\b/i;
+const CREATE_SKILL_RE =
+	/\bcreate_skill\b|\b(?:create|write|scaffold)\s+(?:a\s+|new\s+)?skill\b|\badd\s+(?:a\s+)?(?:new\s+)?skill\s+(?:file|to\s+(?:the\s+)?(?:skill\s+store|skill\s+catalog|project|repo|repository))\b/i;
+const ASK_USER_RE =
+	/\bask[_-]?user\b|\bask\s+user\s+tool\b|\b(?:interview\s+me|ask\s+me\s+(?:about|which|what|how|to)|confirm\s+with\s+me)\b/i;
 const SHELL_RE = /\b(?:bash|shell|terminal|command line|cli command|run command|execute command)\b/i;
 /** Mentions of concrete CLI invocations that the curated tools do not cover. */
 const COMMAND_MENTION_RE =
@@ -151,6 +155,7 @@ export interface IntentSignals {
 	dispatch: boolean;
 	skill: boolean;
 	skillAuthoring: boolean;
+	askUser: boolean;
 	external: boolean;
 	edit: boolean;
 	problemReport: boolean;
@@ -172,8 +177,9 @@ export function detectIntentSignals(text: string): IntentSignals {
 		noShell: AVOID_SHELL_RE.test(trimmed),
 		toolMeta: TOOL_META_RE.test(trimmed),
 		dispatch: DISPATCH_RE.test(trimmed),
-		skill: SKILL_RE.test(trimmed),
+		skill: false,
 		skillAuthoring: CREATE_SKILL_RE.test(trimmed),
+		askUser: ASK_USER_RE.test(trimmed),
 		external: EXTERNAL_RE.test(trimmed),
 		edit: EDIT_RE.test(trimmed),
 		problemReport: PROBLEM_RE.test(trimmed),
@@ -195,6 +201,7 @@ function hasWorkIntent(signals: IntentSignals): boolean {
 	return (
 		signals.dispatch ||
 		signals.skill ||
+		signals.askUser ||
 		signals.external ||
 		signals.edit ||
 		signals.problemReport ||
@@ -212,7 +219,7 @@ export function classifyIntent(signals: IntentSignals): ToolPaletteIntent {
 	if (signals.empty || signals.greeting) return "small_talk";
 	if (signals.toolMeta && !hasWorkIntent(signals)) return "tool_meta";
 	if (signals.dispatch) return "delegation";
-	if (signals.skill) return "skill_work";
+	if (signals.skill || signals.askUser) return "skill_work";
 	if (signals.external) return "external_research";
 	if (signals.edit) return "coding";
 	// A problem statement implies a fix workflow, but question-form prompts
@@ -256,7 +263,7 @@ function requestedGroups(
 ): ToolPaletteGroup[] {
 	if (intent === "small_talk" || intent === "tool_meta") return [];
 	const groups: ToolPaletteGroup[] = ["orientation", "locate", "inspect"];
-	if (intent === "coding" || intent === "skill_work" || signals.edit) groups.push("mutate");
+	if (intent === "coding" || signals.edit || signals.skillAuthoring) groups.push("mutate");
 	if (
 		signals.validation ||
 		signals.problemReport ||
@@ -268,7 +275,7 @@ function requestedGroups(
 	}
 	if (signals.dispatch) groups.push("delegate");
 	if (signals.external) groups.push("external");
-	if (signals.skill) groups.push("skills");
+	if (signals.skill || signals.askUser || signals.skillAuthoring) groups.push("skills");
 	if (signals.artifact) groups.push("artifact");
 	if ((signals.shell || signals.commandMention) && !signals.noShell) groups.push("escape_hatch");
 	return uniqueGroups(groups);
@@ -289,6 +296,8 @@ function expandGroups(groups: ReadonlyArray<ToolPaletteGroup>, signals: IntentSi
 	const tools: ToolName[] = [];
 	for (const group of groups) {
 		for (const tool of TOOL_GROUPS[group]) {
+			if (tool === ToolNames.ReadSkill) continue;
+			if (tool === ToolNames.AskUser && !signals.askUser) continue;
 			if (tool === ToolNames.CreateSkill && !signals.skillAuthoring) continue;
 			tools.push(tool);
 		}
@@ -321,7 +330,11 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 		? profileTools.filter((tool) => input.workerAllowedTools?.includes(tool))
 		: profileTools;
 	const candidates = unique(constrained);
-	const signals = detectIntentSignals(input.userText);
+	const rawSignals = detectIntentSignals(input.userText);
+	const hasPendingSkillRequest = (input.pendingSkillRequests?.length ?? 0) > 0;
+	const signals: IntentSignals = hasPendingSkillRequest
+		? { ...rawSignals, skill: true, askUser: true, noTools: false }
+		: rawSignals;
 	const intent = classifyIntent(signals);
 	const phase = resolvePhase(intent, signals, input.recentToolNames);
 	const signalNames = firedSignalNames(signals);
@@ -342,6 +355,36 @@ export function resolveToolPalette(input: ResolveToolPaletteInput): ToolPaletteR
 	// An explicit tool-free request suppresses every schema this turn while
 	// keeping the truthful intent label; the Tool Catalog still tells the
 	// model what it could use if the user changes their mind.
+	if (hasPendingSkillRequest && !signals.noTools) {
+		const activeTools = candidates.filter((tool) => tool === ToolNames.ReadSkill || tool === ToolNames.AskUser);
+		return {
+			activeTools,
+			availableTools: candidates,
+			intent: "skill_work",
+			phase: "initial",
+			groups: ["skills"],
+			signals: signalNames.includes("pendingSkillRequest") ? signalNames : [...signalNames, "pendingSkillRequest"],
+			toolsSuppressed: false,
+			providerSupportsTools: true,
+			posture: "operating",
+			omittedToolCount: Math.max(0, candidates.length - activeTools.length),
+		};
+	}
+	if (signals.askUser && !signals.noTools) {
+		const activeTools = candidates.filter((tool) => tool === ToolNames.AskUser);
+		return {
+			activeTools,
+			availableTools: candidates,
+			intent: "skill_work",
+			phase: "initial",
+			groups: ["skills"],
+			signals: signalNames,
+			toolsSuppressed: false,
+			providerSupportsTools: true,
+			posture: "operating",
+			omittedToolCount: Math.max(0, candidates.length - activeTools.length),
+		};
+	}
 	const groups = signals.noTools ? [] : requestedGroups(intent, phase, signals);
 	const requested = new Set(expandGroups(groups, signals));
 	const activeTools = candidates.filter((tool) => requested.has(tool));
