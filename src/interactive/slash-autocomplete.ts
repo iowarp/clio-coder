@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-
+import type { Skill } from "../domains/resources/skills/loader.js";
+import type { MarketplaceSkill } from "../domains/resources/skills/marketplace.js";
 import {
 	type AutocompleteItem,
 	type AutocompleteProvider,
@@ -15,12 +16,9 @@ export type SlashAutocompleteCommand = SlashCommand;
 export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
+	listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] };
 }
 
-// The terminal engine's @-prefix completion only works through `fd`. The Debian/Ubuntu
-// `fd-find` apt package ships the binary as `fdfind` to avoid colliding with
-// an unrelated `fd` package, so we accept either name. Returns an absolute
-// path so spawn() does not depend on PATH at call time.
 export function resolveFdBinary(): string | null {
 	return findExecutableOnPath("fd") ?? findExecutableOnPath("fdfind");
 }
@@ -67,9 +65,16 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	readonly triggerCharacters = ["/", "@"];
 
 	private readonly provider: CombinedAutocompleteProvider;
+	private readonly listSkills: (() => { installed: Skill[]; marketplace: MarketplaceSkill[] }) | undefined;
 
-	constructor(commands: SlashAutocompleteCommand[], basePath: string, fdPath: string | null) {
+	constructor(
+		commands: SlashAutocompleteCommand[],
+		basePath: string,
+		fdPath: string | null,
+		listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] },
+	) {
 		this.provider = new CombinedAutocompleteProvider(commands, basePath, fdPath);
+		this.listSkills = listSkills;
 	}
 
 	async getSuggestions(
@@ -78,13 +83,47 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		cursorCol: number,
 		options: { signal: AbortSignal; force?: boolean },
 	): Promise<AutocompleteSuggestions | null> {
+		const currentLine = lines[cursorLine] ?? "";
+		const textBeforeCursor = currentLine.slice(0, cursorCol);
+
+		// Check if we are typing the canonical /skill selector/invocation command.
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)?([a-zA-Z0-9_-]*)$/i);
+		if (skillMatch && this.listSkills) {
+			const typedPrefix = skillMatch[1]?.toLowerCase() ?? "";
+			const { installed, marketplace } = this.listSkills();
+
+			const items: AutocompleteItem[] = [];
+
+			// 1. Installed skills
+			for (const skill of installed) {
+				if (skill.name.toLowerCase().startsWith(typedPrefix)) {
+					items.push({
+						value: `skill:${skill.name}`,
+						label: skill.name,
+						description: skill.description,
+					});
+				}
+			}
+
+			// 2. Marketplace skills (uninstalled)
+			for (const skill of marketplace) {
+				if (installed.some((s) => s.name === skill.name)) continue;
+
+				if (skill.name.toLowerCase().startsWith(typedPrefix)) {
+					items.push({
+						value: `marketplace:${skill.name}`,
+						label: `${skill.name} (marketplace)`,
+						description: skill.description,
+					});
+				}
+			}
+
+			if (items.length > 0) return { items, prefix: typedPrefix };
+		}
+
 		const suggestions = await this.provider.getSuggestions(lines, cursorLine, cursorCol, options);
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (!suggestions || commandPrefix === null) return suggestions;
-		// The terminal engine returns fuzzy-ranked matches for slash commands. Clio narrows to
-		// strict prefix matches so /m surfaces /model only, not every command
-		// containing 'm'. Keep this filter even though it overlaps with
-		// the engine's own ranking.
 		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));
 		return items.length > 0 ? { ...suggestions, items } : null;
 	}
@@ -96,6 +135,23 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		item: AutocompleteItem,
 		prefix: string,
 	): { lines: string[]; cursorLine: number; cursorCol: number } {
+		const currentLine = lines[cursorLine] ?? "";
+		const textBeforeCursor = currentLine.slice(0, cursorCol);
+		const textAfterCursor = currentLine.slice(cursorCol);
+
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)?[a-zA-Z0-9_-]*$/i);
+		if (skillMatch && (item.value.startsWith("skill:") || item.value.startsWith("marketplace:"))) {
+			const skillName = item.value.slice(item.value.indexOf(":") + 1);
+			const newLine = `/skill:${skillName} ${textAfterCursor}`;
+			const newLines = [...lines];
+			newLines[cursorLine] = newLine;
+			return {
+				lines: newLines,
+				cursorLine,
+				cursorCol: `/skill:${skillName} `.length,
+			};
+		}
+
 		return this.provider.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
 	}
 
@@ -109,5 +165,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		buildSlashAutocompleteCommands(),
 		options.basePath ?? process.cwd(),
 		options.fdPath === undefined ? resolveFdBinary() : options.fdPath,
+		options.listSkills,
 	);
 }

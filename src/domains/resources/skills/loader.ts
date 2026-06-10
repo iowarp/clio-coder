@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
+import { getMarketplaceSkills } from "./marketplace.js";
 
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
@@ -85,6 +87,11 @@ export interface SkillList {
 	diagnostics: ResourceDiagnostic[];
 }
 
+export interface SkillExpansionOptions {
+	/** @deprecated Ignored. Skill invocation is explicit slash/selector only. */
+	naturalLanguageTriggers?: boolean;
+}
+
 export interface LoadSkillsInput {
 	cwd?: string;
 	roots?: ReadonlyArray<SkillRoot>;
@@ -112,6 +119,7 @@ export type SkillExpansion =
 			text: string;
 			args: string;
 			skill: Skill;
+			triggeredBy: "slash-command";
 			diagnostics: ResourceDiagnostic[];
 	  };
 
@@ -695,10 +703,17 @@ export function formatSkillsCatalogForPrompt(skills: SkillList): string {
 	return lines.join("\n");
 }
 
-function parseSkillCommand(input: string): { name: string; args: string } | null {
+export function parseSkillCommand(input: string): { name: string; args: string } | null {
 	const trimmed = input.trim();
-	if (!trimmed.startsWith("/skill:")) return null;
-	const rest = trimmed.slice("/skill:".length);
+	const prefix = trimmed.startsWith("/skill:")
+		? "/skill:"
+		: trimmed.startsWith("/skills:")
+			? "/skills:"
+			: trimmed.startsWith("/skill ")
+				? "/skill "
+				: null;
+	if (!prefix) return null;
+	const rest = trimmed.slice(prefix.length).trim();
 	const separator = rest.search(/\s/);
 	const name = separator === -1 ? rest : rest.slice(0, separator);
 	if (name.length === 0) return null;
@@ -706,23 +721,82 @@ function parseSkillCommand(input: string): { name: string; args: string } | null
 	return { name, args };
 }
 
-export function expandSkillInvocationInput(input: string, skills: SkillList): SkillExpansion {
+export function expandSkillInvocationInput(
+	input: string,
+	skills: SkillList,
+	_options: SkillExpansionOptions = {},
+): SkillExpansion {
 	const command = parseSkillCommand(input);
 	if (!command) return { expanded: false, text: input, args: "", diagnostics: skills.diagnostics };
 	const skill = skills.items.find((entry) => entry.name === command.name);
-	if (!skill) return { expanded: false, text: input, args: command.args, diagnostics: skills.diagnostics };
-	const block = [
-		`<skill name="${escapeXmlAttribute(skill.name)}" location="${escapeXmlAttribute(skill.filePath)}">`,
-		`References are relative to ${skill.baseDir}.`,
-		"",
-		skill.content,
-		"</skill>",
-	].join("\n");
+	const args = command.args;
+	if (!skill) return { expanded: false, text: input, args, diagnostics: skills.diagnostics };
 	return {
 		expanded: true,
-		text: command.args.length > 0 ? `${block}\n\n${command.args}` : block,
-		args: command.args,
+		text: args,
+		args,
 		skill,
+		triggeredBy: "slash-command",
 		diagnostics: skills.diagnostics,
+	};
+}
+
+export function parsePendingSkillRequests(
+	input: string,
+	skills: SkillList,
+	_options: SkillExpansionOptions = {},
+): { text: string; pendingSkillRequests: PendingSkillRequest[] } {
+	const command = parseSkillCommand(input);
+	if (command) {
+		const name = command.name;
+		const args = command.args;
+		const installedSkill = skills.items.find((entry) => entry.name === name);
+		if (installedSkill) {
+			return {
+				text: args,
+				pendingSkillRequests: [
+					{
+						name,
+						args,
+						source: "slash-command",
+						installed: true,
+						filePath: installedSkill.filePath,
+					},
+				],
+			};
+		}
+		// Check the local marketplace/discovery contract. Empty means unavailable/offline.
+		const marketplaceSkill = getMarketplaceSkills().find((s) => s.name === name);
+		if (marketplaceSkill) {
+			return {
+				text: args,
+				pendingSkillRequests: [
+					{
+						name,
+						args,
+						source: "marketplace",
+						installed: false,
+						marketplaceRef: marketplaceSkill.sourceUrl,
+					},
+				],
+			};
+		}
+		// Not installed and not in marketplace
+		return {
+			text: args,
+			pendingSkillRequests: [
+				{
+					name,
+					args,
+					source: "slash-command",
+					installed: false,
+				},
+			],
+		};
+	}
+
+	return {
+		text: input,
+		pendingSkillRequests: [],
 	};
 }

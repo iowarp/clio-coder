@@ -6,7 +6,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { ToolNames } from "../core/tool-names.js";
 import { clioConfigDir } from "../core/xdg.js";
 import { type LoadSkillsInput, loadSkills, modelVisibleSkills, type Skill } from "../domains/resources/index.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_TREE_ENTRIES = 50;
@@ -88,6 +88,48 @@ function renderReadSkillOutput(skill: Skill, tree: string[] | null): string {
 	return lines.join("\n");
 }
 
+function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | undefined): string | null {
+	const policy = options?.pendingSkillPolicy;
+	if (!policy) {
+		return "read_skill: no pending skill request is active this turn. Skills can only be loaded after an explicit /skill:<name> task, /skill <name> task, or selector choice.";
+	}
+	const allowed = [...new Set(policy.allowedSkillNames.map((entry) => entry.trim()).filter(Boolean))];
+	if (allowed.length === 0) {
+		return "read_skill: no pending skill request is active this turn. Skills can only be loaded after an explicit /skill:<name> task, /skill <name> task, or selector choice.";
+	}
+	if (!allowed.includes(name)) {
+		return `read_skill: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
+	}
+	if (policy.loadedSkillNames.has(name)) {
+		return `read_skill: pending skill ${name} already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+	}
+	return null;
+}
+
+function pendingSkillRequestFor(name: string, options: ToolInvokeOptions | undefined) {
+	return options?.pendingSkillPolicy?.requests.find((request) => request.name === name) ?? null;
+}
+
+function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undefined): string[] {
+	const request = pendingSkillRequestFor(name, options);
+	if (!request) return [];
+	const task = request.args.trim();
+	const lines = [
+		"Pending skill request",
+		`name: ${request.name}`,
+		`source: ${request.source}`,
+		`task: ${task.length > 0 ? task : "(none supplied)"}`,
+	];
+	if (task.length > 0) {
+		lines.push(
+			"",
+			"Treat task as the user's starting subject for this skill workflow. Do not ask what the subject is again; ask_user only for missing follow-up decisions.",
+		);
+	}
+	lines.push("");
+	return lines;
+}
+
 export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.ReadSkill,
@@ -104,9 +146,11 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 		}),
 		baseActionClass: "read",
 		executionMode: "parallel",
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
 			const name = typeof args.name === "string" ? args.name.trim() : "";
 			if (name.length === 0) return { kind: "error", message: "read_skill: missing name" };
+			const policyError = pendingSkillPolicyError(name, options);
+			if (policyError) return { kind: "error", message: policyError };
 			const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 			const visible = modelVisibleSkills(list.items);
 			const skill = visible.find((item) => item.name === name);
@@ -121,13 +165,17 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 					? Math.min(Math.floor(args.max_tree_entries), MAX_TREE_ENTRIES)
 					: DEFAULT_TREE_ENTRIES;
 			const tree = includeTree ? buildResourceTree(skill.baseDir, maxEntries) : null;
-			const output = renderReadSkillOutput(skill, tree);
+			const pendingRequest = pendingSkillRequestFor(name, options);
+			const pendingTask = pendingRequest?.args.trim() ?? "";
+			const output = [...renderPendingSkillTask(name, options), renderReadSkillOutput(skill, tree)].join("\n");
+			options?.pendingSkillPolicy?.loadedSkillNames.add(name);
 			return {
 				kind: "ok",
 				output,
 				details: {
 					name: skill.name,
 					description: skill.description,
+					...(pendingTask.length > 0 ? { pendingTask } : {}),
 					path: skill.filePath,
 					baseDir: skill.baseDir,
 					hash: skill.hash,

@@ -1,4 +1,4 @@
-import type { SkillActivation } from "../../core/skill-activation.js";
+import type { PendingSkillRequest, SkillActivation } from "../../core/skill-activation.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -7,6 +7,7 @@ import { serializeJsonLine } from "./jsonl.js";
 export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	skillActivations?: ReadonlyArray<SkillActivation>;
 	mode?: "text" | "json";
 	getSessionHeader?: () => unknown | null;
@@ -71,19 +72,16 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	});
 
 	try {
-		await chat.submit(
-			options.prompt,
-			options.images && options.images.length > 0
-				? {
-						images: options.images,
-						...(options.skillActivations && options.skillActivations.length > 0
-							? { skillActivations: options.skillActivations }
-							: {}),
-					}
-				: options.skillActivations && options.skillActivations.length > 0
-					? { skillActivations: options.skillActivations }
-					: undefined,
-		);
+		const submitOptions = {
+			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
+			...(options.pendingSkillRequests && options.pendingSkillRequests.length > 0
+				? { pendingSkillRequests: options.pendingSkillRequests }
+				: {}),
+			...(options.skillActivations && options.skillActivations.length > 0
+				? { skillActivations: options.skillActivations }
+				: {}),
+		};
+		await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
 	} finally {
 		unsubscribe();
 	}

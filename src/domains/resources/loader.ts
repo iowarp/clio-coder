@@ -1,4 +1,5 @@
 import { expandConfigPath } from "../../core/resolve-config-value.js";
+import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import {
 	type LoadProjectContextFilesInput,
@@ -17,8 +18,10 @@ import {
 	formatSkillsCatalogForPrompt,
 	type LoadSkillsInput,
 	loadSkills,
+	parsePendingSkillRequests,
 	type Skill,
 	type SkillExpansion,
+	type SkillExpansionOptions,
 } from "./skills/loader.js";
 
 export interface ResourceList<T> {
@@ -37,7 +40,12 @@ export interface ResourcesLoader {
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd?: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
 	skillsCatalog(cwd?: string): string;
-	expandSkillInvocation(text: string, cwd?: string): SkillExpansion;
+	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
+	parsePendingSkillRequests(
+		text: string,
+		cwd?: string,
+		options?: SkillExpansionOptions,
+	): { text: string; pendingSkillRequests: PendingSkillRequest[] };
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
 	themes(): ResourceList<never>;
@@ -66,8 +74,11 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		skillsCatalog(cwd = defaultCwd) {
 			return formatSkillsCatalogForPrompt(loadSkills({ cwd, ...skillOptions() }));
 		},
-		expandSkillInvocation(text, cwd = defaultCwd) {
-			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }));
+		expandSkillInvocation(text, cwd = defaultCwd, expansionOptions = {}) {
+			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
+		},
+		parsePendingSkillRequests(text, cwd = defaultCwd, expansionOptions = {}) {
+			return parsePendingSkillRequests(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
 		},
 		prompts(cwd = defaultCwd) {
 			return loadPromptTemplates({ cwd });

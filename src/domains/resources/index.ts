@@ -54,6 +54,8 @@ export {
 	type LoadSkillsInput,
 	loadSkills,
 	modelVisibleSkills,
+	parsePendingSkillRequests,
+	parseSkillCommand,
 	type Skill,
 	type SkillExpansion,
 	type SkillList,
