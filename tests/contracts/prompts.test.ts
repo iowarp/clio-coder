@@ -3,11 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { workspaceContextTool } from "../../src/tools/workspace-context.js";
-import { createDispatchTool } from "../../src/tools/dispatch.js";
 import {
 	buildCodewiki,
 	ContextDomainModule,
@@ -16,10 +14,14 @@ import {
 	writeClioState,
 	writeCodewiki,
 } from "../../src/domains/context/index.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
+import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { workspaceContextTool } from "../../src/tools/workspace-context.js";
 
 const scratchRoots: string[] = [];
 
@@ -268,6 +270,42 @@ describe("contracts/prompts compiler logic", () => {
 		ok(result.systemPrompt.includes("available_skills"));
 	});
 
+	it("describes ask_user interview behavior only when ask_user is active", () => {
+		const table = loadFragments();
+		const active = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["read_skill", "ask_user"],
+				toolPaletteIntent: "skill_work",
+				toolPalettePhase: "editing",
+				toolCatalog: "- skills (load skills; ask structured operator questions): read_skill, ask_user",
+			},
+		});
+		ok(active.systemPrompt.includes("first call read_skill"));
+		ok(active.systemPrompt.includes("Use ask_user for structured operator interviews"));
+		ok(active.systemPrompt.includes("If ask_user returns cancelled"));
+
+		const inactive = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			dynamicInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["read_skill"],
+				toolPaletteIntent: "skill_work",
+				toolPalettePhase: "editing",
+			},
+		});
+		strictEqual(inactive.systemPrompt.includes("Use ask_user for structured operator interviews"), false);
+	});
+
 	it("summarizes project context across missing, CLIO-only, fresh codewiki, and stale codewiki states", async () => {
 		const empty = scratchProject();
 		let result = await compileProjectPrompt(empty);
@@ -423,7 +461,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
 	});
 
-	it("context-related skills are visible in the compiled prompt even when read_skill is not active", async () => {
+	it("omits the skills catalog when read_skill is not active", async () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -434,19 +472,20 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: ["workspace_context"], // read_skill / create_skill are not active
-				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n  <skill name="context-prime" scope="project" ...>\n  </skill>\n</available_skills>',
+				skillsCatalog:
+					'# Skills\n\n<available_skills catalog_hash="abc123">\n  <skill name="context-prime" scope="project" ...>\n  </skill>\n</available_skills>',
 			},
 		});
 
-		ok(result.systemPrompt.includes("# Skills"));
-		ok(result.systemPrompt.includes("available_skills"));
-		ok(result.systemPrompt.includes('scope="project"'));
+		strictEqual(result.systemPrompt.includes("# Skills"), false);
+		strictEqual(result.systemPrompt.includes("available_skills"), false);
+		strictEqual(result.systemPrompt.includes('scope="project"'), false);
 	});
 
 	it("workspace_context is not described as automatic and is explicit/manual", () => {
 		const spec = workspaceContextTool({
 			getSnapshot: () => null,
-			probeWorkspace: () => ({} as any),
+			probeWorkspace: () => emptyWorkspaceSnapshot(process.cwd()),
 			saveSnapshot: () => {},
 			hasSession: () => true,
 		});
@@ -456,7 +495,19 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 	});
 
 	it("dispatch is not described as context handoff", () => {
-		const spec = createDispatchTool({} as any);
+		const dispatch: DispatchContract = {
+			dispatch: async () => {
+				throw new Error("unused");
+			},
+			dispatchBatch: async () => {
+				throw new Error("unused");
+			},
+			listRuns: () => [],
+			getRun: () => null,
+			abort: () => {},
+			drain: async () => {},
+		};
+		const spec = createDispatchTool({ dispatch });
 		strictEqual(spec.description.includes("handoff"), false);
 	});
 });

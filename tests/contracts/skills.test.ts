@@ -11,6 +11,7 @@ import {
 	formatSkillsCatalogForPrompt,
 	loadSkills,
 	modelVisibleSkills,
+	parsePendingSkillRequests,
 	type ResourcesContract,
 	type SkillRoot,
 } from "../../src/domains/resources/index.js";
@@ -57,6 +58,14 @@ function allowAllSafety(): SafetyContract {
 		},
 		isSubset,
 		audit: { recordCount: () => 0 },
+	};
+}
+
+function pendingPolicy(name: string, args = "test task") {
+	return {
+		allowedSkillNames: [name],
+		requests: [{ name, args, source: "slash-command" as const, installed: true }],
+		loadedSkillNames: new Set<string>(),
 	};
 }
 
@@ -351,12 +360,107 @@ describe("contracts/skills slash-command parity", () => {
 		const list = loadSkills({ roots: [projectRoot(root)] });
 		const expansion = expandSkillInvocationInput("/skill:expandable do the thing", list);
 		strictEqual(expansion.expanded, true);
-		ok(expansion.text.includes("FOLLOW STEPS"));
-		ok(expansion.text.includes("do the thing"));
-		if (expansion.expanded) strictEqual(expansion.skill.name, "expandable");
+		strictEqual(expansion.text, "do the thing");
+		strictEqual(expansion.text.includes("FOLLOW STEPS"), false);
+		if (expansion.expanded) {
+			strictEqual(expansion.skill.name, "expandable");
+			strictEqual(expansion.triggeredBy, "slash-command");
+		}
 	});
 
-	it("returns slash-command activation metadata from interactive submit expansion", () => {
+	it("expands /skills:name as the interactive plural alias", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const expansion = expandSkillInvocationInput("/skills:grill-me about adding science skills", list);
+		strictEqual(expansion.expanded, true);
+		strictEqual(expansion.text, "about adding science skills");
+		strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
+		if (expansion.expanded) {
+			strictEqual(expansion.skill.name, "grill-me");
+			strictEqual(expansion.triggeredBy, "slash-command");
+		}
+	});
+
+	it("ignores quoted trigger phrases even when the deprecated opt-in flag is passed", () => {
+		const root = scratchDir();
+		writeSkillDir(
+			root,
+			"grill-me",
+			['name: "grill-me"', 'description: \'Use when interviewing. Triggers on "grill me", "interview me".\''],
+			"ASK ONE QUESTION",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const expansion = expandSkillInvocationInput("grill me about adding science skills", list, {
+			naturalLanguageTriggers: true,
+		});
+		strictEqual(expansion.expanded, false);
+		strictEqual(expansion.text, "grill me about adding science skills");
+		strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
+	});
+
+	it("does not expand quoted trigger phrases unless interactive mode opts in", () => {
+		const root = scratchDir();
+		writeSkillDir(
+			root,
+			"grill-me",
+			['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
+			"ASK ONE QUESTION",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
+		strictEqual(expansion.expanded, false);
+		strictEqual(expansion.text, "grill me about adding science skills");
+	});
+
+	it("does not trigger hidden model-invocation skills from plain text", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "hidden", [
+			'name: "hidden"',
+			"description: 'Use when hidden. Triggers on \"grill me\".'",
+			"disable-model-invocation: true",
+		]);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const expansion = expandSkillInvocationInput("grill me about hidden things", list, {
+			naturalLanguageTriggers: true,
+		});
+		strictEqual(expansion.expanded, false);
+		strictEqual(expansion.text, "grill me about hidden things");
+	});
+
+	it("parses explicit slash skill requests into clean pending request state", () => {
+		const root = scratchDir();
+		const filePath = writeSkillDir(
+			root,
+			"grill-me",
+			['name: "grill-me"', 'description: "Interview skill."'],
+			"ASK ONE QUESTION",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const parsed = parsePendingSkillRequests("/skill:grill-me adding more science skills", list);
+		strictEqual(parsed.text, "adding more science skills");
+		strictEqual(parsed.pendingSkillRequests.length, 1);
+		const pending = parsed.pendingSkillRequests[0];
+		ok(pending);
+		strictEqual(pending.name, "grill-me");
+		strictEqual(pending.args, "adding more science skills");
+		strictEqual(pending.source, "slash-command");
+		strictEqual(pending.installed, true);
+		strictEqual(pending.filePath, filePath);
+	});
+
+	it("does not parse plain skill-management text into pending request state", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const parsed = parsePendingSkillRequests("adding more science skills to clio coder", list, {
+			naturalLanguageTriggers: true,
+		});
+		strictEqual(parsed.text, "adding more science skills to clio coder");
+		strictEqual(parsed.pendingSkillRequests.length, 0);
+	});
+
+	it("interactive submit asks the model to load slash-command skills without preloading the body", () => {
 		const root = scratchDir();
 		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
 		const list = loadSkills({ roots: [projectRoot(root)] });
@@ -365,7 +469,23 @@ describe("contracts/skills slash-command parity", () => {
 			renderContextFiles: () => "",
 			skills: () => list,
 			skillsCatalog: () => formatSkillsCatalogForPrompt(list),
-			expandSkillInvocation: (text: string) => expandSkillInvocationInput(text, list),
+			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
+			parsePendingSkillRequests: (text, _cwd, options) => {
+				const expansion = expandSkillInvocationInput(text, list, options);
+				return {
+					text: expansion.text,
+					pendingSkillRequests: expansion.expanded
+						? [
+								{
+									name: expansion.skill.name,
+									args: expansion.args,
+									source: "slash-command" as const,
+									installed: true,
+								},
+							]
+						: [],
+				};
+			},
 			expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
 			prompts: () => ({ items: [], diagnostics: [] }),
 			themes: () => ({ items: [], diagnostics: [] }),
@@ -373,15 +493,52 @@ describe("contracts/skills slash-command parity", () => {
 			reload: async () => undefined,
 		};
 		const expanded = expandInteractiveSubmit("/skill:expandable do the thing", resources);
-		strictEqual(expanded.skillActivations.length, 1);
-		const activation = expanded.skillActivations[0];
-		ok(activation);
-		strictEqual(activation.name, "expandable");
-		strictEqual(activation.triggeredBy, "slash-command");
-		strictEqual(activation.source, "clio");
-		match(activation.hash, /^[0-9a-f]{64}$/);
-		strictEqual(activation.sourceOrigin, "project");
-		ok(expanded.text.includes("FOLLOW STEPS"));
+		strictEqual(expanded.pendingSkillRequests.length, 1);
+		strictEqual(expanded.text, "do the thing");
+		strictEqual(expanded.text.includes("FOLLOW STEPS"), false);
+	});
+
+	it("interactive submit does not auto-activate prompt-triggered skills from plain text", () => {
+		const root = scratchDir();
+		writeSkillDir(
+			root,
+			"grill-me",
+			['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
+			"ASK ONE QUESTION",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const resources: ResourcesContract = {
+			contextFiles: () => [],
+			renderContextFiles: () => "",
+			skills: () => list,
+			skillsCatalog: () => formatSkillsCatalogForPrompt(list),
+			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
+			parsePendingSkillRequests: (text, _cwd, options) => {
+				const expansion = expandSkillInvocationInput(text, list, options);
+				return {
+					text: expansion.text,
+					pendingSkillRequests: expansion.expanded
+						? [
+								{
+									name: expansion.skill.name,
+									args: expansion.args,
+									source: "slash-command" as const,
+									installed: true,
+								},
+							]
+						: [],
+				};
+			},
+			expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
+			prompts: () => ({ items: [], diagnostics: [] }),
+			themes: () => ({ items: [], diagnostics: [] }),
+			resolvePath: (value: string) => value,
+			reload: async () => undefined,
+		};
+		const expanded = expandInteractiveSubmit("grill me about science skills", resources);
+		strictEqual(expanded.pendingSkillRequests.length, 0);
+		strictEqual(expanded.text, "grill me about science skills");
+		strictEqual(expanded.text.includes("ASK ONE QUESTION"), false);
 	});
 
 	it("leaves non-skill input untouched", () => {
@@ -426,7 +583,7 @@ describe("contracts/skills tools", () => {
 			"READ ME BODY",
 		);
 		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "readable" });
+		const result = await tool.run({ name: "readable" }, { pendingSkillPolicy: pendingPolicy("readable") });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("READ ME BODY"));
@@ -436,6 +593,46 @@ describe("contracts/skills tools", () => {
 		strictEqual(details.scope, "project");
 		strictEqual(details.sourceOrigin, "project");
 		ok(String(details.baseDir).includes(".clio"));
+	});
+
+	it("read_skill pending policy rejects non-requested and repeated skill loads", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"grill-me",
+			['name: "grill-me"', 'description: "Interview skill."'],
+			"ASK ONE QUESTION",
+		);
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"context-prime",
+			['name: "context-prime"', 'description: "Context skill."'],
+			"PRIME CONTEXT",
+		);
+		const policy = pendingPolicy("grill-me", "about adding science skills");
+		const tool = createReadSkillTool({ getCwd: () => cwd });
+
+		const wrong = await tool.run({ name: "context-prime" }, { pendingSkillPolicy: policy });
+		strictEqual(wrong.kind, "error");
+		if (wrong.kind === "error") {
+			strictEqual(
+				wrong.message,
+				"read_skill: this turn has pending skill request(s): grill-me. Load only those before doing anything else.",
+			);
+		}
+
+		const first = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
+		strictEqual(first.kind, "ok");
+		ok(policy.loadedSkillNames.has("grill-me"));
+
+		const repeated = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
+		strictEqual(repeated.kind, "error");
+		if (repeated.kind === "error") {
+			strictEqual(
+				repeated.message,
+				"read_skill: pending skill grill-me already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.",
+			);
+		}
 	});
 
 	it("read_skill activation is emitted by the registry with turn metadata", async () => {
@@ -461,7 +658,18 @@ describe("contracts/skills tools", () => {
 		});
 		registry.register(createReadSkillTool({ getCwd: () => cwd }));
 
-		const result = await registry.invoke({ tool: ToolNames.ReadSkill, args: { name: "readable" } }, { turnId: "turn-1" });
+		const missing = await registry.invoke(
+			{ tool: ToolNames.ReadSkill, args: { name: "missing" } },
+			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("missing") },
+		);
+		strictEqual(missing.kind, "ok");
+		if (missing.kind === "ok") strictEqual(missing.result.kind, "error");
+		strictEqual(activations.length, 0);
+
+		const result = await registry.invoke(
+			{ tool: ToolNames.ReadSkill, args: { name: "readable" } },
+			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("readable") },
+		);
 		strictEqual(result.kind, "ok");
 		strictEqual(activations.length, 1);
 		const activation = activations[0];
@@ -486,7 +694,10 @@ describe("contracts/skills tools", () => {
 		writeFileSync(join(dir, "scripts", "run.sh"), "echo hi\n");
 		writeFileSync(join(dir, "references", "doc.md"), "# Doc\n");
 		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "with-tree", include_tree: true });
+		const result = await tool.run(
+			{ name: "with-tree", include_tree: true },
+			{ pendingSkillPolicy: pendingPolicy("with-tree") },
+		);
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("resources:"));
@@ -502,7 +713,7 @@ describe("contracts/skills tools", () => {
 			"disable-model-invocation: true",
 		]);
 		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "hidden" });
+		const result = await tool.run({ name: "hidden" }, { pendingSkillPolicy: pendingPolicy("hidden") });
 		strictEqual(result.kind, "error");
 	});
 
@@ -570,5 +781,19 @@ describe("contracts/skills tools", () => {
 		ok(skill);
 		strictEqual(skill.metadata.license, "Apache-2.0");
 		ok(Array.isArray(skill.metadata["allowed-tools"]));
+	});
+
+	it("diagnostics warn about missing skill requirements", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "dep-skill", [
+			'name: "dep-skill"',
+			'description: "Dependent skill."',
+			"requires:",
+			"  - skill:non-existent-skill",
+		]);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		strictEqual(list.items.length, 1);
+		const warnings = list.diagnostics.map((d) => d.message);
+		ok(warnings.some((w) => w.includes('requires skill "non-existent-skill"')));
 	});
 });
