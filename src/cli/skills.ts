@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import {
+	discoverMarketplaceSkills,
 	installSkill,
 	loadSkills,
+	type MarketplaceSkill,
 	modelVisibleSkills,
 	type ResourceDiagnostic,
 	type Skill,
@@ -17,12 +19,16 @@ Manage local Clio and Agent Skills-compatible skills.
 
 Commands:
   clio skills list [--json] [--all]
+  clio skills search <query> [--json]
   clio skills inspect <name> [--json]
   clio skills validate [path] [--json]
   clio skills create <name> [--user|--project]
   clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
+
+search covers installed skills plus the local marketplace (a repo skills/
+catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
 `;
 
 type SkillCreateScope = "user" | "project";
@@ -142,6 +148,13 @@ function printInspect(skill: Skill): void {
 	}
 }
 
+function formatMarketplaceOrigin(skill: MarketplaceSkill): string {
+	const parts = [skill.origin === "catalog" ? "catalog" : "index"];
+	if (skill.version) parts.push(`v${skill.version}`);
+	if (skill.audit) parts.push(`audit: ${skill.audit}`);
+	return parts.join(", ");
+}
+
 function validationLoad(pathArg: string | undefined): ReturnType<typeof loadSkills> {
 	if (!pathArg) return loadSkills({ cwd: process.cwd() });
 	return loadSkills({ disableDiscovery: true, explicitSkillPaths: [resolve(pathArg)] });
@@ -171,6 +184,42 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				printDiagnostics(list.diagnostics);
 			}
 			return list.diagnostics.some((diag) => diag.type === "error") ? 1 : 0;
+		}
+		case "search": {
+			const query = parsed.positional.join(" ").trim().toLowerCase();
+			if (query.length === 0) {
+				process.stderr.write("usage: clio skills search <query> [--json]\n");
+				return 2;
+			}
+			const list = loadSkills({ cwd: process.cwd() });
+			const installedNames = new Set(list.items.map((skill) => skill.name));
+			const matchesQuery = (name: string, description: string): boolean =>
+				name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
+			const installed = list.items.filter((skill) => matchesQuery(skill.name, skill.description));
+			const marketplace = discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter(
+				(skill) => !installedNames.has(skill.name) && matchesQuery(skill.name, skill.description),
+			);
+			if (parsed.json) {
+				process.stdout.write(`${JSON.stringify({ query, installed, marketplace }, null, 2)}\n`);
+				return 0;
+			}
+			if (installed.length === 0 && marketplace.length === 0) {
+				process.stdout.write(`skills: no matches for "${query}"\n`);
+				return 0;
+			}
+			if (installed.length > 0) {
+				process.stdout.write("installed:\n");
+				for (const skill of installed) {
+					process.stdout.write(`  ${skill.name.padEnd(24)} ${skill.description}  (${skill.scope}/${skill.source})\n`);
+				}
+			}
+			if (marketplace.length > 0) {
+				process.stdout.write("marketplace (clio skills install <name|source>):\n");
+				for (const skill of marketplace) {
+					process.stdout.write(`  ${skill.name.padEnd(24)} ${skill.description}  (${formatMarketplaceOrigin(skill)})\n`);
+				}
+			}
+			return 0;
 		}
 		case "inspect": {
 			const name = parsed.positional[0];

@@ -78,7 +78,7 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
 		},
 		parsePendingSkillRequests(text, cwd = defaultCwd, expansionOptions = {}) {
-			return parsePendingSkillRequests(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
+			return parsePendingSkillRequests(text, loadSkills({ cwd, ...skillOptions() }), { cwd, ...expansionOptions });
 		},
 		prompts(cwd = defaultCwd) {
 			return loadPromptTemplates({ cwd });

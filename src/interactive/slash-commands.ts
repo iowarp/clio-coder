@@ -7,7 +7,7 @@ import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
-import { parseSkillCommand } from "../domains/resources/index.js";
+import { getMarketplaceSkills, parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
 
@@ -468,12 +468,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "skills") return;
 			const list = ctx.listSkills();
 			const query = command.query?.toLowerCase();
-			const items = query
-				? list.items.filter(
-						(skill) => skill.name.toLowerCase().includes(query) || skill.description.toLowerCase().includes(query),
-					)
-				: list.items;
-			if (items.length === 0) {
+			const matches = (name: string, description: string): boolean =>
+				!query || name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
+			const items = list.items.filter((skill) => matches(skill.name, skill.description));
+			const installedNames = new Set(list.items.map((skill) => skill.name));
+			const marketplace = getMarketplaceSkills().filter(
+				(skill) => !installedNames.has(skill.name) && matches(skill.name, skill.description),
+			);
+			if (items.length === 0 && marketplace.length === 0) {
 				ctx.io.stdout(query ? `\nskills: no matches for "${command.query}"\n` : "\nskills: none\n");
 				return;
 			}
@@ -482,9 +484,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const origin = `${skill.scope}/${skill.source}${skill.trusted ? "" : ", untrusted"}`;
 				return `  ${usage.padEnd(26)} ${skill.description}  (${origin})`;
 			});
+			const marketplaceRows = marketplace.map((skill) => {
+				const usage = `/skill:${skill.name}`;
+				const origin = [skill.origin, ...(skill.audit ? [`audit: ${skill.audit}`] : [])].join(", ");
+				return `  ${usage.padEnd(26)} ${skill.description}  (marketplace: ${origin})`;
+			});
+			const sections = [
+				...(rows.length > 0 ? [`skills:\n${rows.join("\n")}`] : []),
+				...(marketplaceRows.length > 0
+					? [`marketplace (installs on first /skill:<name> use):\n${marketplaceRows.join("\n")}`]
+					: []),
+			];
 			const diagnostics =
 				list.diagnostics.length > 0 ? `\n${list.diagnostics.length} skill diagnostic(s) while loading resources.\n` : "\n";
-			ctx.io.stdout(`\nskills:\n${rows.join("\n")}\n${diagnostics}`);
+			ctx.io.stdout(`\n${sections.join("\n\n")}\n${diagnostics}`);
 		},
 	},
 	{
