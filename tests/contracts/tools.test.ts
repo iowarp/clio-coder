@@ -218,13 +218,13 @@ describe("contracts/tools basic happy paths", () => {
 });
 
 describe("contracts/tools palette", () => {
-	it("keeps create_skill hidden for install/update skill requests", () => {
+	it("does not expose read_skill for plain skill-management language", () => {
 		const install = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
 			userText: "install a local skill folder for this project",
 		});
-		ok(install.activeTools.includes(ToolNames.ReadSkill));
+		strictEqual(install.activeTools.includes(ToolNames.ReadSkill), false);
 		strictEqual(install.activeTools.includes(ToolNames.CreateSkill), false);
 
 		const update = resolveToolPalette({
@@ -232,8 +232,23 @@ describe("contracts/tools palette", () => {
 			availableTools: ALL_TOOLS,
 			userText: "update the skill catalog and tell me what exists",
 		});
-		ok(update.activeTools.includes(ToolNames.ReadSkill));
+		strictEqual(update.activeTools.includes(ToolNames.ReadSkill), false);
 		strictEqual(update.activeTools.includes(ToolNames.CreateSkill), false);
+
+		const plain = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "adding more skills",
+		});
+		strictEqual(plain.activeTools.includes(ToolNames.ReadSkill), false);
+
+		const discussion = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "new skills added to clio coder",
+		});
+		strictEqual(discussion.activeTools.includes(ToolNames.CreateSkill), false);
+		strictEqual(discussion.activeTools.includes(ToolNames.ReadSkill), false);
 	});
 
 	it("exposes create_skill only for authoring intent", () => {
@@ -242,7 +257,7 @@ describe("contracts/tools palette", () => {
 			availableTools: ALL_TOOLS,
 			userText: "create a skill for reviewing MPI tests",
 		});
-		ok(palette.activeTools.includes(ToolNames.ReadSkill));
+		strictEqual(palette.activeTools.includes(ToolNames.ReadSkill), false);
 		ok(palette.activeTools.includes(ToolNames.CreateSkill));
 	});
 

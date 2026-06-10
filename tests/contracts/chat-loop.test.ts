@@ -315,6 +315,6 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		const payload = assistant.payload as { contextExhaustion?: { kind?: string; contextWindow?: number } };
 		strictEqual(payload.contextExhaustion?.kind, "provider_length_stop");
 		strictEqual(payload.contextExhaustion?.contextWindow, 1000);
-		ok(panel.render(120).join("\n").includes("output/context limit"));
+		ok(panel.render(120).join("\n").includes("generation/output limit"));
 	});
 });
