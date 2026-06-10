@@ -1,0 +1,44 @@
+{
+	"thinking": ["off"],
+	"contextWindow": [225280],
+	"sampling": [
+		{
+			"name": "deterministic",
+			"temperature": 0,
+			"topP": 0.8,
+			"topK": 1,
+			"minP": 0,
+			"presencePenalty": 0,
+			"repeatPenalty": 1
+		},
+		{
+			"name": "precise",
+			"temperature": 0.2,
+			"topP": 0.9,
+			"topK": 20,
+			"minP": 0,
+			"presencePenalty": 0,
+			"repeatPenalty": 1
+		},
+		{
+			"name": "balanced",
+			"temperature": 0.6,
+			"topP": 0.95,
+			"topK": 20,
+			"minP": 0,
+			"presencePenalty": 0,
+			"repeatPenalty": 1
+		},
+		{
+			"name": "creative",
+			"temperature": 0.9,
+			"topP": 0.98,
+			"topK": 40,
+			"minP": 0.02,
+			"presencePenalty": 0.3,
+			"repeatPenalty": 1.05
+		}
+	],
+	"weightQuantization": ["i1-Q4_K_M"],
+	"kvCache": ["q8_0"]
+}

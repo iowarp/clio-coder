@@ -1,12 +1,24 @@
 import type { PendingSkillRequest, SkillActivation } from "../../core/skill-activation.js";
+import { CLIO_SAMPLING_OVERRIDES_ENV } from "../../engine/apis/sampling-overrides.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { serializeJsonLine } from "./jsonl.js";
 
+export interface HeadlessSamplingOverrides {
+	temperature?: number;
+	topP?: number;
+	topK?: number;
+	minP?: number;
+	presencePenalty?: number;
+	frequencyPenalty?: number;
+	repeatPenalty?: number;
+}
+
 export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
+	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	skillActivations?: ReadonlyArray<SkillActivation>;
 	mode?: "text" | "json";
@@ -71,6 +83,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		result = resultFromEvent(event, result);
 	});
 
+	const previousSamplingOverride = process.env[CLIO_SAMPLING_OVERRIDES_ENV];
+	if (options.sampling && Object.keys(options.sampling).length > 0) {
+		process.env[CLIO_SAMPLING_OVERRIDES_ENV] = JSON.stringify(options.sampling);
+	}
 	try {
 		const submitOptions = {
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
@@ -83,6 +99,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 		await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
 	} finally {
+		if (previousSamplingOverride === undefined) delete process.env[CLIO_SAMPLING_OVERRIDES_ENV];
+		else process.env[CLIO_SAMPLING_OVERRIDES_ENV] = previousSamplingOverride;
 		unsubscribe();
 	}
 

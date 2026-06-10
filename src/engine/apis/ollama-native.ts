@@ -34,6 +34,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import { mergeSamplingOverride } from "./sampling-overrides.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
 
@@ -57,8 +58,8 @@ function pickSamplingProfile(
 	thinkingActive: boolean,
 ): SamplingProfile | undefined {
 	const sampling = quirks?.sampling;
-	if (!sampling) return undefined;
-	return thinkingActive ? sampling.thinking : sampling.instruct;
+	const profile = sampling ? (thinkingActive ? (sampling.thinking ?? sampling.instruct) : sampling.instruct) : undefined;
+	return mergeSamplingOverride(profile);
 }
 
 function applyOllamaSamplingProfile(opts: Partial<OllamaOptions>, profile: SamplingProfile): void {

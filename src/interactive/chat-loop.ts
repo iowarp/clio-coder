@@ -28,6 +28,7 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
+	applyModelCapabilityPatch,
 	type EndpointDescriptor,
 	firstRuntimeResolutionError,
 	type ProvidersContract,
@@ -1319,11 +1320,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			synth,
 			deps.providers.knowledgeBase,
 		);
-		const mutable = synth as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
-		const caps = target.runtimeResolution.capabilities;
-		mutable.contextWindow = caps.contextWindow;
-		mutable.maxTokens = caps.maxTokens;
-		mutable.reasoning = caps.reasoning;
+		applyModelCapabilityPatch(synth, target.runtimeResolution.capabilities);
 		return synth as unknown as Model<never>;
 	};
 	const ensureReasoningProbe = (target: ChatLoopTarget): void => {
@@ -1346,18 +1343,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						requireOutputBudget: true,
 					});
 					if (!refreshed.ok) return;
-					const liveModel = runtime.agent.state.model as
-						| { contextWindow?: number; maxTokens?: number; reasoning?: boolean }
-						| undefined;
+					const liveModel = runtime.agent.state.model;
 					const runtimeResolution = liveModel
 						? refineRuntimeTargetWithModelHints(refreshed.target, liveModel, deps.providers.knowledgeBase)
 						: refreshed.target;
-					if (liveModel) {
-						const caps = runtimeResolution.capabilities;
-						liveModel.contextWindow = caps.contextWindow;
-						liveModel.maxTokens = caps.maxTokens;
-						liveModel.reasoning = caps.reasoning;
-					}
+					if (liveModel) applyModelCapabilityPatch(liveModel, runtimeResolution.capabilities);
 					runtime.agent.state.thinkingLevel = runtimeResolution.effectiveThinkingLevel;
 					runtime.runtimeResolution = runtimeResolution;
 				}

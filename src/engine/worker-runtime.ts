@@ -18,7 +18,7 @@ import type {
 	RuntimeTargetSnapshot,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
+import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
 import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
 import {
 	FileKnowledgeBase,
@@ -117,15 +117,6 @@ function getKnowledgeBase(): KnowledgeBase {
 	return kbSingleton;
 }
 
-function applyModelCapabilities(model: Model<never>, caps: Partial<CapabilityFlags> | undefined): Model<never> {
-	if (!caps) return model;
-	const mutable = model as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
-	if (typeof caps.contextWindow === "number") mutable.contextWindow = caps.contextWindow;
-	if (typeof caps.maxTokens === "number") mutable.maxTokens = caps.maxTokens;
-	if (typeof caps.reasoning === "boolean") mutable.reasoning = caps.reasoning;
-	return model;
-}
-
 function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLevel | undefined): ThinkingLevel {
 	const level = requested ?? "off";
 	return resolveModelRuntimeCapabilitiesForModel(model, level).thinking.effectiveLevel;
@@ -194,7 +185,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);
 	const synthesized = input.runtime.synthesizeModel(input.endpoint, input.wireModelId, kbHit);
-	const model = applyModelCapabilities(
+	const model = applyModelCapabilityPatch(
 		input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>),
 		input.modelCapabilities,
 	);

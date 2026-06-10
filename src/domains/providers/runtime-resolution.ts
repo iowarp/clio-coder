@@ -26,9 +26,9 @@ export interface ContextWindowDetails {
 	probedContextWindow: number | null;
 	/** Context actually loaded server-side; only LM Studio reports this. */
 	loadedContextWindow: number | null;
-	/** What Clio wants for coding: 128k floor on local-native tiers, declared elsewhere. */
+	/** What Clio would like for coding; advisory only and never displayed as provider truth. */
 	desiredContextWindow: number;
-	/** What the target actually offers; probe/loaded beats config beats declared knowledge. */
+	/** What the target actually offers; live probe/config/model knowledge only. */
 	effectiveContextWindow: number;
 	/** Where `effectiveContextWindow` came from. */
 	contextWindowSource:
@@ -38,7 +38,6 @@ export interface ContextWindowDetails {
 		| "endpoint-override"
 		| "model-hint"
 		| "descriptor-default"
-		| "local-native-default"
 		| "unknown";
 	warning: string | null;
 }
@@ -314,7 +313,7 @@ export function resolveRuntimeTarget(
 
 	const requestedThinkingLevel = input.requestedThinkingLevel ?? "off";
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);
-	const capabilities = capabilityResolution.capabilities;
+	const capabilities: CapabilityFlags = { ...capabilityResolution.capabilities };
 	const probedContextWindow = probeCapabilitiesForModel(status, wireModelId)?.contextWindow ?? null;
 	const contextWindowDetails = resolveContextWindowDetails(
 		endpoint,
@@ -324,6 +323,9 @@ export function resolveRuntimeTarget(
 		probedContextWindow,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
+	if (contextWindowDetails.warning) {
+		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
+	}
 
 	const modelRuntime = resolveEndpointRuntimeCapabilities(
 		endpoint,
@@ -471,7 +473,7 @@ export function firstRuntimeResolutionError(diagnostics: ReadonlyArray<RuntimeRe
 	return diagnostics.find((entry) => entry.severity === "error")?.message ?? null;
 }
 
-/** Recommended minimum context for coding against a local-native runtime. */
+/** Recommended minimum context for coding against a local-native runtime. Advisory, not provider truth. */
 const LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW = 128000;
 /** Last-resort window when nothing declares one. */
 const FALLBACK_CONTEXT_WINDOW = 8192;
@@ -485,15 +487,15 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  *
  *  - `declared`: best static knowledge of the model's window
  *    (live model hint > knowledge base > catalog > runtime default > 8192).
- *  - `desired`: what Clio wants for coding. Local-native tiers get a 128k
- *    floor regardless of what KB/catalog declare; elsewhere desired follows
- *    the declared window.
+ *  - `desired`: what Clio wants for coding. Local-native tiers still get a
+ *    128k recommendation, but this is advisory only.
  *  - `effective`: what the target actually offers, most live source first:
  *    probe/loaded > endpoint config override > model-specific knowledge >
- *    the local-native floor (we ask local runtimes to load that much) >
- *    runtime descriptor default. `contextWindowSource` labels whichever won.
+ *    runtime descriptor default. Clio no longer invents a 128k effective
+ *    window for unknown local models; providers must probe it or users must
+ *    configure an explicit override.
  *
- * Warns when a local-native target ends up below the 128k recommendation.
+ * Warns when a local-native target's effective window is below the 128k recommendation.
  */
 export function resolveContextWindowDetails(
 	endpoint: EndpointDescriptor,
@@ -544,11 +546,6 @@ export function resolveContextWindowDetails(
 	} else if (modelDeclared !== undefined) {
 		effective = modelDeclared;
 		source = modelDeclaredSource;
-	} else if (runtime.tier === "local-native") {
-		// No live or model-specific signal; plan for the floor we ask local
-		// runtimes to load.
-		effective = desired;
-		source = "local-native-default";
 	} else {
 		effective = declaredContextWindow;
 		source = "descriptor-default";

@@ -5,12 +5,23 @@ export interface CliArgDiagnostic {
 	message: string;
 }
 
+export interface RunSamplingArgs {
+	temperature?: number;
+	topP?: number;
+	topK?: number;
+	minP?: number;
+	presencePenalty?: number;
+	frequencyPenalty?: number;
+	repeatPenalty?: number;
+}
+
 export interface RunCliArgs {
 	help: boolean;
 	json: boolean;
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
+	sampling?: RunSamplingArgs;
 	agentId?: string;
 	agentProfile?: string;
 	agentRuntime?: string;
@@ -78,6 +89,41 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
+		if (arg === "--temperature") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "temperature", value, { min: 0 });
+			continue;
+		}
+		if (arg === "--top-p") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "topP", value, { min: 0, max: 1 });
+			continue;
+		}
+		if (arg === "--top-k") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "topK", value, { min: 0, integer: true });
+			continue;
+		}
+		if (arg === "--min-p") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "minP", value, { min: 0, max: 1 });
+			continue;
+		}
+		if (arg === "--presence-penalty") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "presencePenalty", value);
+			continue;
+		}
+		if (arg === "--frequency-penalty") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "frequencyPenalty", value);
+			continue;
+		}
+		if (arg === "--repeat-penalty") {
+			const value = need(arg);
+			if (value !== null) setNumberOption(parsed, "repeatPenalty", value);
+			continue;
+		}
 		if (arg === "--agent") {
 			const value = need(arg);
 			if (value !== null) parsed.agentId = value;
@@ -123,4 +169,31 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	}
 
 	return parsed;
+}
+
+function setNumberOption(
+	parsed: RunCliArgs,
+	key: keyof NonNullable<RunCliArgs["sampling"]>,
+	raw: string,
+	limits: { min?: number; max?: number; integer?: boolean } = {},
+): void {
+	const value = Number(raw);
+	if (!Number.isFinite(value)) {
+		parsed.diagnostics.push({ type: "error", message: `--${kebab(key)} must be a number` });
+		return;
+	}
+	if (limits.min !== undefined && value < limits.min) {
+		parsed.diagnostics.push({ type: "error", message: `--${kebab(key)} must be >= ${limits.min}` });
+		return;
+	}
+	if (limits.max !== undefined && value > limits.max) {
+		parsed.diagnostics.push({ type: "error", message: `--${kebab(key)} must be <= ${limits.max}` });
+		return;
+	}
+	const normalized = limits.integer === true ? Math.floor(value) : value;
+	parsed.sampling = { ...(parsed.sampling ?? {}), [key]: normalized };
+}
+
+function kebab(value: string): string {
+	return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
 }

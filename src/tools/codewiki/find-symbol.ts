@@ -5,7 +5,8 @@ import { loadCodewikiForTool, renderEntries } from "./shared.js";
 
 export const findSymbolTool: ToolSpec = {
 	name: ToolNames.FindSymbol,
-	description: "Find codewiki entries that export the requested symbol. Use this tool to locate exported variables, classes, functions, or interfaces when answering codebase questions.",
+	description:
+		"Find codewiki entries that export the requested symbol. Use this tool to locate exported variables, classes, functions, or interfaces when answering codebase questions.",
 	parameters: Type.Object({
 		symbol: Type.String({ description: "Exported symbol name to look up." }),
 	}),

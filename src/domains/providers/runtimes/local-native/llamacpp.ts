@@ -10,6 +10,7 @@ import {
 	detectModelMismatch,
 	probeLlamaCppModelStatus,
 	probeLlamaCppProps,
+	probeOpenAIModelCatalog,
 	probeOpenAIModels,
 } from "../common/probe-helpers.js";
 
@@ -55,7 +56,10 @@ const llamacppRuntime: RuntimeDescriptor = {
 		if (!health.ok) return health;
 		const props = await probeLlamaCppProps(base, ctx);
 		const status = await probeLlamaCppModelStatus(base, endpoint, ctx);
+		const catalog = await probeOpenAIModelCatalog(base, ctx);
 		const result: ProbeResult = { ok: true };
+		if (catalog.models.length > 0) result.models = catalog.models;
+		if (Object.keys(catalog.modelCapabilities).length > 0) result.modelCapabilities = catalog.modelCapabilities;
 		if (typeof health.latencyMs === "number") result.latencyMs = health.latencyMs;
 		const discoveredCapabilities = {
 			...(props.discoveredCapabilities ?? {}),

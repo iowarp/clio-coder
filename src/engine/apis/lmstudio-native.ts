@@ -40,6 +40,7 @@ import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJso
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import { mergeSamplingOverride } from "./sampling-overrides.js";
 import { formatThinkingForReplay } from "./thinking-replay.js";
 
 const EMPTY_TOOL_ARGUMENTS_ERROR =
@@ -440,8 +441,8 @@ function pickSamplingProfile(
 	thinkingActive: boolean,
 ): SamplingProfile | undefined {
 	const sampling = quirks?.sampling;
-	if (!sampling) return undefined;
-	return thinkingActive ? sampling.thinking : sampling.instruct;
+	const profile = sampling ? (thinkingActive ? (sampling.thinking ?? sampling.instruct) : sampling.instruct) : undefined;
+	return mergeSamplingOverride(profile);
 }
 
 function thinkingLevelFromHintOrModel(hints: RunStreamHints, model: Model<"lmstudio-native">): ThinkingLevel {

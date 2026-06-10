@@ -1,0 +1,32 @@
+{
+	"thinking": ["off", "low", "medium"],
+	"contextWindow": [null],
+	"sampling": [
+		{
+			"name": "catalog",
+			"temperature": null,
+			"topP": null,
+			"topK": null,
+			"presencePenalty": null,
+			"repeatPenalty": null
+		},
+		{
+			"name": "precise",
+			"temperature": 0.2,
+			"topP": 0.9,
+			"topK": 20,
+			"presencePenalty": 0,
+			"repeatPenalty": 1
+		},
+		{
+			"name": "balanced",
+			"temperature": 0.6,
+			"topP": 0.95,
+			"topK": 20,
+			"presencePenalty": 0,
+			"repeatPenalty": 1
+		}
+	],
+	"weightQuantization": ["server-loaded"],
+	"kvCache": ["server-default"]
+}

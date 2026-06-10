@@ -28,7 +28,8 @@ export { mergeCapabilities } from "./capabilities.js";
 export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
 export { isTargetEligibleRuntime } from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";
-export { resolveModelCapabilities } from "./model-capabilities.js";
+export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
+export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";
 export {
 	inferLocalModelFamily,
 	isHarmonyModelId,
