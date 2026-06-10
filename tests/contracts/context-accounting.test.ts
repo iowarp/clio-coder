@@ -1,11 +1,32 @@
+import { ok, strictEqual } from "node:assert";
 import { describe, it } from "node:test";
-import { strictEqual, ok } from "node:assert";
+import {
+	EMPTY_CAPABILITIES,
+	type EndpointDescriptor,
+	type RuntimeDescriptor,
+} from "../../src/domains/providers/index.js";
+import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
 import {
 	buildSnapshotCategories,
+	type ContextSnapshot,
 	reconcileSnapshot,
 } from "../../src/domains/session/context-accounting.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
-import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
+
+function testRuntime(id: "ollama-native" | "lmstudio-native"): RuntimeDescriptor {
+	return {
+		id,
+		displayName: id,
+		kind: "http",
+		tier: "local-native",
+		apiFamily: id,
+		auth: "none",
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: 8192 },
+		synthesizeModel() {
+			throw new Error("not used in this test");
+		},
+	};
+}
 
 describe("contracts/context-accounting", () => {
 	it("categories sum to usedTokens in the ledger", () => {
@@ -44,7 +65,7 @@ describe("contracts/context-accounting", () => {
 	});
 
 	it("normalizes estimated splits deterministically to the exact reconciled prompt total", () => {
-		const snapshot = {
+		const snapshot: ContextSnapshot = {
 			snapshotId: "snap-1",
 			sessionId: "session-1",
 			turnId: "turn-1",
@@ -67,8 +88,8 @@ describe("contracts/context-accounting", () => {
 				streaming: 0,
 			},
 			sources: {
-				total: "estimated" as const,
-				splits: {} as any,
+				total: "estimated",
+				splits: {},
 			},
 		};
 
@@ -89,36 +110,28 @@ describe("contracts/context-accounting", () => {
 		strictEqual(reconciled.sources.total, "reconciled");
 	});
 
-	it("resolves context window for local-native tiers, defaulting to 128k when unknown", () => {
-		const endpoint = {
+	it("keeps local-native 128k as advisory and does not inflate unknown effective context", () => {
+		const endpoint: EndpointDescriptor = {
 			id: "local-endpoint",
 			runtime: "ollama-native",
 			capabilities: {},
-		} as any;
-		const runtime = {
-			id: "ollama-native",
-			tier: "local-native",
-			defaultCapabilities: { contextWindow: 8192 },
-		} as any;
+		};
+		const runtime = testRuntime("ollama-native");
 
 		const details = resolveContextWindowDetails(endpoint, runtime, "model", null, null);
 		strictEqual(details.desiredContextWindow, 128000);
-		strictEqual(details.effectiveContextWindow, 128000);
-		strictEqual(details.contextWindowSource, "local-native-default");
-		ok(details.warning === null);
+		strictEqual(details.effectiveContextWindow, 8192);
+		strictEqual(details.contextWindowSource, "descriptor-default");
+		ok(details.warning !== null);
 	});
 
 	it("caps effectiveContextWindow and warns if probed/loaded context below 128k", () => {
-		const endpoint = {
+		const endpoint: EndpointDescriptor = {
 			id: "local-endpoint",
 			runtime: "lmstudio-native",
 			capabilities: {},
-		} as any;
-		const runtime = {
-			id: "lmstudio-native",
-			tier: "local-native",
-			defaultCapabilities: { contextWindow: 8192 },
-		} as any;
+		};
+		const runtime = testRuntime("lmstudio-native");
 
 		const details = resolveContextWindowDetails(endpoint, runtime, "model", null, 32000);
 		strictEqual(details.desiredContextWindow, 128000);

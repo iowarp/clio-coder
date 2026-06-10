@@ -25,6 +25,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
+import { mergeSamplingOverride } from "./sampling-overrides.js";
 
 /**
  * Average characters-per-token for the English/code reasoning streams pi-ai
@@ -55,8 +56,8 @@ function pickSamplingProfile(
 	thinkingActive: boolean,
 ): SamplingProfile | undefined {
 	const sampling = quirks?.sampling;
-	if (!sampling) return undefined;
-	return thinkingActive ? sampling.thinking : sampling.instruct;
+	const profile = sampling ? (thinkingActive ? (sampling.thinking ?? sampling.instruct) : sampling.instruct) : undefined;
+	return mergeSamplingOverride(profile);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

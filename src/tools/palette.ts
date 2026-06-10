@@ -109,7 +109,7 @@ const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
 
 const GREETING_RE = /^(?:hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|ping)[.!?\s]*$/i;
 const EDIT_RE =
-	/\b(?:implement|fix|edit|modify|change|update|add|remove|delete|refactor|rewrite|create|scaffold|patch|repair|wire|migrate|resolve|address|handle|improve|optimi[sz]e|rename|extract|bump|upgrade|downgrade|revert|apply|configure|correct)\b|\bclean\s*up\b|\bset\s+up\b|\bhook\s+up\b|\bmake\b.{0,40}\b(?:pass|work|compile|build|green)\b/i;
+	/\b(?:implement|fix|edit|modify|change|update|add|remove|delete|refactor|rewrite|write|save|create|scaffold|patch|repair|wire|migrate|resolve|address|handle|improve|optimi[sz]e|rename|extract|bump|upgrade|downgrade|revert|apply|configure|correct)\b|\bclean\s*up\b|\bset\s+up\b|\bhook\s+up\b|\bmake\b.{0,40}\b(?:pass|work|compile|build|green)\b/i;
 const INSPECT_RE =
 	/\b(?:inspect|audit|review|explain|summari[sz]e|understand|find|where|locate|read|show|list|search|grep|status|diff|log|trace|map)\b/i;
 /** Problem statements ("the build is broken") imply a debug-and-fix workflow. */
@@ -120,6 +120,8 @@ const QUESTION_RE = /^(?:why|what|how|when|where|who|which|is|are|does|do|can|co
 const VALIDATE_RE = /\b(?:test|tests|lint|typecheck|build|verify|validation|validate|ci|precommit)\b/i;
 const DISPATCH_RE =
 	/\b(?:subagents?|sub-agents?|delegate|worker|workers|dispatch|multi-agent|parallel agents?|fleet)\b/i;
+const AVOID_DISPATCH_RE =
+	/\b(?:(?:do\s+not|don't)\s+(?:use\s+)?|(?:without|no)\s+(?:using\s+)?)\b(?:dispatch|delegat(?:e|ion)|subagents?|sub-agents?|workers?|fleet|multi-agent|parallel agents?)\b/i;
 const EXTERNAL_RE =
 	/\bhttps?:\/\/|\b(?:web\s*search|search\s+the\s+web|browse|internet|online\s+docs?|external\s+research|webpage|web\s+page|url)\b|\bfetch\s+(?:the\s+)?(?:url|page|site|website|docs?|documentation)\b|\blatest\s+(?:version|release|docs?|documentation|news)\b|\bwhat'?s\s+new\s+in\b/i;
 const CREATE_SKILL_RE =
@@ -153,6 +155,7 @@ export interface IntentSignals {
 	noShell: boolean;
 	toolMeta: boolean;
 	dispatch: boolean;
+	avoidDispatch: boolean;
 	skill: boolean;
 	skillAuthoring: boolean;
 	askUser: boolean;
@@ -176,7 +179,8 @@ export function detectIntentSignals(text: string): IntentSignals {
 		noTools: NO_TOOL_RE.test(trimmed),
 		noShell: AVOID_SHELL_RE.test(trimmed),
 		toolMeta: TOOL_META_RE.test(trimmed),
-		dispatch: DISPATCH_RE.test(trimmed),
+		avoidDispatch: AVOID_DISPATCH_RE.test(trimmed),
+		dispatch: DISPATCH_RE.test(trimmed) && !AVOID_DISPATCH_RE.test(trimmed),
 		skill: false,
 		skillAuthoring: CREATE_SKILL_RE.test(trimmed),
 		askUser: ASK_USER_RE.test(trimmed),

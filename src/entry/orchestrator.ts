@@ -31,6 +31,7 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
+	applyModelCapabilityPatch,
 	isTargetEligibleRuntime,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
@@ -82,6 +83,16 @@ export interface BootResult {
 	bootTimeMs: number;
 }
 
+export interface HeadlessSamplingOverrides {
+	temperature?: number;
+	topP?: number;
+	topK?: number;
+	minP?: number;
+	presencePenalty?: number;
+	frequencyPenalty?: number;
+	repeatPenalty?: number;
+}
+
 export interface BootOptions {
 	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
 	apiKey?: string;
@@ -97,6 +108,7 @@ export interface BootOptions {
 		target?: string;
 		model?: string;
 		thinking?: ThinkingLevel;
+		sampling?: HeadlessSamplingOverrides;
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
 	};
@@ -201,10 +213,7 @@ export function synthesizeOrchestratorModel(
 			const caps = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
 				detectedReasoning: providers.getDetectedReasoning(endpoint.id, wireModelId),
 			});
-			const mutable = model as { contextWindow?: number; maxTokens?: number; reasoning?: boolean };
-			mutable.contextWindow = caps.contextWindow;
-			mutable.maxTokens = caps.maxTokens;
-			mutable.reasoning = caps.reasoning;
+			applyModelCapabilityPatch(model, caps);
 		}
 	} catch {
 		// Older test doubles and degraded provider bundles may not expose live
@@ -665,6 +674,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
 				...(images.length > 0 ? { images } : {}),
+				...(options.headless.sampling ? { sampling: options.headless.sampling } : {}),
 				...(parsedSkillRequest.pendingSkillRequests.length > 0
 					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }
 					: {}),

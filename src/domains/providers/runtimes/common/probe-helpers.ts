@@ -4,7 +4,7 @@ import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult } from "../../types/runtime-descriptor.js";
 
 export interface OpenAIModelsResponse {
-	data?: Array<{ id?: unknown; status?: unknown }>;
+	data?: Array<Record<string, unknown> & { id?: unknown; status?: unknown }>;
 }
 
 export async function probeUrl(url: string, ctx: ProbeContext, method: "GET" | "HEAD" = "GET"): Promise<ProbeResult> {
@@ -13,18 +13,119 @@ export async function probeUrl(url: string, ctx: ProbeContext, method: "GET" | "
 }
 
 export async function probeOpenAIModels(base: string, ctx: ProbeContext, modelsPath = "/v1/models"): Promise<string[]> {
+	return (await probeOpenAIModelCatalog(base, ctx, modelsPath)).models;
+}
+
+export interface OpenAIModelCatalogProbe {
+	models: string[];
+	modelCapabilities: Record<string, Partial<CapabilityFlags>>;
+}
+
+export async function probeOpenAIModelCatalog(
+	base: string,
+	ctx: ProbeContext,
+	modelsPath = "/v1/models",
+): Promise<OpenAIModelCatalogProbe> {
 	const opts = { url: `${base}${modelsPath}`, timeoutMs: ctx.httpTimeoutMs } as const;
 	const result = await (ctx.signal
 		? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OpenAIModelsResponse>(opts));
-	if (!result.ok || !result.data?.data) return [];
-	return result.data.data
-		.map((row) => (typeof row?.id === "string" ? row.id : null))
-		.filter((id): id is string => id !== null);
+	if (!result.ok || !result.data?.data) return { models: [], modelCapabilities: {} };
+	const models: string[] = [];
+	const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
+	for (const row of result.data.data) {
+		if (typeof row?.id !== "string" || row.id.length === 0) continue;
+		models.push(row.id);
+		const caps = capabilitiesFromOpenAIModelEntry(row);
+		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
+	}
+	return { models, modelCapabilities };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function positiveNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function firstPositiveNumber(record: Record<string, unknown>, keys: ReadonlyArray<string>): number | undefined {
+	for (const key of keys) {
+		const value = positiveNumber(record[key]);
+		if (value !== undefined) return value;
+	}
+	return undefined;
+}
+
+function booleanFromAny(record: Record<string, unknown>, keys: ReadonlyArray<string>): boolean | undefined {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "boolean") return value;
+	}
+	return undefined;
+}
+
+function nestedRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
+	const value = record[key];
+	return isRecord(value) ? value : null;
+}
+
+function statusArgsFromEntry(row: Record<string, unknown>): string[] {
+	const status = nestedRecord(row, "status");
+	return argsFromStatus(status);
+}
+
+function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial<CapabilityFlags> {
+	const caps: Partial<CapabilityFlags> = {};
+	const meta = nestedRecord(row, "meta");
+	const flags = parseLlamaCppServerFlags(statusArgsFromEntry(row));
+	const contextWindow =
+		positiveNumber(flags.contextSize) ??
+		firstPositiveNumber(row, [
+			"context_window",
+			"contextWindow",
+			"context_length",
+			"contextLength",
+			"max_context_length",
+			"maxContextLength",
+			"n_ctx",
+		]) ??
+		(meta ? firstPositiveNumber(meta, ["n_ctx", "n_ctx_train", "context_length", "contextWindow"]) : undefined);
+	if (contextWindow !== undefined) caps.contextWindow = Math.floor(contextWindow);
+	const maxTokens =
+		positiveNumber(flags.maxTokens) ??
+		firstPositiveNumber(row, [
+			"max_output_tokens",
+			"maxOutputTokens",
+			"max_completion_tokens",
+			"maxCompletionTokens",
+			"max_tokens",
+			"maxTokens",
+			"n_predict",
+		]);
+	if (maxTokens !== undefined) caps.maxTokens = Math.floor(maxTokens);
+	const tools = flags.jinja ?? booleanFromAny(row, ["tools", "tool_use", "toolUse", "trained_for_tool_use"]);
+	if (tools !== undefined) caps.tools = tools;
+	const reasoning =
+		flags.reasoning ??
+		(flags.reasoningBudget !== undefined ? true : undefined) ??
+		booleanFromAny(row, ["reasoning", "thinking"]);
+	if (reasoning !== undefined) caps.reasoning = reasoning;
+	const architecture = nestedRecord(row, "architecture");
+	const architectureInput = architecture?.input_modalities;
+	const modalities = Array.isArray(row.modalities)
+		? row.modalities
+		: Array.isArray(row.input)
+			? row.input
+			: Array.isArray(architectureInput)
+				? architectureInput
+				: null;
+	if (modalities) {
+		caps.vision = modalities.some((entry) => entry === "image" || entry === "vision");
+		if (modalities.some((entry) => entry === "audio")) caps.audio = true;
+	}
+	return caps;
 }
 
 function modelEntries(payload: OpenAIModelsResponse | undefined): Array<{ id: string; status?: unknown }> {

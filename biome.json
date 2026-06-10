@@ -38,6 +38,7 @@
 			"!**/.antigravitycli",
 			"!**/.claude",
 			"!**/.clio",
+			"!**/.clio-benchmark",
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.log",

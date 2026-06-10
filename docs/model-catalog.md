@@ -17,6 +17,19 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 The model overlay keeps configured `wireModels` first, then appends live probe discoveries. This preserves operator-curated defaults while allowing newly installed local models or newly entitled cloud models to appear without restarting Clio. A refresh also reloads the local YAML knowledge base when the bundled `FileKnowledgeBase` is active, so capability/quirk edits are visible during development.
 
+Live provider probes are the preferred source for loaded context and per-model metadata. Clio keeps a 128k local-coding context recommendation, but it no longer treats that recommendation as provider truth for unknown local models: effective context comes from live probe data, an explicit target override, a model catalog/KB entry, or the runtime descriptor default. If the live target is below the recommendation, Clio reports a warning rather than silently inflating the displayed window.
+
+## First benchmark harness
+
+A simple model/config benchmark runner ships under `benchmarks/`:
+
+```sh
+npm run build
+npm run bench:models -- --target mini --limit 3
+```
+
+The runner discovers models with `clio models --probe --json`, creates a gitignored `.clio-benchmark/` run directory, asks each model/config combo to generate a single-file Clio Coder website at `app.html`, and scores the artifact with a static rubric. The matrix records context-window, thinking, sampling, weight quantization, and KV-cache quantization settings so server-side sweeps (Q4/Q5/Q6/IQ/UD quants and f16 vs q8 KV) can be compared consistently. Current per-request Clio overrides cover model and thinking level; sampling/context/quant fields are recorded in the report and should be matched by the serving preset until those controls are wired through every runtime.
+
 ## What “sanctioned” means
 
 A model family is “sanctioned” only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:

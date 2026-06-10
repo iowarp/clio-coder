@@ -35,6 +35,13 @@ Flags:
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh
+  --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
+  --top-p <N>               one-run nucleus sampling override (0..1)
+  --top-k <N>               one-run top-k override
+  --min-p <N>               one-run min-p override (0..1)
+  --presence-penalty <N>    one-run presence penalty override
+  --frequency-penalty <N>   one-run frequency penalty override
+  --repeat-penalty <N>      one-run repeat penalty override
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
@@ -126,6 +133,7 @@ export async function runClioRun(
 					...(parsed.target !== undefined ? { target: parsed.target } : {}),
 					...(parsed.model !== undefined ? { model: parsed.model } : {}),
 					...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+					...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 				},
 			});
 			await flushRawStdout();

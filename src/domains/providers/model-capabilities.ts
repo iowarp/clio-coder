@@ -9,6 +9,29 @@ function normalizedModelId(wireModelId: string | null | undefined): string | nul
 	return trimmed ? trimmed : null;
 }
 
+export interface ModelCapabilityPatchTarget {
+	contextWindow?: number;
+	maxTokens?: number;
+	reasoning?: boolean;
+}
+
+/**
+ * Apply the small mutable capability surface pi-ai reads from model objects.
+ * Runtime synthesis returns immutable-ish catalog objects, but live probes can
+ * refine context/output/reasoning after synthesis. Keeping the mutation in one
+ * helper makes those refinements explicit and avoids ad-hoc casts at call sites.
+ */
+export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
+	model: T,
+	caps: Partial<CapabilityFlags> | null | undefined,
+): T {
+	if (!caps) return model;
+	if (typeof caps.contextWindow === "number") model.contextWindow = caps.contextWindow;
+	if (typeof caps.maxTokens === "number") model.maxTokens = caps.maxTokens;
+	if (typeof caps.reasoning === "boolean") model.reasoning = caps.reasoning;
+	return model;
+}
+
 export interface ResolveModelCapabilitiesOptions {
 	/**
 	 * Per-(endpoint, model) reasoning detection result, typically supplied by

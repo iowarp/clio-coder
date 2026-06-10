@@ -14,7 +14,7 @@ import type {
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
 import { endpointBase, synthLocalModel, withAsIs, withV1 } from "../common/local-synth.js";
-import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
+import { probeOpenAIModelCatalog, probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
 export interface OpenAICompatSpec {
 	id: string;
@@ -67,7 +67,21 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = endpointBase(endpoint);
 			if (!base) return { ok: false, error: "endpoint has no url" };
-			return probeUrl(`${base}${healthPath}`, ctx);
+			const health = await probeUrl(`${base}${healthPath}`, ctx);
+			if (!health.ok) return health;
+			const catalog = await probeOpenAIModelCatalog(base, ctx, modelsPath);
+			const result: ProbeResult = { ...health };
+			if (catalog.models.length > 0) result.models = catalog.models;
+			if (Object.keys(catalog.modelCapabilities).length > 0) {
+				result.modelCapabilities = catalog.modelCapabilities;
+				const selected = endpoint.defaultModel?.trim();
+				const selectedCaps = selected ? catalog.modelCapabilities[selected] : undefined;
+				if (selected && selectedCaps) {
+					result.discoveredCapabilities = selectedCaps;
+					result.capabilityModelId = selected;
+				}
+			}
+			return result;
 		},
 		async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = endpointBase(endpoint);

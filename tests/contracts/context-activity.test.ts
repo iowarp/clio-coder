@@ -5,9 +5,9 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	CONTEXT_ISLAND_WIDTH,
+	type ContextActivitySnapshot,
 	createContextActivityStore,
 	formatContextActivityIslandLines,
-	type ContextActivitySnapshot,
 } from "../../src/interactive/context-activity.js";
 
 function makeActivity(overrides: Partial<ContextActivitySnapshot> = {}): ContextActivitySnapshot {
