@@ -75,6 +75,8 @@ function renderReadSkillOutput(skill: Skill, tree: string[] | null): string {
 		`source_origin: ${sourceOrigin}`,
 		`disable_model_invocation: ${skill.disableModelInvocation}`,
 	];
+	if (skill.allowedTools) lines.push(`allowed_tools: ${skill.allowedTools.join(", ")}`);
+	if (skill.disallowedTools) lines.push(`disallowed_tools: ${skill.disallowedTools.join(", ")}`);
 	if (skill.diagnostics.length > 0) {
 		lines.push(`diagnostics: ${skill.diagnostics.map((d) => d.message).join("; ")}`);
 	}
@@ -168,7 +170,14 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			const pendingRequest = pendingSkillRequestFor(name, options);
 			const pendingTask = pendingRequest?.args.trim() ?? "";
 			const output = [...renderPendingSkillTask(name, options), renderReadSkillOutput(skill, tree)].join("\n");
-			options?.pendingSkillPolicy?.loadedSkillNames.add(name);
+			const pendingPolicy = options?.pendingSkillPolicy;
+			if (pendingPolicy) {
+				pendingPolicy.loadedSkillNames.add(name);
+				pendingPolicy.loadedSkillPolicies.set(name, {
+					...(skill.allowedTools ? { allowedTools: skill.allowedTools } : {}),
+					...(skill.disallowedTools ? { disallowedTools: skill.disallowedTools } : {}),
+				});
+			}
 			return {
 				kind: "ok",
 				output,
@@ -184,6 +193,8 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 					sourceInfo: skill.sourceInfo,
 					scope: skill.scope,
 					disableModelInvocation: skill.disableModelInvocation,
+					...(skill.allowedTools ? { allowedTools: skill.allowedTools } : {}),
+					...(skill.disallowedTools ? { disallowedTools: skill.disallowedTools } : {}),
 					diagnostics: skill.diagnostics.map((d) => d.message),
 					metadata: skill.metadata,
 					...(skill.provenance ? { provenance: skill.provenance } : {}),

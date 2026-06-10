@@ -1,17 +1,26 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { Type } from "typebox";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import { createReadSkillTool } from "../../src/tools/skills.js";
 
 function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
@@ -316,5 +325,123 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		strictEqual(payload.contextExhaustion?.kind, "provider_length_stop");
 		strictEqual(payload.contextExhaustion?.contextWindow, 1000);
 		ok(panel.render(120).join("\n").includes("generation/output limit"));
+	});
+});
+
+function allowAllSafety(): SafetyContract {
+	return {
+		classify: () => ({ actionClass: "read", reasons: [] }),
+		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
+		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		isSubset,
+		audit: { recordCount: () => 0 },
+	};
+}
+
+function dummyTool(name: ToolName): ToolSpec {
+	return {
+		name,
+		description: `${name} test tool`,
+		parameters: Type.Object({}),
+		baseActionClass: "read",
+		run: async () => ({ kind: "ok", output: name }),
+	};
+}
+
+interface NamedAgentTool {
+	name: string;
+	execute(toolCallId: string, params: unknown): Promise<unknown>;
+}
+
+describe("contracts/chat-loop pending skill tool surface", () => {
+	it("constrains a pending-skill turn to read_skill, then widens to the skill's declared tools after load", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-chat-skill-"));
+		try {
+			const skillDir = join(scratch, ".clio", "skills", "narrow");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				[
+					"---",
+					"name: narrow",
+					"description: Narrow surface skill.",
+					"allowed-tools:",
+					"  - read",
+					"  - grep",
+					"---",
+					"",
+					"NARROW BODY",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+
+			const registry = createRegistry({ safety: allowAllSafety() });
+			registry.register(createReadSkillTool({ getCwd: () => scratch }));
+			for (const name of [ToolNames.Read, ToolNames.Grep, ToolNames.Edit, ToolNames.Bash]) {
+				registry.register(dummyTool(name));
+			}
+
+			const entries: SessionEntry[] = [];
+			let toolsAtStart: string[] = [];
+			let toolsAfterLoad: string[] = [];
+			let readSkillOutput = "";
+			const loop = createChatLoop({
+				getSettings: () => settings(),
+				providers: providers(),
+				knownEndpoints: () => new Set(["test-target"]),
+				session: createSession(entries),
+				readSessionEntries: () => entries,
+				toolRegistry: registry,
+				createAgent: createFakeAgentFactory(async (agent, input) => {
+					agent.state.messages.push(...inputMessages(input));
+					const tools = agent.state.tools as NamedAgentTool[];
+					toolsAtStart = tools.map((tool) => tool.name);
+					const readSkill = tools.find((tool) => tool.name === "read_skill");
+					ok(readSkill, "read_skill must be active on a pending-skill turn");
+					const result = (await readSkill.execute("call-1", { name: "narrow" })) as {
+						content?: Array<{ type: string; text?: string }>;
+					};
+					readSkillOutput = result.content?.find((part) => part.type === "text")?.text ?? "";
+					agent.state.messages.push({
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: "read_skill", arguments: { name: "narrow" } }],
+						stopReason: "toolUse",
+						timestamp: Date.now(),
+					} as unknown as AgentMessage);
+					agent.state.messages.push({
+						role: "toolResult",
+						toolCallId: "call-1",
+						toolName: "read_skill",
+						content: [{ type: "text", text: readSkillOutput }],
+						timestamp: Date.now(),
+					} as unknown as AgentMessage);
+					const update = (await agent.prepareNextTurn?.(new AbortController().signal)) as
+						| { context?: { tools?: NamedAgentTool[] } }
+						| undefined;
+					ok(update?.context?.tools, "expected a continuation context update after skill load");
+					toolsAfterLoad = (update.context.tools ?? []).map((tool) => tool.name);
+				}),
+			} as never);
+
+			await loop.submit("science skills for expert subagents", {
+				pendingSkillRequests: [
+					{
+						name: "narrow",
+						args: "science skills for expert subagents",
+						source: "slash-command",
+						installed: true,
+						filePath: join(skillDir, "SKILL.md"),
+					},
+				],
+			});
+
+			deepStrictEqual(toolsAtStart, ["read_skill"]);
+			ok(readSkillOutput.includes("NARROW BODY"));
+			deepStrictEqual([...toolsAfterLoad].sort(), ["grep", "read"]);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 });
