@@ -338,19 +338,11 @@ function arxivCategories(entryXml: string): string[] {
 	return categories;
 }
 
-async function fetchArxivPaperSummary(
-	paperId: string,
-	init: Parameters<typeof fetch>[1],
-	maxBytes: number,
-): Promise<ToolResult | null> {
-	const metadataUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(paperId)}`;
-	const response = await fetch(metadataUrl, init);
-	if (response.status < 200 || response.status >= 300) return null;
-	const read = await readResponseText(response, Math.min(120_000, maxBytes));
-	const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/i.exec(read.text)?.[1];
-	if (!entry) return null;
+function parseArxivEntry(entry: string, fallbackId: string): ArxivPaper {
+	const idUrl = xmlText(entry, "id");
+	const parsedId = idUrl ? /\/abs\/([^/?#]+)/i.exec(idUrl)?.[1]?.replace(/v\d+$/i, "") : undefined;
 	const paper: ArxivPaper = {
-		id: paperId,
+		id: parsedId ?? fallbackId,
 		authors: xmlTexts(entry, "name"),
 		categories: arxivCategories(entry),
 	};
@@ -362,6 +354,21 @@ async function fetchArxivPaperSummary(
 	if (published) paper.published = published;
 	if (updated) paper.updated = updated;
 	if (abstract) paper.abstract = abstract;
+	return paper;
+}
+
+async function fetchArxivPaperSummary(
+	paperId: string,
+	init: Parameters<typeof fetch>[1],
+	maxBytes: number,
+): Promise<ToolResult | null> {
+	const metadataUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(paperId)}`;
+	const response = await fetch(metadataUrl, init);
+	if (response.status < 200 || response.status >= 300) return null;
+	const read = await readResponseText(response, Math.min(120_000, maxBytes));
+	const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/i.exec(read.text)?.[1];
+	if (!entry) return null;
+	const paper = parseArxivEntry(entry, paperId);
 
 	let alphaxivRead: ReadResult | null = null;
 	const alphaUrl = `https://alphaxiv.org/overview/${encodeURIComponent(paperId)}.md`;
@@ -406,6 +413,59 @@ async function fetchArxivPaperSummary(
 			format: "arxiv-paper",
 			bytesRead,
 			truncated: read.truncated || (alphaxivRead?.truncated ?? false),
+		},
+	};
+}
+
+function arxivApiUrl(url: URL): boolean {
+	return url.hostname === "export.arxiv.org" && url.pathname === "/api/query";
+}
+
+async function fetchArxivApiSummary(
+	url: URL,
+	init: Parameters<typeof fetch>[1],
+	maxBytes: number,
+): Promise<ToolResult | null> {
+	const response = await fetch(url, init);
+	if (response.status < 200 || response.status >= 300) return null;
+	const read = await readResponseText(response, Math.min(240_000, maxBytes));
+	const entries = Array.from(read.text.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi))
+		.map((match, index) => (match[1] ? parseArxivEntry(match[1], `entry-${index + 1}`) : null))
+		.filter((entry): entry is ArxivPaper => entry !== null);
+	if (entries.length === 0) return null;
+	const total = xmlText(read.text, "opensearch:totalResults") ?? String(entries.length);
+	const query = url.searchParams.get("search_query") ?? url.searchParams.get("id_list") ?? "arxiv query";
+	const lines = [
+		`URL: ${url.toString()}`,
+		"Status: 200",
+		"Format: arxiv-search-results",
+		`Query: ${query}`,
+		`Returned: ${entries.length}`,
+		`Total results: ${total}`,
+		"",
+		"Papers:",
+	];
+	for (const [index, paper] of entries.entries()) {
+		lines.push("", `## ${index + 1}. ${paper.title ?? paper.id}`);
+		lines.push(`Paper ID: ${paper.id}`);
+		if (paper.authors.length > 0)
+			lines.push(`Authors: ${paper.authors.slice(0, 8).join(", ")}${paper.authors.length > 8 ? ", et al." : ""}`);
+		if (paper.published) lines.push(`Published: ${paper.published}`);
+		if (paper.updated) lines.push(`Updated: ${paper.updated}`);
+		if (paper.categories.length > 0) lines.push(`Categories: ${paper.categories.join(", ")}`);
+		lines.push(`Links: https://arxiv.org/abs/${paper.id} | https://arxiv.org/pdf/${paper.id}`);
+		if (paper.abstract) lines.push("Abstract:", truncate(paper.abstract, 1600));
+	}
+	return {
+		kind: "ok",
+		output: truncate(lines.join("\n"), maxBytes),
+		details: {
+			url: url.toString(),
+			status: 200,
+			contentType: "application/atom+xml",
+			format: "arxiv-search-results",
+			bytesRead: read.bytesRead,
+			truncated: read.truncated,
 		},
 	};
 }
@@ -641,6 +701,10 @@ export const webFetchTool: ToolSpec = {
 			};
 			if (body !== undefined) init.body = body;
 			if (method === "GET" && body === undefined && format !== "raw") {
+				if (arxivApiUrl(parsed)) {
+					const arxivApiSummary = await fetchArxivApiSummary(parsed, init, maxBytes);
+					if (arxivApiSummary) return arxivApiSummary;
+				}
 				const arxivId = arxivIdFromUrl(parsed);
 				if (arxivId) {
 					const arxivSummary = await fetchArxivPaperSummary(arxivId, init, maxBytes);
