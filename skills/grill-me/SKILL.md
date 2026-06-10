@@ -1,8 +1,22 @@
 ---
 name: grill-me
 description: Use when the user wants a plan, design, or idea stress-tested through a relentless one-question-at-a-time interview before any code is written, or when intent is too ambiguous to plan from. Walks every branch of the decision tree, resolves dependencies between decisions, and ends with a written decision log. Triggers on "grill me", "interview me", "stress-test this plan", "poke holes in this".
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
+allowed-tools:
+  - read
+  - grep
+  - glob
+  - ls
+  - find
+  - git_status
+  - git_diff
+  - git_log
+  - workspace_context
+  - entry_points
+  - where_is
+  - find_symbol
+  - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/grill-me
 audit: pass
@@ -40,7 +54,9 @@ Clio's structured interaction tools.
 
 ## Termination: the decision log
 
-End the interview by restating the shared understanding as a decision log:
+This skill's tool surface is deliberately read-only plus `ask_user`: the
+deliverable is the conversation and the log below, not a file. End the
+interview by restating the shared understanding as a decision log:
 
 ```markdown
 ## Decision Log — <topic>
