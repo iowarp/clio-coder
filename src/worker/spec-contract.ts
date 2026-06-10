@@ -14,6 +14,13 @@ import type {
 export const WORKER_SPEC_VERSION = 1;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 1;
 
+/**
+ * Exit code a native worker uses to report that the run ended because a tool
+ * call required interactive permission under workers.onPermission="fail".
+ * The orchestrator's outcome resolver maps it to failed/permission_required.
+ */
+export const WORKER_EXIT_PERMISSION_REQUIRED = 3;
+
 export interface SerializedWorkerRuntimeDescriptor {
 	version: typeof WORKER_RUNTIME_DESCRIPTOR_VERSION;
 	id: string;
@@ -49,6 +56,13 @@ export interface WorkerSpec {
 	/** Skill names the agent recipe binds to this run; read_skill admits exactly these. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/**
+	 * Non-stall posture for permission-requiring tool calls. "deny" converts
+	 * the call into a structured tool denial and the run continues; "fail"
+	 * aborts the run, which then exits with WORKER_EXIT_PERMISSION_REQUIRED.
+	 * Default "deny".
+	 */
+	onPermission?: "deny" | "fail";
 }
 
 export interface WorkerPromptMessage {
@@ -379,6 +393,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
+	}
+	if (spec.onPermission !== undefined && spec.onPermission !== "deny" && spec.onPermission !== "fail") {
+		throw new Error('WorkerSpec.onPermission must be "deny" or "fail"');
 	}
 	return spec as unknown as WorkerSpec;
 }

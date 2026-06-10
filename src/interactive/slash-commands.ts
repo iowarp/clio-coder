@@ -40,6 +40,7 @@ export type SlashCommand =
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "status" }
+	| { kind: "fleet" }
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
 	| { kind: "receipt-usage" }
@@ -316,6 +317,8 @@ export interface SlashCommandContext {
 	openContextView: () => void;
 	/** Legacy /status hook. The live dashboard itself is toggled only by Alt+U. */
 	openStatus: () => void;
+	/** Open the read-only `/fleet` overlay: running, retrying, and totals. */
+	openFleet: () => void;
 	openReceipts: () => void;
 	openThinking: () => void;
 	openModel: () => void;
@@ -783,6 +786,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(_command, ctx) {
 			ctx.io.stdout("[status] Press Alt+U to toggle the footer dashboard.\n");
+		},
+	},
+	{
+		name: "fleet",
+		description: "Show in-process dispatch running/retry status",
+		kinds: ["fleet"],
+		match(trimmed) {
+			return trimmed === "/fleet" ? { kind: "fleet" } : null;
+		},
+		handle(_command, ctx) {
+			ctx.openFleet();
 		},
 	},
 	{

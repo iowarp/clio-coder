@@ -73,3 +73,10 @@ export {
 	type MarketplaceSkillOrigin,
 	type MarketplaceStatus,
 } from "./skills/marketplace.js";
+export {
+	checkSkillDrift,
+	loadSkillPinManifest,
+	resolveSkillPinManifestPath,
+	type SkillDriftVerdict,
+	type SkillPinEntry,
+} from "./skills/provenance-pin.js";

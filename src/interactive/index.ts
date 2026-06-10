@@ -66,6 +66,7 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
+import { openFleetOverlay } from "./fleet-overlay.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
@@ -267,6 +268,7 @@ export type OverlayState =
 	| "auth"
 	| "cost"
 	| "context-view"
+	| "fleet"
 	| "receipts"
 	| "thinking"
 	| "model"
@@ -356,6 +358,10 @@ export interface ReceiptsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
+export interface FleetOverlayKeyDeps {
+	closeOverlay: () => void;
+}
+
 export interface ThinkingOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -403,6 +409,7 @@ export interface OverlayKeyDeps
 		AuthOverlayKeyDeps,
 		CostOverlayKeyDeps,
 		ReceiptsOverlayKeyDeps,
+		FleetOverlayKeyDeps,
 		ThinkingOverlayKeyDeps,
 		ModelOverlayKeyDeps,
 		ScopedModelsOverlayKeyDeps,
@@ -815,6 +822,11 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "context-view") {
+		// Read-only overlay; same policy as /cost: Esc closes, all else swallowed.
+		routeCostOverlayKey(data, deps);
+		return true;
+	}
+	if (overlayState === "fleet") {
 		// Read-only overlay; same policy as /cost: Esc closes, all else swallowed.
 		routeCostOverlayKey(data, deps);
 		return true;
@@ -1399,6 +1411,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openStatus: () => toggleStatusFooterState(),
+		openFleet: () => openFleetOverlayState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
@@ -2213,6 +2226,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const toggleStatusFooterState = (): void => {
 		toggleFooterDashboardState();
+	};
+
+	const openFleetOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "fleet";
+		overlayHandle = openFleetOverlay(tui, deps.dispatch, { bus: deps.bus });
+		tui.requestRender();
 	};
 
 	const openReceiptsOverlayState = (): void => {

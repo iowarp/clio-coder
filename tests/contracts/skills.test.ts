@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,10 @@ function scratchDir(prefix = "clio-skills-"): string {
 	const root = mkdtempSync(join(tmpdir(), prefix));
 	scratchRoots.push(root);
 	return root;
+}
+
+function sha256(value: string): string {
+	return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function writeSkillDir(root: string, name: string, frontmatter: string[], body = "Skill body."): string {
@@ -689,6 +694,48 @@ describe("contracts/skills tools", () => {
 		match(activation.hash, /^[0-9a-f]{64}$/);
 		strictEqual(activation.sourceOrigin, "project");
 		ok(activation.filePath.endsWith("SKILL.md"));
+	});
+
+	it("read_skill annotates marketplace provenance drift without blocking", async () => {
+		const cwd = join(scratch, "project");
+		const skillPath = writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"pinned",
+			['name: "pinned"', 'description: "Pinned skill."', 'registry-id: "pinned"'],
+			"PINNED BODY",
+		);
+		const manifestDir = join(cwd, "skills");
+		mkdirSync(manifestDir, { recursive: true });
+		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const skillHash = sha256(readFileSync(skillPath, "utf8"));
+
+		writeFileSync(
+			join(manifestDir, "registry.yaml"),
+			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${skillHash}`, ""].join("\n"),
+			"utf8",
+		);
+		const matchResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		strictEqual(matchResult.kind, "ok");
+		if (matchResult.kind !== "ok") return;
+		strictEqual((matchResult.details as Record<string, unknown>).drift, "match");
+		strictEqual(matchResult.output.includes("skill_drift"), false);
+
+		writeFileSync(
+			join(manifestDir, "registry.yaml"),
+			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${"b".repeat(64)}`, ""].join("\n"),
+			"utf8",
+		);
+		const mismatchResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		strictEqual(mismatchResult.kind, "ok");
+		if (mismatchResult.kind !== "ok") return;
+		strictEqual((mismatchResult.details as Record<string, unknown>).drift, "mismatch");
+		ok(mismatchResult.output.includes("WARNING skill_drift"));
+
+		rmSync(join(manifestDir, "registry.yaml"), { force: true });
+		const absentResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		strictEqual(absentResult.kind, "ok");
+		if (absentResult.kind !== "ok") return;
+		strictEqual((absentResult.details as Record<string, unknown>).drift, undefined);
 	});
 
 	it("read_skill include_tree lists sibling resources without executing them", async () => {

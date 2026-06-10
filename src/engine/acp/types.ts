@@ -146,6 +146,8 @@ export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
 	stopReason: string;
+	/** True when the turn request hit its configured timeout. */
+	timedOut?: boolean;
 	failureMessage?: string;
 	usage: AcpDelegationUsage;
 	delegation: {

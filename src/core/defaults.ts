@@ -19,6 +19,22 @@ export interface WorkerTarget {
 export type WorkerProfiles = Record<string, WorkerTarget>;
 
 /**
+ * Non-stall posture for dispatched native workers. A worker tool call that
+ * requires interactive permission resolves within bounded time: "deny" turns
+ * it into a structured tool denial and the run continues; "fail" finalizes
+ * the run immediately with outcome failed/permission_required.
+ */
+export type WorkerPermissionMode = "deny" | "fail";
+
+export interface WorkersSettings {
+	default: WorkerTarget;
+	profiles: WorkerProfiles;
+	/** Bounded automatic retries for retryable run outcomes. 0 disables. */
+	maxRetries: number;
+	onPermission: WorkerPermissionMode;
+}
+
+/**
  * Compaction controls the session domain reads at runtime. Ships as Phase 12
  * slice 12c. The structural type lives here so core/defaults.ts stays free
  * of a backward domain dependency; the engine-level defaults and the
@@ -95,6 +111,12 @@ export interface DelegationAgentConfig {
 	connectTimeoutMs?: number;
 	turnTimeoutMs?: number;
 	permissionTimeoutMs?: number;
+	/**
+	 * Event-inactivity stall window: when no session/update arrives for this
+	 * long, the reconciler cancels the turn and finalizes the run as stalled.
+	 * Defaults to 300000; <= 0 disables the check.
+	 */
+	stallTimeoutMs?: number;
 	toolGovernance?: DelegationToolGovernance;
 	labels?: Record<string, string>;
 }
@@ -129,7 +151,9 @@ export const DEFAULT_SETTINGS = {
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
 		profiles: {} as WorkerProfiles,
-	},
+		maxRetries: 2,
+		onPermission: "deny" as WorkerPermissionMode,
+	} as WorkersSettings,
 	scope: [] as string[],
 	modelSelector: {
 		favorites: [] as string[],

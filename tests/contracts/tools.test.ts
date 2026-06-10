@@ -550,6 +550,12 @@ describe("contracts/tools dispatch run paths", () => {
 			listRuns: () => [],
 			getRun: () => ({ ...runEnvelope("run-123"), receiptPath: "/tmp/receipt.json" }),
 			abort: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
 			drain: async () => {},
 		};
 
@@ -601,6 +607,12 @@ describe("contracts/tools dispatch run paths", () => {
 			listRuns: () => [],
 			getRun: (runId: string) => runEnvelope(runId),
 			abort: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
 			drain: async () => {},
 		};
 
