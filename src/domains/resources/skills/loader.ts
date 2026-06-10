@@ -35,6 +35,8 @@ export interface SkillProvenance {
 	registryUrl?: string;
 	installedAt?: string;
 	updatedAt?: string;
+	/** Content hash of the upstream SKILL.md at install time, provenance-stripped. */
+	installedHash?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
 }
 
@@ -349,16 +351,19 @@ function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenanc
 	const registryUrl = stringField(frontmatter, "registry-url") ?? stringField(frontmatter, "registryUrl");
 	const installedAt = stringField(frontmatter, "installed-at") ?? stringField(frontmatter, "installedAt");
 	const updatedAt = stringField(frontmatter, "updated-at") ?? stringField(frontmatter, "updatedAt");
+	const installedHash = stringField(frontmatter, "installed-hash") ?? stringField(frontmatter, "installedHash");
 	const auditRaw = stringField(frontmatter, "audit");
 	const audit =
 		auditRaw === "pass" || auditRaw === "warn" || auditRaw === "fail" || auditRaw === "unknown" ? auditRaw : undefined;
-	if (!installUrl && !registryId && !registryUrl && !installedAt && !updatedAt && !audit) return undefined;
+	if (!installUrl && !registryId && !registryUrl && !installedAt && !updatedAt && !installedHash && !audit)
+		return undefined;
 	return {
 		...(installUrl ? { installUrl } : {}),
 		...(registryId ? { registryId } : {}),
 		...(registryUrl ? { registryUrl } : {}),
 		...(installedAt ? { installedAt } : {}),
 		...(updatedAt ? { updatedAt } : {}),
+		...(installedHash ? { installedHash } : {}),
 		...(audit ? { audit } : {}),
 	};
 }
@@ -609,6 +614,27 @@ function resolveSkillCollisions(candidates: ReadonlyArray<SkillCandidate>): {
 	return { winners, diagnostics };
 }
 
+/** Warn on typed `requires: [skill:name, ...]` entries that resolve to no loaded skill. */
+function requiresDiagnostics(winners: ReadonlyArray<Skill>): ResourceDiagnostic[] {
+	const names = new Set(winners.map((skill) => skill.name));
+	const out: ResourceDiagnostic[] = [];
+	for (const skill of winners) {
+		const requires = skill.metadata.requires;
+		if (!Array.isArray(requires)) continue;
+		for (const entry of requires) {
+			if (typeof entry !== "string" || !entry.startsWith("skill:")) continue;
+			const dep = entry.slice("skill:".length).trim();
+			if (dep.length === 0 || names.has(dep)) continue;
+			out.push({
+				type: "warning",
+				message: `${skill.name} requires skill "${dep}" which is not available`,
+				path: skill.filePath,
+			});
+		}
+	}
+	return out;
+}
+
 export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 	const roots = input.roots ?? (input.disableDiscovery === true ? [] : defaultSkillRoots(input));
 	const diagnostics: ResourceDiagnostic[] = [];
@@ -618,9 +644,10 @@ export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 	];
 	const deduped = dedupeCanonicalSkillPaths(candidates, diagnostics);
 	const resolved = resolveSkillCollisions(deduped);
+	const winners = [...resolved.winners].sort((a, b) => a.name.localeCompare(b.name));
 	return {
-		items: [...resolved.winners].sort((a, b) => a.name.localeCompare(b.name)),
-		diagnostics: [...diagnostics, ...resolved.diagnostics],
+		items: winners,
+		diagnostics: [...diagnostics, ...resolved.diagnostics, ...requiresDiagnostics(winners)],
 	};
 }
 
@@ -653,7 +680,7 @@ export function formatSkillsCatalogForPrompt(skills: SkillList): string {
 	const lines = [
 		"# Skills",
 		"",
-		"Use a skill when its description matches the task. This catalog lists names, sources, and descriptions only; call read_skill to load the full SKILL.md body and resolve referenced files against the returned base_dir. Do not run bundled scripts unless normal Clio tool safety permits the call.",
+		"Use a skill when its description matches the task. This catalog lists names, sources, and descriptions only; call read_skill to load the full SKILL.md body and resolve referenced files against the returned base_dir. Do not run bundled scripts unless normal Clio tool safety permits the call. When intent is ambiguous, prefer an interview skill before planning; when a plan spans multiple agent runs, slice it into an executable sprint before dispatching.",
 		"",
 		`<available_skills catalog_hash="${shortHash(catalogHash)}">`,
 	];

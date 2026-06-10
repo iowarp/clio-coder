@@ -36,6 +36,18 @@ export {
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
 export {
+	type InstallSkillInput,
+	type InstallSkillResult,
+	installSkill,
+	normalizedSkillHash,
+	parseSkillSourceSpec,
+	type SkillSourceSpec,
+	type SkillUpdateReport,
+	type SkillUpdateStatus,
+	type UpdateSkillsInput,
+	updateSkills,
+} from "./skills/install.js";
+export {
 	defaultSkillRoots,
 	expandSkillInvocationInput,
 	formatSkillsCatalogForPrompt,
