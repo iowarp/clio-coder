@@ -1,4 +1,5 @@
 import { Editor, type TUI } from "../engine/tui.js";
+import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
@@ -30,8 +31,40 @@ export interface EditorChrome {
  * deliberately does not repeat any of these.
  */
 export function composeRailLabel(chrome: EditorChrome): string {
-	const think = chrome.getThinkingLabel();
-	return `${chrome.getModelLabel()} · think ${think}`;
+	const think = normalizeThinkingHint(chrome.getThinkingLabel());
+	return `${chrome.getModelLabel()} · ${think}`;
+}
+
+function normalizeThinkingHint(value: string): string {
+	return value
+		.replace(/^think\s+/i, "")
+		.trim()
+		.toLowerCase();
+}
+
+function styledThinkingHint(theme: ClioTheme, value: string): string {
+	const hint = normalizeThinkingHint(value);
+	switch (hint) {
+		case "off":
+			return theme.fg("dim", hint);
+		case "minimal":
+		case "low":
+			return theme.style("accentDeep", hint, { dim: true });
+		case "medium":
+			return theme.fg("accentDeep", hint);
+		case "high":
+			return theme.style("accent", hint, { bold: true });
+		case "xhigh":
+		case "max":
+		case "on":
+			return theme.style("frameStrong", hint, { bold: true });
+		default:
+			return theme.fg("dim", hint);
+	}
+}
+
+function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
+	return `${theme.fg("dim", chrome.getModelLabel())} ${theme.fg("dim", "·")} ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
 }
 
 export class ClioEditor extends Editor {
@@ -50,9 +83,9 @@ export class ClioEditor extends Editor {
 
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			lines[0] = rule(theme, safeWidth, {
-				right: composeRailLabel(this.chrome),
+				right: styledRailLabel(theme, this.chrome),
 				fillToken: "frameStrong",
-				rightToken: "dim",
+				rightRaw: true,
 			});
 		}
 
