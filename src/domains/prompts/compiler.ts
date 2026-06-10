@@ -265,6 +265,15 @@ function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
 		"Repository structure and CLIO.md contents are not preloaded every turn.",
 		"Use workspace_context for a quick workspace snapshot. Use codewiki tools for indexed TypeScript structure when entry_points, where_is, or find_symbol are active. Use grep/read for exact file evidence.",
 		"Do not infer mutable repo details from the pinned prompt envelope.",
+		"",
+		"- **Clio-internal Grounding Policy**:",
+		"  - For questions about where code, context priming, context handoff, skills, tools, prompts, or harness behavior live, you MUST inspect local project context or call available lookup tools (such as `where_is`, `find_symbol`, `entry_points`, `workspace_context`, `grep`, or `read`) before answering. Never answer from generic assumptions or hallucinate details.",
+		"  - Do not invent automatic tool behavior (e.g., claiming a tool runs automatically when it must be explicitly called).",
+		"  - Clearly distinguish:",
+		"    - `workspace_context`: An explicit, manual workspace snapshot tool (unless the codebase proves automatic invocation for a specific hook).",
+		"    - `dispatch` / `dispatch_batch`: Shadow-agent/fleet delegation tools.",
+		"    - Context handoff: A context-engine artifact/workflow (e.g., `.clio/handoffs/`), if present.",
+		"    - Context priming: A prompt/context loading workflow (e.g., `.clio` or CLIO.md loading), if present.",
 	].join("\n");
 }
 
@@ -501,8 +510,11 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		toolIsActive(inputs.dynamicInputs, "dispatch") ? inputs.dynamicInputs.agentCatalogDelta : undefined,
 	);
 	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn", "turnContext");
+	const hasProjectSkills = inputs.dynamicInputs.skillsCatalog?.includes('scope="project"') === true;
 	const skillsCatalog = renderSkillsCatalogBlock(
-		toolIsActive(inputs.dynamicInputs, "read_skill") || toolIsActive(inputs.dynamicInputs, "create_skill")
+		toolIsActive(inputs.dynamicInputs, "read_skill") ||
+		toolIsActive(inputs.dynamicInputs, "create_skill") ||
+		hasProjectSkills
 			? inputs.dynamicInputs.skillsCatalog
 			: undefined,
 	);
