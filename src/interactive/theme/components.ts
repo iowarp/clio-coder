@@ -45,7 +45,7 @@ export function settingsListTheme(theme: ClioTheme): SettingsListTheme {
 
 export function editorTheme(theme: ClioTheme): EditorTheme {
 	return {
-		borderColor: (text) => theme.fg("frame", text),
+		borderColor: (text) => theme.style("frameStrong", text, { bold: true }),
 		selectList: selectListTheme(theme),
 	};
 }

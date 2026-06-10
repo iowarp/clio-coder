@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
-import type { ClioTheme } from "./tokens.js";
+import type { ClioTheme, ClioToken } from "./tokens.js";
 
 function padAnsi(text: string, width: number): string {
 	const clipped = truncateToWidth(text, Math.max(0, width), "", true);
@@ -9,16 +9,20 @@ function padAnsi(text: string, width: number): string {
 export interface RuleOptions {
 	left?: string;
 	right?: string;
+	fillToken?: ClioToken;
+	rightToken?: ClioToken;
 }
 
 export function rule(theme: ClioTheme, width: number, options: RuleOptions = {}): string {
 	const safeWidth = Math.max(0, width);
 	if (safeWidth === 0) return "";
 	const left = options.left ? ` ${theme.style("accent", options.left, { bold: true })} ` : "";
-	const right = options.right ? ` ${theme.fg("muted", options.right)} ` : "";
+	const right = options.right ? ` ${theme.fg(options.rightToken ?? "muted", options.right)} ` : "";
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
-	const fill = theme.fg("frame", "─".repeat(safeWidth - labelsWidth));
+	const fill = theme.style(options.fillToken ?? "frame", "─".repeat(safeWidth - labelsWidth), {
+		bold: options.fillToken === "frameStrong",
+	});
 	return `${left}${fill}${right}`;
 }
 
