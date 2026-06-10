@@ -18,6 +18,8 @@ type SerializedSettings = Omit<ClioSettings, "endpoints" | "orchestrator" | "wor
 	workers: {
 		default: Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null };
 		profiles: Record<string, Omit<ClioSettings["workers"]["default"], "endpoint"> & { target: string | null }>;
+		maxRetries: ClioSettings["workers"]["maxRetries"];
+		onPermission: ClioSettings["workers"]["onPermission"];
 	};
 };
 
@@ -304,6 +306,9 @@ function normalizeDelegationAgent(
 		permissionTimeoutMs: positiveInteger(value.permissionTimeoutMs, defaults.permissionTimeoutMs),
 		toolGovernance: normalizeDelegationToolGovernance(value.toolGovernance, defaults.toolGovernance),
 	};
+	if (typeof value.stallTimeoutMs === "number" && Number.isInteger(value.stallTimeoutMs)) {
+		agent.stallTimeoutMs = value.stallTimeoutMs;
+	}
 	const cwd = trimString(value.cwd);
 	const env = trimStringRecord(value.env);
 	const labels = trimStringRecord(value.labels);
@@ -642,6 +647,16 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 			DEFAULT_SETTINGS.workers.default,
 			settings.endpoints,
 		);
+		if (
+			typeof raw.workers.maxRetries === "number" &&
+			Number.isInteger(raw.workers.maxRetries) &&
+			raw.workers.maxRetries >= 0
+		) {
+			settings.workers.maxRetries = raw.workers.maxRetries;
+		}
+		if (raw.workers.onPermission === "deny" || raw.workers.onPermission === "fail") {
+			settings.workers.onPermission = raw.workers.onPermission;
+		}
 	}
 
 	settings.scope = normalizeScope(raw.scope, settings.endpoints);
@@ -825,6 +840,8 @@ function serializeSettings(settings: ClioSettings): SerializedSettings {
 				thinkingLevel: workers.default.thinkingLevel,
 			},
 			profiles,
+			maxRetries: workers.maxRetries,
+			onPermission: workers.onPermission,
 		},
 	};
 }

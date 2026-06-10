@@ -6,7 +6,7 @@
  */
 
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
-import type { DispatchRequestOrigin } from "./types.js";
+import type { DispatchRequestOrigin, RunLineage } from "./types.js";
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -27,6 +27,12 @@ export interface JobSpec {
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	requestOrigin?: DispatchRequestOrigin;
+	/**
+	 * Caller-supplied lineage for retries and nested dispatch (fleet steps).
+	 * Omitted for root runs; the dispatch extension then mints a root lineage
+	 * with rootRunId = the new run's own id.
+	 */
+	lineage?: RunLineage;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -48,6 +54,7 @@ const KNOWN_KEYS = new Set([
 	"skillPaths",
 	"trustProjectCompatRoots",
 	"requestOrigin",
+	"lineage",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
@@ -163,6 +170,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("lineage" in spec && spec.lineage !== undefined) {
+		if (!isValidLineage(spec.lineage)) {
+			errors.push("lineage must carry parentRunId (string|null), rootRunId (string), attempt >= 0, depth >= 0");
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -189,5 +202,15 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;
 	}
+	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	return { ok: true, spec: out };
+}
+
+function isValidLineage(value: unknown): value is RunLineage {
+	if (!isPlainObject(value)) return false;
+	const parentOk = value.parentRunId === null || (typeof value.parentRunId === "string" && value.parentRunId.length > 0);
+	const rootOk = typeof value.rootRunId === "string" && value.rootRunId.length > 0;
+	const attemptOk = typeof value.attempt === "number" && Number.isInteger(value.attempt) && value.attempt >= 0;
+	const depthOk = typeof value.depth === "number" && Number.isInteger(value.depth) && value.depth >= 0;
+	return parentOk && rootOk && attemptOk && depthOk;
 }

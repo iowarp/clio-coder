@@ -26,7 +26,7 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import { resolveToolPalette } from "../tools/palette.js";
-import type { WorkerPromptMessage } from "../worker/spec-contract.js";
+import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
@@ -64,6 +64,8 @@ export interface WorkerRunInput {
 	/** Recipe-bound skill names; read_skill admits exactly these for the run. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/** Non-stall posture for permission-requiring tool calls; default "deny". */
+	onPermission?: "deny" | "fail";
 }
 
 export interface WorkerRunResult {
@@ -258,11 +260,46 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		emit(event);
 	});
 
+	// Non-stall guarantee (Symphony §10.5): a dispatched worker has no
+	// operator, so a permission-requiring tool call must never park forever.
+	// "deny" resolves the parked call as a structured denial and the run
+	// continues; "fail" denies it and aborts the run, which then exits with
+	// the dedicated permission-required code so the orchestrator can resolve
+	// the outcome as failed/permission_required without racing the event
+	// stream.
+	const onPermission = input.onPermission ?? "deny";
+	let permissionFailure = false;
+	const unsubscribePermission = registry.onPermissionRequired((call, decision) => {
+		const reason =
+			onPermission === "fail"
+				? `permission required for ${call.tool} (${decision.classification.actionClass}); workers.onPermission=fail ends this run`
+				: `permission denied by policy: dispatched workers run non-interactively (workers.onPermission=deny); ${call.tool} requires ${decision.classification.actionClass} confirmation`;
+		emit({
+			type: "clio_permission_resolved",
+			payload: {
+				tool: call.tool,
+				actionClass: decision.classification.actionClass,
+				mode: onPermission,
+				reason,
+			},
+		} as ClioWorkerEvent);
+		if (onPermission === "fail") {
+			permissionFailure = true;
+			registry.cancelParkedCalls(reason);
+			agent.abort();
+			return;
+		}
+		registry.cancelParkedCalls(reason);
+	});
+
 	const promise = (async (): Promise<WorkerRunResult> => {
 		try {
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();
+			if (permissionFailure) {
+				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+			}
 			const messages = agent.state.messages;
 			const errorMessage = getTerminalAgentError(messages);
 			if (errorMessage !== null) {
@@ -274,10 +311,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return { messages, exitCode: 0 };
 		} catch (err) {
 			unsubscribe();
+			if (permissionFailure) {
+				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+			}
 			const msg = err instanceof Error ? err.message : String(err);
 			emit({ type: "agent_end", messages: agent.state.messages });
 			process.stderr.write(`[worker] agent error: ${msg}\n`);
 			return { messages: agent.state.messages, exitCode: 1 };
+		} finally {
+			unsubscribePermission();
 		}
 	})();
 

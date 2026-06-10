@@ -85,7 +85,8 @@
 		"install:local": "bash scripts/install-local.sh",
 		"uninstall:local": "bash scripts/uninstall-local.sh",
 		"hooks:install": "bash scripts/install-hooks.sh",
-		"prepublishOnly": "npm run ci:release"
+		"prepublishOnly": "npm run ci:release",
+		"skills:pin": "node --import tsx scripts/pin-skills.ts"
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "0.79.1",

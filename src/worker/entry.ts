@@ -54,6 +54,7 @@ async function main(): Promise<number> {
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
+		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;

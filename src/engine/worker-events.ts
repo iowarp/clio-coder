@@ -17,10 +17,21 @@ export interface ClioToolFinishEvent {
 	payload: ToolFinishEvent;
 }
 
-export type ClioWorkerEvent = ClioToolStartEvent | ClioToolFinishEvent;
+/** Emitted when the worker's non-stall policy resolves a permission-requiring tool call. */
+export interface ClioPermissionResolvedEvent {
+	type: "clio_permission_resolved";
+	payload: {
+		tool: string;
+		actionClass: string;
+		mode: "deny" | "fail";
+		reason: string;
+	};
+}
+
+export type ClioWorkerEvent = ClioToolStartEvent | ClioToolFinishEvent | ClioPermissionResolvedEvent;
 
 export function isClioWorkerEvent(value: unknown): value is ClioWorkerEvent {
 	if (!value || typeof value !== "object") return false;
 	const type = (value as { type?: unknown }).type;
-	return type === "clio_tool_start" || type === "clio_tool_finish";
+	return type === "clio_tool_start" || type === "clio_tool_finish" || type === "clio_permission_resolved";
 }

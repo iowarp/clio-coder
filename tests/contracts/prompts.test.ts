@@ -505,6 +505,12 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			listRuns: () => [],
 			getRun: () => null,
 			abort: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
 			drain: async () => {},
 		};
 		const spec = createDispatchTool({ dispatch });

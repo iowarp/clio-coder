@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } from "./types.js";
 
-export const RUN_RECEIPT_INTEGRITY_VERSION = 1;
+/**
+ * Integrity versions. v1 predates the outcome/lineage/identity blocks; v2
+ * folds them into the digest. Verification branches strictly on the version
+ * recorded in the receipt's integrity block, never on field-presence
+ * heuristics, so every pre-v2 receipt keeps verifying unchanged.
+ */
+export const RUN_RECEIPT_INTEGRITY_VERSION = 2;
+export type ReceiptIntegrityVersion = 1 | 2;
+const KNOWN_INTEGRITY_VERSIONS: ReadonlySet<number> = new Set([1, 2]);
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
 export type ReceiptIntegrityResult = { ok: true } | { ok: false; reason: string };
@@ -53,7 +61,7 @@ function serializeCanonical(value: unknown): string {
 	throw new Error(`receipt integrity: unsupported value of type ${typeof value}`);
 }
 
-function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptDraft {
+function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: ReceiptIntegrityVersion): RunReceiptDraft {
 	const draft: RunReceiptDraft = {
 		runId: receipt.runId,
 		agentId: receipt.agentId,
@@ -125,10 +133,29 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptD
 	if (receipt.runtimeResolution !== undefined) {
 		draft.runtimeResolution = receipt.runtimeResolution;
 	}
+	if (version >= 2) {
+		if (receipt.outcome !== undefined) draft.outcome = receipt.outcome;
+		if (receipt.outcomeDetail !== undefined) draft.outcomeDetail = receipt.outcomeDetail;
+		if (receipt.lineage !== undefined) draft.lineage = receipt.lineage;
+		if (receipt.identity !== undefined) draft.identity = receipt.identity;
+	}
 	return draft;
 }
 
-function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
+function ledgerDigestFields(envelope: RunEnvelope, version: ReceiptIntegrityVersion): Record<string, unknown> {
+	if (version >= 2) {
+		return {
+			...ledgerDigestFieldsV1(envelope),
+			outcome: envelope.outcome ?? null,
+			outcomeDetail: envelope.outcomeDetail ?? null,
+			lineage: envelope.lineage ?? null,
+			identity: envelope.identity ?? null,
+		};
+	}
+	return ledgerDigestFieldsV1(envelope);
+}
+
+function ledgerDigestFieldsV1(envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		id: envelope.id,
 		agentId: envelope.agentId,
@@ -154,24 +181,29 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	};
 }
 
-function integrityPayload(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
+function integrityPayload(
+	receipt: RunReceipt | RunReceiptDraft,
+	envelope: RunEnvelope,
+	version: ReceiptIntegrityVersion,
+): Record<string, unknown> {
 	return {
 		contract: "clio.runReceipt.integrity",
-		version: RUN_RECEIPT_INTEGRITY_VERSION,
+		version,
 		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFields(receipt),
-		ledger: ledgerDigestFields(envelope),
+		receipt: receiptDigestFields(receipt, version),
+		ledger: ledgerDigestFields(envelope, version),
 	};
 }
 
 export function computeReceiptIntegrity(
 	receipt: RunReceipt | RunReceiptDraft,
 	envelope: RunEnvelope,
+	version: ReceiptIntegrityVersion = RUN_RECEIPT_INTEGRITY_VERSION,
 ): RunReceiptIntegrity {
 	return {
-		version: RUN_RECEIPT_INTEGRITY_VERSION,
+		version,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayload(receipt, envelope))),
+		digest: sha256(canonicalJson(integrityPayload(receipt, envelope, version))),
 	};
 }
 
@@ -186,7 +218,8 @@ export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return (
-		candidate.version === RUN_RECEIPT_INTEGRITY_VERSION &&
+		typeof candidate.version === "number" &&
+		KNOWN_INTEGRITY_VERSIONS.has(candidate.version) &&
 		candidate.algorithm === RUN_RECEIPT_INTEGRITY_ALGORITHM &&
 		typeof candidate.digest === "string" &&
 		/^[0-9a-f]{64}$/.test(candidate.digest)
@@ -216,6 +249,10 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["dynamicHash", receipt.dynamicHash ?? null, envelope.dynamicHash ?? null],
 		["costUsd", receipt.costUsd, envelope.costUsd],
 		["sessionId", receipt.sessionId, envelope.sessionId],
+		// Lineage/identity are structural and covered by the digest; outcome is
+		// scalar and cross-checked here for a precise mismatch reason.
+		["outcome", receipt.outcome ?? null, envelope.outcome ?? null],
+		["outcomeDetail", receipt.outcomeDetail ?? null, envelope.outcomeDetail ?? null],
 	];
 	for (const [field, receiptValue, ledgerValue] of sharedFields) {
 		if (!Object.is(receiptValue, ledgerValue)) return field;
@@ -231,7 +268,7 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
-	const expected = computeReceiptIntegrity(receipt, envelope);
+	const expected = computeReceiptIntegrity(receipt, envelope, receipt.integrity.version);
 	if (expected.digest !== receipt.integrity.digest) {
 		return { ok: false, reason: "integrity mismatch" };
 	}

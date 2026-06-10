@@ -2,6 +2,7 @@ import type { DelegationAgentConfig } from "../../core/defaults.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
+import { AcpTimeoutError } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
 import { type AcpJsonRpcTransport, createStdioTransport } from "./transport.js";
@@ -26,6 +27,12 @@ export interface AcpDelegationRunHandle {
 	events: AsyncIterableIterator<AcpRunEvent>;
 	promise: Promise<AcpDelegationResult>;
 	abort(): void;
+	/**
+	 * Hard-terminate a stalled peer: closes the transport (SIGTERM to the
+	 * child, rejects all pending requests) so `promise` resolves promptly even
+	 * when the peer no longer answers session/cancel.
+	 */
+	kill(): void;
 	heartbeatAt: { current: number };
 	toolCallLog(): ReturnType<AcpToolMediator["snapshot"]>["toolCallLog"];
 }
@@ -260,6 +267,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				messages: [],
 				exitCode: 1,
 				stopReason: aborted ? "cancelled" : "error",
+				...(err instanceof AcpTimeoutError ? { timedOut: true } : {}),
 				failureMessage: message,
 				usage,
 				delegation: {
@@ -284,11 +292,21 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		}
 	})();
 
+	const kill = (): void => {
+		aborted = true;
+		try {
+			transport.close();
+		} catch {
+			// best effort; the close handler resolves the promise either way
+		}
+	};
+
 	return {
 		pid: transport.pid,
 		events: queue,
 		promise,
 		abort,
+		kill,
 		heartbeatAt,
 		toolCallLog: () => mediator.snapshot().toolCallLog,
 	};

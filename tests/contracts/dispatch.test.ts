@@ -1,13 +1,22 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains/dispatch/extension.js";
+import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
+import { resolveRunOutcome } from "../../src/domains/dispatch/outcome.js";
+import { openLedger } from "../../src/domains/dispatch/state.js";
+import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -16,6 +25,7 @@ import type { EndpointDescriptor } from "../../src/domains/providers/types/endpo
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
+import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 
 interface Deferred<T> {
@@ -36,6 +46,43 @@ function deferred<T>(): Deferred<T> {
 
 function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
+}
+
+async function waitFor(predicate: () => boolean, message: string, timeoutMs = 1000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		if (predicate()) return;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error(message);
+}
+
+async function drainEvents(events: AsyncIterableIterator<unknown>): Promise<unknown[]> {
+	const out: unknown[] = [];
+	for await (const event of events) out.push(event);
+	return out;
+}
+
+function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
+	const originalEnv = { ...process.env };
+	const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
+	process.env.CLIO_HOME = scratch;
+	process.env.CLIO_DATA_DIR = join(scratch, "data");
+	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+	resetXdgCache();
+	return Promise.resolve()
+		.then(() => fn(scratch))
+		.finally(() => {
+			for (const k of Object.keys(process.env)) {
+				if (!(k in originalEnv)) Reflect.deleteProperty(process.env, k);
+			}
+			for (const [k, v] of Object.entries(originalEnv)) {
+				if (v !== undefined) process.env[k] = v;
+			}
+			rmSync(scratch, { recursive: true, force: true });
+			resetXdgCache();
+		});
 }
 
 function stubContext(
@@ -462,6 +509,7 @@ describe("contracts/dispatch", () => {
 					pid: 4242,
 					heartbeatAt: { current: Date.now() },
 					abort: () => {},
+					kill: () => {},
 					toolCallLog: () => [
 						{
 							callId: "call-1",
@@ -719,5 +767,454 @@ rl.once("line", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+
+	it("table-drives terminal outcome resolution", () => {
+		const base = {
+			exitCode: 0,
+			abortedByOperator: false,
+			stallKilled: false,
+			timedOut: false,
+			permissionFailure: false,
+			policyDenied: null,
+			stopReason: null,
+		};
+		const cases = [
+			{ name: "clean exit", evidence: { ...base, exitCode: 0 }, outcome: "succeeded", detail: null },
+			{ name: "nonzero exit", evidence: { ...base, exitCode: 2 }, outcome: "failed", detail: "exit code 2" },
+			{
+				name: "stall kill",
+				evidence: { ...base, exitCode: 1, stallKilled: true },
+				outcome: "stalled",
+				detail: "no worker activity within the stall window",
+			},
+			{
+				name: "operator abort",
+				evidence: { ...base, exitCode: 1, abortedByOperator: true },
+				outcome: "canceled",
+				detail: "operator abort",
+			},
+			{
+				name: "admission rejection",
+				evidence: { ...base, policyDenied: "scope denied" },
+				outcome: "denied_by_policy",
+				detail: "scope denied",
+			},
+			{
+				name: "spawn ENOENT",
+				evidence: { ...base, exitCode: null },
+				outcome: "spawn_failed",
+				detail: "process never reached a live session",
+			},
+			{
+				name: "ACP turn timeout",
+				evidence: { ...base, exitCode: 1, timedOut: true },
+				outcome: "timed_out",
+				detail: "turn timeout exceeded",
+			},
+		] as const;
+		for (const c of cases) {
+			deepStrictEqual(resolveRunOutcome(c.evidence), { outcome: c.outcome, detail: c.detail }, c.name);
+		}
+	});
+
+	it("kills dead workers and schedules a bounded retry", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let abortCalled = false;
+		const bundle = createDispatchBundle(context, {
+			now: () => 1000,
+			heartbeatSpec: { windowMs: 1, graceMs: 1 },
+			heartbeatIntervalMs: 5,
+			resilienceCooldownMs: 0,
+			spawnWorker: () => ({
+				pid: 7001,
+				promise: exit.promise,
+				events: emptyEvents(),
+				heartbeatAt: { current: 0 },
+				abort: () => {
+					abortCalled = true;
+					exit.resolve({ exitCode: 1, signal: "SIGKILL" });
+				},
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stall me" });
+			await waitFor(() => abortCalled, "heartbeat reconciler did not kill dead worker");
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "stalled");
+			const retry = bundle.contract.snapshot().retrying[0];
+			strictEqual(retry?.runId, handle.runId);
+			strictEqual(retry?.attempt, 1);
+			strictEqual(retry?.reason.startsWith("stalled"), true);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry exhausted or canceled runs", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
+		const exits = [
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+		];
+		let spawnCount = 0;
+		const bundle = createDispatchBundle(context, {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => {
+				const idx = spawnCount++;
+				const exit = exits[idx];
+				if (!exit) throw new Error("unexpected spawn");
+				return {
+					pid: 7100 + idx,
+					promise: exit.promise,
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const exhausted = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "already retried",
+				lineage: { parentRunId: "parent", rootRunId: "root", attempt: 1, depth: 0 },
+			});
+			exits[0]?.resolve({ exitCode: 1, signal: null });
+			const exhaustedReceipt = await exhausted.finalPromise;
+			strictEqual(exhaustedReceipt.outcome, "failed");
+			strictEqual(bundle.contract.snapshot().retrying.length, 0);
+
+			const canceled = await bundle.contract.dispatch({ agentId: "coder", task: "cancel me" });
+			bundle.contract.abort(canceled.runId);
+			const canceledReceipt = await canceled.finalPromise;
+			strictEqual(canceledReceipt.outcome, "canceled");
+			strictEqual(bundle.contract.snapshot().retrying.length, 0);
+			strictEqual(spawnCount, 2);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("dispatchBatch throttles at the concurrency cap instead of throwing", async () => {
+		const base = stubContext();
+		let activeWorkers = 0;
+		const scheduling = {
+			ceilingUsd: () => 5,
+			checkCeiling: () => "under" as const,
+			raiseCeiling: () => {},
+			preflight: () => ({ verdict: "under" as const, currentUsd: 0, ceilingUsd: 5 }),
+			activeWorkers: () => activeWorkers,
+			tryAcquireWorker: () => {
+				if (activeWorkers >= 2) return false;
+				activeWorkers += 1;
+				return true;
+			},
+			releaseWorker: () => {
+				activeWorkers = Math.max(0, activeWorkers - 1);
+			},
+			listNodes: () => [],
+		};
+		const context: DomainContext = {
+			...base,
+			getContract: ((name: string) =>
+				name === "scheduling" ? scheduling : base.getContract(name)) as DomainContext["getContract"],
+		};
+		const exits = Array.from({ length: 5 }, () => deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>());
+		let spawnCount = 0;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => {
+				const idx = spawnCount++;
+				const exit = exits[idx];
+				if (!exit) throw new Error("unexpected spawn");
+				return {
+					pid: 7200 + idx,
+					promise: exit.promise,
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const batchPromise = bundle.contract.dispatchBatch(
+				Array.from({ length: 5 }, (_, i) => ({ agentId: "coder", task: `batch ${i}` })),
+			);
+			await waitFor(() => spawnCount === 2, "batch did not fill the first two worker slots");
+			exits[0]?.resolve({ exitCode: 0, signal: null });
+			await waitFor(() => spawnCount === 3, "batch did not admit third job after a slot freed");
+			exits[1]?.resolve({ exitCode: 0, signal: null });
+			await waitFor(() => spawnCount === 4, "batch did not admit fourth job after a slot freed");
+			exits[2]?.resolve({ exitCode: 0, signal: null });
+			await waitFor(() => spawnCount === 5, "batch did not admit fifth job after a slot freed");
+			exits[3]?.resolve({ exitCode: 0, signal: null });
+			exits[4]?.resolve({ exitCode: 0, signal: null });
+			const batch = await batchPromise;
+			const receipts = await batch.finalPromise;
+			strictEqual(receipts.length, 5);
+			strictEqual(spawnCount, 5);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("snapshot reflects running entries and retry queue rows", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
+		const runningExits = [
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+		];
+		let spawnCount = 0;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				const idx = spawnCount++;
+				if (spec.task === "fail for retry") {
+					return {
+						pid: 7300 + idx,
+						promise: Promise.resolve({ exitCode: 1, signal: null }),
+						events: emptyEvents(),
+						heartbeatAt: { current: Date.now() },
+						abort: () => {},
+					};
+				}
+				const exit = runningExits[idx];
+				if (!exit) throw new Error("unexpected running spawn");
+				return {
+					pid: 7300 + idx,
+					promise: exit.promise,
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const first = await bundle.contract.dispatch({ agentId: "coder", task: "running one" });
+			const second = await bundle.contract.dispatch({ agentId: "coder", task: "running two" });
+			const failed = await bundle.contract.dispatch({ agentId: "coder", task: "fail for retry" });
+			await failed.finalPromise;
+			const snapshot = bundle.contract.snapshot();
+			strictEqual(snapshot.running.length, 2);
+			strictEqual(snapshot.retrying.length, 1);
+			strictEqual(
+				snapshot.running.every((row) => row.heartbeat === "alive"),
+				true,
+			);
+			strictEqual(snapshot.retrying[0]?.attempt, 1);
+			runningExits[0]?.resolve({ exitCode: 0, signal: null });
+			runningExits[1]?.resolve({ exitCode: 0, signal: null });
+			await Promise.all([first.finalPromise, second.finalPromise]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("adopts valid orphan receipts and quarantines corrupt receipts", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const projectCwd = join(scratch, "project");
+			const lineage: RunLineage = { parentRunId: null, rootRunId: "root", attempt: 0, depth: 0 };
+			const identity = { host: "h", user: "u", hpc: null };
+			const ledger = openLedger({ maxRuns: 10 });
+			const env = ledger.create({
+				agentId: "coder",
+				task: "orphan task",
+				endpointId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: projectCwd,
+			});
+			const endedAt = "2026-06-10T00:00:01.000Z";
+			ledger.update(env.id, {
+				status: "completed",
+				outcome: "succeeded",
+				outcomeDetail: null,
+				lineage,
+				identity,
+				endedAt,
+				exitCode: 0,
+				tokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0,
+			});
+			const receiptDraft: RunReceiptDraft = {
+				runId: env.id,
+				agentId: "coder",
+				task: "orphan task",
+				endpointId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				outcome: "succeeded",
+				outcomeDetail: null,
+				lineage,
+				identity,
+				startedAt: env.startedAt,
+				endedAt,
+				exitCode: 0,
+				tokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0,
+				compiledPromptHash: null,
+				staticCompositionHash: null,
+				clioVersion: "0.0.0",
+				piMonoVersion: "0.0.0",
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: 0,
+				toolStats: [],
+				reproducibility: {
+					cwd: projectCwd,
+					git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
+					safetyPolicy: {
+						version: 1,
+						rulePackHash: null,
+						rulePackVersion: null,
+						projectPolicyPath: null,
+						projectPolicyHash: null,
+						projectPolicyValid: null,
+					},
+				},
+				sessionId: null,
+			};
+			ledger.recordReceipt(env.id, receiptDraft);
+			const corruptPath = join(scratch, "data", "receipts", "corrupt.json");
+			writeFileSync(corruptPath, "{not-json\n", "utf8");
+
+			const reopened = openLedger({ maxRuns: 10 });
+			strictEqual(reopened.get(env.id), null);
+			const summary = recoverOrphanReceipts(reopened);
+			strictEqual(summary.recovered, 1);
+			strictEqual(summary.corrupt, 1);
+			strictEqual(reopened.get(env.id)?.outcome, "succeeded");
+			ok(existsSync(`${corruptPath}.corrupt`));
+		});
+	});
+
+	it("native workers resolve permission requests without stalling and audit the denial", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.onPermission = "deny";
+		const permissionEvents: unknown[] = [];
+		const unsubscribe = context.bus.on(BusChannels.PermissionResolved, (payload) => {
+			permissionEvents.push(payload);
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 7401,
+					promise: exit.promise,
+					heartbeatAt: { current: Date.now() },
+					abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+					events: (async function* () {
+						yield {
+							type: "clio_permission_resolved",
+							payload: { tool: "bash", actionClass: "system_modify", mode: "deny", reason: "permission denied" },
+						};
+						yield {
+							type: "clio_tool_finish",
+							payload: {
+								tool: "bash",
+								posture: "operating",
+								durationMs: 1,
+								outcome: "blocked",
+								decision: "permission_requested",
+								actionClass: "system_modify",
+								reason: "permission denied",
+							},
+						};
+					})(),
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need permission" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual((capturedSpec as WorkerSpec | null)?.onPermission, "deny");
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.safety?.decisions.permissionRequested, 1);
+			strictEqual(receipt.safety?.blockedAttempts[0]?.actionClass, "system_modify");
+			strictEqual((permissionEvents[0] as { requestedBy?: string } | undefined)?.requestedBy, handle.runId);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("workers.onPermission=fail maps native permission exits to failed/permission_required", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.onPermission = "fail";
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 7501,
+					promise: Promise.resolve({ exitCode: 3, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "fail on permission" });
+			const receipt = await handle.finalPromise;
+			strictEqual((capturedSpec as WorkerSpec | null)?.onPermission, "fail");
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeDetail, "permission_required");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("ACP permission mediation resolves ask and unknown tools without operator input", async () => {
+		const askSafety: SafetyContract = {
+			classify: () => ({ actionClass: "system_modify", reasons: ["test"] }),
+			evaluate: () => ({
+				kind: "ask",
+				classification: { actionClass: "system_modify", reasons: ["test"] },
+				rejection: { short: "ask", detail: "ask", hints: [] },
+			}),
+			observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			isSubset,
+			audit: { recordCount: () => 0 },
+		};
+		const mediator = new AcpToolMediator({ safety: askSafety, cwd: "/tmp", toolGovernance: "clio-policy" });
+		const askResponse = await mediator.handle({
+			options: [{ optionId: "reject", kind: "reject_once" }],
+			toolCall: { toolCallId: "call-ask", kind: "execute", rawInput: { command: "sudo touch /etc/nope" } },
+		});
+		deepStrictEqual(askResponse, { outcome: { outcome: "selected", optionId: "reject" } });
+		strictEqual(mediator.snapshot().toolCallLog[0]?.decision, "denied");
+		strictEqual(mediator.snapshot().toolCallLog[0]?.reason?.startsWith("permission_required"), true);
+
+		const unknownResponse = await mediator.handle({
+			options: [{ optionId: "reject2", kind: "reject_once" }],
+			toolCall: { toolCallId: "call-unknown", kind: "mystery", rawInput: { tool: "launch_missiles" } },
+		});
+		deepStrictEqual(unknownResponse, { outcome: { outcome: "selected", optionId: "reject2" } });
+		strictEqual(mediator.snapshot().toolCallLog[1]?.decision, "denied");
+		strictEqual(mediator.snapshot().toolCallLog[1]?.reason, "unknown ACP tool: launch_missiles");
 	});
 });

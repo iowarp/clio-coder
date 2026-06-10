@@ -40,6 +40,7 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/connect [target]", action: "Connect to a target", scope: "editor" },
 	{ keys: "/disconnect [target]", action: "Disconnect a target", scope: "editor" },
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
+	{ keys: "/fleet", action: "Open fleet status overlay", scope: "editor" },
 	{ keys: "/status", action: "Show dashboard key hint", scope: "editor" },
 	{ keys: "/receipts [verify <runId>]", action: "Browse or verify receipts", scope: "editor" },
 	{

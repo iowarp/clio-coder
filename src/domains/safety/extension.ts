@@ -137,6 +137,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let unsubscribeSessionParked: (() => void) | null = null;
 	let unsubscribeSessionResumed: (() => void) | null = null;
 	let unsubscribeAgentStatusChanged: (() => void) | null = null;
+	let unsubscribeDispatchCompleted: (() => void) | null = null;
+	let unsubscribeDispatchFailed: (() => void) | null = null;
 
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
@@ -192,6 +194,45 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					}),
 				);
 			});
+			// Every dispatch terminal transition is auditable with its resolved
+			// outcome and lineage, so an auditor can walk a retry chain or a
+			// fleet step back to the operator-initiated root run.
+			const auditDispatchTerminal = (raw: unknown): void => {
+				if (!raw || typeof raw !== "object") return;
+				const payload = raw as Record<string, unknown>;
+				if (typeof payload.runId !== "string" || typeof payload.outcome !== "string") return;
+				const lineage =
+					payload.lineage && typeof payload.lineage === "object" && !Array.isArray(payload.lineage)
+						? (payload.lineage as Record<string, unknown>)
+						: null;
+				const durationMs = typeof payload.durationMs === "number" ? payload.durationMs : 0;
+				writeAudit(
+					buildAgentStatusChangeAuditRecord({
+						runId: payload.runId,
+						phase: payload.outcome,
+						prevPhase: "running",
+						elapsedFromStart: durationMs,
+						watchdogTier: 0,
+						metadata: {
+							outcome: payload.outcome,
+							...(payload.outcomeDetail !== undefined && payload.outcomeDetail !== null
+								? { outcomeDetail: payload.outcomeDetail }
+								: {}),
+							...(typeof payload.agentId === "string" ? { agentId: payload.agentId } : {}),
+							...(lineage !== null
+								? {
+										parentRunId: lineage.parentRunId ?? null,
+										rootRunId: lineage.rootRunId ?? null,
+										attempt: lineage.attempt ?? 0,
+										depth: lineage.depth ?? 0,
+									}
+								: {}),
+						},
+					}),
+				);
+			};
+			unsubscribeDispatchCompleted = context.bus.on(BusChannels.DispatchCompleted, auditDispatchTerminal);
+			unsubscribeDispatchFailed = context.bus.on(BusChannels.DispatchFailed, auditDispatchTerminal);
 		},
 		async stop() {
 			unsubscribePermissionResolved?.();
@@ -204,6 +245,10 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			unsubscribeSessionResumed = null;
 			unsubscribeAgentStatusChanged?.();
 			unsubscribeAgentStatusChanged = null;
+			unsubscribeDispatchCompleted?.();
+			unsubscribeDispatchCompleted = null;
+			unsubscribeDispatchFailed?.();
+			unsubscribeDispatchFailed = null;
 			await writer?.close();
 			writer = null;
 		},

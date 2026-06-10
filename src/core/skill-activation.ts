@@ -98,6 +98,8 @@ export interface SkillActivation {
 	source: string;
 	/** Precise root provenance, for example extension:user:<id> or codex-project. */
 	sourceOrigin?: string;
+	/** Pinned-manifest comparison verdict; "mismatch" records skill_drift. */
+	drift?: "match" | "mismatch";
 	triggeredBy: SkillActivationTrigger;
 	turnId?: string;
 }
@@ -141,11 +143,13 @@ export function skillActivationFromToolDetails(details: unknown, turnId?: string
 	const source = trimmedString(record.source);
 	const sourceOrigin = trimmedString(record.sourceOrigin) ?? trimmedString(record.origin);
 	if (!name || !filePath || !hash || !source) return null;
-	return skillActivationFromSource(
+	const activation = skillActivationFromSource(
 		{ name, filePath, hash, source, ...(sourceOrigin ? { sourceOrigin } : {}) },
 		"tool",
 		turnId,
 	);
+	if (record.drift === "match" || record.drift === "mismatch") activation.drift = record.drift;
+	return activation;
 }
 
 export function isSkillActivation(value: unknown): value is SkillActivation {

@@ -178,8 +178,17 @@ function emitFinish(
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;
-		event.decision =
-			extra.decision.kind === "allow" ? "allowed" : extra.decision.kind === "ask" ? "permission_requested" : "blocked";
+		const permissionWasRequired =
+			outcome === "blocked" &&
+			(extra.decision.kind === "ask" ||
+				(extra.decision.kind === "allow" && extra.decision.classification.actionClass === "system_modify"));
+		event.decision = permissionWasRequired
+			? "permission_requested"
+			: extra.decision.kind === "allow"
+				? "allowed"
+				: extra.decision.kind === "ask"
+					? "permission_requested"
+					: "blocked";
 		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
 		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;

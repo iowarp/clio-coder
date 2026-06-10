@@ -12,10 +12,10 @@
  * No worker spawning, no domain wire-up, no SafeEventBus emission yet. Those
  * land in P6S3 and P6S5. This slice is a pure persistence primitive.
  *
- * v0.1 known limitation: a crash between recordReceipt and persist leaves the
- * receipt JSON on disk without a ledger entry, so the orphan run does not
- * appear in listRuns(). Recovery scan at boot is tracked for v0.2 alongside
- * the full ledger replay path.
+ * A crash between recordReceipt and persist leaves the receipt JSON on disk
+ * without a ledger entry. The dispatch extension closes that gap at startup by
+ * scanning receipts/ and adopting verified orphans back into the ledger via
+ * adopt() (see orphan-recovery.ts).
  */
 
 import { randomBytes } from "node:crypto";
@@ -52,6 +52,8 @@ export interface Ledger {
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
 	recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt;
+	/** Insert a fully-formed envelope recovered from a durable artifact. Returns false when the id already exists. */
+	adopt(envelope: RunEnvelope): boolean;
 	persist(): Promise<void>;
 	reload(): void;
 }
@@ -81,7 +83,7 @@ function readRuns(): RunEnvelope[] {
 	return parsed;
 }
 
-function resolveMaxRuns(opt: number | undefined): number {
+export function resolveMaxRuns(opt?: number | undefined): number {
 	if (opt !== undefined && opt > 0) return Math.floor(opt);
 	const envRaw = process.env.CLIO_MAX_RUNS;
 	if (envRaw && envRaw.trim().length > 0) {
@@ -328,6 +330,13 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
 			runs[idx] = { ...current, receiptPath: target };
 			return receiptWithIntegrity;
+		},
+
+		adopt(envelope: RunEnvelope): boolean {
+			if (findIndex(envelope.id) !== -1) return false;
+			runs.push(cloneEnvelope(envelope));
+			runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
+			return true;
 		},
 
 		async persist(): Promise<void> {

@@ -149,6 +149,12 @@ export class AcpToolMediator {
 			if (safetyDecision.kind === "allow") {
 				decision = "approved";
 				reason = safetyDecision.policy?.reasonCode ?? "allowed";
+			} else if (safetyDecision.kind === "ask") {
+				// Non-stall policy: a delegation has no operator to answer an
+				// interactive prompt, so an "ask" resolves as a bounded denial
+				// instead of waiting on input that cannot arrive.
+				decision = "denied";
+				reason = "permission_required: denied by non-stall policy (no interactive operator in delegation context)";
 			} else {
 				decision = "denied";
 				reason = safetyDecision.policy?.reasonCode ?? safetyDecision.kind;

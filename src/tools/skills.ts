@@ -5,7 +5,13 @@ import { Type } from "typebox";
 import { stringify as stringifyYaml } from "yaml";
 import { ToolNames } from "../core/tool-names.js";
 import { clioConfigDir } from "../core/xdg.js";
-import { type LoadSkillsInput, loadSkills, modelVisibleSkills, type Skill } from "../domains/resources/index.js";
+import {
+	checkSkillDrift,
+	type LoadSkillsInput,
+	loadSkills,
+	modelVisibleSkills,
+	type Skill,
+} from "../domains/resources/index.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -180,7 +186,21 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			const tree = includeTree ? buildResourceTree(skill.baseDir, maxEntries) : null;
 			const pendingRequest = pendingSkillRequestFor(name, options);
 			const pendingTask = pendingRequest?.args.trim() ?? "";
-			const output = [...renderPendingSkillTask(name, options), renderReadSkillOutput(skill, tree)].join("\n");
+			// Provenance pinning: marketplace-installed skills (registry-id
+			// frontmatter) are compared against the local pinned manifest. A
+			// mismatch annotates the result and is recorded with the
+			// activation; it never blocks, the normal tool safety gates still
+			// govern whatever the skill asks for.
+			const drift = skill.provenance?.registryId ? checkSkillDrift(skill, cwdFromDeps(deps)) : null;
+			const driftWarning =
+				drift === "mismatch"
+					? `WARNING skill_drift: '${skill.name}' content (sha256 ${skill.hash.slice(0, 12)}…) no longer matches its pinned marketplace hash; the installed skill drifted from its audited content.`
+					: null;
+			const output = [
+				...(driftWarning !== null ? [driftWarning] : []),
+				...renderPendingSkillTask(name, options),
+				renderReadSkillOutput(skill, tree),
+			].join("\n");
 			const pendingPolicy = options?.pendingSkillPolicy;
 			if (pendingPolicy) {
 				pendingPolicy.loadedSkillNames.add(name);
@@ -209,6 +229,7 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 					diagnostics: skill.diagnostics.map((d) => d.message),
 					metadata: skill.metadata,
 					...(skill.provenance ? { provenance: skill.provenance } : {}),
+					...(drift !== null ? { drift } : {}),
 					...(tree ? { tree } : {}),
 				},
 			};

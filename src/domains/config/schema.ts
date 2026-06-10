@@ -152,6 +152,7 @@ const DelegationAgentSchema = Type.Object({
 	connectTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
 	turnTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
 	permissionTimeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+	stallTimeoutMs: Type.Optional(Type.Integer()),
 	toolGovernance: Type.Optional(DelegationToolGovernanceSchema),
 	labels: Type.Optional(Type.Record(Type.String(), Type.String())),
 });
@@ -176,6 +177,10 @@ export const SettingsSchema = Type.Object({
 	workers: Type.Object({
 		default: WorkerTargetSchema,
 		profiles: Type.Record(Type.String({ minLength: 1 }), WorkerTargetSchema),
+		// Optional so settings files written before these keys existed validate;
+		// core/config.ts fills DEFAULT_SETTINGS values on load.
+		maxRetries: Type.Optional(Type.Integer({ minimum: 0 })),
+		onPermission: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("fail")])),
 	}),
 	scope: Type.Array(Type.String()),
 	budget: Type.Object({

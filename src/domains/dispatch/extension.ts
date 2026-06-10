@@ -49,29 +49,53 @@ import type { SafetyContract } from "../safety/contract.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
+import { type BackoffState, createBackoff, nextDelay } from "./backoff.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
-import type { DispatchContract, DispatchRequest } from "./contract.js";
+import {
+	DispatchConcurrencyError,
+	type DispatchContract,
+	type DispatchRequest,
+	type DispatchSnapshot,
+} from "./contract.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import { recoverOrphanReceipts } from "./orphan-recovery.js";
+import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
+import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
 import { countToolCalls, recordToolFinish, snapshotToolStats } from "./tool-stats.js";
-import type {
-	DispatchRequestOrigin,
-	RunEnvelope,
-	RunKind,
-	RunReceipt,
-	RunReceiptDraft,
-	RunReceiptUpstreamResponse,
-	RunStatus,
-	SafetyBlockedAttempt,
-	ToolCallStat,
+import {
+	type DispatchRequestOrigin,
+	RETRYABLE_OUTCOMES,
+	type RunEnvelope,
+	type RunKind,
+	type RunLineage,
+	type RunOutcome,
+	type RunReceipt,
+	type RunReceiptDraft,
+	type RunReceiptUpstreamResponse,
+	type RunStatus,
+	type SafetyBlockedAttempt,
+	type ToolCallStat,
 } from "./types.js";
 import { validateJobSpec } from "./validation.js";
 import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
+interface RunTokenMeter {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	reasoningTokens: number;
+}
+
 interface ActiveRun {
 	runId: string;
+	/** Original request, kept verbatim so a retry re-passes the full admission chain. */
+	req: DispatchRequest;
 	abort: () => void;
+	/** Hard termination used by the reconciler; for native workers this is the SIGTERM→SIGKILL path. */
+	kill: () => void;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
@@ -85,9 +109,15 @@ interface ActiveRun {
 	task: string;
 	cwd: string;
 	aborted: boolean;
+	/** Set by the reconciler before terminating a dead/stalled worker. */
+	stallKilled: boolean;
+	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
+	stallTimeoutMs: number | null;
+	lineage: RunLineage;
 	heartbeatAt: { current: number } | null;
 	heartbeatStatus: HeartbeatStatus;
-	terminalStatusOverride: RunStatus | null;
+	meter: RunTokenMeter;
+	pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
 	finalPromise: Promise<RunReceipt>;
 }
 
@@ -102,6 +132,8 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
+/** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
+const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 
 function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
 	return req.requestOrigin ?? "agent";
@@ -475,6 +507,10 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	} else if (config) {
 		spec.trustProjectCompatRoots = config.get().skills.trustProjectCompatRoots === true;
 	}
+	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
+	// to answer a permission prompt, so the resolution policy ships with the
+	// spec and the worker enforces it within bounded time.
+	spec.onPermission = config?.get().workers.onPermission ?? "deny";
 	return spec;
 }
 
@@ -626,6 +662,133 @@ export function createDispatchBundle(
 	const active = new Map<string, ActiveRun>();
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 
+	/**
+	 * In-memory retry queue (Symphony §14.3: it does not survive restart and
+	 * must not pretend to). Keyed by the finished run's id; backoff state is
+	 * keyed by the retry chain's rootRunId.
+	 */
+	interface RetryQueueEntry {
+		runId: string;
+		agentId: string;
+		attempt: number;
+		dueAt: number;
+		reason: string;
+		timer: ReturnType<typeof setTimeout>;
+	}
+	const retryQueue = new Map<string, RetryQueueEntry>();
+	const retryBackoff = new Map<string, BackoffState>();
+	let draining = false;
+
+	/** Session-scope totals for the operator snapshot; finalized runs only. */
+	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
+
+	function workersMaxRetries(): number {
+		const value = config?.get().workers?.maxRetries;
+		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 2;
+	}
+
+	function lineageFor(req: DispatchRequest, runId: string): RunLineage {
+		if (req.lineage) return { ...req.lineage };
+		return { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 };
+	}
+
+	function accumulateFinalizedTotals(receipt: RunReceipt): void {
+		finalizedTotals.inputTokens += receipt.inputTokenCount ?? 0;
+		finalizedTotals.outputTokens += receipt.outputTokenCount ?? 0;
+		finalizedTotals.totalTokens += receipt.tokenCount;
+		finalizedTotals.costUsd += receipt.costUsd;
+		const startMs = Date.parse(receipt.startedAt);
+		const endMs = Date.parse(receipt.endedAt);
+		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+			finalizedTotals.runtimeSeconds += Math.max(0, endMs - startMs) / 1000;
+		}
+	}
+
+	function maybeScheduleRetry(run: ActiveRun, outcome: RunOutcome, detail: string | null): void {
+		if (draining) return;
+		const rootRunId = run.lineage.rootRunId;
+		if (!RETRYABLE_OUTCOMES.has(outcome)) {
+			retryBackoff.delete(rootRunId);
+			return;
+		}
+		const maxRetries = workersMaxRetries();
+		if (maxRetries <= 0 || run.lineage.attempt >= maxRetries) {
+			retryBackoff.delete(rootRunId);
+			return;
+		}
+		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
+		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
+		retryBackoff.set(rootRunId, nextBackoff);
+		// Retries re-pass every admission gate, including the target cooldown.
+		// Honoring the gate means waiting it out, not skipping it: schedule no
+		// earlier than the cooldown expiry so the retry is not denied on
+		// arrival by a cooldown this same failure created.
+		const cooldown = targetCooldowns.get(cooldownKey(run.endpointId, run.runtimeId, run.wireModelId));
+		const cooldownRemainingMs = cooldown ? Math.max(0, cooldown.until - now()) : 0;
+		const delayMs = Math.max(backoffDelayMs, cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0);
+		const attempt = run.lineage.attempt + 1;
+		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
+		const timer = setTimeout(() => {
+			retryQueue.delete(run.runId);
+			void executeRetry(run, attempt);
+		}, delayMs);
+		timer.unref?.();
+		retryQueue.set(run.runId, {
+			runId: run.runId,
+			agentId: run.agentId,
+			attempt,
+			dueAt: now() + delayMs,
+			reason,
+			timer,
+		});
+	}
+
+	/**
+	 * A retry is a brand-new run with a new runId, re-validated through the
+	 * full admission chain. If admission rejects it the chain ends as
+	 * denied_by_policy; there is no requeue.
+	 */
+	async function executeRetry(run: ActiveRun, attempt: number): Promise<void> {
+		if (draining) return;
+		const retryReq: DispatchRequest = {
+			...run.req,
+			requestOrigin: "internal",
+			lineage: {
+				parentRunId: run.runId,
+				rootRunId: run.lineage.rootRunId,
+				attempt,
+				depth: run.lineage.depth,
+			},
+		};
+		try {
+			const handle = await dispatch(retryReq);
+			// No interactive consumer exists for a retry, so drain the event
+			// stream here; token accounting and tool stats fold in as a side
+			// effect of iteration.
+			void (async () => {
+				for await (const _ of handle.events) {
+					// drained
+				}
+			})().catch(() => {});
+			handle.finalPromise.catch(() => {});
+		} catch (err) {
+			retryBackoff.delete(run.lineage.rootRunId);
+			const message = err instanceof Error ? err.message : String(err);
+			context.bus.emit(BusChannels.DispatchFailed, {
+				runId: run.runId,
+				agentId: run.agentId,
+				...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
+				endpointId: run.endpointId,
+				wireModelId: run.wireModelId,
+				runtimeId: run.runtimeId,
+				runtimeKind: run.runtimeKind,
+				reason: "retry_denied",
+				outcome: "denied_by_policy" satisfies RunOutcome,
+				outcomeDetail: `retry attempt ${attempt} rejected: ${message}`,
+			});
+		}
+	}
+
 	function requireLedger(): Ledger {
 		if (!ledger) throw new Error("dispatch: ledger not initialised");
 		return ledger;
@@ -657,13 +820,39 @@ export function createDispatchBundle(
 		});
 	}
 
+	/**
+	 * Reconciler tick (Symphony §8.1: reconcile before dispatch). Observes
+	 * every running entry and acts on the classification: a stale native
+	 * worker gets one operator-visible warning per transition, a dead one is
+	 * terminated through the SIGTERM→SIGKILL path and finalized as stalled by
+	 * the run's own finalizer. ACP delegations have no periodic heartbeat, so
+	 * they are bounded by an event-inactivity stall window instead of the
+	 * native heartbeat spec. This loop runs on its own timer and never
+	 * consults admission gates: a budget ceiling breach cannot prevent the
+	 * reconciler from killing a dead worker.
+	 */
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
 		const tickNow = now();
 		for (const run of active.values()) {
-			if (run.aborted || run.terminalStatusOverride || !run.heartbeatAt) continue;
+			if (run.aborted || run.stallKilled || !run.heartbeatAt) continue;
 			const heartbeatMs = run.heartbeatAt.current;
 			if (!Number.isFinite(heartbeatMs)) continue;
+			if (run.runtimeKind === "acp-delegation") {
+				ledger.update(run.runId, { heartbeatAt: heartbeatIso(heartbeatMs) });
+				const stallMs = run.stallTimeoutMs;
+				if (stallMs === null || stallMs <= 0) continue;
+				if (tickNow - heartbeatMs <= stallMs) continue;
+				run.stallKilled = true;
+				run.heartbeatStatus = "dead";
+				emitHeartbeatStatus(run, "dead");
+				try {
+					run.kill();
+				} catch {
+					// peer may have exited between classification and kill
+				}
+				continue;
+			}
 			const status = classifyHeartbeat(heartbeatMs, tickNow, heartbeatSpec);
 			const patch: Partial<RunEnvelope> = {
 				status: heartbeatRunStatus(status),
@@ -674,9 +863,9 @@ export function createDispatchBundle(
 			run.heartbeatStatus = status;
 			emitHeartbeatStatus(run, status);
 			if (status !== "dead") continue;
-			run.terminalStatusOverride = "dead";
+			run.stallKilled = true;
 			try {
-				run.abort();
+				run.kill();
 			} catch {
 				// child may have exited between classification and reap attempt
 			}
@@ -857,9 +1046,7 @@ export function createDispatchBundle(
 		if (scheduling) {
 			workerSlotHeld = scheduling.tryAcquireWorker();
 			if (!workerSlotHeld) {
-				throw new Error(
-					`dispatch: admission denied: concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
-				);
+				throw new DispatchConcurrencyError(scheduling.activeWorkers());
 			}
 		}
 
@@ -885,6 +1072,7 @@ export function createDispatchBundle(
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		let failureMessage: string | undefined;
+		let runIdForPermissionAudit: string | null = null;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of acp.events) {
 				const event = raw as {
@@ -929,6 +1117,15 @@ export function createDispatchBundle(
 						if (message !== null) failureMessage = message;
 					}
 				}
+				if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+					context.bus.emit(BusChannels.PermissionResolved, {
+						status: "denied",
+						tool: event.payload.tool,
+						...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
+						...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+						...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+					});
+				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
 					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
@@ -965,11 +1162,19 @@ export function createDispatchBundle(
 			promptSignature: lifecycle.promptSignature,
 			toolSignature: lifecycle.toolSignature,
 		});
+		runIdForPermissionAudit = envelope.id;
+		const lineage = lineageFor(req, envelope.id);
+		const identity = detectRunIdentity();
 		ledgerRef.update(envelope.id, {
 			status: "running",
 			pid: acp.pid,
 			heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+			lineage,
+			identity,
 		});
+		// One durable write at start so sibling processes (clio fleet status)
+		// can observe the running row; finalization persists the terminal state.
+		void ledgerRef.persist().catch(() => {});
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
 			agentId: req.agentId,
@@ -993,7 +1198,9 @@ export function createDispatchBundle(
 		const startedAt = envelope.startedAt;
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
+			req,
 			abort: acp.abort,
+			kill: acp.kill,
 			promise: acp.promise.then(() => undefined),
 			recipe: null,
 			startedAt,
@@ -1006,9 +1213,13 @@ export function createDispatchBundle(
 			task: req.task,
 			cwd: lifecycle.cwd,
 			aborted: false,
+			stallKilled: false,
+			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
+			lineage,
 			heartbeatAt: acp.heartbeatAt,
 			heartbeatStatus: "alive",
-			terminalStatusOverride: null,
+			meter: tokenMeter,
+			pricing: null,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -1016,6 +1227,8 @@ export function createDispatchBundle(
 			result: Awaited<AcpDelegationRunHandle["promise"]>,
 			endedAt: string,
 			status: RunStatus,
+			outcome: RunOutcome,
+			outcomeDetail: string | null,
 		): RunReceiptDraft => {
 			tokenMeter.inputTokens += result.usage.inputTokens;
 			tokenMeter.outputTokens += result.usage.outputTokens;
@@ -1037,6 +1250,10 @@ export function createDispatchBundle(
 				wireModelId,
 				runtimeId,
 				runtimeKind: "acp-delegation",
+				outcome,
+				outcomeDetail,
+				lineage,
+				identity,
 				startedAt,
 				endedAt,
 				exitCode: status === "dead" ? 1 : status === "interrupted" ? 1 : result.exitCode,
@@ -1089,7 +1306,7 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunReceipt, status: RunStatus): void => {
+		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
@@ -1101,6 +1318,9 @@ export function createDispatchBundle(
 				wireModelId,
 				runtimeId,
 				runtimeKind: "acp-delegation",
+				outcome,
+				outcomeDetail: receipt.outcomeDetail ?? null,
+				lineage,
 				tokenCount: receipt.tokenCount,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
@@ -1112,24 +1332,33 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 			};
-			if (status === "completed") {
+			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
 				return;
 			}
-			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: status });
+			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
 		};
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await acp.promise;
 				const endedAt = new Date().toISOString();
-				const status: RunStatus =
-					activeRun.terminalStatusOverride ??
-					(activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed");
-				activeRun.terminalStatusOverride = status;
-				const receiptDraft = buildReceiptDraft(result, endedAt, status);
+				const evidence: RunTerminationEvidence = {
+					exitCode: result.exitCode,
+					abortedByOperator: activeRun.aborted,
+					stallKilled: activeRun.stallKilled,
+					timedOut: result.timedOut === true,
+					permissionFailure: false,
+					policyDenied: null,
+					stopReason: result.stopReason ?? null,
+				};
+				const { outcome, detail } = resolveRunOutcome(evidence);
+				const status = runStatusForOutcome(outcome);
+				const receiptDraft = buildReceiptDraft(result, endedAt, status, outcome, detail);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
+					outcome,
+					outcomeDetail: detail,
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
@@ -1148,7 +1377,9 @@ export function createDispatchBundle(
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				recordTargetOutcome(endpointId, runtimeId, wireModelId, status, receipt.exitCode);
-				emitTerminalDispatchEvent(receipt, status);
+				accumulateFinalizedTotals(receipt);
+				emitTerminalDispatchEvent(receipt, outcome);
+				maybeScheduleRetry(activeRun, outcome, detail);
 				return receipt;
 			} finally {
 				releaseWorkerSlot();
@@ -1207,9 +1438,7 @@ export function createDispatchBundle(
 		if (scheduling) {
 			workerSlotHeld = scheduling.tryAcquireWorker();
 			if (!workerSlotHeld) {
-				throw new Error(
-					`dispatch: admission denied: concurrency limit reached (${scheduling.activeWorkers()} active workers)`,
-				);
+				throw new DispatchConcurrencyError(scheduling.activeWorkers());
 			}
 		}
 
@@ -1249,6 +1478,7 @@ export function createDispatchBundle(
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		let failureMessage: string | undefined;
+		let runIdForPermissionAudit: string | null = null;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
 			for await (const raw of workerEvents) {
 				const event = raw as {
@@ -1294,6 +1524,15 @@ export function createDispatchBundle(
 						if (message !== null) failureMessage = message;
 					}
 				}
+				if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+					context.bus.emit(BusChannels.PermissionResolved, {
+						status: "denied",
+						tool: event.payload.tool,
+						...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
+						...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+						...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+					});
+				}
 				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 					recordToolFinish(toolStats, event.payload);
 					if (isSkillActivation(event.payload.skillActivation)) {
@@ -1334,12 +1573,19 @@ export function createDispatchBundle(
 			promptSignature: lifecycle.promptSignature,
 			toolSignature: lifecycle.toolSignature,
 		});
-		ledgerRef.update(
-			envelope.id,
-			heartbeatAt
-				? { status: "running", pid, heartbeatAt: heartbeatIso(heartbeatAt.current) }
-				: { status: "running", pid },
-		);
+		runIdForPermissionAudit = envelope.id;
+		const lineage = lineageFor(req, envelope.id);
+		const identity = detectRunIdentity();
+		ledgerRef.update(envelope.id, {
+			status: "running",
+			pid,
+			lineage,
+			identity,
+			...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
+		});
+		// One durable write at start so sibling processes (clio fleet status)
+		// can observe the running row; finalization persists the terminal state.
+		void ledgerRef.persist().catch(() => {});
 
 		context.bus.emit(BusChannels.DispatchEnqueued, {
 			runId: envelope.id,
@@ -1367,7 +1613,9 @@ export function createDispatchBundle(
 
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
+			req,
 			abort,
+			kill: abort,
 			promise: workerDone.then(() => undefined),
 			recipe: lifecycle.recipe,
 			startedAt,
@@ -1381,9 +1629,13 @@ export function createDispatchBundle(
 			task: req.task,
 			cwd: lifecycle.cwd,
 			aborted: false,
+			stallKilled: false,
+			stallTimeoutMs: null,
+			lineage,
 			heartbeatAt,
 			heartbeatStatus: "alive",
-			terminalStatusOverride: null,
+			meter: tokenMeter,
+			pricing: lifecycle.target.endpoint.pricing ?? null,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -1391,6 +1643,8 @@ export function createDispatchBundle(
 			result: { exitCode?: number | null },
 			endedAt: string,
 			status: RunStatus,
+			outcome: RunOutcome,
+			outcomeDetail: string | null,
 		): RunReceiptDraft => {
 			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
 			const pricing = lifecycle.target.endpoint.pricing;
@@ -1413,6 +1667,10 @@ export function createDispatchBundle(
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
+				outcome,
+				outcomeDetail,
+				lineage,
+				identity,
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
@@ -1452,7 +1710,7 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunReceipt, status: RunStatus): void => {
+		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
@@ -1465,6 +1723,9 @@ export function createDispatchBundle(
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
+				outcome,
+				outcomeDetail: receipt.outcomeDetail ?? null,
+				lineage,
 				tokenCount: receipt.tokenCount,
 				inputTokenCount: receipt.inputTokenCount ?? 0,
 				outputTokenCount: receipt.outputTokenCount ?? 0,
@@ -1478,24 +1739,33 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 			};
-			if (status === "completed") {
+			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
 				return;
 			}
-			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: status });
+			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
 		};
 
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
 				const endedAt = new Date().toISOString();
-				const status: RunStatus =
-					activeRun.terminalStatusOverride ??
-					(activeRun.aborted ? "interrupted" : result.exitCode === 0 ? "completed" : "failed");
-				activeRun.terminalStatusOverride = status;
-				const receiptDraft = buildReceiptDraft(result, endedAt, status);
+				const evidence: RunTerminationEvidence = {
+					exitCode: result.exitCode ?? null,
+					abortedByOperator: activeRun.aborted,
+					stallKilled: activeRun.stallKilled,
+					timedOut: false,
+					permissionFailure: false,
+					policyDenied: null,
+					stopReason: null,
+				};
+				const { outcome, detail } = resolveRunOutcome(evidence);
+				const status = runStatusForOutcome(outcome);
+				const receiptDraft = buildReceiptDraft(result, endedAt, status, outcome, detail);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
+					outcome,
+					outcomeDetail: detail,
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
@@ -1525,7 +1795,9 @@ export function createDispatchBundle(
 					status,
 					receipt.exitCode,
 				);
-				emitTerminalDispatchEvent(receipt, status);
+				accumulateFinalizedTotals(receipt);
+				emitTerminalDispatchEvent(receipt, outcome);
+				maybeScheduleRetry(activeRun, outcome, detail);
 				return receipt;
 			} finally {
 				releaseWorkerSlot();
@@ -1597,14 +1869,31 @@ export function createDispatchBundle(
 	}> {
 		if (reqs.length === 0) throw new Error("dispatch: batch requires at least one request");
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
+		const settledRunIds = new Set<string>();
+		// Admission is sequential so the concurrency gate can throttle instead
+		// of failing the whole batch: when a slot is unavailable the batch
+		// waits for one of its own in-flight runs (or a short delay covering
+		// externally-held slots) and retries that member. Every other
+		// admission failure still aborts the batch.
+		const slotWaitMs = 250;
 		try {
-			const admitted = await Promise.all(
-				reqs.map(async (req) => {
-					const handle = await dispatch(req);
-					return { ...handle, agentId: req.agentId };
-				}),
-			);
-			handles.push(...admitted);
+			for (const req of reqs) {
+				for (;;) {
+					try {
+						const handle = await dispatch(req);
+						handle.finalPromise.finally(() => settledRunIds.add(handle.runId)).catch(() => {});
+						handles.push({ ...handle, agentId: req.agentId });
+						break;
+					} catch (err) {
+						if (!(err instanceof DispatchConcurrencyError)) throw err;
+						const waiters: Array<Promise<unknown>> = handles
+							.filter((handle) => !settledRunIds.has(handle.runId))
+							.map((handle) => handle.finalPromise.catch(() => undefined));
+						waiters.push(new Promise((resolve) => setTimeout(resolve, slotWaitMs)));
+						await Promise.race(waiters);
+					}
+				}
+			}
 		} catch (err) {
 			for (const handle of handles) {
 				try {
@@ -1634,9 +1923,29 @@ export function createDispatchBundle(
 	const extension: DomainExtension = {
 		async start() {
 			ledger = openLedger();
+			// Symphony P10: restart recovery from durable artifacts. Adopt
+			// receipts whose ledger rows were lost to a crash between
+			// recordReceipt() and persist(); quarantine tampered ones.
+			try {
+				const recovery = recoverOrphanReceipts(ledger);
+				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0) {
+					await ledger.persist();
+					if (process.env.CLIO_INTERACTIVE !== "1") {
+						process.stderr.write(
+							`[dispatch] ledger recovery: recovered=${recovery.recovered} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
+						);
+					}
+				}
+			} catch {
+				// Recovery is best-effort; a failed scan never blocks startup.
+			}
 			startHeartbeatWatchdog();
 		},
 		async stop() {
+			draining = true;
+			for (const entry of retryQueue.values()) clearTimeout(entry.timer);
+			retryQueue.clear();
+			retryBackoff.clear();
 			stopHeartbeatWatchdog();
 			await drain();
 		},
@@ -1655,7 +1964,76 @@ export function createDispatchBundle(
 		});
 	}
 
+	/**
+	 * Operator snapshot (Symphony §13.3/§13.4). Pure copy of in-memory state:
+	 * no I/O, no locks. A consumer failure cannot affect orchestration because
+	 * nothing here mutates dispatch state.
+	 */
+	function snapshot(): DispatchSnapshot {
+		const tickNow = now();
+		const running: DispatchSnapshot["running"] = [];
+		const totals = { ...finalizedTotals };
+		for (const run of active.values()) {
+			let heartbeat: "alive" | "stale" | "dead" | "n/a" = "n/a";
+			if (run.heartbeatAt && Number.isFinite(run.heartbeatAt.current)) {
+				if (run.runtimeKind === "acp-delegation") {
+					const stallMs = run.stallTimeoutMs;
+					if (stallMs !== null && stallMs > 0) {
+						heartbeat = tickNow - run.heartbeatAt.current > stallMs ? "dead" : "alive";
+					}
+				} else {
+					heartbeat = classifyHeartbeat(run.heartbeatAt.current, tickNow, heartbeatSpec);
+				}
+			}
+			const meter = run.meter;
+			const totalTokens = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
+			const pricing = run.pricing;
+			const costUsd = pricing
+				? (meter.inputTokens * pricing.input +
+						meter.outputTokens * pricing.output +
+						meter.cacheReadTokens * (pricing.cacheRead ?? 0) +
+						meter.cacheWriteTokens * (pricing.cacheWrite ?? 0)) /
+					1_000_000
+				: 0;
+			const startedMs = Date.parse(run.startedAt);
+			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
+			running.push({
+				runId: run.runId,
+				agentId: run.agentId,
+				runtimeKind: run.runtimeKind,
+				outcomePhase: run.stallKilled ? "terminating" : run.aborted ? "aborting" : "running",
+				heartbeat,
+				lineage: { ...run.lineage },
+				startedAt: run.startedAt,
+				elapsedMs,
+				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
+				costUsd,
+			});
+			totals.inputTokens += meter.inputTokens;
+			totals.outputTokens += meter.outputTokens;
+			totals.totalTokens += totalTokens;
+			totals.costUsd += costUsd;
+			totals.runtimeSeconds += elapsedMs / 1000;
+		}
+		const retrying = [...retryQueue.values()].map((entry) => ({
+			runId: entry.runId,
+			agentId: entry.agentId,
+			attempt: entry.attempt,
+			dueAt: new Date(entry.dueAt).toISOString(),
+			reason: entry.reason,
+		}));
+		return {
+			generatedAt: new Date(tickNow).toISOString(),
+			running,
+			retrying,
+			totals,
+		};
+	}
+
 	async function drain(): Promise<void> {
+		draining = true;
+		for (const entry of retryQueue.values()) clearTimeout(entry.timer);
+		retryQueue.clear();
 		const runs = Array.from(active.values());
 		for (const run of runs) {
 			emitRunAborted(run, "dispatch_drain");
@@ -1692,6 +2070,7 @@ export function createDispatchBundle(
 				// child may already be gone
 			}
 		},
+		snapshot,
 		drain,
 	};
 

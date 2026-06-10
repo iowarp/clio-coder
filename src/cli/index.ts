@@ -10,6 +10,7 @@ import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
 import { runEvolveCommand } from "./evolve.js";
 import { runExtensionsCommand } from "./extensions.js";
+import { runFleetCommand } from "./fleet.js";
 import { runInitCommand } from "./init.js";
 import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
@@ -49,6 +50,7 @@ Usage:
   clio uninstall            remove Clio Coder state and print package removal guidance
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
+  clio fleet list|run|status  repo-owned fleet contracts and dispatch status
   clio components           list, snapshot, or diff harness components
   clio evidence             build, list, or inspect evidence artifacts
   clio eval                 run, report, or compare local eval task files
@@ -110,6 +112,8 @@ async function main(argv: string[]): Promise<number> {
 		case "extensions":
 		case "ext":
 			return runExtensionsCommand(subArgs);
+		case "fleet":
+			return runFleetCommand(subArgs);
 		case "skills":
 			return runSkillsCommand(subArgs);
 		case "share":

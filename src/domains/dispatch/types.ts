@@ -14,6 +14,52 @@ import type { RuntimeTargetSnapshot } from "../providers/index.js";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
 /**
+ * Terminal outcome taxonomy. Every run that reaches finalization gets exactly
+ * one outcome, resolved at the single finalization point in extension.ts via
+ * resolveRunOutcome(). No call site assigns an outcome literal directly.
+ * Retry policy and audit semantics branch on the outcome, not on RunStatus,
+ * which is kept for backward compatibility with pre-existing ledgers.
+ */
+export type RunOutcome =
+	| "succeeded" // worker exited 0, receipt complete
+	| "failed" // worker exited nonzero or threw
+	| "timed_out" // exceeded turn/run timeout
+	| "stalled" // heartbeat dead or ACP event-inactivity exceeded
+	| "canceled" // operator abort (SIGINT, /abort, batch cancel)
+	| "denied_by_policy" // admission, budget, scope, or cooldown rejection
+	| "spawn_failed"; // process never reached a live session
+
+export const RETRYABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set(["failed", "timed_out", "stalled", "spawn_failed"]);
+
+/**
+ * Proof-of-work lineage. Retries inherit rootRunId, increment attempt, keep
+ * depth. Nested dispatch (a fleet step, a worker that dispatches) increments
+ * depth, resets attempt, and points parentRunId at the dispatching run.
+ */
+export interface RunLineage {
+	parentRunId: string | null; // run that dispatched or retried this one
+	rootRunId: string; // first ancestor; equals runId for roots
+	attempt: number; // 0 for first attempt, increments per retry
+	depth: number; // 0 for operator-initiated, +1 per nesting level
+}
+
+/**
+ * Host and HPC-scheduler identity captured at run start. A receipt produced
+ * inside a Slurm/PBS/LSF allocation carries the allocation identity so the
+ * provenance chain anchors to the scheduler job, not folklore.
+ */
+export interface RunIdentity {
+	host: string;
+	user: string;
+	hpc: {
+		scheduler: "slurm" | "pbs" | "lsf";
+		jobId: string;
+		jobName: string | null;
+		cluster: string | null;
+	} | null;
+}
+
+/**
  * Runtime kind recorded on a run envelope/receipt. "http" covers Clio-owned
  * model runtimes; "acp-delegation" covers external Agent Client Protocol
  * harnesses that Clio supervises as delegated coding agents.
@@ -22,7 +68,7 @@ export type RunKind = "http" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
-	version: 1;
+	version: 1 | 2;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -40,6 +86,11 @@ export interface RunEnvelope {
 	startedAt: string;
 	endedAt: string | null;
 	status: RunStatus;
+	/** Terminal outcome; null until the run finalizes. Absent on pre-taxonomy rows. */
+	outcome?: RunOutcome | null;
+	outcomeDetail?: string | null;
+	lineage?: RunLineage;
+	identity?: RunIdentity;
 	exitCode: number | null;
 	pid: number | null;
 	heartbeatAt: string | null;
@@ -163,6 +214,11 @@ export interface RunReceipt {
 	runtimeKind: RunKind;
 	startedAt: string;
 	endedAt: string;
+	/** Terminal outcome; present on every receipt written after the taxonomy landed. */
+	outcome?: RunOutcome;
+	outcomeDetail?: string | null;
+	lineage?: RunLineage;
+	identity?: RunIdentity;
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;
