@@ -1,4 +1,20 @@
 export type SkillActivationTrigger = "slash-command" | "tool";
+export type PendingSkillRequestSource = "slash-command" | "selector" | "marketplace";
+
+export interface PendingSkillRequest {
+	name: string;
+	args: string;
+	source: PendingSkillRequestSource;
+	installed: boolean;
+	filePath?: string;
+	marketplaceRef?: string;
+}
+
+export interface PendingSkillToolPolicy {
+	allowedSkillNames: ReadonlyArray<string>;
+	requests: ReadonlyArray<PendingSkillRequest>;
+	loadedSkillNames: Set<string>;
+}
 
 export interface SkillActivation {
 	name: string;

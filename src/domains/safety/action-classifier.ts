@@ -65,6 +65,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.FindSymbol:
 		case ToolNames.EntryPoints:
 		case ToolNames.WhereIs:
+		case ToolNames.AskUser:
 		case ToolNames.ReadSkill:
 			return "read";
 		case ToolNames.Write:

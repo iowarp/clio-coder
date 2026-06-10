@@ -77,6 +77,7 @@ export interface ResolveAgentToolsInput {
 	task?: string;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: () => Partial<ToolInvokeOptions>;
+	includeInteractiveTools?: boolean;
 }
 
 export interface InvokeWorkerToolOptions {
@@ -482,8 +483,10 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	};
 	const toolIds = new Set(applyToolProfile(input.registry.listRegistered(), input.toolProfile, profileContext));
 	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
+	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const specs: ToolSpec[] = [];
 	for (const name of toolIds) {
+		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
 		if (allowed && !allowed.has(name)) continue;
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);

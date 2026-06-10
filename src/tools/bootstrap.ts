@@ -4,6 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
 import { findSymbolTool } from "./codewiki/find-symbol.js";
@@ -38,6 +39,7 @@ export interface ToolBootstrapDeps {
 	session?: SessionContract;
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
+	askUser?: AskUserHandler;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -246,6 +248,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedReadPolicy,
 		costLatency: "local_fast",
 	},
+	[ToolNames.AskUser]: {
+		objective: "Ask the operator structured questions.",
+		uiLabel: "Ask",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 20_000,
+			followUpHint: "Proceed with stated assumptions if the operator cancels or no UI is available.",
+		},
+		costLatency: "local_slow",
+	},
 	[ToolNames.CreateSkill]: {
 		objective: "Create a reusable coding skill file.",
 		uiLabel: "Create Skill",
@@ -368,6 +381,14 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 	};
+	if (deps.askUser) {
+		registry.register({
+			...builtin(createAskUserTool({ askUser: deps.askUser }), {
+				path: "src/tools/ask-user.ts",
+				scope: "core",
+			}),
+		});
+	}
 	registry.register({
 		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 	});
@@ -411,5 +432,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	assertBuiltinToolPolicy(registry.listAll(), {
 		includeSessionTools: Boolean(session),
 		includeDispatchTools: Boolean(deps.dispatch),
+		includeInteractiveTools: Boolean(deps.askUser),
 	});
 }

@@ -4,10 +4,12 @@ import type { ToolSpec } from "./registry.js";
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([ToolNames.WorkspaceContext]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.DispatchBatch]);
+const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
 	includeDispatchTools?: boolean;
+	includeInteractiveTools?: boolean;
 }
 
 export function validateBuiltinToolPolicy(
@@ -32,10 +34,12 @@ export function validateBuiltinToolPolicy(
 
 	const includeSessionTools = options.includeSessionTools ?? false;
 	const includeDispatchTools = options.includeDispatchTools ?? false;
+	const includeInteractiveTools = options.includeInteractiveTools ?? false;
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	for (const tool of [...required]) {
 		if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (!includeInteractiveTools && INTERACTIVE_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);
