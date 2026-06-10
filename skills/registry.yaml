@@ -4,7 +4,7 @@
 skills:
   - name: arxiv-literature
     version: 0.1.0
-    sha256: 1a033fbcad94c98527ed5805f0d5bdde9f975ddb26faa5ae36f5a973f71ea0ae
+    sha256: 2266ef609e2e2e28cf52fb9ecb5d9adc669c49240b95148dd478fe8815cc395e
   - name: clio-dev
     version: 0.1.0
     sha256: 3f490839b1d93a9e2855e4e09d1e59ed2f05043d42ec004616fee3a3bf5247dd
