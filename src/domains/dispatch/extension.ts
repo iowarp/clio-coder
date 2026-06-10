@@ -14,7 +14,7 @@ import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
-import { isBuiltinToolName, type ToolName } from "../../core/tool-names.js";
+import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -214,10 +214,10 @@ function renderAgentSkillPrompt(recipe: AgentRecipe): string {
 	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
 	return [
 		"# Agent-Bound Skills",
-		`This recipe declares preferred skills: ${skillList}.`,
-		"Use `read_skill` only when one of those skills matches the assigned task.",
+		`This run binds these skills: ${skillList}. read_skill admits exactly these names and rejects any other.`,
+		"Load a bound skill with `read_skill` when it matches the assigned task, then follow its workflow.",
 		"Skills provide reusable know-how and resources; they never expand your tool authority.",
-		"If a declared skill is unavailable, continue with the assigned task and report the missing skill.",
+		"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
 	].join("\n");
 }
 
@@ -266,6 +266,7 @@ interface DispatchWorkerSpecInput {
 	req: DispatchRequest;
 	target: ResolvedTarget;
 	admission: DispatchAdmissionStage;
+	recipe?: AgentRecipe | null;
 	systemPrompt: string;
 	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
 	promptSignature: string | null;
@@ -459,6 +460,16 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	if (input.req.skillPaths !== undefined) spec.skillPaths = input.req.skillPaths;
+	// Recipe-declared skills become a harness-enforced read_skill allowlist in
+	// the worker. Only forwarded when the admitted tool surface can use them.
+	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
+	if (
+		input.req.noSkills !== true &&
+		recipeSkills.length > 0 &&
+		input.admission.allowedTools.includes(ToolNames.ReadSkill)
+	) {
+		spec.agentSkills = [...new Set(recipeSkills)];
+	}
 	if (input.req.trustProjectCompatRoots !== undefined) {
 		spec.trustProjectCompatRoots = input.req.trustProjectCompatRoots;
 	} else if (config) {
@@ -1210,6 +1221,7 @@ export function createDispatchBundle(
 				req,
 				target: lifecycle.target,
 				admission: lifecycle.admission,
+				recipe: lifecycle.recipe,
 				systemPrompt: lifecycle.systemPrompt,
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				promptSignature: lifecycle.promptSignature,

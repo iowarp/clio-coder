@@ -46,6 +46,8 @@ export interface WorkerSpec {
 	middlewareSnapshot?: MiddlewareSnapshot;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
+	/** Skill names the agent recipe binds to this run; read_skill admits exactly these. */
+	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 }
 
@@ -369,6 +371,11 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.skillPaths !== undefined) {
 		readStringArray(spec.skillPaths, "WorkerSpec.skillPaths");
+	}
+	if (spec.agentSkills !== undefined) {
+		for (const name of readStringArray(spec.agentSkills, "WorkerSpec.agentSkills")) {
+			if (name.trim().length === 0) throw new Error("WorkerSpec.agentSkills entries must be non-empty strings");
+		}
 	}
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");

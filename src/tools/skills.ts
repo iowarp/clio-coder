@@ -90,6 +90,10 @@ function renderReadSkillOutput(skill: Skill, tree: string[] | null): string {
 	return lines.join("\n");
 }
 
+function policyIsRecipeBound(policy: { requests: ReadonlyArray<{ source: string }> }): boolean {
+	return policy.requests.length > 0 && policy.requests.every((request) => request.source === "recipe");
+}
+
 function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | undefined): string | null {
 	const policy = options?.pendingSkillPolicy;
 	if (!policy) {
@@ -99,11 +103,16 @@ function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | unde
 	if (allowed.length === 0) {
 		return "read_skill: no pending skill request is active this turn. Skills can only be loaded after an explicit /skill:<name> task, /skill <name> task, or selector choice.";
 	}
+	const recipeBound = policyIsRecipeBound(policy);
 	if (!allowed.includes(name)) {
-		return `read_skill: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
+		return recipeBound
+			? `read_skill: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`
+			: `read_skill: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
 	}
 	if (policy.loadedSkillNames.has(name)) {
-		return `read_skill: pending skill ${name} already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+		return recipeBound
+			? `read_skill: skill ${name} is already loaded in this run; continue with its workflow.`
+			: `read_skill: pending skill ${name} already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
 	}
 	return null;
 }
@@ -115,6 +124,8 @@ function pendingSkillRequestFor(name: string, options: ToolInvokeOptions | undef
 function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undefined): string[] {
 	const request = pendingSkillRequestFor(name, options);
 	if (!request) return [];
+	// Recipe-bound loads carry no user task; the worker already has its assignment.
+	if (request.source === "recipe") return [];
 	const task = request.args.trim();
 	const lines = [
 		"Pending skill request",
