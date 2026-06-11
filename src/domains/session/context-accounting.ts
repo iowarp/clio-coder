@@ -443,7 +443,7 @@ function nextSnapshotId(): string {
 
 /**
  * Single assembly point for a turn's context snapshot. Every capture site
- * (turn submit, progressive compaction, LLM-summary compaction) feeds the same
+ * (turn submit, observation masking, LLM-summary compaction) feeds the same
  * inputs through the same category decomposition, so totals shown in the
  * footer, the overlay, and the persisted ledger cannot drift apart.
  */

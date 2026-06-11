@@ -232,42 +232,14 @@ export function buildSettingItems(
 			label: "compaction.excludeLastTurns",
 			currentValue: String(compaction.excludeLastTurns),
 			values: ["3", "6", "10", "15"],
-			description: "Recent user turns protected from progressive masking.",
+			description: "Recent user turns protected from observation masking.",
 		},
 		{
-			id: "compaction.thresholds.warning",
-			label: "ctx.warning",
-			currentValue: formatThreshold(compaction.thresholds.warning),
-			values: ["0.6", "0.7", "0.75"],
-			description: "Warn without modifying context.",
-		},
-		{
-			id: "compaction.thresholds.maskObservations",
-			label: "ctx.maskObservations",
-			currentValue: formatThreshold(compaction.thresholds.maskObservations),
-			values: ["0.75", "0.8", "0.85"],
-			description: "Mask older tool-result bodies.",
-		},
-		{
-			id: "compaction.thresholds.pruneObservations",
-			label: "ctx.pruneObservations",
-			currentValue: formatThreshold(compaction.thresholds.pruneObservations),
-			values: ["0.8", "0.85", "0.9"],
-			description: "Prune older tool-result bodies.",
-		},
-		{
-			id: "compaction.thresholds.maskDialogue",
-			label: "ctx.maskDialogue",
-			currentValue: formatThreshold(compaction.thresholds.maskDialogue),
-			values: ["0.85", "0.9", "0.95"],
-			description: "Mask older dialogue while preserving tool calls.",
-		},
-		{
-			id: "compaction.thresholds.llmSummary",
-			label: "ctx.llmSummary",
-			currentValue: formatThreshold(compaction.thresholds.llmSummary),
-			values: ["0.95", "0.98", "0.99"],
-			description: "Run full LLM compaction summary.",
+			id: "compaction.threshold",
+			label: "compaction.threshold",
+			currentValue: formatThreshold(compaction.threshold),
+			values: ["0.7", "0.8", "0.85", "0.9"],
+			description: "Pressure at which compaction acts: mask stale observations, then LLM summary.",
 		},
 		{
 			id: "retry.enabled",
@@ -354,29 +326,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				if (next > 0) settings.compaction.excludeLastTurns = next;
 			});
 			return;
-		case "compaction.thresholds.warning": {
+		case "compaction.threshold": {
 			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.warning = parsed;
-			return;
-		}
-		case "compaction.thresholds.maskObservations": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.maskObservations = parsed;
-			return;
-		}
-		case "compaction.thresholds.pruneObservations": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.pruneObservations = parsed;
-			return;
-		}
-		case "compaction.thresholds.maskDialogue": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.maskDialogue = parsed;
-			return;
-		}
-		case "compaction.thresholds.llmSummary": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.thresholds.llmSummary = parsed;
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.threshold = parsed;
 			return;
 		}
 		case "retry.enabled":

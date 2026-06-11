@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import initialMigration from "./2026-04-17-initial.js";
+import compactionSingleThreshold from "./2026-06-11-compaction-single-threshold.js";
 
 export interface Migration {
 	id: string;
@@ -34,7 +35,7 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([initialMigration]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([initialMigration, compactionSingleThreshold]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;

@@ -46,27 +46,32 @@ function withMetadata<T extends ToolSpec>(spec: T, metadata: ToolMetadata): T {
 	return { ...spec, metadata };
 }
 
+// Per-observation caps at persistence time. Bounded read/search tools cap a
+// hair above the 6KB source cap in src/tools/truncate.ts so their own
+// continuation notices survive shaping. The 16KB summary policies are the
+// explicit overrides for tools whose output is inherently aggregate (shell,
+// validation runs, dispatch receipts, web pages); nothing exceeds them.
 const boundedReadPolicy = {
 	kind: "bounded",
-	maxBytes: 60_000,
+	maxBytes: 8_192,
 	followUpHint: "Use offset/limit or a narrower locate/search tool call to inspect omitted content.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
 const boundedSearchPolicy = {
 	kind: "bounded",
-	maxBytes: 60_000,
+	maxBytes: 8_192,
 	followUpHint: "Refine the pattern, path, glob, context, or limit to inspect omitted matches.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
 const boundedValidationPolicy = {
 	kind: "summary",
-	maxBytes: 80_000,
+	maxBytes: 16_384,
 	followUpHint: "Rerun the validation with a narrower script or inspect the named failing file/test directly.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
 const exactMutationPolicy = {
 	kind: "exact",
-	maxBytes: 60_000,
+	maxBytes: 8_192,
 	followUpHint: "Inspect the changed file or git diff for exact follow-up context.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
@@ -98,7 +103,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "unknown",
 		resultSizePolicy: {
 			kind: "summary",
-			maxBytes: 80_000,
+			maxBytes: 16_384,
 			followUpHint: "Use a narrower command or a dedicated validation/read/search tool to inspect omitted output.",
 		},
 		costLatency: "local_slow",
@@ -137,7 +142,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "retry_safe",
 		resultSizePolicy: {
 			kind: "bounded",
-			maxBytes: 80_000,
+			maxBytes: 16_384,
 			followUpHint: "Fetch a narrower URL or lower max_bytes to inspect a specific section.",
 		},
 		costLatency: "network",
@@ -215,7 +220,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "summary",
-			maxBytes: 80_000,
+			maxBytes: 16_384,
 			followUpHint: "Use the dispatch receipt path or ask a narrower worker follow-up for omitted output.",
 		},
 		costLatency: "agent",
@@ -226,7 +231,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "summary",
-			maxBytes: 80_000,
+			maxBytes: 16_384,
 			followUpHint: "Use the batch run ids or receipts for omitted worker details.",
 		},
 		costLatency: "agent",

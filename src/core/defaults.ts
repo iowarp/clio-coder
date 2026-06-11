@@ -35,39 +35,30 @@ export interface WorkersSettings {
 }
 
 /**
- * Compaction controls the session domain reads at runtime. Ships as Phase 12
- * slice 12c. The structural type lives here so core/defaults.ts stays free
- * of a backward domain dependency; the engine-level defaults and the
- * companion DEFAULT_COMPACTION_SETTINGS value live alongside the rest of
- * the compaction engine in src/domains/session/compaction/defaults.ts.
+ * Compaction controls the session domain reads at runtime. The structural
+ * type lives here so core/defaults.ts stays free of a backward domain
+ * dependency; the engine-level defaults and the companion
+ * DEFAULT_COMPACTION_SETTINGS value live alongside the rest of the
+ * compaction engine in src/domains/session/compaction/defaults.ts.
  *
  * Fields:
- *   - thresholds: graduated pressure thresholds (0..1) for warning,
- *     progressive masking/pruning, and final LLM compaction.
  *   - auto: master switch for the chat-loop's pre-request trigger. Manual
  *     /compact still runs when auto=false.
+ *   - threshold: context pressure (estimated_tokens / context_window, 0..1)
+ *     at which compaction acts: stale observations are masked first, and a
+ *     full LLM summary runs if pressure stays above the threshold.
  *   - excludeLastTurns: number of recent user turns protected from
- *     progressive masking/pruning.
+ *     observation masking.
  *   - model: optional pattern (e.g. "provider/summary-model-id") used to
  *     resolve a dedicated summarization model. Falls back to the orchestrator
  *     target when absent.
  *   - systemPrompt: optional path to a prompt-override file; resolved to
  *     text at call time, not at settings load.
  */
-export interface CompactionThresholdSettings {
-	warning: number;
-	maskObservations: number;
-	pruneObservations: number;
-	maskDialogue: number;
-	llmSummary: number;
-}
-
 export interface CompactionSettings {
-	thresholds: CompactionThresholdSettings;
 	auto: boolean;
+	threshold: number;
 	excludeLastTurns: number;
-	/** Deprecated compatibility input. New settings should use thresholds.llmSummary. */
-	threshold?: number;
 	model?: string;
 	systemPrompt?: string;
 }
@@ -188,14 +179,8 @@ export const DEFAULT_SETTINGS = {
 		recentModels: [] as string[],
 	},
 	compaction: {
-		thresholds: {
-			warning: 0.7,
-			maskObservations: 0.8,
-			pruneObservations: 0.85,
-			maskDialogue: 0.9,
-			llmSummary: 0.99,
-		},
 		auto: true,
+		threshold: 0.8,
 		excludeLastTurns: 6,
 	} as CompactionSettings,
 	retry: {
@@ -349,24 +334,19 @@ state:
   recentModels: []
 
 # Context compaction controls.
-#   auto              master switch for pre-request graduated context pressure.
-#                     Manual /compact always runs the LLM summary stage.
-#   excludeLastTurns  recent user turns protected from progressive masking.
-#   thresholds        pressure = estimated_tokens / context_window.
-#                     Earlier stages reclaim context without an LLM call;
-#                     llmSummary is the final full summarization stage.
+#   auto              master switch for the pre-request compaction trigger.
+#                     Manual /compact always runs the LLM summary.
+#   threshold         pressure = estimated_tokens / context_window. Crossing
+#                     it masks stale tool observations first, then runs a
+#                     full LLM summary if pressure stays above the threshold.
+#   excludeLastTurns  recent user turns protected from observation masking.
 #   model             optional pattern (e.g. provider/summary-model-id) for a
 #                     dedicated summarization model. Absent ⇒ orchestrator target.
 #   systemPrompt      optional path to a prompt-override file.
 compaction:
   auto: true
+  threshold: 0.8
   excludeLastTurns: 6
-  thresholds:
-    warning: 0.7
-    maskObservations: 0.8
-    pruneObservations: 0.85
-    maskDialogue: 0.9
-    llmSummary: 0.99
   # model: provider/summary-model-id
   # systemPrompt: ~/.config/clio/prompts/compaction.md
 

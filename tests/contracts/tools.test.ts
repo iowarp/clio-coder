@@ -17,7 +17,7 @@ import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
-import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
+import { READ_TURN_OBSERVATION_BUDGET_ENV, readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -357,18 +357,25 @@ describe("contracts/tools result shaping and truncation", () => {
 		writeFileSync(first, `${"a".repeat(100)}\n`.repeat(420), "utf8");
 		writeFileSync(second, `${"b".repeat(100)}\n`.repeat(420), "utf8");
 
-		const options = { sessionId: "s-read-budget", turnId: `turn-${Date.now()}` };
-		const r1 = await readTool.run({ path: first }, options);
-		const r2 = await readTool.run({ path: second }, options);
+		const previousBudget = process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
+		process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = "8192";
+		try {
+			const options = { sessionId: "s-read-budget", turnId: `turn-${Date.now()}` };
+			const r1 = await readTool.run({ path: first }, options);
+			const r2 = await readTool.run({ path: second }, options);
 
-		strictEqual(r1.kind, "ok");
-		strictEqual(r2.kind, "ok");
-		if (r1.kind === "ok" && r2.kind === "ok") {
-			ok(Buffer.byteLength(r1.output, "utf8") > 30_000);
-			ok(Buffer.byteLength(r1.output + r2.output, "utf8") < DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES + 8_000);
-			ok(r2.output.includes("Per-turn read observation budget"));
-			const budget = r2.details?.observationBudget as { limited?: unknown } | undefined;
-			strictEqual(budget?.limited, true);
+			strictEqual(r1.kind, "ok");
+			strictEqual(r2.kind, "ok");
+			if (r1.kind === "ok" && r2.kind === "ok") {
+				ok(Buffer.byteLength(r1.output, "utf8") > 4_000, "first read should use most of the per-call cap");
+				ok(Buffer.byteLength(r1.output + r2.output, "utf8") < 8_192 + 4_000);
+				ok(r2.output.includes("Per-turn read observation budget"));
+				const budget = r2.details?.observationBudget as { limited?: unknown } | undefined;
+				strictEqual(budget?.limited, true);
+			}
+		} finally {
+			if (previousBudget === undefined) delete process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
+			else process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = previousBudget;
 		}
 	});
 });

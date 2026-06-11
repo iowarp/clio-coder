@@ -91,7 +91,7 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
  * Why a compaction run fired. Persisted on CompactionSummaryEntry so post-mortem
  * tools can distinguish a threshold-driven shrink from a user-issued /compact
  * and from a context-overflow retry.
- *   - "auto"      : pre-submit graduated context-pressure trigger via shouldCompact().
+ *   - "auto"      : pre-submit context-pressure trigger via shouldCompact().
  *   - "force"     : explicit /compact slash command or CLIO_FORCE_COMPACT=1.
  *   - "overflow"  : compact-and-retry path after a context overflow error.
  */

@@ -152,24 +152,21 @@ describe("contracts/config", () => {
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);
 		next.compaction.auto = false;
-		next.compaction.thresholds.llmSummary = 0.98;
+		next.compaction.threshold = 0.9;
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
-		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.thresholds.llmSummary"]);
+		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
 	});
 
-	it("migrates legacy compaction threshold to the final LLM stage", () => {
+	it("reads the single compaction threshold and ignores unknown keys", () => {
 		const normalized = normalizeSettings({
 			compaction: {
 				threshold: 0.92,
 				auto: true,
+				thresholds: { llmSummary: 0.99 },
 			},
 		});
-		strictEqual(normalized.compaction.thresholds.llmSummary, 0.92);
-		strictEqual(
-			normalized.compaction.thresholds.maskObservations,
-			DEFAULT_SETTINGS.compaction.thresholds.maskObservations,
-		);
+		strictEqual(normalized.compaction.threshold, 0.92);
 		strictEqual(Value.Check(SettingsSchema, normalized), true);
 	});
 
