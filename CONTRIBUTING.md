@@ -1,12 +1,11 @@
 # Contributing to Clio Coder
 
-Clio Coder is an IOWarp AI coding harness for supervised repository work.
-The project is an experimental community alpha. Treat public behavior,
-installation paths, and release process as moving until a stable release is
-announced.
+Clio Coder is IOWarp's coding agent for supervised repository work. The
+project is in alpha: public behavior, installation paths, and release process
+may move until a stable release is announced.
 
-This repo is optimized for human reviewers and coding agents. Keep changes
-small, explicit, and easy to verify from git history.
+This repository is optimized for human reviewers and coding agents alike.
+Keep changes small, explicit, and easy to verify from git history.
 
 
 ## Setup
@@ -66,7 +65,8 @@ npm run hooks:install
 
 The boundary checker enforces these:
 
-- Engine boundary: only `src/engine/**` value-imports pi SDK packages (`@earendil-works/pi-*`, currently pinned to 0.78.1).
+- Engine boundary: only `src/engine/**` value-imports pi SDK packages
+  (`@earendil-works/pi-*`, pinned in `package.json`).
 - Worker isolation: `src/worker/**` value-imports only the worker-safe
   provider runtime rehydration modules under `src/domains/providers/**`;
   all other worker domain imports must be type-only.

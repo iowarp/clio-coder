@@ -4,14 +4,10 @@
 
 # Clio Coder Documentation
 
-Clio Coder is an experimental community alpha. These docs describe the current
-`v0.2.2` source-build release for early adopters, including reliable local
-install/uninstall scripts, ACP interop, curated skills, local harness telemetry,
-prompt-envelope reuse, bounded tool outputs, and headless validation fixes.
-
-These pages are source-aligned guides, not production-stability promises. When
-docs drift, prefer the current source, tests, `CHANGELOG.md`, and release
-receipts over older prose.
+These pages document the current `v0.2.2` release of Clio Coder, IOWarp's
+terminal-first coding agent for HPC and scientific-software repositories.
+They are source-aligned guides: when prose and source disagree, prefer the
+current source, tests, and `CHANGELOG.md`.
 
 ## Start Here
 
@@ -34,6 +30,11 @@ receipts over older prose.
 | Falsifiable Change Manifest JSON templates, auditability, and `clio evolve` | [evolution.md](evolution.md) ([Interactive Blueprint](html/evolution_blueprint.html)) |
 | Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
 
+Every project Clio works in gets its context from a checked-in `CLIO.md`,
+bootstrapped and maintained by `clio init`. The root
+[CLIO.md](../CLIO.md) of this repository is the maintained reference example
+of the format.
+
 ## Developer Quick Start
 
 ```bash
@@ -47,24 +48,22 @@ clio --version
 The local symlink executes `dist/cli/index.js`. If you edit TypeScript files
 under `src/`, run `npm run build` again or keep `npm run dev` running.
 
-## Current Release Notes
+## Release Notes
 
-The public release entry point is [../README.md](../README.md), and detailed
-release history lives in [../CHANGELOG.md](../CHANGELOG.md).
+The release entry point is [../README.md](../README.md); detailed release
+history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.2.2 the supported
+install path is a source checkout through `npm run install:local`, the
+deterministic release gate is `npm run ci:release`, and live model smoke
+validation is manual and opt-in through `npm run test:live`. The package is
+not published to npm for this release.
 
-For v0.2.2:
+## Writing Documentation
 
-- source checkout is the supported install path through `npm run install:local`;
-- npm registry publication is not part of this release;
-- deterministic release verification is `npm run ci:release`;
-- live model smoke validation is manual and opt-in through `npm run test:live`;
-- local model behavior can vary by runtime, model family, context budget, and
-  server configuration.
+Guidance for doc authors lives in
+[documentation-guide.md](documentation-guide.md). The short version:
 
-## Documentation Rules
-
-- Keep alpha and experimental wording explicit.
-- Do not imply npm publication, production stability, managed upgrades, or
-  universal local-model behavior without current proof.
-- Prefer command examples that are valid against `node dist/cli/index.js --help`.
-- Keep the README short and move detailed command explanations into docs.
+- State alpha status plainly; do not imply npm publication, production
+  stability, or universal local-model behavior without current proof.
+- Prefer command examples that are valid against
+  `node dist/cli/index.js --help`.
+- Keep the README short; detailed command explanations belong in these pages.
