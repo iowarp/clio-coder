@@ -4,11 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
+import {
+	consumeToolActivationGrants,
+	createToolActivationPolicy,
+	grantToolActivation,
+	narrowToolActivationBound,
+} from "../../src/core/tool-activation.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
+import { createActivateToolsTool } from "../../src/tools/activate-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -409,6 +416,98 @@ describe("contracts/tools palette", () => {
 		ok(navigationArchitect.includes(ToolNames.EntryPoints));
 		ok(navigationArchitect.includes(ToolNames.WhereIs));
 		ok(navigationArchitect.includes(ToolNames.FindSymbol));
+	});
+});
+
+describe("contracts/tools model-driven activation", () => {
+	it("attaches activate_tools on work turns and never on suppressed or chatter turns", () => {
+		const work = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "find recent papers comparing flash attention variants",
+		});
+		ok(work.activeTools.includes(ToolNames.ActivateTools));
+
+		const greeting = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "hi",
+		});
+		strictEqual(greeting.activeTools.includes(ToolNames.ActivateTools), false);
+
+		const noTools = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "without tools, explain what the palette does",
+		});
+		strictEqual(noTools.activeTools.length, 0);
+
+		const pendingSkill = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "run the literature workflow",
+			pendingSkillRequests: [{ name: "arxiv-literature", args: "agents", source: "slash-command", installed: true }],
+		});
+		// The constrained pending-skill phase stays read_skill (+ask_user) only.
+		strictEqual(pendingSkill.activeTools.includes(ToolNames.ActivateTools), false);
+		ok(pendingSkill.activeTools.includes(ToolNames.ReadSkill));
+	});
+
+	it("bounds grants by session policy and consumes them once", () => {
+		const policy = createToolActivationPolicy([ToolNames.Read, ToolNames.WebFetch, ToolNames.Dispatch], [ToolNames.Read]);
+		const grant = grantToolActivation(policy, [ToolNames.WebFetch, ToolNames.Read, ToolNames.Bash], "research");
+		strictEqual(grant.granted.length, 1);
+		strictEqual(grant.granted[0], ToolNames.WebFetch);
+		strictEqual(grant.alreadyActive[0], ToolNames.Read);
+		strictEqual(grant.rejected[0], ToolNames.Bash);
+
+		strictEqual(consumeToolActivationGrants(policy).length, 1);
+		// Grants attach once; a second consume pass finds nothing.
+		strictEqual(consumeToolActivationGrants(policy).length, 0);
+		strictEqual(policy.requests.length, 1);
+		strictEqual(policy.requests[0]?.reason, "research");
+	});
+
+	it("narrowing the bound drops out-of-bound pending grants (skill narrowing wins)", () => {
+		const policy = createToolActivationPolicy([ToolNames.Read, ToolNames.WebFetch, ToolNames.Bash], []);
+		grantToolActivation(policy, [ToolNames.WebFetch, ToolNames.Bash], "research");
+		narrowToolActivationBound(policy, [ToolNames.Read, ToolNames.WebFetch]);
+		const attached = consumeToolActivationGrants(policy);
+		strictEqual(attached.length, 1);
+		strictEqual(attached[0], ToolNames.WebFetch);
+	});
+
+	it("activate_tools tool expands catalog groups within policy and fails without a policy", async () => {
+		const tool = createActivateToolsTool();
+		const policy = createToolActivationPolicy(
+			[ToolNames.Read, ToolNames.WebFetch, ToolNames.Dispatch, ToolNames.DispatchBatch],
+			[ToolNames.Read],
+		);
+		const result = await tool.run(
+			{ groups: ["external", "delegate"], reason: "paper research needs web and the researcher agent" },
+			{ toolActivationPolicy: policy },
+		);
+		strictEqual(result.kind, "ok");
+		ok(policy.granted.has(ToolNames.WebFetch));
+		ok(policy.granted.has(ToolNames.Dispatch));
+		ok(policy.granted.has(ToolNames.DispatchBatch));
+
+		const outside = await tool.run({ tools: [ToolNames.Bash], reason: "shell" }, { toolActivationPolicy: policy });
+		strictEqual(outside.kind, "error");
+
+		const orphan = await tool.run({ groups: ["external"], reason: "x" }, {});
+		strictEqual(orphan.kind, "error");
+	});
+
+	it("never exposes activate_tools to workers", () => {
+		const registry = testRegistryWithTools([ToolNames.Read, ToolNames.ActivateTools]);
+		const worker = resolveAgentTools({
+			registry,
+			allowedTools: [ToolNames.Read, ToolNames.ActivateTools],
+			includeInteractiveTools: false,
+		}).map((tool) => tool.name);
+		strictEqual(worker.includes(ToolNames.ActivateTools), false);
+		ok(worker.includes(ToolNames.Read));
 	});
 });
 

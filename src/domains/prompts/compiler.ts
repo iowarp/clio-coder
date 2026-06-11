@@ -208,7 +208,7 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 	} else if (activeToolNames && activeToolNames.length === 0) {
 		lines.push("Active tools this turn: none (small talk or a tool/meta question).");
 		lines.push(
-			"The Tool Catalog below lists everything you can use. Describe your real capabilities from it; never invent tool names or claim a tool channel you lack. To inspect or change the repository, say what you will do and the matching tools attach on the next turn.",
+			"The Tool Catalog below lists everything you can use. Describe your real capabilities from it; never invent tool names or claim a tool channel you lack. On a work request the base tools attach automatically, and activate_tools widens the surface from there.",
 		);
 	} else if (activeToolNames) {
 		lines.push(`Active tools this turn: ${activeToolNames.join(", ")}.`);
@@ -218,9 +218,15 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 			lines.push(`Palette: ${intent || "unknown"}${phase ? ` / ${phase}` : ""}.`);
 		}
 		lines.push("Only call tools in the active list, and only for concrete inspection or changes that the task requires.");
-		lines.push(
-			"The Tool Catalog below lists the full surface; if the task needs a tool that is not active yet, name the next step and it attaches next turn.",
-		);
+		if (activeToolNames.includes("activate_tools")) {
+			lines.push(
+				"The Tool Catalog below lists the full surface. If the task needs a tool that is not active yet (web research, delegation to a fleet agent, validation, shell), call activate_tools with the catalog group or tool names plus a one-line reason; the schemas attach before your next step. Activation never bypasses safety confirmation and cannot exceed session policy.",
+			);
+		} else {
+			lines.push(
+				"The Tool Catalog below lists the full surface; tools outside the active list are not reachable in this constrained phase.",
+			);
+		}
 		lines.push(
 			"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 		);
@@ -256,7 +262,7 @@ function renderToolCatalogBlock(inputs: DynamicInputs): string {
 	if (catalog.length === 0) return "";
 	return [
 		"# Tool Catalog",
-		"Every tool you can use this session, grouped by purpose. Schemas are attached only for the active subset above; this catalog is the authoritative list of what exists. Use it to answer capability questions accurately.",
+		"Every tool you can use this session, grouped by purpose. Schemas are attached only for the active subset above; this catalog is the authoritative list of what exists. Use it to answer capability questions accurately, and use activate_tools to attach any listed tool you need next.",
 		"",
 		catalog,
 	].join("\n");

@@ -14,6 +14,12 @@ import {
 	type SkillActivation,
 	type SkillDeclaredToolPolicy,
 } from "../core/skill-activation.js";
+import {
+	consumeToolActivationGrants,
+	createToolActivationPolicy,
+	narrowToolActivationBound,
+	type ToolActivationPolicy,
+} from "../core/tool-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type {
@@ -924,6 +930,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const toolStartTimes = new Map<string, number>();
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	let currentAskUserPolicy: AskUserToolPolicy | undefined;
+	let currentToolActivationPolicy: ToolActivationPolicy | undefined;
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -1048,6 +1055,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (turnId) options.turnId = turnId;
 		if (currentPendingSkillPolicy) options.pendingSkillPolicy = currentPendingSkillPolicy;
 		if (currentAskUserPolicy) options.askUserPolicy = currentAskUserPolicy;
+		if (currentToolActivationPolicy) options.toolActivationPolicy = currentToolActivationPolicy;
 		return options;
 	};
 
@@ -2171,34 +2179,76 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	/**
-	 * Pending-skill turns start constrained to read_skill (+ ask_user). Once
-	 * read_skill succeeds, widen the rest of the run to the host palette merged
-	 * with the loaded skill's declared tool policy. Host policy always wins:
-	 * the merge filters the host surface; it can never add to it. Runs inside
-	 * prepareNextTurn so the expanded schemas reach the very next provider call.
+	 * Mid-run tool surface changes, applied before the next provider call.
+	 *
+	 * Two sources, in order:
+	 *
+	 *  1. Skill load. Pending-skill turns start constrained to read_skill
+	 *     (+ ask_user); once read_skill succeeds, the run widens to the host
+	 *     palette merged with the loaded skill's declared tool policy. Host
+	 *     policy always wins: the merge filters the host surface and also
+	 *     narrows the activation bound, so a skill that narrows cannot be
+	 *     escaped via activate_tools.
+	 *  2. Model activation. Grants accumulated by the activate_tools tool
+	 *     attach on top of the current active set, bounded by the (possibly
+	 *     skill-narrowed) session surface.
+	 *
+	 * Runs inside the post-tool continuation guard so expanded schemas reach
+	 * the very next provider call.
 	 */
-	const maybeExpandToolsAfterSkillLoad = (agentRuntime: AgentRuntime): boolean => {
-		const policy = currentPendingSkillPolicy;
-		if (!policy || policy.toolsExpanded || policy.loadedSkillNames.size === 0) return false;
+	const maybeExpandToolSurface = (agentRuntime: AgentRuntime): boolean => {
 		if (!deps.toolRegistry) return false;
 		const hostTools = currentToolPalette?.availableTools ?? deps.toolRegistry.listRegistered();
-		const merged = mergePendingSkillToolSurface(hostTools, policy);
-		policy.toolsExpanded = true;
-		if (!merged) return false;
-		// The merge only filters hostTools, so every entry is a registered ToolName.
-		const mergedNames = merged as ToolName[];
+		const widenSignals: string[] = [];
+		let surface: ToolName[] | null = null;
+
+		const skillPolicy = currentPendingSkillPolicy;
+		if (skillPolicy && !skillPolicy.toolsExpanded && skillPolicy.loadedSkillNames.size > 0) {
+			const merged = mergePendingSkillToolSurface(hostTools, skillPolicy);
+			skillPolicy.toolsExpanded = true;
+			if (merged) {
+				// The merge only filters hostTools, so every entry is a registered ToolName.
+				surface = merged as ToolName[];
+				widenSignals.push("skillActivated");
+				if (currentToolActivationPolicy) narrowToolActivationBound(currentToolActivationPolicy, merged);
+			}
+		}
+
+		// Grants stay parked while a pending-skill turn is still constrained;
+		// the skill must load (or fail to) before the surface may widen.
+		const skillPhaseConstrained = currentPendingSkillPolicy !== undefined && !currentPendingSkillPolicy.toolsExpanded;
+		if (currentToolActivationPolicy && !skillPhaseConstrained) {
+			const grants = consumeToolActivationGrants(currentToolActivationPolicy) as ToolName[];
+			if (grants.length > 0) {
+				const base =
+					surface ??
+					(currentToolPalette
+						? [...currentToolPalette.activeTools]
+						: agentRuntime.agent.state.tools.map((tool) => tool.name as ToolName));
+				const present = new Set(base);
+				for (const grant of grants) {
+					if (present.has(grant)) continue;
+					present.add(grant);
+					base.push(grant);
+				}
+				surface = base;
+				widenSignals.push(`modelActivated:${grants.join("+")}`);
+			}
+		}
+
+		if (!surface) return false;
 		const resolved = resolveAgentTools({
 			registry: deps.toolRegistry,
-			allowedTools: mergedNames,
+			allowedTools: surface,
 			invokeOptions: currentToolInvokeOptions,
 		});
 		agentRuntime.agent.state.tools = resolved;
 		if (currentToolPalette) {
 			currentToolPalette = {
 				...currentToolPalette,
-				activeTools: mergedNames,
-				signals: [...currentToolPalette.signals, "skillActivated"],
-				omittedToolCount: Math.max(0, currentToolPalette.availableTools.length - mergedNames.length),
+				activeTools: surface,
+				signals: [...currentToolPalette.signals, ...widenSignals],
+				omittedToolCount: Math.max(0, currentToolPalette.availableTools.length - surface.length),
 			};
 		}
 		return true;
@@ -2206,7 +2256,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const postToolContinuationGuard = async (agentRuntime: AgentRuntime, signal?: AbortSignal) => {
 		if (signal?.aborted || !toolResultTail(agentRuntime)) return undefined;
-		const toolsExpanded = maybeExpandToolsAfterSkillLoad(agentRuntime);
+		const toolsExpanded = maybeExpandToolSurface(agentRuntime);
 		const before = liveContextEstimate(agentRuntime);
 		if (before.contextWindow <= 0 || before.tokens <= 0) {
 			return toolsExpanded ? continuationContextUpdate(agentRuntime) : undefined;
@@ -2357,6 +2407,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;
 			const askUserPolicy = createAskUserToolPolicy(resolvedTools.tools);
+			// Model-driven escalation bound: everything the session policy allows,
+			// seeded with what is already active. Suppressed turns get no policy,
+			// so a stray activate_tools call fails deterministically.
+			const toolActivationPolicy =
+				resolvedTools.palette?.providerSupportsTools && !resolvedTools.palette.toolsSuppressed
+					? createToolActivationPolicy(resolvedTools.palette.availableTools, resolvedTools.palette.activeTools)
+					: undefined;
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2438,8 +2495,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			const priorPendingSkillPolicy = currentPendingSkillPolicy;
 			const priorAskUserPolicy = currentAskUserPolicy;
+			const priorToolActivationPolicy = currentToolActivationPolicy;
 			currentPendingSkillPolicy = pendingSkillPolicy;
 			currentAskUserPolicy = askUserPolicy;
+			currentToolActivationPolicy = toolActivationPolicy;
 			try {
 				const promptMessages = promptMessagesForTurn(compileResult, text, images);
 				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
@@ -2495,6 +2554,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				streaming = false;
 				currentPendingSkillPolicy = priorPendingSkillPolicy;
 				currentAskUserPolicy = priorAskUserPolicy;
+				currentToolActivationPolicy = priorToolActivationPolicy;
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
 				currentToolPalette = null;

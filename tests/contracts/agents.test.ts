@@ -210,6 +210,22 @@ describe("contracts/agents", () => {
 		match(errors[0] ?? "", /declares skills but does not expose read_skill/);
 	});
 
+	it("rejects recipes that declare the orchestrator-only activate_tools", () => {
+		const spec = normalizeAgentSpec({
+			id: "self-escalating",
+			name: "Self Escalating",
+			description: "Invalid recipe trying to widen its own surface.",
+			tools: ["read", "activate_tools"],
+			category: "research",
+			capabilityClass: "read-only",
+			source: "project",
+			filepath: "/tmp/self-escalating.md",
+			body: "# Self Escalating",
+		});
+		const errors = agentSpecPolicyErrors(spec);
+		ok(errors.some((error) => error.includes("activate_tools")));
+	});
+
 	it("keeps shipped built-in recipes aligned with their declared capability class", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });

@@ -4,6 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import { createActivateToolsTool } from "./activate-tools.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { entryPointsTool } from "./codewiki/entry-points.js";
@@ -40,6 +41,8 @@ export interface ToolBootstrapDeps {
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
 	askUser?: AskUserHandler;
+	/** Agent Fleet roster for activate_tools to return when dispatch is granted mid-run. */
+	getAgentCatalog?: () => string;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -295,6 +298,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedReadPolicy,
 		costLatency: "local_fast",
 	},
+	[ToolNames.ActivateTools]: {
+		objective: "Attach additional catalog tool schemas within session policy.",
+		uiLabel: "Activate",
+		retrySafety: "idempotent",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 4_000,
+			followUpHint: "Use the activated tools directly on the next step.",
+		},
+		costLatency: "local_fast",
+	},
 };
 
 function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
@@ -389,6 +403,12 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			}),
 		});
 	}
+	registry.register({
+		...builtin(createActivateToolsTool(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}), {
+			path: "src/tools/activate-tools.ts",
+			scope: "core",
+		}),
+	});
 	registry.register({
 		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 	});
