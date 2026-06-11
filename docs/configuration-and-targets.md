@@ -152,13 +152,10 @@ skills:
   trustProjectCompatRoots: false
 compaction:
   auto: true
+  threshold: 0.8
   excludeLastTurns: 6
-  thresholds:
-    warning: 0.7
-    maskObservations: 0.8
-    pruneObservations: 0.85
-    maskDialogue: 0.9
-    llmSummary: 0.99
+  # model: provider/summary-model-id
+  # systemPrompt: ~/.config/clio/prompts/compaction.md
 retry:
   enabled: true
   maxRetries: 3

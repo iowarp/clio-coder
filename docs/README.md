@@ -23,7 +23,7 @@ receipts over older prose.
 | Installation, upgrade, reset, uninstallation, configuration folders, and permissions | [installation-and-lifecycle.md](installation-and-lifecycle.md) ([Interactive Blueprint](html/lifecycle_blueprint.html)) |
 | Safety posture, default-deny Bash, project policy, damage-control rules, and typed validation | [safety-model.md](safety-model.md) ([Interactive Blueprint](html/safety_blueprint.html)) |
 | Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](architecture.md) ([Interactive Blueprint](html/architecture_blueprint.html)) |
-| Prompt envelopes, provider tool contracts, active tool palettes, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) ([Interactive Blueprint](html/tools_blueprint.html)) |
+| Prompt envelope reuse, provider tool delivery, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) ([Interactive Blueprint](html/tools_blueprint.html)) |
 | Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](built-in-agents.md) ([Interactive Blueprint](html/agents_blueprint.html)) |
 | Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](evidence-and-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](eval-runner.md) ([Interactive Blueprint](html/eval_blueprint.html)) |
