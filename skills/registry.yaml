@@ -21,8 +21,8 @@ skills:
     version: 0.2.0
     sha256: 40dc26c98c2698e7f238e40f6cd47e3287f18622fd7ae3b9a31d0dd2b8126e2a
   - name: grill-me
-    version: 0.2.0
-    sha256: b446270a119a11b67752cc9b12ce93471c5d54cd7ff37be579e948acc8e373af
+    version: 0.3.0
+    sha256: 2d4db0dde4926dc5ccc283724193f1b2db274e555e33cc36d2f0eb4e30f884c0
   - name: prd
     version: 0.2.0
     sha256: ec69dcb9b523fc34c78a3bfbe9641cfb5c3e62ad2b9b9d7d8352304bc9e4de83

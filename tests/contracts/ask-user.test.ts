@@ -7,7 +7,7 @@ import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { resolveToolPalette } from "../../src/tools/palette.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";
 
 const ALL_TOOLS = Object.values(ToolNames) as ToolName[];
 
@@ -19,6 +19,24 @@ function allowReadSafety() {
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset: () => true,
 		audit: { recordCount: () => 0 },
+	};
+}
+
+function askUserPolicy(maxCalls = 6): AskUserToolPolicy {
+	const now = new Date().toISOString();
+	return {
+		id: "test-ask-user-policy",
+		status: "idle",
+		startedAt: now,
+		updatedAt: now,
+		rounds: [],
+		decisions: [],
+		inFlight: false,
+		cancelled: false,
+		answerCount: 0,
+		callCount: 0,
+		maxCalls,
+		askedQuestionKeys: new Set<string>(),
 	};
 }
 
@@ -41,6 +59,67 @@ describe("contracts/ask_user", () => {
 		strictEqual(zeroQuestions.error, "questions must contain at least 1 item");
 		strictEqual(fiveQuestions.error, "questions must contain at most 4 items");
 		strictEqual(complete.call?.action, "complete");
+	});
+
+	it("normalizes single-question interview mode and bounded max_rounds", () => {
+		const single = normalizeAskUserCall({
+			mode: "single-question",
+			max_rounds: 12,
+			questions: [{ question: "What should this optimize for?" }],
+		});
+		const batched = normalizeAskUserCall({
+			mode: "single_question",
+			questions: [{ question: "one" }, { question: "two" }],
+		});
+		const tooManyRounds = normalizeAskUserCall({
+			max_rounds: 25,
+			questions: [{ question: "Pick a direction?" }],
+		});
+
+		strictEqual(single.error, undefined);
+		strictEqual(single.call?.mode, "single_question");
+		strictEqual(single.call?.max_rounds, 12);
+		strictEqual(batched.error, "mode=single_question requires exactly 1 question");
+		strictEqual(tooManyRounds.error, "max_rounds must be an integer from 1 to 24");
+	});
+
+	it("allows bounded phased interviews to raise the round limit", async () => {
+		const policy = askUserPolicy(1);
+		const tool = createAskUserTool({
+			askUser: async (questions) => ({
+				answers: questions.map((question) => ({ question: question.question, answer: "chosen answer" })),
+			}),
+		});
+
+		const first = await tool.run(
+			{
+				mode: "single_question",
+				max_rounds: 2,
+				questions: [{ question: "First root decision?" }],
+			},
+			{ askUserPolicy: policy },
+		);
+		const second = await tool.run(
+			{
+				mode: "single_question",
+				questions: [{ question: "Second root decision?" }],
+			},
+			{ askUserPolicy: policy },
+		);
+		const third = await tool.run(
+			{
+				mode: "single_question",
+				questions: [{ question: "Third root decision?" }],
+			},
+			{ askUserPolicy: policy },
+		);
+
+		strictEqual(first.kind, "ok");
+		strictEqual(second.kind, "ok");
+		strictEqual(policy.maxCalls, 2);
+		strictEqual(policy.callCount, 2);
+		strictEqual(third.kind, "ok");
+		ok(third.output.includes("ask_user result: round_limit_reached"));
 	});
 
 	it("direct fallback handler returns cancelled without blocking", async () => {

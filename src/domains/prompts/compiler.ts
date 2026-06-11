@@ -238,7 +238,7 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 		}
 		if (activeToolNames.includes("ask_user")) {
 			lines.push(
-				'Use ask_user for structured operator interviews, confirmations, and choices. ask_user is an active tool, not a skill body or a file protocol. Start or continue the interview with action="ask" and one to four bundled questions. Include options with descriptions when choices are natural and put your recommended answer first. Ask adaptive follow-up rounds only for new necessary information. When the interview has enough information, call ask_user with action="complete", a compact decisions array, and an optional short summary before final prose. If ask_user returns cancelled, continue with defaults and do not ask again.',
+				'Use ask_user for structured operator interviews, confirmations, and choices. ask_user is an active tool, not a skill body or a file protocol. For interview or stress-test workflows use action="ask", mode="single_question", and exactly one question. For compact confirmations use mode="round" with one to four tightly related questions. Include options with descriptions when choices are natural and put your recommended answer first. Ask adaptive follow-up rounds only for new necessary information. When the interview has enough information, call ask_user with action="complete", a compact decisions array, and an optional short summary before final prose. If ask_user returns cancelled, continue with defaults and do not ask again.',
 			);
 		}
 	} else {
@@ -277,7 +277,7 @@ function renderPendingSkillRequestsBlock(inputs: DynamicInputs): string {
 		`First call read_skill for: ${allowed.join(", ")}.`,
 		`Only these pending skill names are allowed this turn: ${allowed.join(", ")}.`,
 		"After read_skill succeeds, follow the loaded workflow. The active tool surface then widens to the skill's declared tools merged with host policy, so load the skill before attempting other tool calls.",
-		'If that workflow needs an interview, confirmation, or choice and ask_user is active, call ask_user with action="ask" and one to four bundled questions when possible. Adaptive follow-up rounds are allowed only for new, necessary questions. When enough information is collected, call ask_user with action="complete" and compact decisions before final prose. If ask_user is unavailable or cancelled, proceed with defaults and state assumptions.',
+		'If that workflow needs an interview, confirmation, or choice and ask_user is active, call ask_user with action="ask". Use mode="single_question" and exactly one question for interview workflows; use mode="round" only for tightly related confirmations. Adaptive follow-up rounds are allowed only for new, necessary questions. When enough information is collected, call ask_user with action="complete" and compact decisions before final prose. If ask_user is unavailable or cancelled, proceed with defaults and state assumptions.',
 	);
 	return lines.join("\n");
 }

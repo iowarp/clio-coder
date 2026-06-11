@@ -17,8 +17,11 @@ import type {
 export const ASK_USER_OTHER_LABEL = "Other (type your answer)";
 
 const MAX_DECISIONS = 24;
+const DEFAULT_MAX_ROUNDS = 6;
+const MAX_ROUNDS = 24;
 
 export type AskUserAction = "ask" | "complete";
+export type AskUserMode = "round" | "single_question";
 
 export interface AskUserOption {
 	label: string;
@@ -54,9 +57,11 @@ export interface AskUserResult {
 
 export interface AskUserCall {
 	action: AskUserAction;
+	mode?: AskUserMode;
 	questions?: AskUserQuestion[];
 	decisions?: AskUserDecision[];
 	summary?: string;
+	max_rounds?: number;
 }
 
 export type AskUserHandler = (
@@ -73,6 +78,12 @@ export const askUserParameters = Type.Object({
 		Type.Union([Type.Literal("ask"), Type.Literal("complete")], {
 			description:
 				"Interview lifecycle action. Use ask to present the next round of questions. Use complete exactly once when enough decisions have been collected and before final prose.",
+		}),
+	),
+	mode: Type.Optional(
+		Type.Union([Type.Literal("round"), Type.Literal("single_question")], {
+			description:
+				"Question pacing for action=ask. Use single_question for interview or stress-test workflows that must ask exactly one question per round; use round for one to four tightly related confirmations.",
 		}),
 	),
 	questions: Type.Optional(
@@ -98,9 +109,17 @@ export const askUserParameters = Type.Object({
 				minItems: 0,
 				maxItems: 4,
 				description:
-					"For action=ask, one to four structured questions for the operator. Bundle related questions into one round when possible; ask adaptive follow-up rounds only when the previous answer makes them necessary.",
+					"For action=ask, one to four structured questions for the operator. In mode=single_question this must contain exactly one question; otherwise bundle only tightly related confirmations.",
 			},
 		),
+	),
+	max_rounds: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			maximum: MAX_ROUNDS,
+			description:
+				"Optional bounded interview round limit for this turn. Use a higher value for phased interviews that legitimately need more than the default six rounds.",
+		}),
 	),
 	decisions: Type.Optional(
 		Type.Array(
@@ -136,6 +155,30 @@ function trimOptionalString(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeAskUserMode(value: unknown): { mode?: AskUserMode; error?: string } {
+	if (value === undefined) return {};
+	const raw = trimOptionalString(value)
+		?.toLowerCase()
+		.replace(/[-\s]+/g, "_");
+	if (!raw) return { error: "mode must be round or single_question" };
+	if (raw === "round" || raw === "batch") return { mode: "round" };
+	if (raw === "single" || raw === "single_question" || raw === "one_question") {
+		return { mode: "single_question" };
+	}
+	return { error: "mode must be round or single_question" };
+}
+
+function normalizeMaxRounds(value: unknown): { maxRounds?: number; error?: string } {
+	if (value === undefined) return {};
+	if (typeof value !== "number" || !Number.isInteger(value)) {
+		return { error: `max_rounds must be an integer from 1 to ${MAX_ROUNDS}` };
+	}
+	if (value < 1 || value > MAX_ROUNDS) {
+		return { error: `max_rounds must be an integer from 1 to ${MAX_ROUNDS}` };
+	}
+	return { maxRounds: value };
 }
 
 function normalizeOptions(value: unknown, index: number): { options?: AskUserOption[]; error?: string } {
@@ -224,6 +267,10 @@ export function normalizeAskUserCall(args: Record<string, unknown>): { call?: As
 	if (rawAction !== "ask" && rawAction !== "complete") {
 		return { error: "action must be ask or complete" };
 	}
+	const mode = normalizeAskUserMode(args.mode);
+	if (mode.error) return { error: mode.error };
+	const maxRounds = normalizeMaxRounds(args.max_rounds);
+	if (maxRounds.error) return { error: maxRounds.error };
 	const decisions = normalizeDecisions(args.decisions);
 	if (decisions.error) return { error: decisions.error };
 	const summary = trimOptionalString(args.summary);
@@ -241,11 +288,16 @@ export function normalizeAskUserCall(args: Record<string, unknown>): { call?: As
 	}
 	const questions = normalizeAskUserQuestions(args);
 	if (!questions.questions) return { error: questions.error ?? "invalid questions" };
+	if (mode.mode === "single_question" && questions.questions.length !== 1) {
+		return { error: "mode=single_question requires exactly 1 question" };
+	}
 	return {
 		call: {
 			action: "ask",
+			...(mode.mode ? { mode: mode.mode } : {}),
 			questions: questions.questions,
 			...(summary ? { summary } : {}),
+			...(maxRounds.maxRounds ? { max_rounds: maxRounds.maxRounds } : {}),
 		},
 	};
 }
@@ -283,7 +335,7 @@ function createStandalonePolicy(options?: ToolInvokeOptions): AskUserToolPolicy 
 		cancelled: false,
 		answerCount: 0,
 		callCount: 0,
-		maxCalls: 6,
+		maxCalls: DEFAULT_MAX_ROUNDS,
 		askedQuestionKeys: new Set<string>(),
 	};
 }
@@ -437,6 +489,7 @@ function compactInterview(
 		status: policy.status,
 		event,
 		rounds: policy.rounds.length,
+		max_rounds: policy.maxCalls,
 		transcript_path: policy.transcriptPath ?? null,
 		latest_answers: latestAnswers,
 		decisions: policy.decisions,
@@ -525,7 +578,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			"Run a host-owned operator interview. Use action=ask with one to four bundled questions for each round; include multiple-choice options with descriptions when choices are natural, put your recommended option first, and ask adaptive follow-up rounds only for new necessary information. When enough information is collected, call action=complete with a compact decisions object before final prose. If cancelled, proceed with defaults and do not ask again.",
+			"Run a host-owned operator interview. For interview or stress-test workflows, use action=ask with mode=single_question and exactly one question per round. For compact confirmations, use mode=round with one to four tightly related questions. Include multiple-choice options with descriptions when choices are natural, put your recommended option first, and ask adaptive follow-up rounds only for new necessary information. Raise max_rounds only for bounded phased interviews. When enough information is collected, call action=complete with a compact decisions object before final prose. If cancelled, proceed with defaults and do not ask again.",
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",
@@ -540,6 +593,10 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);
 			}
 			const questions = call.questions ?? [];
+			if (call.max_rounds !== undefined) {
+				const nextLimit = policy.callCount === 0 ? call.max_rounds : Math.max(policy.maxCalls, call.max_rounds);
+				policy.maxCalls = Math.max(nextLimit, policy.callCount + 1);
+			}
 			if (policy.inFlight === true) {
 				return {
 					kind: "error",
