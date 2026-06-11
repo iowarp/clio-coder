@@ -232,16 +232,7 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		let compactTrigger: string | undefined;
 		let prepareUpdate: unknown;
 		const loop = createChatLoop({
-			getSettings: () =>
-				settings({
-					thresholds: {
-						warning: 0.1,
-						maskObservations: 0.2,
-						pruneObservations: 0.3,
-						maskDialogue: 0.4,
-						llmSummary: 0.5,
-					},
-				}),
+			getSettings: () => settings({ threshold: 0.5 }),
 			providers: providers(),
 			knownEndpoints: () => new Set(["test-target"]),
 			session: createSession(entries),

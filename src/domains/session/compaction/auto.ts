@@ -1,130 +1,56 @@
 /**
- * Auto-compaction trigger (Phase 12 slice 12d).
+ * Auto-compaction trigger.
  *
- * Pure pressure classifier + in-flight-debounced runner used by the chat-loop
- * before every assistant request. `shouldCompact` returns the graduated stage
- * crossed by the current context pressure; `AutoCompactionTrigger` wraps the
- * actual task so two concurrent chat submissions cannot spawn overlapping
- * compaction runs on the same session.
+ * Pure pressure check + in-flight-debounced runner used by the chat-loop
+ * before every assistant request. `shouldCompact` reports whether the current
+ * context pressure crossed the single compaction threshold; the
+ * `AutoCompactionTrigger` wraps the actual task so two concurrent chat
+ * submissions cannot spawn overlapping compaction runs on the same session.
  *
- * Ported from pi-coding-agent's runtime compaction gate. Kept deliberately
- * small so the chat-loop can call it on the hot path without new allocations
- * per turn. No I/O here. The caller injects the work via `fire(task)`.
+ * Kept deliberately small so the chat-loop can call it on the hot path
+ * without new allocations per turn. No I/O here. The caller injects the work
+ * via `fire(task)`.
  */
 
-export const CONTEXT_COMPACTION_STAGES = [
-	"warning",
-	"mask_observations",
-	"prune_observations",
-	"mask_dialogue",
-	"llm_summary",
-] as const;
-
-export type ContextCompactionStage = (typeof CONTEXT_COMPACTION_STAGES)[number];
-
-export interface ContextCompactionThresholds {
-	warning: number;
-	maskObservations: number;
-	pruneObservations: number;
-	maskDialogue: number;
-	llmSummary: number;
-}
-
 export interface ContextCompactionVerdict {
-	stage: ContextCompactionStage | null;
+	shouldCompact: boolean;
 	pressure: number | null;
 	contextTokens: number;
 	contextWindow: number;
-	threshold: number | null;
+	threshold: number;
 }
 
-export const DEFAULT_CONTEXT_COMPACTION_THRESHOLDS: ContextCompactionThresholds = {
-	warning: 0.7,
-	maskObservations: 0.8,
-	pruneObservations: 0.85,
-	maskDialogue: 0.9,
-	llmSummary: 0.99,
-};
-
-function clampThreshold(value: unknown, fallback: number): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-	if (value <= 0) return 0;
-	if (value > 1) return 1;
-	return value;
-}
-
-export function normalizeContextCompactionThresholds(
-	value: Partial<ContextCompactionThresholds> | undefined,
-	legacyLlmSummaryThreshold?: number,
-): ContextCompactionThresholds {
-	const defaults = DEFAULT_CONTEXT_COMPACTION_THRESHOLDS;
-	const llmFallback =
-		typeof legacyLlmSummaryThreshold === "number" && Number.isFinite(legacyLlmSummaryThreshold)
-			? legacyLlmSummaryThreshold
-			: defaults.llmSummary;
-	return {
-		warning: clampThreshold(value?.warning, defaults.warning),
-		maskObservations: clampThreshold(value?.maskObservations, defaults.maskObservations),
-		pruneObservations: clampThreshold(value?.pruneObservations, defaults.pruneObservations),
-		maskDialogue: clampThreshold(value?.maskDialogue, defaults.maskDialogue),
-		llmSummary: clampThreshold(value?.llmSummary, llmFallback),
-	};
-}
-
-function stageThreshold(thresholds: ContextCompactionThresholds, stage: ContextCompactionStage): number {
-	switch (stage) {
-		case "warning":
-			return thresholds.warning;
-		case "mask_observations":
-			return thresholds.maskObservations;
-		case "prune_observations":
-			return thresholds.pruneObservations;
-		case "mask_dialogue":
-			return thresholds.maskDialogue;
-		case "llm_summary":
-			return thresholds.llmSummary;
-	}
-}
+export const DEFAULT_COMPACTION_THRESHOLD = 0.8;
 
 /**
- * Return the highest graduated stage crossed by `contextTokens / contextWindow`.
- * Defensive behavior mirrors pi-coding-agent's conservative trigger:
+ * Report whether `contextTokens / contextWindow` crossed `threshold`.
+ * Defensive behavior:
  *   - non-positive or NaN contextWindow returns a no-op verdict.
- *   - threshold values outside 0..1 are clamped by the normalizer.
- *   - zero thresholds are treated as disabled for that stage.
+ *   - thresholds outside (0, 1] disable the trigger.
  */
 export function shouldCompact(
 	contextTokens: number,
-	thresholds: ContextCompactionThresholds,
+	threshold: number,
 	contextWindow: number,
 ): ContextCompactionVerdict {
 	const base: ContextCompactionVerdict = {
-		stage: null,
+		shouldCompact: false,
 		pressure: null,
 		contextTokens,
 		contextWindow,
-		threshold: null,
+		threshold,
 	};
+	if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1) return base;
 	if (!Number.isFinite(contextTokens) || contextTokens <= 0) return base;
 	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return base;
 
 	const pressure = contextTokens / contextWindow;
-	let selected: ContextCompactionStage | null = null;
-	let selectedThreshold: number | null = null;
-	for (const stage of CONTEXT_COMPACTION_STAGES) {
-		const threshold = stageThreshold(thresholds, stage);
-		if (threshold <= 0) continue;
-		if (pressure >= threshold) {
-			selected = stage;
-			selectedThreshold = threshold;
-		}
-	}
 	return {
-		stage: selected,
+		shouldCompact: pressure >= threshold,
 		pressure,
 		contextTokens,
 		contextWindow,
-		threshold: selectedThreshold,
+		threshold,
 	};
 }
 

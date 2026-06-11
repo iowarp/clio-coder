@@ -4,7 +4,7 @@
  * Two output shapes live here:
  *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop
  *      emits after an auto-compaction or `/compact` run. It uses the same
- *      `[context engine] <stage>:` shape as graduated pruning notices.
+ *      `[context engine] <stage>:` shape as the observation-mask notice.
  *   2. `renderCompactionSummaryEntry` renders a persisted
  *      `CompactionSummaryEntry` as a framed, indented block the chat panel
  *      can splice into a replayed transcript. The block visually marks the

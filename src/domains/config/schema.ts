@@ -100,24 +100,14 @@ const WorkerTargetSchema = Type.Object({
 	thinkingLevel: ThinkingLevelSchema,
 });
 
-const CompactionThresholdsSchema = Type.Object({
-	warning: Type.Number({ minimum: 0, maximum: 1 }),
-	maskObservations: Type.Number({ minimum: 0, maximum: 1 }),
-	pruneObservations: Type.Number({ minimum: 0, maximum: 1 }),
-	maskDialogue: Type.Number({ minimum: 0, maximum: 1 }),
-	llmSummary: Type.Number({ minimum: 0, maximum: 1 }),
-});
-
 /**
- * Graduated compaction controls. `threshold` remains optional only so older
- * settings files can validate while core/config.ts migrates it to
- * thresholds.llmSummary in memory.
+ * Compaction controls: one pressure threshold where compaction acts (mask
+ * stale observations first, then LLM summary if pressure stays above it).
  */
 const CompactionSchema = Type.Object({
-	thresholds: CompactionThresholdsSchema,
 	auto: Type.Boolean(),
+	threshold: Type.Number({ minimum: 0, maximum: 1 }),
 	excludeLastTurns: Type.Integer({ minimum: 1 }),
-	threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 	systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
 });

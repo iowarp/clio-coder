@@ -1208,17 +1208,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, (payload) => {
 		const evt = payload as ContextWarningPayload | null | undefined;
-		if (evt && typeof evt === "object") {
-			if ("warning" in evt) {
-				if (evt.warning !== null) notify("warning", evt.warning, "context-low-warning");
-				else notifications.dismiss("context-low-warning");
-			} else if (evt.stage === "warning") {
-				notify(
-					"warning",
-					`[Context Pressure] Context is ${Math.round((evt.pressure ?? 0) * 100)}% full. Consider running /compact soon.`,
-					"context-pressure-warning",
-				);
-			}
+		if (evt && typeof evt === "object" && "warning" in evt) {
+			if (evt.warning !== null) notify("warning", evt.warning, "context-low-warning");
+			else notifications.dismiss("context-low-warning");
 		}
 		footer.refresh();
 		tui.requestRender();
@@ -1231,7 +1223,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				`[Compaction] Reclaimed context: ${evt.tokensBefore} -> ${evt.tokensAfter} tokens (${evt.stage})`,
 				"compaction-notice",
 			);
-			notifications.dismiss("context-pressure-warning");
 		}
 		footer.refresh();
 		tui.requestRender();

@@ -176,7 +176,7 @@ describe("contracts/context-accounting", () => {
 			compactionThreshold: 0.8,
 			compactionAuto: true,
 			lastCompaction: {
-				stage: "progressive_cut",
+				stage: "mask_observations",
 				tokensBefore: 800,
 				tokensAfter: 300,
 				trigger: "auto",
@@ -184,7 +184,7 @@ describe("contracts/context-accounting", () => {
 		});
 
 		ok(ledger.lastCompaction !== null);
-		strictEqual(ledger.lastCompaction?.stage, "progressive_cut");
+		strictEqual(ledger.lastCompaction?.stage, "mask_observations");
 		strictEqual(ledger.lastCompaction?.tokensBefore, 800);
 		strictEqual(ledger.lastCompaction?.tokensAfter, 300);
 	});

@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	BusChannels,
-	type ContextPressureWarningPayload,
-	type ContextPrunedPayload,
-	type ContextWindowWarningPayload,
-} from "../core/bus-events.js";
+import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
@@ -30,17 +25,11 @@ import type { LocalModelQuirks } from "../domains/providers/types/local-model-qu
 import { assessFinishContract } from "../domains/safety/finish-contract.js";
 import {
 	AutoCompactionTrigger,
-	type ContextCompactionStage,
-	normalizeContextCompactionThresholds,
+	DEFAULT_COMPACTION_THRESHOLD,
 	shouldCompact,
 } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
-import {
-	applyProgressiveCompaction,
-	isProgressiveCompactionStage,
-	type ProgressiveCompactionResult,
-	shouldAnnounceStage,
-} from "../domains/session/compaction/progressive.js";
+import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import {
 	appendContextSnapshot,
 	type CaptureContextSnapshotInput,
@@ -699,35 +688,12 @@ function toolResultSummary(result: unknown): Record<string, unknown> {
 	};
 }
 
-export interface ProgressiveCompactionNoticeAccounting {
-	tokensBefore?: number | null;
-	tokensAfter?: number | null;
-}
-
-export function formatProgressiveCompactionNotice(
-	result: ProgressiveCompactionResult,
-	accounting: ProgressiveCompactionNoticeAccounting = {},
-): string {
-	const beforeTokens = accounting.tokensBefore ?? result.tokensBefore;
-	const afterTokens = accounting.tokensAfter ?? result.tokensAfter;
-	const before = beforeTokens && beforeTokens > 0 ? `~${beforeTokens} tokens` : "unknown tokens";
-	const after = afterTokens && afterTokens > 0 ? `~${afterTokens} tokens` : "unknown tokens";
-	const actions: string[] = [];
-	if (result.maskedObservations > 0) actions.push(`${result.maskedObservations} observations masked`);
-	if (result.prunedObservations > 0) actions.push(`${result.prunedObservations} observations pruned`);
-	if (result.maskedDialogue > 0) actions.push(`${result.maskedDialogue} dialogue messages masked`);
-	const actionText = actions.length > 0 ? actions.join(", ") : "no eligible stale entries";
-	return `[context engine] ${result.stage}: ${actionText}; ${before} -> ${after}`;
-}
-
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
-	const progressiveCompactionTrigger = new AutoCompactionTrigger<ProgressiveCompactionResult | null>();
 	let runtime: AgentRuntime | null = null;
 	let lastTurnId: string | null = null;
-	const lastContextStageBySession = new Map<string, ContextCompactionStage>();
 	let streaming = false;
 	let currentThinkingLevel: ThinkingLevel = deps.getSettings().orchestrator.thinkingLevel ?? "off";
 	let replayedContextMessages: AgentMessage[] = [];
@@ -1283,7 +1249,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const emitContextWindowWarningTransition = (warning: string | null): void => {
 		if (warning === lastContextWindowWarning) return;
 		lastContextWindowWarning = warning;
-		deps.bus?.emit(BusChannels.ContextWarning, { warning } satisfies ContextWindowWarningPayload);
+		deps.bus?.emit(BusChannels.ContextWarning, { warning } satisfies ContextWarningPayload);
 	};
 
 	const ensureRuntime = (): AgentRuntime | null => {
@@ -1837,11 +1803,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
-	const sessionStageKey = (): string => deps.session?.current()?.id ?? "__no_session__";
-
-	const formatPressure = (pressure: number | null): string =>
-		pressure === null ? "unknown pressure" : `${Math.round(pressure * 100)}% context pressure`;
-
 	const liveContextEstimate = (
 		agentRuntime: AgentRuntime,
 		pendingUserText?: string,
@@ -1867,22 +1828,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return refreshedEntries;
 	};
 
-	const maybeNoticeStage = (stage: ContextCompactionStage, message: string): void => {
-		const key = sessionStageKey();
-		const previous = lastContextStageBySession.get(key);
-		if (!shouldAnnounceStage(previous, stage)) return;
-		lastContextStageBySession.set(key, stage);
-		emitNotice(message);
-	};
-
 	/**
-	 * Evaluate the graduated context engine against the current session and
-	 * rebuild `agent.state.messages` whenever a stage mutates persisted
-	 * entries. Stage 5 delegates to the existing pi-style LLM compaction path:
-	 * append a compaction summary entry, then replay from the session view.
+	 * Two-mechanism context protection. When pressure crosses the single
+	 * threshold, first mask the bodies of tool observations older than
+	 * `excludeLastTurns` (cheap, no LLM call). If pressure stays above the
+	 * threshold, delegate to the pi-style LLM compaction path: append a
+	 * compaction summary entry, then replay from the session view.
 	 *
-	 * `force = true` bypasses graduated pressure and executes Stage 5 directly.
-	 * Used for `/compact`, CLIO_FORCE_COMPACT=1, and overflow recovery.
+	 * `force = true` skips the pressure check and the mask pre-stage and runs
+	 * the LLM summary directly. Used for `/compact`, CLIO_FORCE_COMPACT=1,
+	 * and overflow recovery.
 	 */
 	const runAutoCompact = async (
 		agentRuntime: AgentRuntime,
@@ -1897,90 +1852,61 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 
-		const compactionThreshold = cfg?.thresholds?.llmSummary ?? null;
+		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
 
-		let selectedStage: ContextCompactionStage = "llm_summary";
-		let pressure: number | null = null;
-		let liveTokensBefore: number | null = null;
 		if (!force) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
-			liveTokensBefore = estimate.tokens;
-			const thresholds = normalizeContextCompactionThresholds(cfg?.thresholds, cfg?.threshold);
-			const verdict = shouldCompact(estimate.tokens, thresholds, estimate.contextWindow);
-			if (verdict.stage === null) return false;
-			selectedStage = verdict.stage;
-			pressure = verdict.pressure;
-		}
+			const verdict = shouldCompact(estimate.tokens, compactionThreshold, estimate.contextWindow);
+			if (!verdict.shouldCompact) return false;
 
-		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
-		if (!force && selectedStage === "warning") {
-			deps.bus?.emit(BusChannels.ContextWarning, {
-				stage: "warning",
-				pressure,
-				trigger,
-				at: Date.now(),
-			} satisfies ContextPressureWarningPayload);
-			maybeNoticeStage(
-				selectedStage,
-				`[context engine] ${formatPressure(pressure)}; consider /compact if the next turn needs more room`,
-			);
-			return false;
-		}
+			// Mechanism B pre-stage: mask stale observations before paying for
+			// an LLM summary. History rewrites here invalidate the backend
+			// prefix cache; the "compaction" expectedColdReasons stamp from the
+			// CompactionBegin/End subscription explains the next cold turn.
+			if (deps.session?.current()) {
+				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
+				const masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
+				if (masked.changed) {
+					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+					deps.session.replaceEntries(masked.entries);
+					refreshAgentMessagesFromSession(agentRuntime);
+					deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
-		if (!force && isProgressiveCompactionStage(selectedStage)) {
-			if (!deps.session?.current()) return false;
-			const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-			const result = await progressiveCompactionTrigger.fire(async () =>
-				applyProgressiveCompaction({
-					entries: deps.readSessionEntries?.() ?? [],
-					stage: selectedStage,
-					excludeLastTurns: cfg?.excludeLastTurns ?? 6,
-				}),
-			);
-			if (!result?.changed) {
-				maybeNoticeStage(
-					selectedStage,
-					`[context engine] ${selectedStage} reached at ${formatPressure(pressure)}, but no stale entries were eligible`,
-				);
-				return false;
+					const postMaskSnapshot = captureRuntimeContextSnapshot(
+						agentRuntime,
+						activeUserTurnId || "compaction",
+						compactionThreshold,
+					);
+					currentContextSnapshot = postMaskSnapshot;
+					persistContextSnapshot(postMaskSnapshot);
+
+					const tokensAfterMask = snapshotInputTokens(postMaskSnapshot);
+					lastCompactionEvent = {
+						stage: "mask_observations",
+						tokensBefore: estimate.tokens,
+						tokensAfter: tokensAfterMask,
+						trigger,
+					};
+					deps.bus?.emit(BusChannels.ContextPruned, {
+						stage: "mask_observations",
+						pressure: verdict.pressure,
+						tokensBefore: estimate.tokens,
+						tokensAfter: tokensAfterMask,
+						maskedObservations: masked.maskedObservations,
+						trigger,
+						snapshotIdBefore: beforeSnapshotId,
+						snapshotIdAfter: postMaskSnapshot.snapshotId,
+						at: Date.now(),
+					} satisfies ContextPrunedPayload);
+					emitNotice(
+						`[context engine] mask_observations: ${masked.maskedObservations} observations masked; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
+					);
+
+					const after = liveContextEstimate(agentRuntime, pendingUserText);
+					if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+				}
 			}
-			deps.session.replaceEntries(result.entries);
-			refreshAgentMessagesFromSession(agentRuntime);
-
-			const postCompactSnapshot = captureRuntimeContextSnapshot(
-				agentRuntime,
-				activeUserTurnId || "compaction",
-				compactionThreshold,
-			);
-			currentContextSnapshot = postCompactSnapshot;
-			persistContextSnapshot(postCompactSnapshot);
-
-			const liveTokensAfter = snapshotInputTokens(postCompactSnapshot);
-			const tokensBefore = liveTokensBefore ?? result.tokensBefore;
-			lastCompactionEvent = {
-				stage: result.stage,
-				tokensBefore,
-				tokensAfter: liveTokensAfter,
-				trigger,
-			};
-			deps.bus?.emit(BusChannels.ContextPruned, {
-				stage: result.stage,
-				pressure,
-				tokensBefore,
-				tokensAfter: liveTokensAfter,
-				maskedObservations: result.maskedObservations,
-				prunedObservations: result.prunedObservations,
-				maskedDialogue: result.maskedDialogue,
-				trigger,
-				snapshotIdBefore: beforeSnapshotId,
-				snapshotIdAfter: postCompactSnapshot.snapshotId,
-				at: Date.now(),
-			} satisfies ContextPrunedPayload);
-			maybeNoticeStage(
-				selectedStage,
-				formatProgressiveCompactionNotice(result, { tokensBefore, tokensAfter: liveTokensAfter }),
-			);
-			return true;
 		}
 
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
@@ -1994,7 +1920,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!result || result.summary.length === 0) return false;
 
 		refreshAgentMessagesFromSession(agentRuntime);
-		lastContextStageBySession.set(sessionStageKey(), "llm_summary");
 
 		const postCompactSnapshot = captureRuntimeContextSnapshot(
 			agentRuntime,
@@ -2054,13 +1979,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
 
 		const settings = deps.getSettings();
-		const thresholds = normalizeContextCompactionThresholds(
-			settings.compaction?.thresholds,
-			settings.compaction?.threshold,
-		);
-		const verdict = shouldCompact(before.tokens, thresholds, before.contextWindow);
+		const threshold = settings.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+		const verdict = shouldCompact(before.tokens, threshold, before.contextWindow);
 		let compacted = false;
-		if (verdict.stage !== null) {
+		if (verdict.shouldCompact) {
 			try {
 				compacted = await runAutoCompact(agentRuntime, false, undefined, "auto");
 			} catch (err) {
@@ -2189,7 +2111,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
 			// next replay would treat as an unanswered turn.
-			const compactionThreshold = deps.getSettings().compaction?.thresholds?.llmSummary ?? null;
+			const compactionThreshold = deps.getSettings().compaction?.threshold ?? null;
 			const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
 				captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
 					promptSegments: compiledPrompt
@@ -2375,7 +2297,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		contextLedger(): ContextLedger {
 			const settings = deps.getSettings();
-			const compactionThreshold = settings.compaction?.thresholds?.llmSummary ?? null;
+			const compactionThreshold = settings.compaction?.threshold ?? null;
 			const compactionAuto = settings.compaction?.auto !== false;
 			if (!runtime) {
 				return buildContextLedger({

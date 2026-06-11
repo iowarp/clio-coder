@@ -1,5 +1,9 @@
+// Per-observation source cap. One tool result must stay proportional to the
+// question asked: ~6k chars ≈ 1.5k tokens, which a local backend prefills in
+// seconds. Truncated output always says how to continue (offset/limit or a
+// narrower query), so bigger requests cost extra calls, not a blown context.
 export const DEFAULT_MAX_LINES = 2000;
-export const DEFAULT_MAX_BYTES = 50 * 1024;
+export const DEFAULT_MAX_BYTES = 6 * 1024;
 export const GREP_MAX_LINE_LENGTH = 500;
 
 export interface TruncationResult {

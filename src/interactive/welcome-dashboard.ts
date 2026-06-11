@@ -159,9 +159,9 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 
 	const safetyLevel = settings?.safetyLevel ?? "auto-edit";
 	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
-	const compactionThreshold = settings?.compaction?.thresholds?.llmSummary
-		? `${Math.round(settings.compaction.thresholds.llmSummary * 100)}%`
-		: "99%";
+	const compactionThreshold = settings?.compaction?.threshold
+		? `${Math.round(settings.compaction.threshold * 100)}%`
+		: "80%";
 
 	let clioMdStatus = "none";
 	let codewikiCount = 0;

@@ -1,10 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_CONTEXT_COMPACTION_THRESHOLDS, shouldCompact } from "../../src/domains/session/compaction/auto.js";
-import { applyProgressiveCompaction } from "../../src/domains/session/compaction/progressive.js";
+import { rewriteCompactionThresholds } from "../../src/domains/lifecycle/migrations/2026-06-11-compaction-single-threshold.js";
+import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
+import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
-import { formatProgressiveCompactionNotice } from "../../src/interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
@@ -70,18 +70,19 @@ function toolResult(id: string, callId: string, text: string, parentTurnId: stri
 	};
 }
 
-describe("contracts/context compaction stages", () => {
-	it("selects the highest crossed graduated stage", () => {
-		const thresholds = DEFAULT_CONTEXT_COMPACTION_THRESHOLDS;
-		strictEqual(shouldCompact(690, thresholds, 1000).stage, null);
-		strictEqual(shouldCompact(700, thresholds, 1000).stage, "warning");
-		strictEqual(shouldCompact(800, thresholds, 1000).stage, "mask_observations");
-		strictEqual(shouldCompact(850, thresholds, 1000).stage, "prune_observations");
-		strictEqual(shouldCompact(900, thresholds, 1000).stage, "mask_dialogue");
-		strictEqual(shouldCompact(990, thresholds, 1000).stage, "llm_summary");
-		strictEqual(shouldCompact(990, thresholds, 0).stage, null);
+describe("contracts/context compaction trigger", () => {
+	it("fires on a single pressure threshold", () => {
+		strictEqual(shouldCompact(790, DEFAULT_COMPACTION_THRESHOLD, 1000).shouldCompact, false);
+		strictEqual(shouldCompact(800, DEFAULT_COMPACTION_THRESHOLD, 1000).shouldCompact, true);
+		strictEqual(shouldCompact(990, DEFAULT_COMPACTION_THRESHOLD, 1000).shouldCompact, true);
+		strictEqual(shouldCompact(990, DEFAULT_COMPACTION_THRESHOLD, 0).shouldCompact, false);
+		// Disabled thresholds never fire.
+		strictEqual(shouldCompact(990, 0, 1000).shouldCompact, false);
+		strictEqual(shouldCompact(990, 1.5, 1000).shouldCompact, false);
 	});
+});
 
+describe("contracts/context compaction mask_observations", () => {
 	it("masks older tool results while preserving tool metadata and invalidating stale usage", () => {
 		const huge = `${"line\n".repeat(120)}final secret body`;
 		const entries: SessionEntry[] = [
@@ -93,7 +94,7 @@ describe("contracts/context compaction stages", () => {
 			assistant("06", [{ type: "text", text: "recent answer" }], "05", 10),
 		];
 
-		const result = applyProgressiveCompaction({ entries, stage: "mask_observations", excludeLastTurns: 1 });
+		const result = maskStaleObservations(entries, 1);
 		strictEqual(result.changed, true);
 		strictEqual(result.maskedObservations, 1);
 		const masked = result.entries[3] as MessageEntry;
@@ -108,15 +109,24 @@ describe("contracts/context compaction stages", () => {
 		ok(estimated < 10_000, `expected invalidated usage anchor to fall back to projection, got ${estimated}`);
 	});
 
-	it("formats progressive notices with the same live accounting source as the footer", () => {
+	it("protects recent turns and never re-masks an already masked observation", () => {
 		const entries: SessionEntry[] = [
 			user("01", "old"),
 			toolResult("02", "call-1", "large observation ".repeat(500), "01"),
 			user("03", "recent", "02"),
+			toolResult("04", "call-2", "recent observation body", "03"),
 		];
-		const result = applyProgressiveCompaction({ entries, stage: "prune_observations", excludeLastTurns: 1 });
-		const notice = formatProgressiveCompactionNotice(result, { tokensBefore: 58_596, tokensAfter: 7_864 });
-		ok(notice.includes("~58596 tokens -> ~7864 tokens"), notice);
+
+		const first = maskStaleObservations(entries, 1);
+		strictEqual(first.changed, true);
+		strictEqual(first.maskedObservations, 1);
+		const recent = first.entries[3] as MessageEntry;
+		const recentPayload = recent.payload as { result?: { content?: Array<{ text?: string }> } };
+		ok((recentPayload.result?.content?.[0]?.text ?? "").includes("recent observation body"));
+
+		const second = maskStaleObservations(first.entries, 1);
+		strictEqual(second.changed, false);
+		strictEqual(second.maskedObservations, 0);
 	});
 
 	it("formats LLM summary notices without a stray closing bracket", () => {
@@ -175,41 +185,37 @@ describe("contracts/context compaction stages", () => {
 		const resultIndex = replay.findIndex((message) => message.role === "toolResult" && message.toolCallId === "call-1");
 		ok(callIndex >= 0 && resultIndex > callIndex, `callIndex=${callIndex} resultIndex=${resultIndex}`);
 	});
+});
 
-	it("prunes older observations and masks dialogue without deleting tool calls", () => {
-		const originalAssistantText = `I will inspect the file before answering. ${"verbose implementation detail ".repeat(80)}`;
-		const entries: SessionEntry[] = [
-			user("01", "original goal stays visible"),
-			assistant(
-				"02",
-				[
-					{ type: "text", text: originalAssistantText },
-					{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/huge.ts" } },
-				],
-				"01",
-			),
-			toolResult("03", "call-1", "very large observation body ".repeat(200), "02"),
-			user("04", "recent protected turn", "03"),
-			assistant("05", [{ type: "text", text: "recent answer" }], "04", 10),
-		];
+describe("contracts/context compaction settings migration", () => {
+	it("rewrites the five-threshold block to a single threshold, preserving comments and custom values", () => {
+		const yamlText = [
+			"# user settings",
+			"compaction:",
+			"  auto: true",
+			"  excludeLastTurns: 2",
+			"  thresholds:",
+			"    warning: 0.7",
+			"    maskObservations: 0.75",
+			"    pruneObservations: 0.85",
+			"    maskDialogue: 0.9",
+			"    llmSummary: 0.99",
+			"retry:",
+			"  enabled: true",
+			"",
+		].join("\n");
 
-		const result = applyProgressiveCompaction({ entries, stage: "mask_dialogue", excludeLastTurns: 1 });
-		strictEqual(result.changed, true);
-		strictEqual(result.prunedObservations, 1);
-		strictEqual(result.maskedDialogue, 1);
+		const rewritten = rewriteCompactionThresholds(yamlText);
+		ok(rewritten !== null);
+		ok(rewritten.includes("# user settings"));
+		ok(rewritten.includes("threshold: 0.75"));
+		ok(!rewritten.includes("thresholds:"));
+		ok(!rewritten.includes("llmSummary"));
+		ok(rewritten.includes("excludeLastTurns: 2"));
+		ok(rewritten.includes("enabled: true"));
 
-		const maskedAssistant = result.entries[1] as MessageEntry;
-		const assistantPayload = maskedAssistant.payload as {
-			content?: Array<{ type?: string; id?: string; text?: string }>;
-		};
-		const content = assistantPayload.content ?? [];
-		ok(content.some((block) => block.type === "toolCall" && block.id === "call-1"));
-		ok(content.some((block) => block.type === "text" && block.text?.includes("Earlier assistant response masked")));
-		ok(!JSON.stringify(content).includes("verbose implementation detail verbose implementation detail verbose"));
-
-		const prunedResult = result.entries[2] as MessageEntry;
-		const resultPayload = prunedResult.payload as { result?: { content?: Array<{ text?: string }> } };
-		const resultText = resultPayload.result?.content?.[0]?.text ?? "";
-		ok(resultText.includes("Observation pruned"));
+		// Already-migrated and threshold-less files are left untouched.
+		strictEqual(rewriteCompactionThresholds(rewritten), null);
+		strictEqual(rewriteCompactionThresholds("retry:\n  enabled: true\n"), null);
 	});
 });
