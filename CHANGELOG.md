@@ -14,12 +14,35 @@ now narrower and more honest: Clio drives HTTP/native/pi-ai-backed executable
 adapters directly, and external coding agents integrate through ACP delegation
 rather than hidden subprocess shims.
 
+The release also rebuilds the local-inference hot path around prompt-prefix
+stability: one compiled system prompt and one deterministic tool surface per
+session, bounded tool results, single-threshold compaction, and per-call
+timing/cache telemetry persisted in the session ledger. On a single-slot
+llama.cpp backend this turns repeated full-prompt prefills into cache reads;
+the measured first-turn gap on the same hardware dropped from roughly a minute
+to about a second once the prefix is resident. Concurrent Clio processes are
+now safe on one machine: live routing is session-owned, and the shared
+settings file is written through field-level patches under an advisory lock.
+
 ### Added
 
 - Added the Context Engine featuring context window resolution, per-model probe capabilities, unified character-based token accounting, per-turn context snapshots, and a persisted snapshot ledger.
 - Added single-threshold context compaction with a cheap stale-observation masking pre-stage, LLM summary fallback when pressure remains above threshold, manual `/compact`, and overflow recovery.
 - Added bounded tool-result handling with a 6KB source cap, an 8KB shaping backstop, 16KB summary-kind tool policies, continuation hints, and a 20KB `ask_user` policy.
 - Added per-turn performance telemetry for assistant calls: TTFT, API duration, prompt-cache input/read/write counts, backend cache verdicts, and expected-cold reasons.
+- Added session-owned live routing so multiple Clio processes can run against
+  the same configuration safely. Each interactive or ACP process seeds its
+  routing from `settings.yaml` at boot; routing changes (`/model`, `/settings`,
+  Alt+L, Alt+J/K, Shift+Tab, `/thinking`, `/scoped-models`) apply to the
+  session immediately and write through as defaults for future sessions, while
+  external settings writes update defaults only and surface a divergence
+  notice. Recently selected models moved to `state/recent-models.json` in the
+  data dir (legacy `state.recentModels` migrates on first read), and saved
+  settings writes go through field-level patches under an advisory file lock.
+- Added a live measurement harness: `scripts/live-turns.mjs` drives the real
+  TUI through tmux for reproducible multi-turn sessions, and
+  `scripts/turn-report.mjs` renders per-call timing, token, and cache-verdict
+  forensics from the session ledger.
 - Added an event-driven `/context-view` overlay visualizer, a context meter, and compact footer telemetry.
 - Added `clio acp`, a stdio Agent Client Protocol v1 server surface for ACP
   frontends. The server maps Clio chat events, tool-call updates, cancellation,
@@ -86,6 +109,12 @@ rather than hidden subprocess shims.
 - Reworked provider tool delivery to use one deterministic session tool surface.
   Per-tool safety, pending-skill, ask-user, and dispatch policies are enforced
   at invocation time.
+- Reworked the session ledger writer to true append mode: each persisted entry
+  is one `O_APPEND` write with a debounced fsync that is forced at checkpoint
+  and close, instead of rewriting the whole `current.jsonl` on every append.
+  History-rewriting operations keep the atomic tmp+rename path, and a torn
+  trailing line from a crash is newline-terminated on resume so the reader
+  skips exactly one invalid line with a warning.
 
 ### Fixed
 
