@@ -1,54 +1,29 @@
-# Clio Coder
+# clio-coder
 
-Clio Coder is a TypeScript coding-agent harness for HPC and scientific-software developers. It runs as an operator-driven CLI/TUI, resolves configured model targets, assembles project context, mediates tools through safety policy, and dispatches bounded worker agents with auditable receipts.
+Clio Coder is IOWarp's orchestrator coding agent. It owns the agent loop, TUI, session format, tool registry, and identity.
 
-## Conventions
+## Hard invariants
 
-- Domain code lives under `src/domains/<name>` and exposes public APIs through `index.ts` or an explicit contract file.
-- CLI entry points live in `src/cli`; interactive TUI surfaces live in `src/interactive`.
-- Worker execution crosses the `src/worker` / `src/engine` boundary through serialized worker specs, not ad hoc imports.
-- Tool registration flows through `src/tools/bootstrap.ts`; tool safety is enforced by the registry and safety domain before execution.
+1. Migration ids must be of form `YYYY-MM-DD-<slug>` and are registered in src/domains/lifecycle/migrations.
+2. Worker isolation: code under src/worker/** may only import from src/domains/providers, not other domain modules.
 
-## Hard Invariants
+## Context Retrieval
 
-1. Scope/admission policy must not loosen: dispatch workers and retries pass the same safety gates as first-run work.
-2. Every finalized dispatch run writes one integrity-sealed receipt with outcome, lineage, identity, costs, and safety summary.
-3. Background workers must not stall on permission prompts; non-interactive permission policy is machine-enforced and audited.
-4. Status surfaces are read-only and must not be required for orchestration correctness.
+The codewiki indexes 499 modules across the repository. Start orientation with these indexed entry points: src/cli/index.ts, src/domains/agents/index.ts, src/domains/components/index.ts, src/domains/config/index.ts, src/domains/context/bootstrap.ts, src/domains/context/index.ts, src/domains/dispatch/index.ts, src/domains/eval/index.ts. Use entry_points, where_is, and find_symbol before broad reads when the task is navigational.
 
-## Dispatch and Fleet Orchestration
+## Repository Shape
 
-`src/domains/dispatch/extension.ts` is the single authority for dispatch state. It owns admission, worker launch, heartbeat reconciliation, terminal outcome mapping, bounded retry, ledger persistence, and operator snapshots. Native workers and ACP delegations share the same receipt/outcome taxonomy.
+Largest indexed areas are src/domains (267 modules), src/interactive (67), src/cli (36), src/tools (33). Treat this as an orientation hint; refresh the codewiki after structural edits.
 
-`clio fleet` is the repo-owned fleet-contract surface. Fleet contracts live under `.clio/fleets/*.md`, render strict prompt templates, preflight agents/scope/budget, and dispatch normal workers with lineage. `clio fleet status` and the TUI `/fleet` overlay expose running rows, retry rows, and totals without mutating orchestration state.
+## Architecture Boundaries
 
-## Safety and Audit
+- Migration ids must be of form `YYYY-MM-DD-<slug>` and are registered in src/domains/lifecycle/migrations.
+- Worker isolation: code under src/worker/** may only import from src/domains/providers, not other domain modules.
 
-The safety domain classifies tools and commands, applies damage-control/path/project policy, emits audit records, and records permission decisions. `workers.onPermission` controls dispatched-worker non-stall behavior: `deny` returns a structured tool denial and lets the run continue; `fail` ends the run as `failed` with `outcomeDetail: permission_required` and worker exit code `3`.
+## Verification expectations
 
-## Receipts, Lineage, and Provenance
+Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and style checks. Run `npm run build` after CLI, worker, packaging, or generated-dist changes. Use targeted checks for narrower risk: `npm run test:contracts`, `npm run test:smoke`, `npm run check:boundaries`. Run `npm run test` when behavior crosses domains, tool contracts, smoke flows, or boundaries. Use `npm run ci` for the full local gate before committing broad or shared behavior changes.
 
-Receipts are integrity-sealed JSON artifacts under the Clio data directory. New receipts carry `outcome`, `outcomeDetail`, `lineage`, and `identity` blocks. Lineage links retries and nested fleet steps back to the operator-initiated root run. Identity records host/user and, when present, Slurm/PBS/LSF allocation metadata for reproducibility.
+## Context artifacts
 
-## Verification Expectations
-
-Use narrow validation first when changing a bounded surface, then broaden for shared contracts. Standard gates are:
-
-```bash
-npm run typecheck
-npm run check:boundaries
-npm run lint
-npm run build
-npm run test
-node --import tsx --test tests/contracts/*.test.ts
-```
-
-<!-- clio:fingerprint v1
-{
-  "initAt": "2026-06-10T18:18:25.221Z",
-  "model": "configured-clio-target",
-  "gitHead": "220b25cbca487863e483c66c489d7ea2bdb3ddbb",
-  "treeHash": "6f1bcd59231fe3c28cccd64cb724619b3595b659e6664c366436aba885332f53",
-  "loc": 93785
-}
--->
+`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
