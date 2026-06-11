@@ -33,6 +33,7 @@ import {
 	LMStudioClient,
 } from "@lmstudio/sdk";
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
+import { lmStudioQuietLogger } from "../../domains/providers/runtimes/common/lmstudio-logger.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { ceilChars } from "../../domains/session/context-accounting.js";
@@ -247,7 +248,8 @@ function getOrCreateLmStudioClient(
 }
 
 const defaultRunDeps: LmStudioRunDeps = {
-	createClient: (opts) => getOrCreateLmStudioClient(opts, (o) => new LMStudioClient(o)),
+	createClient: (opts) =>
+		getOrCreateLmStudioClient(opts, (o) => new LMStudioClient({ ...(o ?? {}), logger: lmStudioQuietLogger })),
 	ensureResident: ensureResidentModel,
 	discoverLoadedContext: discoverLoadedContextLength,
 };

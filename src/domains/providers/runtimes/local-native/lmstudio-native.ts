@@ -8,6 +8,7 @@ import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import { lmStudioQuietLogger } from "../common/lmstudio-logger.js";
 import { type ClioLocalModelMetadata, endpointLifecycle, stripTrailingSlash } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -42,6 +43,7 @@ function buildClient(endpoint: EndpointDescriptor, ctx: ProbeContext): LMStudioC
 	try {
 		const opts: ConstructorParameters<typeof LMStudioClient>[0] = {
 			baseUrl: toWebSocketUrl(endpoint.url),
+			logger: lmStudioQuietLogger,
 		};
 		const auth = endpoint.auth;
 		const envName = auth?.apiKeyEnvVar;
