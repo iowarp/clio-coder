@@ -51,7 +51,11 @@ function normalizeSource(source: string): string {
 }
 
 function normalizeInline(value: string): string {
-	return value.replace(/\s+/g, " ").trim();
+	return value
+		.replace(/\s+/g, " ")
+		.trim()
+		.replace(/^#{1,6}\s+/, "")
+		.trim();
 }
 
 function normalizeNestedMarkdown(value: string): string {

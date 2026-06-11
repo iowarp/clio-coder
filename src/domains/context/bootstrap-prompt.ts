@@ -29,6 +29,10 @@ Produce a proposed CLIO.md draft with these possible sections:
 
 Total CLIO.md size target: 2500-8000 bytes without adoption, or compact and provenance-rich with adoption.
 
+CLIO.md is a versioned, human-owned project handbook equivalent to CLAUDE.md, AGENTS.md, and GEMINI.md. It may be generated or updated by context-init, but it is not an ignored transient artifact. Do not tell agents to avoid committing CLIO.md, do not call CLIO.md disposable, and do not describe it as generated state. The generated/local artifact policy applies to .clio/* state, proposals, codewiki data, caches, and handoff files unless the repository explicitly says otherwise. If you include an artifact policy section, state that CLIO.md is versioned and .clio/* is ignored local state unless explicitly force-added.
+
+Do not invent ownership teams, review requirements, release processes, module export conventions, migration requirements, or file counts unless they are present in the input or verified by Scout tools.
+
 Do not include a project map, file tree, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, generated state, or fingerprint metadata. Build/test commands are appropriate only when they are project-specific verification expectations an agent should actually run. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
 
 Return one assistant message containing only compact JSON with this exact shape. Do not include markdown fences, prose, explanation, or commentary:

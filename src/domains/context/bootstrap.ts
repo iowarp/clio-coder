@@ -68,6 +68,7 @@ export interface RunBootstrapInput {
 	preview?: boolean;
 	adopt?: boolean;
 	applyClioMd?: boolean;
+	rewriteClioMd?: boolean;
 	proposeClioMd?: boolean;
 	includeGlobalImports?: boolean;
 	homeDir?: string;
@@ -310,6 +311,104 @@ function topCodewikiDirectories(codewiki: Codewiki, limit = 8): string[] {
 		.map(([dir, count]) => `${dir} (${count})`);
 }
 
+function packageScripts(cwd: string): Record<string, string> {
+	const pkg = readJsonFile(join(cwd, "package.json"));
+	if (typeof pkg !== "object" || pkg === null || Array.isArray(pkg)) return {};
+	const scripts = (pkg as Record<string, unknown>).scripts;
+	if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) return {};
+	const out: Record<string, string> = {};
+	for (const [name, command] of Object.entries(scripts)) {
+		if (typeof command === "string" && command.trim().length > 0) out[name] = command.trim();
+	}
+	return out;
+}
+
+function verificationSection(cwd: string): ClioMdSection | null {
+	const scripts = packageScripts(cwd);
+	const hasScript = (name: string) => typeof scripts[name] === "string";
+	const command = (name: string) => `\`npm run ${name}\``;
+	const lines: string[] = [];
+	const baseline = ["typecheck", "lint"].filter(hasScript).map(command);
+	if (baseline.length > 0) {
+		lines.push(`Before handoff, run ${baseline.join(" and ")} for TypeScript and style checks.`);
+	}
+	if (hasScript("build")) {
+		lines.push(`Run ${command("build")} after CLI, worker, packaging, or generated-dist changes.`);
+	}
+	const targeted = ["test:contracts", "test:smoke", "check:boundaries"].filter(hasScript).map(command);
+	if (targeted.length > 0) {
+		lines.push(`Use targeted checks for narrower risk: ${targeted.join(", ")}.`);
+	}
+	if (hasScript("test")) {
+		lines.push(`Run ${command("test")} when behavior crosses domains, tool contracts, smoke flows, or boundaries.`);
+	}
+	if (hasScript("ci")) {
+		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
+	}
+	if (lines.length === 0) return null;
+	return { title: "Verification expectations", body: lines.join(" ") };
+}
+
+function contextArtifactsSection(): ClioMdSection {
+	return {
+		title: "Context artifacts",
+		body: [
+			"`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed.",
+			"`.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts.",
+			"Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact.",
+			"`context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.",
+		].join(" "),
+	};
+}
+
+const ARTIFACT_SECTION_RE = /\b(artifact|generated|local state|local file|context artifact)\b/i;
+const VERIFICATION_SECTION_RE = /\bverification\b/i;
+const SOURCE_SPARSE_RISK_RE =
+	/\b(ownership|dedicated team|review requirement|migration chain|workflow traps|failure modes)\b/i;
+
+function sourceSparseBootstrap(input: BootstrapGenerateInput): boolean {
+	return (
+		input.siblingFiles.length === 0 &&
+		input.adoption.importedRules.length === 0 &&
+		input.existingClioMd === undefined &&
+		input.existingClioMdText === undefined
+	);
+}
+
+function sourceSparseNeedsHeuristicFloor(input: BootstrapGenerateInput, output: BootstrapStructuredOutput): boolean {
+	if (!sourceSparseBootstrap(input)) return false;
+	return (output.sections ?? []).some((section) => SOURCE_SPARSE_RISK_RE.test(`${section.title}\n${section.body}`));
+}
+
+function stabilizeGeneratedOutput(
+	input: BootstrapGenerateInput,
+	output: BootstrapStructuredOutput,
+): BootstrapStructuredOutput {
+	const base = sourceSparseNeedsHeuristicFloor(input, output)
+		? {
+				...output,
+				projectName: projectName(input.cwd),
+				identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
+				conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
+				invariants: inferInvariants(input.siblingFiles),
+				sections: inferHeuristicSections(input),
+			}
+		: output;
+	const verification = verificationSection(input.cwd);
+	const ordinarySections = (base.sections ?? []).filter(
+		(section) => !ARTIFACT_SECTION_RE.test(section.title) && !VERIFICATION_SECTION_RE.test(section.title),
+	);
+	const ordinaryLimit = verification ? 6 : 7;
+	return {
+		...base,
+		sections: [
+			...ordinarySections.slice(0, ordinaryLimit),
+			...(verification ? [verification] : []),
+			contextArtifactsSection(),
+		],
+	};
+}
+
 function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
 	const sections: ClioMdSection[] = [];
 	const entryPoints = codewikiEntryPoints(input.codewiki, 8);
@@ -340,14 +439,6 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			body: invariants.map((item) => `- ${item}`).join("\n"),
 		});
 	}
-	sections.push({
-		title: "Generated context artifacts",
-		body: [
-			"`CLIO.md` is the versioned project context file.",
-			"`.clio/codewiki.json`, `.clio/state.json`, and `.clio/handoffs/` are local generated context-engine artifacts and stay ignored unless explicitly shared.",
-			"Run `/context-init` after branch switches, dependency-shape changes, or context-source changes.",
-		].join(" "),
-	});
 	if (input.adoption.sources.length > 0) {
 		const sourceNames = input.adoption.sources
 			.map((source) => `\`${source.path}\``)
@@ -371,13 +462,13 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
  * unavailable or fails.
  */
 function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapStructuredOutput {
-	return {
+	return stabilizeGeneratedOutput(input, {
 		projectName: projectName(input.cwd),
 		identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
 		conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
 		invariants: inferInvariants(input.siblingFiles),
 		sections: inferHeuristicSections(input),
-	};
+	});
 }
 
 export const heuristicBootstrapOutput: BootstrapGenerate = heuristicBootstrapOutputSync;
@@ -754,8 +845,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		total: codewiki.entries.length,
 	});
 	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
-	const existingClioMdText = hadClioMd ? readExistingClioMdText(cwd) : null;
-	const existingClioMd = tryReadClioMd(cwd);
+	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
+	const existingClioMdText = useExistingClioMdAsSource ? readExistingClioMdText(cwd) : null;
+	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
 	const shouldGenerate = !hadClioMd || input.applyClioMd === true || input.proposeClioMd === true;
 	let output: BootstrapStructuredOutput;
@@ -780,6 +872,18 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			status: "completed",
 			message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
 		});
+		output = stabilizeGeneratedOutput(
+			{
+				cwd,
+				projectType,
+				siblingFiles,
+				adoption,
+				codewiki,
+				...(existingParsed ? { existingClioMd: existingParsed } : {}),
+				...(existingClioMdText ? { existingClioMdText } : {}),
+			},
+			output,
+		);
 	} else {
 		output = existingParsed
 			? bootstrapOutputFromParsed(existingParsed)
