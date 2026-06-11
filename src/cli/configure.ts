@@ -1,6 +1,6 @@
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../core/config.js";
+import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
@@ -674,21 +674,27 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		return 1;
 	}
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
-	applyEndpoint(settings, descriptor);
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
-	if (setOrchestrator)
-		setOrchestratorPointer(settings, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
-	if (setWorkerDefault)
-		setWorkerDefaultPointer(settings, descriptor, args.workerModel ?? descriptor.defaultModel ?? null);
-	if (args.workerProfile !== undefined) {
-		setWorkerProfilePointer(
-			settings,
-			args.workerProfile,
-			descriptor,
-			args.workerProfileModel ?? descriptor.defaultModel ?? null,
-		);
-	}
-	writeSettings(settings);
+	const applyConfiguration = (target: ClioSettings): void => {
+		applyEndpoint(target, descriptor);
+		if (setOrchestrator)
+			setOrchestratorPointer(target, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
+		if (setWorkerDefault)
+			setWorkerDefaultPointer(target, descriptor, args.workerModel ?? descriptor.defaultModel ?? null);
+		if (args.workerProfile !== undefined) {
+			setWorkerProfilePointer(
+				target,
+				args.workerProfile,
+				descriptor,
+				args.workerProfileModel ?? descriptor.defaultModel ?? null,
+			);
+		}
+	};
+	// Apply to the local snapshot for the summary below, then persist the same
+	// mutation against the freshest on-disk state under the settings lock so a
+	// concurrent session's field-level write-through is never lost.
+	applyConfiguration(settings);
+	updateSettings(applyConfiguration);
 	const probe = await runtimeProbe(runtime, descriptor);
 	printSummary(settings, descriptor, probe);
 	if (
@@ -1110,10 +1116,13 @@ async function runInteractive(
 		: undefined;
 	if (workerModel === null) return 0;
 
-	applyEndpoint(settings, descriptor);
-	if (setOrchestrator) setOrchestratorPointer(settings, descriptor, orchestratorModel);
-	if (setWorkerDefault) setWorkerDefaultPointer(settings, descriptor, workerModel);
-	writeSettings(settings);
+	const applyWizardChoice = (target: ClioSettings): void => {
+		applyEndpoint(target, descriptor);
+		if (setOrchestrator) setOrchestratorPointer(target, descriptor, orchestratorModel);
+		if (setWorkerDefault) setWorkerDefaultPointer(target, descriptor, workerModel);
+	};
+	applyWizardChoice(settings);
+	updateSettings(applyWizardChoice);
 
 	printSummary(settings, descriptor, probe);
 	printOk(`target ${endpointId} saved`);
@@ -1121,29 +1130,28 @@ async function runInteractive(
 }
 
 export function runTargetRemove(id: string): number {
-	const settings = readSettings();
-	const before = settings.endpoints.length;
-	settings.endpoints = settings.endpoints.filter((e) => e.id !== id);
-	if (settings.endpoints.length === before) {
+	if (!readSettings().endpoints.some((e) => e.id === id)) {
 		printError(`no target with id ${id}`);
 		return 1;
 	}
-	if (settings.orchestrator.endpoint === id) {
-		settings.orchestrator.endpoint = null;
-		settings.orchestrator.model = null;
-	}
-	if (settings.workers.default.endpoint === id) {
-		settings.workers.default.endpoint = null;
-		settings.workers.default.model = null;
-	}
-	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-		if (profile.endpoint === id) delete settings.workers.profiles[name];
-	}
-	settings.scope = settings.scope.filter((entry) => {
-		const [head] = entry.split("/");
-		return head !== id;
+	updateSettings((settings) => {
+		settings.endpoints = settings.endpoints.filter((e) => e.id !== id);
+		if (settings.orchestrator.endpoint === id) {
+			settings.orchestrator.endpoint = null;
+			settings.orchestrator.model = null;
+		}
+		if (settings.workers.default.endpoint === id) {
+			settings.workers.default.endpoint = null;
+			settings.workers.default.model = null;
+		}
+		for (const [name, profile] of Object.entries(settings.workers.profiles)) {
+			if (profile.endpoint === id) delete settings.workers.profiles[name];
+		}
+		settings.scope = settings.scope.filter((entry) => {
+			const [head] = entry.split("/");
+			return head !== id;
+		});
 	});
-	writeSettings(settings);
 	printOk(`removed target ${id}`);
 	return 0;
 }
@@ -1153,28 +1161,30 @@ export function runTargetRename(oldId: string, newId: string): number {
 		printError("old and new id are identical");
 		return 2;
 	}
-	const settings = readSettings();
-	if (settings.endpoints.some((e) => e.id === newId)) {
+	const current = readSettings();
+	if (current.endpoints.some((e) => e.id === newId)) {
 		printError(`target id already exists: ${newId}`);
 		return 2;
 	}
-	const target = settings.endpoints.find((e) => e.id === oldId);
-	if (!target) {
+	if (!current.endpoints.some((e) => e.id === oldId)) {
 		printError(`no target with id ${oldId}`);
 		return 1;
 	}
-	target.id = newId;
-	if (settings.orchestrator.endpoint === oldId) settings.orchestrator.endpoint = newId;
-	if (settings.workers.default.endpoint === oldId) settings.workers.default.endpoint = newId;
-	for (const profile of Object.values(settings.workers.profiles)) {
-		if (profile.endpoint === oldId) profile.endpoint = newId;
-	}
-	settings.scope = settings.scope.map((entry) => {
-		const [head, ...rest] = entry.split("/");
-		if (head !== oldId) return entry;
-		return rest.length === 0 ? newId : `${newId}/${rest.join("/")}`;
+	updateSettings((settings) => {
+		const target = settings.endpoints.find((e) => e.id === oldId);
+		if (!target) return;
+		target.id = newId;
+		if (settings.orchestrator.endpoint === oldId) settings.orchestrator.endpoint = newId;
+		if (settings.workers.default.endpoint === oldId) settings.workers.default.endpoint = newId;
+		for (const profile of Object.values(settings.workers.profiles)) {
+			if (profile.endpoint === oldId) profile.endpoint = newId;
+		}
+		settings.scope = settings.scope.map((entry) => {
+			const [head, ...rest] = entry.split("/");
+			if (head !== oldId) return entry;
+			return rest.length === 0 ? newId : `${newId}/${rest.join("/")}`;
+		});
 	});
-	writeSettings(settings);
 	printOk(`renamed ${oldId} to ${newId}`);
 	return 0;
 }

@@ -881,7 +881,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "scoped-models",
-		description: "Edit the Ctrl+P model cycle set",
+		description: "Edit the Alt+J / Alt+K model cycle set",
 		kinds: ["scoped-models"],
 		match(trimmed) {
 			return trimmed === "/scoped-models" ? { kind: "scoped-models" } : null;

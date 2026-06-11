@@ -274,11 +274,12 @@ workers:
   #   model: your-model-id
   #   thinkingLevel: off
 
-# Ctrl+P cycling order: plain target ids or "target/model" refs.
+# Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []
 
 # /models focused picker. Favorites are exact "target/model" refs shown before
-# the full search catalog. Recent models are stored under state.recentModels.
+# the full search catalog. Recently selected models are runtime state and live
+# in the data dir (state/recent-models.json), not in this file.
 modelSelector:
   favorites: []
   recentLimit: 12
@@ -328,10 +329,6 @@ delegation:
   #     specialty: coding
 
 keybindings: {}
-
-# Transient session state. Clio Coder rewrites this block; do not hand-edit.
-state:
-  recentModels: []
 
 # Context compaction controls.
 #   auto              master switch for the pre-request compaction trigger.

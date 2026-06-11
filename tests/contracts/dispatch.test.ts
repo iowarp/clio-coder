@@ -261,6 +261,42 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("resolves worker targets through the injected session settings view, not the shared config", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+
+		// The session view (what the running terminal shows in /settings) points
+		// the fleet default at a different model than the shared config snapshot.
+		const sessionView = structuredClone(DEFAULT_SETTINGS);
+		sessionView.endpoints = [{ id: "default", runtime: "openai", defaultModel: "gpt-4o" }];
+		sessionView.workers.default = { endpoint: "default", model: "session-model", thinkingLevel: "off" };
+
+		const bundle = createDispatchBundle(context, {
+			getSettings: () => sessionView,
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9999,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "session view dispatch" });
+			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, "session-model");
+			exit.resolve({ exitCode: 0, signal: null });
+			await handle.finalPromise;
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("dispatch serializes the resolved http runtime onto the worker spec", async () => {
 		const id = "http-worker";
 		const endpoint: EndpointDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };

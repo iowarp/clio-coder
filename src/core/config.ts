@@ -4,7 +4,7 @@
  * modes, prompts) need settings access before the domain loader has finished booting.
  */
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "./defaults.js";
@@ -773,20 +773,110 @@ export function readSettings(): ClioSettings {
 	return normalizeSettings(parsed ?? {});
 }
 
+let settingsWriteSequence = 0;
+
+/**
+ * Whole-file settings write via temp-file + rename. The rename is atomic on
+ * POSIX, so a concurrent readSettings never observes a partially written
+ * YAML document and readers never need the settings lock.
+ */
 export function writeSettings(settings: ClioSettings): void {
-	const tracePath = process.env.CLIO_TRACE_WRITESETTINGS;
-	if (tracePath && tracePath !== "0") {
-		const stack = new Error("writeSettings trace").stack ?? "";
-		const orchTarget = settings.orchestrator?.endpoint ?? "<null>";
-		const orchModel = settings.orchestrator?.model ?? "<null>";
-		const tCount = settings.endpoints?.length ?? 0;
-		const line = `\n[writeSettings @ ${new Date().toISOString()}] target=${orchTarget} model=${orchModel} endpoints=${tCount}\n${stack}\n`;
-		appendFileSync(tracePath, line);
-	}
-	writeFileSync(settingsPath(), stringifyYaml(serializeSettings(normalizeSettings(settings))), {
+	const path = settingsPath();
+	const tmp = `${path}.tmp-${process.pid}-${++settingsWriteSequence}`;
+	writeFileSync(tmp, stringifyYaml(serializeSettings(normalizeSettings(settings))), {
 		encoding: "utf8",
 		mode: 0o644,
 	});
+	try {
+		renameSync(tmp, path);
+	} catch (err) {
+		rmSync(tmp, { force: true });
+		throw err;
+	}
+}
+
+/**
+ * Mutation applied to the freshest saved settings under the settings lock.
+ * Mutate in place (return nothing) or return a replacement blob.
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: in-place mutators legitimately return nothing, including named functions typed `: void`
+export type SettingsMutator = (settings: ClioSettings) => ClioSettings | undefined | void;
+
+export interface SettingsUpdateOptions {
+	/** Total time to wait for the lock before giving up. Default 10s. */
+	timeoutMs?: number;
+	/**
+	 * A lock file older than this is considered abandoned by a dead process
+	 * and is taken over. Locked sections are a read + mutate + write of one
+	 * small YAML file, so a healthy holder releases in milliseconds. Default 5s.
+	 */
+	staleLockMs?: number;
+	/** Sleep between acquisition attempts. Default 25ms. */
+	pollIntervalMs?: number;
+}
+
+export function settingsLockPath(): string {
+	return `${settingsPath()}.lock`;
+}
+
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, ms));
+}
+
+function tryAcquireSettingsLock(lockPath: string, staleLockMs: number): boolean {
+	try {
+		writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`, {
+			encoding: "utf8",
+			flag: "wx",
+			mode: 0o644,
+		});
+		return true;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+	}
+	try {
+		if (Date.now() - statSync(lockPath).mtimeMs > staleLockMs) rmSync(lockPath, { force: true });
+	} catch {
+		// Lock vanished between the failed create and the stat: the holder
+		// released it. The caller's next attempt will race for it normally.
+	}
+	return false;
+}
+
+/**
+ * Cross-process read-modify-write of settings.yaml under an advisory lock
+ * file. Two processes doing naive readSettings → mutate → writeSettings can
+ * interleave and silently drop one of the writes; this helper re-reads the
+ * file *inside* the lock, so the mutation always lands on the freshest saved
+ * state. Readers never touch the lock — they only ever see complete files
+ * thanks to the rename-based writer.
+ *
+ * The mutator may modify the settings in place or return a replacement blob.
+ * Returns the normalized settings that were persisted.
+ */
+export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateOptions = {}): ClioSettings {
+	const timeoutMs = options.timeoutMs ?? 10_000;
+	const staleLockMs = options.staleLockMs ?? 5_000;
+	const pollIntervalMs = options.pollIntervalMs ?? 25;
+	const lockPath = settingsLockPath();
+	const deadline = Date.now() + timeoutMs;
+	while (!tryAcquireSettingsLock(lockPath, staleLockMs)) {
+		if (Date.now() >= deadline) {
+			throw new Error(
+				`timed out after ${timeoutMs}ms waiting for ${lockPath}; delete it if no other clio process is running`,
+			);
+		}
+		sleepSync(pollIntervalMs);
+	}
+	try {
+		const current = readSettings();
+		const next = mutate(current) ?? current;
+		const normalized = normalizeSettings(next);
+		writeSettings(normalized);
+		return normalized;
+	} finally {
+		rmSync(lockPath, { force: true });
+	}
 }
 
 function serializeSettings(settings: ClioSettings): SerializedSettings {

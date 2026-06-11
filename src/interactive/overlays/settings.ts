@@ -122,8 +122,18 @@ const VISIBLE_ROWS = 12;
  */
 export function buildSettingItems(
 	settings: Readonly<ClioSettings>,
-	options?: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager },
+	options?: {
+		providers?: ProvidersContract;
+		keybindings?: ClioKeybindingManager;
+		/**
+		 * Live settings source for submenus. The static `settings` snapshot is
+		 * captured when the overlay opens; submenus must read through this so
+		 * "change target, then pick model" lists models for the new target.
+		 */
+		getSettings?: () => Readonly<ClioSettings>;
+	},
 ): SettingItem[] {
+	const live = options?.getSettings ?? ((): Readonly<ClioSettings> => settings);
 	const scopeList = settings.scope ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
 	const endpointCount = settings.endpoints?.length ?? 0;
@@ -175,7 +185,7 @@ export function buildSettingItems(
 			currentValue: settings.orchestrator.model ?? "(unset)",
 			description: "Active wire model id.",
 			...(options?.providers
-				? { submenu: selectModelSubmenu(options.providers, () => settings.orchestrator.endpoint ?? undefined) }
+				? { submenu: selectModelSubmenu(options.providers, () => live().orchestrator.endpoint ?? undefined) }
 				: {}),
 		},
 		{
@@ -191,7 +201,7 @@ export function buildSettingItems(
 			currentValue: settings.workers.default.model ?? "(unset)",
 			description: "/run wire model id.",
 			...(options?.providers
-				? { submenu: selectModelSubmenu(options.providers, () => settings.workers.default.endpoint ?? undefined) }
+				? { submenu: selectModelSubmenu(options.providers, () => live().workers.default.endpoint ?? undefined) }
 				: {}),
 		},
 		{
@@ -217,7 +227,7 @@ export function buildSettingItems(
 			id: "scope",
 			label: "scope",
 			currentValue: scopeText,
-			description: "Ctrl+P cycle set.",
+			description: "Alt+J / Alt+K cycle set.",
 			submenu: editTextSubmenu("Edit model cycle scope (comma-separated list)"),
 		},
 		{
@@ -352,15 +362,32 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "terminal.showTerminalProgress":
 			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
 			return;
-		case "orchestrator.endpoint":
-			settings.orchestrator.endpoint = value === "(unset)" || value === "" ? null : value;
+		case "orchestrator.endpoint": {
+			const endpoint = value === "(unset)" || value === "" ? null : value;
+			// Switching targets re-bases the model on the new target's default,
+			// matching Alt+L and `clio targets use`; a stale wire model id from
+			// the previous target would just fail to resolve.
+			if (endpoint !== settings.orchestrator.endpoint) {
+				settings.orchestrator.model = endpoint
+					? (settings.endpoints.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+					: null;
+			}
+			settings.orchestrator.endpoint = endpoint;
 			return;
+		}
 		case "orchestrator.model":
 			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
 			return;
-		case "workers.default.endpoint":
-			settings.workers.default.endpoint = value === "(unset)" || value === "" ? null : value;
+		case "workers.default.endpoint": {
+			const endpoint = value === "(unset)" || value === "" ? null : value;
+			if (endpoint !== settings.workers.default.endpoint) {
+				settings.workers.default.model = endpoint
+					? (settings.endpoints.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+					: null;
+			}
+			settings.workers.default.endpoint = endpoint;
 			return;
+		}
 		case "workers.default.model":
 			settings.workers.default.model = value === "(unset)" || value === "" ? null : value;
 			return;
@@ -386,11 +413,42 @@ export interface OpenSettingsOverlayDeps {
 	onClose: () => void;
 }
 
-export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): OverlayHandle {
-	const buildOptions: { providers?: ProvidersContract; keybindings?: ClioKeybindingManager } = {};
+export interface SettingsOverlayHandle extends OverlayHandle {
+	/**
+	 * Re-derive every row from the live effective settings. Called after each
+	 * committed edit and on config change events while the overlay is open, so
+	 * dependent rows (orchestrator.model after orchestrator.target, the
+	 * thinking levels a model supports, scope, …) never go stale.
+	 */
+	refreshRows(): void;
+}
+
+export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
+	const buildOptions: {
+		providers?: ProvidersContract;
+		keybindings?: ClioKeybindingManager;
+		getSettings?: () => Readonly<ClioSettings>;
+	} = { getSettings: deps.getSettings };
 	if (deps.providers) buildOptions.providers = deps.providers;
 	if (deps.keybindings) buildOptions.keybindings = deps.keybindings;
 	const items = buildSettingItems(deps.getSettings(), buildOptions);
+	// SettingsList keeps the items array by reference, so refreshing mutates
+	// the existing SettingItem objects in place: the row set and order are
+	// fixed, which preserves the index-based cursor, and an open submenu is
+	// held by the list separately, so it survives a refresh untouched.
+	const refreshRows = (): void => {
+		const next = buildSettingItems(deps.getSettings(), buildOptions);
+		const byId = new Map(next.map((item) => [item.id, item] as const));
+		for (const item of items) {
+			const updated = byId.get(item.id);
+			if (!updated) continue;
+			item.currentValue = updated.currentValue;
+			if (updated.values) item.values = updated.values;
+			else delete item.values;
+			if (updated.description !== undefined) item.description = updated.description;
+		}
+		tui.requestRender();
+	};
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SettingsList(
 		items,
@@ -400,15 +458,16 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Ov
 			const current = structuredClone(deps.getSettings());
 			applySettingChange(current, id, value);
 			deps.writeSettings(current);
-			list.updateValue(id, value);
+			refreshRows();
 		},
 		() => deps.onClose(),
 	);
 	const box = new FocusBox(list);
-	return showClioOverlayFrame(tui, box, {
+	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SETTINGS_OVERLAY_WIDTH,
 		title: "Settings",
-		footerHint: "[Enter/Space] edit/cycle    [Esc] cancel",
+		footerHint: "[Enter/Space] edit/cycle    [Esc] close    (applies to this session and to new sessions)",
 	});
+	return Object.assign(handle, { refreshRows });
 }

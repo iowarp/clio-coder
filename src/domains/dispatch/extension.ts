@@ -128,6 +128,14 @@ export interface DispatchBundleOptions {
 	heartbeatIntervalMs?: number;
 	resilienceCooldownMs?: number;
 	now?: () => number;
+	/**
+	 * Session-effective settings view for worker target resolution. The
+	 * interactive orchestrator injects this so /run and agent dispatches use
+	 * the fleet routing the running session sees, not whatever another process
+	 * last wrote to settings.yaml. Falls back to the shared config snapshot
+	 * when absent (headless boots, tests).
+	 */
+	getSettings?: () => Readonly<ReturnType<ConfigContract["get"]>> | undefined;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -926,7 +934,7 @@ export function createDispatchBundle(
 			);
 		}
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
-		const targets = readWorkerTargets(config?.get());
+		const targets = readWorkerTargets(options?.getSettings?.() ?? config?.get());
 		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
 		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
 
