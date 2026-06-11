@@ -17,9 +17,10 @@ rather than hidden subprocess shims.
 ### Added
 
 - Added the Context Engine featuring context window resolution, per-model probe capabilities, unified character-based token accounting, per-turn context snapshots, and a persisted snapshot ledger.
-- Added graduated context compaction supporting progressive stages (warning, masking tool observations, pruning tool observations, masking earlier dialogues, and LLM-driven summaries) with pre-submit checks, preflight overflow guards, and post-tool continuation guards.
+- Added single-threshold context compaction with a cheap stale-observation masking pre-stage, LLM summary fallback when pressure remains above threshold, manual `/compact`, and overflow recovery.
+- Added bounded tool-result handling with a 6KB source cap, an 8KB shaping backstop, 16KB summary-kind tool policies, continuation hints, and a 20KB `ask_user` policy.
+- Added per-turn performance telemetry for assistant calls: TTFT, API duration, prompt-cache input/read/write counts, backend cache verdicts, and expected-cold reasons.
 - Added an event-driven `/context-view` overlay visualizer, a context meter, and compact footer telemetry.
-- Added signal-based intent classification and explicit tool suppression in the tool palette.
 - Added `clio acp`, a stdio Agent Client Protocol v1 server surface for ACP
   frontends. The server maps Clio chat events, tool-call updates, cancellation,
   usage metadata, cwd-aware session creation, and optional session close support
@@ -79,6 +80,12 @@ rather than hidden subprocess shims.
 - Converted release/developer guide material into interactive HTML blueprints
   for installation, lifecycle, documentation, validation, and related operator
   workflows.
+- Reworked the chat loop to compile one session prompt keyed by endpoint, model,
+  safety level, and session id. Prompt recompiles are logged as
+  `promptRecompiled` ledger entries only when the compiled text changes.
+- Reworked provider tool delivery to use one deterministic session tool surface.
+  Per-tool safety, pending-skill, ask-user, and dispatch policies are enforced
+  at invocation time.
 
 ### Fixed
 
@@ -125,6 +132,12 @@ rather than hidden subprocess shims.
   `--supervised` dispatch flag, and `DispatchRequest.supervised`.
 - Removed Claude Code / agent-SDK entries from `RuntimeApiFamily` and the worker
   spec's accepted runtime API families.
+- Removed per-turn dynamic prompt fragments, prompt diagnostics events, send-policy
+  prompt churn, and per-turn tool-surface selection.
+- Removed the five-stage compaction ladder and replaced the old settings block
+  with `compaction: { auto, threshold, excludeLastTurns, model?, systemPrompt? }`.
+  Existing settings files are rewritten once by the
+  `2026-06-11-compaction-single-threshold` lifecycle migration.
 
 ### Release verification
 

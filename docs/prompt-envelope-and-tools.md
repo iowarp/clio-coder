@@ -1,152 +1,40 @@
-# Prompt Envelope and Tool Delivery
+# Prompt Envelope and Tools
 
-> [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a token pressure calculator, visual tool schema diagrams, and a registry simulator is located at [docs/html/tools_blueprint.html](html/tools_blueprint.html) (Version: 0.2.2). You can open it in a browser to inspect prompt compiler inputs and tool call execution results in real-time.
+Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
-Clio Coder separates what the model is told from what the runtime is allowed to execute. The prompt compiler builds a hashed prompt envelope, the engine delivers provider tool schemas, and the registry remains the execution gate.
+## One system prompt per session
 
-Source of truth: `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/palette.ts`, `src/tools/registry.ts`, and `src/engine/worker-tools.ts`.
+The chat loop compiles one provider-facing system prompt for a session. The compile key is `endpoint|model|safetyLevel|sessionId`.
 
----
+The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
 
-## Prompt envelope
+There are no dynamic per-turn prompt fragments. Pending skill requests are visible text in the user message, not hidden prompt machinery.
 
-The prompt compiler returns both legacy full text and structured delivery pieces:
+## One tool surface per session
 
-| Field | Purpose |
-| --- | --- |
-| `text` | Full rendered prompt retained for compatibility and reproducibility. |
-| `systemPrompt` | Provider-facing prompt made from stable static and session-level content. |
-| `dynamicPromptFragments` | Turn-level user-role context messages injected before the real user request. |
-| `renderedPromptHash` | SHA-256 over the full rendered text. |
-| `staticShellHash` | Hash over stable identity, operating contract, and safety content. |
-| `sessionShellHash` | Hash over the provider-facing session shell. |
-| `dynamicHash` | Hash over dynamic turn fragments. |
-| `promptEnvelope` | Versioned summary of prompt parts, hashes, token estimates, and inclusion flags. |
+For tool-capable providers, Clio sends the full registry as the session tool surface. The list is deterministic and sorted through the worker-tool resolver, so the serialized schemas stay byte-identical on every submit.
 
-Prompt tiers:
+Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, safety level, Bash policy, path policy, protected artifacts, dispatch admission, and middleware are enforced when a tool is invoked. Prompt text and provider schemas do not bypass the registry.
 
-| Tier | Meaning | Examples |
-| --- | --- | --- |
-| `static-shell` | Stable harness identity and mode/safety instructions. | identity, mode, safety. |
-| `session-shell` | Stable while target/tool/runtime context stays compatible. | runtime block, tool contract, retrieval hints, stable agent/skills catalog. |
-| `dynamic-turn` | Changes turn-to-turn. | memory, project context, session notes, agent fleet deltas. |
+Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.
 
-Envelope parts:
+## Context protection
 
-```text
-pinnedHarness | pinnedRuntime | pinnedToolContract | sessionContext | turnContext | retrievalHints
+Clio uses two context-protection mechanisms.
+
+1. Tool results are capped at the source. The default tool-result source cap is 6KB with continuation text for offset and limit style follow-up. Result shaping has an 8KB backstop. Summary-kind tools such as `bash`, `run_task`, `validate_frontend`, `dispatch`, and `web_fetch` have explicit 16KB policies. `ask_user` has a 20KB policy.
+2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first masks stale tool observations older than `excludeLastTurns`. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view.
+
+Manual `/compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly.
+
+Compaction rewrites history, so the next turn on a local single-slot backend is expected to lose prefix-cache alignment. Clio records `expectedColdReasons` and shows one dim notice for that turn.
+
+## Inspecting a session
+
+Use the turn report to inspect persisted timing and cache behavior:
+
+```bash
+node scripts/turn-report.mjs --session <id>
 ```
 
----
-
-## Send policies
-
-The chat loop records a prompt send policy in the runtime block:
-
-| Policy | When used |
-| --- | --- |
-| `no-tools-fallback` | Target cannot call tools. The tool contract tells the model to answer without repository inspection. |
-| `prefix-cache-deterministic` | `llamacpp` target with tools; designed to cooperate with deterministic prompt-prefix caching. |
-| `reduced-repeated-envelope` | Other tool-capable runtimes. Reuses the session shell when `sessionShellHash` has not changed. |
-
-When the session shell hash is reused, the chat loop avoids resetting the runtime system prompt and sends only dynamic prompt fragments plus the submitted user turn.
-
----
-
-## Dynamic turn fragments
-
-Dynamic fragments are internally marked user-role messages with:
-
-```ts
-{
-  kind: "dynamic-turn-context",
-  fragmentId: string,
-  contentHash: string
-}
-```
-
-They are not user commands. They carry scoped context such as memory, current project context, and session summaries immediately before the actual user request.
-
----
-
-## Tool contract
-
-The prompt compiler emits a `# Tool Contract` block. It describes whether the current target can call tools and reminds the model that schemas are delivered by the provider layer.
-
-This contract is guidance only. The actual tool surface comes from:
-
-1. the single operating posture;
-2. provider/runtime capability resolution in `src/domains/providers/**`;
-3. tool schema conversion in `src/engine/worker-tools.ts`;
-4. registry admission in `src/tools/registry.ts`;
-5. safety policy and dispatch admission checks.
-
-Tool schemas are sent to the provider as structured schemas, not as markdown instructions. The model may request a tool call only when the provider supports tool calling and Clio sends that schema.
-
----
-
-## Registry enforcement
-
-Every tool invocation enters `src/tools/registry.ts`. The registry checks:
-
-| Gate | Source |
-| --- | --- |
-| Registration | Tool name exists in the registry. |
-| Visibility | Tool is visible for the target capabilities and current request intent. |
-| Classification | Requested action class matches the tool and arguments. |
-| Safety | Damage-control rules, Bash policy, project path policy, and protected artifacts. |
-| Middleware | `before_tool` / `after_tool` hooks and structured effects. |
-| Dispatch | Worker scope and requested action classes fit inside the orchestrator scope. |
-
-Prompt text cannot bypass these gates.
-
----
-
-## Prompt diagnostics and receipts
-
-The interactive chat loop records prompt diagnostics with run state:
-
-- rendered prompt hash and envelope hashes;
-- whether the system prompt was reused;
-- tool schema signature and estimated schema tokens;
-- prompt envelope segment ids, tiers, hashes, and token estimates.
-
-These diagnostics help debug local-model behavior and audit which prompt sections were visible during a turn. Dispatch runs and external worker paths also write receipts and run-ledger entries so evidence tools can later reconstruct what happened.
-
----
-
-## Tool Palette Intent Signals
-
-The tool palette employs a signal-based intent classification system to control tool visibility dynamically. The palette evaluates the operator's prompt text using `detectIntentSignals` and maps it to a set of `IntentSignals` flags.
-
-Based on these flags, the engine classifies the primary user intent using `classifyIntent` into one of several categories:
-- `small_talk`: Basic conversation and greeting.
-- `tool_meta`: Discovered when `signals.toolMeta` matches and no active work intent is detected.
-- `delegation`: Triggers ACP fleet dispatch actions.
-- `skill_work`: Triggers custom skill executions.
-- `coding`: Prompts edits, problem reports, and code modifications.
-- `validation`: Drives code quality and frontend validation workflows.
-- `repo_inspection`: Drives read-only search and files inspection.
-
-### Explicit Tool Suppression
-
-When the user's prompt matches a strict text block indicating that no tools should be offered, the `noTools` signal is set to true. The engine then suppresses all tool deliveries, passing an empty tool schema list to the provider model.
-
-### Diagnostics Integration
-
-Fired intent signals are saved within the `ToolPaletteResult` and surfaced directly inside the `promptDiagnostics` payload. This payload is emitted over the event bus as a `prompt_diagnostics` event, allowing developers to trace exactly which intent signals triggered specific tool exclusions or inclusions during a turn.
-
----
-
-## Documentation guidance
-
-When documenting prompt/tool behavior, distinguish:
-
-- **prompt guidance**: what the model is told;
-- **provider schema delivery**: which tool schemas are sent;
-- **registry enforcement**: what can actually run;
-- **safety policy**: whether the call is allowed, parked, or blocked;
-- **receipts/evidence**: what persisted after the run.
-
-Do not imply that prompt text alone enforces safety. In Clio, enforcement lives in the single operating posture, registry, safety policy engine, and worker dispatch admission.
+The report prints per-call `ttft`, `api`, input, cache read, cache write, backend cache verdict, and expected cold reasons. Cache verdicts are `hot`, `partial`, `cold`, or `small`.

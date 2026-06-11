@@ -207,7 +207,7 @@ The README is only the release entry point. Detailed docs live under [docs/](doc
 | Runtime targets, local model configuration, fleet profiles, and auth | [docs/configuration-and-targets.md](docs/configuration-and-targets.md) |
 | Safety posture, default-deny Bash, project policy, and typed validation | [docs/safety-model.md](docs/safety-model.md) |
 | Built-in agent recipes and dispatch admission | [docs/built-in-agents.md](docs/built-in-agents.md) |
-| Prompt envelopes, tool palettes, and bounded tool results | [docs/prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
+| Prompt envelope reuse, provider tool delivery, and bounded tool results | [docs/prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
 | Sessions, receipts, evidence, and memory | [docs/evidence-and-memory.md](docs/evidence-and-memory.md) |
 | Extension packages and share archives | [docs/extensions-and-sharing.md](docs/extensions-and-sharing.md) |
 | Source layout and boundary invariants | [docs/architecture.md](docs/architecture.md) |
@@ -238,6 +238,16 @@ source install/uninstall smoke checks, interactive TUI checks, dispatch work,
 destructive-delete refusal, and opt-in live model smoke. Treat live checks as
 operator-run release evidence, not guarantees that every local model behaves the
 same way.
+
+## Local Model Performance Notes
+
+llama.cpp and similar local backends often expose one prefix-cache slot. Clio keeps the compiled session prompt and provider tool schemas byte-stable so prompt prefixes can be reused across turns and across sessions when the backend slot still holds the same prefix.
+
+Dispatch traffic and compaction can invalidate that slot. The next turn records `expectedColdReasons` and shows one dim notice. Session forensics report per-call cache verdicts as `hot`, `partial`, `cold`, or `small`:
+
+```bash
+node scripts/turn-report.mjs --session <id>
+```
 
 ## Troubleshooting
 

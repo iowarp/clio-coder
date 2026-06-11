@@ -13,7 +13,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 ```mermaid
 graph TD
-    user[User request] --> palette[Tool palette / provider capability]
+    user[User request] --> surface[Provider tool capability]
     palette --> posture[Single operating posture]
     posture --> registry[Tool registry admission]
     registry --> safety[Safety policy engine]
