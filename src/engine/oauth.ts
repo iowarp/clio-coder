@@ -22,6 +22,7 @@ import {
 	resetOAuthProviders as piResetOAuthProviders,
 	unregisterOAuthProvider as piUnregisterOAuthProvider,
 } from "@earendil-works/pi-ai/oauth";
+import { alcfOAuthProvider } from "./alcf-oauth.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProviderInterface, OAuthSelectPrompt };
 
@@ -81,6 +82,19 @@ export function getEngineOAuthApiKey(providerId: OAuthProviderId, credentials: O
 
 export function registerEngineOAuthProvider(provider: OAuthProviderInterface): void {
 	piRegisterOAuthProvider(provider);
+}
+
+let clioOAuthProvidersRegistered = false;
+
+/**
+ * Register clio-coder's in-tree custom OAuth providers (currently ALCF/Globus).
+ * Idempotent: safe to call from every boot path. Built-in pi-ai providers
+ * (anthropic, openai-codex, github-copilot) are registered by pi-ai itself.
+ */
+export function registerClioOAuthProviders(): void {
+	if (clioOAuthProvidersRegistered) return;
+	clioOAuthProvidersRegistered = true;
+	piRegisterOAuthProvider(alcfOAuthProvider);
 }
 
 export function unregisterEngineOAuthProvider(providerId: string): void {

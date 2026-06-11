@@ -1,0 +1,51 @@
+# ALCF (Argonne) inference-gateway model knowledge base.
+#
+# These are open-weight models served behind ALCF's Sophia/Metis gateway
+# (runtime id "alcf", OpenAI-compatible wire format, Globus auth). Unlike the
+# local-models knowledge base, these run on ALCF hardware, but they share the
+# property that pi-ai has no native catalog for them — so capabilities are
+# described here rather than discovered from a provider catalog.
+#
+# GPT-OSS models (openai/gpt-oss-120b on Sophia, gpt-oss-120b on Metis) are
+# already covered by the `openai-gpt-oss` family in the local-models KB; its
+# Harmony reasoning semantics apply identically when served through ALCF.
+#
+# maxTokens here is the model's capability ceiling. The ALCF gateway itself is
+# more conservative, so seeded endpoints pin a lower maxTokens override; see
+# docs/providers/alcf-globus-plan.md.
+
+- family: meta-llama-4-maverick
+  matchPatterns:
+    - meta-llama/llama-4-maverick
+    - llama-4-maverick
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192
+
+- family: meta-llama-4-scout
+  matchPatterns:
+    - meta-llama/llama-4-scout
+    - llama-4-scout
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192

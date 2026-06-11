@@ -3,6 +3,7 @@ import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders } from "../../engine/apis/index.js";
+import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
@@ -232,6 +233,19 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			credentialsPresent: credentialsPresent(),
 			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
 		};
+		// Authenticated runtimes (e.g. ALCF's Globus-gated gateway) need a bearer
+		// to hit their discovery endpoints. Resolve it best-effort — refreshing an
+		// OAuth token here is fine, but a failure must not abort the probe.
+		if (desc.auth === "oauth" || desc.auth === "api-key") {
+			try {
+				const resolution = await authStore.resolveForTarget(resolveAuthTarget(endpoint, desc), {
+					includeFallback: false,
+				});
+				if (resolution.apiKey) probeCtx.authToken = resolution.apiKey;
+			} catch {
+				// best-effort; probe proceeds without a token and reports accordingly.
+			}
+		}
 		let probeResult: ProbeResult;
 		try {
 			probeResult = await desc.probe(endpoint, probeCtx);
@@ -320,6 +334,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		async start() {
 			ensurePiAiRegistered();
 			registerClioApiProviders();
+			registerClioOAuthProviders();
 			registerBuiltinRuntimes(registry);
 			const settings = readConfig();
 			await loadPluginRuntimes(registry, settings);

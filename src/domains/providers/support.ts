@@ -27,6 +27,7 @@ export interface ResolvedProviderReference {
 }
 
 const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
+	alcf: "ALCF inference gateway (Sophia/Metis) via Globus",
 	anthropic: "Anthropic API",
 	bedrock: "Amazon Bedrock",
 	deepseek: "DeepSeek API",
@@ -124,7 +125,12 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		connectable: runtime.auth === "oauth" || runtime.auth === "api-key" || runtime.auth === "cli",
 		supportsCustomUrl:
 			runtime.kind === "http" &&
-			(classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat" || runtime.id === "anthropic-compat"),
+			(classifyGroup(runtime) === "local-http" ||
+				runtime.id === "openai-compat" ||
+				runtime.id === "anthropic-compat" ||
+				// ALCF is an oauth (subscription-group) runtime, but each cluster
+				// (Sophia/Metis) has its own gateway URL, so it must accept one.
+				runtime.id === "alcf"),
 	};
 }
 

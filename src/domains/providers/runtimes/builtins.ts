@@ -16,6 +16,7 @@ import codexCli from "./cli-stub/codex-cli.js";
 import copilotCli from "./cli-stub/copilot-cli.js";
 import geminiCli from "./cli-stub/gemini-cli.js";
 import openCodeCli from "./cli-stub/opencode-cli.js";
+import alcf from "./cloud/alcf.js";
 import anthropic from "./cloud/anthropic.js";
 import bedrock from "./cloud/bedrock.js";
 import deepseek from "./cloud/deepseek.js";
@@ -40,6 +41,7 @@ import anthropicCompat from "./protocol/anthropic-compat.js";
 import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
+	alcf,
 	anthropic,
 	bedrock,
 	deepseek,

@@ -44,6 +44,14 @@ export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;
 	httpTimeoutMs: number;
 	signal?: AbortSignal;
+	/**
+	 * Resolved bearer/API token for the endpoint being probed, when one is
+	 * available (stored API key, environment, or a refreshed OAuth token).
+	 * Present only on live probes; absent on the config-only sweep. Runtimes
+	 * whose discovery endpoints require auth (e.g. ALCF's Globus-gated
+	 * gateway) read this to authenticate `probe`/`probeModels`.
+	 */
+	authToken?: string;
 }
 
 /**
