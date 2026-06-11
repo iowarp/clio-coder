@@ -4,7 +4,6 @@ import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectPromptContext } from "../context/index.js";
-import type { ResourcesContract } from "../resources/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
@@ -30,10 +29,6 @@ export function createPromptsBundle(
 
 	function contextDomain(): ContextContract | undefined {
 		return context.getContract<ContextContract>("context");
-	}
-
-	function resources(): ResourcesContract | undefined {
-		return context.getContract<ResourcesContract>("resources");
 	}
 
 	function reload(): void {
@@ -70,11 +65,9 @@ export function createPromptsBundle(
 					: "";
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
-			const skillsCatalog = resources()?.skillsCatalog(cwd) ?? "";
 			const sessionInputs = {
 				...input.sessionInputs,
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
-				...(skillsCatalog.length > 0 ? { skillsCatalog } : {}),
 			};
 			return compile(table, {
 				identity: "identity.clio",

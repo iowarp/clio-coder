@@ -476,6 +476,25 @@ describe("contracts/tools dispatch run paths", () => {
 		}
 	});
 
+	it("dispatch list:true returns the agent catalog without dispatching", async () => {
+		const tool = createDispatchTool({
+			dispatch: {
+				dispatch: async () => {
+					throw new Error("dispatch must not run for list:true");
+				},
+			} as unknown as DispatchContract,
+			getAgentCatalog: () => "User-facing agents:\n- coder: bounded coding tasks",
+		});
+		const result = await tool.run({ list: true });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("coder: bounded coding tasks"));
+		}
+		const noCatalog = createDispatchTool({ dispatch: {} as DispatchContract });
+		const missing = await noCatalog.run({ list: true });
+		strictEqual(missing.kind, "error");
+	});
+
 	it("createDispatchTool triggers dispatch contract", async () => {
 		const mockDispatch: DispatchContract = {
 			dispatch: async (req: DispatchRequest) => {

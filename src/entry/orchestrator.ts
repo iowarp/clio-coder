@@ -547,6 +547,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
+		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
@@ -602,7 +603,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		observability,
 		bus,
 		...(prompts ? { prompts } : {}),
-		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: () => {
 			try {

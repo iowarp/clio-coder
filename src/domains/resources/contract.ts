@@ -14,7 +14,6 @@ export interface ResourcesContract extends DomainContract {
 	contextFiles(cwd: string): ProjectContextFile[];
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
-	skillsCatalog(cwd?: string): string;
 	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
 	parsePendingSkillRequests(
 		text: string,

@@ -15,7 +15,6 @@ import {
 } from "./prompts/loader.js";
 import {
 	expandSkillInvocationInput,
-	formatSkillsCatalogForPrompt,
 	type LoadSkillsInput,
 	loadSkills,
 	parsePendingSkillRequests,
@@ -39,7 +38,6 @@ export interface ResourcesLoader {
 	contextFiles(cwd?: string, options?: Omit<LoadProjectContextFilesInput, "cwd">): ProjectContextFile[];
 	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd?: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
-	skillsCatalog(cwd?: string): string;
 	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
 	parsePendingSkillRequests(
 		text: string,
@@ -70,9 +68,6 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		skills(cwd = defaultCwd) {
 			return loadSkills({ cwd, ...skillOptions() });
-		},
-		skillsCatalog(cwd = defaultCwd) {
-			return formatSkillsCatalogForPrompt(loadSkills({ cwd, ...skillOptions() }));
 		},
 		expandSkillInvocation(text, cwd = defaultCwd, expansionOptions = {}) {
 			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);

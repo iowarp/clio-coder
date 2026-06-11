@@ -14,7 +14,6 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	createResourcesLoader,
 	expandSkillInvocationInput,
-	formatSkillsCatalogForPrompt,
 	loadSkills,
 	modelVisibleSkills,
 	parsePendingSkillRequests,
@@ -153,7 +152,6 @@ describe("contracts/skills loader normalization", () => {
 		const list = loadSkills({ roots: [projectRoot(root)] });
 		strictEqual(list.items.length, 1);
 		strictEqual(modelVisibleSkills(list.items).length, 0);
-		strictEqual(formatSkillsCatalogForPrompt(list), "");
 	});
 
 	it("resolves collisions by precedence: clio project overrides clio user", () => {
@@ -298,7 +296,6 @@ describe("contracts/skills compatibility roots", () => {
 			modelVisibleSkills(list.items).some((s) => s.name === "proj-compat"),
 			false,
 		);
-		strictEqual(formatSkillsCatalogForPrompt(list), "");
 	});
 
 	it("trusts project compat roots when opted in", () => {
@@ -329,40 +326,35 @@ describe("contracts/skills compatibility roots", () => {
 		const skill = loader.skills(project).items.find((entry) => entry.name === "proj-loader");
 		ok(skill);
 		strictEqual(skill.trusted, true);
-		ok(loader.skillsCatalog(project).includes("proj-loader"));
 	});
 });
 
-describe("contracts/skills prompt catalog", () => {
-	it("emits a catalog hash and per-skill source for visible skills", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "visible", ['name: "visible"', 'description: "Catalog entry."']);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const catalog = formatSkillsCatalogForPrompt(list);
-		ok(catalog.startsWith("# Skills"));
-		match(catalog, /catalog_hash="[0-9a-f]{12}"/);
-		match(catalog, /source="clio"/);
-		match(catalog, /origin="project"/);
-		ok(catalog.includes("<description>Catalog entry.</description>"));
+describe("contracts/skills on-demand listing", () => {
+	it("read_skill with no name lists model-visible skills without a pending request", async () => {
+		const project = scratchDir("clio-proj-");
+		writeSkillDir(join(project, ".clio", "skills"), "visible", ['name: "visible"', 'description: "Catalog entry."']);
+		const tool = createReadSkillTool({ getCwd: () => project });
+		const result = await tool.run({}, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("- visible (project): Catalog entry."));
+			ok(result.output.includes("/skill <name>"));
+		}
 	});
 
-	it("preserves extension skill root origin in model-visible descriptors", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "extension-visible", ['name: "extension-visible"', 'description: "Extension catalog entry."']);
-		const list = loadSkills({
-			roots: [
-				{
-					path: root,
-					scope: "package",
-					source: "extension",
-					origin: "extension:user:test-pack",
-					trusted: true,
-				},
-			],
-		});
-		const catalog = formatSkillsCatalogForPrompt(list);
-		match(catalog, /source="extension"/);
-		match(catalog, /origin="extension:user:test-pack"/);
+	it("read_skill listing excludes disable-model-invocation skills", async () => {
+		const project = scratchDir("clio-proj-");
+		writeSkillDir(join(project, ".clio", "skills"), "manual-only", [
+			'name: "manual-only"',
+			'description: "Only via slash command."',
+			"disable-model-invocation: true",
+		]);
+		const tool = createReadSkillTool({ getCwd: () => project });
+		const result = await tool.run({}, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			strictEqual(result.output.includes("manual-only"), false);
+		}
 	});
 });
 
@@ -481,7 +473,6 @@ describe("contracts/skills slash-command parity", () => {
 			contextFiles: () => [],
 			renderContextFiles: () => "",
 			skills: () => list,
-			skillsCatalog: () => formatSkillsCatalogForPrompt(list),
 			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
 			parsePendingSkillRequests: (text, _cwd, options) => {
 				const expansion = expandSkillInvocationInput(text, list, options);
@@ -524,7 +515,6 @@ describe("contracts/skills slash-command parity", () => {
 			contextFiles: () => [],
 			renderContextFiles: () => "",
 			skills: () => list,
-			skillsCatalog: () => formatSkillsCatalogForPrompt(list),
 			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
 			parsePendingSkillRequests: (text, _cwd, options) => {
 				const expansion = expandSkillInvocationInput(text, list, options);

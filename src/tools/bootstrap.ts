@@ -40,6 +40,8 @@ export interface ToolBootstrapDeps {
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
 	askUser?: AskUserHandler;
+	/** Agent fleet catalog renderer for the dispatch tool's list action. */
+	getAgentCatalog?: () => string;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -396,7 +398,11 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 	});
 	if (deps.dispatch) {
-		const dispatchToolDeps = deps.bus ? { dispatch: deps.dispatch, bus: deps.bus } : { dispatch: deps.dispatch };
+		const dispatchToolDeps = {
+			dispatch: deps.dispatch,
+			...(deps.bus ? { bus: deps.bus } : {}),
+			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
+		};
 		registry.register({
 			...builtin(createDispatchTool(dispatchToolDeps), {
 				path: "src/tools/dispatch.ts",
