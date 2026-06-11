@@ -149,13 +149,25 @@ function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undef
 	return lines;
 }
 
+function renderSkillsList(skills: ReadonlyArray<Skill>): string {
+	if (skills.length === 0) return "No skills are installed.";
+	const lines = [
+		"Available skills. Skill bodies load only after an explicit operator request; when one fits the task, suggest the operator run /skill <name>.",
+		"",
+	];
+	for (const skill of skills) {
+		lines.push(`- ${skill.name} (${skill.scope}): ${skill.description}`);
+	}
+	return lines.join("\n");
+}
+
 export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.ReadSkill,
 		description:
-			"Load the full body and metadata of an available coding skill by name. Use after matching the # Skills catalog; referenced files are relative to the returned base_dir. This never executes bundled scripts.",
+			"List available coding skills (call with no name) or load a requested skill's body by name. This never executes bundled scripts.",
 		parameters: Type.Object({
-			name: Type.String({ description: "Skill name from the available skills catalog." }),
+			name: Type.Optional(Type.String({ description: "Skill name to load. Omit to list available skills." })),
 			include_tree: Type.Optional(
 				Type.Boolean({ description: "List sibling files under the skill base_dir. Default: false." }),
 			),
@@ -167,7 +179,15 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 		executionMode: "parallel",
 		async run(args, options): Promise<ToolResult> {
 			const name = typeof args.name === "string" ? args.name.trim() : "";
-			if (name.length === 0) return { kind: "error", message: "read_skill: missing name" };
+			if (name.length === 0) {
+				const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
+				const visible = modelVisibleSkills(list.items);
+				return {
+					kind: "ok",
+					output: renderSkillsList(visible),
+					details: { skills: visible.map((skill) => ({ name: skill.name, scope: skill.scope })) },
+				};
+			}
 			const policyError = pendingSkillPolicyError(name, options);
 			if (policyError) return { kind: "error", message: policyError };
 			const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });

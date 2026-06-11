@@ -258,8 +258,6 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: () => string;
-	/** Build the prompt-visible catalog of custom agents available through dispatch. */
-	getAgentCatalog?: () => string;
 }
 
 interface ChatLoopTarget {
@@ -1744,16 +1742,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				emitNotice(
 					`[Clio Coder] memory load failed; continuing without memory injection: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		}
-		if (deps.getAgentCatalog) {
-			try {
-				const agentCatalog = deps.getAgentCatalog().trim();
-				if (agentCatalog.length > 0) sessionInputs.agentCatalog = agentCatalog;
-			} catch (err) {
-				emitNotice(
-					`[Clio Coder] agent catalog load failed; continuing without fleet catalog: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}

@@ -167,8 +167,6 @@ describe("contracts/prompts compiler logic", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: ["read", "grep"],
-				agentCatalog: "Clio fleet details.",
-				skillsCatalog: "# Skills",
 			},
 		});
 
@@ -176,11 +174,37 @@ describe("contracts/prompts compiler logic", () => {
 		// surface is fixed and the model simply follows a tool-free instruction.
 		strictEqual(result.systemPrompt.includes("No tool schemas are attached this turn"), false);
 		ok(result.systemPrompt.includes("If the user asks for a tool-free answer"));
-		ok(result.systemPrompt.includes("# Agent Fleet"));
-		ok(result.systemPrompt.includes("# Skills"));
 	});
 
-	it("renders the skills and fleet catalogs for tool-capable targets", () => {
+	it("discloses catalogs through tools instead of rendering them into the prompt", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["read", "grep", "read_skill", "dispatch"],
+			},
+		});
+
+		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
+		strictEqual(result.systemPrompt.includes("available_skills"), false);
+		strictEqual(
+			result.sections.some((section) => section.id === "tools-and-agents"),
+			false,
+		);
+		strictEqual(
+			result.sections.some((section) => section.id === "skills-catalog"),
+			false,
+		);
+		ok(result.systemPrompt.includes("call read_skill with no name to list available skills"));
+		ok(result.systemPrompt.includes("call dispatch with list:true"));
+	});
+
+	it("omits the catalog one-liners when read_skill and dispatch are not in the session surface", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -191,35 +215,11 @@ describe("contracts/prompts compiler logic", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: ["read", "grep"],
-				agentCatalog: "Clio fleet details.",
-				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
 			},
 		});
 
-		ok(result.systemPrompt.includes("# Agent Fleet"));
-		ok(result.systemPrompt.includes("available_skills"));
-		strictEqual(result.systemPrompt.includes("# Tool Catalog"), false);
-		ok(result.sections.some((section) => section.id === "tools-and-agents"));
-		ok(result.sections.some((section) => section.id === "skills-catalog"));
-	});
-
-	it("omits the catalogs when the target has no tool channel", () => {
-		const table = loadFragments();
-		const result = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			sessionInputs: {
-				provider: "stub",
-				model: "stub-model",
-				providerSupportsTools: false,
-				agentCatalog: "Clio fleet details.",
-				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
-			},
-		});
-
-		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
-		strictEqual(result.systemPrompt.includes("available_skills"), false);
+		strictEqual(result.systemPrompt.includes("read_skill with no name"), false);
+		strictEqual(result.systemPrompt.includes("list:true"), false);
 	});
 
 	it("never renders volatile runtime state into the prompt", () => {
@@ -392,29 +392,6 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(systemPrompt.includes("you MUST inspect local project context or call available lookup tools"));
 		ok(systemPrompt.includes("`workspace_context`"));
 		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
-	});
-
-	it("keeps the skills catalog in the prompt regardless of which tools are active", async () => {
-		const table = loadFragments();
-		const result = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			sessionInputs: {
-				provider: "stub",
-				model: "stub-model",
-				providerSupportsTools: true,
-				activeToolNames: ["workspace_context"], // read_skill / create_skill are not active
-				skillsCatalog:
-					'# Skills\n\n<available_skills catalog_hash="abc123">\n  <skill name="context-prime" scope="project" ...>\n  </skill>\n</available_skills>',
-			},
-		});
-
-		// Gating this block on active tools made the prompt flap across turns
-		// and invalidated the provider prefix cache. Skill loading stays
-		// policy-gated in read_skill itself; the catalog is discovery only.
-		ok(result.systemPrompt.includes("# Skills"));
-		ok(result.systemPrompt.includes("available_skills"));
 	});
 
 	it("workspace_context is not described as automatic and is explicit/manual", () => {

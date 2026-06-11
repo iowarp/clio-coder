@@ -21,8 +21,6 @@ export interface SessionPromptInputs {
 	/** The session's frozen tool surface, used only to tailor static contract lines. */
 	activeToolNames?: ReadonlyArray<string>;
 	contextFiles?: string;
-	agentCatalog?: string;
-	skillsCatalog?: string;
 	memorySection?: string;
 }
 
@@ -131,8 +129,11 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	}
 	if (activeToolNames.includes("read_skill")) {
 		lines.push(
-			"When the user message carries a skill request, first call read_skill for the requested skill before answering, planning, writing files, or inspecting the repository.",
+			"Skills are listed on demand: call read_skill with no name to list available skills. When the user message carries a skill request, first call read_skill for the requested skill before answering, planning, writing files, or inspecting the repository.",
 		);
+	}
+	if (activeToolNames.includes("dispatch")) {
+		lines.push("The agent fleet is listed on demand: call dispatch with list:true to see available agents.");
 	}
 	if (activeToolNames.includes("ask_user")) {
 		lines.push(
@@ -182,17 +183,6 @@ function renderMemoryBlock(memorySection: string | undefined): string {
 	return trimmed.length === 0 ? "" : `# Memory\n\n${trimmed}`;
 }
 
-function renderAgentCatalogBlock(agentCatalog: string | undefined): string {
-	const trimmed = agentCatalog?.trim() ?? "";
-	return trimmed.length === 0 ? "" : `# Agent Fleet\n\n${trimmed}`;
-}
-
-function renderSkillsCatalogBlock(skillsCatalog: string | undefined): string {
-	const trimmed = skillsCatalog?.trim() ?? "";
-	if (trimmed.length === 0) return "";
-	return trimmed.startsWith("# Skills") ? trimmed : `# Skills\n\n${trimmed}`;
-}
-
 function estimatePromptTokens(text: string): number {
 	return ceilChars(text.trim().length);
 }
@@ -210,7 +200,6 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const safety = lookupFragment(table, inputs.safety, "safety");
 	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
 	const session = inputs.sessionInputs;
-	const hasToolChannel = session.providerSupportsTools !== false;
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -226,8 +215,6 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	push("safety", renderSafetySection(safety, safetyLevel));
 	push("runtime", renderRuntimeBlock(session));
 	push("tool-contract", renderToolContractBlock(session));
-	push("tools-and-agents", renderAgentCatalogBlock(hasToolChannel ? session.agentCatalog : undefined));
-	push("skills-catalog", renderSkillsCatalogBlock(hasToolChannel ? session.skillsCatalog : undefined));
 	push("retrieval-hints", renderRetrievalHintsBlock(session));
 	push("memory", renderMemoryBlock(session.memorySection));
 	push("project-context", renderProjectBlock(session.contextFiles));

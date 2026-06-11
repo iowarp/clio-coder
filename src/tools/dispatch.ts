@@ -17,6 +17,8 @@ const VALID_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medi
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
 	bus?: SafeEventBus;
+	/** Renders the agent fleet catalog for the `list: true` action. */
+	getAgentCatalog?: () => string;
 }
 
 interface EventSummary {
@@ -66,7 +68,7 @@ function dispatchRequestFromArgs(
 	args: Record<string, unknown>,
 ): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
 	const task = stringArg(args, "task");
-	if (!task) return { ok: false, message: "dispatch: missing task argument" };
+	if (!task) return { ok: false, message: "dispatch: missing task argument (pass list:true to see available agents)" };
 
 	const request: DispatchRequest = {
 		agentId: stringArg(args, "agent_id", "agentId", "agent") ?? DEFAULT_AGENT_ID,
@@ -241,9 +243,12 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch a bounded task to a configured Clio agent from the fleet. Defaults to agent_id='coder' and the configured fleet default target/model when target/model are omitted. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch a bounded task to a configured Clio agent from the fleet, or call with list:true to see available agents and recipes. Defaults to agent_id='coder' and the configured fleet default target/model when target/model are omitted. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
-			task: Type.String({ description: "Concrete agent task. Include expected output, constraints, and handoff format." }),
+			list: Type.Optional(Type.Boolean({ description: "List available agents and recipes instead of dispatching." })),
+			task: Type.Optional(
+				Type.String({ description: "Concrete agent task. Include expected output, constraints, and handoff format." }),
+			),
 			agent_id: Type.Optional(Type.String({ description: "Agent recipe id from the fleet catalog. Defaults to coder." })),
 			target: Type.Optional(Type.String({ description: "Configured target id. Omit for the fleet default." })),
 			model: Type.Optional(Type.String({ description: "Model override. Omit for the target/profile default." })),
@@ -286,6 +291,13 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 		baseActionClass: "dispatch",
 		executionMode: "sequential",
 		async run(args, options): Promise<ToolResult> {
+			if (args.list === true) {
+				const catalog = deps.getAgentCatalog?.().trim() ?? "";
+				if (catalog.length === 0) {
+					return { kind: "error", message: "dispatch: no agent catalog is available in this context" };
+				}
+				return { kind: "ok", output: catalog };
+			}
 			const parsed = dispatchRequestFromArgs(args);
 			if (!parsed.ok) return { kind: "error", message: parsed.message };
 			if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };

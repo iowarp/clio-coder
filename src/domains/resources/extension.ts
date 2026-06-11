@@ -30,9 +30,6 @@ export function createResourcesBundle(
 		skills(cwd) {
 			return loader.skills(cwd);
 		},
-		skillsCatalog(cwd) {
-			return loader.skillsCatalog(cwd);
-		},
 		expandSkillInvocation(text, cwd, options) {
 			return loader.expandSkillInvocation(text, cwd, options);
 		},

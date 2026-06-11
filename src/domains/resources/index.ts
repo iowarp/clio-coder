@@ -50,7 +50,6 @@ export {
 export {
 	defaultSkillRoots,
 	expandSkillInvocationInput,
-	formatSkillsCatalogForPrompt,
 	type LoadSkillsInput,
 	loadSkills,
 	modelVisibleSkills,

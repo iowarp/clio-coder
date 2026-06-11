@@ -153,10 +153,6 @@ function sha256(value: string): string {
 	return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function shortHash(value: string): string {
-	return value.slice(0, 12);
-}
-
 function defaultPrecedenceForScope(scope: ResourceScope): number {
 	switch (scope) {
 		case "package":
@@ -696,48 +692,9 @@ export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 	};
 }
 
-/** Skills the model may see in the catalog and load via read_skill. */
+/** Skills the model may see in read_skill listings and load via read_skill. */
 export function modelVisibleSkills(skills: ReadonlyArray<Skill>): Skill[] {
 	return skills.filter((skill) => skill.trusted && !skill.disableModelInvocation);
-}
-
-function computeCatalogHash(skills: ReadonlyArray<Skill>): string {
-	const parts = skills.map((skill) => `${skill.name}:${skill.hash}`).sort();
-	return sha256(parts.join("\n"));
-}
-
-function escapeXmlAttribute(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeXmlText(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function skillSourceOrigin(skill: Skill): string {
-	return skill.sourceInfo.source ?? `${skill.source}-${skill.scope}`;
-}
-
-export function formatSkillsCatalogForPrompt(skills: SkillList): string {
-	const visible = modelVisibleSkills(skills.items);
-	if (visible.length === 0) return "";
-	const catalogHash = computeCatalogHash(visible);
-	const lines = [
-		"# Skills",
-		"",
-		"Use a skill when its description matches the task. Skills load only after an explicit operator request: when a task matches a skill, suggest the operator run /skill <name>. Call read_skill only for a pending skill request shown in the prompt; it is rejected otherwise. Loaded skill files resolve referenced paths against the returned base_dir. Do not run bundled scripts unless normal Clio tool safety permits the call.",
-		"",
-		`<available_skills catalog_hash="${shortHash(catalogHash)}">`,
-	];
-	for (const skill of visible) {
-		lines.push(
-			`  <skill name="${escapeXmlAttribute(skill.name)}" scope="${escapeXmlAttribute(skill.scope)}" source="${escapeXmlAttribute(skill.source)}" origin="${escapeXmlAttribute(skillSourceOrigin(skill))}" hash="${shortHash(skill.hash)}">`,
-		);
-		lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);
-		lines.push("  </skill>");
-	}
-	lines.push("</available_skills>");
-	return lines.join("\n");
 }
 
 export function parseSkillCommand(input: string): { name: string; args: string } | null {
