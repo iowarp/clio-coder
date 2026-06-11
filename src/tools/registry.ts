@@ -58,7 +58,7 @@ export interface ToolMetadata {
 	retrySafety: ToolRetrySafety;
 	/** Expected result-size behavior at the registry boundary. */
 	resultSizePolicy: ToolResultSizePolicy;
-	/** Coarse cost/latency bucket for palette and dashboard diagnostics. */
+	/** Coarse cost/latency bucket for dashboard diagnostics. */
 	costLatency: ToolCostLatencyClass;
 }
 

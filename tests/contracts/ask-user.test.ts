@@ -1,15 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { agentSpecPolicyErrors, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
-import { resolveToolPalette } from "../../src/tools/palette.js";
 import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";
-
-const ALL_TOOLS = Object.values(ToolNames) as ToolName[];
 
 function allowReadSafety() {
 	return {
@@ -184,38 +181,5 @@ describe("contracts/ask_user", () => {
 		}).map((tool) => tool.name);
 
 		strictEqual(tools.includes(ToolNames.AskUser), false);
-	});
-
-	it("interview phrasing keeps the full stable surface (ask_user included)", () => {
-		// Per-turn intent narrowing was removed: the surface is the full policy
-		// bound on every ordinary turn so the provider prefix cache survives.
-		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "using your ask_user tool interview me about new skills added to clio coder",
-		});
-		ok(palette.activeTools.includes(ToolNames.AskUser));
-		strictEqual(palette.activeTools.length, ALL_TOOLS.length);
-	});
-
-	it("pending skill requests expose only read_skill and ask_user before the skill workflow starts", () => {
-		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "about adding more science skills to clio coder",
-			pendingSkillRequests: [
-				{
-					name: "grill-me",
-					args: "about adding more science skills to clio coder",
-					source: "slash-command",
-					installed: true,
-				},
-			],
-		});
-
-		deepStrictEqual([...palette.activeTools].sort(), [ToolNames.AskUser, ToolNames.ReadSkill].sort());
-		strictEqual(palette.activeTools.includes(ToolNames.Write), false);
-		strictEqual(palette.activeTools.includes(ToolNames.Edit), false);
-		strictEqual(palette.activeTools.includes(ToolNames.CodeNav), false);
 	});
 });
