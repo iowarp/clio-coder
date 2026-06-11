@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import {
@@ -74,15 +73,9 @@ async function compileProjectPrompt(cwd: string) {
 	const promptsBundle = createPromptsBundle(domainContext);
 	await promptsBundle.extension.start();
 	try {
-		return await promptsBundle.contract.compileForTurn({
+		return await promptsBundle.contract.compileSessionPrompt({
 			cwd,
-			contextPolicy: {
-				providerSupportsTools: true,
-				activeToolCount: 3,
-				userText: "audit the repository context",
-				turnCount: 0,
-			},
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
@@ -141,56 +134,59 @@ describe("contracts/prompts identity anti-leak safety", () => {
 });
 
 describe("contracts/prompts compiler logic", () => {
-	it("compiles template with stable composition hashes", () => {
+	it("compiles deterministically: same inputs, same prompt, same hash", () => {
 		const table = loadFragments();
 		const a = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: { provider: "p", model: "m" },
+			sessionInputs: { provider: "p", model: "m" },
 		});
 		const b = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: { provider: "p", model: "m" },
+			sessionInputs: { provider: "p", model: "m" },
 		});
 
-		strictEqual(a.renderedPromptHash, b.renderedPromptHash);
+		strictEqual(a.systemPromptHash, b.systemPromptHash);
+		strictEqual(a.systemPrompt, b.systemPrompt);
 		ok(a.systemPrompt.length > 0);
-		ok(a.segmentManifest.some((segment) => segment.id === "operating-contract"));
+		ok(a.tokenEstimate > 0);
+		ok(a.sections.some((section) => section.id === "operating-contract"));
 	});
 
-	it("keeps the fleet and skills catalogs in the shell even on a tool-free turn", () => {
+	it("renders no per-turn state: tool-free phrasing is an instruction, not a prompt change", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: [],
+				activeToolNames: ["read", "grep"],
 				agentCatalog: "Clio fleet details.",
 				skillsCatalog: "# Skills",
 			},
 		});
 
-		// Suppression is per-turn; the session shell must stay byte-identical
-		// so the provider prefix cache survives the suppressed turn.
-		ok(result.systemPrompt.includes("No tool schemas are attached this turn"));
+		// The prompt never claims schemas were detached for a turn; the session
+		// surface is fixed and the model simply follows a tool-free instruction.
+		strictEqual(result.systemPrompt.includes("No tool schemas are attached this turn"), false);
+		ok(result.systemPrompt.includes("If the user asks for a tool-free answer"));
 		ok(result.systemPrompt.includes("# Agent Fleet"));
 		ok(result.systemPrompt.includes("# Skills"));
 	});
 
-	it("renders the skills and fleet catalogs unconditionally for tool-capable targets", () => {
+	it("renders the skills and fleet catalogs for tool-capable targets", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
@@ -202,12 +198,9 @@ describe("contracts/prompts compiler logic", () => {
 
 		ok(result.systemPrompt.includes("# Agent Fleet"));
 		ok(result.systemPrompt.includes("available_skills"));
-		// Both live in the stable session shell, never in volatile turn fragments.
-		const dynamicIds = result.dynamicPromptFragments.map((fragment) => fragment.id);
-		strictEqual(dynamicIds.includes("tools-and-agents"), false);
-		strictEqual(dynamicIds.includes("skills-catalog"), false);
-		// The Tool Catalog prose block is gone: attached schemas are authoritative.
 		strictEqual(result.systemPrompt.includes("# Tool Catalog"), false);
+		ok(result.sections.some((section) => section.id === "tools-and-agents"));
+		ok(result.sections.some((section) => section.id === "skills-catalog"));
 	});
 
 	it("omits the catalogs when the target has no tool channel", () => {
@@ -216,7 +209,7 @@ describe("contracts/prompts compiler logic", () => {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: false,
@@ -229,39 +222,32 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(result.systemPrompt.includes("available_skills"), false);
 	});
 
-	it("keeps the session shell byte-identical across differently-phrased work turns", () => {
+	it("never renders volatile runtime state into the prompt", () => {
 		const table = loadFragments();
-		const inputs = {
-			provider: "stub",
-			model: "stub-model",
-			providerSupportsTools: true,
-			activeToolNames: ["read", "grep", "dispatch", "read_skill", "ask_user"],
-			agentCatalog: "Clio fleet details.",
-			skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
-		};
-		const a = compile(table, {
+		const result = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: inputs,
+			sessionInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["read", "grep", "dispatch", "read_skill", "ask_user"],
+			},
 		});
-		const b = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			dynamicInputs: { ...inputs },
-		});
-		strictEqual(a.sessionShellHash, b.sessionShellHash);
-		strictEqual(a.systemPrompt, b.systemPrompt);
+		strictEqual(result.systemPrompt.includes("send policy"), false);
+		strictEqual(result.systemPrompt.includes("Prompt send policy"), false);
+		strictEqual(result.systemPrompt.includes("Thinking applied"), false);
+		strictEqual(result.systemPrompt.includes("Thinking level"), false);
 	});
 
-	it("describes ask_user interview behavior only when ask_user is active", () => {
+	it("describes ask_user interview behavior only when ask_user is in the session surface", () => {
 		const table = loadFragments();
 		const active = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
@@ -277,7 +263,7 @@ describe("contracts/prompts compiler logic", () => {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
@@ -290,18 +276,16 @@ describe("contracts/prompts compiler logic", () => {
 	it("summarizes project context across missing, CLIO-only, fresh codewiki, and stale codewiki states", async () => {
 		const empty = scratchProject();
 		let result = await compileProjectPrompt(empty);
-		let project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
-		strictEqual(project.includes("CLIO.md: available"), false);
-		strictEqual(project.includes("Codewiki: available"), false);
-		strictEqual(project.includes("promptFixtureSymbol"), false);
+		strictEqual(result.systemPrompt.includes("CLIO.md: available"), false);
+		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
+		strictEqual(result.systemPrompt.includes("promptFixtureSymbol"), false);
 
 		const clioOnly = scratchProject();
 		writeClioMd(clioOnly);
 		result = await compileProjectPrompt(clioOnly);
-		project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
-		ok(project.includes("# Prompt Fixture"));
-		ok(project.includes("Keep prompt context compact."));
-		strictEqual(project.includes("Codewiki: available"), false);
+		ok(result.systemPrompt.includes("# Prompt Fixture"));
+		ok(result.systemPrompt.includes("Keep prompt context compact."));
+		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
 
 		const freshWiki = scratchProject();
 		writeClioMd(freshWiki);
@@ -315,10 +299,9 @@ describe("contracts/prompts compiler logic", () => {
 			lastIndexedAt: generatedAt,
 		});
 		result = await compileProjectPrompt(freshWiki);
-		project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
-		ok(project.includes("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>"));
-		strictEqual(project.includes("promptFixtureSymbol"), false);
-		strictEqual(project.includes('"entries"'), false);
+		ok(result.systemPrompt.includes("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>"));
+		strictEqual(result.systemPrompt.includes("promptFixtureSymbol"), false);
+		strictEqual(result.systemPrompt.includes('"entries"'), false);
 
 		const staleWiki = scratchProject();
 		writeClioMd(staleWiki);
@@ -334,15 +317,14 @@ describe("contracts/prompts compiler logic", () => {
 			"utf8",
 		);
 		result = await compileProjectPrompt(staleWiki);
-		project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
 		ok(existsSync(join(staleWiki, ".clio", "codewiki.json")));
-		strictEqual(project.includes("Codewiki: available"), false);
-		strictEqual(project.includes("legacySymbol"), false);
+		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
+		strictEqual(result.systemPrompt.includes("legacySymbol"), false);
 	});
 });
 
 describe("contracts/prompts grounding, invalidation, and tools policy", () => {
-	it("context-init invalidates or refreshes context for the next turn", async () => {
+	it("each compile re-reads project context, so post-context-init compiles see fresh content", async () => {
 		const cwd = scratchProject();
 		writeClioMd(cwd);
 		const bus = createSafeEventBus();
@@ -359,74 +341,44 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		await promptsBundle.extension.start();
 
 		try {
-			// Turn 0: Compile first turn, which caches the context hash
-			const firstRes = await promptsBundle.contract.compileForTurn({
-				cwd,
-				contextPolicy: {
-					providerSupportsTools: true,
-					activeToolCount: 3,
-					userText: "audit the repository context",
-					turnCount: 0,
-				},
-				dynamicInputs: {
-					provider: "stub",
-					model: "stub-model",
-					providerSupportsTools: true,
-					activeToolNames: ["workspace_context", "grep", "read"],
-				},
-			});
-			const projectFrag0 = firstRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
-			ok(projectFrag0.length > 0);
+			const sessionInputs = {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["workspace_context", "grep", "read"],
+			};
+			const first = await promptsBundle.contract.compileSessionPrompt({ cwd, sessionInputs });
+			ok(first.systemPrompt.includes("Keep prompt context compact."));
 
-			// Compact CLIO.md content is preloaded every turn, including non-repo-aware follow-ups.
-			const cacheRes = await promptsBundle.contract.compileForTurn({
-				cwd,
-				contextPolicy: {
-					providerSupportsTools: true,
-					activeToolCount: 3,
-					userText: "hello",
-					turnCount: 1,
-				},
-				dynamicInputs: {
-					provider: "stub",
-					model: "stub-model",
-					providerSupportsTools: true,
-					activeToolNames: ["workspace_context", "grep", "read"],
-				},
-			});
-			const projectFragCache = cacheRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
-			ok(projectFragCache.includes("<project-context>"));
-			ok(projectFragCache.includes("Keep prompt context compact."));
+			// Same inputs compile to the byte-identical prompt: the session
+			// prompt is deterministic, so recompiles without underlying change
+			// keep the provider prefix cache intact.
+			const second = await promptsBundle.contract.compileSessionPrompt({ cwd, sessionInputs });
+			strictEqual(second.systemPrompt, first.systemPrompt);
+			strictEqual(second.systemPromptHash, first.systemPromptHash);
 
-			// Emit successful context-init activity completed event on the bus
-			bus.emit(BusChannels.ContextActivity, {
-				kind: "context-init",
-				phase: "done",
-				status: "completed",
-				message: "bootstrap complete",
-				at: Date.now(),
-			});
-
-			// Turn 1 again with same input keeps the compact handbook loaded after context-init invalidation.
-			const freshRes = await promptsBundle.contract.compileForTurn({
-				cwd,
-				contextPolicy: {
-					providerSupportsTools: true,
-					activeToolCount: 3,
-					userText: "hello",
-					turnCount: 1,
-				},
-				dynamicInputs: {
-					provider: "stub",
-					model: "stub-model",
-					providerSupportsTools: true,
-					activeToolNames: ["workspace_context", "grep", "read"],
-				},
-			});
-			const projectFragFresh = freshRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
-			ok(projectFragFresh.length > 0);
-			ok(projectFragFresh.includes("<project-context>"));
-			ok(projectFragFresh.includes("Keep prompt context compact."));
+			// A changed CLIO.md is reflected in the next compile (the chat-loop
+			// decides when to recompile; the compiler never caches stale context).
+			writeFileSync(
+				join(cwd, "CLIO.md"),
+				serializeClioMd({
+					projectName: "Prompt Fixture",
+					identity: "Prompt Fixture is a TypeScript project used to test prompt context selection.",
+					conventions: ["Updated convention after context-init."],
+					invariants: [],
+					fingerprint: {
+						initAt: "2026-05-01T00:00:00.000Z",
+						model: "test",
+						gitHead: null,
+						treeHash: "0".repeat(64),
+						loc: 1,
+					},
+				}),
+				"utf8",
+			);
+			const third = await promptsBundle.contract.compileSessionPrompt({ cwd, sessionInputs });
+			ok(third.systemPrompt.includes("Updated convention after context-init."));
+			notStrictEqual(third.systemPromptHash, first.systemPromptHash);
 		} finally {
 			await promptsBundle.extension.stop?.();
 		}
@@ -442,13 +394,13 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
 	});
 
-	it("keeps the skills catalog in the shell regardless of which tools are active", async () => {
+	it("keeps the skills catalog in the prompt regardless of which tools are active", async () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
+			sessionInputs: {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
@@ -458,8 +410,8 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			},
 		});
 
-		// Gating this block on active tools made the session shell flap across
-		// turns and invalidated the provider prefix cache. Skill loading stays
+		// Gating this block on active tools made the prompt flap across turns
+		// and invalidated the provider prefix cache. Skill loading stays
 		// policy-gated in read_skill itself; the catalog is discovery only.
 		ok(result.systemPrompt.includes("# Skills"));
 		ok(result.systemPrompt.includes("available_skills"));

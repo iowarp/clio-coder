@@ -108,7 +108,6 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(stats.modelLabel, "gemini-3.5-flash");
 		strictEqual(stats.thinkingLevel, "on");
 		strictEqual(stats.safetyLevel, "auto-edit");
-		strictEqual(stats.sendPolicy, "reduced-repeated-envelope");
 		strictEqual(stats.toolProfile, "clio-policy");
 	});
 

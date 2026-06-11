@@ -41,7 +41,6 @@ export interface ContextSnapshot {
 	// Inputs captured
 	systemPrompt?: string | undefined;
 	promptSegments?: { id: string; tokenEstimate: number }[] | undefined;
-	dynamicPromptMessages?: unknown[] | undefined;
 	conversationMessages?: unknown[] | undefined;
 	activeToolSchemas?: unknown[] | undefined;
 	pendingUserInput?: string | undefined;
@@ -280,7 +279,6 @@ export function getSnapshotsFilePath(meta: SessionMeta): string {
 function persistableSnapshot(snapshot: ContextSnapshot): ContextSnapshot {
 	const {
 		systemPrompt: _systemPrompt,
-		dynamicPromptMessages: _dynamic,
 		conversationMessages: _messages,
 		activeToolSchemas: _tools,
 		pendingUserInput: _pending,
@@ -416,7 +414,6 @@ export interface CaptureContextSnapshotInput {
 	modelId: string | null;
 	systemPrompt?: string | undefined;
 	promptSegments?: ReadonlyArray<{ id: string; tokenEstimate: number }> | undefined;
-	dynamicPromptMessages?: ReadonlyArray<unknown> | undefined;
 	conversationMessages: ReadonlyArray<unknown>;
 	activeToolSchemas: ReadonlyArray<unknown>;
 	pendingUserInput?: string | undefined;
@@ -468,7 +465,6 @@ export function captureContextSnapshot(input: CaptureContextSnapshotInput): Cont
 		modelId: input.modelId,
 		systemPrompt: input.systemPrompt,
 		promptSegments: input.promptSegments ? [...input.promptSegments] : undefined,
-		dynamicPromptMessages: input.dynamicPromptMessages ? [...input.dynamicPromptMessages] : undefined,
 		conversationMessages: [...input.conversationMessages],
 		activeToolSchemas: [...input.activeToolSchemas],
 		pendingUserInput: input.pendingUserInput,

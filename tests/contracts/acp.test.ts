@@ -135,7 +135,7 @@ function createMockChat(): AcpServerChat & { submitted: string[]; cancelled: boo
 			streaming = true;
 			submitted.push(text);
 			emit({ type: "agent_start" });
-			emit({ type: "prompt_diagnostics", promptDiagnostics: { renderedPromptHash: "hash" } });
+			emit({ type: "prompt_diagnostics", promptDiagnostics: { systemPromptHash: "hash" } });
 			emit({ type: "thinking_delta", delta: "thinking" });
 			emit({ type: "text_delta", delta: "hello from clio" });
 			emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "package.json" } });

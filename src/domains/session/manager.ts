@@ -5,12 +5,13 @@ import {
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
 	resumeSession as engineResumeSession,
+	readSessionFileEntries,
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
-import { runMigrations } from "./migrations/index.js";
+import { runMigrations, stripV2PromptArtifacts } from "./migrations/index.js";
 
 /**
  * Wraps engine/session.ts so the session domain can track the single in-memory
@@ -61,11 +62,19 @@ export function persistSessionMeta(state: SessionManagerState): void {
 export function resumeSessionState(sessionId: string): SessionManagerState {
 	const { meta, writer } = engineResumeSession(sessionId);
 	const sessionMeta = meta as SessionMeta;
-	// Migration runs on every resume so pre-v2 sessions opt into the v2
-	// vocabulary transparently. Mutation is in place; the next checkpoint
-	// persists the bumped sessionFormatVersion to meta.json.
-	runMigrations(sessionMeta);
-	return { meta: sessionMeta, writer };
+	// Migration runs on every resume so older sessions opt into the current
+	// vocabulary transparently. Meta mutation is in place; ledger-shape
+	// migrations rewrite current.jsonl through the writer exactly once.
+	const result = runMigrations(sessionMeta);
+	const state = { meta: sessionMeta, writer };
+	if (result.migrated) {
+		if (result.from < 3) {
+			const entries = readSessionFileEntries(sessionPaths(sessionMeta).current);
+			writer.replaceEntries(entries.map(stripV2PromptArtifacts));
+		}
+		persistSessionMeta(state);
+	}
+	return state;
 }
 
 export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTurnRecord {
@@ -76,8 +85,6 @@ export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTu
 		kind: input.kind,
 		payload: input.payload,
 	};
-	if (input.dynamicInputs !== undefined) record.dynamicInputs = input.dynamicInputs;
-	if (input.renderedPromptHash !== undefined) record.renderedPromptHash = input.renderedPromptHash;
 	state.writer.append(record);
 	return record;
 }

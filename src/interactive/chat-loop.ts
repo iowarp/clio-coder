@@ -16,14 +16,7 @@ import {
 } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type {
-	CompileResult,
-	DynamicInputs,
-	DynamicPromptFragment,
-	PromptEnvelopeSignature,
-	PromptSegmentManifestEntry,
-	PromptSendPolicy,
-} from "../domains/prompts/compiler.js";
+import type { CompiledSessionPrompt, PromptSection, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
@@ -210,10 +203,10 @@ export interface CreateChatLoopDeps {
 	knownEndpoints: () => ReadonlySet<string>;
 	session?: SessionContract;
 	/**
-	 * Prompt compiler. When wired, every `submit()` re-runs
-	 * `prompts.compileForTurn` with the current safety level, writes the
-	 * compiled text into `state.systemPrompt`, and threads the resulting
-	 * `renderedPromptHash` onto the user + assistant session entries.
+	 * Prompt compiler. When wired, the session system prompt is compiled once
+	 * per session and written into `state.systemPrompt`; recompiles happen
+	 * only on explicit events (model/endpoint change, safety-level change,
+	 * config hot-reload, session switch).
 	 *
 	 * Optional so unit tests can inject stubs and a degraded boot (prompts
 	 * failed to load) still runs with the built-in identity fallback below.
@@ -282,30 +275,15 @@ interface AgentRuntime {
 	runtimeId: string;
 	wireModelId: string;
 	runtimeResolution: ResolvedRuntimeTarget;
-	lastSessionShellHash: string | null;
 }
 
 export interface PromptDiagnostics {
-	renderedPromptHash: string;
-	promptSignature: string;
-	staticShellHash: string;
-	sessionShellHash: string;
-	dynamicHash: string;
+	systemPromptHash: string;
 	systemPromptReused: boolean;
-	promptEnvelope: PromptEnvelopeSignature;
 	toolSignature: string;
 	toolCount: number;
 	toolSchemaTokenEstimate: number;
-	toolPalette: {
-		activeTools: ReadonlyArray<string>;
-		signals: ReadonlyArray<string>;
-		toolsSuppressed: boolean;
-		omittedToolCount: number;
-		providerSupportsTools: boolean;
-		posture: string;
-	};
-	tiers: ReadonlyArray<Pick<PromptSegmentManifestEntry, "id" | "tier" | "contentHash" | "tokenEstimate">>;
-	skillActivations?: ReadonlyArray<SkillActivation>;
+	sections: ReadonlyArray<PromptSection>;
 }
 
 function notConfiguredNotice(): string {
@@ -469,50 +447,25 @@ function noticeMessage(text: string): AgentMessage {
 	} as AgentMessage;
 }
 
-const CLIO_PROMPT_CONTEXT_MARKER = "__clioPromptContext";
-
-interface InternalPromptContextMarker {
-	kind: "dynamic-turn-context";
-	fragmentId: string;
-	contentHash: string;
-}
-
-function isInternalPromptContextMessage(message: AgentMessage | undefined): boolean {
-	if (!message || typeof message !== "object" || message === null) return false;
-	return (message as unknown as Record<string, unknown>)[CLIO_PROMPT_CONTEXT_MARKER] !== undefined;
-}
-
-function dynamicPromptMessage(fragment: DynamicPromptFragment): AgentMessage {
-	const message = {
-		role: "user",
-		content: [{ type: "text", text: fragment.body }],
-		timestamp: Date.now(),
-		[CLIO_PROMPT_CONTEXT_MARKER]: {
-			kind: "dynamic-turn-context",
-			fragmentId: fragment.id,
-			contentHash: fragment.contentHash,
-		} satisfies InternalPromptContextMarker,
-	};
-	return message as AgentMessage;
-}
-
-function submittedUserMessage(text: string, images: ReadonlyArray<ImageContent> | undefined): AgentMessage {
-	const content = images ? [{ type: "text", text } as const, ...images] : [{ type: "text", text } as const];
-	return {
-		role: "user",
-		content,
-		timestamp: Date.now(),
-	} as AgentMessage;
-}
-
-function promptMessagesForTurn(
-	compileResult: CompileResult | null,
-	text: string,
-	images: ReadonlyArray<ImageContent> | undefined,
-): AgentMessage[] {
-	const messages = (compileResult?.dynamicPromptFragments ?? []).map(dynamicPromptMessage);
-	messages.push(submittedUserMessage(text, images));
-	return messages;
+/**
+ * Render the pending-skill instruction that precedes the user's text in the
+ * same user message. Plain visible text, persisted in the ledger: skill
+ * requests are turn data, not prompt machinery.
+ */
+function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkillRequest>): string {
+	const named = requests.filter((request) => request.name.trim().length > 0);
+	if (named.length === 0) return "";
+	const allowed = [...new Set(named.map((request) => request.name.trim()))];
+	const lines = named.map((request) => {
+		const status = request.installed ? "installed" : "not-installed";
+		const args = request.args.trim();
+		return `- ${request.name} (${status}, source=${request.source})${args.length > 0 ? ` — task: ${args}` : ""}`;
+	});
+	return [
+		"[Skill request]",
+		...lines,
+		`First call read_skill for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After read_skill succeeds, follow the loaded workflow.`,
+	].join("\n");
 }
 
 function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
@@ -541,48 +494,15 @@ function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
 }
 
 function promptDiagnostics(
-	result: CompileResult,
+	result: CompiledSessionPrompt,
 	systemPromptReused: boolean,
 	tools: ReadonlyArray<unknown>,
-	toolPalette: ToolPaletteResult | null,
-	skillActivations: ReadonlyArray<SkillActivation>,
 ): PromptDiagnostics {
-	const toolSignature = toolSignatureFromState(tools);
-	const palette =
-		toolPalette ??
-		({
-			activeTools: [],
-			availableTools: [],
-			signals: [],
-			toolsSuppressed: false,
-			omittedToolCount: 0,
-			providerSupportsTools: tools.length > 0,
-			posture: "operating",
-		} satisfies ToolPaletteResult);
 	return {
-		renderedPromptHash: result.renderedPromptHash,
-		promptSignature: result.promptEnvelope.promptSignature,
-		staticShellHash: result.staticShellHash,
-		sessionShellHash: result.sessionShellHash,
-		dynamicHash: result.dynamicHash,
+		systemPromptHash: result.systemPromptHash,
 		systemPromptReused,
-		promptEnvelope: result.promptEnvelope,
-		...toolSignature,
-		toolPalette: {
-			activeTools: palette.activeTools.map((tool) => String(tool)),
-			signals: [...palette.signals],
-			toolsSuppressed: palette.toolsSuppressed,
-			omittedToolCount: palette.omittedToolCount,
-			providerSupportsTools: palette.providerSupportsTools,
-			posture: palette.posture,
-		},
-		tiers: result.segmentManifest.map((segment) => ({
-			id: segment.id,
-			tier: segment.tier,
-			contentHash: segment.contentHash,
-			tokenEstimate: segment.tokenEstimate,
-		})),
-		...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
+		...toolSignatureFromState(tools),
+		sections: result.sections,
 	};
 }
 
@@ -632,11 +552,6 @@ function runtimeSupportsTools(agentRuntime: AgentRuntime): boolean {
 	return agentRuntime.runtimeResolution.capabilityDecisions.tools === true;
 }
 
-function resolveSendPolicy(agentRuntime: AgentRuntime): PromptSendPolicy {
-	if (!runtimeSupportsTools(agentRuntime)) return "no-tools-fallback";
-	return agentRuntime.runtimeId === "llamacpp" ? "prefix-cache-deterministic" : "reduced-repeated-envelope";
-}
-
 function resolveToolsForRuntime(
 	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
@@ -645,24 +560,6 @@ function resolveToolsForRuntime(
 	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
 	return resolveRuntimeTools(agentRuntime, deps, userText, invokeOptions, pendingSkillRequests);
-}
-
-function userTurnCount(entries: ReadonlyArray<SessionEntry>): number {
-	return entries.filter((entry) => entry.kind === "message" && entry.role === "user").length;
-}
-
-function currentVisibleTurnCount(deps: CreateChatLoopDeps): number {
-	if (!deps.readSessionEntries) return 0;
-	try {
-		return userTurnCount(deps.readSessionEntries());
-	} catch {
-		return 0;
-	}
-}
-
-function activeSkillActivations(deps: CreateChatLoopDeps, pending: ReadonlyArray<SkillActivation>): SkillActivation[] {
-	const prior = deps.session?.current()?.skillActivations ?? [];
-	return [...prior, ...pending];
 }
 
 function createPendingSkillToolPolicy(
@@ -882,19 +779,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let replayedContextMessages: AgentMessage[] = [];
 	let retryCountdown: RetryCountdownHandle | null = null;
 	const persistedAssistantMessages = new WeakSet<object>();
-	// Hash of the prompt compiled for the in-flight turn. User + assistant
-	// entries appended during that turn stamp this value so downstream
-	// analysis can reproduce exactly which fragments the model saw.
-	let currentTurnHash: string | null = null;
 	let currentPromptDiagnostics: PromptDiagnostics | null = null;
 	let currentToolPalette: ToolPaletteResult | null = null;
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
-	// Last settled run's provider cache usage plus whether the compiled shell
-	// was reused. Shown together in /context so "shell reused" can never imply
-	// provider cache reuse the backend did not report.
+	// Last settled run's provider cache usage plus whether the compiled system
+	// prompt was reused. Shown together in /context so "prompt reused" can
+	// never imply provider cache reuse the backend did not report.
 	let lastPromptCache: PromptCacheStats | null = null;
-	let lastShellReused = false;
+	let lastSystemPromptReused = false;
+	// The session system prompt, compiled once per session. Recompiles happen
+	// only on explicit events: the compile key (endpoint, model, safety level,
+	// session id) changes, or a config hot-reload invalidates the cache. A
+	// recompile that changes the prompt text appends a "promptRecompiled"
+	// ledger entry so a cold provider cache is always explainable.
+	let sessionPrompt: CompiledSessionPrompt | null = null;
+	let sessionPromptKey: string | null = null;
+	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
 	const queuedFollowUps: string[] = [];
@@ -908,6 +809,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			listener(event);
 		}
 	};
+
+	// A config hot-reload may change prompt fragments or settings that feed
+	// the session prompt; invalidate so the next submit recompiles. If the
+	// recompiled text is byte-identical, nothing changes and no ledger entry
+	// is written.
+	const unsubscribeConfigReload =
+		deps.bus?.on(BusChannels.ConfigHotReload, () => {
+			sessionPromptKey = null;
+		}) ?? null;
 
 	/**
 	 * Capture a context snapshot from the runtime's live agent state. All
@@ -1038,28 +948,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const contextWindow = runtime.runtimeResolution.capabilityDecisions.contextWindow;
 			if (contextExhaustion && contextWindow > 0) contextExhaustion.contextWindow = contextWindow;
 		}
-		if (currentPromptDiagnostics) payload.promptDiagnostics = currentPromptDiagnostics;
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = deps.session.append({
 			kind: "assistant",
 			parentId: lastTurnId,
 			payload,
-			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = turn.id;
 	};
 
 	const appendQueuedUserTurn = (message: AgentMessage): void => {
 		if (!message || message.role !== "user") return;
-		if (isInternalPromptContextMessage(message)) {
-			// Keep internal dynamic-context messages in the provider state.
-			// They are never persisted to the session ledger, but removing
-			// them after the run made the next request's history diverge from
-			// the previous one, which broke prefix caching on local runtimes
-			// (llama.cpp, LM Studio) at the first divergent message.
-			return;
-		}
 		const text = extractUserText(message).trim();
 		if (text.length === 0) return;
 		const persistedEchoIdx = persistedUserEchoes.indexOf(text);
@@ -1080,7 +980,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			kind: "user",
 			parentId: lastTurnId,
 			payload: currentPromptDiagnostics ? { text, promptDiagnostics: currentPromptDiagnostics } : { text },
-			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
@@ -1440,10 +1339,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const model = synthesizeModel(target);
 		const initialThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
 		const tools: ReturnType<typeof resolveAgentTools> = [];
-		// Seed the system prompt with the fallback identity text. `submit` then
-		// runs `compilePromptForTurn` before every `agent.prompt` call and
-		// overwrites this in place, so the fallback only shows up when the
-		// prompts contract is absent (tests, degraded boot).
+		// Seed the system prompt with the fallback identity text. The first
+		// submit replaces it with the compiled session prompt; the fallback
+		// only shows up when the prompts contract is absent (tests, degraded
+		// boot).
 		const hadPriorRuntime = runtime !== null;
 		const priorMessages = runtime ? [...runtime.agent.state.messages] : [...replayedContextMessages];
 		// Drop any in-flight stream on the prior agent before discarding it.
@@ -1483,7 +1382,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtimeId: target.runtime.id,
 			wireModelId: target.wireModelId,
 			runtimeResolution: target.runtimeResolution,
-			lastSessionShellHash: null,
 		};
 		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => postToolContinuationGuard(localRuntime, signal);
 
@@ -1505,17 +1403,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					resultSummary: toolResultSummary(event.result),
 				} as typeof event;
 			}
-			const publicEvent =
-				enrichedEvent.type === "message_start" || enrichedEvent.type === "message_end"
-					? isInternalPromptContextMessage(enrichedEvent.message)
-						? null
-						: enrichedEvent
-					: enrichedEvent.type === "agent_end"
-						? {
-								...enrichedEvent,
-								messages: enrichedEvent.messages.filter((message) => !isInternalPromptContextMessage(message)),
-							}
-						: enrichedEvent;
+			const publicEvent = enrichedEvent;
 			if (publicEvent?.type === "agent_start") {
 				streamStartedAt = eventAt;
 				firstAssistantDeltaAt = null;
@@ -1533,7 +1421,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const cacheSummary = sumRunUsage(publicEvent.messages);
 				if (cacheSummary.hadUsage) {
 					lastPromptCache = {
-						shellReused: lastShellReused,
+						shellReused: lastSystemPromptReused,
 						cacheReadTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheRead : null,
 						cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
 						uncachedInputTokens: cacheSummary.input,
@@ -1815,69 +1703,44 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * Compile the prompt for the current turn, write only the stable shell into
-	 * `state.systemPrompt`, and capture the renderedPromptHash so the user and
-	 * assistant entries appended this turn can carry it. Dynamic prompt
-	 * fragments return separately and are sent as marked user messages directly
-	 * before the real user turn. They stay in provider state so append-only
-	 * local runtimes can reuse their prefix cache, but subscribers filter them
-	 * from public events and the session ledger so they do not become durable
-	 * conversation history.
-	 *
-	 * Throws are swallowed and downgraded to a user-visible notice because
-	 * a dead prompts domain must not block chat. The fallback identity
-	 * stays on `state.systemPrompt` from the previous compile (or from
-	 * `ensureRuntime`).
+	 * Ensure the session system prompt is compiled and applied to the live
+	 * agent. Compiles only when the compile key (endpoint, model, safety
+	 * level, session id) changes or a config hot-reload invalidated the
+	 * cache; every other submit reuses the cached prompt byte-for-byte. A
+	 * compile whose text differs from the previous prompt queues a
+	 * "promptRecompiled" ledger entry (written once the session exists).
 	 */
-	const compilePromptForTurn = async (
-		agentRuntime: AgentRuntime,
-		userText: string,
-		pendingSkillActivations: ReadonlyArray<SkillActivation>,
-		pendingSkillRequests: ReadonlyArray<PendingSkillRequest>,
-	): Promise<CompileResult | null> => {
+	const ensureSessionPrompt = async (agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> => {
 		if (!deps.prompts) {
-			currentTurnHash = null;
 			currentPromptDiagnostics = null;
-			currentToolPalette = null;
 			return null;
 		}
 		const settings = deps.getSettings();
+		const safetyLevel = settings.safetyLevel ?? "auto-edit";
+		const sessionId = deps.session?.current()?.id ?? "";
+		const key = `${agentRuntime.endpointId}|${agentRuntime.wireModelId}|${safetyLevel}|${sessionId}`;
+		if (sessionPrompt && sessionPromptKey === key) {
+			lastSystemPromptReused = true;
+			return sessionPrompt;
+		}
 		const modelState = agentRuntime.agent.state.model as
 			| (Model<never> & { clio?: { quirks?: LocalModelQuirks } })
 			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
-		// Read the thinking budget from the live agent state, which reflects
-		// `clampThinkingLevelForModel` after a hot-swap onto a non-reasoning
-		// model. If we read raw settings the prompt would advertise e.g.
-		// `thinkingBudget: high` while the runtime actually sends "off",
-		// telling the model a budget it does not have.
-		const runtimeThinkingLevel = agentRuntime.agent.state.thinkingLevel as ThinkingLevel | undefined;
-		const effectiveLevel: ThinkingLevel = runtimeThinkingLevel ?? settings.orchestrator.thinkingLevel ?? "off";
-		const resolved = modelState ? resolveModelRuntimeCapabilitiesForModel(modelState, effectiveLevel) : null;
-		const applied = resolved?.thinking;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
-		const workspaceProjectType = deps.session?.current()?.workspace?.projectType;
-		const activeToolNames = currentToolPalette?.activeTools.map((tool) => String(tool));
-		const activeToolCount = activeToolNames?.length ?? agentRuntime.agent.state.tools.length;
-		const dynamicInputs: DynamicInputs = {
+		const sessionToolNames = currentToolPalette?.availableTools.map((tool) => String(tool));
+		const sessionInputs: SessionPromptInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
 			providerSupportsTools: runtimeSupportsTools(agentRuntime),
-			sendPolicy: resolveSendPolicy(agentRuntime),
-			thinkingBudget: resolved?.thinking.display ?? effectiveLevel,
-			thinkingMechanism: applied?.mechanism ?? "none",
-			thinkingApplied: applied?.noticeKind ?? "applied",
-			thinkingNotice: applied?.notice ?? "",
 			...(guidance ? { thinkingGuidance: guidance } : {}),
-			...(currentToolPalette && activeToolNames ? { activeToolNames } : {}),
-			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
-			...(pendingSkillRequests.length > 0 ? { pendingSkillRequests } : {}),
+			...(sessionToolNames ? { activeToolNames: sessionToolNames } : {}),
 		};
 		if (deps.getMemorySection) {
 			try {
 				const memorySection = deps.getMemorySection();
-				if (memorySection.length > 0) dynamicInputs.memorySection = memorySection;
+				if (memorySection.length > 0) sessionInputs.memorySection = memorySection;
 			} catch (err) {
 				emitNotice(
 					`[Clio Coder] memory load failed; continuing without memory injection: ${err instanceof Error ? err.message : String(err)}`,
@@ -1887,50 +1750,63 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (deps.getAgentCatalog) {
 			try {
 				const agentCatalog = deps.getAgentCatalog().trim();
-				if (agentCatalog.length > 0) dynamicInputs.agentCatalog = agentCatalog;
+				if (agentCatalog.length > 0) sessionInputs.agentCatalog = agentCatalog;
 			} catch (err) {
 				emitNotice(
 					`[Clio Coder] agent catalog load failed; continuing without fleet catalog: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}
-		const safetyLevel = settings.safetyLevel ?? "auto-edit";
 		try {
-			const result = await deps.prompts.compileForTurn({
-				dynamicInputs,
+			const result = await deps.prompts.compileSessionPrompt({
+				sessionInputs,
 				safetyLevel,
 				cwd: process.cwd(),
-				contextPolicy: {
-					userText,
-					turnCount: currentVisibleTurnCount(deps),
-					providerSupportsTools: runtimeSupportsTools(agentRuntime),
-					sendPolicy: resolveSendPolicy(agentRuntime),
-					activeToolCount,
-				},
 			});
-			const systemPromptReused = agentRuntime.lastSessionShellHash === result.sessionShellHash;
-			lastShellReused = systemPromptReused;
-			if (!systemPromptReused) {
+			const previousHash = sessionPrompt?.systemPromptHash ?? null;
+			const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
+			if (changed) {
 				agentRuntime.agent.state.systemPrompt = result.systemPrompt;
-				agentRuntime.lastSessionShellHash = result.sessionShellHash;
+				pendingPromptLogEntry = {
+					previousHash,
+					hash: result.systemPromptHash,
+					tokenEstimate: result.tokenEstimate,
+				};
 			}
-			currentTurnHash = result.renderedPromptHash;
-			currentPromptDiagnostics = promptDiagnostics(
-				result,
-				systemPromptReused,
-				agentRuntime.agent.state.tools,
-				currentToolPalette,
-				activeSkillActivations(deps, pendingSkillActivations),
-			);
+			lastSystemPromptReused = !changed;
+			sessionPrompt = result;
+			sessionPromptKey = key;
 			return result;
 		} catch (err) {
-			currentTurnHash = null;
 			currentPromptDiagnostics = null;
-			currentToolPalette = null;
 			emitNotice(
 				`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 			);
 			return null;
+		}
+	};
+
+	/**
+	 * Write the queued prompt-compile ledger entry. Deferred until after the
+	 * user turn is appended so the session is guaranteed to exist.
+	 */
+	const logPromptCompileIfPending = (): void => {
+		if (!pendingPromptLogEntry || !deps.session?.current()) return;
+		const entry = pendingPromptLogEntry;
+		pendingPromptLogEntry = null;
+		try {
+			deps.session.appendEntry({
+				kind: "custom",
+				customType: "promptRecompiled",
+				parentTurnId: lastTurnId,
+				data: {
+					previousHash: entry.previousHash,
+					hash: entry.hash,
+					tokenEstimate: entry.tokenEstimate,
+				},
+			});
+		} catch {
+			// Ledger logging is diagnostics, not control flow; never abort a turn.
 		}
 	};
 
@@ -2244,7 +2120,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...(images ? { content: [{ type: "text", text }, ...images] } : { text }),
 				...(currentPromptDiagnostics ? { promptDiagnostics: currentPromptDiagnostics } : {}),
 			},
-			...(currentTurnHash !== null ? { renderedPromptHash: currentTurnHash } : {}),
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
@@ -2330,12 +2205,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
+			// Pending skill requests are plain visible text in the user message
+			// itself: persisted in the ledger, no hidden prompt machinery.
+			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
+			const submittedText = skillPreamble.length > 0 ? `${skillPreamble}\n\n${text}` : text;
 
 			// 1. Resolve tools once
 			const resolvedTools = resolveToolsForRuntime(
 				agentRuntime,
 				deps,
-				text,
+				submittedText,
 				currentToolInvokeOptions,
 				pendingSkillRequests,
 			);
@@ -2346,14 +2225,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
 			try {
-				await runAutoCompact(agentRuntime, forceNow, undefined, undefined, text);
+				await runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
-			// 3. Compile prompt
+			// 3. Ensure the session prompt (compiles only on explicit events)
 			const pendingSkillActivations = options.skillActivations ?? [];
-			let compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations, pendingSkillRequests);
+			const compiledPrompt = await ensureSessionPrompt(agentRuntime);
+			currentPromptDiagnostics = compiledPrompt
+				? promptDiagnostics(compiledPrompt, lastSystemPromptReused, agentRuntime.agent.state.tools)
+				: null;
 
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
@@ -2361,21 +2243,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const compactionThreshold = deps.getSettings().compaction?.thresholds?.llmSummary ?? null;
 			const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
 				captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
-					promptSegments: compileResult?.segmentManifest
-						? compileResult.segmentManifest.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate }))
+					promptSegments: compiledPrompt
+						? compiledPrompt.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate }))
 						: undefined,
-					dynamicPromptMessages: compileResult?.dynamicPromptFragments
-						? [...compileResult.dynamicPromptFragments]
-						: undefined,
-					pendingUserInput: text,
+					pendingUserInput: submittedText,
 					images,
-					promptHash: currentTurnHash ?? undefined,
+					promptHash: compiledPrompt?.systemPromptHash,
 					toolSignature: currentPromptDiagnostics?.toolSignature ?? undefined,
 				});
 
 			const reservedOutput = resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens);
 			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
-			const pendingInputTokens = ceilChars(text.length);
+			const pendingInputTokens = ceilChars(submittedText.length);
 			let turnSnapshot = captureTurnSnapshot("pending");
 			const totalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
 
@@ -2383,7 +2262,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(
 					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${snapshotInputTokens(turnSnapshot) + pendingInputTokens} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
 				);
-				const compacted = await runAutoCompact(agentRuntime, true, undefined, undefined, text);
+				const compacted = await runAutoCompact(agentRuntime, true, undefined, undefined, submittedText);
 				if (!compacted) {
 					emitNotice(
 						"[Clio Coder] Compaction could not reclaim enough space. Request blocked; trim the prompt, reduce active tools, or start a fresh session.",
@@ -2391,7 +2270,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					return;
 				}
 				refreshAgentMessagesFromSession(agentRuntime);
-				compileResult = await compilePromptForTurn(agentRuntime, text, pendingSkillActivations, pendingSkillRequests);
 				turnSnapshot = captureTurnSnapshot("pending");
 				const postTotalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
 				if (postTotalEstimate > effectiveWindow) {
@@ -2406,7 +2284,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			// 5. Append the user turn, then stamp and persist the snapshot.
-			const userTurnId = appendSubmittedUserTurn(agentRuntime, text, images);
+			const userTurnId = appendSubmittedUserTurn(agentRuntime, submittedText, images);
+			logPromptCompileIfPending();
 			// PendingSkillRequest is intent only. SkillActivation ledger entries are recorded by read_skill success.
 			recordSubmittedSkillActivations(pendingSkillActivations, userTurnId);
 			if (currentPromptDiagnostics) {
@@ -2426,8 +2305,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			currentPendingSkillPolicy = pendingSkillPolicy;
 			currentAskUserPolicy = askUserPolicy;
 			try {
-				const promptMessages = promptMessagesForTurn(compileResult, text, images);
-				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
+				await markPersistedUserEcho(submittedText, () => agentRuntime.agent.prompt(submittedText, images));
 				// pi-agent-core does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
@@ -2436,7 +2314,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// a resolve, not only the catch arm.
 				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
 				if (overflowPostResolve) {
-					await runCompactAndRetry(agentRuntime, text, overflowPostResolve, images);
+					await runCompactAndRetry(agentRuntime, submittedText, overflowPostResolve, images);
 				} else {
 					const failure = detectTerminalFailureFromState(agentRuntime.agent);
 					if (failure) {
@@ -2444,7 +2322,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							(failure.message as { errorMessage?: string }).errorMessage = toolProseAbortReason;
 						}
 						ensureFailureVisibleAndPersisted(failure);
-						await runTransientRetryChain(agentRuntime, text, failure);
+						await runTransientRetryChain(agentRuntime, submittedText, failure);
 					}
 				}
 			} catch (err) {
@@ -2462,7 +2340,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							errorMessage: message,
 							timestamp: Date.now(),
 						} as AgentMessage;
-						await runTransientRetryChain(agentRuntime, text, {
+						await runTransientRetryChain(agentRuntime, submittedText, {
 							stopReason: "error",
 							errorMessage: message,
 							message: failureMessage,
@@ -2472,7 +2350,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitNotice(err instanceof Error ? err.message : String(err));
 					return;
 				}
-				await runCompactAndRetry(agentRuntime, text, overflow, images);
+				await runCompactAndRetry(agentRuntime, submittedText, overflow, images);
 			} finally {
 				if (askUserPolicy) {
 					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
@@ -2605,9 +2483,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			persistedUserEchoes.length = 0;
 			emitQueueUpdate();
 			lastTurnId = leafTurnId;
-			currentTurnHash = null;
 			lastPromptCache = null;
-			lastShellReused = false;
+			lastSystemPromptReused = false;
+			sessionPromptKey = null;
+			pendingPromptLogEntry = null;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];
@@ -2624,6 +2503,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 		},
 		dispose(): void {
+			unsubscribeConfigReload?.();
 			if (runtime) {
 				runtime.agent.abort();
 				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
