@@ -14,7 +14,7 @@ export function workspaceContextTool(deps: WorkspaceContextDeps): ToolSpec {
 	return {
 		name: ToolNames.WorkspaceContext,
 		description:
-			"An explicit, manual workspace snapshot tool. Return structured facts about the working directory: git state, recent commits, remote URL, and detected project type. Use manually at the start of a task to orient yourself without running multiple shell commands. Do not assume this tool is run automatically.",
+			"An explicit, manual workspace snapshot tool: git state, recent commits, remote URL, and project type. Do not assume this tool is run automatically.",
 		parameters: Type.Object({}),
 		baseActionClass: "read",
 		executionMode: "parallel",

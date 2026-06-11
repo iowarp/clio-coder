@@ -149,11 +149,11 @@ async function fdFind(
 
 export const findTool: ToolSpec = {
 	name: ToolNames.Find,
-	description: `Search for files by glob pattern. Returns matching paths relative to the search directory. Respects .gitignore when fd is available. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB.`,
+	description: "Find files by glob pattern; returns paths relative to the search directory. Respects .gitignore.",
 	parameters: Type.Object({
-		pattern: Type.String({ description: "Glob pattern, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'." }),
-		path: Type.Optional(Type.String({ description: "Directory to search in. Defaults to the orchestrator cwd." })),
-		limit: Type.Optional(Type.Number({ description: "Maximum number of results. Defaults to 1000." })),
+		pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
+		path: Type.Optional(Type.String({ description: "Directory to search in." })),
+		limit: Type.Optional(Type.Number({ description: "Max results (default 1000)." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

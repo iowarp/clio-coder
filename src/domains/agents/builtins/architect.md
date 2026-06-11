@@ -1,7 +1,7 @@
 ---
 name: Architect
 description: Designs coding changes across boundaries, contracts, migrations, and validation gates.
-tools: [read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan, read_skill]
+tools: [read, grep, glob, ls, code_nav, git, write_plan, read_skill]
 audience: base
 category: plan
 capabilityClass: artifact-write

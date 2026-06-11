@@ -72,7 +72,7 @@ describe("contracts/agents", () => {
 				id: "verifier",
 				name: "Verifier",
 				description: "Run gates.",
-				tools: ["read", "run_tests"],
+				tools: ["read", "run_task"],
 				category: "quality",
 				capabilityClass: "verification",
 				latencyClass: "fast",

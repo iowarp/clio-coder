@@ -11,6 +11,7 @@ import {
 } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
@@ -89,113 +90,67 @@ async function runVectorTool(
 	}
 }
 
-const commonExecParams = {
-	cwd: Type.Optional(Type.String({ description: "Working directory under the workspace root." })),
-	timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds. Defaults to 120000." })),
-	max_output_bytes: Type.Optional(Type.Number({ description: "Maximum combined stdout/stderr bytes." })),
-} as const;
-
-export const gitStatusTool: ToolSpec = {
-	name: ToolNames.GitStatus,
-	description: "Run `git status --short --branch` using a fixed command vector.",
-	parameters: Type.Object(commonExecParams),
-	baseActionClass: "read",
-	executionMode: "parallel",
-	async run(args, options) {
-		return runVectorTool("git_status", "git", ["status", "--short", "--branch"], args, options);
-	},
-};
-
-export const gitDiffTool: ToolSpec = {
-	name: ToolNames.GitDiff,
-	description: "Run a constrained git diff. Supports cached, stat, name_only, and one optional path.",
+export const gitTool: ToolSpec = {
+	name: ToolNames.Git,
+	description: "Read-only git inspection: op=status (short status), diff, or log (oneline).",
 	parameters: Type.Object({
-		cached: Type.Optional(Type.Boolean({ description: "Use --cached." })),
-		stat: Type.Optional(Type.Boolean({ description: "Use --stat." })),
-		name_only: Type.Optional(Type.Boolean({ description: "Use --name-only." })),
-		path: Type.Optional(Type.String({ description: "Optional path under the repository." })),
-		...commonExecParams,
+		op: stringEnum(["status", "diff", "log"], "Inspection to run."),
+		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
+		cached: Type.Optional(Type.Boolean({ description: "diff: staged changes (--cached)." })),
+		stat: Type.Optional(Type.Boolean({ description: "diff: summary only (--stat)." })),
+		name_only: Type.Optional(Type.Boolean({ description: "diff: file names only." })),
+		limit: Type.Optional(Type.Number({ description: "log: commits to show (default 20, max 200)." })),
+		cwd: Type.Optional(Type.String({ description: "Working directory." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options) {
-		const vector = ["diff"];
-		if (args.cached === true) vector.push("--cached");
-		if (args.stat === true) vector.push("--stat");
-		if (args.name_only === true) vector.push("--name-only");
-		if (typeof args.path === "string" && args.path.length > 0) vector.push("--", args.path);
-		return runVectorTool("git_diff", "git", vector, args, options);
+		const op = typeof args.op === "string" ? args.op : "";
+		const pathArg = typeof args.path === "string" && args.path.length > 0 ? args.path : null;
+		if (op === "status") {
+			return runVectorTool("git", "git", ["status", "--short", "--branch"], args, options);
+		}
+		if (op === "diff") {
+			const vector = ["diff"];
+			if (args.cached === true) vector.push("--cached");
+			if (args.stat === true) vector.push("--stat");
+			if (args.name_only === true) vector.push("--name-only");
+			if (pathArg) vector.push("--", pathArg);
+			return runVectorTool("git", "git", vector, args, options);
+		}
+		if (op === "log") {
+			const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(200, Math.floor(args.limit)) : 20;
+			const vector = ["log", "--oneline", "-n", String(limit)];
+			if (pathArg) vector.push("--", pathArg);
+			return runVectorTool("git", "git", vector, args, options);
+		}
+		return { kind: "error", message: `git: op must be status, diff, or log; got '${op}'` };
 	},
 };
 
-export const gitLogTool: ToolSpec = {
-	name: ToolNames.GitLog,
-	description: "Run `git log --oneline` with a bounded limit and optional path.",
+export const runTaskTool: ToolSpec = {
+	name: ToolNames.RunTask,
+	description:
+		"Run one standard package.json script via npm with no shell: test, test:e2e, lint, build, typecheck, or ci.",
 	parameters: Type.Object({
-		limit: Type.Optional(Type.Number({ description: "Number of commits to show. Defaults to 20, max 200." })),
-		path: Type.Optional(Type.String({ description: "Optional path under the repository." })),
-		...commonExecParams,
-	}),
-	baseActionClass: "read",
-	executionMode: "parallel",
-	async run(args, options) {
-		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(200, Math.floor(args.limit)) : 20;
-		const vector = ["log", "--oneline", "-n", String(limit)];
-		if (typeof args.path === "string" && args.path.length > 0) vector.push("--", args.path);
-		return runVectorTool("git_log", "git", vector, args, options);
-	},
-};
-
-export const runTestsTool: ToolSpec = packageScriptTool(
-	ToolNames.RunTests,
-	"test",
-	"Run the standard project test script.",
-);
-export const runLintTool: ToolSpec = packageScriptTool(
-	ToolNames.RunLint,
-	"lint",
-	"Run the standard project lint script.",
-);
-export const runBuildTool: ToolSpec = packageScriptTool(
-	ToolNames.RunBuild,
-	"build",
-	"Run the standard project build script.",
-);
-
-export const packageScriptToolSpec: ToolSpec = {
-	name: ToolNames.PackageScript,
-	description: "Run one standard package.json validation script by name through `npm run <script>` with no shell.",
-	parameters: Type.Object({
-		script: Type.String({ description: "Script name. Must be one of test, test:e2e, lint, build, typecheck, ci." }),
-		args: Type.Optional(Type.Array(Type.String(), { description: "Additional plain arguments passed after --." })),
-		...commonExecParams,
+		task: Type.String({ description: "Script name from the allowlist above." }),
+		args: Type.Optional(Type.Array(Type.String(), { description: "Extra arguments passed after --." })),
+		cwd: Type.Optional(Type.String({ description: "Working directory." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
 	async run(args, options) {
-		const script = typeof args.script === "string" ? args.script : "";
-		if (!STANDARD_PACKAGE_SCRIPTS.has(script)) {
-			return { kind: "error", message: `package_script: script '${script}' is not in the standard allowlist` };
+		const task = typeof args.task === "string" ? args.task : "";
+		if (!STANDARD_PACKAGE_SCRIPTS.has(task)) {
+			return {
+				kind: "error",
+				message: `run_task: task '${task}' is not allowed. Use one of test, test:e2e, lint, build, typecheck, ci; run anything else through bash.`,
+			};
 		}
-		return runPackageScript("package_script", script, args, options);
+		return runPackageScript("run_task", task, args, options);
 	},
 };
-
-function packageScriptTool(name: ToolSpec["name"], script: string, description: string): ToolSpec {
-	return {
-		name,
-		description: `${description} Uses npm with a fixed argv vector and structured result details.`,
-		parameters: Type.Object({
-			args: Type.Optional(Type.Array(Type.String(), { description: "Additional plain arguments passed after --." })),
-			...commonExecParams,
-		}),
-		baseActionClass: "execute",
-		executionMode: "sequential",
-		async run(args, options) {
-			return runPackageScript(name, script, args, options);
-		},
-	};
-}
 
 async function runPackageScript(
 	action: string,

@@ -79,7 +79,7 @@ function renderPromptContext(cwd: string): ProjectPromptContext {
 		const state = readClioState(cwd);
 		const stale = state ? state.fingerprint.treeHash !== computeFingerprint(cwd).treeHash : true;
 		const suffix = stale ? " (stale; run /context-init to refresh)" : "";
-		pieces.push(`<codewiki>available${suffix}; use find_symbol, entry_points, where_is</codewiki>`);
+		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
 }

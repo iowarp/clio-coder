@@ -140,7 +140,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 		lines.push(`Project: ${context.clioMd.projectName}`);
 		lines.push("CLIO.md: available; compact synopsis only because the handbook is too large for automatic preload.");
 	}
-	if (hasCodewiki(context.text)) lines.push("Codewiki: available for entry_points, where_is, and find_symbol.");
+	if (hasCodewiki(context.text)) lines.push("Codewiki: available via code_nav.");
 	if (providerSupportsTools === false) {
 		lines.push("Tools: unavailable for this target; use this synopsis only as fallback context.");
 	} else {

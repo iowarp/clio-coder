@@ -195,15 +195,15 @@ async function runRipgrep(input: {
 
 export const grepTool: ToolSpec = {
 	name: ToolNames.Grep,
-	description: `Search file contents for a pattern using ripgrep. Returns matching lines with file paths and line numbers. Respects .gitignore and skips Clio cache directories. Output is truncated to ${DEFAULT_LIMIT} matches or ${DEFAULT_MAX_BYTES / 1024}KB.`,
+	description: `Search file contents with ripgrep; returns matching lines with paths and line numbers. Respects .gitignore. Capped at ${DEFAULT_LIMIT} matches.`,
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Search pattern (regex by default)." }),
-		path: Type.Optional(Type.String({ description: "Directory or file to search. Defaults to the orchestrator cwd." })),
-		glob: Type.Optional(Type.String({ description: "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'." })),
-		ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive search. Defaults to false." })),
-		literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal text instead of regex." })),
-		context: Type.Optional(Type.Number({ description: "Lines of surrounding context per match. Defaults to 0." })),
-		limit: Type.Optional(Type.Number({ description: "Maximum number of matches. Defaults to 100." })),
+		path: Type.Optional(Type.String({ description: "Directory or file to search." })),
+		glob: Type.Optional(Type.String({ description: "Filter files by glob, e.g. '*.ts'." })),
+		ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive search." })),
+		literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal text." })),
+		context: Type.Optional(Type.Number({ description: "Context lines per match." })),
+		limit: Type.Optional(Type.Number({ description: "Max matches." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

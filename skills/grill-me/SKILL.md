@@ -9,13 +9,9 @@ allowed-tools:
   - glob
   - ls
   - find
-  - git_status
-  - git_diff
-  - git_log
+  - git
   - workspace_context
-  - entry_points
-  - where_is
-  - find_symbol
+  - code_nav
   - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/grill-me

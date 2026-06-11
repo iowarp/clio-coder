@@ -14,12 +14,10 @@ function parseLimit(value: unknown): number {
 
 export const lsTool: ToolSpec = {
 	name: ToolNames.Ls,
-	description: `List directory contents. Returns entries sorted alphabetically, with "/" suffix for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Prefer this over \`bash ls\` for file exploration.`,
+	description: 'List directory entries sorted alphabetically, "/" suffix for directories, dotfiles included.',
 	parameters: Type.Object({
-		path: Type.Optional(Type.String({ description: "Directory to list. Defaults to the orchestrator cwd." })),
-		limit: Type.Optional(
-			Type.Number({ description: `Maximum number of entries to return. Defaults to ${DEFAULT_LIMIT}.` }),
-		),
+		path: Type.Optional(Type.String({ description: "Directory to list." })),
+		limit: Type.Optional(Type.Number({ description: "Max entries (default 500)." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

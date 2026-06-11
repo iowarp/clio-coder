@@ -781,23 +781,6 @@ describe("contracts/skills tools", () => {
 		ok(content.includes("Do work."));
 	});
 
-	it("create_skill with_scaffold creates resource folders", async () => {
-		const cwd = join(scratch, "project");
-		mkdirSync(cwd, { recursive: true });
-		const tool = createSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({
-			name: "scaffold-skill",
-			description: "Scaffolded skill.",
-			body: "Body.",
-			with_scaffold: true,
-		});
-		strictEqual(result.kind, "ok");
-		const base = join(cwd, ".clio", "skills", "scaffold-skill");
-		ok(existsSync(join(base, "scripts")));
-		ok(existsSync(join(base, "references")));
-		ok(existsSync(join(base, "assets")));
-	});
-
 	it("create_skill refuses to overwrite without the overwrite flag", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
@@ -810,7 +793,7 @@ describe("contracts/skills tools", () => {
 		strictEqual(third.kind, "ok");
 	});
 
-	it("create_skill renders optional frontmatter that round-trips through the loader", async () => {
+	it("create_skill renders allowed-tools frontmatter that round-trips through the loader", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
 		const tool = createSkillTool({ getCwd: () => cwd });
@@ -818,14 +801,12 @@ describe("contracts/skills tools", () => {
 			name: "rich-skill",
 			description: "Rich frontmatter skill.",
 			body: "Body.",
-			license: "Apache-2.0",
 			allowed_tools: ["Read", "Edit"],
 		});
 		strictEqual(result.kind, "ok");
 		const list = loadSkills({ roots: [projectRoot(join(cwd, ".clio", "skills"))] });
 		const skill = list.items.find((s) => s.name === "rich-skill");
 		ok(skill);
-		strictEqual(skill.metadata.license, "Apache-2.0");
 		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
 	});
 

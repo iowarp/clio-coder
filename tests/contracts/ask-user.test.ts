@@ -216,6 +216,6 @@ describe("contracts/ask_user", () => {
 		deepStrictEqual([...palette.activeTools].sort(), [ToolNames.AskUser, ToolNames.ReadSkill].sort());
 		strictEqual(palette.activeTools.includes(ToolNames.Write), false);
 		strictEqual(palette.activeTools.includes(ToolNames.Edit), false);
-		strictEqual(palette.activeTools.includes(ToolNames.WhereIs), false);
+		strictEqual(palette.activeTools.includes(ToolNames.CodeNav), false);
 	});
 });

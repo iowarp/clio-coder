@@ -46,21 +46,21 @@ User-facing agents visible in `clio agents` and `/agents`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `architect` | read, grep, glob, ls, find_symbol, entry_points, where_is, git_status, git_diff, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
-| `coder` | read, write, edit, grep, glob, ls, web_fetch, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
-| `debugger` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
-| `documenter` | read, write, edit, grep, glob, ls, git_status, git_diff, run_lint, run_build | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
-| `tester` | read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | read, grep, glob, ls, git_status, git_diff, git_log, run_tests, run_lint, run_build, package_script, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
+| `architect` | read, grep, glob, ls, code_nav, git, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
+| `coder` | read, write, edit, grep, glob, ls, web_fetch, git, run_task, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
+| `debugger` | read, grep, glob, ls, git, run_task | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
+| `documenter` | read, write, edit, grep, glob, ls, git, run_task | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `tester` | read, write, edit, grep, glob, ls, git, run_task | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
+| `verifier` | read, grep, glob, ls, git, run_task, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
 
 ### Shipped Shadow Agents
 Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `scout` | read, grep, glob, ls, workspace_context, find_symbol, entry_points, where_is, git_status, git_diff, git_log | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
+| `scout` | read, grep, glob, ls, workspace_context, code_nav, git | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
 | `researcher` | read, web_fetch, read_skill | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
-| `provenance` | read, grep, glob, ls, git_status, git_diff, git_log | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| `provenance` | read, grep, glob, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
 ---
 
@@ -72,7 +72,7 @@ Internal orchestration helpers. They are hidden from default displays (but visib
 ---
 name: Coder                       # string; defaults to recipe id when absent
 description: Bounded code changes # string; defaults to empty string
-tools: [read, edit, run_tests]    # string array; filtered by target capabilities and dispatch admission
+tools: [read, edit, run_task]    # string array; filtered by target capabilities and dispatch admission
 model: null                       # string only when set; null is ignored
 endpoint: null                    # string only when set; target/endpoint hint
 thinkingLevel: off                # off | minimal | low | medium | high | xhigh
@@ -142,7 +142,7 @@ Create `.clio/agents/my-agent.md`:
 ---
 name: My Agent
 description: Focused local review helper.
-tools: [read, grep, glob, ls, git_diff, write_review]
+tools: [read, grep, glob, ls, git, write_review]
 ---
 
 You are My Agent. Inspect only the requested area. Never edit files. End by writing a concise review artifact with risks, evidence, and follow-up tests.

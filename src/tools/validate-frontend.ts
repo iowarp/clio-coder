@@ -13,6 +13,7 @@ import {
 import { ToolNames } from "../core/tool-names.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const BROWSER_MODES = ["auto", "required", "off"] as const;
@@ -62,19 +63,11 @@ const JAVASCRIPT_TYPES = new Set([
 export const validateFrontendTool: ToolSpec = {
 	name: ToolNames.ValidateFrontend,
 	description:
-		"Validate a frontend artifact without shell access. Checks HTML structure, local script/style references, JavaScript syntax, CSS balance, and optionally loads HTML in an available headless browser.",
+		"Validate an HTML, CSS, or JavaScript artifact without shell access: structure, local references, syntax, and an optional headless-browser load.",
 	parameters: Type.Object({
-		path: Type.String({ description: "HTML, CSS, or JavaScript file under the workspace root to validate." }),
-		browser: Type.Optional(
-			Type.Union(
-				BROWSER_MODES.map((mode) => Type.Literal(mode)),
-				{
-					description: "Headless browser check for HTML: auto (default), required, or off.",
-				},
-			),
-		),
-		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds for subprocess checks." })),
-		max_output_bytes: Type.Optional(Type.Number({ description: "Maximum combined stdout/stderr bytes per subprocess." })),
+		path: Type.String({ description: "File under the workspace root." }),
+		browser: Type.Optional(stringEnum(BROWSER_MODES, "Headless browser check (default auto).")),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms per subprocess." })),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",

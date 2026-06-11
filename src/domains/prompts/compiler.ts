@@ -115,29 +115,24 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const activeToolNames = normalizeToolNames(inputs.activeToolNames) ?? [];
 	const lines = [
 		"# Tool Contract",
-		"Tool schemas are delivered by the provider layer; follow the schema exactly when calling a tool.",
-		"The attached schemas are the complete tool surface for this session. Call tools only for concrete inspection or changes that the task requires.",
-		"If the user asks for a tool-free answer, simply answer without calling tools.",
+		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
+		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 		"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 	];
-	if (
-		activeToolNames.includes("entry_points") ||
-		activeToolNames.includes("where_is") ||
-		activeToolNames.includes("find_symbol")
-	) {
-		lines.push("Use entry_points, where_is, and find_symbol for indexed TypeScript navigation.");
+	if (activeToolNames.includes("code_nav")) {
+		lines.push("Use code_nav for indexed TypeScript navigation (modes: symbol, path, entries).");
 	}
 	if (activeToolNames.includes("read_skill")) {
 		lines.push(
-			"Skills are listed on demand: call read_skill with no name to list available skills. When the user message carries a skill request, first call read_skill for the requested skill before answering, planning, writing files, or inspecting the repository.",
+			"Call read_skill with no name to list available skills. When the user message carries a skill request, first call read_skill for that skill before doing anything else.",
 		);
 	}
 	if (activeToolNames.includes("dispatch")) {
-		lines.push("The agent fleet is listed on demand: call dispatch with list:true to see available agents.");
+		lines.push("Call dispatch with list:true to see the agent fleet.");
 	}
 	if (activeToolNames.includes("ask_user")) {
 		lines.push(
-			'Use ask_user for structured operator interviews, confirmations, and choices. ask_user is an active tool, not a skill body or a file protocol. For interview or stress-test workflows use action="ask", mode="single_question", and exactly one question. For compact confirmations use mode="round" with one to four tightly related questions. Include options with descriptions when choices are natural and put your recommended answer first. Ask adaptive follow-up rounds only for new necessary information. When the interview has enough information, call ask_user with action="complete", a compact decisions array, and an optional short summary before final prose. If ask_user returns cancelled, continue with defaults and do not ask again.',
+			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
 		);
 	}
 	return lines.join("\n");
@@ -153,18 +148,8 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	}
 	return [
 		"# Retrieval Hints",
-		"Compact CLIO.md project instructions may be preloaded. Large repository structure is intentionally compact.",
-		"Use workspace_context for a quick workspace snapshot. Use codewiki tools for indexed TypeScript structure when entry_points, where_is, or find_symbol are active. Use grep/read for exact file evidence.",
-		"Do not infer mutable repo details from the system prompt.",
-		"",
-		"- **Clio-internal Grounding Policy**:",
-		"  - For questions about where code, context priming, context handoff, skills, tools, prompts, or harness behavior live, you MUST inspect local project context or call available lookup tools (such as `where_is`, `find_symbol`, `entry_points`, `workspace_context`, `grep`, or `read`) before answering. Never answer from generic assumptions or hallucinate details.",
-		"  - Do not invent automatic tool behavior (e.g., claiming a tool runs automatically when it must be explicitly called).",
-		"  - Clearly distinguish:",
-		"    - `workspace_context`: An explicit, manual workspace snapshot tool (unless the codebase proves automatic invocation for a specific hook).",
-		"    - `dispatch` / `dispatch_batch`: Shadow-agent/fleet delegation tools.",
-		"    - Context handoff: A context-engine artifact/workflow (e.g., `.clio/handoffs/`), if present.",
-		"    - Context priming: A prompt/context loading workflow (e.g., `.clio` or CLIO.md loading), if present.",
+		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
+		"For questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, workspace_context, grep, or read before answering. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 

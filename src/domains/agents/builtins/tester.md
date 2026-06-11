@@ -1,7 +1,7 @@
 ---
 name: Tester
 description: Adds focused deterministic tests for regressions and missing coverage.
-tools: [read, write, edit, grep, glob, ls, git_status, git_diff, run_tests, run_lint, run_build]
+tools: [read, write, edit, grep, glob, ls, git, run_task]
 audience: base
 category: quality
 capabilityClass: workspace-edit
@@ -23,5 +23,5 @@ Mock external services and unstable runtimes unless the task explicitly asks for
 Do not change production code unless the test harness needs a minimal exported seam.
 Avoid broad snapshots and assertions that only prove something exists.
 Run the new or changed test directly, then broaden validation when the touched surface is shared.
-Use `git_diff` before finishing to confirm the diff is test-focused.
+Use `git` (op=diff) before finishing to confirm the diff is test-focused.
 End with tests changed, commands run, and remaining coverage gaps.

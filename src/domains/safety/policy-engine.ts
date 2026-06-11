@@ -91,7 +91,7 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
 
-const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, "run_tests", "run_lint", "run_build", "package_script"]);
+const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.RunTask]);
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = path.resolve(options.cwd ?? process.cwd());

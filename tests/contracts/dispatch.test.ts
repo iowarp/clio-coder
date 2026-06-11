@@ -368,7 +368,7 @@ describe("contracts/dispatch", () => {
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
-					tools: ["read", "run_tests"],
+					tools: ["read", "run_task"],
 					capabilityClass: "read-only",
 					source: "builtin",
 					filepath: "/test/bad-validator.md",

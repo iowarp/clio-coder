@@ -97,9 +97,9 @@ export const globTool: ToolSpec = {
 	description:
 		"Find files and directories matching a glob (supports *, **, ?, [abc]). Returns paths relative to the search root, sorted by mtime descending.",
 	parameters: Type.Object({
-		pattern: Type.String({ description: "Glob pattern. Supports *, **, ?, and [abc] character classes." }),
-		path: Type.Optional(Type.String({ description: "Root directory to search from. Defaults to the orchestrator cwd." })),
-		limit: Type.Optional(Type.Number({ description: `Maximum number of results. Defaults to ${MAX_RESULTS}.` })),
+		pattern: Type.String({ description: "Glob pattern (*, **, ?, [abc])." }),
+		path: Type.Optional(Type.String({ description: "Root directory to search from." })),
+		limit: Type.Optional(Type.Number({ description: "Max results (default 500)." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

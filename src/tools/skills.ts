@@ -13,11 +13,10 @@ import {
 	type Skill,
 } from "../domains/resources/index.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
+import { stringEnum } from "./string-enum.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_TREE_ENTRIES = 50;
-const MAX_TREE_ENTRIES = 200;
-const SCAFFOLD_DIRS = ["scripts", "references", "assets"] as const;
 
 export interface SkillToolDeps {
 	getCwd?: () => string;
@@ -168,12 +167,7 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			"List available coding skills (call with no name) or load a requested skill's body by name. This never executes bundled scripts.",
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: "Skill name to load. Omit to list available skills." })),
-			include_tree: Type.Optional(
-				Type.Boolean({ description: "List sibling files under the skill base_dir. Default: false." }),
-			),
-			max_tree_entries: Type.Optional(
-				Type.Number({ description: `Cap on listed resource entries. Default: ${DEFAULT_TREE_ENTRIES}.` }),
-			),
+			include_tree: Type.Optional(Type.Boolean({ description: "Also list files under the skill base_dir." })),
 		}),
 		baseActionClass: "read",
 		executionMode: "parallel",
@@ -199,11 +193,7 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 				return { kind: "error", message: `read_skill: unknown skill "${name}".${suffix}` };
 			}
 			const includeTree = args.include_tree === true;
-			const maxEntries =
-				typeof args.max_tree_entries === "number" && args.max_tree_entries > 0
-					? Math.min(Math.floor(args.max_tree_entries), MAX_TREE_ENTRIES)
-					: DEFAULT_TREE_ENTRIES;
-			const tree = includeTree ? buildResourceTree(skill.baseDir, maxEntries) : null;
+			const tree = includeTree ? buildResourceTree(skill.baseDir, DEFAULT_TREE_ENTRIES) : null;
 			const pendingRequest = pendingSkillRequestFor(name, options);
 			const pendingTask = pendingRequest?.args.trim() ?? "";
 			// Provenance pinning: marketplace-installed skills (registry-id
@@ -260,11 +250,7 @@ export function createReadSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 interface FrontmatterFields {
 	name: string;
 	description: string;
-	license?: string;
-	version?: string;
-	compatibility?: string;
 	allowedTools?: string[];
-	metadata?: Record<string, unknown>;
 }
 
 function renderSkillFile(fields: FrontmatterFields, body: string): string {
@@ -272,11 +258,7 @@ function renderSkillFile(fields: FrontmatterFields, body: string): string {
 		name: fields.name,
 		description: fields.description,
 	};
-	if (fields.license) frontmatter.license = fields.license;
-	if (fields.version) frontmatter.version = fields.version;
-	if (fields.compatibility) frontmatter.compatibility = fields.compatibility;
 	if (fields.allowedTools && fields.allowedTools.length > 0) frontmatter["allowed-tools"] = fields.allowedTools;
-	if (fields.metadata && Object.keys(fields.metadata).length > 0) frontmatter.metadata = fields.metadata;
 	const yaml = stringifyYaml(frontmatter).trimEnd();
 	return ["---", yaml, "---", "", body.trimEnd(), ""].join("\n");
 }
@@ -294,25 +276,14 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.CreateSkill,
 		description:
-			"Create a new reusable coding skill as a SKILL.md folder in the project or user skill store. Use only for durable patterns worth reusing.",
+			"Create a reusable coding skill as a SKILL.md folder in the project or user skill store. Use only for durable patterns worth reusing.",
 		parameters: Type.Object({
-			name: Type.String({ description: "Lowercase skill name using hyphens, for example review-tests." }),
-			description: Type.String({ description: "One concise sentence describing when to use the skill." }),
-			body: Type.String({ description: "Markdown instructions to store in SKILL.md." }),
-			scope: Type.Optional(
-				Type.Union([Type.Literal("project"), Type.Literal("user")], { description: "Default: project." }),
-			),
-			overwrite: Type.Optional(Type.Boolean({ description: "Overwrite an existing skill file. Default: false." })),
-			with_scaffold: Type.Optional(
-				Type.Boolean({ description: "Also create scripts/, references/, and assets/ folders. Default: false." }),
-			),
-			license: Type.Optional(Type.String({ description: "Optional SPDX license identifier." })),
-			version: Type.Optional(Type.String({ description: "Optional skill version string." })),
-			compatibility: Type.Optional(Type.String({ description: "Optional compatibility note." })),
-			allowed_tools: Type.Optional(Type.Array(Type.String(), { description: "Optional allowed-tools frontmatter list." })),
-			metadata: Type.Optional(
-				Type.Record(Type.String(), Type.Unknown(), { description: "Optional extra frontmatter metadata." }),
-			),
+			name: Type.String({ description: "Lowercase hyphenated skill name, e.g. review-tests." }),
+			description: Type.String({ description: "One sentence describing when to use the skill." }),
+			body: Type.String({ description: "Markdown instructions for SKILL.md." }),
+			scope: Type.Optional(stringEnum(["project", "user"], "Default: project.")),
+			overwrite: Type.Optional(Type.Boolean({ description: "Overwrite an existing skill." })),
+			allowed_tools: Type.Optional(Type.Array(Type.String(), { description: "allowed-tools frontmatter list." })),
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",
@@ -340,16 +311,8 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			const fields: FrontmatterFields = {
 				name,
 				description,
-				...(typeof args.license === "string" && args.license.trim().length > 0 ? { license: args.license.trim() } : {}),
-				...(typeof args.version === "string" && args.version.trim().length > 0 ? { version: args.version.trim() } : {}),
-				...(typeof args.compatibility === "string" && args.compatibility.trim().length > 0
-					? { compatibility: args.compatibility.trim() }
-					: {}),
 				...(Array.isArray(args.allowed_tools)
 					? { allowedTools: args.allowed_tools.filter((t): t is string => typeof t === "string") }
-					: {}),
-				...(args.metadata && typeof args.metadata === "object" && !Array.isArray(args.metadata)
-					? { metadata: args.metadata as Record<string, unknown> }
 					: {}),
 			};
 
@@ -359,19 +322,8 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 				flag: overwrite ? "w" : "wx",
 			});
 
-			const scaffolded: string[] = [];
-			if (args.with_scaffold === true) {
-				for (const dir of SCAFFOLD_DIRS) {
-					const target = path.join(skillDir, dir);
-					mkdirSync(target, { recursive: true });
-					writeFileSync(path.join(target, ".gitkeep"), "", { encoding: "utf8" });
-					scaffolded.push(dir);
-				}
-			}
-
 			const gitignored = destinationIsGitignored(cwd, filePath);
 			const notes: string[] = [`created ${scope} skill ${name} at ${filePath}`];
-			if (scaffolded.length > 0) notes.push(`scaffolded ${scaffolded.join(", ")}`);
 			if (gitignored) notes.push("warning: destination is gitignored and will not be tracked");
 
 			return {
@@ -381,7 +333,6 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 					name,
 					scope,
 					path: filePath,
-					...(scaffolded.length > 0 ? { scaffolded } : {}),
 					gitignored,
 				},
 			};
