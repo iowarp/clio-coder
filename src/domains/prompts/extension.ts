@@ -167,7 +167,7 @@ function renderProjectSynopsis(
 	if (projectType) lines.push(`Language: ${projectType}`);
 	if (context.clioMd) {
 		lines.push(`Project: ${context.clioMd.projectName}`);
-		lines.push("CLIO.md: available, not preloaded in full.");
+		lines.push("CLIO.md: available; compact synopsis only because the handbook is too large for automatic preload.");
 	}
 	if (hasCodewiki(context.text)) lines.push("Codewiki: available for entry_points, where_is, and find_symbol.");
 	if (providerSupportsTools === false) {
@@ -177,6 +177,16 @@ function renderProjectSynopsis(
 	}
 	lines.push("</project-synopsis>");
 	return lines.join("\n");
+}
+
+const FULL_PROJECT_CONTEXT_MAX_CHARS = 8000;
+const FULL_PROJECT_CONTEXT_MAX_LINES = 220;
+
+function shouldPreloadProjectContext(context: ProjectPromptContext): boolean {
+	if (!context.clioMd) return false;
+	if (context.text.length > FULL_PROJECT_CONTEXT_MAX_CHARS) return false;
+	const lines = context.text.split("\n").length;
+	return lines <= FULL_PROJECT_CONTEXT_MAX_LINES;
 }
 
 function userTextLooksRepoAware(text: string | undefined): boolean {
@@ -211,6 +221,10 @@ function selectProjectContextForTurn(
 	const contextText = context.text.trim();
 	if (contextText.length === 0) return "";
 	const contextHash = sha256(contextText);
+	if (shouldPreloadProjectContext(context)) {
+		lastProjectContextHashByCwd.set(cwd, contextHash);
+		return contextText;
+	}
 	const reason = selectProjectContextReason(cwd, contextHash, policy, lastProjectContextHashByCwd);
 	lastProjectContextHashByCwd.set(cwd, contextHash);
 	if (!reason) return "";

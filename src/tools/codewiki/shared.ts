@@ -24,7 +24,6 @@ export function loadCodewikiForTool(
 			version: 1,
 			projectType: prev?.projectType ?? projectType,
 			fingerprint: computeFingerprint(cwd),
-			...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
 			...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 			...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 			...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),

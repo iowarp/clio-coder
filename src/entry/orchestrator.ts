@@ -730,6 +730,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						options: {
 							preview?: boolean;
 							adopt?: boolean;
+							applyClioMd?: boolean;
+							proposeClioMd?: boolean;
 							includeGlobalImports?: boolean;
 							heuristic?: boolean;
 						},
@@ -744,9 +746,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							cwd: process.cwd(),
 							confirmGitignore: () => true,
 							...(options.preview === undefined ? {} : { preview: options.preview }),
-							// Adopt project agent context (AGENTS.md/CLAUDE.md/.codex/...) by default;
-							// context-init folds it in so the agent inherits sibling-tool guidance.
-							adopt: options.adopt !== false,
+							adopt: options.adopt === true,
+							...(options.applyClioMd === undefined ? {} : { applyClioMd: options.applyClioMd }),
+							...(options.proposeClioMd === undefined ? {} : { proposeClioMd: options.proposeClioMd }),
 							...(options.includeGlobalImports === undefined ? {} : { includeGlobalImports: options.includeGlobalImports }),
 							...(useModel
 								? {

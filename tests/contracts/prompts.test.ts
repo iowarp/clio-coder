@@ -299,9 +299,8 @@ describe("contracts/prompts compiler logic", () => {
 		writeClioMd(clioOnly);
 		result = await compileProjectPrompt(clioOnly);
 		project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
-		ok(project.includes("Project: Prompt Fixture"));
-		ok(project.includes("CLIO.md: available, not preloaded in full."));
-		strictEqual(project.includes("Keep prompt context compact."), false);
+		ok(project.includes("# Prompt Fixture"));
+		ok(project.includes("Keep prompt context compact."));
 		strictEqual(project.includes("Codewiki: available"), false);
 
 		const freshWiki = scratchProject();
@@ -317,7 +316,7 @@ describe("contracts/prompts compiler logic", () => {
 		});
 		result = await compileProjectPrompt(freshWiki);
 		project = result.dynamicPromptFragments.find((fragment) => fragment.id === "project-context")?.body ?? "";
-		ok(project.includes("Codewiki: available for entry_points, where_is, and find_symbol."));
+		ok(project.includes("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>"));
 		strictEqual(project.includes("promptFixtureSymbol"), false);
 		strictEqual(project.includes('"entries"'), false);
 
@@ -379,7 +378,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			const projectFrag0 = firstRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
 			ok(projectFrag0.length > 0);
 
-			// Turn 1 with no-repo-aware user text should normally return NO project-context synopsis if cached and turnCount > 0
+			// Compact CLIO.md content is preloaded every turn, including non-repo-aware follow-ups.
 			const cacheRes = await promptsBundle.contract.compileForTurn({
 				cwd,
 				contextPolicy: {
@@ -396,7 +395,8 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 				},
 			});
 			const projectFragCache = cacheRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
-			strictEqual(projectFragCache, ""); // Cached and not repo-aware, so empty
+			ok(projectFragCache.includes("<project-context>"));
+			ok(projectFragCache.includes("Keep prompt context compact."));
 
 			// Emit successful context-init activity completed event on the bus
 			bus.emit(BusChannels.ContextActivity, {
@@ -407,7 +407,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 				at: Date.now(),
 			});
 
-			// Turn 1 again with same input should now return a FRESH synopsis block because cache was cleared by context-init completion!
+			// Turn 1 again with same input keeps the compact handbook loaded after context-init invalidation.
 			const freshRes = await promptsBundle.contract.compileForTurn({
 				cwd,
 				contextPolicy: {
@@ -425,8 +425,8 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			});
 			const projectFragFresh = freshRes.dynamicPromptFragments.find((f) => f.id === "project-context")?.body ?? "";
 			ok(projectFragFresh.length > 0);
-			ok(projectFragFresh.includes("<project-synopsis>"));
-			ok(projectFragFresh.includes("Reason: context-fingerprint-changed"));
+			ok(projectFragFresh.includes("<project-context>"));
+			ok(projectFragFresh.includes("Keep prompt context compact."));
 		} finally {
 			await promptsBundle.extension.stop?.();
 		}

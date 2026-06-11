@@ -10,11 +10,12 @@ You are being dispatched through Clio's internal Scout shadow agent. Use Scout's
 
 You will be given:
 - The detected project type.
+- The existing CLIO.md when one is present. Treat it as the primary source of truth for project-specific guidance. Preserve useful manual sections unless they are clearly obsolete from inspected evidence.
 - A structural digest from the codewiki index: module count, entry points, and top directories. Ground the identity and any architecture sections in this real structure; do not invent files.
 - A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.
 
-Produce a CLIO.md with these possible sections:
+Produce a proposed CLIO.md draft with these possible sections:
 
 1. Identity. One paragraph, at most four sentences and at most 600 characters. The project name as H1, then a paragraph naming the stack, role, and what the project is. Do not list project files. Do not state language-generic conventions. Do not include build commands.
 
@@ -22,13 +23,13 @@ Produce a CLIO.md with these possible sections:
 
 3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
 
-4. Custom H2 sections. Prefer four to eight sections when the repository structure supports them, each with a title and markdown body. Use these for repository-specific architecture boundaries, ownership boundaries, context-retrieval strategy, generated/local artifact policy, workflow traps, failure modes, and verification expectations that are not obvious from the language. Keep each section dense and actionable for a coding agent. Do not add generic "how to build/test" guidance.
+4. Custom H2 sections. Prefer four to eight sections when the repository structure supports them, each with a title and markdown body. Use these for repository-specific architecture boundaries, ownership boundaries, context-retrieval strategy, generated/local artifact policy, workflow traps, failure modes, and verification expectations that are not obvious from the language. Keep each section dense and actionable for a coding agent. Do not add generic "how to build/test" guidance. If an existing CLIO.md is supplied, preserve its useful custom sections instead of replacing them with generic architecture prose.
 
 5. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
 
 Total CLIO.md size target: 2500-8000 bytes without adoption, or compact and provenance-rich with adoption.
 
-Do not include a project map, file tree, commands list, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, or generated state. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
+Do not include a project map, file tree, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, generated state, or fingerprint metadata. Build/test commands are appropriate only when they are project-specific verification expectations an agent should actually run. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
 
 Return one assistant message containing only compact JSON with this exact shape. Do not include markdown fences, prose, explanation, or commentary:
 {
@@ -44,6 +45,7 @@ export interface BootstrapPromptInput {
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
+	existingClioMdText?: string;
 	codewiki?: Codewiki;
 }
 
@@ -95,6 +97,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 	const payload = {
 		cwd: input.cwd,
 		projectType: input.projectType,
+		...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 8000) } : {}),
 		...(input.codewiki ? { structure: summarizeCodewiki(input.codewiki) } : {}),
 		siblingFiles: input.siblingFiles.map(sourceSummary),
 		adoption: {

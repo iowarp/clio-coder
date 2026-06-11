@@ -4,17 +4,20 @@ import { runBootstrap } from "../domains/context/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
-  clio context-init [--preview] [--heuristic] [--yes]
+  clio context-init [--preview] [--heuristic] [--yes] [--adopt] [--propose|--apply]
 
 Explore the repository and bootstrap the project context in one pass: CLIO.md,
 the codewiki index, a starter handoff, and the .clio state. The configured Clio
-target drafts CLIO.md grounded in the codewiki structure and folds in sibling
-agent context (AGENTS.md, CLAUDE.md, .codex, ...); it falls back to a
-deterministic heuristic when no target is reachable.
+target drafts CLIO.md grounded in the existing handbook, codewiki structure, and
+sibling agent context. Existing CLIO.md files are preserved by default; use
+--propose for an ignored draft or --apply to replace the handbook explicitly.
 
 Options:
   --preview        show the plan without writing any files
   --heuristic      skip model exploration; use the deterministic generator (offline)
+  --adopt          refresh only the managed Imported agent context section
+  --propose        write an ignored .clio/proposals/CLIO-*.md draft when CLIO.md exists
+  --apply          replace an existing CLIO.md with the generated draft
   --yes, -y        update .gitignore without prompting
 `;
 
@@ -44,6 +47,8 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	// Model-driven exploration is the default. --heuristic (or legacy --no-generate)
 	// forces the deterministic generator; preview never spawns a model.
 	const heuristic = hasFlag(args, "--heuristic") || hasFlag(args, "--no-generate");
+	const applyClioMd = hasFlag(args, "--apply") || hasFlag(args, "--rewrite");
+	const proposeClioMd = hasFlag(args, "--propose");
 	const useModel = !heuristic && !preview;
 	try {
 		await runBootstrap({
@@ -54,9 +59,9 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			},
 			confirmGitignore: () => confirmGitignore(assumeYes),
 			preview,
-			// Always fold in project agent context; context-init is the one-pass
-			// bootstrap. --global stays opt-in (and undocumented) for privacy.
-			adopt: true,
+			adopt: hasFlag(args, "--adopt"),
+			applyClioMd,
+			proposeClioMd,
 			includeGlobalImports: hasFlag(args, "--global") || hasFlag(args, "--include-global"),
 			...(useModel
 				? {

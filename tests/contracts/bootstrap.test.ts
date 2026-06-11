@@ -99,10 +99,14 @@ describe("contracts/bootstrap", () => {
 		ok(parsed.ok);
 	});
 
-	it("rejects more than six convention bullets", () => {
+	it("parses more than six convention bullets with a warning", () => {
 		const bullets = Array.from({ length: 7 }, (_, index) => `- rule ${index}`).join("\n");
 		const parsed = parseClioMd(`# Sample\n\nSample is a project with too many rules.\n\n## Conventions\n\n${bullets}\n`);
-		strictEqual(parsed.ok, false);
+		ok(parsed.ok);
+		if (parsed.ok) {
+			strictEqual(parsed.value.conventions.length, 7);
+			ok(parsed.value.warnings.some((warning) => warning.includes("conventions exceed")));
+		}
 	});
 
 	it("bootstraps a directory, generates state, CLIO.md, and ignores .clio by default", async () => {
@@ -145,7 +149,7 @@ describe("contracts/bootstrap", () => {
 		strictEqual(state?.lastIndexedAt, "2026-05-01T00:00:00.000Z");
 	});
 
-	it("preserves existing CLIO.md when model generation falls back", async () => {
+	it("preserves existing CLIO.md by default without a model rewrite", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
 		writeFileSync(
@@ -166,6 +170,7 @@ describe("contracts/bootstrap", () => {
 			"utf8",
 		);
 		const phases: string[] = [];
+		let generated = false;
 
 		await runBootstrap({
 			cwd: scratch,
@@ -174,6 +179,7 @@ describe("contracts/bootstrap", () => {
 			now: () => new Date("2026-05-01T00:00:00.000Z"),
 			onProgress: (event) => phases.push(`${event.phase}:${event.status}`),
 			generate: (input) => {
+				generated = true;
 				const fallback = fallbackBootstrapOutput(input);
 				strictEqual(fallback.mode, "existing");
 				return fallback.output;
@@ -188,6 +194,7 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.sections[0]?.title, "Architecture traps");
 			strictEqual(parsed.value.sections[0]?.body, "Preserve this section when scout or model generation is unavailable.");
 		}
+		strictEqual(generated, false);
 		ok(phases.includes("codewiki:completed"));
 		ok(phases.includes("clio-md:completed"));
 		ok(phases.includes("done:completed"));
