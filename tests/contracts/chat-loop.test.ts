@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
+import { BusChannels } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -17,7 +19,7 @@ import type { CompactResult } from "../../src/domains/session/compaction/compact
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { backendCacheVerdict, type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { createReadSkillTool } from "../../src/tools/skills.js";
@@ -38,7 +40,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 	return value;
 }
 
-function providers(): ProvidersContract {
+function providers(tier?: "local-native"): ProvidersContract {
 	const endpoint: EndpointDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
@@ -49,6 +51,7 @@ function providers(): ProvidersContract {
 		id: "fake-runtime",
 		displayName: "Fake Runtime",
 		kind: "http",
+		...(tier ? { tier } : {}),
 		apiFamily: "openai-completions",
 		auth: "none",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 1000, maxTokens: 256 },
@@ -79,6 +82,7 @@ function providers(): ProvidersContract {
 		getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 		getDetectedReasoning: () => null,
+		probeEndpoint: async () => status,
 		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 		auth: {
@@ -321,10 +325,83 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 
 		const assistant = entries.find((entry) => entry.kind === "message" && entry.role === "assistant");
 		ok(assistant && assistant.kind === "message");
-		const payload = assistant.payload as { contextExhaustion?: { kind?: string; contextWindow?: number } };
+		const payload = assistant.payload as {
+			contextExhaustion?: { kind?: string; contextWindow?: number };
+			timing?: { ttftMs: number | null; apiMs: number };
+			promptCache?: { input: number; cacheRead: number; backendVerdict: string };
+		};
 		strictEqual(payload.contextExhaustion?.kind, "provider_length_stop");
 		strictEqual(payload.contextExhaustion?.contextWindow, 1000);
+		// Per-call telemetry (T3.2) rides every persisted assistant entry.
+		ok(payload.timing && payload.timing.apiMs >= 0, "expected persisted apiMs");
+		strictEqual(payload.timing?.ttftMs, null);
+		strictEqual(payload.promptCache?.input, 1100);
+		strictEqual(payload.promptCache?.backendVerdict, "small");
 		ok(panel.render(120).join("\n").includes("generation/output limit"));
+	});
+});
+
+describe("contracts/chat-loop per-turn telemetry", () => {
+	it("classifies per-call cache verdicts with the turn-report thresholds", () => {
+		strictEqual(backendCacheVerdict(11, 5319), "hot");
+		strictEqual(backendCacheVerdict(2400, 3000), "partial");
+		strictEqual(backendCacheVerdict(5330, 0), "cold");
+		strictEqual(backendCacheVerdict(17, 0), "small");
+	});
+
+	it("persists timing + prompt-cache fields and stamps expected-cold reasons after dispatch activity", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers("local-native"),
+			knownEndpoints: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "warm reply" }],
+					stopReason: "stop",
+					usage: { input: 17, output: 9, cacheRead: 5319, cacheWrite: 0, totalTokens: 5345 },
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				await agent.emit({ type: "agent_start" });
+				await agent.emit({ type: "message_start", message });
+				await agent.emit({
+					type: "message_update",
+					message,
+					assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "warm", partial: message },
+				} as never);
+				agent.state.messages.push(message);
+				await agent.emit({ type: "message_end", message });
+				await agent.emit({ type: "agent_end", messages: [message] });
+			}),
+		} as never);
+
+		// Worker traffic on the shared backend since the last settled run.
+		bus.emit(BusChannels.DispatchCompleted, { at: Date.now() });
+		await loop.submit("after a dispatch ran");
+
+		const assistant = entries.find((entry) => entry.kind === "message" && entry.role === "assistant");
+		ok(assistant && assistant.kind === "message");
+		const payload = assistant.payload as {
+			timing?: { ttftMs: number | null; apiMs: number };
+			promptCache?: {
+				input: number;
+				cacheRead: number;
+				cacheWrite: number;
+				backendVerdict: string;
+				expectedColdReasons?: string[];
+			};
+		};
+		ok(payload.timing && payload.timing.apiMs >= 0, "expected persisted apiMs");
+		ok(payload.timing?.ttftMs !== null && (payload.timing?.ttftMs ?? -1) >= 0, "expected persisted ttftMs");
+		strictEqual(payload.promptCache?.input, 17);
+		strictEqual(payload.promptCache?.cacheRead, 5319);
+		strictEqual(payload.promptCache?.backendVerdict, "hot");
+		deepStrictEqual(payload.promptCache?.expectedColdReasons, ["dispatch"]);
 	});
 });
 

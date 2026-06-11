@@ -7,15 +7,10 @@ import {
 } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type {
-	PendingSkillRequest,
-	PendingSkillToolPolicy,
-	SkillActivation,
-	SkillDeclaredToolPolicy,
-} from "../core/skill-activation.js";
+import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type { CompiledSessionPrompt, PromptSection, SessionPromptInputs } from "../domains/prompts/compiler.js";
+import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
@@ -62,7 +57,6 @@ import {
 	getLatestContextSnapshot,
 	reconcileSnapshot,
 	snapshotInputTokens,
-	toolSchemaChars,
 } from "../domains/session/context-accounting.js";
 import { buildContextLedger, type ContextLedger, type PromptCacheStats } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -125,29 +119,16 @@ export interface QueueUpdateEvent {
 	followUp: string[];
 }
 
-export interface PromptDiagnosticsEvent {
-	type: "prompt_diagnostics";
-	promptDiagnostics: PromptDiagnostics;
-}
-
 export interface QueuedMessagesSnapshot {
 	followUp: ReadonlyArray<string>;
 }
 
-export type ChatLoopEvent =
-	| AgentEvent
-	| AssistantDeltaEvent
-	| RetryStatusEvent
-	| QueueUpdateEvent
-	| PromptDiagnosticsEvent
-	| AgentStatusEvent;
+export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | QueueUpdateEvent | AgentStatusEvent;
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
 	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
-	/** @deprecated loaded skill ledger entries; only read_skill should produce these. */
-	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
 export interface ChatLoop {
@@ -270,15 +251,6 @@ interface AgentRuntime {
 	runtimeId: string;
 	wireModelId: string;
 	runtimeResolution: ResolvedRuntimeTarget;
-}
-
-export interface PromptDiagnostics {
-	systemPromptHash: string;
-	systemPromptReused: boolean;
-	toolSignature: string;
-	toolCount: number;
-	toolSchemaTokenEstimate: number;
-	sections: ReadonlyArray<PromptSection>;
 }
 
 function notConfiguredNotice(): string {
@@ -463,11 +435,12 @@ function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkillRequest
 	].join("\n");
 }
 
-function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
-	toolSignature: string;
-	toolCount: number;
-	toolSchemaTokenEstimate: number;
-} {
+/**
+ * Hash of the serialized tool schemas the provider sees this turn. Stamped on
+ * every persisted context snapshot so a cold backend cache can be traced to a
+ * tool-surface change.
+ */
+function toolSignatureFromState(tools: ReadonlyArray<unknown>): string {
 	const schemas: Array<{ name: string; description: string; parameters: unknown }> = [];
 	for (const tool of tools) {
 		if (!tool || typeof tool !== "object" || Array.isArray(tool)) continue;
@@ -479,26 +452,7 @@ function toolSignatureFromState(tools: ReadonlyArray<unknown>): {
 		});
 	}
 	schemas.sort((a, b) => a.name.localeCompare(b.name));
-	const serialized = canonicalJson(schemas);
-	const toolSchemaTokenEstimate = tools.reduce((sum: number, tool) => sum + ceilChars(toolSchemaChars(tool)), 0);
-	return {
-		toolSignature: sha256(serialized),
-		toolCount: schemas.length,
-		toolSchemaTokenEstimate,
-	};
-}
-
-function promptDiagnostics(
-	result: CompiledSessionPrompt,
-	systemPromptReused: boolean,
-	tools: ReadonlyArray<unknown>,
-): PromptDiagnostics {
-	return {
-		systemPromptHash: result.systemPromptHash,
-		systemPromptReused,
-		...toolSignatureFromState(tools),
-		sections: result.sections,
-	};
+	return sha256(canonicalJson(schemas));
 }
 
 /**
@@ -596,7 +550,7 @@ interface RunUsageSummary {
  * actually billed and keeps the `/cost` overlay and footer counters
  * aligned across tool-heavy runs.
  */
-export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
+function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
 	const summary: RunUsageSummary = {
 		tokens: 0,
 		costUsd: 0,
@@ -651,6 +605,30 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		if (typeof total === "number") summary.costUsd += total;
 	}
 	return summary;
+}
+
+export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small";
+
+/**
+ * Classify one API call's provider-reported usage the same way
+ * scripts/turn-report.mjs does, so the persisted ledger and the forensics
+ * report can never disagree:
+ *   hot      cacheRead > 0  and input < 2000   (prefix reused, prefill ≈ user text)
+ *   partial  cacheRead > 0  and input >= 2000  (prefix reused up to a divergence point)
+ *   cold     cacheRead == 0 and input >= 2000  (full re-prefill)
+ *   small    cacheRead == 0 and input < 2000   (too small to judge)
+ */
+export function backendCacheVerdict(input: number, cacheRead: number): BackendCacheVerdict {
+	if (cacheRead > 0) return input >= 2000 ? "partial" : "hot";
+	return input >= 2000 ? "cold" : "small";
+}
+
+/** Per-API-call latency captured from the agent event stream (T3.2). */
+interface AssistantCallTiming {
+	/** message_start → first assistant delta; null when no delta arrived. */
+	ttftMs: number | null;
+	/** message_start → message_end for the same assistant API call. */
+	apiMs: number;
 }
 
 function assistantSessionPayload(
@@ -755,7 +733,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let replayedContextMessages: AgentMessage[] = [];
 	let retryCountdown: RetryCountdownHandle | null = null;
 	const persistedAssistantMessages = new WeakSet<object>();
-	let currentPromptDiagnostics: PromptDiagnostics | null = null;
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
@@ -793,6 +770,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		deps.bus?.on(BusChannels.ConfigHotReload, () => {
 			sessionPromptKey = null;
 		}) ?? null;
+
+	// Cache-disturbance honesty (T3.3). Dispatch traffic and history
+	// compaction invalidate a single-slot local backend's prefix cache.
+	// Accumulate every disturbance since the last settled run; the next
+	// submit consumes the set, stamps `promptCache.expectedColdReasons` on
+	// its first assistant entry, and shows one dim notice.
+	const pendingColdReasons = new Set<string>();
+	let runExpectedColdReasons: string[] = [];
+	let stampColdReasonsPending = false;
+	const unsubscribeColdReasonSources = [
+		...[BusChannels.DispatchStarted, BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
+			(channel) =>
+				deps.bus?.on(channel, () => {
+					pendingColdReasons.add("dispatch");
+				}) ?? null,
+		),
+		...[BusChannels.CompactionBegin, BusChannels.CompactionEnd].map(
+			(channel) =>
+				deps.bus?.on(channel, () => {
+					pendingColdReasons.add("compaction");
+				}) ?? null,
+		),
+	];
 
 	/**
 	 * Capture a context snapshot from the runtime's live agent state. All
@@ -914,10 +914,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return options;
 	};
 
-	const appendAssistantTurn = (message: AgentMessage): void => {
+	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
 		if (!message || message.role !== "assistant") return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		if (timing) payload.timing = timing;
+		// Per-call prompt-cache record (T3.2): provider-reported numbers only,
+		// classified with the same thresholds as scripts/turn-report.mjs. The
+		// run's first persisted call also carries any expected-cold reasons.
+		const usage = (message as { usage?: Usage }).usage;
+		if (usage && typeof usage === "object") {
+			const input = typeof usage.input === "number" ? usage.input : 0;
+			const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+			const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+			const promptCache: Record<string, unknown> = {
+				input,
+				cacheRead,
+				cacheWrite,
+				backendVerdict: backendCacheVerdict(input, cacheRead),
+			};
+			if (stampColdReasonsPending && runExpectedColdReasons.length > 0) {
+				promptCache.expectedColdReasons = [...runExpectedColdReasons];
+				stampColdReasonsPending = false;
+			}
+			payload.promptCache = promptCache;
+		}
 		if (isLengthStopAssistantMessage(message) && runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = runtime.runtimeResolution.capabilityDecisions.contextWindow;
@@ -954,7 +975,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const userTurn = deps.session.append({
 			kind: "user",
 			parentId: lastTurnId,
-			payload: currentPromptDiagnostics ? { text, promptDiagnostics: currentPromptDiagnostics } : { text },
+			payload: { text },
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
@@ -1147,6 +1168,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 	};
 
+	/**
+	 * Probe a local-native endpoint once per endpoint+model selection, not on
+	 * every submit (T3.1). The probe re-runs when the selection key changes
+	 * (which is also when the runtime is rebuilt or hot-swapped) or after a
+	 * generous TTL. Failures keep the last known endpoint state; the TTL
+	 * retries later.
+	 */
+	const ENDPOINT_PROBE_TTL_MS = 5 * 60 * 1000;
+	let lastEndpointProbe: { key: string; at: number } | null = null;
 	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
 		const settings = deps.getSettings();
 		const endpointId = settings.orchestrator.endpoint?.trim();
@@ -1156,7 +1186,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!endpoint) return;
 		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
 		if (runtimeDesc?.tier !== "local-native") return;
-		await deps.providers.probeEndpoint(endpointId);
+		const key = `${endpointId}|${wireModelId}`;
+		const now = Date.now();
+		if (lastEndpointProbe?.key === key && now - lastEndpointProbe.at < ENDPOINT_PROBE_TTL_MS) return;
+		lastEndpointProbe = { key, at: now };
+		try {
+			await deps.providers.probeEndpoint(endpointId);
+		} catch {
+			// Fall back to the last known endpoint state.
+		}
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
@@ -1362,6 +1400,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		let streamStartedAt: number | null = null;
 		let firstAssistantDeltaAt: number | null = null;
+		// Per-API-call timing (T3.2): one assistant message per provider call,
+		// bounded by message_start/message_end; the first delta marks TTFT.
+		let apiCallStartedAt: number | null = null;
+		let apiCallFirstDeltaAt: number | null = null;
+		// First call of the run is the one whose verdict says whether the
+		// backend reused the session prefix; later calls in a tool loop are
+		// trivially warm.
+		let runFirstCallVerdict: BackendCacheVerdict | null = null;
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
@@ -1382,6 +1428,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (publicEvent?.type === "agent_start") {
 				streamStartedAt = eventAt;
 				firstAssistantDeltaAt = null;
+				apiCallStartedAt = null;
+				apiCallFirstDeltaAt = null;
+				runFirstCallVerdict = null;
+			}
+			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
+				apiCallStartedAt = eventAt;
+				apiCallFirstDeltaAt = null;
 			}
 			if (publicEvent?.type === "message_update") {
 				const assistantEvent = publicEvent.assistantMessageEvent as { type?: string; delta?: unknown };
@@ -1391,6 +1444,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					assistantEvent.type === "toolcall_start" ||
 					assistantEvent.type === "toolcall_delta";
 				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventAt;
+				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventAt;
 			}
 			if (publicEvent?.type === "agent_end") {
 				const cacheSummary = sumRunUsage(publicEvent.messages);
@@ -1400,6 +1454,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						cacheReadTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheRead : null,
 						cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
 						uncachedInputTokens: cacheSummary.input,
+						backendVerdict: runFirstCallVerdict,
 					};
 				}
 			}
@@ -1477,8 +1532,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (enrichedEvent.type === "message_end") {
 				appendQueuedUserTurn(enrichedEvent.message);
-				appendAssistantTurn(enrichedEvent.message);
+				const isAssistant = enrichedEvent.message?.role === "assistant";
+				const timing: AssistantCallTiming | null =
+					isAssistant && apiCallStartedAt !== null
+						? {
+								ttftMs: apiCallFirstDeltaAt !== null ? Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt) : null,
+								apiMs: Math.max(0, eventAt - apiCallStartedAt),
+							}
+						: null;
+				appendAssistantTurn(enrichedEvent.message, timing);
+				if (isAssistant) apiCallStartedAt = null;
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
+				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
+					const input = typeof usage.input === "number" ? usage.input : 0;
+					const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+					runFirstCallVerdict = backendCacheVerdict(input, cacheRead);
+				}
 				if (usage && currentContextSnapshot) {
 					// Reconcile in memory on every API call so the live meters
 					// track usage; persistence waits for the run to settle.
@@ -1684,10 +1753,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * "promptRecompiled" ledger entry (written once the session exists).
 	 */
 	const ensureSessionPrompt = async (agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> => {
-		if (!deps.prompts) {
-			currentPromptDiagnostics = null;
-			return null;
-		}
+		if (!deps.prompts) return null;
 		const settings = deps.getSettings();
 		const safetyLevel = settings.safetyLevel ?? "auto-edit";
 		const sessionId = deps.session?.current()?.id ?? "";
@@ -1740,7 +1806,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			sessionPromptKey = key;
 			return result;
 		} catch (err) {
-			currentPromptDiagnostics = null;
 			emitNotice(
 				`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 			);
@@ -2030,10 +2095,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const userTurn = deps.session.append({
 			kind: "user",
 			parentId: lastTurnId,
-			payload: {
-				...(images ? { content: [{ type: "text", text }, ...images] } : { text }),
-				...(currentPromptDiagnostics ? { promptDiagnostics: currentPromptDiagnostics } : {}),
-			},
+			payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
@@ -2042,22 +2104,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			agentRuntime.agent.sessionId = sessionId;
 		}
 		return userTurn.id;
-	};
-
-	const recordSubmittedSkillActivations = (
-		activations: ReadonlyArray<SkillActivation> | undefined,
-		userTurnId: string | null,
-	): void => {
-		if (!deps.session || !activations || activations.length === 0) return;
-		for (const activation of activations) {
-			const withTurn = userTurnId ? { ...activation, turnId: userTurnId } : activation;
-			try {
-				deps.session.recordSkillActivation(withTurn);
-			} catch {
-				// Legacy caller-provided activations are audit metadata only.
-				// Persistence is best-effort and must not abort the turn.
-			}
-		}
 	};
 
 	return {
@@ -2138,11 +2184,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			// 3. Ensure the session prompt (compiles only on explicit events)
-			const pendingSkillActivations = options.skillActivations ?? [];
 			const compiledPrompt = await ensureSessionPrompt(agentRuntime);
-			currentPromptDiagnostics = compiledPrompt
-				? promptDiagnostics(compiledPrompt, lastSystemPromptReused, agentRuntime.agent.state.tools)
-				: null;
 
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
@@ -2156,7 +2198,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingUserInput: submittedText,
 					images,
 					promptHash: compiledPrompt?.systemPromptHash,
-					toolSignature: currentPromptDiagnostics?.toolSignature ?? undefined,
+					toolSignature: toolSignatureFromState(agentRuntime.agent.state.tools),
 				});
 
 			const reservedOutput = resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens);
@@ -2191,13 +2233,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			// 5. Append the user turn, then stamp and persist the snapshot.
+			// PendingSkillRequest is intent only; SkillActivation ledger entries
+			// are recorded by read_skill success.
 			const userTurnId = appendSubmittedUserTurn(agentRuntime, submittedText, images);
 			logPromptCompileIfPending();
-			// PendingSkillRequest is intent only. SkillActivation ledger entries are recorded by read_skill success.
-			recordSubmittedSkillActivations(pendingSkillActivations, userTurnId);
-			if (currentPromptDiagnostics) {
-				emit({ type: "prompt_diagnostics", promptDiagnostics: currentPromptDiagnostics });
-			}
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			currentContextSnapshot = turnSnapshot;
 			persistContextSnapshot(turnSnapshot);
@@ -2205,6 +2244,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 			toolProseAbortReason = null;
+
+			// 6. Cache-disturbance honesty (T3.3): consume disturbances since
+			// the last settled run. Only single-slot local backends lose their
+			// prefix cache to interleaved work, so only local-native targets
+			// stamp reasons and notify; other tiers just clear the set.
+			runExpectedColdReasons = [];
+			stampColdReasonsPending = false;
+			if (pendingColdReasons.size > 0) {
+				const reasons = [...pendingColdReasons];
+				pendingColdReasons.clear();
+				if (deps.providers.getRuntime(agentRuntime.runtimeId)?.tier === "local-native") {
+					runExpectedColdReasons = reasons;
+					stampColdReasonsPending = true;
+					emitStreamingNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
+				}
+			}
 
 			streaming = true;
 			const priorPendingSkillPolicy = currentPendingSkillPolicy;
@@ -2266,7 +2321,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				currentPendingSkillPolicy = priorPendingSkillPolicy;
 				currentAskUserPolicy = priorAskUserPolicy;
 				activeUserTurnId = null;
-				currentPromptDiagnostics = null;
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
 				flushReconciledSnapshot();
@@ -2410,6 +2464,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		dispose(): void {
 			unsubscribeConfigReload?.();
+			for (const unsubscribe of unsubscribeColdReasonSources) unsubscribe?.();
 			if (runtime) {
 				runtime.agent.abort();
 				(runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();

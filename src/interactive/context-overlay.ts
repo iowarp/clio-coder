@@ -77,13 +77,22 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 	if (ledger.promptCache) {
 		const cache = ledger.promptCache;
 		const shell = cache.shellReused ? "shell reused" : "shell recompiled";
+		const backend =
+			cache.backendVerdict === "hot" || cache.backendVerdict === "partial"
+				? "backend reused"
+				: cache.backendVerdict === "cold"
+					? "backend cold"
+					: cache.backendVerdict === "small"
+						? "backend small"
+						: "backend n/a";
 		const read = cache.cacheReadTokens !== null ? `cache read ${formatTokens(cache.cacheReadTokens)}` : "cache read n/a";
 		const uncached =
 			cache.uncachedInputTokens !== null ? `uncached input ${formatTokens(cache.uncachedInputTokens)}` : null;
-		const line = ["prompt cache:", shell, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
-		// A reused shell with zero provider cache reads means the backend
-		// re-prefilled anyway; surface that disagreement instead of hiding it.
-		const misleading = cache.shellReused && cache.cacheReadTokens === 0;
+		const line = ["prompt cache:", shell, "·", backend, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
+		// A reused shell with a cold backend means Clio kept the bytes stable
+		// but the provider re-prefilled anyway; surface that disagreement
+		// instead of hiding it.
+		const misleading = cache.shellReused && cache.backendVerdict === "cold";
 		lines.push(theme.fg(misleading ? "warning" : "dim", line));
 	}
 

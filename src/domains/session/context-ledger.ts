@@ -98,6 +98,13 @@ export interface PromptCacheStats {
 	cacheWriteTokens: number | null;
 	/** Provider-reported uncached input tokens for the last run. */
 	uncachedInputTokens: number | null;
+	/**
+	 * Cache verdict of the run's first API call, classified from the
+	 * provider-reported usage (turn-report thresholds). Null before any
+	 * settled run. "Shell reused but backend cold" is the dishonest
+	 * combination the overlay renders as a warning.
+	 */
+	backendVerdict: "hot" | "partial" | "cold" | "small" | null;
 }
 
 export interface ContextLedgerGroup {

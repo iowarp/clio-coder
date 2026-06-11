@@ -1,4 +1,4 @@
-import type { PendingSkillRequest, SkillActivation } from "../../core/skill-activation.js";
+import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import { CLIO_SAMPLING_OVERRIDES_ENV } from "../../engine/apis/sampling-overrides.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
@@ -20,7 +20,6 @@ export interface HeadlessMainAgentOptions {
 	images?: ReadonlyArray<ImageContent>;
 	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
-	skillActivations?: ReadonlyArray<SkillActivation>;
 	mode?: "text" | "json";
 	getSessionHeader?: () => unknown | null;
 }
@@ -92,9 +91,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
 			...(options.pendingSkillRequests && options.pendingSkillRequests.length > 0
 				? { pendingSkillRequests: options.pendingSkillRequests }
-				: {}),
-			...(options.skillActivations && options.skillActivations.length > 0
-				? { skillActivations: options.skillActivations }
 				: {}),
 		};
 		await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
