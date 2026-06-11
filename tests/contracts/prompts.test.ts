@@ -288,6 +288,7 @@ describe("contracts/prompts compiler logic", () => {
 		});
 		ok(active.systemPrompt.includes("first call read_skill"));
 		ok(active.systemPrompt.includes("Use ask_user for structured operator interviews"));
+		ok(active.systemPrompt.includes('mode="single_question"'));
 		ok(active.systemPrompt.includes("If ask_user returns cancelled"));
 
 		const inactive = compile(table, {
