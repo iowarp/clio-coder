@@ -1,5 +1,4 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
-import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { type ClioTheme, GLYPH } from "./theme/index.js";
@@ -68,20 +67,6 @@ export function throughputDetailSegment(metric: TokenThroughputSnapshot | null |
 		parts.push(`ttft ${formatDurationMs(metric.ttftMs)}`);
 	parts.push(`↓${formatFooterTokens(metric.outputTokens)}`);
 	return parts.join(" · ");
-}
-
-export function buildCtxBar(percent: number | null | undefined, width = 8): string {
-	const cells = Math.max(1, Math.floor(width));
-	if (typeof percent !== "number" || !Number.isFinite(percent)) return "░".repeat(cells);
-	const filled = Math.max(0, Math.min(cells, Math.round((Math.max(0, Math.min(100, percent)) / 100) * cells)));
-	return `${"█".repeat(filled)}${"░".repeat(cells - filled)}`;
-}
-
-export function contextSegment(usage: ContextUsageSnapshot | null | undefined): string | null {
-	if (!usage || usage.contextWindow <= 0) return null;
-	const percent = usage.percent;
-	const percentLabel = typeof percent === "number" && Number.isFinite(percent) ? `${Math.round(percent)}%` : "?%";
-	return `ctx ${buildCtxBar(percent, 10)} ${percentLabel}`;
 }
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {

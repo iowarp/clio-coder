@@ -42,10 +42,6 @@ function executeCommand(commandConfig: string): string | undefined {
 	return value;
 }
 
-function executeCommandUncached(commandConfig: string): string | undefined {
-	return shellCommand(commandConfig.slice(1));
-}
-
 function warnLegacyCommand(config: string, options?: ResolveConfigValueOptions): void {
 	options?.onWarning?.({
 		code: "dynamic-command-in-generic-resolution",
@@ -99,112 +95,9 @@ export function resolveDynamicConfigValue(config: string, options?: ResolveConfi
 	return resolveStaticConfigValue(config, options);
 }
 
-export function resolveDynamicConfigValueUncached(
-	config: string,
-	options?: ResolveConfigValueOptions,
-): string | undefined {
-	if (config.startsWith("!")) return executeCommandUncached(config);
-	return resolveStaticConfigValue(config, options);
-}
-
 export function resolveConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	if (config.startsWith("!")) {
 		warnLegacyCommand(config, options);
 	}
 	return resolveStaticConfigValue(config, options);
-}
-
-export function resolveConfigValueUncached(config: string, options?: ResolveConfigValueOptions): string | undefined {
-	if (config.startsWith("!")) {
-		warnLegacyCommand(config, options);
-	}
-	return resolveStaticConfigValue(config, options);
-}
-
-export function resolveConfigValueOrThrow(
-	config: string,
-	description: string,
-	options?: ResolveConfigValueOptions,
-): string {
-	const value = resolveConfigValueUncached(config, options);
-	if (value !== undefined) return value;
-	if (config.startsWith("!")) throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);
-	throw new Error(`Failed to resolve ${description}`);
-}
-
-export function resolveStaticConfigValueOrThrow(
-	config: string,
-	description: string,
-	options?: ResolveConfigValueOptions,
-): string {
-	const value = resolveStaticConfigValue(config, options);
-	if (value !== undefined) return value;
-	throw new Error(`Failed to resolve ${description}`);
-}
-
-export function resolveDynamicConfigValueOrThrow(
-	config: string,
-	description: string,
-	options?: ResolveConfigValueOptions,
-): string {
-	const value = resolveDynamicConfigValueUncached(config, options);
-	if (value !== undefined) return value;
-	if (config.startsWith("!")) throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);
-	throw new Error(`Failed to resolve ${description}`);
-}
-
-export function resolveHeaders(
-	headers: Readonly<Record<string, string>> | undefined,
-	options?: ResolveConfigValueOptions,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const resolved: Record<string, string> = {};
-	for (const [key, value] of Object.entries(headers)) {
-		const next = resolveStaticConfigValue(value, options);
-		if (next !== undefined && next.length > 0) resolved[key] = next;
-	}
-	return Object.keys(resolved).length > 0 ? resolved : undefined;
-}
-
-export function resolveDynamicHeaders(
-	headers: Readonly<Record<string, string>> | undefined,
-	options?: ResolveConfigValueOptions,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const resolved: Record<string, string> = {};
-	for (const [key, value] of Object.entries(headers)) {
-		const next = resolveDynamicConfigValue(value, options);
-		if (next !== undefined && next.length > 0) resolved[key] = next;
-	}
-	return Object.keys(resolved).length > 0 ? resolved : undefined;
-}
-
-export function resolveHeadersOrThrow(
-	headers: Readonly<Record<string, string>> | undefined,
-	description: string,
-	options?: ResolveConfigValueOptions,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const resolved: Record<string, string> = {};
-	for (const [key, value] of Object.entries(headers)) {
-		resolved[key] = resolveStaticConfigValueOrThrow(value, `${description} header "${key}"`, options);
-	}
-	return Object.keys(resolved).length > 0 ? resolved : undefined;
-}
-
-export function resolveDynamicHeadersOrThrow(
-	headers: Readonly<Record<string, string>> | undefined,
-	description: string,
-	options?: ResolveConfigValueOptions,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const resolved: Record<string, string> = {};
-	for (const [key, value] of Object.entries(headers)) {
-		resolved[key] = resolveDynamicConfigValueOrThrow(value, `${description} header "${key}"`, options);
-	}
-	return Object.keys(resolved).length > 0 ? resolved : undefined;
-}
-
-export function clearConfigValueCache(): void {
-	commandResultCache.clear();
 }

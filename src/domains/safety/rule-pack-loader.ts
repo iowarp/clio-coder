@@ -90,7 +90,3 @@ export function getCachedDefaultRulePacks(): RulePacks {
 	if (cachedPacks === null) cachedPacks = loadDefaultRulePacks();
 	return cachedPacks;
 }
-
-export function resetRulePackCache(): void {
-	cachedPacks = null;
-}

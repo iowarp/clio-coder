@@ -4,7 +4,8 @@ import type { SessionManagerState } from "./manager.js";
 
 /**
  * Three-stage atomic checkpoint:
- *  1. current.jsonl is already durable because the engine writer fsyncs each append.
+ *  1. current.jsonl appends are fsync'd by writer.persistTree() (the engine
+ *     writer debounces fsync between checkpoints).
  *  2. tree.json is written via writer.persistTree() (atomicWrite under the hood).
  *  3. meta.json is rewritten with lastCheckpointAt / lastCheckpointReason via
  *     atomicWrite so the on-disk marker survives crashes.

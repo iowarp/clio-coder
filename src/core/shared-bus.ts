@@ -6,8 +6,3 @@ export function getSharedBus(): SafeEventBus {
 	if (!sharedBus) sharedBus = createSafeEventBus();
 	return sharedBus;
 }
-
-export function resetSharedBus(): void {
-	sharedBus?.clear();
-	sharedBus = null;
-}

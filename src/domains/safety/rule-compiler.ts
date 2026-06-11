@@ -46,11 +46,3 @@ export function compileDamageControlRule(raw: RawRule, index: number): DamageCon
 		...(raw.ask !== undefined ? { ask: raw.ask } : {}),
 	};
 }
-
-export function compileDamageControlRules(rawRules: unknown, ctx: string): DamageControlRule[] {
-	if (rawRules === undefined || rawRules === null) return [];
-	if (!Array.isArray(rawRules)) {
-		throw new Error(`damage-control ${ctx}: expected array at 'rules'`);
-	}
-	return rawRules.map((rule, index) => compileDamageControlRule(rule as RawRule, index));
-}

@@ -53,19 +53,6 @@ export interface WelcomeDashboardStats {
 	handoffFreshness: string;
 }
 
-function stripAnsi(text: string): string {
-	let out = "";
-	for (let i = 0; i < text.length; i += 1) {
-		if (text.charCodeAt(i) === 27 && text[i + 1] === "[") {
-			i += 2;
-			while (i < text.length && text[i] !== "m") i += 1;
-			continue;
-		}
-		out += text[i] ?? "";
-	}
-	return out;
-}
-
 function activeStatus(status: EndpointStatus): boolean {
 	return status.available && status.health.status !== "down";
 }
@@ -366,5 +353,3 @@ export class WelcomeDashboard implements Component {
 export function createWelcomeDashboard(deps: WelcomeDashboardDeps): Component {
 	return new WelcomeDashboard(deps);
 }
-
-export const __welcomeDashboardTest = { stripAnsi };

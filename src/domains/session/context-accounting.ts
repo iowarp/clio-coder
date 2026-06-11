@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cwdHash, sessionPaths } from "../../engine/session.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
@@ -321,16 +321,6 @@ export function getContextSnapshots(meta: SessionMeta): ContextSnapshot[] {
 export function getLatestContextSnapshot(meta: SessionMeta): ContextSnapshot | null {
 	const list = getContextSnapshots(meta);
 	return list.at(-1) ?? null;
-}
-
-export function writeContextSnapshots(meta: SessionMeta, snapshots: ReadonlyArray<ContextSnapshot>): void {
-	try {
-		const file = getSnapshotsFilePath(meta);
-		const content = `${snapshots.map((s) => JSON.stringify(persistableSnapshot(s))).join("\n")}\n`;
-		writeFileSync(file, content, "utf8");
-	} catch {
-		// Best-effort, same contract as appendContextSnapshot.
-	}
 }
 
 export function buildSnapshotCategories(inputs: {

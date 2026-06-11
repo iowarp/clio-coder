@@ -1,16 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { resolvePackageRoot } from "../../core/package-root.js";
-import { compileDamageControlRules } from "./rule-compiler.js";
-
 /**
- * Rule-driven hard-block interceptor. Rules are seeded from
- * `damage-control-rules.yaml` at the repo root and compiled once at load. Slice
- * 3 wires the matcher into dispatch; this module is pure data + matching.
- *
- * The on-disk file stores a named `base` rule pack (schema v2). For backward
- * compatibility this module exposes a flat ruleset built from that pack.
+ * Rule-driven hard-block interceptor. Rules are loaded from
+ * `damage-control-rules.yaml` by rule-pack-loader and compiled once at load;
+ * this module is pure data shapes + matching.
  */
 
 export interface DamageControlRule {
@@ -33,46 +24,6 @@ export interface DamageControlMatch {
 	actionClass: string;
 	block: boolean;
 	ask?: boolean;
-}
-
-interface RawPack {
-	id?: unknown;
-	rules?: unknown;
-}
-
-interface RawRuleset {
-	version?: unknown;
-	rules?: unknown;
-	packs?: unknown;
-}
-
-export function loadRuleset(path: string): DamageControlRuleset {
-	const raw = readFileSync(path, "utf8");
-	const parsed = parseYaml(raw) as RawRuleset | null;
-	if (!parsed || typeof parsed !== "object") {
-		throw new Error(`damage-control rules at ${path}: expected mapping at document root`);
-	}
-	const version = typeof parsed.version === "number" ? parsed.version : 0;
-
-	if (version === 1) {
-		return { version, rules: compileDamageControlRules(parsed.rules, `rules at ${path}`) };
-	}
-
-	if (version === 2) {
-		if (!Array.isArray(parsed.packs)) {
-			throw new Error(`damage-control rules at ${path}: expected array at 'packs'`);
-		}
-		const baseRaw = (parsed.packs as RawPack[]).find((p) => p.id === "base");
-		const baseRules = baseRaw ? compileDamageControlRules(baseRaw.rules, `pack 'base' at ${path}`) : [];
-		return { version, rules: baseRules };
-	}
-
-	throw new Error(`damage-control rules at ${path}: unsupported version ${String(parsed.version)}`);
-}
-
-export function loadDefaultRuleset(): DamageControlRuleset {
-	const path = join(resolvePackageRoot(), "damage-control-rules.yaml");
-	return loadRuleset(path);
 }
 
 export function match(commandString: string, ruleset: DamageControlRuleset): DamageControlMatch | null {

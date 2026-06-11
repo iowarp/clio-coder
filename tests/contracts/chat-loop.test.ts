@@ -19,7 +19,8 @@ import type { CompactResult } from "../../src/domains/session/compaction/compact
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { backendCacheVerdict, type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { backendCacheVerdict } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { createReadSkillTool } from "../../src/tools/skills.js";

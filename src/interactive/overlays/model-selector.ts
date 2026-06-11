@@ -1036,12 +1036,3 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		},
 	};
 }
-
-/** @internal */
-export const __modelSelectorTest = {
-	formatModelRow,
-	modelColumns,
-	renderModelOverlayLines,
-	resolveOverlayWidth,
-	truncateMiddle,
-};

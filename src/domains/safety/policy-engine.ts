@@ -515,10 +515,3 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 		...(rule.ask !== undefined ? { ask: rule.ask } : {}),
 	}));
 }
-
-export function activeDamageControlRulesForMetadata(
-	packs: RulePacks,
-	_options?: { posture?: string },
-): ReadonlyArray<DamageControlRule> {
-	return packs.base.rules;
-}

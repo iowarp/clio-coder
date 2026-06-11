@@ -96,14 +96,6 @@ export function clioDataPath(): string {
 	return cachedDataDir ?? resolveClioDirs().data;
 }
 
-export function clioCachePath(): string {
-	return cachedCacheDir ?? resolveClioDirs().cache;
-}
-
-export function clioConfigPath(): string {
-	return cachedConfigDir ?? resolveClioDirs().config;
-}
-
 export function resetXdgCache(): void {
 	cachedDataDir = undefined;
 	cachedCacheDir = undefined;

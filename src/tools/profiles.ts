@@ -52,11 +52,6 @@ export function applyToolProfile(
 	return applyCodewikiWorkerPolicy(profiled, context);
 }
 
-export function toolProfileToolNames(profile: ToolProfileName): ReadonlyArray<BuiltinToolName> | null {
-	if (profile === "full-agent") return null;
-	return [...NARROW_TOOL_PROFILES[profile]];
-}
-
 function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {
 	const seen = new Set<ToolName>();
 	const unique: ToolName[] = [];

@@ -228,10 +228,6 @@ export function deriveRequestedActions(
 	return [...actions].sort();
 }
 
-export function buildSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
-	return buildStableSystemPrompt(req, recipe);
-}
-
 export function buildStableSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
 	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
 	const skillBlock = recipe && req.noSkills !== true ? renderAgentSkillPrompt(recipe) : "";

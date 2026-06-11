@@ -117,5 +117,3 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	await flushRawStdout();
 	return 0;
 }
-
-export const runPrintMode = runHeadlessMainAgent;

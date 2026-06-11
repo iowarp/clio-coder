@@ -423,18 +423,3 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 		footerHint: () => view.getHint(),
 	});
 }
-
-/** @internal Construct the overlay view without mounting a TUI. Testing hook only. */
-export function createTreeOverlayViewForTesting(
-	deps: OpenTreeOverlayDeps,
-	initial: TreeSnapshot | null,
-): {
-	handleInput: (data: string) => void;
-	render: (width: number) => string[];
-} {
-	const view = new TreeOverlayView(deps, initial);
-	return {
-		handleInput: (data) => view.handleInput(data),
-		render: (width) => view.render(width),
-	};
-}

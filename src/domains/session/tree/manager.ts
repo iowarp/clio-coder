@@ -1,7 +1,6 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-	atomicWrite,
 	openSession,
 	readSessionFileEntries,
 	type SessionTreeNode,
@@ -111,17 +110,6 @@ export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry)
 	const paths = sessionPaths(meta);
 	const entries = readSessionFileEntries(paths.current);
 	writeJsonlFileAtomic(paths.current, [...entries, entry]);
-}
-
-/**
- * Atomically rewrite a session's tree.json on disk. Engine writer persists
- * tree.json through its own path when the session is current; this helper
- * supports manual rewrites (e.g. after a deleteSession tombstone check).
- */
-export function writeTreeFile(sessionId: string, nodes: ReadonlyArray<SessionTreeNode>): void {
-	const meta = openSession(sessionId).meta();
-	const paths = sessionPaths(meta);
-	atomicWrite(paths.tree, JSON.stringify(nodes, null, 2));
 }
 
 /**

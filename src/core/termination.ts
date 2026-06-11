@@ -155,7 +155,3 @@ export function getTerminationCoordinator(): TerminationCoordinator {
 	if (!coordinator) coordinator = new TerminationCoordinator();
 	return coordinator;
 }
-
-export function resetTerminationCoordinator(): void {
-	coordinator = null;
-}

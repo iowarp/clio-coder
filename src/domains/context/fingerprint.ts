@@ -109,10 +109,6 @@ export function computeFingerprint(cwd: string): Fingerprint {
 	};
 }
 
-export function fingerprintsEqual(prev: Fingerprint, curr: Fingerprint): boolean {
-	return prev.treeHash === curr.treeHash && prev.gitHead === curr.gitHead && prev.loc === curr.loc;
-}
-
 export function isStale(prev: Fingerprint, curr: Fingerprint): boolean {
 	if (prev.gitHead !== curr.gitHead && prev.treeHash !== curr.treeHash) return true;
 	const locDelta = Math.abs(curr.loc - prev.loc) / Math.max(prev.loc, 1);

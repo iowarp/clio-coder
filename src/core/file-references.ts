@@ -26,19 +26,6 @@ export interface FileReferenceOptions {
 const FILE_REF = /(^|\s)@(\S+)/g;
 const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
 
-export function splitFileArgs(args: ReadonlyArray<string>): { fileArgs: string[]; messages: string[] } {
-	const fileArgs: string[] = [];
-	const messages: string[] = [];
-	for (const arg of args) {
-		if (arg.startsWith("@") && arg.length > 1) {
-			fileArgs.push(arg.slice(1));
-		} else {
-			messages.push(arg);
-		}
-	}
-	return { fileArgs, messages };
-}
-
 function renderTextFile(filePath: string, content: string): string {
 	return `<file name="${filePath}">\n${content}\n</file>\n`;
 }
@@ -162,19 +149,6 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 		const reason = err instanceof Error ? err.message : String(err);
 		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
 	}
-}
-
-export function readFileArgs(fileArgs: ReadonlyArray<string>, options: FileReferenceOptions = {}): FileReferenceResult {
-	const diagnostics: FileReferenceDiagnostic[] = [];
-	const images: ImageContent[] = [];
-	let text = "";
-	for (const fileArg of fileArgs) {
-		const ref = readFileReference(fileArg, { ...options, missing: options.missing ?? "error", includeImages: true });
-		text += ref.text;
-		images.push(...ref.images);
-		diagnostics.push(...ref.diagnostics);
-	}
-	return { text, images, diagnostics };
 }
 
 export async function readFileArgsAsync(

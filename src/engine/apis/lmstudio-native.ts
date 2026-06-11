@@ -81,10 +81,6 @@ function normalizeHttpBaseUrl(url: string): string {
 export const RESIDENT_TTL_MS = 60_000;
 const residentCache = new Map<string, { modelId: string; at: number }>();
 
-export function resetResidentCache(): void {
-	residentCache.clear();
-}
-
 export interface ResidentModelEntry {
 	readonly modelKey: string;
 	unload(): Promise<void>;
@@ -214,10 +210,6 @@ const lmStudioClientCache = new Map<string, LMStudioClient>();
 
 function lmStudioCacheKey(baseUrl: string, clientPasskey: string | undefined): string {
 	return `${baseUrl}|${clientPasskey ?? ""}`;
-}
-
-export function resetLmStudioClientCache(): void {
-	lmStudioClientCache.clear();
 }
 
 export async function disposeLmStudioClients(): Promise<void> {

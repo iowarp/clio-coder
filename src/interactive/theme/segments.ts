@@ -37,15 +37,7 @@ export function chip(theme: ClioTheme, token: ClioToken, text: string): string {
 }
 
 /** A key=value chip: a dim key glued to a colored value (e.g. `git main`). */
-export function labeledChip(theme: ClioTheme, key: string, value: string, valueToken: ClioToken = "muted"): string {
-	return `${theme.fg("dim", `${key} `)}${theme.fg(valueToken, value)}`;
-}
-
 /** Subtle keybinding affordance, e.g. `⌃U dashboard`. */
-export function keyHint(theme: ClioTheme, key: string, label: string): string {
-	return `${theme.fg("accentDeep", key)} ${theme.fg("dim", label)}`;
-}
-
 /** Join chips within a section with a dim middot, dropping empties. */
 export function joinChips(theme: ClioTheme, parts: ReadonlyArray<string | null | undefined>): string {
 	return present(parts).join(dotSep(theme));
