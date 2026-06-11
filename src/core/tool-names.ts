@@ -32,7 +32,6 @@ export const ToolNames = {
 	AskUser: "ask_user",
 	ReadSkill: "read_skill",
 	CreateSkill: "create_skill",
-	ActivateTools: "activate_tools",
 } as const;
 
 export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];

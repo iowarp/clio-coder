@@ -219,11 +219,6 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	if (spec.tools.includes(ToolNames.AskUser)) {
 		errors.push(`agent '${spec.id}' exposes ask_user, which is only available to the orchestrator`);
 	}
-	if (spec.tools.includes(ToolNames.ActivateTools)) {
-		errors.push(
-			`agent '${spec.id}' exposes activate_tools, which is only available to the orchestrator; workers receive their full surface at admission`,
-		);
-	}
 	if (spec.skills.length > 0 && !spec.tools.includes(ToolNames.ReadSkill)) {
 		errors.push(`agent '${spec.id}' declares skills but does not expose read_skill`);
 	}

@@ -725,7 +725,7 @@ export function formatSkillsCatalogForPrompt(skills: SkillList): string {
 	const lines = [
 		"# Skills",
 		"",
-		"Use a skill when its description matches the task. This catalog lists names, sources, and descriptions only; call read_skill to load the full SKILL.md body and resolve referenced files against the returned base_dir. Do not run bundled scripts unless normal Clio tool safety permits the call. When intent is ambiguous, prefer an interview skill before planning; when a plan spans multiple agent runs, slice it into an executable sprint before dispatching.",
+		"Use a skill when its description matches the task. Skills load only after an explicit operator request: when a task matches a skill, suggest the operator run /skill <name>. Call read_skill only for a pending skill request shown in the prompt; it is rejected otherwise. Loaded skill files resolve referenced paths against the returned base_dir. Do not run bundled scripts unless normal Clio tool safety permits the call.",
 		"",
 		`<available_skills catalog_hash="${shortHash(catalogHash)}">`,
 	];

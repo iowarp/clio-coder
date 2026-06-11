@@ -9,13 +9,20 @@ export interface AgentCatalogSections {
 }
 
 export function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
-	const specs = recipes
-		.map(normalizeAgentSpec)
-		.slice()
-		.sort((a, b) => {
-			const category = a.category.localeCompare(b.category);
-			return category === 0 ? a.id.localeCompare(b.id) : category;
-		});
+	return renderAgentCatalogSectionsFromSpecs(recipes.map(normalizeAgentSpec));
+}
+
+/**
+ * Spec-based roster used when the caller already holds normalized specs.
+ * `AgentsContract.listSpecs()` includes ACP delegation agents synthesized from
+ * settings.delegation.agents[], which never exist as recipe files; rendering
+ * from specs keeps those dispatchable targets discoverable in the fleet block.
+ */
+export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSpec>): AgentCatalogSections {
+	const specs = input.slice().sort((a, b) => {
+		const category = a.category.localeCompare(b.category);
+		return category === 0 ? a.id.localeCompare(b.id) : category;
+	});
 	const publicSpecs = specs.filter(isUserVisibleAgent);
 	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow");
 

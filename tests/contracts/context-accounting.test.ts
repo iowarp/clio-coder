@@ -29,6 +29,26 @@ function testRuntime(id: "ollama-native" | "lmstudio-native"): RuntimeDescriptor
 }
 
 describe("contracts/context-accounting", () => {
+	it("passes prompt-cache stats through the ledger and reports their absence honestly", () => {
+		const withCache = buildContextLedger({
+			provider: "test",
+			model: "test-model",
+			contextWindow: 1000,
+			promptCache: { shellReused: true, cacheReadTokens: 0, cacheWriteTokens: 120, uncachedInputTokens: 4000 },
+		});
+		strictEqual(withCache.promptCache?.shellReused, true);
+		// The dishonest case stays visible: shell reused, provider read nothing.
+		strictEqual(withCache.promptCache?.cacheReadTokens, 0);
+		strictEqual(withCache.promptCache?.uncachedInputTokens, 4000);
+
+		const withoutCache = buildContextLedger({
+			provider: "test",
+			model: "test-model",
+			contextWindow: 1000,
+		});
+		strictEqual(withoutCache.promptCache, null);
+	});
+
 	it("categories sum to usedTokens in the ledger", () => {
 		const categories = buildSnapshotCategories({
 			systemPrompt: "You are a coding assistant.",

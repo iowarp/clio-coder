@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
-import { renderAgentCatalog } from "../../src/domains/agents/catalog.js";
+import { renderAgentCatalog, renderAgentCatalogSectionsFromSpecs } from "../../src/domains/agents/catalog.js";
 import { loadRecipesFromDir, mergeRecipes } from "../../src/domains/agents/registry.js";
 import { agentSpecPolicyErrors, isUserVisibleAgent, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 
@@ -102,6 +102,39 @@ describe("contracts/agents", () => {
 		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests\)/);
 		match(catalog, /Shadow agents for internal orchestration:/);
 		match(catalog, /scout \(shadow, explore, read-only, fast, builtin\)/);
+	});
+
+	it("includes config-synthesized delegation specs in the spec-based roster", () => {
+		const sections = renderAgentCatalogSectionsFromSpecs([
+			normalizeAgentSpec({
+				id: "coder",
+				name: "Coder",
+				description: "Code.",
+				source: "builtin",
+				filepath: "/tmp/coder.md",
+				body: "# Coder",
+			}),
+			{
+				id: "claude-cli",
+				name: "claude-cli",
+				description: "External ACP delegation agent: claude --acp",
+				source: "custom",
+				filepath: "settings.yaml",
+				tools: [],
+				category: "explore",
+				capabilityClass: "orchestration",
+				latencyClass: "deep",
+				audience: "custom",
+				tags: ["delegation", "acp"],
+				skills: [],
+				output: null,
+				body: "",
+			},
+		]);
+
+		match(sections.stable, /User-facing agents:/);
+		match(sections.stable, /claude-cli \(custom, explore, orchestration, deep, custom, tags=delegation\/acp\)/);
+		match(sections.stable, /External ACP delegation agent/);
 	});
 
 	it("keeps shadow agents hidden from user-visible lists", () => {
@@ -208,22 +241,6 @@ describe("contracts/agents", () => {
 		const errors = agentSpecPolicyErrors(spec);
 		strictEqual(errors.length, 1);
 		match(errors[0] ?? "", /declares skills but does not expose read_skill/);
-	});
-
-	it("rejects recipes that declare the orchestrator-only activate_tools", () => {
-		const spec = normalizeAgentSpec({
-			id: "self-escalating",
-			name: "Self Escalating",
-			description: "Invalid recipe trying to widen its own surface.",
-			tools: ["read", "activate_tools"],
-			category: "research",
-			capabilityClass: "read-only",
-			source: "project",
-			filepath: "/tmp/self-escalating.md",
-			body: "# Self Escalating",
-		});
-		const errors = agentSpecPolicyErrors(spec);
-		ok(errors.some((error) => error.includes("activate_tools")));
 	});
 
 	it("keeps shipped built-in recipes aligned with their declared capability class", () => {

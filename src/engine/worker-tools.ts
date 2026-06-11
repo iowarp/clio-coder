@@ -497,7 +497,7 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	for (const name of toolIds) {
 		// Orchestrator-only tools. Workers resolve their full surface once at
 		// admission, so neither operator interviews nor self-activation apply.
-		if (!includeInteractiveTools && (name === ToolNames.AskUser || name === ToolNames.ActivateTools)) continue;
+		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
 		if (allowed && !allowed.has(name)) continue;
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);

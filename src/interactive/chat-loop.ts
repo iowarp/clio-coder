@@ -14,12 +14,6 @@ import {
 	type SkillActivation,
 	type SkillDeclaredToolPolicy,
 } from "../core/skill-activation.js";
-import {
-	consumeToolActivationGrants,
-	createToolActivationPolicy,
-	narrowToolActivationBound,
-	type ToolActivationPolicy,
-} from "../core/tool-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type {
@@ -79,7 +73,7 @@ import {
 	snapshotInputTokens,
 	toolSchemaChars,
 } from "../domains/session/context-accounting.js";
-import { buildContextLedger, type ContextLedger } from "../domains/session/context-ledger.js";
+import { buildContextLedger, type ContextLedger, type PromptCacheStats } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
@@ -98,7 +92,7 @@ import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
-import { renderToolCatalog, resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
+import { resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
@@ -272,7 +266,7 @@ export interface CreateChatLoopDeps {
 	 */
 	getMemorySection?: () => string;
 	/** Build the prompt-visible catalog of custom agents available through dispatch. */
-	getAgentCatalog?: () => string | { stable?: string; volatile?: string };
+	getAgentCatalog?: () => string;
 }
 
 interface ChatLoopTarget {
@@ -303,9 +297,6 @@ export interface PromptDiagnostics {
 	toolCount: number;
 	toolSchemaTokenEstimate: number;
 	toolPalette: {
-		intent: ToolPaletteResult["intent"];
-		phase: ToolPaletteResult["phase"];
-		groups: ReadonlyArray<string>;
 		activeTools: ReadonlyArray<string>;
 		signals: ReadonlyArray<string>;
 		toolsSuppressed: boolean;
@@ -560,9 +551,6 @@ function promptDiagnostics(
 	const palette =
 		toolPalette ??
 		({
-			intent: "repo_inspection",
-			phase: "inspection",
-			groups: [],
 			activeTools: [],
 			availableTools: [],
 			signals: [],
@@ -581,9 +569,6 @@ function promptDiagnostics(
 		promptEnvelope: result.promptEnvelope,
 		...toolSignature,
 		toolPalette: {
-			intent: palette.intent,
-			phase: palette.phase,
-			groups: [...palette.groups],
 			activeTools: palette.activeTools.map((tool) => String(tool)),
 			signals: [...palette.signals],
 			toolsSuppressed: palette.toolsSuppressed,
@@ -599,20 +584,6 @@ function promptDiagnostics(
 		})),
 		...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 	};
-}
-
-function applyAgentCatalogInput(
-	dynamicInputs: DynamicInputs,
-	catalog: string | { stable?: string; volatile?: string },
-): void {
-	if (typeof catalog === "string") {
-		if (catalog.trim().length > 0) dynamicInputs.agentCatalogStable = catalog;
-		return;
-	}
-	const stable = catalog.stable?.trim() ?? "";
-	const volatile = catalog.volatile?.trim() ?? "";
-	if (stable.length > 0) dynamicInputs.agentCatalogStable = stable;
-	if (volatile.length > 0) dynamicInputs.agentCatalogDelta = volatile;
 }
 
 /**
@@ -637,7 +608,6 @@ function resolveRuntimeTools(
 	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
 	userText: string,
-	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
 	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
@@ -646,7 +616,6 @@ function resolveRuntimeTools(
 		providerSupportsTools: runtimeSupportsTools(agentRuntime),
 		userText,
 		availableTools: deps.toolRegistry.listRegistered(),
-		recentToolNames,
 		pendingSkillRequests,
 	});
 	const input = {
@@ -672,11 +641,10 @@ function resolveToolsForRuntime(
 	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
 	userText: string,
-	recentToolNames: ReadonlyArray<ToolName>,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
 	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
 ): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
-	return resolveRuntimeTools(agentRuntime, deps, userText, recentToolNames, invokeOptions, pendingSkillRequests);
+	return resolveRuntimeTools(agentRuntime, deps, userText, invokeOptions, pendingSkillRequests);
 }
 
 function userTurnCount(entries: ReadonlyArray<SessionEntry>): number {
@@ -922,15 +890,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let currentToolPalette: ToolPaletteResult | null = null;
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
+	// Last settled run's provider cache usage plus whether the compiled shell
+	// was reused. Shown together in /context so "shell reused" can never imply
+	// provider cache reuse the backend did not report.
+	let lastPromptCache: PromptCacheStats | null = null;
+	let lastShellReused = false;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
 	const queuedFollowUps: string[] = [];
 	const persistedUserEchoes: string[] = [];
-	const recentToolNames: ToolName[] = [];
 	const toolStartTimes = new Map<string, number>();
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	let currentAskUserPolicy: AskUserToolPolicy | undefined;
-	let currentToolActivationPolicy: ToolActivationPolicy | undefined;
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -1055,13 +1026,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (turnId) options.turnId = turnId;
 		if (currentPendingSkillPolicy) options.pendingSkillPolicy = currentPendingSkillPolicy;
 		if (currentAskUserPolicy) options.askUserPolicy = currentAskUserPolicy;
-		if (currentToolActivationPolicy) options.toolActivationPolicy = currentToolActivationPolicy;
 		return options;
-	};
-
-	const rememberRecentToolName = (toolName: string): void => {
-		recentToolNames.push(toolName as ToolName);
-		while (recentToolNames.length > 16) recentToolNames.shift();
 	};
 
 	const appendAssistantTurn = (message: AgentMessage): void => {
@@ -1088,11 +1053,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const appendQueuedUserTurn = (message: AgentMessage): void => {
 		if (!message || message.role !== "user") return;
 		if (isInternalPromptContextMessage(message)) {
-			if (runtime) {
-				const messages = runtime.agent.state.messages;
-				const idx = messages.lastIndexOf(message);
-				if (idx >= 0) runtime.agent.state.messages = [...messages.slice(0, idx), ...messages.slice(idx + 1)];
-			}
+			// Keep internal dynamic-context messages in the provider state.
+			// They are never persisted to the session ledger, but removing
+			// them after the run made the next request's history diverge from
+			// the previous one, which broke prefix caching on local runtimes
+			// (llama.cpp, LM Studio) at the first divergent message.
 			return;
 		}
 		const text = extractUserText(message).trim();
@@ -1533,7 +1498,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} else if (event.type === "tool_execution_end") {
 				const startedAt = toolStartTimes.get(event.toolCallId);
 				toolStartTimes.delete(event.toolCallId);
-				rememberRecentToolName(event.toolName);
 				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
 				enrichedEvent = {
 					...event,
@@ -1564,6 +1528,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					assistantEvent.type === "toolcall_start" ||
 					assistantEvent.type === "toolcall_delta";
 				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventAt;
+			}
+			if (publicEvent?.type === "agent_end") {
+				const cacheSummary = sumRunUsage(publicEvent.messages);
+				if (cacheSummary.hadUsage) {
+					lastPromptCache = {
+						shellReused: lastShellReused,
+						cacheReadTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheRead : null,
+						cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
+						uncachedInputTokens: cacheSummary.input,
+					};
+				}
 			}
 			if (publicEvent?.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(publicEvent.messages);
@@ -1844,8 +1819,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * `state.systemPrompt`, and capture the renderedPromptHash so the user and
 	 * assistant entries appended this turn can carry it. Dynamic prompt
 	 * fragments return separately and are sent as marked user messages directly
-	 * before the real user turn; the subscriber removes them from in-memory
-	 * state after the provider call sees them, so they do not become durable
+	 * before the real user turn. They stay in provider state so append-only
+	 * local runtimes can reuse their prefix cache, but subscribers filter them
+	 * from public events and the session ledger so they do not become durable
 	 * conversation history.
 	 *
 	 * Throws are swallowed and downgraded to a user-visible notice because
@@ -1894,18 +1870,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			thinkingApplied: applied?.noticeKind ?? "applied",
 			thinkingNotice: applied?.notice ?? "",
 			...(guidance ? { thinkingGuidance: guidance } : {}),
-			...(currentToolPalette && activeToolNames
-				? {
-						activeToolNames,
-						toolCatalog: renderToolCatalog(currentToolPalette.availableTools),
-						toolPaletteIntent: currentToolPalette.intent,
-						toolPalettePhase: currentToolPalette.phase,
-						toolPaletteGroups: currentToolPalette.groups.map((group) => String(group)),
-						omittedToolCount: currentToolPalette.omittedToolCount,
-					}
-				: {}),
+			...(currentToolPalette && activeToolNames ? { activeToolNames } : {}),
 			...(workspaceProjectType && workspaceProjectType !== "unknown" ? { projectType: workspaceProjectType } : {}),
-			turnCount: 0,
 			...(pendingSkillRequests.length > 0 ? { pendingSkillRequests } : {}),
 		};
 		if (deps.getMemorySection) {
@@ -1920,8 +1886,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		if (deps.getAgentCatalog) {
 			try {
-				const agentCatalog = deps.getAgentCatalog();
-				applyAgentCatalogInput(dynamicInputs, agentCatalog);
+				const agentCatalog = deps.getAgentCatalog().trim();
+				if (agentCatalog.length > 0) dynamicInputs.agentCatalog = agentCatalog;
 			} catch (err) {
 				emitNotice(
 					`[Clio Coder] agent catalog load failed; continuing without fleet catalog: ${err instanceof Error ? err.message : String(err)}`,
@@ -1943,6 +1909,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				},
 			});
 			const systemPromptReused = agentRuntime.lastSessionShellHash === result.sessionShellHash;
+			lastShellReused = systemPromptReused;
 			if (!systemPromptReused) {
 				agentRuntime.agent.state.systemPrompt = result.systemPrompt;
 				agentRuntime.lastSessionShellHash = result.sessionShellHash;
@@ -2179,22 +2146,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	/**
-	 * Mid-run tool surface changes, applied before the next provider call.
+	 * Mid-run tool surface widening after a pending skill loads, applied
+	 * before the next provider call. Pending-skill turns start constrained to
+	 * read_skill (+ ask_user); once read_skill succeeds, the run widens to the
+	 * host surface merged with the loaded skill's declared tool policy.
+	 * Host policy always wins: the merge only filters the host surface.
 	 *
-	 * Two sources, in order:
-	 *
-	 *  1. Skill load. Pending-skill turns start constrained to read_skill
-	 *     (+ ask_user); once read_skill succeeds, the run widens to the host
-	 *     palette merged with the loaded skill's declared tool policy. Host
-	 *     policy always wins: the merge filters the host surface and also
-	 *     narrows the activation bound, so a skill that narrows cannot be
-	 *     escaped via activate_tools.
-	 *  2. Model activation. Grants accumulated by the activate_tools tool
-	 *     attach on top of the current active set, bounded by the (possibly
-	 *     skill-narrowed) session surface.
-	 *
-	 * Runs inside the post-tool continuation guard so expanded schemas reach
-	 * the very next provider call.
+	 * Runs inside the post-tool continuation guard so the widened schemas
+	 * reach the very next provider call.
 	 */
 	const maybeExpandToolSurface = (agentRuntime: AgentRuntime): boolean => {
 		if (!deps.toolRegistry) return false;
@@ -2210,29 +2169,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The merge only filters hostTools, so every entry is a registered ToolName.
 				surface = merged as ToolName[];
 				widenSignals.push("skillActivated");
-				if (currentToolActivationPolicy) narrowToolActivationBound(currentToolActivationPolicy, merged);
-			}
-		}
-
-		// Grants stay parked while a pending-skill turn is still constrained;
-		// the skill must load (or fail to) before the surface may widen.
-		const skillPhaseConstrained = currentPendingSkillPolicy !== undefined && !currentPendingSkillPolicy.toolsExpanded;
-		if (currentToolActivationPolicy && !skillPhaseConstrained) {
-			const grants = consumeToolActivationGrants(currentToolActivationPolicy) as ToolName[];
-			if (grants.length > 0) {
-				const base =
-					surface ??
-					(currentToolPalette
-						? [...currentToolPalette.activeTools]
-						: agentRuntime.agent.state.tools.map((tool) => tool.name as ToolName));
-				const present = new Set(base);
-				for (const grant of grants) {
-					if (present.has(grant)) continue;
-					present.add(grant);
-					base.push(grant);
-				}
-				surface = base;
-				widenSignals.push(`modelActivated:${grants.join("+")}`);
 			}
 		}
 
@@ -2400,20 +2336,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				agentRuntime,
 				deps,
 				text,
-				recentToolNames,
 				currentToolInvokeOptions,
 				pendingSkillRequests,
 			);
 			agentRuntime.agent.state.tools = resolvedTools.tools;
 			currentToolPalette = resolvedTools.palette;
 			const askUserPolicy = createAskUserToolPolicy(resolvedTools.tools);
-			// Model-driven escalation bound: everything the session policy allows,
-			// seeded with what is already active. Suppressed turns get no policy,
-			// so a stray activate_tools call fails deterministically.
-			const toolActivationPolicy =
-				resolvedTools.palette?.providerSupportsTools && !resolvedTools.palette.toolsSuppressed
-					? createToolActivationPolicy(resolvedTools.palette.availableTools, resolvedTools.palette.activeTools)
-					: undefined;
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2495,10 +2423,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			streaming = true;
 			const priorPendingSkillPolicy = currentPendingSkillPolicy;
 			const priorAskUserPolicy = currentAskUserPolicy;
-			const priorToolActivationPolicy = currentToolActivationPolicy;
 			currentPendingSkillPolicy = pendingSkillPolicy;
 			currentAskUserPolicy = askUserPolicy;
-			currentToolActivationPolicy = toolActivationPolicy;
 			try {
 				const promptMessages = promptMessagesForTurn(compileResult, text, images);
 				await markPersistedUserEcho(text, () => agentRuntime.agent.prompt(promptMessages));
@@ -2554,7 +2480,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				streaming = false;
 				currentPendingSkillPolicy = priorPendingSkillPolicy;
 				currentAskUserPolicy = priorAskUserPolicy;
-				currentToolActivationPolicy = priorToolActivationPolicy;
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
 				currentToolPalette = null;
@@ -2636,6 +2561,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					toolCount: runtime.agent.state.tools.length,
 					compactionThreshold,
 					compactionAuto,
+					promptCache: lastPromptCache,
 				});
 			}
 
@@ -2665,6 +2591,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				liveTotalTokens: totalUsed > 0 ? totalUsed : null,
 				measured,
 				lastCompaction: lastCompactionEvent,
+				promptCache: lastPromptCache,
 			});
 		},
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
@@ -2679,6 +2606,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			emitQueueUpdate();
 			lastTurnId = leafTurnId;
 			currentTurnHash = null;
+			lastPromptCache = null;
+			lastShellReused = false;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 			replayedContextMessages = replayMessages ? [...replayMessages] : [];

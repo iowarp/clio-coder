@@ -10,7 +10,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
-import { renderAgentCatalogSections } from "../domains/agents/catalog.js";
+import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
@@ -547,7 +547,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
-		...(agents ? { getAgentCatalog: () => renderAgentCatalogSections(agents.list()).stable } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
@@ -603,7 +602,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		observability,
 		bus,
 		...(prompts ? { prompts } : {}),
-		...(agents ? { getAgentCatalog: () => renderAgentCatalogSections(agents.list()) } : {}),
+		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: () => {
 			try {
