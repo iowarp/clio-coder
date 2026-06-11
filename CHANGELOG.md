@@ -1,28 +1,29 @@
 # Changelog
 
-All notable changes to Clio Coder are tracked here. Format loosely follows
-Keep a Changelog.
+All notable changes to Clio Coder are documented in this file. The format
+follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
+semantic versioning for a pre-1.0 project: minor versions may change
+interfaces.
 
-## 0.2.2 - unreleased
+## 0.2.2 - 2026-06-11
 
-Clio Coder 0.2.2 is a harness-shaping release. It cuts away the brittle
-Claude Code/CLI-subprocess runtime era, adds ACP as the deliberate interop
-surface, hardens skill activation and dispatch worker metadata, and turns
-`CLIO.md` into a higher-signal project constitution that future Clio sessions can
-use without rediscovering the same architecture traps. The runtime contract is
-now narrower and more honest: Clio drives HTTP/native/pi-ai-backed executable
-adapters directly, and external coding agents integrate through ACP delegation
-rather than hidden subprocess shims.
+Clio Coder 0.2.2 is the largest harness revision since the v0.2.0 community
+alpha. It retires the CLI-subprocess runtime era: Clio now drives
+HTTP/native/pi-ai-backed targets directly, and external coding agents
+integrate through Agent Client Protocol (ACP) delegation instead of hidden
+subprocess shims. The release also hardens skill activation, introduces a
+curated skills catalog, and upgrades `CLIO.md` into a full project rulebook
+that future sessions can rely on.
 
-The release also rebuilds the local-inference hot path around prompt-prefix
-stability: one compiled system prompt and one deterministic tool surface per
-session, bounded tool results, single-threshold compaction, and per-call
-timing/cache telemetry persisted in the session ledger. On a single-slot
-llama.cpp backend this turns repeated full-prompt prefills into cache reads;
-the measured first-turn gap on the same hardware dropped from roughly a minute
-to about a second once the prefix is resident. Concurrent Clio processes are
-now safe on one machine: live routing is session-owned, and the shared
-settings file is written through field-level patches under an advisory lock.
+The local-inference hot path was rebuilt around prompt-prefix stability: one
+compiled system prompt and one deterministic tool surface per session, bounded
+tool results, single-threshold compaction, and per-call timing and cache
+telemetry persisted in the session ledger. On a single-slot llama.cpp backend
+this turns repeated full-prompt prefills into cache reads; the measured
+first-turn gap on the same hardware dropped from roughly a minute to about a
+second once the prefix is resident. Concurrent Clio processes are now safe on
+one machine: live routing is session-owned, and the shared settings file is
+written through field-level patches under an advisory lock.
 
 ### Added
 
@@ -170,17 +171,14 @@ settings file is written through field-level patches under an advisory lock.
 
 ### Release verification
 
-- Recent deterministic checks on the v0.2.2 line: `npm run typecheck`,
-  `npm run build`, and `npm run test -- tests/contracts/bootstrap.test.ts` passed;
-  the test command exercised the full configured contract/smoke/boundary suite
-  with 122 passing tests.
-- Known release-gate blocker before tagging: `npm run lint` currently reports
-  pre-existing accessibility issues in generated `docs/html/*_blueprint.html`
-  files, primarily SVGs without titles and buttons without explicit `type`
-  attributes. `npm run ci:release` will remain blocked until those docs are
-  fixed or the release gate is intentionally scoped.
-- Before final tagging, date this changelog section, rebuild `dist`, and run the
-  full `npm run ci:release` plus packaging sanity checks.
+- Deterministic release gate: `npm run ci:release` passed at tag time,
+  covering typecheck, Biome checks, the production build, 286 contract,
+  smoke, and boundary tests, and `check-dist` packaging verification.
+- Manual release-prep evidence covered local source install/uninstall smoke
+  checks, interactive TUI checks, dispatch work, destructive-delete refusal,
+  and opt-in live model smoke through `npm run test:live`.
+- The package is not published to npm for this release; the supported install
+  path is a source checkout of the `v0.2.2` tag.
 
 ## 0.2.1 - 2026-06-05
 
@@ -705,7 +703,7 @@ recommended path.
 - The full release gate is `npm run ci`, covering typecheck, lint, unit,
   integration, boundary, build, and end-to-end tests.
 
-## 0.1.4 — 2026-04-30
+## 0.1.4 - 2026-04-30
 
 The v0.1 evolution-plane release. v0.1.4 lands the components registry
 (M1), typed change manifests (M2), the deterministic evidence corpus
@@ -725,7 +723,7 @@ accounting, a status-indicator domain, and a richer chat-loop replay
 path. No breaking changes. No settings migration required. Sessions,
 receipts, and audit JSONL written by v0.1.3 remain readable.
 
-### Added — components
+### Added - components
 
 - `clio components` lists read-only harness components with stable
   ids, SHA-256 content hashes, authority, reload class, and owner
@@ -739,7 +737,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   packs, config and session and receipt schemas, context files, doc
   specs, and memory.
 
-### Added — evolve
+### Added - evolve
 
 - `clio evolve manifest init|validate|summarize` creates, validates,
   and summarizes typed change manifests for auditable harness
@@ -750,7 +748,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   regressions for high-authority changes, and admits empty evidence
   refs only for the first exploratory iteration.
 
-### Added — evidence
+### Added - evidence
 
 - `clio evidence build --run <runId>`, `clio evidence build --session
   <sessionId>`, `clio evidence build --eval <evalId>`, `clio evidence
@@ -768,7 +766,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   `provider-transient`, `proxy-validation`, `test-failure`,
   `timeout`, `tool-loop`, `wrong-runtime`, plus link-quality tags).
 
-### Added — eval
+### Added - eval
 
 - `clio eval run --task-file <tasks.yaml> --repeat <n>` runs
   repo-local YAML eval tasks through explicit setup and verifier
@@ -785,7 +783,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   matched, added, missing, regression, improvement, unchanged,
   failure-class, token, cost, wall-time, and pass-rate deltas.
 
-### Added — memory
+### Added - memory
 
 - `clio memory list`, `clio memory propose --from-evidence
   <evidenceId>`, `clio memory approve <memoryId>`, `clio memory
@@ -803,7 +801,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   stale after 180 days without verification; unapproved records
   become stale after 30 days.
 
-### Added — middleware
+### Added - middleware
 
 - A pure middleware domain ships with a deterministic hook runner for
   future policy wiring. Eleven hooks (`before_model`, `after_model`, `before_tool`,
@@ -819,7 +817,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   worker runs so native worker tools replay no-op middleware hooks
   from data instead of loading middleware code dynamically.
 
-### Added — safety / protected artifacts
+### Added - safety / protected artifacts
 
 - Pure protected-artifact safety logic ships for deterministic
   protection state updates, validation command detection, and
@@ -828,14 +826,14 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   entries and exported into deterministic evidence artifacts,
   including `protected-artifacts.json`.
 
-### Added — finish-contract
+### Added - finish-contract
 
 - Interactive turns run an advisory finish-contract check that warns
   when an assistant completion claim has no recent validation
   evidence or explicit limitation. Recorded in evidence and consumed
   through the middleware `before_finish` and `after_finish` hooks.
 
-### Added — workspace orientation
+### Added - workspace orientation
 
 - `src/domains/workspace/` ships three pure probes: a git probe (branch,
   dirty flag, remote URL, recent commits) with scratch-repo tests, a
@@ -856,7 +854,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   action-classifier admits it; and the boundary test
   `tests/boundaries/mode-fragments-tool-truth.test.ts` enforces parity.
 
-### Added — agents
+### Added - agents
 
 - Eight new built-in agent recipes ship under
   `src/domains/agents/builtins/`: `memory-curator` (advise) drafts
@@ -875,7 +873,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 - Built-in recipe enumeration is regression-tested; new recipes are
   picked up by `clio components` automatically.
 
-### Added — scientific-validation
+### Added - scientific-validation
 
 - A scientific-validation pack ships as a docs/spec at
   `docs/specs/scientific-validation.md` plus the
@@ -886,7 +884,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   files, simulation restart artifacts, plots), and the three
   declarative rule intents.
 
-### Added — dispatch / worker memory
+### Added - dispatch / worker memory
 
 - `DispatchRequest` and `JobSpec` now carry an optional
   `memorySection?: string` field. `dispatch.buildSystemPrompt`
@@ -900,7 +898,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   defaults. The worker isolation invariant is unchanged because no
   new `src/domains/**` import enters `src/worker/**`.
 
-### Changed — providers and runtimes
+### Changed - providers and runtimes
 
 - A unified `llamacpp` runtime replaces the four surface-specific
   variants in the configure menu. The unified descriptor defaults to
@@ -923,7 +921,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   `ListProviderSupportOptions` so `clio configure --list --all` can
   surface hidden aliases.
 
-### Changed — interactive TUI
+### Changed - interactive TUI
 
 - The `/model` picker scales between 60 and 120 columns based on
   `terminal.columns` so descriptions no longer truncate mid-word on wide
@@ -943,7 +941,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
   `clio components --help`, `clio upgrade --help`, and `clio run --help`
   all print full usage instead of defaulting to top-level help.
 
-### Changed — engine parity
+### Changed - engine parity
 
 - Compaction now mirrors pi `prepareCompaction`: split-turn compaction
   summarizes pre and turn-prefix separately through a turn-prefix prompt
@@ -1041,7 +1039,7 @@ receipts, and audit JSONL written by v0.1.3 remain readable.
 - Test counts at tag time: 944 unit, integration, and boundary tests
   green; 53 e2e tests green. Lint covers 477 source files.
 
-## 0.1.3 — 2026-04-27
+## 0.1.3 - 2026-04-27
 
 Polish release on top of v0.1.2. Four user-visible TUI improvements
 (live tool output, bash echo, Ctrl+T thinking, footer git branch),
@@ -1053,7 +1051,7 @@ dev-env-only test passes before the next tag. No breaking changes.
 No settings migration required. Sessions, receipts, and audit JSONL
 written by v0.1.2 remain readable.
 
-### Added — interactive TUI
+### Added - interactive TUI
 
 - Live tool output. `tool_execution_update` events stream into the
   expanded tool block as they arrive, with a dim `(running...)`
@@ -1078,7 +1076,7 @@ written by v0.1.2 remain readable.
   refresh in v0.1.x; cwd changes during a session leave the slot
   stale until the next boot.
 
-### Added — project context loading
+### Added - project context loading
 
 - CLIO.md is the canonical project instruction file and is
   auto-loaded by walking from the working directory upward. The
@@ -1086,7 +1084,7 @@ written by v0.1.2 remain readable.
   the same compiled prompt, with CLIO.md winning on conflicts.
   `--no-context-files` (alias `-nc`) still skips the entire chain.
 
-### Added — local runtimes and discovery
+### Added - local runtimes and discovery
 
 - `clio targets convert <id> --runtime <runtimeId>` rewrites an
   existing endpoint's runtime in place. Use it to migrate
@@ -1102,7 +1100,7 @@ written by v0.1.2 remain readable.
   detected local targets, replacing the prior generic openai-compat
   path.
 
-### Changed — local runtimes
+### Changed - local runtimes
 
 - `lmstudio-native` evicts non-target loaded models before each
   prompt (within a 60-second cache) so the active model owns VRAM
@@ -1118,7 +1116,7 @@ written by v0.1.2 remain readable.
   diagnostic note when the configured wire model id does not match
   the server's single loaded model.
 
-### Changed — identity
+### Changed - identity
 
 - Clio Coder is positioned as the coding agent inside IOWarp's CLIO
   ecosystem of agentic science, targeting HPC and scientific-
@@ -1129,7 +1127,7 @@ written by v0.1.2 remain readable.
   new positioning. Architecture, engine boundaries, runtime
   selection, and test surfaces are unchanged.
 
-### Changed — packaging and docs
+### Changed - packaging and docs
 
 - `package.json` `files` no longer references AGENTS.md, STATUS.md,
   or GOVERNANCE.md (the files were never shipped). CLIO.md is
@@ -1137,14 +1135,14 @@ written by v0.1.2 remain readable.
 - README.md and CONTRIBUTING.md document CLIO.md instead of
   AGENTS.md.
 
-### Changed — safety rule packs
+### Changed - safety rule packs
 
 - `damage-control-rules.yaml` is restructured under schema v2 as a
   named `packs[]` list. Historic kill-switches stay under `base`
   and elevated rules stay under `super`, keeping normal operation on
   the base pack alone.
 
-### Changed — CI
+### Changed - CI
 
 - The runner installs `fd-find` on `ubuntu-latest` so slash-
   autocomplete `@path` completion is exercised on every push.
@@ -1177,7 +1175,7 @@ written by v0.1.2 remain readable.
 - v0.1.x runtime tier is still `native` only; `sdk` and `cli` tiers
   remain scaffolded and rejected by dispatch until v0.2.
 
-## 0.1.2 — 2026-04-25
+## 0.1.2 - 2026-04-25
 
 ### Added
 
@@ -1275,7 +1273,7 @@ written by v0.1.2 remain readable.
 - Dismissing the Alt+S super-mode overlay emits a `request_cancelled`
   `mode_change` audit row instead of dropping the transition silently.
 
-## 0.1.1 — 2026-04-24
+## 0.1.1 - 2026-04-24
 
 ### Added
 
@@ -1305,7 +1303,7 @@ written by v0.1.2 remain readable.
 - `npm run check:boundaries` now exists for the boundary command documented in
   contributor guidance.
 
-## 0.1.0-exp — 2026-04-24
+## 0.1.0-exp - 2026-04-24
 
 First public release. Experimental. Expect moving surfaces; pin the tag if
 you need a stable target.
