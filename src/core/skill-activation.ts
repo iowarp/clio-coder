@@ -22,16 +22,12 @@ export interface PendingSkillToolPolicy {
 	loadedSkillNames: Set<string>;
 	/** Declared tool policy per successfully loaded skill, recorded by read_skill. */
 	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
-	/** Set once the harness has widened the run's tool surface after activation. */
-	toolsExpanded: boolean;
 }
 
 /**
  * Per-run skill policy for a dispatched worker whose agent recipe declares
  * skills. The worker may read_skill exactly these names; anything else gets
  * the same deterministic rejection an unrequested skill gets interactively.
- * Workers resolve their tool surface once at admission, so `toolsExpanded`
- * starts true and no post-activation widening occurs.
  */
 export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): PendingSkillToolPolicy | undefined {
 	const allowedSkillNames = [...new Set(skillNames.map((name) => name.trim()).filter((name) => name.length > 0))];
@@ -41,54 +37,7 @@ export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): Pending
 		requests: allowedSkillNames.map((name) => ({ name, args: "", source: "recipe" as const, installed: true })),
 		loadedSkillNames: new Set<string>(),
 		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
-		toolsExpanded: true,
 	};
-}
-
-/**
- * Tool surface for the remainder of a pending-skill turn after at least one
- * requested skill loaded successfully. Pure merge with host-wins semantics:
- *
- *  - The result is always a subset of `hostTools`; a skill can narrow its
- *    surface via `allowed-tools` but never grant beyond host policy.
- *  - A loaded skill with no `allowed-tools` declaration requests the full host
- *    surface. When several skills loaded, their declared sets union.
- *  - `disallowed-tools` subtracts after the allowed union (self-restriction).
- *  - `read_skill` stays active while requested skills remain unloaded, and is
- *    dropped once every request has loaded.
- *  - `ask_user` survives `allowed-tools` narrowing when the host offers it
- *    (the pending skill contract promises the interview channel to loaded
- *    workflows), but an explicit `disallowed-tools` entry still removes it.
- *
- * Returns null when no skill has loaded yet (no expansion).
- */
-export function mergePendingSkillToolSurface(
-	hostTools: ReadonlyArray<string>,
-	policy: Pick<PendingSkillToolPolicy, "allowedSkillNames" | "loadedSkillNames" | "loadedSkillPolicies">,
-): string[] | null {
-	if (policy.loadedSkillNames.size === 0) return null;
-	const loaded = [...policy.loadedSkillNames];
-	const declarations = loaded.map((name) => policy.loadedSkillPolicies.get(name) ?? {});
-	const everyLoadedDeclares = declarations.every((decl) => (decl.allowedTools?.length ?? 0) > 0);
-	const allowedUnion = new Set(declarations.flatMap((decl) => decl.allowedTools ?? []));
-	const disallowedUnion = new Set(declarations.flatMap((decl) => decl.disallowedTools ?? []));
-	const remainingRequests = policy.allowedSkillNames.some((name) => !policy.loadedSkillNames.has(name));
-	const out: string[] = [];
-	for (const tool of hostTools) {
-		if (out.includes(tool)) continue;
-		if (tool === "read_skill") {
-			if (remainingRequests) out.push(tool);
-			continue;
-		}
-		if (tool === "ask_user") {
-			if (!disallowedUnion.has(tool)) out.push(tool);
-			continue;
-		}
-		if (everyLoadedDeclares && !allowedUnion.has(tool)) continue;
-		if (disallowedUnion.has(tool)) continue;
-		out.push(tool);
-	}
-	return out;
 }
 
 export interface SkillActivation {

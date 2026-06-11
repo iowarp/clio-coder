@@ -355,7 +355,7 @@ interface NamedAgentTool {
 }
 
 describe("contracts/chat-loop pending skill tool surface", () => {
-	it("constrains a pending-skill turn to read_skill, then widens to the skill's declared tools after load", async () => {
+	it("keeps the full frozen surface on a pending-skill turn; loading a skill never reshapes the wire schemas", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-chat-skill-"));
 		try {
 			const skillDir = join(scratch, ".clio", "skills", "narrow");
@@ -385,8 +385,9 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 
 			const entries: SessionEntry[] = [];
 			let toolsAtStart: string[] = [];
-			let toolsAfterLoad: string[] = [];
+			let unrequestedDenied = "";
 			let readSkillOutput = "";
+			let updateAfterLoad: unknown = "unset";
 			const loop = createChatLoop({
 				getSettings: () => settings(),
 				providers: providers(),
@@ -400,6 +401,16 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 					toolsAtStart = tools.map((tool) => tool.name);
 					const readSkill = tools.find((tool) => tool.name === "read_skill");
 					ok(readSkill, "read_skill must be active on a pending-skill turn");
+					// Invoke-time policy still gates skill loading even though the
+					// wire schemas never narrow.
+					try {
+						const denied = (await readSkill.execute("call-0", { name: "unrequested" })) as {
+							content?: Array<{ type: string; text?: string }>;
+						};
+						unrequestedDenied = denied.content?.find((part) => part.type === "text")?.text ?? "";
+					} catch (err) {
+						unrequestedDenied = err instanceof Error ? err.message : String(err);
+					}
 					const result = (await readSkill.execute("call-1", { name: "narrow" })) as {
 						content?: Array<{ type: string; text?: string }>;
 					};
@@ -417,11 +428,7 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 						content: [{ type: "text", text: readSkillOutput }],
 						timestamp: Date.now(),
 					} as unknown as AgentMessage);
-					const update = (await agent.prepareNextTurn?.(new AbortController().signal)) as
-						| { context?: { tools?: NamedAgentTool[] } }
-						| undefined;
-					ok(update?.context?.tools, "expected a continuation context update after skill load");
-					toolsAfterLoad = (update.context.tools ?? []).map((tool) => tool.name);
+					updateAfterLoad = await agent.prepareNextTurn?.(new AbortController().signal);
 				}),
 			} as never);
 
@@ -437,9 +444,12 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 				],
 			});
 
-			deepStrictEqual(toolsAtStart, ["read_skill"]);
+			// The frozen surface: every registered tool, sorted, from the first call.
+			deepStrictEqual(toolsAtStart, ["bash", "edit", "grep", "read", "read_skill"]);
+			ok(unrequestedDenied.includes("read_skill"));
 			ok(readSkillOutput.includes("NARROW BODY"));
-			deepStrictEqual([...toolsAfterLoad].sort(), ["grep", "read"]);
+			// Loading a skill must not push a continuation update that reshapes tools.
+			strictEqual(updateAfterLoad, undefined);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}

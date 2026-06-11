@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,6 @@ import { findTool } from "../../src/tools/find.js";
 import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
-import { resolveToolPalette } from "../../src/tools/palette.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
@@ -24,7 +23,6 @@ import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
-const ALL_TOOLS = Object.values(ToolNames) as ToolName[];
 
 function scratchDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-tools-basic-"));
@@ -217,76 +215,7 @@ describe("contracts/tools basic happy paths", () => {
 	});
 });
 
-describe("contracts/tools palette", () => {
-	it("attaches the full policy bound on ordinary turns, in stable sorted order", () => {
-		const work = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "fix the parser bug and run the tests",
-		});
-		strictEqual(work.activeTools.length, ALL_TOOLS.length);
-		deepStrictEqual([...work.activeTools], [...work.availableTools]);
-		deepStrictEqual(
-			[...work.activeTools],
-			[...work.activeTools].sort((a, b) => a.localeCompare(b)),
-		);
-
-		// The surface is identical regardless of phrasing: prefix-cache
-		// stability across turns beats per-turn intent guessing.
-		const chat = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "hi",
-		});
-		deepStrictEqual([...chat.activeTools], [...work.activeTools]);
-	});
-
-	it("suppresses schemas only on an explicit tool-free request", () => {
-		const noTools = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "without tools, explain what src/tools/palette.ts does",
-		});
-		strictEqual(noTools.activeTools.length, 0);
-		strictEqual(noTools.toolsSuppressed, true);
-		ok(noTools.signals.includes("noTools"));
-		// The bound is still reported so capability answers stay truthful.
-		strictEqual(noTools.availableTools.length, ALL_TOOLS.length);
-	});
-
-	it("returns no tools when the provider has no tool channel", () => {
-		const palette = resolveToolPalette({
-			providerSupportsTools: false,
-			availableTools: ALL_TOOLS,
-			userText: "fix the bug",
-		});
-		strictEqual(palette.activeTools.length, 0);
-		strictEqual(palette.availableTools.length, 0);
-		strictEqual(palette.providerSupportsTools, false);
-	});
-
-	it("constrains pending-skill turns to read_skill and ask_user", () => {
-		const pendingSkill = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "run the literature workflow",
-			pendingSkillRequests: [{ name: "arxiv-literature", args: "agents", source: "slash-command", installed: true }],
-		});
-		deepStrictEqual([...pendingSkill.activeTools].sort(), [ToolNames.AskUser, ToolNames.ReadSkill].sort());
-		ok(pendingSkill.signals.includes("pendingSkillRequest"));
-		strictEqual(pendingSkill.availableTools.length, ALL_TOOLS.length);
-	});
-
-	it("honors worker admission constraints as a hard bound", () => {
-		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			workerAllowedTools: [ToolNames.Read, ToolNames.Grep],
-			userText: "inspect the repo",
-		});
-		deepStrictEqual([...palette.activeTools].sort(), [ToolNames.Grep, ToolNames.Read].sort());
-	});
-
+describe("contracts/tools profiles", () => {
 	it("keeps codewiki tools scout-owned by default while allowing navigation-heavy non-scout runs", () => {
 		const candidateTools = [ToolNames.Read, ToolNames.WorkspaceContext, ToolNames.CodeNav];
 

@@ -158,13 +158,6 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		"off";
 
 	const safetyLevel = settings?.safetyLevel ?? "auto-edit";
-
-	const resolution = resolveModelRuntimeCapabilitiesForProviders(
-		deps.providers,
-		settings?.orchestrator?.endpoint,
-		settings?.orchestrator?.model,
-		settings?.orchestrator?.thinkingLevel ?? "off",
-	);
 	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
 	const compactionThreshold = settings?.compaction?.thresholds?.llmSummary
 		? `${Math.round(settings.compaction.thresholds.llmSummary * 100)}%`

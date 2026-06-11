@@ -7,14 +7,13 @@ import {
 } from "../core/bus-events.js";
 import { type ClioSettings, settingsPath } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import {
-	mergePendingSkillToolSurface,
-	type PendingSkillRequest,
-	type PendingSkillToolPolicy,
-	type SkillActivation,
-	type SkillDeclaredToolPolicy,
+import type {
+	PendingSkillRequest,
+	PendingSkillToolPolicy,
+	SkillActivation,
+	SkillDeclaredToolPolicy,
 } from "../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, PromptSection, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -28,7 +27,6 @@ import {
 	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
 	refineRuntimeTargetWithModelHints,
-	resolveModelRuntimeCapabilitiesForModel,
 	resolveRuntimeTarget,
 	type ThinkingLevel,
 	targetRequiresAuth,
@@ -85,7 +83,6 @@ import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
-import { resolveToolPalette, type ToolPaletteResult } from "../tools/palette.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
@@ -522,42 +519,24 @@ function fallbackIdentityPrompt(): string {
 	].join(" ");
 }
 
-function resolveRuntimeTools(
+/**
+ * The session tool surface: the full registry when the provider supports
+ * tools, nothing otherwise. Deterministic and identical on every submit so
+ * the serialized tool schemas stay byte-stable for provider prefix caching.
+ * Per-tool gating (pending-skill policy, safety) happens at invoke time.
+ */
+function resolveSessionTools(
 	agentRuntime: AgentRuntime,
 	deps: CreateChatLoopDeps,
-	userText: string,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
-	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
-): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
-	if (!deps.toolRegistry) return { tools: [], palette: null };
-	const palette = resolveToolPalette({
-		providerSupportsTools: runtimeSupportsTools(agentRuntime),
-		userText,
-		availableTools: deps.toolRegistry.listRegistered(),
-		pendingSkillRequests,
-	});
-	const input = {
-		registry: deps.toolRegistry,
-		allowedTools: palette.activeTools,
-	};
-	return {
-		tools: resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input),
-		palette,
-	};
+): ReturnType<typeof resolveAgentTools> {
+	if (!deps.toolRegistry || !runtimeSupportsTools(agentRuntime)) return [];
+	const input = { registry: deps.toolRegistry };
+	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
 }
 
 function runtimeSupportsTools(agentRuntime: AgentRuntime): boolean {
 	return agentRuntime.runtimeResolution.capabilityDecisions.tools === true;
-}
-
-function resolveToolsForRuntime(
-	agentRuntime: AgentRuntime,
-	deps: CreateChatLoopDeps,
-	userText: string,
-	invokeOptions?: () => Partial<ToolInvokeOptions>,
-	pendingSkillRequests: ReadonlyArray<PendingSkillRequest> = [],
-): { tools: ReturnType<typeof resolveAgentTools>; palette: ToolPaletteResult | null } {
-	return resolveRuntimeTools(agentRuntime, deps, userText, invokeOptions, pendingSkillRequests);
 }
 
 function createPendingSkillToolPolicy(
@@ -572,7 +551,6 @@ function createPendingSkillToolPolicy(
 		requests: [...requests],
 		loadedSkillNames: new Set<string>(),
 		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
-		toolsExpanded: false,
 	};
 }
 
@@ -778,7 +756,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let retryCountdown: RetryCountdownHandle | null = null;
 	const persistedAssistantMessages = new WeakSet<object>();
 	let currentPromptDiagnostics: PromptDiagnostics | null = null;
-	let currentToolPalette: ToolPaletteResult | null = null;
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
@@ -1474,9 +1451,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						delta: assistantEvent.delta ?? "",
 						partialText,
 					});
-					const activeToolNames = currentToolPalette
-						? currentToolPalette.activeTools.map((tool) => String(tool))
-						: toolNamesFromAgentState(localRuntime.agent.state.tools);
+					const activeToolNames = toolNamesFromAgentState(localRuntime.agent.state.tools);
 					const localToolRuntime = localRuntime.runtimeId === "llamacpp" || localRuntime.runtimeId === "lmstudio-native";
 					if (localToolRuntime && toolProseAbortReason === null) {
 						const assessment = assessToolProseLoop({
@@ -1726,14 +1701,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
-		const sessionToolNames = currentToolPalette?.availableTools.map((tool) => String(tool));
 		const sessionInputs: SessionPromptInputs = {
 			provider: agentRuntime.endpointId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
 			providerSupportsTools: runtimeSupportsTools(agentRuntime),
 			...(guidance ? { thinkingGuidance: guidance } : {}),
-			...(sessionToolNames ? { activeToolNames: sessionToolNames } : {}),
+			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools),
 		};
 		if (deps.getMemorySection) {
 			try {
@@ -2009,58 +1983,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		thinkingLevel: agentRuntime.agent.state.thinkingLevel,
 	});
 
-	/**
-	 * Mid-run tool surface widening after a pending skill loads, applied
-	 * before the next provider call. Pending-skill turns start constrained to
-	 * read_skill (+ ask_user); once read_skill succeeds, the run widens to the
-	 * host surface merged with the loaded skill's declared tool policy.
-	 * Host policy always wins: the merge only filters the host surface.
-	 *
-	 * Runs inside the post-tool continuation guard so the widened schemas
-	 * reach the very next provider call.
-	 */
-	const maybeExpandToolSurface = (agentRuntime: AgentRuntime): boolean => {
-		if (!deps.toolRegistry) return false;
-		const hostTools = currentToolPalette?.availableTools ?? deps.toolRegistry.listRegistered();
-		const widenSignals: string[] = [];
-		let surface: ToolName[] | null = null;
-
-		const skillPolicy = currentPendingSkillPolicy;
-		if (skillPolicy && !skillPolicy.toolsExpanded && skillPolicy.loadedSkillNames.size > 0) {
-			const merged = mergePendingSkillToolSurface(hostTools, skillPolicy);
-			skillPolicy.toolsExpanded = true;
-			if (merged) {
-				// The merge only filters hostTools, so every entry is a registered ToolName.
-				surface = merged as ToolName[];
-				widenSignals.push("skillActivated");
-			}
-		}
-
-		if (!surface) return false;
-		const resolved = resolveAgentTools({
-			registry: deps.toolRegistry,
-			allowedTools: surface,
-			invokeOptions: currentToolInvokeOptions,
-		});
-		agentRuntime.agent.state.tools = resolved;
-		if (currentToolPalette) {
-			currentToolPalette = {
-				...currentToolPalette,
-				activeTools: surface,
-				signals: [...currentToolPalette.signals, ...widenSignals],
-				omittedToolCount: Math.max(0, currentToolPalette.availableTools.length - surface.length),
-			};
-		}
-		return true;
-	};
-
 	const postToolContinuationGuard = async (agentRuntime: AgentRuntime, signal?: AbortSignal) => {
 		if (signal?.aborted || !toolResultTail(agentRuntime)) return undefined;
-		const toolsExpanded = maybeExpandToolSurface(agentRuntime);
 		const before = liveContextEstimate(agentRuntime);
-		if (before.contextWindow <= 0 || before.tokens <= 0) {
-			return toolsExpanded ? continuationContextUpdate(agentRuntime) : undefined;
-		}
+		if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
 
 		const settings = deps.getSettings();
 		const thresholds = normalizeContextCompactionThresholds(
@@ -2085,7 +2011,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /compact, narrower reads, or a follow-up turn with smaller observations.`,
 			);
 		}
-		return compacted || toolsExpanded ? continuationContextUpdate(agentRuntime) : undefined;
+		return compacted ? continuationContextUpdate(agentRuntime) : undefined;
 	};
 
 	const appendSubmittedUserTurn = (
@@ -2198,17 +2124,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
 			const submittedText = skillPreamble.length > 0 ? `${skillPreamble}\n\n${text}` : text;
 
-			// 1. Resolve tools once
-			const resolvedTools = resolveToolsForRuntime(
-				agentRuntime,
-				deps,
-				submittedText,
-				currentToolInvokeOptions,
-				pendingSkillRequests,
-			);
-			agentRuntime.agent.state.tools = resolvedTools.tools;
-			currentToolPalette = resolvedTools.palette;
-			const askUserPolicy = createAskUserToolPolicy(resolvedTools.tools);
+			// 1. Resolve the frozen session tool surface: same set, same order,
+			// same bytes on every submit so the provider prefix cache holds.
+			agentRuntime.agent.state.tools = resolveSessionTools(agentRuntime, deps, currentToolInvokeOptions);
+			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2348,7 +2267,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				currentAskUserPolicy = priorAskUserPolicy;
 				activeUserTurnId = null;
 				currentPromptDiagnostics = null;
-				currentToolPalette = null;
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
 				flushReconciledSnapshot();
