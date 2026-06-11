@@ -18,9 +18,6 @@ import {
 	getOAuthProvider as piGetOAuthProvider,
 	getOAuthProviders as piGetOAuthProviders,
 	loginOpenAICodex as piLoginOpenAICodex,
-	registerOAuthProvider as piRegisterOAuthProvider,
-	resetOAuthProviders as piResetOAuthProviders,
-	unregisterOAuthProvider as piUnregisterOAuthProvider,
 } from "@earendil-works/pi-ai/oauth";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProviderInterface, OAuthSelectPrompt };
@@ -77,16 +74,4 @@ export function getEngineOAuthApiKey(providerId: OAuthProviderId, credentials: O
 	const provider = piGetOAuthProvider(providerId);
 	if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
 	return provider.getApiKey(credentials);
-}
-
-export function registerEngineOAuthProvider(provider: OAuthProviderInterface): void {
-	piRegisterOAuthProvider(provider);
-}
-
-export function unregisterEngineOAuthProvider(providerId: string): void {
-	piUnregisterOAuthProvider(providerId);
-}
-
-export function resetEngineOAuthProviders(): void {
-	piResetOAuthProviders();
 }

@@ -1,7 +1,5 @@
 import { truncateToWidth } from "../../engine/tui.js";
 
-export const KEYBINDING_DETAIL_OVERLAY_WIDTH = 74;
-
 export interface KeybindingDetailEntry {
 	id: string;
 	keys: string;

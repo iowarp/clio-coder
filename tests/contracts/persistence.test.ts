@@ -8,7 +8,15 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { openSession, readSessionFileEntries, writeJsonlFileAtomic } from "../../src/engine/session.js";
+import {
+	type ClioTurnRecord,
+	createSession,
+	openSession,
+	readSessionFileEntries,
+	resumeSession,
+	sessionPaths,
+	writeJsonlFileAtomic,
+} from "../../src/engine/session.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -160,6 +168,85 @@ describe("contracts/persistence", () => {
 		const persistedMeta = reader.meta() as { skillActivations?: Array<{ name: string; turnId?: string }> };
 		strictEqual(persistedMeta.skillActivations?.[0]?.name, "review-tests");
 		strictEqual(persistedMeta.skillActivations?.[0]?.turnId, userTurn.id);
+	});
+
+	it("fd-appends turns without close and they are immediately readable", () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		const turn = (id: string, parentId: string | null, text: string): ClioTurnRecord => ({
+			id,
+			parentId,
+			at: "2026-06-11T00:00:00.000Z",
+			kind: "user",
+			payload: { text },
+		});
+		writer.append(turn("t1", null, "one"));
+		writer.append(turn("t2", "t1", "two"));
+
+		const entries = readSessionFileEntries(sessionPaths(meta).current);
+		strictEqual(entries.length, 3);
+		strictEqual((entries[0] as { type?: string }).type, "session");
+		strictEqual((entries[1] as { turnId?: string }).turnId, "t1");
+		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
+	});
+
+	it("terminates a torn tail on resume so appends never fuse onto the fragment", () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		writer.append({
+			id: "t1",
+			parentId: null,
+			at: "2026-06-11T00:00:00.000Z",
+			kind: "user",
+			payload: { text: "before crash" },
+		});
+		const current = sessionPaths(meta).current;
+		// Simulate a crash mid-append: a partial line with no trailing newline.
+		writeFileSync(current, `${readFileSync(current, "utf8")}{"kind":"mess`, "utf8");
+
+		const resumed = resumeSession(meta.id);
+		resumed.writer.append({
+			id: "t2",
+			parentId: "t1",
+			at: "2026-06-11T00:00:01.000Z",
+			kind: "user",
+			payload: { text: "after crash" },
+		});
+
+		const warnings: string[] = [];
+		const entries = readSessionFileEntries(current, { onWarning: (w) => warnings.push(w.message) });
+		strictEqual(warnings.length, 1);
+		ok(warnings[0]?.startsWith("invalid JSON skipped"));
+		strictEqual(entries.length, 3);
+		strictEqual((entries[1] as { turnId?: string }).turnId, "t1");
+		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
+	});
+
+	it("reopens the append fd after replaceEntries so later appends land in the new file", () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		const turn = (id: string, text: string): ClioTurnRecord => ({
+			id,
+			parentId: null,
+			at: "2026-06-11T00:00:00.000Z",
+			kind: "user",
+			payload: { text },
+		});
+		writer.append(turn("t1", "original"));
+		writer.replaceEntries([
+			{
+				kind: "message",
+				turnId: "r1",
+				parentTurnId: null,
+				timestamp: "2026-06-11T00:00:00.000Z",
+				role: "user",
+				payload: { text: "rewritten" },
+			},
+		]);
+		writer.append(turn("t2", "post-replace"));
+
+		const entries = readSessionFileEntries(sessionPaths(meta).current);
+		strictEqual(entries.length, 3);
+		strictEqual((entries[0] as { type?: string }).type, "session");
+		strictEqual((entries[1] as { turnId?: string }).turnId, "r1");
+		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
 	});
 
 	it("handles atomic JSONL file writes and skips corrupt trailing lines", () => {

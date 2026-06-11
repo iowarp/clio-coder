@@ -98,20 +98,8 @@ export function brandedBottomBorder(innerWidth: number, hint?: string): string {
 	return `${clioFrame("└")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┘")}`;
 }
 
-export function brandedDividerRow(contentWidth: number): string {
-	return `${clioFrame("│")} ${clioFrame("─".repeat(contentWidth))} ${clioFrame("│")}`;
-}
-
 export function brandedContentRow(text: string, contentWidth: number): string {
 	return `${clioFrame("│")} ${padAnsi(truncateToWidth(text, contentWidth, "...", true), contentWidth)} ${clioFrame("│")}`;
-}
-
-export function brandedTextRow(text: string, contentWidth: number): string {
-	return brandedContentRow(text, contentWidth);
-}
-
-export function brandedErrorRow(text: string, contentWidth: number): string {
-	return brandedContentRow(clioError(text), contentWidth);
 }
 
 export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {
@@ -120,13 +108,6 @@ export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionD
 
 export function runtimeResolutionDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
 	return clioError(fitDiagnosticLine(diagnostic, width));
-}
-
-export function brandedRuntimeResolutionDiagnosticRow(
-	diagnostic: RuntimeResolutionDiagnostic,
-	contentWidth: number,
-): string {
-	return brandedErrorRow(formatRuntimeResolutionDiagnostic(diagnostic), contentWidth);
 }
 
 function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {

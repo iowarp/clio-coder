@@ -765,10 +765,6 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	return dashboardBlock(theme, "success", "Activity", rows);
 }
 
-export function agentQuadrant(facts: AgentWorkFacts, options: ActivityQuadrantOptions = {}): string[] {
-	return activityQuadrant(facts, options);
-}
-
 /**
  * Zip two quadrant blocks into a side-by-side row, padding the shorter block so
  * both columns stay aligned, and clamping each cell to its column width.

@@ -44,7 +44,3 @@ export function installBusTracer(): void {
 		});
 	}
 }
-
-export function resetBusTracerForTests(): void {
-	installed = false;
-}

@@ -123,10 +123,3 @@ export function createSentinelStripper(): SentinelStripper {
 		},
 	};
 }
-
-/** Exported for tests; do not depend on this from production code. */
-export const __sentinelInternals = {
-	KNOWN_SENTINELS,
-	SENTINEL_RE,
-	MAX_SENTINEL_LEN,
-};

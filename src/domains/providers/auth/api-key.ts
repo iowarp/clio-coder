@@ -1,8 +1,4 @@
-import {
-	type ResolveConfigValueOptions,
-	resolveDynamicConfigValue,
-	resolveDynamicConfigValueUncached,
-} from "../../../core/resolve-config-value.js";
+import { type ResolveConfigValueOptions, resolveDynamicConfigValue } from "../../../core/resolve-config-value.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/oauth.js";
 
 export interface EnvironmentApiKeyResolution {
@@ -28,15 +24,6 @@ export function resolveProviderDynamicSecret(
 ): string | undefined {
 	void context;
 	return resolveDynamicConfigValue(value, options);
-}
-
-export function resolveProviderDynamicSecretUncached(
-	value: string,
-	context: { providerId: string; endpointId?: string; field?: string },
-	options?: ResolveConfigValueOptions,
-): string | undefined {
-	void context;
-	return resolveDynamicConfigValueUncached(value, options);
 }
 
 export function resolveEnvironmentApiKey(providerId: string, explicitEnvVar?: string): EnvironmentApiKeyResolution {

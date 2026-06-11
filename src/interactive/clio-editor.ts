@@ -8,11 +8,6 @@ function stripAnsi(text: string): string {
 	return text.replace(ANSI, "");
 }
 
-function isRail(line: string): boolean {
-	const stripped = stripAnsi(line).trim();
-	return stripped.includes("─") && /^[─↑↓0-9 a-zA-Z]+$/.test(stripped);
-}
-
 function hasScrollIndicator(line: string): boolean {
 	const stripped = stripAnsi(line);
 	return stripped.includes(GLYPH.up) || stripped.includes(GLYPH.down);
@@ -23,16 +18,6 @@ export interface EditorChrome {
 	getModelLabel: () => string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
-}
-
-/**
- * Compose the single editor rail label. The editor rail is the one place that
- * owns model identity (target/provider · model · thinking); the footer
- * deliberately does not repeat any of these.
- */
-export function composeRailLabel(chrome: EditorChrome): string {
-	const think = normalizeThinkingHint(chrome.getThinkingLabel());
-	return `${chrome.getModelLabel()} · ${think}`;
 }
 
 function normalizeThinkingHint(value: string): string {
@@ -93,5 +78,3 @@ export class ClioEditor extends Editor {
 		return lines;
 	}
 }
-
-export const __clioEditorTest = { isRail, stripAnsi };

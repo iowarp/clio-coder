@@ -9,7 +9,6 @@
  * or thinking streams.
  */
 
-import { isHarmonyModelId } from "../domains/providers/model-family.js";
 import {
 	type HarmonyReasoningEffort,
 	harmonyReasoningEffort,
@@ -34,10 +33,6 @@ export interface HarmonyParsedChunk {
 }
 
 type HarmonyRoute = "text" | "thinking";
-
-export function shouldParseHarmonyResponse(modelId: string): boolean {
-	return isHarmonyModelId(modelId);
-}
 
 export { type HarmonyReasoningEffort, harmonyReasoningEffort, isHarmonyThinkingFormat };
 

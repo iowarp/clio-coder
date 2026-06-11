@@ -57,13 +57,6 @@ export function protectArtifact(state: ProtectedArtifactState, artifact: Protect
 	return stateFromMap(artifacts);
 }
 
-export function unprotectArtifact(state: ProtectedArtifactState, artifactPath: string): ProtectedArtifactState {
-	const artifacts = artifactMap(state.artifacts);
-	const key = normalizePathKey(artifactPath);
-	if (key !== null) artifacts.delete(key);
-	return stateFromMap(artifacts);
-}
-
 export function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): boolean {
 	const candidate = normalizePathKey(artifactPath);
 	if (candidate === null) return false;

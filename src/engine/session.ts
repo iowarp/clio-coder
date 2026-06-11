@@ -8,7 +8,12 @@
  *     tree.json      [{id, parentId, at, kind}, ...]
  *
  * Atomicity:
- *   - current.jsonl is rewritten via `writeJsonlFileAtomic` (`.tmp` + fsync + rename).
+ *   - Appends go to an O_APPEND fd held for the writer's lifetime; each line
+ *     is one write(2). fsync is debounced after appends and forced on
+ *     checkpoint (`persistTree`) and `close`. A torn last line from a crash
+ *     is tolerated by the reader (skipped with a warning).
+ *   - `replaceEntries` rewrites current.jsonl via `writeJsonlFileAtomic`
+ *     (`.tmp` + fsync + rename) and reopens the append fd afterwards.
  *   - tree.json and meta.json are written via `atomicWrite` (tmp + fsync + rename).
  *
  * This module sits in `src/engine/` because it is the engine's artifact
@@ -481,6 +486,32 @@ function findSessionDir(id: string): string {
 	throw new Error(`session not found: ${id}`);
 }
 
+const APPEND_FSYNC_DEBOUNCE_MS = 500;
+
+/**
+ * True when the file's last byte is a newline (or the file is empty or
+ * missing). A false result means a crash left a torn partial line that an
+ * O_APPEND writer must terminate before writing, or the next record would
+ * fuse onto the fragment and corrupt itself too.
+ */
+function endsWithNewline(path: string): boolean {
+	let size: number;
+	try {
+		size = statSync(path).size;
+	} catch {
+		return true;
+	}
+	if (size === 0) return true;
+	const fd = openSync(path, "r");
+	try {
+		const buf = Buffer.alloc(1);
+		readSync(fd, buf, 0, 1, size - 1);
+		return buf[0] === 0x0a;
+	} finally {
+		closeSync(fd);
+	}
+}
+
 function createWriter(
 	meta: ClioSessionMeta,
 	initialTree: SessionTreeNode[],
@@ -491,13 +522,67 @@ function createWriter(
 	const tree: SessionTreeNode[] = [...initialTree];
 	const fileEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
 	let closed = false;
+	let appendFd: number | null = null;
+	let fsyncTimer: NodeJS.Timeout | null = null;
+
+	// One-time normalization for resumes of pre-header files: rewrite once so
+	// fd-appended lines land after a header. Disk and memory match from here on.
+	if (!isSessionJsonlHeader(initialFileEntries[0])) {
+		writeJsonlFileAtomic(paths.current, fileEntries);
+	}
+
+	function openAppendFd(): number {
+		if (appendFd !== null) return appendFd;
+		const tornTail = !endsWithNewline(paths.current);
+		appendFd = openSync(paths.current, "a");
+		// Terminating the fragment keeps the reader's torn-tail behavior:
+		// it skips exactly one invalid line with a warning.
+		if (tornTail) writeSync(appendFd, "\n");
+		return appendFd;
+	}
+
+	function scheduleFsync(): void {
+		if (fsyncTimer !== null) return;
+		fsyncTimer = setTimeout(() => {
+			fsyncTimer = null;
+			if (appendFd === null) return;
+			try {
+				fsyncSync(appendFd);
+			} catch {
+				// A concurrent close already flushed and released the fd.
+			}
+		}, APPEND_FSYNC_DEBOUNCE_MS);
+		fsyncTimer.unref?.();
+	}
+
+	function closeAppendFd(opts: { flush: boolean }): void {
+		if (fsyncTimer !== null) {
+			clearTimeout(fsyncTimer);
+			fsyncTimer = null;
+		}
+		if (appendFd === null) return;
+		try {
+			if (opts.flush) fsyncSync(appendFd);
+		} finally {
+			closeSync(appendFd);
+			appendFd = null;
+		}
+	}
+
+	function appendLine(entry: unknown): void {
+		const serialized = JSON.stringify(entry);
+		if (serialized === undefined) {
+			throw new Error("session JSONL entry is not serializable");
+		}
+		writeSync(openAppendFd(), `${serialized}\n`);
+		scheduleFsync();
+	}
 
 	return {
 		append(turn: ClioTurnRecord): void {
 			if (closed) throw new Error("session writer closed");
 			const record = recordFromTurn(turn);
-			const nextEntries = [...fileEntries, record];
-			writeJsonlFileAtomic(paths.current, nextEntries);
+			appendLine(record);
 			fileEntries.push(record);
 			tree.push({
 				id: turn.id,
@@ -508,13 +593,15 @@ function createWriter(
 		},
 		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
 			if (closed) throw new Error("session writer closed");
-			const nextEntries = [...fileEntries, entry];
-			writeJsonlFileAtomic(paths.current, nextEntries);
+			appendLine(entry);
 			fileEntries.push(entry);
 			if (opts?.treeNode) tree.push(opts.treeNode);
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
 			if (closed) throw new Error("session writer closed");
+			// The rename below replaces the inode; the held fd would keep
+			// appending to the orphaned old file. Drop it, reopen lazily.
+			closeAppendFd({ flush: false });
 			const existingHeader = fileEntries.find(isSessionJsonlHeader);
 			const body = entries.filter((entry) => !isSessionJsonlHeader(entry));
 			const nextEntries = existingHeader ? [existingHeader, ...body] : ensureSessionHeader(meta, body, headerOptions);
@@ -528,11 +615,13 @@ function createWriter(
 			}
 		},
 		async persistTree(): Promise<void> {
+			// Checkpoint: make appended lines durable alongside the tree.
+			if (appendFd !== null) fsyncSync(appendFd);
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 		},
 		async close(): Promise<void> {
 			if (closed) return;
-			writeJsonlFileAtomic(paths.current, fileEntries);
+			closeAppendFd({ flush: true });
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));

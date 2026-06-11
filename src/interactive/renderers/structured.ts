@@ -55,10 +55,6 @@ export function tryRenderJson(value: unknown, width: number, options: Structured
 	});
 }
 
-export function renderJson(value: unknown, width: number, options: StructuredRenderOptions = {}): string[] {
-	return tryRenderJson(value, width, options) ?? [fit(String(value), width)];
-}
-
 function prettyXml(text: string): string[] {
 	const tokens = text.match(/<[^>]+>|[^<]+/gu) ?? [text];
 	const lines: string[] = [];
@@ -90,8 +86,4 @@ export function tryRenderXml(text: string, width: number, options: StructuredRen
 		const styled = line.startsWith("... ") && line.endsWith(" hidden") ? clioTheme().fg("dim", line) : colorXmlLine(line);
 		return fit(styled, width);
 	});
-}
-
-export function renderXml(text: string, width: number, options: StructuredRenderOptions = {}): string[] {
-	return tryRenderXml(text, width, options) ?? [fit(text, width)];
 }

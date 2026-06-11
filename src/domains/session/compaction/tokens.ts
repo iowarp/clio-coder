@@ -144,9 +144,3 @@ export function calculateContextTokens(entries: ReadonlyArray<SessionEntry>, las
 	for (const entry of entries) total += estimateTokens(entry);
 	return total;
 }
-
-/** Default estimator: chars/4. Future `/count_tokens` estimators drop in here. */
-export const charsOverFourEstimator: TokenEstimator = {
-	estimateEntry: estimateTokens,
-	calculateContextTokens,
-};

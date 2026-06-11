@@ -252,14 +252,6 @@ export async function expandInteractiveSubmitAsync(
 	return { text: fileExpansion.text, images: fileExpansion.images, pendingSkillRequests: parsed.pendingSkillRequests };
 }
 
-export function expandInteractiveSubmitText(
-	text: string,
-	resources: ResourcesContract | undefined,
-	cwd = process.cwd(),
-): string {
-	return expandInteractiveSubmit(text, resources, cwd).text;
-}
-
 export type OverlayState =
 	| "closed"
 	| "permission-confirm"
@@ -581,14 +573,6 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 }
 
 /** Legacy pure router for the retired status overlay shape. Runtime /status now toggles the footer dashboard. */
-export function routeStatusOverlayKey(data: string, deps: StatusOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
 /** Pure overlay key router for the target status overlay. Esc closes; everything else is swallowed. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
 	if (data === ESC) {

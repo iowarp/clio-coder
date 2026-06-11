@@ -52,9 +52,3 @@ export function readPiMonoVersion(): string {
 	cachedPiMonoVersion = pkg.dependencies?.[PI_MONO_PACKAGES.agentCore] ?? "unknown";
 	return cachedPiMonoVersion;
 }
-
-export function resetPackageRootCache(): void {
-	cached = null;
-	cachedClioVersion = null;
-	cachedPiMonoVersion = null;
-}

@@ -29,9 +29,3 @@ export interface ClioPermissionResolvedEvent {
 }
 
 export type ClioWorkerEvent = ClioToolStartEvent | ClioToolFinishEvent | ClioPermissionResolvedEvent;
-
-export function isClioWorkerEvent(value: unknown): value is ClioWorkerEvent {
-	if (!value || typeof value !== "object") return false;
-	const type = (value as { type?: unknown }).type;
-	return type === "clio_tool_start" || type === "clio_tool_finish" || type === "clio_permission_resolved";
-}

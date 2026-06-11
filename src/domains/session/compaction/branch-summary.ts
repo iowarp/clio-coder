@@ -16,48 +16,11 @@ import type { MessageEntry, SessionEntry } from "../entries.js";
 /** Tool-result bodies are truncated to this char count inside summaries. */
 export const TOOL_RESULT_MAX_CHARS = 2000;
 
-/**
- * Return a contiguous slice of entries intended to become the historical
- * portion of a branch summary. The `[startIndex, endIndex)` window is the
- * range of entries the model will summarize; callers provide the cut point
- * (from `findCutPoint`) and whether the cut splits a turn.
- */
-export function collectEntriesForBranchSummary(
-	entries: ReadonlyArray<SessionEntry>,
-	startIndex: number,
-	endIndex: number,
-): SessionEntry[] {
-	const out: SessionEntry[] = [];
-	for (let i = startIndex; i < endIndex; i++) {
-		const entry = entries[i];
-		if (!entry) continue;
-		out.push(entry);
-	}
-	return out;
-}
-
 export interface PreparedBranchEntries {
 	/** Entries up to (exclusive) the first-kept index. These get summarized. */
 	pre: SessionEntry[];
 	/** Entries at and after the first-kept index. These remain verbatim. */
 	post: SessionEntry[];
-}
-
-/**
- * Partition entries around the cut. `pre` is what the model summarizes;
- * `post` is what the replayed context keeps verbatim. A future slice may
- * extend this to surface a separate `turnPrefix` bucket when the cut is
- * mid-turn, matching pi-coding-agent's split-turn handling.
- */
-export function prepareBranchEntries(
-	entries: ReadonlyArray<SessionEntry>,
-	firstKeptEntryIndex: number,
-): PreparedBranchEntries {
-	const clamped = Math.max(0, Math.min(firstKeptEntryIndex, entries.length));
-	return {
-		pre: entries.slice(0, clamped),
-		post: entries.slice(clamped),
-	};
 }
 
 function truncate(text: string, max: number): string {

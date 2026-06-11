@@ -20,10 +20,8 @@ import {
 	type Model,
 	type ModelThinkingLevel,
 	calculateCost as piCalculateCost,
-	clampThinkingLevel as piClampThinkingLevel,
 	cleanupSessionResources as piCleanupSessionResources,
 	getModel as piGetModel,
-	getOverflowPatterns as piGetOverflowPatterns,
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
 	parseJsonWithRepair as piParseJsonWithRepair,
@@ -85,13 +83,6 @@ export function getEngineSupportedThinkingLevels<TApi extends Api>(model: Model<
 	return piGetSupportedThinkingLevels(model);
 }
 
-export function clampEngineThinkingLevel<TApi extends Api>(
-	model: Model<TApi>,
-	requested: ModelThinkingLevel,
-): ModelThinkingLevel {
-	return piClampThinkingLevel(model, requested);
-}
-
 export function cleanupEngineSessionResources(sessionId?: string): void {
 	piCleanupSessionResources(sessionId);
 }
@@ -109,10 +100,6 @@ export function isEngineContextOverflow(errorMessage: string, contextWindow?: nu
 		timestamp: Date.now(),
 	};
 	return piIsContextOverflow(message, contextWindow);
-}
-
-export function getEngineOverflowPatterns(): RegExp[] {
-	return piGetOverflowPatterns();
 }
 
 export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unknown {
