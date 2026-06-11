@@ -34,12 +34,19 @@ describe("contracts/context-accounting", () => {
 			provider: "test",
 			model: "test-model",
 			contextWindow: 1000,
-			promptCache: { shellReused: true, cacheReadTokens: 0, cacheWriteTokens: 120, uncachedInputTokens: 4000 },
+			promptCache: {
+				shellReused: true,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 120,
+				uncachedInputTokens: 4000,
+				backendVerdict: "cold",
+			},
 		});
 		strictEqual(withCache.promptCache?.shellReused, true);
-		// The dishonest case stays visible: shell reused, provider read nothing.
+		// The dishonest case stays visible: shell reused, backend re-prefilled.
 		strictEqual(withCache.promptCache?.cacheReadTokens, 0);
 		strictEqual(withCache.promptCache?.uncachedInputTokens, 4000);
+		strictEqual(withCache.promptCache?.backendVerdict, "cold");
 
 		const withoutCache = buildContextLedger({
 			provider: "test",

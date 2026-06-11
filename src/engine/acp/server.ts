@@ -358,10 +358,10 @@ function handleChatEvent(
 		if (last !== undefined) applyStopReason(active, last);
 		return;
 	}
-	// Clio lifecycle events (agent_start, prompt_diagnostics, retry_status,
-	// clio_plan_update) have no ACP v1 SessionUpdate equivalent. The prompt turn
-	// is bounded by the session/prompt response, so emitting non-spec
-	// `progress` updates would break strict clients. They are intentionally dropped.
+	// Clio lifecycle events (agent_start, retry_status, clio_plan_update) have
+	// no ACP v1 SessionUpdate equivalent. The prompt turn is bounded by the
+	// session/prompt response, so emitting non-spec `progress` updates would
+	// break strict clients. They are intentionally dropped.
 }
 
 function rawToolInput(call: { tool: string; args?: Record<string, unknown> }): Record<string, unknown> {
