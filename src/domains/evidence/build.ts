@@ -528,8 +528,6 @@ function parseSessionEntryLine(value: unknown): SessionEntry | null {
 		role: kind,
 		payload: value.payload,
 	};
-	if (value.dynamicInputs !== undefined) entry.dynamicInputs = value.dynamicInputs;
-	if (typeof value.renderedPromptHash === "string") entry.renderedPromptHash = value.renderedPromptHash;
 	return entry;
 }
 

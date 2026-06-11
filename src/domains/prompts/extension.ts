@@ -6,7 +6,7 @@ import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectPromptContext } from "../context/index.js";
 import type { ResourcesContract } from "../resources/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
-import type { CompileForTurnInput, ProjectContextPolicyInput, PromptsContract } from "./contract.js";
+import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 
@@ -23,7 +23,6 @@ export function createPromptsBundle(
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
 	const suppressContextFiles = options.noContextFiles === true;
-	const lastProjectContextHashByCwd = new Map<string, string>();
 
 	function config(): ConfigContract | undefined {
 		return context.getContract<ConfigContract>("config");
@@ -40,7 +39,6 @@ export function createPromptsBundle(
 	function reload(): void {
 		try {
 			table = loadFragments();
-			lastProjectContextHashByCwd.clear();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[clio:prompts] reload failed: ${msg}\n`);
@@ -55,7 +53,7 @@ export function createPromptsBundle(
 	}
 
 	const contract: PromptsContract = {
-		async compileForTurn(input: CompileForTurnInput) {
+		async compileSessionPrompt(input: CompileSessionPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
 			if (table.byId.size === 0) {
 				throw new Error("prompts: no fragments loaded, check startup logs");
@@ -68,17 +66,13 @@ export function createPromptsBundle(
 			if (!suppressContextFiles) {
 				const projectContext = contextDomain()?.renderPromptContext(cwd);
 				contextFiles = projectContext
-					? selectProjectContextForTurn(cwd, projectContext, input.contextPolicy, lastProjectContextHashByCwd)
+					? selectProjectContext(projectContext, input.sessionInputs.providerSupportsTools ?? null)
 					: "";
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
 			const skillsCatalog = resources()?.skillsCatalog(cwd) ?? "";
-			const dynamicInputs = {
-				...input.dynamicInputs,
-				...(typeof input.contextPolicy?.providerSupportsTools === "boolean"
-					? { providerSupportsTools: input.contextPolicy.providerSupportsTools }
-					: {}),
-				...(input.contextPolicy?.sendPolicy ? { sendPolicy: input.contextPolicy.sendPolicy } : {}),
+			const sessionInputs = {
+				...input.sessionInputs,
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
 				...(skillsCatalog.length > 0 ? { skillsCatalog } : {}),
 			};
@@ -86,7 +80,7 @@ export function createPromptsBundle(
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: `safety.${safety}`,
-				dynamicInputs,
+				sessionInputs,
 				additionalFragments: clioRepoAwarenessFragments(cwd),
 			});
 		},
@@ -107,17 +101,6 @@ export function createPromptsBundle(
 				const paths = diff?.hotReload ?? [];
 				if (!diffTouchesFragments(paths)) return;
 				reload();
-			});
-			context.bus.on(BusChannels.ContextActivity, (payload: unknown) => {
-				const activity = payload as { kind: string; phase: string; status: string } | undefined;
-				if (
-					activity &&
-					(activity.kind === "context-init" || activity.kind === "context-clear") &&
-					activity.phase === "done" &&
-					activity.status === "completed"
-				) {
-					lastProjectContextHashByCwd.clear();
-				}
 			});
 		},
 		async stop() {},
@@ -156,14 +139,9 @@ function hasCodewiki(text: string): boolean {
 	return text.includes("<codewiki>");
 }
 
-function renderProjectSynopsis(
-	context: ProjectPromptContext,
-	reason: string,
-	providerSupportsTools: boolean | undefined,
-): string {
+function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
 	const projectType = projectTypeFromPromptContext(context.text);
 	const lines = ["<project-synopsis>"];
-	lines.push(`Reason: ${reason}`);
 	if (projectType) lines.push(`Language: ${projectType}`);
 	if (context.clioMd) {
 		lines.push(`Project: ${context.clioMd.projectName}`);
@@ -189,44 +167,14 @@ function shouldPreloadProjectContext(context: ProjectPromptContext): boolean {
 	return lines <= FULL_PROJECT_CONTEXT_MAX_LINES;
 }
 
-function userTextLooksRepoAware(text: string | undefined): boolean {
-	if (!text) return false;
-	return /\b(repo|repository|codebase|workspace|source tree|file|files|path|paths|implement|fix|bug|test|tests|build|lint|typecheck|grep|read|diff|commit|clio|context|audit|refactor)\b/i.test(
-		text,
-	);
-}
-
-function selectProjectContextReason(
-	cwd: string,
-	contextHash: string,
-	policy: ProjectContextPolicyInput | undefined,
-	lastProjectContextHashByCwd: Map<string, string>,
-): string | null {
-	if (policy?.providerSupportsTools === false) return "no-tools-fallback";
-	if (policy?.activeToolCount === 0 && !userTextLooksRepoAware(policy.userText)) return null;
-	if ((policy?.turnCount ?? 0) <= 0) return "first-turn-synopsis";
-	const previousHash = lastProjectContextHashByCwd.get(cwd);
-	if (previousHash !== undefined && previousHash !== contextHash) return "context-fingerprint-changed";
-	if (previousHash === undefined) return "context-fingerprint-changed";
-	if (userTextLooksRepoAware(policy?.userText)) return "repo-aware-request";
-	return null;
-}
-
-function selectProjectContextForTurn(
-	cwd: string,
-	context: ProjectPromptContext,
-	policy: ProjectContextPolicyInput | undefined,
-	lastProjectContextHashByCwd: Map<string, string>,
-): string {
+/**
+ * Project context is selected once per session compile: the full CLIO.md
+ * preload when it is small enough, a compact synopsis otherwise. No per-turn
+ * selection — the session prompt is stable for the session's lifetime.
+ */
+function selectProjectContext(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
 	const contextText = context.text.trim();
 	if (contextText.length === 0) return "";
-	const contextHash = sha256(contextText);
-	if (shouldPreloadProjectContext(context)) {
-		lastProjectContextHashByCwd.set(cwd, contextHash);
-		return contextText;
-	}
-	const reason = selectProjectContextReason(cwd, contextHash, policy, lastProjectContextHashByCwd);
-	lastProjectContextHashByCwd.set(cwd, contextHash);
-	if (!reason) return "";
-	return renderProjectSynopsis(context, reason, policy?.providerSupportsTools);
+	if (shouldPreloadProjectContext(context)) return contextText;
+	return renderProjectSynopsis(context, providerSupportsTools);
 }

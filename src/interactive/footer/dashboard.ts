@@ -387,12 +387,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const capabilities = capabilityLabels(caps);
 
 		const safety = settings?.safetyLevel ?? "auto-edit";
-		const supportsTools = resolution?.capabilities.tools === true;
-		const sendPolicy = !supportsTools
-			? "no-tools-fallback"
-			: settings?.orchestrator?.endpoint === "llamacpp"
-				? "prefix-cache-deterministic"
-				: "reduced-repeated-envelope";
 		const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
 
 		return {
@@ -410,7 +404,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				thinking,
 				capabilities,
 				safety,
-				sendPolicy,
 				toolProfile,
 			},
 			context: {

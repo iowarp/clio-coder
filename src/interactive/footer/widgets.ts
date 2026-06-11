@@ -46,7 +46,6 @@ export interface SessionFacts {
 	thinking: string | null;
 	capabilities: string[] | null;
 	safety: string | null;
-	sendPolicy: string | null;
 	toolProfile: string | null;
 }
 
@@ -397,14 +396,6 @@ export function workspaceQuadrant(facts: WorkspaceFacts, _options: ExpandedQuadr
 	]);
 }
 
-function shortPolicyLabel(policy: string): string {
-	return policy
-		.replace(/reduced-repeated-envelope/g, "reduced envelope")
-		.replace(/prefix-cache-deterministic/g, "prefix cache")
-		.replace(/no-tools-fallback/g, "no tools fallback")
-		.replace(/-/g, " ");
-}
-
 function sessionIdentity(facts: SessionFacts): { key: string; value: string } {
 	if (facts.id) return { key: "id", value: facts.id };
 	if (facts.name) return { key: "name", value: facts.name };
@@ -428,7 +419,6 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 		kv("think", facts.thinking, "reason"),
 		styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
 		kv("safety", facts.safety, "accentDeep"),
-		kv("policy", facts.sendPolicy ? shortPolicyLabel(facts.sendPolicy) : null),
 		kv("profile", facts.toolProfile),
 	]);
 }

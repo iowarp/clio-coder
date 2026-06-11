@@ -41,8 +41,6 @@ export interface MessageEntry extends BaseSessionEntry {
 	kind: "message";
 	role: MessageRole;
 	payload: unknown;
-	dynamicInputs?: unknown;
-	renderedPromptHash?: string;
 }
 
 export interface BashExecutionEntry extends BaseSessionEntry {
@@ -431,7 +429,5 @@ export function fromLegacyTurn(record: ClioTurnRecord): MessageEntry {
 		role: record.kind,
 		payload: record.payload,
 	};
-	if (record.dynamicInputs !== undefined) entry.dynamicInputs = record.dynamicInputs;
-	if (record.renderedPromptHash !== undefined) entry.renderedPromptHash = record.renderedPromptHash;
 	return entry;
 }

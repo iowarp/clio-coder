@@ -337,7 +337,6 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		thinking: "high",
 		capabilities: ["tools", "reason", "vision", "ctx 262k"],
 		safety: "auto-edit",
-		sendPolicy: "reduced-repeated-envelope",
 		toolProfile: "profile",
 	};
 
@@ -601,7 +600,10 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		const activityText = wideColumnText(lines, 3);
 		ok(sessionText.includes("target"), `SESSION should include target, got "${sessionText}"`);
 		ok(sessionText.includes("caps"), `SESSION should include caps, got "${sessionText}"`);
-		ok(sessionText.includes("reduced envelope"), `SESSION should abbreviate policy, got "${sessionText}"`);
+		ok(
+			!sessionText.includes("policy"),
+			`SESSION must not show a send-policy row (one send path exists), got "${sessionText}"`,
+		);
 		ok(!sessionText.includes("speed"), `SESSION should not include speed, got "${sessionText}"`);
 		ok(!sessionText.includes("cost"), `SESSION should not include cost, got "${sessionText}"`);
 		ok(!sessionText.includes("tok"), `SESSION should not include token rows, got "${sessionText}"`);

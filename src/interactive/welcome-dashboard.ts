@@ -45,7 +45,6 @@ export interface WelcomeDashboardStats {
 	activeCapabilities: string[];
 	extensions: { active: number; installed: number } | null;
 	safetyLevel: string;
-	sendPolicy: string;
 	toolProfile: string;
 	compactionThreshold: string;
 	clioMdStatus: string;
@@ -166,13 +165,6 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		settings?.orchestrator?.model,
 		settings?.orchestrator?.thinkingLevel ?? "off",
 	);
-	const supportsTools = resolution?.capabilities.tools === true;
-	const sendPolicy = !supportsTools
-		? "no-tools-fallback"
-		: settings?.orchestrator?.endpoint === "llamacpp"
-			? "prefix-cache-deterministic"
-			: "reduced-repeated-envelope";
-
 	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
 	const compactionThreshold = settings?.compaction?.thresholds?.llmSummary
 		? `${Math.round(settings.compaction.thresholds.llmSummary * 100)}%`
@@ -226,7 +218,6 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		activeCapabilities,
 		extensions: deps.getExtensionStats?.() ?? null,
 		safetyLevel,
-		sendPolicy,
 		toolProfile,
 		compactionThreshold,
 		clioMdStatus,
@@ -315,7 +306,6 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			: `${theme.fg("dim", "no handoff")}`;
 
 	const safetyStr = `safety ${theme.fg("accentDeep", stats.safetyLevel)}`;
-	const policyStr = `policy ${theme.fg("dim", stats.sendPolicy)}`;
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
 
@@ -325,7 +315,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
 		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${policyStr} · ${profileStr} · ${compactStr}`;
+		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
 		const hintLine = `  ${theme.fg("muted", "Hint:")}     ${hintStr}`;
 
 		const innerWidth = safeWidth - 4;

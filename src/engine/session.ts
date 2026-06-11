@@ -43,14 +43,12 @@ export interface ClioSessionMeta {
 	endedAt: string | null;
 	model: string | null;
 	endpoint: string | null;
-	compiledPromptHash: string | null;
-	staticCompositionHash: string | null;
 	clioVersion: string;
 	piMonoVersion: string;
 	platform: string;
 	nodeVersion: string;
 	/**
-	 * v2 on every new session. v1 files on disk omit the field; readers
+	 * v3 on every new session. v1 files on disk omit the field; readers
 	 * treat missing as 1 and run the migration chain in
 	 * src/domains/session/migrations on resume. Bumped by a future
 	 * migration when the entry-union vocabulary changes again.
@@ -58,7 +56,7 @@ export interface ClioSessionMeta {
 	sessionFormatVersion?: number;
 }
 
-export const CURRENT_SESSION_FORMAT_VERSION = 2;
+export const CURRENT_SESSION_FORMAT_VERSION = 3;
 
 export interface ClioSessionJsonlHeader {
 	type: "session";
@@ -76,8 +74,6 @@ export interface ClioTurnRecord {
 	at: string;
 	kind: "user" | "assistant" | "tool_call" | "tool_result" | "system" | "checkpoint";
 	payload: unknown;
-	dynamicInputs?: unknown;
-	renderedPromptHash?: string;
 }
 
 export interface SessionTreeNode {
@@ -345,8 +341,6 @@ function recordFromTurn(turn: ClioTurnRecord): unknown {
 		role: turn.kind,
 		payload: turn.payload,
 	};
-	if (turn.dynamicInputs !== undefined) entry.dynamicInputs = turn.dynamicInputs;
-	if (turn.renderedPromptHash !== undefined) entry.renderedPromptHash = turn.renderedPromptHash;
 	return entry;
 }
 
@@ -367,8 +361,6 @@ function buildMeta(input: { cwd: string; model?: string | null; endpoint?: strin
 		endedAt: null,
 		model: input.model ?? null,
 		endpoint: input.endpoint ?? null,
-		compiledPromptHash: null,
-		staticCompositionHash: null,
 		clioVersion: readClioVersion(),
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
