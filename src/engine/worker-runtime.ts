@@ -25,7 +25,6 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import { resolveToolPalette } from "../tools/palette.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
@@ -166,23 +165,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// runtime (lmstudio-native, ollama-native).
 	registerClioApiProviders();
 	const fauxModel = registerFauxFromEnv();
-	const workerPalette = resolveToolPalette({
-		providerSupportsTools: workerProviderSupportsTools(input),
-		userText: input.task,
-		availableTools: input.allowedTools,
-		workerAllowedTools: input.allowedTools,
-	});
-	// Recipe-bound skills: the palette never activates read_skill on its own;
-	// a declared agent skill list is the harness-level grant that does. The
-	// matching per-run policy below restricts read_skill to exactly those names.
+	// Workers are bounded runs against an admission-verified recipe surface.
+	// They have no operator to widen a missing tool and no activate_tools, so
+	// intent guessing over the task text must never drop an admitted tool:
+	// the active surface is exactly the admitted set.
 	const agentSkillPolicy =
 		input.allowedTools.includes(ToolNames.ReadSkill) && input.noSkills !== true
 			? agentSkillToolPolicy(input.agentSkills ?? [])
 			: undefined;
-	const activeWorkerTools =
-		agentSkillPolicy && !workerPalette.activeTools.includes(ToolNames.ReadSkill)
-			? [...workerPalette.activeTools, ToolNames.ReadSkill]
-			: workerPalette.activeTools;
+	const activeWorkerTools = workerProviderSupportsTools(input) ? input.allowedTools : [];
 
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);
@@ -220,7 +211,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		includeInteractiveTools: false,
 		...(agentSkillPolicy ? { invokeOptions: () => ({ pendingSkillPolicy: agentSkillPolicy }) } : {}),
 	});
-	if (tools.length === 0 && input.allowedTools.length > 0 && workerPalette.groups.length > 0) {
+	if (tools.length === 0 && activeWorkerTools.length > 0) {
 		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);
 	}
 	const effectiveThinkingLevel = clampThinkingLevelForModel(

@@ -547,6 +547,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
+		...(agents ? { getAgentCatalog: () => renderAgentCatalogSections(agents.list()).stable } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,

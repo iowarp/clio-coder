@@ -12,7 +12,8 @@ export type ToolPaletteGroup =
 	| "external"
 	| "skills"
 	| "artifact"
-	| "escape_hatch";
+	| "escape_hatch"
+	| "meta";
 
 export type ToolPaletteIntent =
 	| "small_talk"
@@ -78,6 +79,7 @@ export const TOOL_GROUPS: Readonly<Record<ToolPaletteGroup, ReadonlyArray<ToolNa
 	skills: [ToolNames.ReadSkill, ToolNames.AskUser, ToolNames.CreateSkill],
 	artifact: [ToolNames.WritePlan, ToolNames.WriteReview],
 	escape_hatch: [ToolNames.Bash],
+	meta: [ToolNames.ActivateTools],
 };
 
 const GROUP_ORDER: ReadonlyArray<ToolPaletteGroup> = [
@@ -91,7 +93,12 @@ const GROUP_ORDER: ReadonlyArray<ToolPaletteGroup> = [
 	"skills",
 	"artifact",
 	"escape_hatch",
+	"meta",
 ];
+
+export function isToolPaletteGroup(value: string): value is ToolPaletteGroup {
+	return Object.hasOwn(TOOL_GROUPS, value);
+}
 
 /** One-line purpose per group, rendered in the always-present Tool Catalog. */
 const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
@@ -105,6 +112,7 @@ const GROUP_PURPOSE: Readonly<Record<ToolPaletteGroup, string>> = {
 	skills: "load or author SKILL.md playbooks; ask structured operator questions",
 	artifact: "write PLAN.md / REVIEW.md artifacts",
 	escape_hatch: "raw shell via bash",
+	meta: "activate additional catalog tools mid-run",
 };
 
 const GREETING_RE = /^(?:hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|ping)[.!?\s]*$/i;
@@ -260,13 +268,21 @@ function resolvePhase(
 	return "inspection";
 }
 
+/**
+ * Groups whose schemas attach this turn. The base read-only groups plus
+ * `meta` (activate_tools) attach on every work turn; the signal-gated groups
+ * below are prefetch hints that save the model one activate_tools round trip
+ * when the user text makes the need obvious. A signal miss is recoverable:
+ * the model widens itself via activate_tools, so no domain-specific trigger
+ * ever needs to be added here.
+ */
 function requestedGroups(
 	intent: ToolPaletteIntent,
 	phase: ToolPalettePhase,
 	signals: IntentSignals,
 ): ToolPaletteGroup[] {
 	if (intent === "small_talk" || intent === "tool_meta") return [];
-	const groups: ToolPaletteGroup[] = ["orientation", "locate", "inspect"];
+	const groups: ToolPaletteGroup[] = ["orientation", "locate", "inspect", "meta"];
 	if (intent === "coding" || signals.edit || signals.skillAuthoring) groups.push("mutate");
 	if (
 		signals.validation ||
