@@ -100,7 +100,7 @@ Core data paths:
 
 Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
-- `src/tools/palette.ts` and provider capability resolution decide which tool schemas are visible to the model for a turn.
+- Provider capability resolution decides whether tool schemas are sent at all; tool-capable sessions receive the full registry as one deterministic session tool surface.
 - `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy.
 - `src/tools/registry.ts` is the admission point for every tool invocation.
 - `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
