@@ -36,4 +36,4 @@ If any invariant is intentionally relaxed, link the design note that authorized 
 
 ## Related
 
-<!-- Issues, plans under docs/.superpowers/, prior PRs. -->
+<!-- Issues, design notes, prior PRs. -->

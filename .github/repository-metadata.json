@@ -1,15 +1,19 @@
 {
-	"description": "Agentic coding harness for supervised repository work, model-target orchestration, worker dispatch, and self-development.",
+	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
 	"homepage": "https://iowarp.ai",
 	"topics": [
 		"ai",
 		"agentic-ai",
 		"agentic-coding",
+		"agentic-science",
 		"coding-agents",
 		"developer-tools",
+		"hpc",
 		"llm",
+		"local-llm",
 		"multi-agent",
 		"research-software",
+		"scientific-computing",
 		"software-engineering",
 		"terminal"
 	],

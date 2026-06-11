@@ -14,84 +14,74 @@
 <p align="center"><strong>The coding agent in IOWarp's CLIO ecosystem of agentic science.</strong></p>
 
 <p align="center">
-  Terminal-first. Model-flexible. Agent-aware. Built for HPC and scientific-software developers who want AI assistance on real research code without giving up review, control, or auditability.
+  Terminal-first. Model-flexible. Built for HPC and scientific-software developers who want
+  AI assistance on real research code without giving up review, control, or auditability.
 </p>
 
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases"><img alt="version" src="https://img.shields.io/badge/version-0.2.2-00d4db?style=flat-square" /></a>
-  <a href="#install-from-source"><img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.19-147366?style=flat-square" /></a>
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
-  <a href="https://github.com/iowarp/clio-coder/actions"><img alt="ci" src="https://img.shields.io/badge/ci-deterministic-147366?style=flat-square" /></a>
-  <a href="#npm-status"><img alt="install" src="https://img.shields.io/badge/npm-not%20published-lightgrey?style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/tag/iowarp/clio-coder?sort=semver&label=release&color=00d4db&style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/iowarp/clio-coder/ci.yml?branch=main&label=ci&style=flat-square" /></a>
+  <a href="#requirements"><img alt="Node >=22.19" src="https://img.shields.io/badge/node-%3E%3D22.19-147366?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
   <a href="https://iowarp.ai"><img alt="IOWarp CLIO" src="https://img.shields.io/badge/IOWarp-CLIO-00d4db?style=flat-square" /></a>
 </p>
 
 ---
 
+Clio Coder is a supervised coding agent that runs inside your repository from
+the terminal. You bring a model: a local runtime such as llama.cpp, Ollama,
+LM Studio, vLLM, or SGLang, or a cloud API. Clio brings the harness: an
+interactive TUI, typed tools instead of an unrestricted shell, a fleet of
+focused agents, durable sessions, and receipts that record what actually
+happened.
+
+It is built for developers working on research software and HPC codebases who
+want agentic help with inspection, planning, edits, reviews, and validation
+while keeping every privileged action gated and auditable.
+
+## Highlights
+
+- **Local-first inference.** The harness is engineered for local models:
+  byte-stable prompt prefixes that keep single-slot llama.cpp caches hot,
+  bounded tool results, single-threshold compaction, and per-call timing and
+  cache telemetry persisted in the session ledger.
+- **Target-first model routing.** Configure named targets across local
+  runtimes and cloud APIs, probe their health, and route interactive chat and
+  fleet dispatch through different targets independently.
+- **A supervised tool surface.** Typed git, test, lint, build, package-script,
+  and frontend-validation tools replace an unrestricted shell. Bash is
+  default-deny, governed by damage-control rules and per-project policy.
+- **Built-in agent fleet.** Dispatch `scout`, `planner`, `reviewer`,
+  `implementer`, `debugger`, and other focused recipes as bounded workers with
+  explicit tool profiles and per-run receipts.
+- **Receipts and audit logs.** Every run records token usage, cost, tool
+  activity, safety decisions, and receipt integrity, so you can reconstruct
+  what the agent did and why.
+- **ACP interop.** `clio acp` serves the Agent Client Protocol over stdio for
+  ACP frontends, and dispatch can delegate tasks to external ACP agents while
+  Clio mediates permissions.
+- **Project context and skills.** `clio init` bootstraps a checked-in
+  `CLIO.md` as the canonical project guide, and reusable `SKILL.md` guides
+  load on demand from per-user and per-project discovery roots, including
+  cross-harness layouts.
+
 ## Status
 
-Clio Coder is an **experimental alpha**. The current public release is
-**v0.2.2**.
+Clio Coder is alpha software distributed from source. The current release is
+**v0.2.2**. The `@iowarp/clio-coder` package is not yet published to npm;
+install from a source checkout as described below. Interfaces may still move
+between minor versions, and model-specific behavior varies by target. Release
+history lives in the [CHANGELOG](CHANGELOG.md), and every release is gated by
+the deterministic `npm run ci:release` suite.
 
-v0.2.2 is a source-checkout alpha for local model operators and the largest
-harness revision since the v0.2.0 community alpha. It removes the
-CLI-subprocess runtime era in favor of direct HTTP/native/pi-ai-backed targets
-with ACP as the interop surface, and it rebuilds the local-inference hot path
-around prompt-prefix stability: one compiled system prompt and one
-deterministic tool surface per session, bounded tool results, single-threshold
-compaction, and per-call timing and cache telemetry persisted in the session
-ledger. Sessions now append to their on-disk ledger instead of rewriting it,
-and live routing is session-owned, so several Clio processes can run on one
-machine at the same time. A reliable local install/uninstall path, neutral
-first-run configuration examples, curated skills, and stronger skill
-activation round out the release.
+## Requirements
 
-It builds on the v0.2.0 community alpha foundations: durable sessions,
-`CLIO.md` project context adoption, target-first runtime routing, fleet
-dispatch, typed validation tools, receipts, and local-runtime support.
+- Node.js `>=22.19.0` and npm
+- Linux or macOS (Windows is best effort until a stable release)
+- A model target: a local OpenAI-compatible server, Ollama, LM Studio,
+  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API key
 
-Expect sharp edges around first-run configuration, local runtime availability,
-and model-specific behavior. This is ready for early users who can build from
-source, run checks, and report failures with receipts and logs. It is not a
-production-stable managed coding assistant.
-
-## What It Does
-
-Clio Coder runs inside real repositories as a supervised terminal harness. It
-lets developers ask for inspection, plans, edits, reviews, validation, and
-focused fleet-agent work while Clio gates tool access and records what happened.
-
-Core surfaces:
-
-| Surface | Purpose |
-| --- | --- |
-| Interactive TUI | Work with an assistant without leaving the shell. |
-| Target-first configuration | Route chat and fleet dispatch through HTTP/native/pi-ai-backed targets. |
-| Built-in agents | Dispatch `scout`, `planner`, `reviewer`, `implementer`, and other focused recipes. |
-| Typed tools | Run common git, test, lint, build, package-script, and frontend validation paths without handing the model an unrestricted shell. |
-| Receipts and audit logs | Track completed runs, token usage, costs, tool activity, safety decisions, and receipt integrity. |
-| Project context | Use checked-in `CLIO.md` as the canonical project guide. |
-
-Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai
-and from Clio's generic `openai-compat` and `anthropic-compat` targets; Clio
-adds orchestration, local/native runtime ergonomics, target configuration,
-fleet dispatch, safety, and receipts rather than mirroring every pi-ai provider
-as a separate product surface.
-
-Use it if you run local models such as Ollama, LM Studio, llama.cpp, vLLM, or
-SGLang, or if you have ChatGPT Codex OAuth or cloud API keys and want
-supervised repository work with auditable outputs.
-
-## Install From Source
-
-Requirements:
-
-- Node.js `>=22.19.0`
-- npm
-- A model target, such as a local OpenAI-compatible gateway, Ollama, LM Studio,
-  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API.
-
-Recommended alpha source install:
+## Install
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
@@ -101,54 +91,33 @@ hash -r
 clio --version
 ```
 
-`npm run install:local` runs dependency/build checks and installs a deterministic
-symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`. It warns if that bin dir is
-not on `PATH`. If you edit TypeScript source, run `npm run build` again before
-testing `clio`; the local symlink points at `dist/cli/index.js`. For a
-reproducible release checkout after v0.2.2 is published, `main` and tag
-`v0.2.2` should point at the same commit.
+`npm run install:local` verifies dependencies, builds the CLI, and installs a
+symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`. It warns if that
+directory is not on your `PATH`. The symlink executes `dist/cli/index.js`, so
+re-run `npm run build` after editing TypeScript sources.
 
-## npm Status
-
-`@iowarp/clio-coder` is not published on npm for v0.2.2. Use the source install
-path above unless a future release note explicitly announces registry
-availability.
-
-## Uninstall Local Source Install
-
-Preview first, then remove the local symlink and Clio state:
+To uninstall, preview first and then remove the symlink and local state:
 
 ```bash
 npm run uninstall:local -- --dry-run
 npm run uninstall:local -- --force
-hash -r
 ```
 
-To remove sessions/cache while keeping only the active `settings.yaml` and
-`credentials.yaml` files, use:
+Add `--keep-settings-auth` to preserve `settings.yaml` and `credentials.yaml`,
+or `--keep-state` to unlink the binary only. Full lifecycle details are in
+[docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
 
-```bash
-npm run uninstall:local -- --force --keep-settings-auth
-```
+## Quick Start
 
-Use `--keep-state` for binary-only unlinking. The script refuses to remove a
-`clio` symlink unless it points into the current checkout or an explicitly
-accepted path.
-
-## First Run
-
-Start Clio Coder from the repository you want to work on:
+Run Clio from the repository you want to work on. Check your environment,
+then configure one target against a running model server. The example below
+uses LM Studio; other local runtime ids include `ollama-native`, `llamacpp`,
+`vllm`, and `sglang`.
 
 ```bash
 cd /path/to/your/repo
 clio doctor --fix
-clio configure --list
-```
 
-Start one local runtime, then configure a single target with its runtime id and
-wire model id. Example for LM Studio:
-
-```bash
 clio configure \
   --id local-lmstudio \
   --runtime lmstudio-native \
@@ -156,80 +125,101 @@ clio configure \
   --model your-model-id \
   --set-orchestrator \
   --set-fleet-default
+
 clio targets use local-lmstudio
 clio targets --probe
-clio
 ```
 
-Other common local runtime ids are `ollama-native`, `llamacpp`, `vllm`, and
-`sglang`; use `your-model-id` from that runtime's model list. Add
-`--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only
-when you know those model-specific overrides.
-
-Quick headless smoke after the target probes healthy:
+Once the target probes healthy, try a headless turn, then start the TUI:
 
 ```bash
 clio run "Summarize this repository layout and identify the main entry points."
+clio
 ```
 
-Inside the TUI, verify onboarding with:
+Inside the TUI, `/targets`, `/agents`, and `/skills` confirm what the session
+can see. The full command and slash-command reference is in
+[docs/commands-and-modes.md](docs/commands-and-modes.md), and target
+configuration in depth is covered by
+[docs/configuration-and-targets.md](docs/configuration-and-targets.md).
 
-```text
-/targets
-/agents
-/skills
-```
+## Project Context: CLIO.md
+
+Clio loads a checked-in `CLIO.md` as the canonical project guide on every
+session. Run `clio init` in your repository to bootstrap one: the bootstrap
+agent grounds it in your real source structure and can adopt existing
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
+provenance and conflict reporting.
+
+This repository's own [CLIO.md](CLIO.md) is the maintained reference example
+of the format: one identity paragraph, up to six verifiable conventions, up
+to three build-enforced hard invariants, and a handful of dense custom
+sections covering architecture boundaries, workflow traps, and artifact
+policy.
 
 ## Skills
 
-Skills are reusable `SKILL.md` guides the model loads on demand. Clio discovers
-runtime skills from per-user and per-project roots (including `.clio/skills` and
-cross-harness layouts such as `.claude/skills` and `.codex/skills`), surfaces
-them in a catalog, and loads a body on request through `read_skill`. Manage them
-with `clio skills list | inspect | validate | create`.
+Skills are reusable `SKILL.md` guides the model loads on demand. Clio
+discovers them from per-user and per-project roots, including `.clio/skills`
+and cross-harness layouts such as `.claude/skills` and `.codex/skills`, and
+loads bodies on request through `read_skill`. Manage them with
+`clio skills list | inspect | validate | create`.
 
-This repository also ships a curated **skills marketplace** under
-[skills/](skills/README.md): maintainer-approved skills that carry provenance
-frontmatter (`registry-id`, `source-url`, `audit`). The first wave is
-`context-prime` (orient at session start), `context-handoff` (brief the next
-session), `clio-dev` (self-development boundary), and `clio-test` (the v0.2.2
-test harness). The catalog is not a discovery root, so nothing auto-loads;
-activate a skill explicitly:
+This repository also ships a curated skills catalog under
+[skills/](skills/README.md): maintainer-reviewed skills with provenance
+frontmatter. Nothing in the catalog auto-loads; activate a skill explicitly:
 
 ```bash
 skills/install.sh context-handoff   # link into .clio/skills (project scope)
 clio skills list                    # confirm Clio sees it
 ```
 
-See [skills/README.md](skills/README.md) for the catalog, install options, and
-how to contribute a skill.
-
 ## Documentation
 
-The README is only the release entry point. Detailed docs live under [docs/](docs/README.md).
+The README is the entry point; the full documentation set lives under
+[docs/](docs/README.md).
 
-| Need | Read |
+| Topic | Guide |
 | --- | --- |
-| Commands, slash commands, operating posture, keybindings, dispatch, verification, and troubleshooting | [docs/commands-and-modes.md](docs/commands-and-modes.md) |
-| Runtime targets, local model configuration, fleet profiles, and auth | [docs/configuration-and-targets.md](docs/configuration-and-targets.md) |
-| Safety posture, default-deny Bash, project policy, and typed validation | [docs/safety-model.md](docs/safety-model.md) |
-| Built-in agent recipes and dispatch admission | [docs/built-in-agents.md](docs/built-in-agents.md) |
-| Prompt envelope reuse, provider tool delivery, and bounded tool results | [docs/prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
-| Sessions, receipts, evidence, and memory | [docs/evidence-and-memory.md](docs/evidence-and-memory.md) |
-| Extension packages and share archives | [docs/extensions-and-sharing.md](docs/extensions-and-sharing.md) |
-| Source layout and boundary invariants | [docs/architecture.md](docs/architecture.md) |
+| Commands, slash commands, keybindings, dispatch, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
+| Runtime targets, local model configuration, fleet profiles, auth | [configuration-and-targets.md](docs/configuration-and-targets.md) |
+| Install, upgrade, reset, uninstall, state layout | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
+| Safety posture, default-deny Bash, project policy, typed validation | [safety-model.md](docs/safety-model.md) |
+| Context window resolution, compaction, token accounting | [context-engine.md](docs/context-engine.md) |
+| Built-in agent recipes and dispatch admission | [built-in-agents.md](docs/built-in-agents.md) |
+| Prompt envelope reuse, tool delivery, bounded tool results | [prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
+| Sessions, receipts, evidence, memory | [evidence-and-memory.md](docs/evidence-and-memory.md) |
+| Extension packages and share archives | [extensions-and-sharing.md](docs/extensions-and-sharing.md) |
+| Source layout and boundary invariants | [architecture.md](docs/architecture.md) |
+
+## Local Model Performance
+
+llama.cpp and similar backends often expose a single prefix-cache slot. Clio
+keeps the compiled session prompt and provider tool schemas byte-stable so
+that slot can be reused across turns and sessions. When dispatch traffic or
+compaction invalidates the slot, the next turn records the expected-cold
+reasons and shows one dim notice. Per-call cache verdicts (`hot`, `partial`,
+`cold`, `small`) are persisted in the session ledger and can be inspected
+with:
+
+```bash
+node scripts/turn-report.mjs --session <id>
+```
+
+See [docs/context-engine.md](docs/context-engine.md) for how the context
+engine measures and protects the prompt prefix.
 
 ## Release Verification
 
-Deterministic maintainer gate:
+Every release is gated by a deterministic suite:
 
 ```bash
 npm run ci:release
 ```
 
-This runs typecheck, Biome checks, build, contract/smoke/boundary tests, and
-`check-dist` packaging verification. Live model validation is separate,
-manual, and opt-in:
+It runs typecheck, Biome checks, the production build, the contract, smoke,
+and boundary test suites, and `check-dist` packaging verification. Live model
+validation is separate, manual, and opt-in:
 
 ```bash
 CLIO_LIVE_SMOKE=1 \
@@ -240,21 +230,8 @@ CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
 ```
 
-Manual v0.2.2 release-prep evidence covers deterministic CI commands, local
-source install/uninstall smoke checks, interactive TUI checks, dispatch work,
-destructive-delete refusal, and opt-in live model smoke. Treat live checks as
-operator-run release evidence, not guarantees that every local model behaves the
-same way.
-
-## Local Model Performance Notes
-
-llama.cpp and similar local backends often expose one prefix-cache slot. Clio keeps the compiled session prompt and provider tool schemas byte-stable so prompt prefixes can be reused across turns and across sessions when the backend slot still holds the same prefix.
-
-Dispatch traffic and compaction can invalidate that slot. The next turn records `expectedColdReasons` and shows one dim notice. Session forensics report per-call cache verdicts as `hot`, `partial`, `cold`, or `small`:
-
-```bash
-node scripts/turn-report.mjs --session <id>
-```
+Treat live checks as operator-run release evidence, not a guarantee that every
+local model behaves identically.
 
 ## Troubleshooting
 
@@ -267,7 +244,7 @@ node scripts/turn-report.mjs --session <id>
 | Source changes do not appear | Re-run `npm run build`; the linked CLI points at `dist/`. |
 | State appears corrupted | Run `clio doctor`; if needed, run `clio doctor --fix`. |
 
-For issue reports, include:
+When filing an issue, include the output of:
 
 ```bash
 clio --version
@@ -278,24 +255,28 @@ clio targets
 
 Redact secrets, private prompts, logs, and proprietary code.
 
-## Development
+## Contributing
 
-Contributor guidance lives in [CONTRIBUTING.md](CONTRIBUTING.md). The short
-version:
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, architecture invariants, branch and commit conventions, and the review
+rubric. The fast local gate is:
 
 ```bash
 npm ci
 npm run ci
 ```
 
-Use `npm run ci:release` before release artifacts. Do not imply production
-stability, npm publication, or broad local-model guarantees without live proof.
+Security reports go through the channels described in
+[SECURITY.md](SECURITY.md), not public issues.
 
 ## Lineage
 
-Clio Coder is part of the IOWarp CLIO family.
+Clio Coder is part of the IOWarp CLIO family:
 
-- [clio-core](https://github.com/iowarp/clio-core): Chimaera-based context storage runtime.
-- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific data, including HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, Zarr, and more.
+- [clio-core](https://github.com/iowarp/clio-core): Chimaera-based context
+  storage runtime.
+- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific
+  data, including HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, and
+  Zarr.
 
-Apache-2.0. See [LICENSE](LICENSE).
+Licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
