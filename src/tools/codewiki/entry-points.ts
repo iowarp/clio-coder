@@ -43,19 +43,45 @@ function isEntry(entry: CodewikiEntry, packageEntries: ReadonlySet<string>): boo
 	return /(^|\/)(index|main|cli|orchestrator|bootstrap)\.tsx?$/.test(entry.path);
 }
 
+const DEFAULT_ENTRY_LIMIT = 25;
+const MAX_ENTRY_LIMIT = 200;
+
 export const entryPointsTool: ToolSpec = {
 	name: ToolNames.EntryPoints,
 	description:
 		"Return likely project entry points from the codewiki index. Use this tool to locate main entry points or initialization routes in the codebase.",
-	parameters: Type.Object({}),
+	parameters: Type.Object({
+		limit: Type.Optional(
+			Type.Number({
+				description: `Maximum entries returned. Default: ${DEFAULT_ENTRY_LIMIT}, max: ${MAX_ENTRY_LIMIT}. Package-manifest entries rank first.`,
+			}),
+		),
+	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
-	async run(): Promise<ToolResult> {
+	async run(args): Promise<ToolResult> {
 		const cwd = process.cwd();
 		const loaded = loadCodewikiForTool(cwd);
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const packageEntries = readPackageEntryPaths(cwd);
 		const entries = loaded.codewiki.entries.filter((entry) => isEntry(entry, packageEntries));
-		return { kind: "ok", output: renderEntries(entries) };
+		const limit =
+			typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0
+				? Math.min(Math.floor(args.limit), MAX_ENTRY_LIMIT)
+				: DEFAULT_ENTRY_LIMIT;
+		// Manifest-declared entries are the strongest signal; surface them first
+		// so a small default limit never drops package.json main/bin targets.
+		const ranked = [...entries].sort((a, b) => {
+			const aPkg = packageEntries.has(a.path) ? 0 : 1;
+			const bPkg = packageEntries.has(b.path) ? 0 : 1;
+			return aPkg === bPkg ? a.path.localeCompare(b.path) : aPkg - bPkg;
+		});
+		const limited = ranked.slice(0, limit);
+		const omitted = ranked.length - limited.length;
+		const output =
+			omitted > 0
+				? `${renderEntries(limited)}\n[${omitted} more entries omitted; pass limit up to ${MAX_ENTRY_LIMIT} for more]`
+				: renderEntries(limited);
+		return { kind: "ok", output };
 	},
 };

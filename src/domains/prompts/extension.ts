@@ -79,7 +79,6 @@ export function createPromptsBundle(
 					? { providerSupportsTools: input.contextPolicy.providerSupportsTools }
 					: {}),
 				...(input.contextPolicy?.sendPolicy ? { sendPolicy: input.contextPolicy.sendPolicy } : {}),
-				...(typeof input.contextPolicy?.turnCount === "number" ? { turnCount: input.contextPolicy.turnCount } : {}),
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
 				...(skillsCatalog.length > 0 ? { skillsCatalog } : {}),
 			};

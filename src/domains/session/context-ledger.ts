@@ -79,6 +79,25 @@ export interface BuildContextLedgerInput {
 		tokensAfter: number;
 		trigger: string;
 	} | null;
+	/** Prompt-cache honesty line; null until a turn has compiled and settled. */
+	promptCache?: PromptCacheStats | null;
+}
+
+/**
+ * Shell reuse and provider cache reuse are different facts and the overlay
+ * shows both: `shellReused` only means Clio's session-shell hash matched the
+ * previous turn; `cacheReadTokens` is what the provider actually reused.
+ * A reused shell with zero cache reads is the dishonest case this surfaces.
+ */
+export interface PromptCacheStats {
+	/** Compiled session-shell hash matched the previous turn. */
+	shellReused: boolean;
+	/** Provider-reported cache-read tokens for the last run; null when the provider reports no cache usage. */
+	cacheReadTokens: number | null;
+	/** Provider-reported cache-write tokens for the last run. */
+	cacheWriteTokens: number | null;
+	/** Provider-reported uncached input tokens for the last run. */
+	uncachedInputTokens: number | null;
 }
 
 export interface ContextLedgerGroup {
@@ -117,6 +136,7 @@ export interface ContextLedger {
 		tokensAfter: number;
 		trigger: string;
 	} | null;
+	promptCache: PromptCacheStats | null;
 }
 
 const DEFAULT_AUTO_THRESHOLD = 0.85;
@@ -293,5 +313,6 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		groups,
 		meter,
 		lastCompaction: input.lastCompaction ?? null,
+		promptCache: input.promptCache ?? null,
 	};
 }

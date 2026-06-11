@@ -186,31 +186,16 @@ describe("contracts/ask_user", () => {
 		strictEqual(tools.includes(ToolNames.AskUser), false);
 	});
 
-	it("plain interview phrasing does not expose read_skill or ask_user", () => {
+	it("interview phrasing keeps the full stable surface (ask_user included)", () => {
+		// Per-turn intent narrowing was removed: the surface is the full policy
+		// bound on every ordinary turn so the provider prefix cache survives.
 		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "grill me on the plugin design",
-		});
-
-		strictEqual(palette.activeTools.includes(ToolNames.ReadSkill), false);
-		strictEqual(palette.activeTools.includes(ToolNames.AskUser), false);
-	});
-
-	it("explicit ask_user interview requests expose only ask_user", () => {
-		const compact = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
 			userText: "using your ask_user tool interview me about new skills added to clio coder",
 		});
-		deepStrictEqual(compact.activeTools, [ToolNames.AskUser]);
-
-		const spaced = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "interview me about the plugin design",
-		});
-		deepStrictEqual(spaced.activeTools, [ToolNames.AskUser]);
+		ok(palette.activeTools.includes(ToolNames.AskUser));
+		strictEqual(palette.activeTools.length, ALL_TOOLS.length);
 	});
 
 	it("pending skill requests expose only read_skill and ask_user before the skill workflow starts", () => {

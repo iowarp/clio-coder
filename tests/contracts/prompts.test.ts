@@ -161,7 +161,7 @@ describe("contracts/prompts compiler logic", () => {
 		ok(a.segmentManifest.some((segment) => segment.id === "operating-contract"));
 	});
 
-	it("trims session-shell tool guidance when no tools are active", () => {
+	it("keeps the fleet and skills catalogs in the shell even on a tool-free turn", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -172,19 +172,19 @@ describe("contracts/prompts compiler logic", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: [],
-				toolPaletteIntent: "small_talk",
-				toolPalettePhase: "initial",
-				agentCatalogStable: "Clio fleet details.",
+				agentCatalog: "Clio fleet details.",
 				skillsCatalog: "# Skills",
 			},
 		});
 
-		ok(result.systemPrompt.includes("Active tools this turn: none"));
-		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
-		strictEqual(result.systemPrompt.includes("# Skills"), false);
+		// Suppression is per-turn; the session shell must stay byte-identical
+		// so the provider prefix cache survives the suppressed turn.
+		ok(result.systemPrompt.includes("No tool schemas are attached this turn"));
+		ok(result.systemPrompt.includes("# Agent Fleet"));
+		ok(result.systemPrompt.includes("# Skills"));
 	});
 
-	it("always renders the tool catalog so the model knows its full surface with no active tools", () => {
+	it("renders the skills and fleet catalogs unconditionally for tool-capable targets", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -194,26 +194,23 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: [],
-				toolPaletteIntent: "small_talk",
-				toolPalettePhase: "initial",
-				toolCatalog: "- inspect (read, grep, list): read, grep, ls\n- delegate (dispatch fleet): dispatch",
+				activeToolNames: ["read", "grep"],
+				agentCatalog: "Clio fleet details.",
+				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
 			},
 		});
 
-		ok(result.systemPrompt.includes("# Tool Catalog"));
-		ok(result.systemPrompt.includes("read, grep, ls"));
-		ok(result.systemPrompt.includes("dispatch"));
-		// The old wording told the model to deny repository capability; it must be gone.
-		strictEqual(result.systemPrompt.includes("Do not claim repository facts that require inspection"), false);
-		// The catalog is part of the stable session shell, not the volatile turn fragments.
-		strictEqual(
-			result.dynamicPromptFragments.some((fragment) => fragment.id === "tool-catalog"),
-			false,
-		);
+		ok(result.systemPrompt.includes("# Agent Fleet"));
+		ok(result.systemPrompt.includes("available_skills"));
+		// Both live in the stable session shell, never in volatile turn fragments.
+		const dynamicIds = result.dynamicPromptFragments.map((fragment) => fragment.id);
+		strictEqual(dynamicIds.includes("tools-and-agents"), false);
+		strictEqual(dynamicIds.includes("skills-catalog"), false);
+		// The Tool Catalog prose block is gone: attached schemas are authoritative.
+		strictEqual(result.systemPrompt.includes("# Tool Catalog"), false);
 	});
 
-	it("omits the tool catalog when the target has no tool channel", () => {
+	it("omits the catalogs when the target has no tool channel", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -223,51 +220,39 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: false,
-				toolCatalog: "- inspect (read, grep): read, grep",
-			},
-		});
-
-		strictEqual(result.systemPrompt.includes("# Tool Catalog"), false);
-	});
-
-	it("does not emit tool-gated catalogs when active tool names are absent", () => {
-		const table = loadFragments();
-		const result = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			dynamicInputs: {
-				provider: "stub",
-				model: "stub-model",
-				providerSupportsTools: true,
-				agentCatalogStable: "Clio fleet details.",
+				agentCatalog: "Clio fleet details.",
 				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
 			},
 		});
 
 		strictEqual(result.systemPrompt.includes("# Agent Fleet"), false);
-		strictEqual(result.systemPrompt.includes("# Skills"), false);
+		strictEqual(result.systemPrompt.includes("available_skills"), false);
 	});
 
-	it("includes the skills catalog when read_skill is active", () => {
+	it("keeps the session shell byte-identical across differently-phrased work turns", () => {
 		const table = loadFragments();
-		const result = compile(table, {
+		const inputs = {
+			provider: "stub",
+			model: "stub-model",
+			providerSupportsTools: true,
+			activeToolNames: ["read", "grep", "dispatch", "read_skill", "ask_user"],
+			agentCatalog: "Clio fleet details.",
+			skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
+		};
+		const a = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
 			safety: "safety.auto-edit",
-			dynamicInputs: {
-				provider: "stub",
-				model: "stub-model",
-				providerSupportsTools: true,
-				activeToolNames: ["read_skill"],
-				toolPaletteIntent: "skill_work",
-				toolPalettePhase: "editing",
-				skillsCatalog: '# Skills\n\n<available_skills catalog_hash="abc123">\n</available_skills>',
-			},
+			dynamicInputs: inputs,
 		});
-
-		ok(result.systemPrompt.includes("# Skills"));
-		ok(result.systemPrompt.includes("available_skills"));
+		const b = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			dynamicInputs: { ...inputs },
+		});
+		strictEqual(a.sessionShellHash, b.sessionShellHash);
+		strictEqual(a.systemPrompt, b.systemPrompt);
 	});
 
 	it("describes ask_user interview behavior only when ask_user is active", () => {
@@ -281,9 +266,6 @@ describe("contracts/prompts compiler logic", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: ["read_skill", "ask_user"],
-				toolPaletteIntent: "skill_work",
-				toolPalettePhase: "editing",
-				toolCatalog: "- skills (load skills; ask structured operator questions): read_skill, ask_user",
 			},
 		});
 		ok(active.systemPrompt.includes("first call read_skill"));
@@ -300,8 +282,6 @@ describe("contracts/prompts compiler logic", () => {
 				model: "stub-model",
 				providerSupportsTools: true,
 				activeToolNames: ["read_skill"],
-				toolPaletteIntent: "skill_work",
-				toolPalettePhase: "editing",
 			},
 		});
 		strictEqual(inactive.systemPrompt.includes("Use ask_user for structured operator interviews"), false);
@@ -462,7 +442,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
 	});
 
-	it("omits the skills catalog when read_skill is not active", async () => {
+	it("keeps the skills catalog in the shell regardless of which tools are active", async () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -478,9 +458,11 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			},
 		});
 
-		strictEqual(result.systemPrompt.includes("# Skills"), false);
-		strictEqual(result.systemPrompt.includes("available_skills"), false);
-		strictEqual(result.systemPrompt.includes('scope="project"'), false);
+		// Gating this block on active tools made the session shell flap across
+		// turns and invalidated the provider prefix cache. Skill loading stays
+		// policy-gated in read_skill itself; the catalog is discovery only.
+		ok(result.systemPrompt.includes("# Skills"));
+		ok(result.systemPrompt.includes("available_skills"));
 	});
 
 	it("workspace_context is not described as automatic and is explicit/manual", () => {

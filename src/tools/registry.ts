@@ -4,7 +4,6 @@ import {
 	type SkillActivation,
 	skillActivationFromToolDetails,
 } from "../core/skill-activation.js";
-import type { ToolActivationPolicy } from "../core/tool-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
@@ -124,7 +123,6 @@ export interface ToolInvokeOptions {
 	correlationId?: string;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 	askUserPolicy?: AskUserToolPolicy;
-	toolActivationPolicy?: ToolActivationPolicy;
 }
 
 export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";

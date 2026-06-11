@@ -1,21 +1,14 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
-import {
-	consumeToolActivationGrants,
-	createToolActivationPolicy,
-	grantToolActivation,
-	narrowToolActivationBound,
-} from "../../src/core/tool-activation.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
-import { createActivateToolsTool } from "../../src/tools/activate-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -23,7 +16,7 @@ import { findTool } from "../../src/tools/find.js";
 import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
-import { renderToolCatalog, resolveToolPalette } from "../../src/tools/palette.js";
+import { resolveToolPalette } from "../../src/tools/palette.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import { DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
@@ -225,66 +218,30 @@ describe("contracts/tools basic happy paths", () => {
 });
 
 describe("contracts/tools palette", () => {
-	it("does not expose read_skill for plain skill-management language", () => {
-		const install = resolveToolPalette({
+	it("attaches the full policy bound on ordinary turns, in stable sorted order", () => {
+		const work = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
-			userText: "install a local skill folder for this project",
+			userText: "fix the parser bug and run the tests",
 		});
-		strictEqual(install.activeTools.includes(ToolNames.ReadSkill), false);
-		strictEqual(install.activeTools.includes(ToolNames.CreateSkill), false);
+		strictEqual(work.activeTools.length, ALL_TOOLS.length);
+		deepStrictEqual([...work.activeTools], [...work.availableTools]);
+		deepStrictEqual(
+			[...work.activeTools],
+			[...work.activeTools].sort((a, b) => a.localeCompare(b)),
+		);
 
-		const update = resolveToolPalette({
+		// The surface is identical regardless of phrasing: prefix-cache
+		// stability across turns beats per-turn intent guessing.
+		const chat = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
-			userText: "update the skill catalog and tell me what exists",
+			userText: "hi",
 		});
-		strictEqual(update.activeTools.includes(ToolNames.ReadSkill), false);
-		strictEqual(update.activeTools.includes(ToolNames.CreateSkill), false);
-
-		const plain = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "adding more skills",
-		});
-		strictEqual(plain.activeTools.includes(ToolNames.ReadSkill), false);
-
-		const discussion = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "new skills added to clio coder",
-		});
-		strictEqual(discussion.activeTools.includes(ToolNames.CreateSkill), false);
-		strictEqual(discussion.activeTools.includes(ToolNames.ReadSkill), false);
+		deepStrictEqual([...chat.activeTools], [...work.activeTools]);
 	});
 
-	it("exposes create_skill only for authoring intent", () => {
-		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "create a skill for reviewing MPI tests",
-		});
-		strictEqual(palette.activeTools.includes(ToolNames.ReadSkill), false);
-		ok(palette.activeTools.includes(ToolNames.CreateSkill));
-	});
-
-	it("keeps bash out unless shell intent is explicit", () => {
-		const palette = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "fix the TypeScript test failure",
-		});
-		strictEqual(palette.activeTools.includes(ToolNames.Bash), false);
-
-		const shell = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "run this bash command after inspecting the repo",
-		});
-		ok(shell.activeTools.includes(ToolNames.Bash));
-	});
-
-	it("classifies deterministically from named signals", () => {
+	it("suppresses schemas only on an explicit tool-free request", () => {
 		const noTools = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
@@ -292,63 +249,42 @@ describe("contracts/tools palette", () => {
 		});
 		strictEqual(noTools.activeTools.length, 0);
 		strictEqual(noTools.toolsSuppressed, true);
-
-		const toolMeta = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "what tools do you have?",
-		});
-		strictEqual(toolMeta.intent, "tool_meta");
-		strictEqual(toolMeta.activeTools.length, 0);
-
-		// "current diff" must not trip the external-research signal.
-		const repoNotWeb = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "show the current diff in this repo",
-		});
-		strictEqual(repoNotWeb.intent, "repo_inspection");
-		strictEqual(repoNotWeb.activeTools.includes(ToolNames.WebFetch), false);
-
-		// Multi-intent prompts union groups beyond the primary intent.
-		const multi = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "fix the parser bug and run the tests",
-		});
-		strictEqual(multi.intent, "coding");
-		ok(multi.activeTools.includes(ToolNames.Edit));
-		ok(multi.activeTools.includes(ToolNames.RunTests));
-		ok(multi.signals.includes("edit"));
-		ok(multi.signals.includes("validation"));
+		ok(noTools.signals.includes("noTools"));
+		// The bound is still reported so capability answers stay truthful.
+		strictEqual(noTools.availableTools.length, ALL_TOOLS.length);
 	});
 
-	it("exposes the full available surface even when no tools are active this turn", () => {
+	it("returns no tools when the provider has no tool channel", () => {
+		const palette = resolveToolPalette({
+			providerSupportsTools: false,
+			availableTools: ALL_TOOLS,
+			userText: "fix the bug",
+		});
+		strictEqual(palette.activeTools.length, 0);
+		strictEqual(palette.availableTools.length, 0);
+		strictEqual(palette.providerSupportsTools, false);
+	});
+
+	it("constrains pending-skill turns to read_skill and ask_user", () => {
+		const pendingSkill = resolveToolPalette({
+			providerSupportsTools: true,
+			availableTools: ALL_TOOLS,
+			userText: "run the literature workflow",
+			pendingSkillRequests: [{ name: "arxiv-literature", args: "agents", source: "slash-command", installed: true }],
+		});
+		deepStrictEqual([...pendingSkill.activeTools].sort(), [ToolNames.AskUser, ToolNames.ReadSkill].sort());
+		ok(pendingSkill.signals.includes("pendingSkillRequest"));
+		strictEqual(pendingSkill.availableTools.length, ALL_TOOLS.length);
+	});
+
+	it("honors worker admission constraints as a hard bound", () => {
 		const palette = resolveToolPalette({
 			providerSupportsTools: true,
 			availableTools: ALL_TOOLS,
-			userText: "hi",
+			workerAllowedTools: [ToolNames.Read, ToolNames.Grep],
+			userText: "inspect the repo",
 		});
-		// Small talk attaches no schemas this turn...
-		strictEqual(palette.activeTools.length, 0);
-		// ...but the model must still know its full surface for accurate answers.
-		strictEqual(palette.availableTools.length, ALL_TOOLS.length);
-		ok(palette.availableTools.includes(ToolNames.Read));
-		ok(palette.availableTools.includes(ToolNames.Dispatch));
-	});
-
-	it("renders a grouped, names-only tool catalog", () => {
-		const catalog = renderToolCatalog(ALL_TOOLS);
-		ok(catalog.includes("orientation"));
-		ok(catalog.includes(ToolNames.WorkspaceContext));
-		ok(catalog.includes(ToolNames.Read));
-		ok(catalog.includes(ToolNames.Dispatch));
-		ok(catalog.includes("skills"));
-		// Drops groups whose tools are not available.
-		const minimal = renderToolCatalog([ToolNames.Read, ToolNames.Grep]);
-		ok(minimal.includes("inspect"));
-		strictEqual(minimal.includes("mutate"), false);
-		strictEqual(renderToolCatalog([]), "");
+		deepStrictEqual([...palette.activeTools].sort(), [ToolNames.Grep, ToolNames.Read].sort());
 	});
 
 	it("keeps codewiki tools scout-owned by default while allowing navigation-heavy non-scout runs", () => {
@@ -416,98 +352,6 @@ describe("contracts/tools palette", () => {
 		ok(navigationArchitect.includes(ToolNames.EntryPoints));
 		ok(navigationArchitect.includes(ToolNames.WhereIs));
 		ok(navigationArchitect.includes(ToolNames.FindSymbol));
-	});
-});
-
-describe("contracts/tools model-driven activation", () => {
-	it("attaches activate_tools on work turns and never on suppressed or chatter turns", () => {
-		const work = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "find recent papers comparing flash attention variants",
-		});
-		ok(work.activeTools.includes(ToolNames.ActivateTools));
-
-		const greeting = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "hi",
-		});
-		strictEqual(greeting.activeTools.includes(ToolNames.ActivateTools), false);
-
-		const noTools = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "without tools, explain what the palette does",
-		});
-		strictEqual(noTools.activeTools.length, 0);
-
-		const pendingSkill = resolveToolPalette({
-			providerSupportsTools: true,
-			availableTools: ALL_TOOLS,
-			userText: "run the literature workflow",
-			pendingSkillRequests: [{ name: "arxiv-literature", args: "agents", source: "slash-command", installed: true }],
-		});
-		// The constrained pending-skill phase stays read_skill (+ask_user) only.
-		strictEqual(pendingSkill.activeTools.includes(ToolNames.ActivateTools), false);
-		ok(pendingSkill.activeTools.includes(ToolNames.ReadSkill));
-	});
-
-	it("bounds grants by session policy and consumes them once", () => {
-		const policy = createToolActivationPolicy([ToolNames.Read, ToolNames.WebFetch, ToolNames.Dispatch], [ToolNames.Read]);
-		const grant = grantToolActivation(policy, [ToolNames.WebFetch, ToolNames.Read, ToolNames.Bash], "research");
-		strictEqual(grant.granted.length, 1);
-		strictEqual(grant.granted[0], ToolNames.WebFetch);
-		strictEqual(grant.alreadyActive[0], ToolNames.Read);
-		strictEqual(grant.rejected[0], ToolNames.Bash);
-
-		strictEqual(consumeToolActivationGrants(policy).length, 1);
-		// Grants attach once; a second consume pass finds nothing.
-		strictEqual(consumeToolActivationGrants(policy).length, 0);
-		strictEqual(policy.requests.length, 1);
-		strictEqual(policy.requests[0]?.reason, "research");
-	});
-
-	it("narrowing the bound drops out-of-bound pending grants (skill narrowing wins)", () => {
-		const policy = createToolActivationPolicy([ToolNames.Read, ToolNames.WebFetch, ToolNames.Bash], []);
-		grantToolActivation(policy, [ToolNames.WebFetch, ToolNames.Bash], "research");
-		narrowToolActivationBound(policy, [ToolNames.Read, ToolNames.WebFetch]);
-		const attached = consumeToolActivationGrants(policy);
-		strictEqual(attached.length, 1);
-		strictEqual(attached[0], ToolNames.WebFetch);
-	});
-
-	it("activate_tools tool expands catalog groups within policy and fails without a policy", async () => {
-		const tool = createActivateToolsTool();
-		const policy = createToolActivationPolicy(
-			[ToolNames.Read, ToolNames.WebFetch, ToolNames.Dispatch, ToolNames.DispatchBatch],
-			[ToolNames.Read],
-		);
-		const result = await tool.run(
-			{ groups: ["external", "delegate"], reason: "paper research needs web and the researcher agent" },
-			{ toolActivationPolicy: policy },
-		);
-		strictEqual(result.kind, "ok");
-		ok(policy.granted.has(ToolNames.WebFetch));
-		ok(policy.granted.has(ToolNames.Dispatch));
-		ok(policy.granted.has(ToolNames.DispatchBatch));
-
-		const outside = await tool.run({ tools: [ToolNames.Bash], reason: "shell" }, { toolActivationPolicy: policy });
-		strictEqual(outside.kind, "error");
-
-		const orphan = await tool.run({ groups: ["external"], reason: "x" }, {});
-		strictEqual(orphan.kind, "error");
-	});
-
-	it("never exposes activate_tools to workers", () => {
-		const registry = testRegistryWithTools([ToolNames.Read, ToolNames.ActivateTools]);
-		const worker = resolveAgentTools({
-			registry,
-			allowedTools: [ToolNames.Read, ToolNames.ActivateTools],
-			includeInteractiveTools: false,
-		}).map((tool) => tool.name);
-		strictEqual(worker.includes(ToolNames.ActivateTools), false);
-		ok(worker.includes(ToolNames.Read));
 	});
 });
 

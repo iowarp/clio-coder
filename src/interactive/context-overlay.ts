@@ -74,6 +74,19 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 	const footer = toolsLabel ? `${compaction} · ${toolsLabel}` : compaction;
 	lines.push(theme.fg("dim", footer));
 
+	if (ledger.promptCache) {
+		const cache = ledger.promptCache;
+		const shell = cache.shellReused ? "shell reused" : "shell recompiled";
+		const read = cache.cacheReadTokens !== null ? `cache read ${formatTokens(cache.cacheReadTokens)}` : "cache read n/a";
+		const uncached =
+			cache.uncachedInputTokens !== null ? `uncached input ${formatTokens(cache.uncachedInputTokens)}` : null;
+		const line = ["prompt cache:", shell, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
+		// A reused shell with zero provider cache reads means the backend
+		// re-prefilled anyway; surface that disagreement instead of hiding it.
+		const misleading = cache.shellReused && cache.cacheReadTokens === 0;
+		lines.push(theme.fg(misleading ? "warning" : "dim", line));
+	}
+
 	if (ledger.lastCompaction) {
 		const pruneInfo = `last compaction: reclaimed ${formatTokens(ledger.lastCompaction.tokensBefore)} -> ${formatTokens(ledger.lastCompaction.tokensAfter)} tokens (${ledger.lastCompaction.stage})`;
 		lines.push(theme.fg("dim", pruneInfo));

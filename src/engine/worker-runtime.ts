@@ -166,9 +166,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	registerClioApiProviders();
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.
-	// They have no operator to widen a missing tool and no activate_tools, so
-	// intent guessing over the task text must never drop an admitted tool:
-	// the active surface is exactly the admitted set.
+	// They have no operator to widen a missing tool, so the active surface is
+	// exactly the admitted set.
 	const agentSkillPolicy =
 		input.allowedTools.includes(ToolNames.ReadSkill) && input.noSkills !== true
 			? agentSkillToolPolicy(input.agentSkills ?? [])

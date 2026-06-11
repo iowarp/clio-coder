@@ -25,25 +25,11 @@ export interface DynamicInputs {
 	thinkingGuidance?: string | null;
 	familyGuidance?: string | null;
 	activeToolNames?: ReadonlyArray<string>;
-	/**
-	 * Compact, names-only catalog of every tool the target can use this session.
-	 * Rendered verbatim into the always-present Tool Catalog block so the model
-	 * knows its full surface even on turns with no active schema.
-	 */
-	toolCatalog?: string | null;
-	toolPaletteIntent?: string | null;
-	toolPalettePhase?: string | null;
-	toolPaletteGroups?: ReadonlyArray<string>;
-	omittedToolCount?: number | null;
-	sessionNotes?: string;
 	contextFiles?: string;
 	projectType?: string | null;
 	agentCatalog?: string;
-	agentCatalogStable?: string;
-	agentCatalogDelta?: string;
 	skillsCatalog?: string;
 	memorySection?: string;
-	turnCount?: number;
 	clioVersion?: string;
 	piMonoVersion?: string;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
@@ -206,27 +192,13 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		lines.push("This target cannot call tools; answer from the visible user request and compact context only.");
 	} else if (activeToolNames && activeToolNames.length === 0) {
-		lines.push("Active tools this turn: none (small talk or a tool/meta question).");
 		lines.push(
-			"The Tool Catalog below lists everything you can use. Describe your real capabilities from it; never invent tool names or claim a tool channel you lack. On a work request the base tools attach automatically, and activate_tools widens the surface from there.",
+			"No tool schemas are attached this turn (the user asked for a tool-free answer). Answer from visible context; never invent tool names or claim a tool channel you lack.",
 		);
 	} else if (activeToolNames) {
-		lines.push(`Active tools this turn: ${activeToolNames.join(", ")}.`);
-		const intent = inputs.toolPaletteIntent?.trim();
-		const phase = inputs.toolPalettePhase?.trim();
-		if (intent || phase) {
-			lines.push(`Palette: ${intent || "unknown"}${phase ? ` / ${phase}` : ""}.`);
-		}
-		lines.push("Only call tools in the active list, and only for concrete inspection or changes that the task requires.");
-		if (activeToolNames.includes("activate_tools")) {
-			lines.push(
-				"The Tool Catalog below lists the full surface. If the task needs a tool that is not active yet (web research, delegation to a fleet agent, validation, shell), call activate_tools with the catalog group or tool names plus a one-line reason; the schemas attach before your next step. Activation never bypasses safety confirmation and cannot exceed session policy.",
-			);
-		} else {
-			lines.push(
-				"The Tool Catalog below lists the full surface; tools outside the active list are not reachable in this constrained phase.",
-			);
-		}
+		lines.push(
+			"The attached schemas are the complete tool surface for this session. Call tools only for concrete inspection or changes that the task requires.",
+		);
 		lines.push(
 			"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 		);
@@ -235,7 +207,7 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 			activeToolNames.includes("where_is") ||
 			activeToolNames.includes("find_symbol")
 		) {
-			lines.push("Use entry_points, where_is, and find_symbol for indexed TypeScript navigation when they are active.");
+			lines.push("Use entry_points, where_is, and find_symbol for indexed TypeScript navigation.");
 		}
 		if (activeToolNames.includes("read_skill")) {
 			lines.push(
@@ -254,18 +226,6 @@ function renderToolContractBlock(inputs: DynamicInputs): string {
 		);
 	}
 	return lines.join("\n");
-}
-
-function renderToolCatalogBlock(inputs: DynamicInputs): string {
-	if (inputs.providerSupportsTools === false) return "";
-	const catalog = inputs.toolCatalog?.trim() ?? "";
-	if (catalog.length === 0) return "";
-	return [
-		"# Tool Catalog",
-		"Every tool you can use this session, grouped by purpose. Schemas are attached only for the active subset above; this catalog is the authoritative list of what exists. Use it to answer capability questions accurately, and use activate_tools to attach any listed tool you need next.",
-		"",
-		catalog,
-	].join("\n");
 }
 
 function renderPendingSkillRequestsBlock(inputs: DynamicInputs): string {
@@ -328,11 +288,6 @@ function normalizeToolNames(tools: ReadonlyArray<string> | undefined): string[] 
 	return out;
 }
 
-function toolIsActive(inputs: DynamicInputs, name: string): boolean {
-	const active = normalizeToolNames(inputs.activeToolNames);
-	return active?.includes(name) === true;
-}
-
 function renderProjectBlock(contextFiles: string | undefined, projectType: string | null | undefined): string {
 	const trimmedFiles = contextFiles?.trim() ?? "";
 	const trimmedType = typeof projectType === "string" ? projectType.trim() : "";
@@ -362,33 +317,10 @@ function renderAgentCatalogBlock(agentCatalog: string | undefined): string {
 	return `# Agent Fleet\n\n${trimmed}`;
 }
 
-function renderAgentCatalogStableBlock(agentCatalog: string | undefined): string {
-	return renderAgentCatalogBlock(agentCatalog);
-}
-
-function renderAgentCatalogDeltaBlock(agentCatalog: string | undefined): string {
-	const trimmed = agentCatalog?.trim() ?? "";
-	if (trimmed.length === 0) return "";
-	return `# Agent Fleet Status\n\n${trimmed}`;
-}
-
 function renderSkillsCatalogBlock(skillsCatalog: string | undefined): string {
 	const trimmed = skillsCatalog?.trim() ?? "";
 	if (trimmed.length === 0) return "";
 	return trimmed.startsWith("# Skills") ? trimmed : `# Skills\n\n${trimmed}`;
-}
-
-function renderSessionBlock(inputs: DynamicInputs): string {
-	const sessionNotes = inputs.sessionNotes?.trim() ?? "";
-	const turnCount = typeof inputs.turnCount === "number" ? inputs.turnCount : 0;
-	if (sessionNotes.length === 0 && turnCount === 0) return "";
-	const lines: string[] = ["# Session"];
-	if (turnCount > 0) lines.push(`Turn count: ${turnCount}`);
-	if (sessionNotes.length > 0) {
-		if (turnCount > 0) lines.push("");
-		lines.push(sessionNotes);
-	}
-	return lines.join("\n");
 }
 
 function estimatePromptTokens(text: string): number {
@@ -431,7 +363,7 @@ const ENVELOPE_PART_TIERS: Record<PromptEnvelopePartId, PromptTier> = {
 	pinnedHarness: "static-shell",
 	pinnedRuntime: "session-shell",
 	pinnedToolContract: "session-shell",
-	sessionContext: "dynamic-turn",
+	sessionContext: "session-shell",
 	turnContext: "dynamic-turn",
 	retrievalHints: "session-shell",
 };
@@ -521,38 +453,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		"session-shell",
 		"pinnedToolContract",
 	);
-	pushSegment(
-		segmentManifest,
-		parts,
-		"tool-catalog",
-		renderToolCatalogBlock(inputs.dynamicInputs),
-		true,
-		"session-shell",
-		"pinnedToolContract",
-	);
-	const stableAgentCatalog = renderAgentCatalogStableBlock(
-		toolIsActive(inputs.dynamicInputs, "dispatch")
-			? (inputs.dynamicInputs.agentCatalogStable ?? inputs.dynamicInputs.agentCatalog)
-			: undefined,
-	);
-	pushSegment(
-		segmentManifest,
-		parts,
-		"tools-and-agents",
-		stableAgentCatalog,
-		true,
-		"session-shell",
-		"pinnedToolContract",
-	);
-	const volatileAgentCatalog = renderAgentCatalogDeltaBlock(
-		toolIsActive(inputs.dynamicInputs, "dispatch") ? inputs.dynamicInputs.agentCatalogDelta : undefined,
-	);
-	pushSegment(segmentManifest, parts, "agent-fleet-deltas", volatileAgentCatalog, true, "dynamic-turn", "turnContext");
-	const skillsCatalog = renderSkillsCatalogBlock(
-		toolIsActive(inputs.dynamicInputs, "read_skill") || toolIsActive(inputs.dynamicInputs, "create_skill")
-			? inputs.dynamicInputs.skillsCatalog
-			: undefined,
-	);
+	// Fleet and skills catalogs render whenever the target has a tool channel.
+	// They are deliberately NOT gated on per-turn active tools: gating made the
+	// session shell appear and disappear across turns, which invalidated the
+	// provider's cached prompt prefix on local runtimes. A stable shell that is
+	// a few hundred tokens larger beats re-prefilling the whole prompt.
+	const hasToolChannel = inputs.dynamicInputs.providerSupportsTools !== false;
+	const agentCatalog = renderAgentCatalogBlock(hasToolChannel ? inputs.dynamicInputs.agentCatalog : undefined);
+	pushSegment(segmentManifest, parts, "tools-and-agents", agentCatalog, true, "session-shell", "pinnedToolContract");
+	const skillsCatalog = renderSkillsCatalogBlock(hasToolChannel ? inputs.dynamicInputs.skillsCatalog : undefined);
 	pushSegment(segmentManifest, parts, "skills-catalog", skillsCatalog, true, "session-shell", "pinnedToolContract");
 	pushSegment(
 		segmentManifest,
@@ -572,12 +481,13 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompileRes
 		"session-shell",
 		"retrievalHints",
 	);
+	// Memory lives in the session shell: it changes rarely, and emitting it as
+	// a per-turn dynamic fragment re-injected the same text every turn now
+	// that dynamic fragments are retained append-only in provider context.
 	const memory = renderMemoryBlock(inputs.dynamicInputs.memorySection);
-	pushSegment(segmentManifest, parts, "memory", memory, true, "dynamic-turn", "sessionContext");
+	pushSegment(segmentManifest, parts, "memory", memory, true, "session-shell", "sessionContext");
 	const project = renderProjectBlock(inputs.dynamicInputs.contextFiles, inputs.dynamicInputs.projectType);
 	pushSegment(segmentManifest, parts, "project-context", project, true, "dynamic-turn", "turnContext");
-	const session = renderSessionBlock(inputs.dynamicInputs);
-	pushSegment(segmentManifest, parts, "history-summary", session, true, "dynamic-turn", "sessionContext");
 	for (const fragment of inputs.additionalFragments ?? []) {
 		pushSegment(segmentManifest, parts, fragment.id, fragment.body, fragment.dynamic, "session-shell", "pinnedHarness");
 	}
