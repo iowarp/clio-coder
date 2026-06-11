@@ -5,7 +5,7 @@
 
 Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
 
-Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/palette.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.
 
 ---
 
@@ -14,7 +14,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 ```mermaid
 graph TD
     user[User request] --> surface[Provider tool capability]
-    palette --> posture[Single operating posture]
+    surface --> posture[Single operating posture]
     posture --> registry[Tool registry admission]
     registry --> safety[Safety policy engine]
     safety --> path[Path/project policy]
