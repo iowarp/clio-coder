@@ -14,7 +14,7 @@ on:
       model:
         description: 'Model name override'
         required: false
-        default: 'claude-3-5-sonnet-latest'
+        default: 'claude-sonnet-4-6'
       base_url:
         description: 'Base URL (for openai-compat)'
         required: false

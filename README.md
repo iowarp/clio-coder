@@ -33,11 +33,18 @@
 Clio Coder is an **experimental alpha**. The current public release is
 **v0.2.2**.
 
-v0.2.2 is a source-checkout alpha patch for local model operators. It adds a
-reliable local install/uninstall path, neutral first-run configuration examples,
-ACP interop, curated skills, stronger skill activation, and recent harness
-improvements for throughput telemetry, prompt-envelope reuse, bounded tool
-results, and smaller-terminal dashboard controls.
+v0.2.2 is a source-checkout alpha for local model operators and the largest
+harness revision since the v0.2.0 community alpha. It removes the
+CLI-subprocess runtime era in favor of direct HTTP/native/pi-ai-backed targets
+with ACP as the interop surface, and it rebuilds the local-inference hot path
+around prompt-prefix stability: one compiled system prompt and one
+deterministic tool surface per session, bounded tool results, single-threshold
+compaction, and per-call timing and cache telemetry persisted in the session
+ledger. Sessions now append to their on-disk ledger instead of rewriting it,
+and live routing is session-owned, so several Clio processes can run on one
+machine at the same time. A reliable local install/uninstall path, neutral
+first-run configuration examples, curated skills, and stronger skill
+activation round out the release.
 
 It builds on the v0.2.0 community alpha foundations: durable sessions,
 `CLIO.md` project context adoption, target-first runtime routing, fleet
