@@ -418,7 +418,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			body: [
 				`The codewiki currently indexes ${input.codewiki.entries.length} module${input.codewiki.entries.length === 1 ? "" : "s"}.`,
 				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
-				"Use `entry_points`, `where_is`, and `find_symbol` before broad reads when the task is navigational.",
+				"Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.",
 			].join(" "),
 		});
 	}
@@ -793,7 +793,7 @@ function seedInitialHandoff(cwd: string, output: BootstrapStructuredOutput, code
 		"",
 		"## Where things stand",
 		`- Identity: ${output.identity}`,
-		`- Codewiki indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"} (use entry_points, where_is, find_symbol).`,
+		`- Codewiki indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"} (use code_nav).`,
 		...(entryPoints.length > 0 ? ["- Entry points:", ...entryPoints.map((path) => `  - ${path}`)] : []),
 		"",
 		"## Suggested first step",

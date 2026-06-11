@@ -143,10 +143,7 @@ export interface AskUserTranscriptDecision {
 	key: string;
 	value: string;
 	label?: string;
-	rationale?: string;
-	confidence?: "low" | "medium" | "high";
 	source_question?: string;
-	source_questions?: string[];
 }
 
 export interface AskUserTranscriptRound {

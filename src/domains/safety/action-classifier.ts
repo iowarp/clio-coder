@@ -58,13 +58,9 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Glob:
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:
-		case ToolNames.GitStatus:
-		case ToolNames.GitDiff:
-		case ToolNames.GitLog:
+		case ToolNames.Git:
 		case ToolNames.WorkspaceContext:
-		case ToolNames.FindSymbol:
-		case ToolNames.EntryPoints:
-		case ToolNames.WhereIs:
+		case ToolNames.CodeNav:
 		case ToolNames.AskUser:
 		case ToolNames.ReadSkill:
 			return "read";
@@ -75,10 +71,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.CreateSkill:
 			return "write";
 		case ToolNames.Bash:
-		case ToolNames.RunTests:
-		case ToolNames.RunLint:
-		case ToolNames.RunBuild:
-		case ToolNames.PackageScript:
+		case ToolNames.RunTask:
 		case ToolNames.ValidateFrontend:
 			return "execute";
 		case ToolNames.Dispatch:

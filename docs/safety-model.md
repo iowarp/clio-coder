@@ -37,8 +37,8 @@ Representative built-in tools:
 | Group | Tools |
 | --- | --- |
 | File/search | `read`, `write`, `edit`, `grep`, `find`, `glob`, `ls` |
-| Web/context/codewiki | `web_fetch`, `workspace_context`, `find_symbol`, `entry_points`, `where_is` |
-| Git/safe exec | `git_status`, `git_diff`, `git_log`, `run_tests`, `run_lint`, `run_build`, `package_script` |
+| Web/context/codewiki | `web_fetch`, `workspace_context`, `code_nav` |
+| Git/safe exec | `git`, `run_task` |
 | Frontend | `validate_frontend` |
 | Advice artifacts | `write_plan`, `write_review` |
 | Skills/fleet | `read_skill`, `create_skill`, `dispatch` |
@@ -134,8 +134,8 @@ Command entry notes:
 
 Prefer typed tools over Bash:
 
-- `git_status`, `git_diff`, `git_log` use fixed command vectors.
-- `run_tests`, `run_lint`, `run_build`, and `package_script` use bounded execution helpers.
+- `git` (op=status/diff/log) uses fixed command vectors.
+- `run_task` uses bounded execution helpers with an allowlisted script set.
 - `validate_frontend` validates frontend artifacts without granting arbitrary shell access.
 
 `validate_frontend` accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).

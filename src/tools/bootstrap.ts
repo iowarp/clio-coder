@@ -6,9 +6,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
-import { entryPointsTool } from "./codewiki/entry-points.js";
-import { findSymbolTool } from "./codewiki/find-symbol.js";
-import { whereIsTool } from "./codewiki/where-is.js";
+import { codeNavTool } from "./codewiki/code-nav.js";
 import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
@@ -18,15 +16,7 @@ import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
-import {
-	gitDiffTool,
-	gitLogTool,
-	gitStatusTool,
-	packageScriptToolSpec,
-	runBuildTool,
-	runLintTool,
-	runTestsTool,
-} from "./safe-exec.js";
+import { gitTool, runTaskTool } from "./safe-exec.js";
 import { createReadSkillTool, createSkillTool } from "./skills.js";
 import { validateFrontendTool } from "./validate-frontend.js";
 import { webFetchTool } from "./web-fetch.js";
@@ -152,51 +142,16 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "network",
 	},
-	[ToolNames.GitStatus]: {
-		objective: "Inspect git status with a fixed command vector.",
-		uiLabel: "Git Status",
+	[ToolNames.Git]: {
+		objective: "Read-only git inspection: status, diff, or log.",
+		uiLabel: "Git",
 		retrySafety: "idempotent",
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_fast",
 	},
-	[ToolNames.GitDiff]: {
-		objective: "Inspect bounded git diffs.",
-		uiLabel: "Git Diff",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_medium",
-	},
-	[ToolNames.GitLog]: {
-		objective: "Inspect recent git history.",
-		uiLabel: "Git Log",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_fast",
-	},
-	[ToolNames.RunTests]: {
-		objective: "Run the standard project test script.",
-		uiLabel: "Tests",
-		retrySafety: "retry_safe",
-		resultSizePolicy: boundedValidationPolicy,
-		costLatency: "local_slow",
-	},
-	[ToolNames.RunLint]: {
-		objective: "Run the standard project lint script.",
-		uiLabel: "Lint",
-		retrySafety: "retry_safe",
-		resultSizePolicy: boundedValidationPolicy,
-		costLatency: "local_slow",
-	},
-	[ToolNames.RunBuild]: {
-		objective: "Run the standard project build script.",
-		uiLabel: "Build",
-		retrySafety: "retry_safe",
-		resultSizePolicy: boundedValidationPolicy,
-		costLatency: "local_slow",
-	},
-	[ToolNames.PackageScript]: {
+	[ToolNames.RunTask]: {
 		objective: "Run one allowlisted package.json validation script.",
-		uiLabel: "Script",
+		uiLabel: "Task",
 		retrySafety: "retry_safe",
 		resultSizePolicy: boundedValidationPolicy,
 		costLatency: "local_slow",
@@ -222,23 +177,9 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
 	},
-	[ToolNames.FindSymbol]: {
-		objective: "Find codewiki entries exporting a symbol.",
-		uiLabel: "Symbol",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_fast",
-	},
-	[ToolNames.EntryPoints]: {
-		objective: "Return likely project entry points from codewiki.",
-		uiLabel: "Entries",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_fast",
-	},
-	[ToolNames.WhereIs]: {
-		objective: "Locate codewiki entries by path pattern.",
-		uiLabel: "Where",
+	[ToolNames.CodeNav]: {
+		objective: "Navigate the codewiki TypeScript index by symbol, path, or entry points.",
+		uiLabel: "Nav",
 		retrySafety: "idempotent",
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_fast",
@@ -341,25 +282,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(gitStatusTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(gitTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(gitDiffTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(gitLogTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(runTestsTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(runLintTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(runBuildTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(packageScriptToolSpec, { path: "src/tools/safe-exec.ts", scope: "core" }),
+		...builtin(runTaskTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 	});
 	registry.register({
 		...builtin(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
@@ -371,13 +297,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(findSymbolTool, { path: "src/tools/codewiki/find-symbol.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(entryPointsTool, { path: "src/tools/codewiki/entry-points.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(whereIsTool, { path: "src/tools/codewiki/where-is.ts", scope: "core" }),
+		...builtin(codeNavTool, { path: "src/tools/codewiki/code-nav.ts", scope: "core" }),
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),

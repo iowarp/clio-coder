@@ -615,28 +615,15 @@ function formatOutput(args: {
 
 export const webFetchTool: ToolSpec = {
 	name: ToolNames.WebFetch,
-	description:
-		"Fetch a URL over HTTP(S) and return token-efficient content. HTML is cleaned, boilerplate/script/style removed, main content converted to Markdown, and metadata included. Non-2xx is an error with a short body preview. Body is truncated at max_bytes (default 600 KB).",
+	description: "Fetch an http(s) URL; HTML is cleaned and converted to Markdown. Non-2xx responses are errors.",
 	parameters: Type.Object({
-		url: Type.String({ description: "Fully-qualified http:// or https:// URL." }),
-		method: Type.Optional(Type.String({ description: "HTTP method. Defaults to GET. Case-insensitive." })),
-		headers: Type.Optional(
-			Type.Record(Type.String(), Type.String(), {
-				description: "Request headers as a string→string map. Browser-like defaults are supplied unless overridden.",
-			}),
-		),
-		body: Type.Optional(Type.String({ description: "Request body as a UTF-8 string (used with POST/PUT/etc.)." })),
-		timeout_ms: Type.Optional(Type.Number({ description: "Abort after this many milliseconds. Defaults to 30000." })),
-		max_bytes: Type.Optional(
-			Type.Number({
-				description: "Maximum bytes to read and return after extraction. Defaults to 600000; hard-capped at 5000000.",
-			}),
-		),
-		format: Type.Optional(
-			Type.String({
-				description: "Output mode: auto (default, HTML→Markdown), markdown (same as auto for HTML), or raw.",
-			}),
-		),
+		url: Type.String({ description: "Fully-qualified http(s) URL." }),
+		method: Type.Optional(Type.String({ description: "HTTP method (default GET)." })),
+		headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Request headers." })),
+		body: Type.Optional(Type.String({ description: "Request body (POST/PUT)." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (default 30000)." })),
+		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000)." })),
+		format: Type.Optional(Type.String({ description: "auto (HTML to Markdown), markdown, or raw." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

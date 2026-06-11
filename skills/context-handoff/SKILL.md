@@ -8,9 +8,7 @@ allowed-tools:
   - grep
   - glob
   - ls
-  - git_status
-  - git_diff
-  - git_log
+  - git
   - workspace_context
   - write
   - bash
@@ -46,7 +44,7 @@ Distinct from two things it is often confused with:
    focus and slug. Otherwise summarize all active threads.
 
 2. **Gather state.** Capture git state and recent commits with
-   `workspace_context` and `git_status` when available, else `git status -sb`
+   `workspace_context` and `git` (op=status) when available, else `git status -sb`
    and `git log --oneline -10`. Note uncommitted changes.
 
 3. **Get the real date.** Run `date +%F`. Never fabricate the date.

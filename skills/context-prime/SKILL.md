@@ -9,13 +9,9 @@ allowed-tools:
   - glob
   - ls
   - find
-  - git_status
-  - git_diff
-  - git_log
+  - git
   - workspace_context
-  - entry_points
-  - where_is
-  - find_symbol
+  - code_nav
   - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/context-prime
@@ -53,7 +49,7 @@ Work top to bottom; stop early once you have enough to state where things stand.
    session's brief: focus, work-in-progress, blockers, suggested skills.
 
 3. **Git state.** Capture branch, uncommitted changes, and recent commits
-   (`workspace_context` and `git_status` when available, else `git status -sb`
+   (`workspace_context` and `git` (op=status) when available, else `git status -sb`
    and `git log --oneline -10`). Reconcile against the handoff's "work in
    progress" — flag anything that drifted (committed since, reverted, conflicts).
 

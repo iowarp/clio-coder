@@ -9,18 +9,15 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 export const writeTool: ToolSpec = {
 	name: ToolNames.Write,
 	description:
-		"Write a UTF-8 text file. Creates parent directories and overwrites existing files. Use edit for surgical changes to existing files.",
+		"Write a UTF-8 text file, creating parent directories and overwriting existing files. Use edit for surgical changes.",
 	parameters: Type.Object({
-		path: Type.String({ description: "Path of the file to create (relative or absolute). Required." }),
-		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
+		path: Type.String({ description: "File path (relative or absolute)." }),
 		content: Type.String({ description: "Full UTF-8 file contents." }),
-		overwrite: Type.Optional(Type.Boolean({ description: "Deprecated compatibility flag; write overwrites files." })),
 	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
 	async run(args): Promise<ToolResult> {
-		const pathArg =
-			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
+		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "write: missing path argument" };
 		const content =
 			typeof args.content === "string" ? args.content : args.content === undefined ? null : String(args.content);

@@ -13,6 +13,7 @@ import type {
 	ToolResult,
 	ToolSpec,
 } from "./registry.js";
+import { stringEnum } from "./string-enum.js";
 
 export const ASK_USER_OTHER_LABEL = "Other (type your answer)";
 
@@ -44,10 +45,8 @@ export interface AskUserDecision {
 	key: string;
 	value: string;
 	label?: string;
-	rationale?: string;
-	confidence?: "low" | "medium" | "high";
+	/** Question that produced this decision; derived by the harness, not model-supplied. */
 	source_question?: string;
-	source_questions?: string[];
 }
 
 export interface AskUserResult {
@@ -75,76 +74,48 @@ export interface AskUserToolDeps {
 
 export const askUserParameters = Type.Object({
 	action: Type.Optional(
-		Type.Union([Type.Literal("ask"), Type.Literal("complete")], {
-			description:
-				"Interview lifecycle action. Use ask to present the next round of questions. Use complete exactly once when enough decisions have been collected and before final prose.",
-		}),
+		stringEnum(
+			["ask", "complete"],
+			"ask presents a round of questions; complete (exactly once) records decisions before final prose.",
+		),
 	),
 	mode: Type.Optional(
-		Type.Union([Type.Literal("round"), Type.Literal("single_question")], {
-			description:
-				"Question pacing for action=ask. Use single_question for interview or stress-test workflows that must ask exactly one question per round; use round for one to four tightly related confirmations.",
-		}),
+		stringEnum(
+			["round", "single_question"],
+			"single_question: exactly one question per round (interviews); round: up to four tightly related confirmations.",
+		),
 	),
 	questions: Type.Optional(
 		Type.Array(
 			Type.Object({
-				question: Type.String({ minLength: 1, description: "Question to ask the operator." }),
-				header: Type.Optional(Type.String({ minLength: 1, description: "Optional short header for this question." })),
+				question: Type.String({ description: "Question for the operator." }),
+				header: Type.Optional(Type.String({ description: "Short header." })),
 				options: Type.Optional(
 					Type.Array(
 						Type.Object({
-							label: Type.String({ minLength: 1, description: "Choice label shown to the operator." }),
-							description: Type.Optional(Type.String({ description: "Optional short explanation for the choice." })),
+							label: Type.String({ description: "Choice label." }),
+							description: Type.Optional(Type.String({ description: "Short explanation." })),
 						}),
-						{
-							description:
-								"Suggested choices. Put your recommended choice first and include short descriptions for meaningful tradeoffs. When present, the UI also renders an implicit Other (type your answer) choice.",
-						},
+						{ description: "Suggested choices, recommended first. The UI adds an implicit Other choice." },
 					),
 				),
-				multi_select: Type.Optional(Type.Boolean({ description: "Allow selecting more than one option." })),
+				multi_select: Type.Optional(Type.Boolean({ description: "Allow multiple selections." })),
 			}),
-			{
-				minItems: 0,
-				maxItems: 4,
-				description:
-					"For action=ask, one to four structured questions for the operator. In mode=single_question this must contain exactly one question; otherwise bundle only tightly related confirmations.",
-			},
+			{ description: "For action=ask: one to four questions." },
 		),
 	),
-	max_rounds: Type.Optional(
-		Type.Integer({
-			minimum: 1,
-			maximum: MAX_ROUNDS,
-			description:
-				"Optional bounded interview round limit for this turn. Use a higher value for phased interviews that legitimately need more than the default six rounds.",
-		}),
-	),
+	max_rounds: Type.Optional(Type.Integer({ description: "Round limit for this turn (default 6, max 24)." })),
 	decisions: Type.Optional(
 		Type.Array(
 			Type.Object({
-				key: Type.String({ minLength: 1, description: "Stable snake_case decision key." }),
-				value: Type.String({ minLength: 1, description: "Selected or inferred decision value." }),
-				label: Type.Optional(Type.String({ description: "Human-readable decision label." })),
-				rationale: Type.Optional(Type.String({ description: "Brief reason this decision was chosen." })),
-				confidence: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
-				source_question: Type.Optional(Type.String({ description: "Question that produced this decision." })),
-				source_questions: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+				key: Type.String({ description: "Stable snake_case key." }),
+				value: Type.String({ description: "Decision value." }),
+				label: Type.Optional(Type.String({ description: "Human-readable label." })),
 			}),
-			{
-				maxItems: MAX_DECISIONS,
-				description:
-					"Compact decision object to return on action=complete. Prefer stable keys and concise values; the full transcript is persisted separately.",
-			},
+			{ description: "For action=complete: compact decisions." },
 		),
 	),
-	summary: Type.Optional(
-		Type.String({
-			description:
-				"Concise interview closeout summary for action=complete. Keep this short; the full transcript is persisted separately.",
-		}),
-	),
+	summary: Type.Optional(Type.String({ description: "Short closeout summary for action=complete." })),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -233,19 +204,6 @@ function normalizeDecision(raw: unknown, index: number): { decision?: AskUserDec
 	const decision: AskUserDecision = { key: toDecisionKey(key), value };
 	const label = trimOptionalString(raw.label);
 	if (label) decision.label = label;
-	const rationale = trimOptionalString(raw.rationale);
-	if (rationale) decision.rationale = rationale;
-	if (raw.confidence === "low" || raw.confidence === "medium" || raw.confidence === "high") {
-		decision.confidence = raw.confidence;
-	}
-	const sourceQuestion = trimOptionalString(raw.source_question);
-	if (sourceQuestion) decision.source_question = sourceQuestion;
-	if (Array.isArray(raw.source_questions)) {
-		const sourceQuestions = raw.source_questions
-			.map((item) => trimOptionalString(item))
-			.filter((item): item is string => Boolean(item));
-		if (sourceQuestions.length > 0) decision.source_questions = sourceQuestions;
-	}
 	return { decision };
 }
 
@@ -405,10 +363,7 @@ function toTranscriptDecision(decision: AskUserDecision): AskUserTranscriptDecis
 		key: toDecisionKey(decision.key),
 		value: decision.value,
 		...(decision.label ? { label: decision.label } : {}),
-		...(decision.rationale ? { rationale: decision.rationale } : {}),
-		...(decision.confidence ? { confidence: decision.confidence } : {}),
 		...(decision.source_question ? { source_question: decision.source_question } : {}),
-		...(decision.source_questions ? { source_questions: decision.source_questions } : {}),
 	};
 }
 
@@ -578,7 +533,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			"Run a host-owned operator interview. For interview or stress-test workflows, use action=ask with mode=single_question and exactly one question per round. For compact confirmations, use mode=round with one to four tightly related questions. Include multiple-choice options with descriptions when choices are natural, put your recommended option first, and ask adaptive follow-up rounds only for new necessary information. Raise max_rounds only for bounded phased interviews. When enough information is collected, call action=complete with a compact decisions object before final prose. If cancelled, proceed with defaults and do not ask again.",
+			"Run a host-owned operator interview: action=ask presents questions, action=complete records compact decisions before final prose. If cancelled, proceed with defaults and do not ask again.",
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",

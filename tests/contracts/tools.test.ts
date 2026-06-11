@@ -288,70 +288,48 @@ describe("contracts/tools palette", () => {
 	});
 
 	it("keeps codewiki tools scout-owned by default while allowing navigation-heavy non-scout runs", () => {
-		const candidateTools = [
-			ToolNames.Read,
-			ToolNames.WorkspaceContext,
-			ToolNames.EntryPoints,
-			ToolNames.WhereIs,
-			ToolNames.FindSymbol,
-		];
+		const candidateTools = [ToolNames.Read, ToolNames.WorkspaceContext, ToolNames.CodeNav];
 
 		const scout = applyToolProfile(candidateTools, undefined, { agentId: "scout", task: "summarize the current work" });
-		ok(scout.includes(ToolNames.EntryPoints));
-		ok(scout.includes(ToolNames.WhereIs));
-		ok(scout.includes(ToolNames.FindSymbol));
+		ok(scout.includes(ToolNames.CodeNav));
 
 		const genericArchitect = applyToolProfile(candidateTools, undefined, {
 			agentId: "architect",
 			task: "write a high level implementation plan",
 		});
-		strictEqual(genericArchitect.includes(ToolNames.EntryPoints), false);
-		strictEqual(genericArchitect.includes(ToolNames.WhereIs), false);
-		strictEqual(genericArchitect.includes(ToolNames.FindSymbol), false);
+		strictEqual(genericArchitect.includes(ToolNames.CodeNav), false);
 		ok(genericArchitect.includes(ToolNames.WorkspaceContext));
 
 		const navigationArchitect = applyToolProfile(candidateTools, undefined, {
 			agentId: "architect",
 			task: "map call sites and locate the implementation in src/domains/context/index.ts",
 		});
-		ok(navigationArchitect.includes(ToolNames.EntryPoints));
-		ok(navigationArchitect.includes(ToolNames.WhereIs));
-		ok(navigationArchitect.includes(ToolNames.FindSymbol));
+		ok(navigationArchitect.includes(ToolNames.CodeNav));
 	});
 
 	it("applies scout codewiki ownership in the worker tool resolver", () => {
-		const registry = testRegistryWithTools([
-			ToolNames.Read,
-			ToolNames.WorkspaceContext,
-			ToolNames.EntryPoints,
-			ToolNames.WhereIs,
-			ToolNames.FindSymbol,
-		]);
+		const registry = testRegistryWithTools([ToolNames.Read, ToolNames.WorkspaceContext, ToolNames.CodeNav]);
 		const genericArchitect = resolveAgentTools({
 			registry,
 			agentId: "architect",
 			task: "write a high level plan",
 		}).map((tool) => tool.name);
-		strictEqual(genericArchitect.includes(ToolNames.EntryPoints), false);
+		strictEqual(genericArchitect.includes(ToolNames.CodeNav), false);
 
 		const scout = resolveAgentTools({
 			registry,
 			agentId: "scout",
 			task: "write a high level plan",
 		}).map((tool) => tool.name);
-		ok(scout.includes(ToolNames.EntryPoints));
-		ok(scout.includes(ToolNames.WhereIs));
-		ok(scout.includes(ToolNames.FindSymbol));
+		ok(scout.includes(ToolNames.CodeNav));
 
 		const navigationArchitect = resolveAgentTools({
 			registry,
 			agentId: "architect",
 			task: "locate the implementation for src/domains/context/index.ts",
-			allowedTools: [ToolNames.EntryPoints, ToolNames.WhereIs, ToolNames.FindSymbol],
+			allowedTools: [ToolNames.CodeNav],
 		}).map((tool) => tool.name);
-		ok(navigationArchitect.includes(ToolNames.EntryPoints));
-		ok(navigationArchitect.includes(ToolNames.WhereIs));
-		ok(navigationArchitect.includes(ToolNames.FindSymbol));
+		ok(navigationArchitect.includes(ToolNames.CodeNav));
 	});
 });
 

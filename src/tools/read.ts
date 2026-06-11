@@ -131,20 +131,18 @@ function budgetNote(reservation: ReadTurnBudgetReservation | null): string {
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
-	description: `Read the contents of a file as UTF-8 text. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${
+	description: `Read a UTF-8 text file. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_MAX_BYTES / 1024
-	}KB per call (whichever hits first) and also shares a per-turn read observation budget so batched reads cannot flood context. Use offset/limit for large files; when the result is truncated, continue with the suggested offset until complete.`,
+	}KB per call; truncated results say how to continue with offset/limit.`,
 	parameters: Type.Object({
-		path: Type.Optional(Type.String({ description: "Path to the file to read (relative or absolute)." })),
-		file_path: Type.Optional(Type.String({ description: "Legacy alias for path." })),
-		offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)." })),
-		limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read." })),
+		path: Type.String({ description: "File path (relative or absolute)." }),
+		offset: Type.Optional(Type.Number({ description: "1-indexed start line." })),
+		limit: Type.Optional(Type.Number({ description: "Max lines to read." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
-		const pathArg =
-			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
+		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
 		const filePath = resolveReadPath(pathArg);
 		const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 1;
@@ -227,7 +225,7 @@ export const readTool: ToolSpec = {
 			if (code === "ENOENT") {
 				return {
 					kind: "error",
-					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: where_is, find, glob, or ls to locate it.`,
+					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: code_nav, find, glob, or ls to locate it.`,
 				};
 			}
 			return { kind: "error", message: `read: ${msg}` };

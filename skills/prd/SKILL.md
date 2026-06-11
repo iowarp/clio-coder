@@ -9,12 +9,9 @@ allowed-tools:
   - glob
   - ls
   - find
-  - git_status
-  - git_log
+  - git
   - workspace_context
-  - entry_points
-  - where_is
-  - find_symbol
+  - code_nav
   - write
   - edit
   - ask_user

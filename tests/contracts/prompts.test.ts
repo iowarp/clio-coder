@@ -200,8 +200,8 @@ describe("contracts/prompts compiler logic", () => {
 			result.sections.some((section) => section.id === "skills-catalog"),
 			false,
 		);
-		ok(result.systemPrompt.includes("call read_skill with no name to list available skills"));
-		ok(result.systemPrompt.includes("call dispatch with list:true"));
+		ok(result.systemPrompt.includes("Call read_skill with no name to list available skills"));
+		ok(result.systemPrompt.includes("Call dispatch with list:true"));
 	});
 
 	it("omits the catalog one-liners when read_skill and dispatch are not in the session surface", () => {
@@ -254,10 +254,9 @@ describe("contracts/prompts compiler logic", () => {
 				activeToolNames: ["read_skill", "ask_user"],
 			},
 		});
-		ok(active.systemPrompt.includes("first call read_skill"));
-		ok(active.systemPrompt.includes("Use ask_user for structured operator interviews"));
-		ok(active.systemPrompt.includes('mode="single_question"'));
-		ok(active.systemPrompt.includes("If ask_user returns cancelled"));
+		ok(active.systemPrompt.includes("first call read_skill for that skill"));
+		ok(active.systemPrompt.includes("Use ask_user for operator interviews"));
+		ok(active.systemPrompt.includes("If cancelled, continue with defaults"));
 
 		const inactive = compile(table, {
 			identity: "identity.clio",
@@ -270,7 +269,7 @@ describe("contracts/prompts compiler logic", () => {
 				activeToolNames: ["read_skill"],
 			},
 		});
-		strictEqual(inactive.systemPrompt.includes("Use ask_user for structured operator interviews"), false);
+		strictEqual(inactive.systemPrompt.includes("Use ask_user for operator interviews"), false);
 	});
 
 	it("summarizes project context across missing, CLIO-only, fresh codewiki, and stale codewiki states", async () => {
@@ -299,7 +298,7 @@ describe("contracts/prompts compiler logic", () => {
 			lastIndexedAt: generatedAt,
 		});
 		result = await compileProjectPrompt(freshWiki);
-		ok(result.systemPrompt.includes("<codewiki>available; use find_symbol, entry_points, where_is</codewiki>"));
+		ok(result.systemPrompt.includes("<codewiki>available; use code_nav</codewiki>"));
 		strictEqual(result.systemPrompt.includes("promptFixtureSymbol"), false);
 		strictEqual(result.systemPrompt.includes('"entries"'), false);
 
@@ -388,10 +387,9 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		const cwd = scratchProject();
 		const res = await compileProjectPrompt(cwd);
 		const systemPrompt = res.systemPrompt;
-		ok(systemPrompt.includes("Clio-internal Grounding Policy"));
-		ok(systemPrompt.includes("you MUST inspect local project context or call available lookup tools"));
-		ok(systemPrompt.includes("`workspace_context`"));
-		ok(systemPrompt.includes("`dispatch` / `dispatch_batch`"));
+		ok(systemPrompt.includes("# Retrieval Hints"));
+		ok(systemPrompt.includes("inspect with code_nav, workspace_context, grep, or read before answering"));
+		ok(systemPrompt.includes("Never invent file paths, automatic tool behavior, or mutable repo details"));
 	});
 
 	it("workspace_context is not described as automatic and is explicit/manual", () => {

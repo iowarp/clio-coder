@@ -5,14 +5,15 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { isToolProfileName, type ToolProfileName } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
-const VALID_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
@@ -44,23 +45,13 @@ function stringArg(args: Record<string, unknown>, ...names: string[]): string | 
 	return undefined;
 }
 
-function stringArrayArg(args: Record<string, unknown>, ...names: string[]): string[] | undefined {
-	for (const name of names) {
-		const value = args[name];
-		if (!Array.isArray(value)) continue;
-		const out = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-		return out.map((item) => item.trim());
-	}
-	return undefined;
-}
-
 function maxOutputBytesArg(args: Record<string, unknown>): number {
-	const value = args.max_output_bytes ?? args.maxOutputBytes;
+	const value = args.max_output_bytes;
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_OUTPUT_BYTES;
 }
 
 function timeoutMsArg(args: Record<string, unknown>): number | undefined {
-	const value = args.timeout_ms ?? args.timeoutMs;
+	const value = args.timeout_ms;
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
@@ -71,43 +62,24 @@ function dispatchRequestFromArgs(
 	if (!task) return { ok: false, message: "dispatch: missing task argument (pass list:true to see available agents)" };
 
 	const request: DispatchRequest = {
-		agentId: stringArg(args, "agent_id", "agentId", "agent") ?? DEFAULT_AGENT_ID,
+		agentId: stringArg(args, "agent_id") ?? DEFAULT_AGENT_ID,
 		task,
 	};
 
-	const endpoint = stringArg(args, "target", "endpoint");
+	const endpoint = stringArg(args, "target");
 	if (endpoint) request.endpoint = endpoint;
 	const model = stringArg(args, "model");
 	if (model) request.model = model;
-	const workerProfile = stringArg(args, "agent_profile", "agentProfile", "worker_profile", "workerProfile");
-	if (workerProfile) request.workerProfile = workerProfile;
-	const workerRuntime = stringArg(args, "agent_runtime", "agentRuntime", "worker_runtime", "workerRuntime");
-	if (workerRuntime) request.workerRuntime = workerRuntime;
-	const delegationAgentId = stringArg(args, "delegation_agent_id", "delegationAgentId", "delegate", "acp_agent_id");
-	if (delegationAgentId) request.delegationAgentId = delegationAgentId;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
-	const memorySection = stringArg(args, "memory_section", "memorySection");
-	if (memorySection) request.memorySection = memorySection;
 
-	const thinkingLevel = stringArg(args, "thinking_level", "thinkingLevel");
+	const thinkingLevel = stringArg(args, "thinking_level");
 	if (thinkingLevel) {
 		if (!VALID_THINKING.has(thinkingLevel as JobThinkingLevel)) {
 			return { ok: false, message: "dispatch: thinking_level must be one of off|minimal|low|medium|high|xhigh" };
 		}
 		request.thinkingLevel = thinkingLevel as JobThinkingLevel;
 	}
-
-	const toolProfile = stringArg(args, "tool_profile", "toolProfile");
-	if (toolProfile) {
-		if (!isToolProfileName(toolProfile)) {
-			return { ok: false, message: "dispatch: tool_profile must be one of minimal-local|science-local|full-agent" };
-		}
-		request.toolProfile = toolProfile as ToolProfileName;
-	}
-
-	const requiredCapabilities = stringArrayArg(args, "required_capabilities", "requiredCapabilities");
-	if (requiredCapabilities && requiredCapabilities.length > 0) request.requiredCapabilities = requiredCapabilities;
 
 	return { ok: true, request };
 }
@@ -243,50 +215,17 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch a bounded task to a configured Clio agent from the fleet, or call with list:true to see available agents and recipes. Defaults to agent_id='coder' and the configured fleet default target/model when target/model are omitted. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch a bounded task to a Clio fleet agent, or call with list:true to see available agents. Use the returned receipt/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
-			list: Type.Optional(Type.Boolean({ description: "List available agents and recipes instead of dispatching." })),
-			task: Type.Optional(
-				Type.String({ description: "Concrete agent task. Include expected output, constraints, and handoff format." }),
-			),
-			agent_id: Type.Optional(Type.String({ description: "Agent recipe id from the fleet catalog. Defaults to coder." })),
-			target: Type.Optional(Type.String({ description: "Configured target id. Omit for the fleet default." })),
-			model: Type.Optional(Type.String({ description: "Model override. Omit for the target/profile default." })),
-			thinking_level: Type.Optional(
-				Type.Union([
-					Type.Literal("off"),
-					Type.Literal("minimal"),
-					Type.Literal("low"),
-					Type.Literal("medium"),
-					Type.Literal("high"),
-					Type.Literal("xhigh"),
-				]),
-			),
-			agent_profile: Type.Optional(
-				Type.String({
-					description: "Named fleet profile. Legacy settings store these under settings.workers.profiles.",
-				}),
-			),
-			agent_runtime: Type.Optional(
-				Type.String({ description: "Runtime selector used when no explicit target is given." }),
-			),
-			delegation_agent_id: Type.Optional(
-				Type.String({ description: "ACP delegation agent id from settings.delegation.agents[]." }),
-			),
-			tool_profile: Type.Optional(
-				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
-			),
-			required_capabilities: Type.Optional(
-				Type.Array(Type.String(), { description: "Capabilities the selected target must advertise." }),
-			),
-			cwd: Type.Optional(Type.String({ description: "Agent working directory. Defaults to the current process cwd." })),
-			memory_section: Type.Optional(
-				Type.String({ description: "Extra memory/context text to append to the dispatched agent prompt." }),
-			),
-			timeout_ms: Type.Optional(Type.Number({ description: "Abort the agent run after this many milliseconds." })),
-			max_output_bytes: Type.Optional(
-				Type.Number({ description: "Maximum dispatched-agent text bytes returned to the main agent." }),
-			),
+			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
+			task: Type.Optional(Type.String({ description: "Concrete agent task with expected output and constraints." })),
+			agent_id: Type.Optional(Type.String({ description: "Agent recipe id (default coder)." })),
+			target: Type.Optional(Type.String({ description: "Configured target id (omit for fleet default)." })),
+			model: Type.Optional(Type.String({ description: "Model override." })),
+			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),
+			cwd: Type.Optional(Type.String({ description: "Agent working directory." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Abort the run after this many ms." })),
+			max_output_bytes: Type.Optional(Type.Number({ description: "Max agent text bytes returned." })),
 		}),
 		baseActionClass: "dispatch",
 		executionMode: "sequential",
@@ -369,7 +308,7 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.DispatchBatch,
 		description:
-			"Dispatch multiple bounded tasks to configured Clio fleet agents as one batch. Each item may be a task string or an object with task plus the same targeting fields as dispatch. Returns run ids and receipt summaries.",
+			"Dispatch several bounded tasks to Clio fleet agents as one batch. Items are task strings or objects with the same targeting fields as dispatch. Returns run ids and receipt summaries.",
 		parameters: Type.Object({
 			tasks: Type.Array(
 				Type.Union([
@@ -379,36 +318,14 @@ export function createDispatchBatchTool(deps: DispatchToolDeps): ToolSpec {
 						agent_id: Type.Optional(Type.String()),
 						target: Type.Optional(Type.String()),
 						model: Type.Optional(Type.String()),
-						agent_profile: Type.Optional(Type.String()),
-						agent_runtime: Type.Optional(Type.String()),
-						delegation_agent_id: Type.Optional(Type.String()),
-						tool_profile: Type.Optional(
-							Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
-						),
-						thinking_level: Type.Optional(
-							Type.Union([
-								Type.Literal("off"),
-								Type.Literal("minimal"),
-								Type.Literal("low"),
-								Type.Literal("medium"),
-								Type.Literal("high"),
-								Type.Literal("xhigh"),
-							]),
-						),
 					}),
 				]),
 			),
 			agent_id: Type.Optional(Type.String({ description: "Default agent recipe for string tasks." })),
-			target: Type.Optional(Type.String({ description: "Default target id for every task." })),
-			model: Type.Optional(Type.String({ description: "Default model override for every task." })),
-			agent_profile: Type.Optional(Type.String({ description: "Default fleet profile." })),
-			agent_runtime: Type.Optional(Type.String({ description: "Default worker runtime selector." })),
-			delegation_agent_id: Type.Optional(Type.String({ description: "Default ACP delegation agent id." })),
-			tool_profile: Type.Optional(
-				Type.Union([Type.Literal("minimal-local"), Type.Literal("science-local"), Type.Literal("full-agent")]),
-			),
-			timeout_ms: Type.Optional(Type.Number({ description: "Abort all active batch runs after this many milliseconds." })),
-			max_output_bytes: Type.Optional(Type.Number({ description: "Maximum summary bytes returned to the main agent." })),
+			target: Type.Optional(Type.String({ description: "Default target id." })),
+			model: Type.Optional(Type.String({ description: "Default model override." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Abort all batch runs after this many ms." })),
+			max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),
 		}),
 		baseActionClass: "dispatch",
 		executionMode: "sequential",

@@ -44,17 +44,8 @@ interface ToolCallEvidenceCandidate {
 	command: string;
 }
 
-const TYPED_VALIDATION_TOOL_SUMMARIES = new Map<string, string>([
-	["run_tests", "run_tests"],
-	["run_lint", "run_lint"],
-	["run_build", "run_build"],
-]);
 const PACKAGE_VALIDATION_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
-const TYPED_INSPECTION_TOOL_SUMMARIES = new Map<string, string>([
-	["git_status", "git status"],
-	["git_diff", "git diff"],
-	["git_log", "git log"],
-]);
+const GIT_INSPECTION_OPS = new Set(["status", "diff", "log"]);
 
 const COMPLETION_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(?:done|finished|complete|completed|implemented|fixed|resolved|updated|added|changed|removed|wired|shipped)\b/i,
@@ -140,7 +131,7 @@ function collectRecentEvidence(
 	recentEntryLimit: number,
 ): FinishContractEvidence[] {
 	const recent = recentEntries(entries, assistantTurnId, recentEntryLimit);
-	const requestedInspectionTools = requestedInspectionToolNames(entries, assistantTurnId);
+	const requestedGitOps = requestedGitInspectionOps(entries, assistantTurnId);
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
@@ -166,7 +157,7 @@ function collectRecentEvidence(
 			continue;
 		}
 
-		const inspectionCall = requestedInspectionToolCall(entry, requestedInspectionTools);
+		const inspectionCall = requestedInspectionToolCall(entry, requestedGitOps);
 		if (inspectionCall !== null) {
 			inspectionCalls.set(inspectionCall.toolCallId, inspectionCall);
 			continue;
@@ -205,13 +196,14 @@ function collectRecentEvidence(
 	return evidence;
 }
 
-function requestedInspectionToolNames(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): Set<string> {
+/** Git ops the current user text explicitly asked to see (e.g. "show git diff"). */
+function requestedGitInspectionOps(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): Set<string> {
 	const userText = currentUserText(entries, assistantTurnId);
 	const requested = new Set<string>();
 	if (userText === null) return requested;
-	if (/\bgit\s+status\b/i.test(userText)) requested.add("git_status");
-	if (/\bgit\s+diff\b/i.test(userText)) requested.add("git_diff");
-	if (/\bgit\s+log\b/i.test(userText)) requested.add("git_log");
+	if (/\bgit\s+status\b/i.test(userText)) requested.add("status");
+	if (/\bgit\s+diff\b/i.test(userText)) requested.add("diff");
+	if (/\bgit\s+log\b/i.test(userText)) requested.add("log");
 	return requested;
 }
 
@@ -315,22 +307,23 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 
 function requestedInspectionToolCall(
 	entry: unknown,
-	requestedTools: ReadonlySet<string>,
+	requestedGitOps: ReadonlySet<string>,
 ): ToolCallEvidenceCandidate | null {
-	if (requestedTools.size === 0) return null;
+	if (requestedGitOps.size === 0) return null;
 	const record = asRecord(entry);
 	if (record?.kind !== "message" || record.role !== "tool_call") return null;
 	const payload = asRecord(record.payload);
 	if (payload === null) return null;
 	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
-	if (toolName === null || !requestedTools.has(toolName)) return null;
-	const summary = TYPED_INSPECTION_TOOL_SUMMARIES.get(toolName);
-	if (summary === undefined) return null;
+	if (toolName !== "git") return null;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+	const op = typeof args?.op === "string" ? args.op.trim() : "";
+	if (!GIT_INSPECTION_OPS.has(op) || !requestedGitOps.has(op)) return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const candidate: ToolCallEvidenceCandidate = {
 		toolCallId,
-		command: summary,
+		command: `git ${op}`,
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -338,13 +331,11 @@ function requestedInspectionToolCall(
 }
 
 function typedValidationSummary(toolName: string, payload: Record<string, unknown>): string | null {
-	const simple = TYPED_VALIDATION_TOOL_SUMMARIES.get(toolName);
-	if (simple !== undefined) return simple;
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
-	if (toolName === "package_script") {
-		const script = typeof args?.script === "string" ? args.script.trim() : "";
-		if (!PACKAGE_VALIDATION_SCRIPTS.has(script)) return null;
-		return `npm run ${script}`;
+	if (toolName === "run_task") {
+		const task = typeof args?.task === "string" ? args.task.trim() : "";
+		if (!PACKAGE_VALIDATION_SCRIPTS.has(task)) return null;
+		return `npm run ${task}`;
 	}
 	if (toolName === "validate_frontend") {
 		const path = typeof args?.path === "string" && args.path.trim().length > 0 ? args.path.trim() : "artifact";
