@@ -68,6 +68,8 @@ export interface RunIo {
 export interface InitCommandOptions {
 	preview?: boolean;
 	adopt?: boolean;
+	applyClioMd?: boolean;
+	proposeClioMd?: boolean;
 	includeGlobalImports?: boolean;
 	/** Skip model-driven exploration and use the deterministic heuristic generator. */
 	heuristic?: boolean;
@@ -195,6 +197,8 @@ function parseInitCommand(rest: string): SlashCommand {
 	for (const part of parts) {
 		if (part === "--preview") options.preview = true;
 		else if (part === "--adopt") options.adopt = true;
+		else if (part === "--apply" || part === "--rewrite") options.applyClioMd = true;
+		else if (part === "--propose") options.proposeClioMd = true;
 		else if (part === "--global" || part === "--include-global") options.includeGlobalImports = true;
 		else if (part === "--heuristic" || part === "--no-generate") options.heuristic = true;
 		else return { kind: "unknown", text: `/context-init ${rest}`.trim() };
@@ -400,7 +404,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "context-init",
 		description: "Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff",
-		argumentHint: "[--preview]",
+		argumentHint: "[--preview|--propose|--apply] [--adopt]",
 		kinds: ["init"],
 		match(trimmed) {
 			if (trimmed === "/context-init") return { kind: "init", options: {} };

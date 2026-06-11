@@ -16,12 +16,12 @@ import {
 } from "./clio-md.js";
 import { buildCodewiki, codewikiPath, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";
 import type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
-import { computeFingerprint, isStale } from "./fingerprint.js";
+import { computeFingerprint } from "./fingerprint.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
 
 /**
- * Persist the current Clio state for `cwd`, preserving bootstrap-time fields and
- * stamping the supplied fingerprint and index time. Shared by the session-start
+ * Persist the current Clio state for `cwd`, preserving imported-context source
+ * tracking and stamping the supplied fingerprint/index time. Shared by the session-start
  * freshness check, in-session incremental updates, and session stop.
  */
 function persistState(
@@ -34,7 +34,6 @@ function persistState(
 		version: 1,
 		projectType: prev?.projectType ?? detectProjectType(cwd),
 		fingerprint,
-		...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
@@ -99,11 +98,11 @@ function resolveClioMdState(cwd: string): ContextState["clioMd"] {
 	const clio = tryReadClioMd(cwd);
 	if (!clio) return "none";
 	if (!clio.ok) return "malformed";
-	if (clio.value.firstInit || !clio.value.fingerprint) return "no-fingerprint";
 	const state = readClioState(cwd);
-	const reference = state?.bootstrapFingerprint ?? state?.fingerprint ?? clio.value.fingerprint;
-	const current = computeFingerprint(cwd);
-	return isStale(reference, current) ? "stale" : "ok";
+	if (state?.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
+		return "stale";
+	}
+	return "ok";
 }
 
 function createContextStateReader(): { read(cwd?: string): ContextState; invalidate(cwd?: string): void } {
@@ -138,16 +137,8 @@ function collectStartupHints(cwd: string): string[] {
 	if (clio && !clio.ok) {
 		hints.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
 	}
-	if (clio?.ok && clio.value.firstInit) {
-		hints.push("clio: CLIO.md has no fingerprint footer. Run /context-init to refresh.");
-	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
-	const reference = state.bootstrapFingerprint ?? state.fingerprint;
-	const current = computeFingerprint(cwd);
-	if (isStale(reference, current)) {
-		hints.push("clio: CLIO.md fingerprint differs from current project state. Run /context-init to refresh.");
-	}
 	if (state.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
 		hints.push("clio: Imported agent context changed. Run /context-init --adopt to refresh.");
 	}
@@ -205,7 +196,6 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				version: 1,
 				projectType,
 				fingerprint,
-				...(state?.bootstrapFingerprint ? { bootstrapFingerprint: state.bootstrapFingerprint } : {}),
 				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
 				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),

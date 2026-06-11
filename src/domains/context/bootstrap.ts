@@ -9,15 +9,9 @@ import {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
-import {
-	type ClioMdFingerprintFooter,
-	type ClioMdSection,
-	parseClioMd,
-	serializeClioMd,
-	tryReadClioMd,
-} from "./clio-md.js";
+import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
-import { computeFingerprint, fingerprintsEqual } from "./fingerprint.js";
+import { computeFingerprint } from "./fingerprint.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import { readClioState, statePath as resolveStatePath, writeClioState } from "./state.js";
 
@@ -46,6 +40,8 @@ export interface BootstrapGenerateInput {
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
 	codewiki: Codewiki;
+	existingClioMd?: ParsedClioMd;
+	existingClioMdText?: string;
 	progress?: BootstrapProgressSink;
 }
 
@@ -71,6 +67,8 @@ export interface RunBootstrapInput {
 	confirmGitignore?: () => boolean | Promise<boolean>;
 	preview?: boolean;
 	adopt?: boolean;
+	applyClioMd?: boolean;
+	proposeClioMd?: boolean;
 	includeGlobalImports?: boolean;
 	homeDir?: string;
 	generate?: BootstrapGenerate;
@@ -88,12 +86,13 @@ export interface RunBootstrapResult {
 }
 
 export interface RunBootstrapSummary {
-	action: "wrote" | "refreshed" | "previewed";
+	action: "wrote" | "refreshed" | "preserved" | "proposed" | "previewed";
 	contextFileCount: number;
 	contextFileNames: string[];
 	codewikiEntries: number;
 	dirtyFiles: number;
 	adoption: RunBootstrapAdoptionSummary;
+	proposalPath?: string;
 }
 
 export interface RunBootstrapAdoptionSummary {
@@ -383,26 +382,49 @@ function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapS
 
 export const heuristicBootstrapOutput: BootstrapGenerate = heuristicBootstrapOutputSync;
 
-export function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
-	const parsed = tryReadClioMd(cwd);
-	if (!parsed?.ok) return null;
+function bootstrapOutputFromParsed(parsed: ParsedClioMd): BootstrapStructuredOutput {
 	const out: BootstrapStructuredOutput = {
-		projectName: parsed.value.projectName,
-		identity: parsed.value.identity,
-		conventions: [...parsed.value.conventions],
-		invariants: [...parsed.value.invariants],
+		projectName: parsed.projectName,
+		identity: parsed.identity,
+		conventions: [...parsed.conventions],
+		invariants: [...parsed.invariants],
 	};
-	if (parsed.value.sections.length > 0) {
-		out.sections = parsed.value.sections.map((section) => ({ title: section.title, body: section.body }));
+	if (parsed.sections.length > 0) {
+		out.sections = parsed.sections.map((section) => ({ title: section.title, body: section.body }));
 	}
-	if (parsed.value.importedAgentContext) out.importedAgentContext = parsed.value.importedAgentContext;
+	if (parsed.importedAgentContext) out.importedAgentContext = parsed.importedAgentContext;
 	return out;
 }
 
+export function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
+	const parsed = tryReadClioMd(cwd);
+	if (!parsed?.ok) return null;
+	return bootstrapOutputFromParsed(parsed.value);
+}
+
 export function fallbackBootstrapOutput(input: BootstrapGenerateInput): BootstrapFallbackResult {
-	const existing = existingClioMdBootstrapOutput(input.cwd);
+	const existing = input.existingClioMd
+		? bootstrapOutputFromParsed(input.existingClioMd)
+		: existingClioMdBootstrapOutput(input.cwd);
 	if (existing) return { mode: "existing", output: existing };
 	return { mode: "heuristic", output: heuristicBootstrapOutputSync(input) };
+}
+
+function readExistingClioMdText(cwd: string): string | null {
+	try {
+		return readFileSync(join(cwd, "CLIO.md"), "utf8");
+	} catch {
+		return null;
+	}
+}
+
+function replaceImportedAgentContext(
+	output: BootstrapStructuredOutput,
+	importedAgentContext: string,
+): BootstrapStructuredOutput {
+	const { importedAgentContext: _old, ...rest } = output;
+	if (importedAgentContext.length === 0) return rest;
+	return { ...rest, importedAgentContext };
 }
 
 function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContextFile[] {
@@ -472,10 +494,31 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		].join("\n");
 	}
 	const adoptionLine = formatAdoptionLine(summary);
+	const proposalLine = summary.proposalPath ? `  proposal written ${summary.proposalPath}` : null;
+	if (summary.action === "preserved") {
+		return [
+			"clio context-init preserved CLIO.md",
+			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			"  CLIO.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
+			...(adoptionLine ? [adoptionLine] : []),
+			"",
+		].join("\n");
+	}
+	if (summary.action === "proposed") {
+		return [
+			"clio context-init proposed CLIO.md",
+			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			...(proposalLine ? [proposalLine] : []),
+			"  CLIO.md was not changed. Re-run with --apply only after reviewing the proposal.",
+			...(adoptionLine ? [adoptionLine] : []),
+			"",
+		].join("\n");
+	}
 	return [
 		`clio context-init ${summary.action} CLIO.md`,
-		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; fingerprint updated; ${dirtyLine}`,
-		"  git policy: .clio/ stays ignored by default; CLIO.md stays versioned. Force-add .clio assets only when you explicitly intend to share them.",
+		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+		"  git policy: .clio/ stays ignored by default; CLIO.md stays versioned and human-owned. Force-add .clio assets only when you explicitly intend to share them.",
+		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
 		"",
 	].join("\n");
@@ -538,46 +581,59 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 	writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 }
 
-function writeArtifacts(
-	cwd: string,
-	projectType: ProjectType,
-	modelId: string,
-	now: Date,
-	output: BootstrapStructuredOutput,
-	adoption: AdoptionScanResult,
-): { clioMdPath: string; statePath: string } {
+function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
+	return serializeClioMd({ ...output, fingerprint: null });
+}
+
+function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {
 	const clioMdPath = join(cwd, "CLIO.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
-	let fingerprint = computeFingerprint(cwd);
-	for (let i = 0; i < 4; i += 1) {
-		const footer: ClioMdFingerprintFooter = {
-			initAt: now.toISOString(),
-			model: modelId,
-			gitHead: fingerprint.gitHead,
-			treeHash: fingerprint.treeHash,
-			loc: fingerprint.loc,
-		};
-		const serialized = serializeClioMd({ ...output, fingerprint: footer });
-		const parsed = parseClioMd(serialized);
-		if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO.md: ${parsed.errors.join("; ")}`);
-		writeFileSync(clioMdPath, serialized, "utf8");
-		const next = computeFingerprint(cwd);
-		if (fingerprintsEqual(fingerprint, next)) break;
-		fingerprint = next;
-	}
+	const serialized = serializeBootstrapOutput(output);
+	const parsed = parseClioMd(serialized);
+	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO.md: ${parsed.errors.join("; ")}`);
+	writeFileSync(clioMdPath, serialized, "utf8");
+	return clioMdPath;
+}
+
+function timestampForPath(now: Date): string {
+	return now
+		.toISOString()
+		.replace(/[-:]/g, "")
+		.replace(/\.\d{3}Z$/, "Z");
+}
+
+function writeClioMdProposal(cwd: string, now: Date, output: BootstrapStructuredOutput): string {
+	const dir = join(cwd, ".clio", "proposals");
+	mkdirSync(dir, { recursive: true });
+	const proposalPath = join(dir, `CLIO-${timestampForPath(now)}.md`);
+	writeFileSync(proposalPath, serializeBootstrapOutput(output), "utf8");
+	return proposalPath;
+}
+
+function writeProjectState(
+	cwd: string,
+	projectType: ProjectType,
+	now: Date,
+	indexedAt: string,
+	adoption: AdoptionScanResult,
+	recordAdoption: boolean,
+): string {
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
-	const contextSources = adoption.sourceSnapshots;
+	const prev = readClioState(cwd);
+	const contextSources = recordAdoption ? adoption.sourceSnapshots : (prev?.contextSources ?? []);
+	const contextSourceHash = contextSources.length > 0 ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
 		fingerprint: finalFingerprint,
-		bootstrapFingerprint: finalFingerprint,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
-		...(contextSources.length > 0 ? { contextSources, contextSourceHash: adoptionSnapshotsHash(contextSources) } : {}),
+		lastIndexedAt: indexedAt,
+		...(contextSources.length > 0 ? { contextSources } : {}),
+		...(contextSourceHash ? { contextSourceHash } : {}),
 	});
-	return { clioMdPath, statePath };
+	return statePath;
 }
 
 function summarizeAdoption(
@@ -697,27 +753,45 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		current: codewiki.entries.length,
 		total: codewiki.entries.length,
 	});
-	progress(input, {
-		phase: "generate",
-		status: "started",
-		message: input.generate ? "drafting CLIO.md with scout" : "drafting CLIO.md with heuristic",
-	});
-	let output = await (input.generate ?? heuristicBootstrapOutput)({
-		cwd,
-		projectType,
-		siblingFiles,
-		adoption,
-		codewiki,
-		...(input.onProgress ? { progress: input.onProgress } : {}),
-	});
-	progress(input, {
-		phase: "generate",
-		status: "completed",
-		message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
-	});
+	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
+	const existingClioMdText = hadClioMd ? readExistingClioMdText(cwd) : null;
+	const existingClioMd = tryReadClioMd(cwd);
+	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
+	const shouldGenerate = !hadClioMd || input.applyClioMd === true || input.proposeClioMd === true;
+	let output: BootstrapStructuredOutput;
+	if (shouldGenerate) {
+		progress(input, {
+			phase: "generate",
+			status: "started",
+			message: input.generate ? "drafting CLIO.md with scout" : "drafting CLIO.md with heuristic",
+		});
+		output = await (input.generate ?? heuristicBootstrapOutput)({
+			cwd,
+			projectType,
+			siblingFiles,
+			adoption,
+			codewiki,
+			...(existingParsed ? { existingClioMd: existingParsed } : {}),
+			...(existingClioMdText ? { existingClioMdText } : {}),
+			...(input.onProgress ? { progress: input.onProgress } : {}),
+		});
+		progress(input, {
+			phase: "generate",
+			status: "completed",
+			message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
+		});
+	} else {
+		output = existingParsed
+			? bootstrapOutputFromParsed(existingParsed)
+			: await heuristicBootstrapOutput({ cwd, projectType, siblingFiles, adoption, codewiki });
+		progress(input, {
+			phase: "generate",
+			status: "completed",
+			message: hadClioMd ? "preserving existing CLIO.md; no generated rewrite requested" : "using heuristic CLIO.md draft",
+		});
+	}
 	if (input.adopt === true) {
-		const importedAgentContext = renderImportedAgentContext(adoption);
-		if (importedAgentContext.length > 0) output = { ...output, importedAgentContext };
+		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
@@ -744,23 +818,43 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	}
 
 	await ensureGitignore(cwd, input);
-	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
+	let clioMdPath = join(cwd, "CLIO.md");
+	let proposalPath: string | undefined;
+	let action: RunBootstrapSummary["action"] = "preserved";
 	progress(input, {
 		phase: "clio-md",
 		status: "started",
-		message: hadClioMd ? "refreshing CLIO.md" : "writing CLIO.md",
+		message: hadClioMd ? "preserving CLIO.md" : "writing CLIO.md",
 	});
-	const paths = writeArtifacts(cwd, projectType, input.modelId ?? "local-bootstrap", now, output, adoption);
+	if (!hadClioMd) {
+		clioMdPath = writeClioMdFile(cwd, output);
+		action = "wrote";
+	} else if (input.applyClioMd === true) {
+		clioMdPath = writeClioMdFile(cwd, output);
+		action = "refreshed";
+	} else if (input.adopt === true && existingParsed) {
+		clioMdPath = writeClioMdFile(cwd, output);
+		action = "refreshed";
+	} else if (input.proposeClioMd === true) {
+		proposalPath = writeClioMdProposal(cwd, now, output);
+		action = "proposed";
+	}
 	progress(input, {
 		phase: "clio-md",
 		status: "completed",
-		message: hadClioMd ? "CLIO.md refreshed" : "CLIO.md written",
-		detail: paths.clioMdPath,
+		message:
+			action === "wrote"
+				? "CLIO.md written"
+				: action === "refreshed"
+					? "CLIO.md refreshed"
+					: action === "proposed"
+						? "CLIO.md proposal written"
+						: "CLIO.md preserved",
+		detail: proposalPath ?? clioMdPath,
 	});
 	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
 	writeCodewiki(cwd, codewiki);
-	const state = readClioState(cwd);
-	if (state) writeClioState(cwd, { ...state, lastIndexedAt: indexedAt });
+	const statePath = writeProjectState(cwd, projectType, now, indexedAt, adoption, input.adopt === true);
 	progress(input, {
 		phase: "state",
 		status: "completed",
@@ -772,12 +866,13 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 
 	const postStatus = gitStatus(cwd);
 	const summary: RunBootstrapSummary = {
-		action: hadClioMd ? "refreshed" : "wrote",
+		action,
 		contextFileCount: readNames.length,
 		contextFileNames: readNames,
 		codewikiEntries: codewiki.entries.length,
 		dirtyFiles: countStatusLines(postStatus),
 		adoption: summarizeAdoption(adoption, input.adopt === true ? "adopt" : "scan"),
+		...(proposalPath ? { proposalPath } : {}),
 	};
 	out(input.io, formatBootstrapSummary(summary));
 	progress(input, {
@@ -786,7 +881,8 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		message: `${summary.action} CLIO.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}`,
 	});
 	return {
-		...paths,
+		clioMdPath,
+		statePath,
 		siblingFiles,
 		output,
 		projectType,

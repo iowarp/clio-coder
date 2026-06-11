@@ -260,7 +260,7 @@ function renderRetrievalHintsBlock(inputs: DynamicInputs): string {
 	}
 	return [
 		"# Retrieval Hints",
-		"Repository structure and CLIO.md contents are not preloaded every turn.",
+		"Compact CLIO.md project instructions may be preloaded. Large repository structure is intentionally compact.",
 		"Use workspace_context for a quick workspace snapshot. Use codewiki tools for indexed TypeScript structure when entry_points, where_is, or find_symbol are active. Use grep/read for exact file evidence.",
 		"Do not infer mutable repo details from the pinned prompt envelope.",
 		"",

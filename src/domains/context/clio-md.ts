@@ -35,7 +35,7 @@ export interface SerializeClioMdInput {
 	invariants: ReadonlyArray<string>;
 	sections?: ReadonlyArray<ClioMdSection>;
 	importedAgentContext?: string;
-	fingerprint: ClioMdFingerprintFooter;
+	fingerprint?: ClioMdFingerprintFooter | null;
 }
 
 const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
@@ -205,30 +205,32 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	const projectName = (h1[1] ?? "").trim();
 	const errors: string[] = [];
 	if (projectName.length === 0) errors.push("project name must not be empty");
-	if (charLen(projectName) > 80) errors.push("project name must be at most 80 characters");
+	if (charLen(projectName) > 80) warnings.push("project name is longer than the generator target");
 
 	const afterH1 = footerResult.body.slice(h1.index + h1[0].length);
 	const identity = identityParagraph(afterH1);
 	if (identity.length === 0) errors.push("identity paragraph is required");
-	if (charLen(identity) > 600) errors.push("identity paragraph must be at most 600 characters");
+	if (charLen(identity) > 600) warnings.push("identity paragraph is longer than the generator target");
 
 	const sections = readSections(afterH1);
 	const conventions = parseBullets(sectionBody(sections, "conventions"));
 	const invariants = parseNumbered(sectionBody(sections, "hard invariants"));
 	const customSections = extraSections(sections);
 	const importedAgentContext = sectionBody(sections, "imported agent context") || null;
-	if (conventions.length > 6) errors.push("conventions must contain at most 6 bullets");
-	if (invariants.length > 3) errors.push("hard invariants must contain at most 3 numbered rules");
-	if (customSections.length > 8) errors.push("custom sections must contain at most 8 H2 sections");
+	if (conventions.length > 6) warnings.push("conventions exceed the generator target of six bullets");
+	if (invariants.length > 3) warnings.push("hard invariants exceed the generator target of three numbered rules");
+	if (customSections.length > 8) warnings.push("custom sections exceed the generator target of eight H2 sections");
 	for (const [index, item] of conventions.entries()) {
-		if (charLen(item) > 200) errors.push(`convention ${index + 1} must be at most 200 characters`);
+		if (charLen(item) > 200) warnings.push(`convention ${index + 1} is longer than the generator target`);
 	}
 	for (const [index, item] of invariants.entries()) {
-		if (charLen(item) > 280) errors.push(`hard invariant ${index + 1} must be at most 280 characters`);
+		if (charLen(item) > 280) warnings.push(`hard invariant ${index + 1} is longer than the generator target`);
 	}
 	for (const [index, section] of customSections.entries()) {
-		if (charLen(section.title) > 80) errors.push(`custom section ${index + 1} title must be at most 80 characters`);
-		if (charLen(section.body) > 2500) errors.push(`custom section ${index + 1} body must be at most 2500 characters`);
+		if (charLen(section.title) > 80)
+			warnings.push(`custom section ${index + 1} title is longer than the generator target`);
+		if (charLen(section.body) > 2500)
+			warnings.push(`custom section ${index + 1} body is longer than the generator target`);
 	}
 	if (errors.length > 0) return { ok: false, errors, warnings };
 
@@ -274,6 +276,7 @@ function renderWithoutParse(input: SerializeClioMdInput): string {
 	if (imported && imported.length > 0) {
 		lines.push("", "## Imported agent context", "", imported);
 	}
+	if (!input.fingerprint) return `${lines.join("\n")}\n`;
 	const footer = JSON.stringify(input.fingerprint, null, 2);
 	return `${lines.join("\n")}\n\n<!-- clio:fingerprint v1\n${footer}\n-->\n`;
 }
