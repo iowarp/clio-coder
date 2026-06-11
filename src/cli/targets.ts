@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { readSettings, writeSettings } from "../core/config.js";
+import { readSettings, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
@@ -217,11 +217,17 @@ function runUse(args: ReadonlyArray<string>): number {
 		return 1;
 	}
 	const sharedModel = parsed.model ?? target.defaultModel ?? null;
-	settings.orchestrator.endpoint = target.id;
-	settings.orchestrator.model = parsed.orchestratorModel ?? sharedModel;
-	settings.workers.default.endpoint = target.id;
-	settings.workers.default.model = parsed.workerModel ?? sharedModel;
-	writeSettings(settings);
+	const orchestratorModel = parsed.orchestratorModel ?? sharedModel;
+	const workerModel = parsed.workerModel ?? sharedModel;
+	// Locked read-modify-write so a concurrent session's field-level
+	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
+	// above and this save.
+	updateSettings((fresh) => {
+		fresh.orchestrator.endpoint = target.id;
+		fresh.orchestrator.model = orchestratorModel;
+		fresh.workers.default.endpoint = target.id;
+		fresh.workers.default.model = workerModel;
+	});
 	printOk(`using target ${target.id} for chat and fleet dispatch`);
 	return 0;
 }
@@ -277,12 +283,15 @@ function runProfile(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	const existing = settings.workers.profiles[parsed.name];
-	settings.workers.profiles[parsed.name] = {
+	const profileName = parsed.name;
+	const profile = {
 		endpoint: target.id,
 		model: parsed.model ?? target.defaultModel ?? null,
 		thinkingLevel: parsed.thinkingLevel ?? existing?.thinkingLevel ?? "off",
 	};
-	writeSettings(settings);
+	updateSettings((fresh) => {
+		fresh.workers.profiles[profileName] = profile;
+	});
 	printOk(`fleet profile ${parsed.name} -> ${target.id}`);
 	return 0;
 }
@@ -402,8 +411,10 @@ function runConvert(args: ReadonlyArray<string>): number {
 		return 1;
 	}
 	const previousRuntime = target.runtime;
-	target.runtime = runtimeId;
-	writeSettings(settings);
+	updateSettings((fresh) => {
+		const entry = fresh.endpoints.find((candidate) => candidate.id === id);
+		if (entry) entry.runtime = runtimeId;
+	});
 	printOk(`converted target ${id}: ${previousRuntime} -> ${runtimeId}`);
 	return 0;
 }

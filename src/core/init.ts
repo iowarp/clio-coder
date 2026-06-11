@@ -4,7 +4,7 @@
  * absent. Idempotent.
  */
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
@@ -55,14 +55,6 @@ export function initializeClioHome(): InitReport {
 	const settingsPath = join(configDir, "settings.yaml");
 	let touched = false;
 	if (!existsSync(settingsPath)) {
-		const tracePath = process.env.CLIO_TRACE_WRITESETTINGS;
-		if (tracePath && tracePath !== "0") {
-			const stack = new Error("init.ts default-write trace").stack ?? "";
-			appendFileSync(
-				tracePath,
-				`\n[init.ts default-write @ ${new Date().toISOString()}] settingsPath=${settingsPath}\n${stack}\n`,
-			);
-		}
 		writeFileSync(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
 		created.push(settingsPath);
 		touched = true;

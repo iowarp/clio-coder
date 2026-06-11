@@ -1,4 +1,5 @@
 import { type FSWatcher, watch } from "node:fs";
+import { basename, dirname } from "node:path";
 import { settingsPath } from "../../core/config.js";
 
 export type WatcherCallback = (raw: { at: number }) => void;
@@ -9,12 +10,18 @@ export interface ConfigWatcher {
 
 export function startConfigWatcher(cb: WatcherCallback): ConfigWatcher {
 	const path = settingsPath();
+	const settingsFile = basename(path);
 
 	let watcher: FSWatcher | null = null;
 	let debounceTimer: NodeJS.Timeout | null = null;
 
 	try {
-		watcher = watch(path, { persistent: false }, () => {
+		// Watch the config directory, not the file: settings writes go through
+		// temp-file + rename, which replaces the inode a file-level watch is
+		// pinned to. The exact-name filter also keeps .lock and .tmp-* churn
+		// from other Clio processes out of the reload path.
+		watcher = watch(dirname(path), { persistent: false }, (_event, filename) => {
+			if (filename !== null && filename !== settingsFile) return;
 			if (debounceTimer) clearTimeout(debounceTimer);
 			debounceTimer = setTimeout(() => {
 				cb({ at: Date.now() });

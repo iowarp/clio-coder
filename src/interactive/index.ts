@@ -5,6 +5,7 @@ import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } fr
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -1211,6 +1212,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
+	// Saved settings moved under a running session. Live routing is
+	// session-owned, so external writers (another Clio session, the CLI, a
+	// manual edit) only change defaults; surface a notice when the new defaults
+	// diverge from this session's active routing, and warn when the active
+	// target was removed from the shared endpoint catalog.
+	let settingsOverlayRefresh: (() => void) | null = null;
+	const unsubscribeConfigRouting = deps.bus.on(BusChannels.ConfigNextTurn, (payload) => {
+		const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
+		const effective = deps.getSettings?.();
+		if (!effective || !evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
+		for (const notice of routingChangeNotices(evt.diff.nextTurn, evt.settings, effective, { commandHints: true })) {
+			notify(
+				notice.level,
+				notice.text,
+				notice.kind === "external-divergence" ? "config:routing-divergence" : "config:target-removed",
+			);
+		}
+		// Re-derive the /settings overlay rows while it is open: the shared
+		// snapshot just moved (target catalog, defaults), and rows like
+		// endpoints/fleet.profiles must track it.
+		settingsOverlayRefresh?.();
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Hot-reload fields (theme, keybindings, safetyLevel) repaint immediately;
+	// the safetyLevel row of an open /settings overlay must follow.
+	const unsubscribeConfigHotReloadOverlay = deps.bus.on(BusChannels.ConfigHotReload, () => {
+		settingsOverlayRefresh?.();
+	});
 
 	let activeEditorBash: AbortController | null = null;
 	let activeContextInit = false;
@@ -2295,7 +2325,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "settings";
 		const getSettings = deps.getSettings;
 		const writeSettingsOut = deps.writeSettings;
-		overlayHandle = openSettingsOverlay(tui, {
+		const handle = openSettingsOverlay(tui, {
 			getSettings,
 			providers: deps.providers,
 			keybindings,
@@ -2303,8 +2333,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				writeSettingsOut(next);
 				footer.refresh();
 			},
-			onClose: () => closeOverlay(),
+			onClose: () => {
+				settingsOverlayRefresh = null;
+				closeOverlay();
+			},
 		});
+		overlayHandle = handle;
+		settingsOverlayRefresh = handle.refreshRows;
 		tui.requestRender();
 	};
 
@@ -2557,6 +2592,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeFooterTokens();
 		unsubscribeContextPressure();
 		unsubscribeContextPruned();
+		unsubscribeConfigRouting();
+		unsubscribeConfigHotReloadOverlay();
 		unsubscribePermissionRequired();
 		unregisterAskUserHandler?.();
 		unregisterAskUserHandler = null;

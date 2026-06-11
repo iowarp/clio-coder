@@ -3,9 +3,20 @@ import { modelBootstrapGenerate } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
-import { type ClioSettings, readSettings, writeSettings } from "../core/config.js";
+import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { listRecentModels, rememberRecentModel } from "../core/recent-models.js";
+import {
+	applyRoutingPatch,
+	applySessionRouting,
+	diffRouting,
+	mergeRoutingPatchIntoSettings,
+	type RoutingPatch,
+	restoreRoutingFields,
+	routingChangeNotices,
+	seedSessionRouting,
+} from "../core/session-routing.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -354,9 +365,9 @@ function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, res
 }
 
 /**
- * Ctrl+P / Shift+Ctrl+P step the orchestrator through the `scope` list of
- * endpoint ids or endpoint/model refs. Absent scope is a no-op so unconfigured
- * users feel nothing.
+ * Alt+J / Alt+K step the orchestrator through the `scope` list of endpoint
+ * ids or endpoint/model refs. Absent scope is a no-op so unconfigured users
+ * feel nothing.
  */
 export function advanceScopedTarget(
 	settings: Readonly<ClioSettings>,
@@ -394,26 +405,6 @@ export function advanceScopedTarget(
 	return { endpoint, model: endpointDescriptor?.defaultModel ?? null };
 }
 
-function rememberRecentModel(settings: ClioSettings, endpoint: string, model: string): void {
-	const value = `${endpoint}/${model}`;
-	const limit = Math.max(1, Math.floor(settings.modelSelector?.recentLimit ?? 12));
-	const previous = settings.state.recentModels ?? [];
-	settings.state.recentModels = [value, ...previous.filter((entry) => entry !== value)].slice(0, limit);
-}
-
-function cycleScoped(
-	direction: "forward" | "backward",
-	readCurrent: () => Readonly<ClioSettings> = readSettings,
-	persist: (next: ClioSettings) => void = writeSettings,
-): void {
-	const current = structuredClone(readCurrent());
-	const next = advanceScopedTarget(current, direction);
-	if (!next) return;
-	current.orchestrator.endpoint = next.endpoint;
-	current.orchestrator.model = next.model;
-	persist(current);
-}
-
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const timer = new StartupTimer();
 	const bus = getSharedBus();
@@ -423,6 +414,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	ensureClioState();
 	timer.mark("install check");
+
+	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 
 	const result = await loadDomains([
 		ConfigDomainModule,
@@ -449,7 +442,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		SessionDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		createDispatchDomainModule(),
+		// Dispatch resolves worker targets through the session's effective
+		// settings view once it exists (assigned below, after the config
+		// contract loads); until then it falls back to the shared snapshot.
+		createDispatchDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
 		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);
@@ -559,8 +555,27 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 	});
 
-	const getCurrentSettings = (): ClioSettings =>
-		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
+	// Live routing is owned by this process. Seed it once from saved settings
+	// (with any headless CLI overrides baked in); from here on every consumer
+	// reads the effective view — shared snapshot + session routing overlay — so
+	// another process writing settings.yaml can update defaults and the
+	// endpoint catalog but never redirect this session's routing.
+	const sessionRouting = seedSessionRouting(
+		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless),
+	);
+	const getCurrentSettings = (): ClioSettings => {
+		const view = applySessionRouting(config?.get() ?? readSettings(), sessionRouting);
+		// Recents live in the data dir (core/recent-models.ts), not in
+		// settings.yaml, so an Alt+L pick in another session no longer churns
+		// the config watcher here. The overlay keeps state.recentModels readable
+		// for every existing consumer and migrates a legacy settings list once.
+		view.state.recentModels = listRecentModels({
+			migrateFrom: view.state.recentModels ?? [],
+			limit: view.modelSelector.recentLimit,
+		});
+		return view;
+	};
+	effectiveSettingsForDispatch = getCurrentSettings;
 
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;
@@ -577,17 +592,55 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (interactive) initialNotices.push(notice);
 		else process.stderr.write(notice);
 	}
-	const persistSettings = (next: ClioSettings): void => {
-		if (config?.set) {
-			config.set(next);
+	/**
+	 * Locked read-modify-write of saved settings. Routes through the config
+	 * contract (which refreshes its snapshot and dispatches change events) when
+	 * available, else straight through core updateSettings. Either way the
+	 * mutator runs against the freshest on-disk state under the advisory
+	 * settings lock, so two processes saving defaults at the same time cannot
+	 * interleave and drop each other's patches.
+	 */
+	const persistSavedMutation = (mutator: SettingsMutator): void => {
+		if (config?.update) {
+			config.update(mutator);
 			return;
 		}
-		writeSettings(next);
+		updateSettings(mutator);
 	};
-	const updateSettings = (mutate: (current: ClioSettings) => void): void => {
-		const current = getCurrentSettings();
-		mutate(current);
-		persistSettings(current);
+	/**
+	 * Apply a routing change with one consistent scope: it takes effect in this
+	 * session immediately and writes through to saved settings as the default
+	 * for future sessions. Only the patched fields hit the file, so concurrent
+	 * sessions cannot clobber each other's saved defaults wholesale.
+	 */
+	const updateSessionRouting = (patch: RoutingPatch, mutateSaved?: (saved: ClioSettings) => void): void => {
+		applyRoutingPatch(sessionRouting, patch);
+		persistSavedMutation((saved) => {
+			mergeRoutingPatchIntoSettings(saved, patch);
+			mutateSaved?.(saved);
+		});
+	};
+	/**
+	 * Persist a whole-settings blob coming from the effective view (the
+	 * /settings overlay, favorites toggles). Routing edits in the blob are
+	 * absorbed into the session state and written through; everything else is
+	 * persisted without leaking this session's routing into the saved defaults.
+	 */
+	const applySettingsBlob = (next: ClioSettings): void => {
+		const patch = diffRouting(getCurrentSettings(), next);
+		if (patch) applyRoutingPatch(sessionRouting, patch);
+		persistSavedMutation((fresh) => {
+			const persisted = structuredClone(next);
+			restoreRoutingFields(persisted, fresh);
+			if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
+			return persisted;
+		});
+	};
+	/** Alt+J / Alt+K: step this session's orchestrator through the scope list. */
+	const cycleScopedSession = (direction: "forward" | "backward"): void => {
+		const next = advanceScopedTarget(getCurrentSettings(), direction);
+		if (!next) return;
+		updateSessionRouting({ orchestrator: { endpoint: next.endpoint, model: next.model } });
 	};
 
 	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
@@ -617,7 +670,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					readSessionEntries: readCurrentSessionEntries,
 					autoCompact: async (instructions?: string, trigger?: CompactionTrigger): Promise<CompactResult | null> => {
 						try {
-							return await runCompactionFlow(session, config?.get() ?? readSettings(), providers, instructions, trigger);
+							return await runCompactionFlow(session, getCurrentSettings(), providers, instructions, trigger);
 						} catch {
 							return null;
 						}
@@ -628,20 +681,51 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 
 	if (options.acp) {
-		const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
-		const code = await serveClioAcpAgent({
-			transport,
-			chat,
-			...(session ? { session } : {}),
-			toolRegistry,
-			cwd: process.cwd(),
-			version: getVersionInfo().clio,
-			permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,
+		// ACP-served sessions get the same routing isolation as interactive
+		// ones, but ACP v1 has no channel for agent-initiated advisory text:
+		// the session/update union (agent_message_chunk, agent_thought_chunk,
+		// tool_call*, plan, …) carries turn content, and notifications outside
+		// an active session/prompt would break strict clients (see the matching
+		// note in src/engine/acp/server.ts). The external-divergence and
+		// target-removed notices therefore go to the session ledger as `custom`
+		// entries, where /resume and session tooling can surface them.
+		const unsubscribeAcpRoutingNotices = bus.on(BusChannels.ConfigNextTurn, (payload) => {
+			const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
+			if (!evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
+			if (!session?.current()) return;
+			const notices = routingChangeNotices(evt.diff.nextTurn, evt.settings, getCurrentSettings());
+			for (const notice of notices) {
+				try {
+					session.appendEntry({
+						kind: "custom",
+						customType: "clio.routing-notice",
+						parentTurnId: null,
+						data: { kind: notice.kind, level: notice.level, text: notice.text },
+					});
+				} catch {
+					// Advisory only; a ledger write failure must not affect the
+					// ACP turn loop.
+				}
+			}
 		});
-		chat.dispose();
-		await dispatch.drain();
-		await result.stop();
-		return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+		try {
+			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
+			const code = await serveClioAcpAgent({
+				transport,
+				chat,
+				...(session ? { session } : {}),
+				toolRegistry,
+				cwd: process.cwd(),
+				version: getVersionInfo().clio,
+				permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,
+			});
+			chat.dispose();
+			await dispatch.drain();
+			await result.stop();
+			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
+		} finally {
+			unsubscribeAcpRoutingNotices();
+		}
 	}
 
 	if (options.headless) {
@@ -709,19 +793,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				if (askUserHandler === handler) askUserHandler = null;
 			};
 		},
-		getSettings: () => config?.get() ?? readSettings(),
-		...(config
-			? {
-					getWorkerDefault: () => {
-						const workerDefault = config.get().workers?.default;
-						if (!workerDefault) return undefined;
-						const result: { endpoint?: string; model?: string } = {};
-						if (workerDefault.endpoint) result.endpoint = workerDefault.endpoint;
-						if (workerDefault.model) result.model = workerDefault.model;
-						return result;
-					},
-				}
-			: {}),
+		getSettings: getCurrentSettings,
+		getWorkerDefault: () => {
+			const workerDefault = getCurrentSettings().workers.default;
+			const result: { endpoint?: string; model?: string } = {};
+			if (workerDefault.endpoint) result.endpoint = workerDefault.endpoint;
+			if (workerDefault.model) result.model = workerDefault.model;
+			return result;
+		},
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {
@@ -784,9 +863,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					current.orchestrator.model,
 					level,
 				)?.thinking.effectiveLevel ?? "off";
-			updateSettings((current) => {
-				current.orchestrator.thinkingLevel = nextLevel;
-			});
+			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
 		},
 		onCycleThinking: () => {
 			const current = getCurrentSettings();
@@ -797,12 +874,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				current.orchestrator.thinkingLevel ?? "off",
 			)?.thinking;
 			const effectiveAvailable = thinking?.supportedLevels ?? (["off"] as ThinkingLevel[]);
-			updateSettings((next) => {
-				next.orchestrator.thinkingLevel = advanceThinkingLevel(
-					thinking?.effectiveLevel ?? next.orchestrator.thinkingLevel ?? "off",
-					effectiveAvailable,
-				);
-			});
+			const nextLevel = advanceThinkingLevel(
+				thinking?.effectiveLevel ?? current.orchestrator.thinkingLevel ?? "off",
+				effectiveAvailable,
+			);
+			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
 		},
 		onSelectModel: ({ endpoint, model }) => {
 			const registry = getRuntimeRegistry();
@@ -821,18 +897,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					);
 				}
 			}
-			updateSettings((current) => {
-				current.orchestrator.endpoint = endpoint;
-				current.orchestrator.model = model;
-				rememberRecentModel(current, endpoint, model);
-			});
+			updateSessionRouting({ orchestrator: { endpoint, model } });
+			rememberRecentModel(`${endpoint}/${model}`, getCurrentSettings().modelSelector.recentLimit);
 		},
 		onSetScope: (scope) => {
-			updateSettings((current) => {
-				current.scope = Array.from(scope);
-			});
+			updateSessionRouting({ scope: Array.from(scope) });
 		},
-		writeSettings: (next) => persistSettings(next),
+		writeSettings: (next) => applySettingsBlob(next),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {
@@ -861,8 +932,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 				}
 			: {}),
-		onCycleScopedModelForward: () => cycleScoped("forward", getCurrentSettings, persistSettings),
-		onCycleScopedModelBackward: () => cycleScoped("backward", getCurrentSettings, persistSettings),
+		onCycleScopedModelForward: () => cycleScopedSession("forward"),
+		onCycleScopedModelBackward: () => cycleScopedSession("backward"),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

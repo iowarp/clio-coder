@@ -1,6 +1,6 @@
 import { Value } from "typebox/value";
 import { BusChannels } from "../../core/bus-events.js";
-import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -80,10 +80,12 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 			return snapshot;
 		},
 		set(next) {
+			contract.update?.(() => next);
+		},
+		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
-			writeSettings(next);
-			const normalized = readSettings();
+			const normalized = updateSettings(mutate);
 			validate(normalized);
 			snapshot = normalized;
 			const diff = diffSettings(previous, normalized);

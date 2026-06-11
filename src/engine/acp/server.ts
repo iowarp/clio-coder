@@ -361,7 +361,11 @@ function handleChatEvent(
 	// Clio lifecycle events (agent_start, retry_status, clio_plan_update) have
 	// no ACP v1 SessionUpdate equivalent. The prompt turn is bounded by the
 	// session/prompt response, so emitting non-spec `progress` updates would
-	// break strict clients. They are intentionally dropped.
+	// break strict clients. They are intentionally dropped. The same protocol
+	// gap applies to routing advisories (external settings divergence, active
+	// target removed): ACP v1 has no agent-initiated advisory channel, so the
+	// orchestrator records those as `custom` session-ledger entries
+	// (customType "clio.routing-notice") instead of inventing update kinds.
 }
 
 function rawToolInput(call: { tool: string; args?: Record<string, unknown> }): Record<string, unknown> {
