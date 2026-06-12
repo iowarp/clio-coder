@@ -1,7 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
+	createDispatchBoardStore,
 	type DispatchBoardRow,
 	formatTaskIslandLines,
 	renderDispatchCard,
@@ -74,6 +77,97 @@ describe("dispatch board card", () => {
 			for (const line of renderDispatchCard(makeRow(), width)) {
 				strictEqual(visibleWidth(line), width, `width ${width}: line "${line}" should span ${width} columns`);
 			}
+		}
+	});
+
+	it("renders a compact terminal detail line for failed, dead, and aborted cards", () => {
+		for (const status of ["failed", "dead", "aborted"] as const) {
+			const lines = renderDispatchCard(makeRow({ status, outcomeDetail: "fatal\nworker crash" }), 76);
+			ok(lines.join("\n").includes("Detail:"));
+			ok(lines.join("\n").includes("fatal worker crash"));
+			for (const line of lines) {
+				strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
+			}
+		}
+	});
+});
+
+describe("dispatch board terminal taxonomy", () => {
+	it("maps terminal run outcomes to board statuses with timeout detail", () => {
+		const cases: Array<{ reason: string; status: DispatchBoardRow["status"]; detail?: string }> = [
+			{ reason: "canceled", status: "aborted" },
+			{ reason: "interrupted", status: "aborted" },
+			{ reason: "stalled", status: "dead" },
+			{ reason: "dead", status: "dead" },
+			{ reason: "timed_out", status: "failed", detail: "turn timeout exceeded" },
+			{ reason: "failed", status: "failed" },
+		];
+
+		for (const { reason, status, detail } of cases) {
+			const bus = createSafeEventBus();
+			const store = createDispatchBoardStore(bus);
+			try {
+				bus.emit(BusChannels.DispatchStarted, {
+					runId: `run-${reason}`,
+					agentId: "coder",
+					endpointId: "default",
+					wireModelId: "model",
+					runtimeId: "runtime",
+					runtimeKind: "http",
+				});
+				bus.emit(BusChannels.DispatchFailed, {
+					runId: `run-${reason}`,
+					agentId: "coder",
+					endpointId: "default",
+					wireModelId: "model",
+					runtimeId: "runtime",
+					runtimeKind: "http",
+					reason,
+				});
+
+				const row = store.rows()[0];
+				strictEqual(row?.status, status, `${reason} should render as ${status}`);
+				if (detail !== undefined) strictEqual(row?.outcomeDetail, detail);
+			} finally {
+				store.unsubscribe();
+			}
+		}
+	});
+
+	it("does not downgrade a heartbeat-dead row when the terminal event is generic failed", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-dead",
+				agentId: "coder",
+				endpointId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+			});
+			bus.emit(BusChannels.DispatchProgress, {
+				runId: "run-dead",
+				agentId: "coder",
+				event: { type: "heartbeat_status", status: "dead" },
+			});
+			strictEqual(store.rows()[0]?.status, "dead");
+
+			bus.emit(BusChannels.DispatchFailed, {
+				runId: "run-dead",
+				agentId: "coder",
+				endpointId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				reason: "failed",
+				outcomeDetail: "exit code 1",
+			});
+			const row = store.rows()[0];
+			strictEqual(row?.status, "dead");
+			strictEqual(row?.outcomeDetail, "exit code 1");
+		} finally {
+			store.unsubscribe();
 		}
 	});
 });

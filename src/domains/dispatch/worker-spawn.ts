@@ -18,9 +18,16 @@ import type { WorkerSpec } from "../../worker/spec-contract.js";
 
 export type { WorkerSpec } from "../../worker/spec-contract.js";
 
+export interface SpawnedWorkerResult {
+	exitCode: number | null;
+	signal: NodeJS.Signals | null;
+	stderrTail?: string;
+	malformedStdoutLines?: number;
+}
+
 export interface SpawnedWorker {
 	pid: number | null;
-	promise: Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>;
+	promise: Promise<SpawnedWorkerResult>;
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
 	heartbeatAt: { current: number };
@@ -41,6 +48,7 @@ export interface SpawnOptions {
  * initiated cancel with output flush) pass `shutdownGraceMs` explicitly.
  */
 const DEFAULT_SHUTDOWN_GRACE_MS = 500;
+const STDERR_TAIL_BYTES = 4096;
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
@@ -58,6 +66,23 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	const pending: unknown[] = [];
 	const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
 	let finished = false;
+	let malformedStdoutLines = 0;
+	let stderrTail = Buffer.alloc(0);
+
+	function appendStderr(chunk: Buffer | string): void {
+		const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		if (next.length === 0) return;
+		const combined = Buffer.concat([stderrTail, next]);
+		stderrTail = combined.length > STDERR_TAIL_BYTES ? combined.subarray(combined.length - STDERR_TAIL_BYTES) : combined;
+	}
+
+	function diagnostics(): Pick<SpawnedWorkerResult, "stderrTail" | "malformedStdoutLines"> {
+		const stderrText = stderrTail.toString("utf8").trim();
+		return {
+			...(stderrText.length > 0 ? { stderrTail: stderrText } : {}),
+			...(malformedStdoutLines > 0 ? { malformedStdoutLines } : {}),
+		};
+	}
 
 	function push(value: unknown): void {
 		heartbeatAt.current = Date.now();
@@ -107,12 +132,12 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 				const value = JSON.parse(trimmed) as unknown;
 				push(value);
 			} catch {
-				// malformed line; stderr carries diagnostics
+				malformedStdoutLines += 1;
 			}
 		});
 	}
 
-	child.stderr?.on("data", () => {});
+	child.stderr?.on("data", (chunk: Buffer | string) => appendStderr(chunk));
 
 	const events: AsyncIterableIterator<unknown> = {
 		next(): Promise<IteratorResult<unknown>> {
@@ -134,7 +159,7 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		},
 	};
 
-	const promise = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+	const promise = new Promise<SpawnedWorkerResult>((resolve) => {
 		child.on("close", (code, signal) => {
 			try {
 				child.stdin?.end();
@@ -143,10 +168,10 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 			}
 			end();
 			if (sawSpawnError) {
-				resolve({ exitCode: null, signal: null });
+				resolve({ exitCode: null, signal: null, ...diagnostics() });
 				return;
 			}
-			resolve({ exitCode: code ?? 0, signal: signal ?? null });
+			resolve({ exitCode: code ?? 0, signal: signal ?? null, ...diagnostics() });
 		});
 	});
 
