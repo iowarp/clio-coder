@@ -94,11 +94,11 @@ When asked to review scientific array output:
 Use in the TUI:
 
 ```text
-/skills
+/skill
 /skill:hdf5-review review the output validation path
 ```
 
-`/skills [query]` lists every discovered skill with its scope, source, and trust state. `/skill:name args` force-activates a skill by expanding its body into the submitted message. The same expansion runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
+`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` force-activates a skill by expanding its body into the submitted message. The same expansion runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -115,7 +115,7 @@ Recognized frontmatter fields:
 
 ### Trust and compatibility roots
 
-Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skills` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
+Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
 Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio/skills` is always trusted as the Clio-native project root.
 

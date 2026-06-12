@@ -137,7 +137,7 @@ clio run "Summarize this repository layout and identify the main entry points."
 clio
 ```
 
-Inside the TUI, `/targets`, `/agents`, and `/skills` confirm what the session
+Inside the TUI, `/targets`, `/agents`, and `/skill` confirm what the session
 can see. The full command and slash-command reference is in
 [docs/commands-and-modes.md](docs/commands-and-modes.md), and target
 configuration in depth is covered by

@@ -42,7 +42,7 @@ export interface TreeSnapshot {
 		parentSessionId?: string | null;
 		parentTurnId?: string | null;
 	};
-	/** Id of the leaf node the session will append under next. */
+	/** Id of the active turn the session will append under next. */
 	leafId: string | null;
 	/** Flat node map keyed by id. */
 	nodesById: Record<string, TreeSnapshotNode>;

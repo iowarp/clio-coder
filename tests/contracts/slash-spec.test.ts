@@ -282,6 +282,47 @@ describe("contracts/slash-spec", () => {
 		}
 	});
 
+	it("locks the v0.2.3 post-sprint command registry", () => {
+		const expected = [
+			"quit",
+			"help",
+			"context-init",
+			"context-clear",
+			"skill",
+			"prompts",
+			"extensions",
+			"share",
+			"run",
+			"delegate",
+			"agents",
+			"targets",
+			"cost",
+			"context-view",
+			"fleet",
+			"view",
+			"thinking",
+			"model",
+			"scoped-models",
+			"settings",
+			"resume",
+			"new",
+			"tree",
+			"fork",
+			"compact",
+		];
+		deepStrictEqual(
+			BUILTIN_SLASH_COMMANDS.map((entry) => entry.name),
+			expected,
+		);
+		deepStrictEqual(
+			commandReference().map((entry) => entry.name),
+			expected,
+		);
+		for (const deleted of ["status", "hotkeys", "skills", "connect", "disconnect", "receipts"]) {
+			deepStrictEqual(parseSlashCommand(`/${deleted}`), { kind: "unknown", text: `/${deleted}` });
+		}
+	});
+
 	it("builds slash autocomplete commands from commandReference usage", () => {
 		const commands = buildSlashAutocompleteCommands();
 		const byName = new Map(commands.map((command) => [command.name, command]));

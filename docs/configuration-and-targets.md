@@ -88,7 +88,7 @@ Inside the TUI, verify the local surface with:
 ```text
 /targets
 /agents
-/skills
+/skill
 ```
 
 The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `c` to connect or authorize it, `d` to disconnect the live session state, `r` to probe the selected target, and `R` to probe all targets.

@@ -18,19 +18,17 @@ const VISIBLE_ROWS = 16;
  *   - One row per node, children indented under parents by 2 spaces per depth
  *   - Shift+T toggles ISO timestamps on/off
  *   - `e` enters label edit submode (Enter commits, Esc cancels)
- *   - `d` deletes the highlighted session with files
- *   - Shift+D deletes the highlighted session and keeps files (tombstone)
- *   - Enter on a row calls onSwitchBranch with the snapshot's session id
+ *   - Enter on a row switches the active append point to that turn id
  *   - Esc closes the overlay
  *
  * Cwd-toggle (`p`) and sort-order (`s`) land in Phase 18.
  *
  * The overlay queries `session.tree()` on open and after any mutation so
- * label/delete edits are reflected without a close/reopen cycle.
+ * label edits are reflected without a close/reopen cycle.
  */
 export interface OpenTreeOverlayDeps {
 	session: SessionContract;
-	onSwitchBranch: (sessionId: string) => void;
+	onSwitchTurn: (turnId: string) => void;
 	onClose: () => void;
 }
 
@@ -40,31 +38,10 @@ interface TreeRow {
 	sessionId: string;
 }
 
-type Submode = "browse" | "edit-label" | "confirm-delete";
-
-interface DeleteContext {
-	keepFiles: boolean;
-}
+type Submode = "browse" | "edit-label";
 
 function shortTurnId(id: string): string {
 	return id.length > 6 ? id.slice(0, 6) : id;
-}
-
-/**
- * Translate a deleteSession failure into an operator-facing message. The
- * session.deleteSession guard against removing the currently-open session
- * throws a verbose `session.deleteSession: refusing to delete the currently
- * open session; close() first` string that leaks contract-level language
- * into the TUI. Strip it down to a plain sentence; surface anything else
- * verbatim so genuine disk errors still reach the user.
- */
-/** @internal */
-export function formatTreeDeleteError(err: unknown): string {
-	const message = err instanceof Error ? err.message : String(err);
-	if (message.includes("refusing to delete the currently open session")) {
-		return "[tree] cannot delete the currently-open session";
-	}
-	return `[tree] could not delete session: ${message}`;
 }
 
 function clampPreview(text: string, max: number): string {
@@ -139,7 +116,8 @@ export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; wid
 	return `${primary}${pad}${ts}`;
 }
 
-class TreeOverlayView implements Component {
+/** @internal */
+export class TreeOverlayView implements Component {
 	private snapshot: TreeSnapshot | null;
 	private rows: TreeRow[];
 	private highlight = 0;
@@ -147,8 +125,6 @@ class TreeOverlayView implements Component {
 	private showTimestamps = false;
 	private submode: Submode = "browse";
 	private labelBuffer = "";
-	private deleteConfirmBuffer = "";
-	private deleteContext: DeleteContext | null = null;
 	private status = "";
 	private statusKind: "info" | "error" = "info";
 
@@ -226,17 +202,11 @@ class TreeOverlayView implements Component {
 		if (this.submode === "edit-label") {
 			return `label: ${this.labelBuffer}_  ${buildHint("commit", [{ key: "Enter", verb: "commit" }])}`;
 		}
-		if (this.submode === "confirm-delete") {
-			const scope = this.deleteContext?.keepFiles ? "tombstone" : "delete with files";
-			const typed = this.deleteConfirmBuffer ? ` typed:${this.deleteConfirmBuffer}` : "";
-			return `Delete session (${scope})? confirm: y + Enter${typed}  ${buildHint("commit", [{ key: "n", verb: "cancel" }])}`;
-		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
 		return buildHint("browse", [
 			{ key: "↑↓", verb: "move" },
 			{ key: "Enter", verb: "switch" },
 			{ key: "e", verb: "label" },
-			{ key: "d/Shift+D", verb: "delete" },
 			{ key: "Shift+T", verb: `ts:${tsLabel}` },
 		]);
 	}
@@ -246,10 +216,6 @@ class TreeOverlayView implements Component {
 	handleInput(data: string): void {
 		if (this.submode === "edit-label") {
 			this.handleLabelInput(data);
-			return;
-		}
-		if (this.submode === "confirm-delete") {
-			this.handleDeleteConfirmInput(data);
 			return;
 		}
 		this.handleBrowseInput(data);
@@ -276,7 +242,7 @@ class TreeOverlayView implements Component {
 		if (matchesKey(data, "enter") || data === "\n") {
 			const row = this.currentRow();
 			if (!row) return;
-			this.deps.onSwitchBranch(row.sessionId);
+			this.deps.onSwitchTurn(row.node.id);
 			this.deps.onClose();
 			return;
 		}
@@ -287,20 +253,6 @@ class TreeOverlayView implements Component {
 		if (data === "e") {
 			this.submode = "edit-label";
 			this.labelBuffer = this.currentRow()?.node.label ?? "";
-			this.setStatus("");
-			return;
-		}
-		if (data === "d") {
-			this.submode = "confirm-delete";
-			this.deleteContext = { keepFiles: false };
-			this.deleteConfirmBuffer = "";
-			this.setStatus("");
-			return;
-		}
-		if (data === "D") {
-			this.submode = "confirm-delete";
-			this.deleteContext = { keepFiles: true };
-			this.deleteConfirmBuffer = "";
 			this.setStatus("");
 			return;
 		}
@@ -343,58 +295,6 @@ class TreeOverlayView implements Component {
 		// Accept printable chars (including multi-byte UTF-8 runs).
 		if (data.charCodeAt(0) < 0x20) return;
 		this.labelBuffer += data;
-	}
-
-	private handleDeleteConfirmInput(data: string): void {
-		if (matchesKey(data, "esc") || data === "n" || data === "N") {
-			this.cancelDeleteConfirm();
-			return;
-		}
-		if (data === "\x7f" || data === "\b") {
-			this.deleteConfirmBuffer = this.deleteConfirmBuffer.slice(0, -1);
-			return;
-		}
-		if (matchesKey(data, "enter") || data === "\n") {
-			const normalized = this.deleteConfirmBuffer.trim().toLowerCase();
-			if (normalized === "y" || normalized === "yes") this.confirmDelete();
-			else this.cancelDeleteConfirm();
-			return;
-		}
-		if (data.length === 0) return;
-		if (data.charCodeAt(0) < 0x20) return;
-		const next = `${this.deleteConfirmBuffer}${data}`.slice(0, 3);
-		if ("yes".startsWith(next.toLowerCase())) {
-			this.deleteConfirmBuffer = next;
-			return;
-		}
-		this.cancelDeleteConfirm();
-	}
-
-	private cancelDeleteConfirm(): void {
-		this.submode = "browse";
-		this.deleteContext = null;
-		this.deleteConfirmBuffer = "";
-	}
-
-	private confirmDelete(): void {
-		const row = this.currentRow();
-		const ctx = this.deleteContext;
-		if (!row || !ctx) {
-			this.submode = "browse";
-			this.deleteContext = null;
-			this.deleteConfirmBuffer = "";
-			return;
-		}
-		try {
-			this.deps.session.deleteSession(row.sessionId, { keepFiles: ctx.keepFiles });
-			this.setStatus(`[tree] session ${shortTurnId(row.sessionId)} ${ctx.keepFiles ? "tombstoned" : "deleted"}`);
-		} catch (err) {
-			this.setStatus(formatTreeDeleteError(err), "error");
-		}
-		this.submode = "browse";
-		this.deleteContext = null;
-		this.deleteConfirmBuffer = "";
-		this.refresh();
 	}
 
 	private setStatus(status: string, kind: "info" | "error" = "info"): void {
