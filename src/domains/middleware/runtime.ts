@@ -1,10 +1,11 @@
 import { listMiddlewareRuleDefinitions } from "./rules.js";
-import type {
-	MiddlewareEffect,
-	MiddlewareHook,
-	MiddlewareHookInput,
-	MiddlewareHookResult,
-	MiddlewareRule,
+import {
+	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
+	type MiddlewareEffect,
+	type MiddlewareHook,
+	type MiddlewareHookInput,
+	type MiddlewareHookResult,
+	type MiddlewareRule,
 } from "./types.js";
 
 /**
@@ -235,5 +236,6 @@ function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
 	if (input.metadata !== undefined) cloned.metadata = { ...input.metadata };
 	if (input.toolArgs !== undefined) cloned.toolArgs = { ...input.toolArgs };
 	if (input.toolResultDetails !== undefined) cloned.toolResultDetails = { ...input.toolResultDetails };
+	if (input.text !== undefined) cloned.text = input.text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS);
 	return cloned;
 }

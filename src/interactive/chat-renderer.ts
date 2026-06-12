@@ -476,16 +476,19 @@ function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
-	if (entry.customType === "finishContractAdvisory") return renderFinishContractAdvisoryEntry(entry, width);
+	// "finishContractAdvisory" is the pre-middleware name for the same entry
+	// shape; older session ledgers still carry it.
+	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") {
+		return renderReminderMessageEntry(entry, width);
+	}
 	const body = stringifyPreview(entry.data);
 	const suffix = body.length > 0 ? ` ${body}` : "";
 	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
 }
 
-function renderFinishContractAdvisoryEntry(entry: CustomEntry, width: number): string[] {
+function renderReminderMessageEntry(entry: CustomEntry, width: number): string[] {
 	const data = payloadObject(entry.data);
-	const message =
-		typeof data?.message === "string" && data.message.length > 0 ? data.message : "finish-contract advisory";
+	const message = typeof data?.message === "string" && data.message.length > 0 ? data.message : "middleware reminder";
 	return wrapTextWithAnsi(message, width);
 }
 

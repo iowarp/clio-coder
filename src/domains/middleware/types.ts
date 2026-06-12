@@ -10,6 +10,8 @@ export const MIDDLEWARE_HOOKS = [
 	"on_compaction",
 	"on_dispatch_start",
 	"on_dispatch_end",
+	"turn_start",
+	"turn_end",
 ] as const;
 
 export type MiddlewareHook = (typeof MIDDLEWARE_HOOKS)[number];
@@ -61,6 +63,14 @@ export type MiddlewareMetadataValue = string | number | boolean | null;
 
 export type MiddlewareMetadata = Readonly<Record<string, MiddlewareMetadataValue>>;
 
+/**
+ * Cap for `MiddlewareHookInput.text`, in characters. The runtime truncates
+ * longer payloads from the head when cloning inputs, so no registration ever
+ * evaluates unbounded text. Producers report the true length out of band
+ * (chat-loop sets `metadata.assistantTextChars` on turn_end).
+ */
+export const MIDDLEWARE_HOOK_TEXT_MAX_CHARS = 16_000;
+
 export interface MiddlewareHookInput {
 	hook: MiddlewareHook;
 	runId?: string;
@@ -81,6 +91,13 @@ export interface MiddlewareHookInput {
 	toolArgs?: Readonly<Record<string, unknown>>;
 	/** Structured result details, supplied by the registry on after_tool. Read-only by contract. */
 	toolResultDetails?: Readonly<Record<string, unknown>>;
+	/**
+	 * Free text attached to the hook occurrence; on turn_end this is the final
+	 * assistant message text. The one typed exception to the scalar `metadata`
+	 * contract (Q3 decision), capped at MIDDLEWARE_HOOK_TEXT_MAX_CHARS by the
+	 * runtime when inputs are cloned.
+	 */
+	text?: string;
 }
 
 export interface MiddlewareHookResult {

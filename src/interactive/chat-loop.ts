@@ -2,6 +2,14 @@ import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } fr
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy } from "../core/skill-activation.js";
+import {
+	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
+	type MiddlewareContract,
+	type MiddlewareEffect,
+	type MiddlewareHookInput,
+	type MiddlewareMetadataValue,
+	type MiddlewareReminderSeverity,
+} from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -19,7 +27,6 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
-import { assessFinishContract } from "../domains/safety/finish-contract.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	AutoCompactionTrigger,
@@ -77,7 +84,6 @@ import {
 	extractThinking,
 	extractUserText,
 	fallbackIdentityPrompt,
-	finalAssistantStopMessage,
 	hasPersistableAssistantContent,
 	hasStructuredToolCall,
 	isLengthStopAssistantMessage,
@@ -237,6 +243,15 @@ export interface CreateChatLoopDeps {
 	 * confirmation admission happen on the actual execution path.
 	 */
 	toolRegistry?: ToolRegistry;
+	/**
+	 * Middleware hook surface. When wired, the chat-loop fires `turn_start`
+	 * when a prompt is accepted (flushing accumulated `inject_reminder`
+	 * effects into the request as a system-reminder block) and `turn_end`
+	 * when the final assistant message of a run lands (finish contract,
+	 * tool-prose loop). Optional so unit tests that exercise neither stay
+	 * minimal.
+	 */
+	middleware?: MiddlewareContract;
 	/**
 	 * Protected-artifact state handle, backed by the protected-artifacts hook
 	 * registration at the composition root. The chat-loop replaces the state
@@ -584,42 +599,125 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emit({ type: "message_end", message: noticeMessage(text) });
 	};
 
-	const appendFinishContractAdvisory = (message: string): void => {
+	// Reminders accumulated from middleware `inject_reminder` effects
+	// (turn_end advisories, hard-block recovery guidance, turn_start
+	// injections). The next accepted prompt flushes them into the model
+	// request as one system-reminder block; the buffer clears on session
+	// switch.
+	const pendingReminders: Array<{ message: string; severity: MiddlewareReminderSeverity }> = [];
+
+	const bufferReminder = (message: string, severity: MiddlewareReminderSeverity): void => {
+		if (pendingReminders.some((entry) => entry.message === message && entry.severity === severity)) return;
+		pendingReminders.push({ message, severity });
+	};
+
+	const flushPendingReminders = (): string => {
+		if (pendingReminders.length === 0) return "";
+		const messages = pendingReminders.map((entry) => entry.message);
+		pendingReminders.length = 0;
+		return `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>`;
+	};
+
+	const runMiddlewareTurnHook = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
+		if (!deps.middleware) return [];
+		try {
+			return deps.middleware.runHook(input).effects;
+		} catch {
+			// Per-registration throws are already isolated inside the runtime;
+			// anything escaping runHook is a runtime bug and must not break the
+			// turn.
+			return [];
+		}
+	};
+
+	const appendMiddlewareReminderEntry = (message: string, severity: MiddlewareReminderSeverity): void => {
 		if (!deps.session?.current()) return;
 		try {
 			deps.session.appendEntry({
 				kind: "custom",
 				parentTurnId: lastTurnId,
-				customType: "finishContractAdvisory",
+				customType: "middlewareReminder",
 				display: true,
-				data: { message },
+				data: { message, severity },
 			});
 		} catch {
-			// Advisory persistence is best-effort; the live notice still
+			// Reminder persistence is best-effort; the live notice still
 			// reaches the operator through the existing chat event path.
 		}
 	};
 
-	const emitFinishContractAdvisory = (messages: ReadonlyArray<AgentMessage>): void => {
-		if (!deps.session?.current() || !deps.readSessionEntries) return;
-		const message = finalAssistantStopMessage(messages);
-		if (message === null) return;
-		const text = extractText(message).trim();
-		if (text.length === 0) return;
-		let entries: ReadonlyArray<SessionEntry>;
-		try {
-			entries = deps.readSessionEntries();
-		} catch {
+	const fireTurnStart = (agentRuntime: AgentRuntime, promptText: string): void => {
+		const sessionId = deps.session?.current()?.id;
+		const input: MiddlewareHookInput = {
+			hook: "turn_start",
+			...(sessionId ? { sessionId } : {}),
+			modelId: agentRuntime.wireModelId,
+			metadata: { promptChars: promptText.length, queued: false },
+		};
+		for (const effect of runMiddlewareTurnHook(input)) {
+			if (effect.kind !== "inject_reminder") continue;
+			bufferReminder(effect.message, effect.severity ?? "info");
+		}
+	};
+
+	const applyTurnEndReminder = (
+		agentRuntime: AgentRuntime,
+		message: string,
+		severity: MiddlewareReminderSeverity,
+	): void => {
+		bufferReminder(message, severity);
+		if (severity === "hard-block") {
+			// Interrupt the turn unless the streaming tool-prose cutoff already
+			// aborted it mid-delta; the buffered reminder carries the recovery
+			// guidance into the next request either way.
+			if (toolProseAbortReason === null) {
+				toolProseAbortReason = message;
+				agentRuntime.agent.abort();
+				emitStreamingNotice(message);
+			}
 			return;
 		}
-		const assessment = assessFinishContract({
-			assistantText: text,
-			sessionEntries: entries,
-			assistantTurnId: lastTurnId,
-		});
-		if (assessment.kind !== "advisory") return;
-		appendFinishContractAdvisory(assessment.message);
-		emitNotice(assessment.message);
+		appendMiddlewareReminderEntry(message, severity);
+		emitNotice(message);
+	};
+
+	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {
+		for (let index = messages.length - 1; index >= 0; index -= 1) {
+			const message = messages[index];
+			if (message && typeof message === "object" && "role" in message && message.role === "assistant") {
+				return message;
+			}
+		}
+		return null;
+	};
+
+	const fireTurnEnd = (agentRuntime: AgentRuntime, messages: ReadonlyArray<AgentMessage>): void => {
+		if (!deps.middleware) return;
+		const message = lastAssistantMessage(messages);
+		if (message === null) return;
+		const text = extractText(message);
+		if (text.trim().length === 0) return;
+		const stopReason = (message as { stopReason?: unknown }).stopReason;
+		const metadata: Record<string, MiddlewareMetadataValue> = {
+			assistantTextChars: text.length,
+			hasStructuredToolCall: hasStructuredToolCall(message),
+			runtimeId: agentRuntime.runtimeId,
+			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
+		};
+		if (typeof stopReason === "string") metadata.stopReason = stopReason;
+		const sessionId = deps.session?.current()?.id;
+		const input: MiddlewareHookInput = {
+			hook: "turn_end",
+			...(sessionId ? { sessionId } : {}),
+			...(lastTurnId ? { turnId: lastTurnId } : {}),
+			modelId: agentRuntime.wireModelId,
+			text: text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
+			metadata,
+		};
+		for (const effect of runMiddlewareTurnHook(input)) {
+			if (effect.kind !== "inject_reminder") continue;
+			applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
+		}
 	};
 
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
@@ -1102,7 +1200,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (enrichedEvent.type === "agent_end") {
 				flushReconciledSnapshot();
-				emitFinishContractAdvisory(publicEvent?.type === "agent_end" ? publicEvent.messages : enrichedEvent.messages);
+				fireTurnEnd(localRuntime, enrichedEvent.messages);
 			}
 		});
 
@@ -1632,10 +1730,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
+			// turn_start: the prompt is accepted; registrations may inject
+			// context for this request. Accumulated reminders (turn_end
+			// advisories from the previous turn plus anything turn_start just
+			// emitted) flush into the request as one system-reminder block.
+			// Like the skill preamble below, the block is plain visible text in
+			// the user message: persisted in the ledger, no hidden prompt
+			// machinery.
+			fireTurnStart(agentRuntime, text);
+			const reminderBlock = flushPendingReminders();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
-			const submittedText = skillPreamble.length > 0 ? `${skillPreamble}\n\n${text}` : text;
+			const submittedText = [reminderBlock, skillPreamble, text].filter((part) => part.length > 0).join("\n\n");
 
 			// 1. Resolve the frozen session tool surface: same set, same order,
 			// same bytes on every submit so the provider prefix cache holds.
@@ -1908,6 +2015,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			retryCountdown?.cancel();
 			queuedFollowUps.length = 0;
 			persistedUserEchoes.length = 0;
+			pendingReminders.length = 0;
 			emitQueueUpdate();
 			lastTurnId = leafTurnId;
 			lastPromptCache = null;
