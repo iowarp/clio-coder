@@ -187,6 +187,28 @@ function receiptDetails(receipt: RunReceipt, receiptPath: string | null, summary
 	};
 }
 
+function dispatchRunHeading(receipt: RunReceipt): string {
+	if (receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded")) {
+		return `dispatch run ${receipt.runId} completed`;
+	}
+	switch (receipt.outcome) {
+		case "timed_out":
+			return `dispatch run ${receipt.runId} timed out`;
+		case "stalled":
+			return `dispatch run ${receipt.runId} stalled`;
+		case "canceled":
+			return `dispatch run ${receipt.runId} canceled`;
+		case "denied_by_policy":
+			return `dispatch run ${receipt.runId} denied by policy`;
+		case "spawn_failed":
+			return `dispatch run ${receipt.runId} spawn failed`;
+		case "failed":
+			return `dispatch run ${receipt.runId} failed`;
+		default:
+			return receipt.exitCode === 0 ? `dispatch run ${receipt.runId} completed` : `dispatch run ${receipt.runId} failed`;
+	}
+}
+
 function formatDispatchOutput(
 	receipt: RunReceipt,
 	receiptPath: string | null,
@@ -202,7 +224,7 @@ function formatDispatchOutput(
 		? truncateUtf8(summary.lastAssistantText, maxOutputBytes, TRUNCATION_MARKER)
 		: "(no assistant text captured)";
 	return [
-		`dispatch run ${receipt.runId} completed`,
+		dispatchRunHeading(receipt),
 		`agent=${receipt.agentId} target=${receipt.endpointId} model=${receipt.wireModelId} runtime=${receipt.runtimeId}`,
 		`exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning} toolCalls=${receipt.toolCalls} receipt=${receiptPath ?? "n/a"}${failure}`,
 		"",

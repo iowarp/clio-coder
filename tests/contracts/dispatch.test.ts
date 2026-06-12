@@ -520,6 +520,10 @@ describe("contracts/dispatch", () => {
 
 	it("dispatches configured ACP delegation agents with delegation receipt metadata", async () => {
 		const context = stubContext();
+		const terminalEvents: unknown[] = [];
+		const unsubscribeTerminal = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			terminalEvents.push(payload);
+		});
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
 			configContract.get().delegation.agents = [
@@ -612,6 +616,14 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.endpointId, "delegation:opencode");
 			strictEqual(receipt.sessionId, "sess-1");
 			strictEqual(receipt.tokenCount, 3);
+			strictEqual(
+				(terminalEvents[0] as { inputTokenCount?: unknown } | undefined)?.inputTokenCount,
+				receipt.inputTokenCount,
+			);
+			strictEqual(
+				(terminalEvents[0] as { outputTokenCount?: unknown } | undefined)?.outputTokenCount,
+				receipt.outputTokenCount,
+			);
 			strictEqual(receipt.delegation?.agentConfigId, "opencode");
 			strictEqual(receipt.delegation?.toolCallsRequested, 1);
 			strictEqual(receipt.delegation?.toolCallLog[0]?.callId, "call-1");
@@ -621,7 +633,58 @@ describe("contracts/dispatch", () => {
 				),
 			);
 		} finally {
+			unsubscribeTerminal();
 			await bundle.extension.stop?.();
+		}
+	});
+
+	it("surfaces bounded native worker stderr and malformed stdout in terminal failure detail", async () => {
+		const { spawnNativeWorker } = await import("../../src/domains/dispatch/worker-spawn.js");
+		const scratch = mkdtempSync(join(tmpdir(), "clio-worker-diagnostics-"));
+		const stubEntry = join(scratch, "stub-entry.js");
+		writeFileSync(
+			stubEntry,
+			`
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+rl.once("line", () => {
+	process.stdout.write("not json\\n");
+	process.stderr.write("x".repeat(5000) + "\\n[worker] fatal: expected diagnostic\\n");
+	process.exit(1);
+});
+`,
+			"utf8",
+		);
+
+		const context = stubContext();
+		const failedEvents: unknown[] = [];
+		const unsubscribeFailed = context.bus.on(BusChannels.DispatchFailed, (payload) => {
+			failedEvents.push(payload);
+		});
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec, opts) =>
+				spawnNativeWorker(spec, {
+					...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
+					workerEntryPath: stubEntry,
+				}),
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "crash with diagnostics" });
+			await drainEvents(handle.events);
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.exitCode, 1);
+			match(receipt.outcomeDetail ?? "", /\[worker\] fatal: expected diagnostic/);
+			match(receipt.outcomeDetail ?? "", /malformed stdout lines: 1/);
+			match(receipt.failureMessage ?? "", /\[worker\] fatal: expected diagnostic/);
+			ok((receipt.failureMessage ?? "").length <= 4200, "failure diagnostics must stay bounded");
+			const failedPayload = failedEvents[0] as { outcomeDetail?: unknown } | undefined;
+			match(String(failedPayload?.outcomeDetail ?? ""), /\[worker\] fatal: expected diagnostic/);
+		} finally {
+			unsubscribeFailed();
+			await bundle.extension.stop?.();
+			rmSync(scratch, { recursive: true, force: true });
 		}
 	});
 

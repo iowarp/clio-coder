@@ -79,7 +79,7 @@ import {
 	type ToolCallStat,
 } from "./types.js";
 import { validateJobSpec } from "./validation.js";
-import { type SpawnedWorker, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
+import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface RunTokenMeter {
 	inputTokens: number;
@@ -206,6 +206,57 @@ function extractReasoningTokenCount(usage: unknown): number {
 
 function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
+const MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS = 4096;
+
+function compactDiagnosticText(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateDiagnosticText(value: string, maxChars: number): string {
+	if (value.length <= maxChars) return value;
+	return `...${value.slice(value.length - maxChars + 3)}`;
+}
+
+function workerDiagnosticsText(result: SpawnedWorkerResult, maxChars: number): string | null {
+	const parts: string[] = [];
+	const stderr = typeof result.stderrTail === "string" ? compactDiagnosticText(result.stderrTail) : "";
+	if (stderr.length > 0) {
+		parts.push(`stderr: ${truncateDiagnosticText(stderr, maxChars)}`);
+	}
+	const malformedStdoutLines =
+		typeof result.malformedStdoutLines === "number" && Number.isFinite(result.malformedStdoutLines)
+			? Math.max(0, Math.floor(result.malformedStdoutLines))
+			: 0;
+	if (malformedStdoutLines > 0) {
+		parts.push(`malformed stdout lines: ${malformedStdoutLines}`);
+	}
+	if (parts.length === 0) return null;
+	return truncateDiagnosticText(parts.join("; "), maxChars);
+}
+
+function mergeWorkerDiagnosticDetail(
+	base: string | null,
+	result: SpawnedWorkerResult,
+	include: boolean,
+): string | null {
+	if (!include) return base;
+	const diagnostics = workerDiagnosticsText(result, MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS);
+	if (diagnostics === null) return base;
+	return base !== null && base.length > 0 ? `${base}; ${diagnostics}` : diagnostics;
+}
+
+function mergeWorkerDiagnosticFailure(
+	base: string | undefined,
+	result: SpawnedWorkerResult,
+	include: boolean,
+): string | undefined {
+	if (!include) return base;
+	const diagnostics = workerDiagnosticsText(result, MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS);
+	if (diagnostics === null) return base;
+	return base !== undefined && base.length > 0 ? `${base}; ${diagnostics}` : diagnostics;
 }
 
 const DISPATCH_TASK_CONTRACT = [
@@ -1326,6 +1377,8 @@ export function createDispatchBundle(
 				outcomeDetail: receipt.outcomeDetail ?? null,
 				lineage,
 				tokenCount: receipt.tokenCount,
+				inputTokenCount: receipt.inputTokenCount ?? 0,
+				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
@@ -1476,7 +1529,7 @@ export function createDispatchBundle(
 		const abort = () => worker.abort();
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
-		const workerDone = worker.promise.then((r) => ({ exitCode: r.exitCode }));
+		const workerDone = worker.promise;
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
@@ -1644,13 +1697,16 @@ export function createDispatchBundle(
 		};
 
 		const buildReceiptDraft = (
-			result: { exitCode?: number | null },
+			result: SpawnedWorkerResult,
 			endedAt: string,
 			status: RunStatus,
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 		): RunReceiptDraft => {
 			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
+			const includeDiagnostics = outcome !== "succeeded";
+			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(outcomeDetail, result, includeDiagnostics);
+			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
 			const pricing = lifecycle.target.endpoint.pricing;
 			const costUsd = pricing
 				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
@@ -1672,13 +1728,13 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				outcome,
-				outcomeDetail,
 				lineage,
 				identity,
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
-				...(failureMessage !== undefined ? { failureMessage } : {}),
+				outcomeDetail: finalOutcomeDetail,
+				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
@@ -1769,7 +1825,7 @@ export function createDispatchBundle(
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome,
-					outcomeDetail: detail,
+					outcomeDetail: receiptDraft.outcomeDetail ?? detail,
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
