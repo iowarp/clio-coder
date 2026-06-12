@@ -125,7 +125,7 @@ describe("domain stop() releases bus subscriptions", () => {
 		await bundle.extension.stop?.();
 		strictEqual(ctx.bus.listeners(BusChannels.ConfigHotReload).length, 0);
 		// Emitting after stop must be a no-op rather than a stale reload.
-		ctx.bus.emit(BusChannels.ConfigHotReload, { diff: { hotReload: ["prompt.fragment"] } });
+		ctx.bus.emit(BusChannels.ConfigHotReload, { diff: { hotReload: ["prompt.fragment"] } } as never);
 	});
 
 	it("context unsubscribes from session.start", async () => {
@@ -140,7 +140,7 @@ describe("domain stop() releases bus subscriptions", () => {
 			strictEqual(ctx.bus.listeners(BusChannels.SessionStart).length, 1);
 			await bundle.extension.stop?.();
 			strictEqual(ctx.bus.listeners(BusChannels.SessionStart).length, 0);
-			ctx.bus.emit(BusChannels.SessionStart, {});
+			ctx.bus.emit(BusChannels.SessionStart, { at: Date.now() });
 		} finally {
 			process.chdir(previousCwd);
 		}
@@ -243,7 +243,8 @@ describe("run.aborted payload reaches the status summary", () => {
 	it("still ends the run on a malformed payload, without detail", () => {
 		const harness = controllerHarness();
 		harness.startRun();
-		harness.bus.emit(BusChannels.RunAborted, { bogus: true });
+		// Deliberately malformed: bypass the compile-time payload check.
+		harness.bus.emit(BusChannels.RunAborted, { bogus: true } as never);
 		strictEqual(harness.controller.current().phase, "ended");
 		strictEqual(harness.controller.current().summary?.stopReason, "cancelled");
 		strictEqual(harness.controller.current().summary?.stopDetail, undefined);

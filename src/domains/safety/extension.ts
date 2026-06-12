@@ -1,4 +1,11 @@
-import { BusChannels, isRunAbortedPayload } from "../../core/bus-events.js";
+import {
+	type AgentStatusChangedPayload,
+	BusChannels,
+	isRunAbortedPayload,
+	type PermissionResolvedPayload,
+	type SessionParkedPayload,
+	type SessionResumedPayload,
+} from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import {
@@ -19,15 +26,6 @@ import { createLoopState, type LoopDetectorState, observe as observeLoop } from 
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
 
-interface PermissionResolvedPayload {
-	status: "granted" | "denied";
-	tool?: string;
-	actionClass?: string;
-	reason?: string;
-	requestedBy?: string;
-	at?: number;
-}
-
 function isPermissionResolvedPayload(value: unknown): value is PermissionResolvedPayload {
 	if (!value || typeof value !== "object") return false;
 	const p = value as Record<string, unknown>;
@@ -37,28 +35,6 @@ function isPermissionResolvedPayload(value: unknown): value is PermissionResolve
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;
 	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
 	return true;
-}
-
-interface SessionParkedPayload {
-	sessionId: string;
-	reason: SessionParkReason;
-	at?: number;
-}
-
-interface SessionResumedPayload {
-	sessionId: string;
-	via: SessionResumeVia;
-	at?: number;
-}
-
-interface AgentStatusChangedPayload {
-	runId: string | null;
-	phase: string;
-	prevPhase: string;
-	at?: number;
-	elapsedFromStart: number;
-	watchdogTier: number;
-	metadata?: Record<string, unknown>;
 }
 
 const PARK_REASONS = new Set<SessionParkReason>([

@@ -10,7 +10,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
@@ -1365,7 +1365,7 @@ export function createDispatchBundle(
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
-			const payload = {
+			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,
 				requestOrigin: lifecycle.requestOrigin,
@@ -1774,7 +1774,7 @@ export function createDispatchBundle(
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
-			const payload = {
+			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,
 				agentAudience: lifecycle.agentAudience,

@@ -1,3 +1,5 @@
+import type { BusChannel, BusPayloadMap } from "./bus-events.js";
+
 /**
  * Listener invoked by {@link SafeEventBus.emit}.
  *
@@ -15,14 +17,26 @@
  * Phase 2+ registers domain listeners here; violate the invariant and
  * shutdown.* ordering or banner timing will drift.
  */
-export type SafeEventListener = (payload: unknown) => void | Promise<void>;
+export type SafeEventListener<C extends BusChannel = BusChannel> = (payload: BusPayloadMap[C]) => void | Promise<void>;
 
+/**
+ * Typed-bus convention (w2-08): `emit` requires the payload registered for
+ * the channel in {@link BusPayloadMap}, and `on` hands the handler that same
+ * mapped type. This is compile-time only; the bus never validates payloads
+ * at runtime, so handlers consuming data that crossed a process boundary
+ * (e.g. DispatchProgressPayload.event) must keep their runtime validation.
+ * Defensive handlers may also declare their parameter as `unknown`, which is
+ * assignable by contravariance.
+ */
 export interface SafeEventBus {
-	emit(channel: string, payload: unknown): void;
-	on(channel: string, listener: SafeEventListener): () => void;
-	listeners(channel: string): SafeEventListener[];
+	emit<C extends BusChannel>(channel: C, payload: BusPayloadMap[C]): void;
+	on<C extends BusChannel>(channel: C, listener: SafeEventListener<C>): () => void;
+	listeners(channel: BusChannel): SafeEventListener[];
 	clear(): void;
 }
+
+/** Internal erased listener shape; payloads are typed at the bus seam only. */
+type StoredListener = (payload: never) => void | Promise<void>;
 
 function reportListenerError(channel: string, error: unknown): void {
 	const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -30,7 +44,7 @@ function reportListenerError(channel: string, error: unknown): void {
 }
 
 export function createSafeEventBus(): SafeEventBus {
-	const registry = new Map<string, Set<SafeEventListener>>();
+	const registry = new Map<string, Set<StoredListener>>();
 
 	const deliver = (channel: string, payload: unknown): void => {
 		const ls = registry.get(channel);
@@ -43,7 +57,7 @@ export function createSafeEventBus(): SafeEventBus {
 		// is safe; registration changes take effect on the next emit().
 		for (const listener of [...ls]) {
 			try {
-				const result = listener(payload);
+				const result = listener(payload as never);
 				if (result && typeof (result as Promise<void>).then === "function") {
 					(result as Promise<void>).catch((error) => reportListenerError(channel, error));
 				}
@@ -58,18 +72,18 @@ export function createSafeEventBus(): SafeEventBus {
 			deliver(channel, payload);
 		},
 		on(channel, listener) {
-			const set = registry.get(channel) ?? new Set<SafeEventListener>();
-			set.add(listener);
+			const set = registry.get(channel) ?? new Set<StoredListener>();
+			set.add(listener as StoredListener);
 			registry.set(channel, set);
 			return () => {
 				const current = registry.get(channel);
 				if (!current) return;
-				current.delete(listener);
+				current.delete(listener as StoredListener);
 				if (current.size === 0) registry.delete(channel);
 			};
 		},
 		listeners(channel) {
-			return [...(registry.get(channel) ?? [])];
+			return [...(registry.get(channel) ?? [])] as SafeEventListener[];
 		},
 		clear() {
 			registry.clear();

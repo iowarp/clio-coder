@@ -4,28 +4,26 @@
  * read the snapshot through the contract.
  */
 
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ObservabilityContract, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
 import { aggregateMetrics } from "./metrics.js";
 import { createTelemetry } from "./telemetry.js";
 
-interface DispatchCostPayload {
-	runId: string;
-	exitCode: number;
-	endpointId?: string;
-	wireModelId?: string;
-	tokenCount?: number;
-	reasoningTokenCount?: number;
-	costUsd?: number;
-	durationMs?: number;
-}
+/**
+ * Terminal dispatch payload with every field optional. Partial<> alone does
+ * not admit DispatchFailedPayload under exactOptionalPropertyTypes, and this
+ * subscriber treats completed/failed identically for cost purposes.
+ */
+type DispatchTerminalLike = {
+	[K in keyof DispatchCompletedPayload]?: DispatchCompletedPayload[K] | undefined;
+};
 
 function recordDispatchCost(
 	telemetry: ReturnType<typeof createTelemetry>,
 	cost: ReturnType<typeof createCostTracker>,
-	payload: DispatchCostPayload,
+	payload: DispatchTerminalLike,
 ): void {
 	if (!payload.endpointId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
 		return;
@@ -50,7 +48,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		async start() {
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
-					const payload = (raw ?? {}) as DispatchCostPayload;
+					const payload: DispatchTerminalLike = raw ?? {};
 					telemetry.record("counter", "dispatch.completed", 1);
 					if (typeof payload.durationMs === "number") {
 						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
@@ -60,7 +58,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 			);
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchFailed, (raw) => {
-					const payload = (raw ?? {}) as DispatchCostPayload;
+					const payload: DispatchTerminalLike = raw ?? {};
 					telemetry.record("counter", "dispatch.failed", 1);
 					if (typeof payload.durationMs === "number") {
 						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);

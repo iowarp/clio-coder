@@ -1,4 +1,10 @@
-import { BusChannels } from "../core/bus-events.js";
+import {
+	BusChannels,
+	type DispatchCompletedPayload,
+	type DispatchFailedPayload,
+	type DispatchProgressPayload,
+	type DispatchRunIdentity,
+} from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
@@ -36,31 +42,6 @@ interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
 	startedAtMs: number | null;
 	finishedAtMs: number | null;
 	durationMs: number | null;
-}
-
-interface DispatchEventBase {
-	runId?: unknown;
-	agentId?: unknown;
-	agentAudience?: unknown;
-	requestOrigin?: unknown;
-	endpointId?: unknown;
-	wireModelId?: unknown;
-	runtimeId?: unknown;
-	runtimeKind?: unknown;
-}
-
-interface DispatchTerminalPayload extends DispatchEventBase {
-	tokenCount?: unknown;
-	costUsd?: unknown;
-	durationMs?: unknown;
-	reason?: unknown;
-	outcomeDetail?: unknown;
-	inputTokenCount?: unknown;
-	outputTokenCount?: unknown;
-}
-
-interface DispatchProgressPayload extends DispatchEventBase {
-	event?: unknown;
 }
 
 interface WorkerEventShape {
@@ -346,7 +327,10 @@ function resolveFailedStatus(reason: unknown): DispatchBoardStatus {
 	return "failed";
 }
 
-function resolveFailureDetail(payload: DispatchTerminalPayload, fallback: string | null | undefined): string | null {
+function resolveFailureDetail(
+	payload: Partial<DispatchFailedPayload>,
+	fallback: string | null | undefined,
+): string | null {
 	const detail = parseOptionalDetail(payload.outcomeDetail);
 	if (detail !== null) return detail;
 	if (payload.reason === "timed_out") return "turn timeout exceeded";
@@ -421,7 +405,13 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 	const entries = new Map<string, DispatchBoardEntry>();
 	let nextSequence = 0;
 
-	const upsertBase = (raw: DispatchEventBase, status: DispatchBoardStatus, now: number): DispatchBoardEntry | null => {
+	// Payloads arrive typed off the bus, but the board keeps its runtime
+	// parsing (parse* helpers) because events are not validated at runtime.
+	const upsertBase = (
+		raw: Partial<DispatchRunIdentity>,
+		status: DispatchBoardStatus,
+		now: number,
+	): DispatchBoardEntry | null => {
 		const runId = parseRunId(raw.runId);
 		if (!runId) return null;
 		const previous = entries.get(runId);
@@ -456,11 +446,11 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 
 	const unsubscribers = [
 		bus.on(BusChannels.DispatchEnqueued, (raw) => {
-			upsertBase((raw ?? {}) as DispatchEventBase, "enqueued", Date.now());
+			upsertBase(raw ?? {}, "enqueued", Date.now());
 		}),
 		bus.on(BusChannels.DispatchStarted, (raw) => {
 			const now = Date.now();
-			const entry = upsertBase((raw ?? {}) as DispatchEventBase, "running", now);
+			const entry = upsertBase(raw ?? {}, "running", now);
 			if (!entry) return;
 			entry.startedAtMs ??= now;
 			entry.finishedAtMs = null;
@@ -468,7 +458,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		}),
 		bus.on(BusChannels.DispatchCompleted, (raw) => {
 			const now = Date.now();
-			const payload = (raw ?? {}) as DispatchTerminalPayload;
+			const payload: Partial<DispatchCompletedPayload> = raw ?? {};
 			const entry = upsertBase(payload, "completed", now);
 			if (!entry) return;
 			entry.startedAtMs ??= entry.enqueuedAtMs;
@@ -486,7 +476,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		}),
 		bus.on(BusChannels.DispatchFailed, (raw) => {
 			const now = Date.now();
-			const payload = (raw ?? {}) as DispatchTerminalPayload;
+			const payload: Partial<DispatchFailedPayload> = raw ?? {};
 			const runId = parseRunId(payload.runId);
 			const previousStatus = runId !== null ? entries.get(runId)?.status : undefined;
 			const resolvedStatus = resolveFailedStatus(payload.reason);
@@ -507,7 +497,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			}
 		}),
 		bus.on(BusChannels.DispatchProgress, (raw) => {
-			const payload = (raw ?? {}) as DispatchProgressPayload;
+			const payload: Partial<DispatchProgressPayload> = raw ?? {};
 			const runId = parseRunId(payload.runId);
 			if (!runId) return;
 			const entry = entries.get(runId);
