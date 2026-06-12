@@ -129,6 +129,120 @@ describe("contracts/context compaction mask_observations", () => {
 		strictEqual(second.maskedObservations, 0);
 	});
 
+	it("drops thinking from stale assistant messages, stamps mask_thinking, and preserves text and tool calls", () => {
+		const staleThinking = "let me reason step by step ".repeat(200);
+		const entries: SessionEntry[] = [
+			user("01", "old question"),
+			assistant(
+				"02",
+				[
+					{ type: "thinking", thinking: staleThinking, thinkingSignature: "reasoning_content" },
+					{ type: "text", text: "old answer" },
+					{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/huge.ts" } },
+				],
+				"01",
+			),
+			user("03", "recent protected turn", "02"),
+			assistant(
+				"04",
+				[
+					{ type: "thinking", thinking: "recent reasoning" },
+					{ type: "text", text: "recent answer" },
+				],
+				"03",
+				10,
+			),
+		];
+
+		const result = maskStaleObservations(entries, 1);
+		strictEqual(result.changed, true);
+		strictEqual(result.maskedObservations, 0);
+		strictEqual(result.maskedThinkingBlocks, 1);
+		strictEqual(result.maskedThinkingChars, staleThinking.length);
+
+		const stale = result.entries[1] as MessageEntry;
+		const stalePayload = stale.payload as {
+			content?: Array<{ type?: string; text?: string; id?: string }>;
+			contextCompaction?: { stage?: string; maskedThinkingChars?: number };
+		};
+		strictEqual(
+			stalePayload.content?.some((block) => block.type === "thinking"),
+			false,
+		);
+		ok(stalePayload.content?.some((block) => block.type === "text" && block.text === "old answer"));
+		ok(stalePayload.content?.some((block) => block.type === "toolCall" && block.id === "call-1"));
+		strictEqual(stalePayload.contextCompaction?.stage, "mask_thinking");
+		strictEqual(stalePayload.contextCompaction?.maskedThinkingChars, staleThinking.length);
+
+		const recent = result.entries[3] as MessageEntry;
+		const recentPayload = recent.payload as { content?: Array<{ type?: string; thinking?: string }> };
+		ok(recentPayload.content?.some((block) => block.type === "thinking" && block.thinking === "recent reasoning"));
+
+		const replay = buildReplayAgentMessagesFromTurns(result.entries) as Array<{ content?: unknown }>;
+		const replayedThinking = replay.flatMap((message) =>
+			Array.isArray(message.content)
+				? message.content.filter((block) => !!block && (block as { type?: string }).type === "thinking")
+				: [],
+		);
+		strictEqual(replayedThinking.length, 1, "only the protected recent thinking block survives replay");
+
+		const second = maskStaleObservations(result.entries, 1);
+		strictEqual(second.changed, false);
+		strictEqual(second.maskedThinkingBlocks, 0);
+		strictEqual(second.maskedThinkingChars, 0);
+	});
+
+	it("masks the payload-level thinking string form", () => {
+		const entries: SessionEntry[] = [
+			user("01", "old"),
+			{
+				kind: "message",
+				...entryBase("02"),
+				parentTurnId: "01",
+				role: "assistant",
+				payload: { text: "old answer", thinking: "legacy string reasoning", stopReason: "stop" },
+			},
+			user("03", "recent", "02"),
+		];
+
+		const result = maskStaleObservations(entries, 1);
+		strictEqual(result.changed, true);
+		strictEqual(result.maskedThinkingBlocks, 1);
+		strictEqual(result.maskedThinkingChars, "legacy string reasoning".length);
+		const payload = (result.entries[1] as MessageEntry).payload as { thinking?: unknown; text?: string };
+		strictEqual(payload.thinking, undefined);
+		strictEqual(payload.text, "old answer");
+		strictEqual(maskStaleObservations(result.entries, 1).changed, false);
+	});
+
+	it("leaves assistant messages inside the protected horizon and thinking-free sessions untouched", () => {
+		const entries: SessionEntry[] = [
+			user("01", "question"),
+			assistant(
+				"02",
+				[
+					{ type: "thinking", thinking: "protected" },
+					{ type: "text", text: "answer" },
+				],
+				"01",
+				10,
+			),
+		];
+		const protectedResult = maskStaleObservations(entries, 1);
+		strictEqual(protectedResult.changed, false);
+		strictEqual(protectedResult.maskedThinkingBlocks, 0);
+		strictEqual(protectedResult.entries[1], entries[1], "protected entries pass through by reference");
+
+		const noThinking: SessionEntry[] = [
+			user("01", "old"),
+			assistant("02", [{ type: "text", text: "plain answer" }], "01"),
+			user("03", "recent", "02"),
+		];
+		const untouched = maskStaleObservations(noThinking, 1);
+		strictEqual(untouched.changed, false);
+		strictEqual(untouched.entries[1], noThinking[1], "thinking-free stale entries pass through by reference");
+	});
+
 	it("formats LLM summary notices without a stray closing bracket", () => {
 		strictEqual(
 			renderCompactionSummaryLine({

@@ -187,6 +187,9 @@ export interface ContextPrunedPayload {
 	/** Used/window ratio at trigger time; mask stage only. */
 	pressure?: number | null;
 	maskedObservations?: number;
+	/** Thinking blocks stripped from stale assistant messages; mask stage only. */
+	maskedThinkingBlocks?: number;
+	maskedThinkingChars?: number;
 }
 
 // ---------------------------------------------------------------------------
