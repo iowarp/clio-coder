@@ -9,7 +9,11 @@ import {
 } from "../../src/domains/providers/auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
-import { modelCandidatesForStatus, resolveModelReference } from "../../src/domains/providers/index.js";
+import {
+	canonicalizeWireModelId,
+	modelCandidatesForStatus,
+	resolveModelReference,
+} from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
@@ -32,6 +36,30 @@ function fakeDescriptor(id: string, overrides: Partial<RuntimeDescriptor> = {}):
 		auth: "api-key",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 		synthesizeModel: () => ({ id, provider: id }) as never,
+		...overrides,
+	};
+}
+
+function fakeLiveStatus(
+	discoveredModels: ReadonlyArray<string>,
+	overrides: Partial<EndpointStatus> = {},
+): EndpointStatus {
+	const runtime = fakeDescriptor("llamacpp");
+	const endpoint: EndpointDescriptor = {
+		id: "mini",
+		runtime: runtime.id,
+		defaultModel: "AgenticQwen-30B-A3B-i1-Q4_K_M",
+		wireModels: ["AgenticQwen-30B-A3B-i1-Q4_K_M"],
+	};
+	return {
+		endpoint,
+		runtime,
+		available: true,
+		reason: "test",
+		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+		capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		discoveredModels,
+		discoveredModelsSource: "probe",
 		...overrides,
 	};
 }
@@ -138,6 +166,62 @@ describe("contracts/providers", () => {
 			strictEqual(resolution.target.contextWindowDetails.loadedContextWindow, 128000);
 			strictEqual(resolution.target.contextWindowDetails.warning, null);
 		}
+	});
+
+	it("canonicalizes wire model ids by preserving exact live catalog matches", () => {
+		const status = fakeLiveStatus(["llama-3.1"]);
+
+		strictEqual(canonicalizeWireModelId(status, "llama-3.1"), "llama-3.1");
+	});
+
+	it("canonicalizes wire model ids through one unique separator prefix alias", () => {
+		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
+		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
+		const status = fakeLiveStatus([canonical]);
+
+		strictEqual(canonicalizeWireModelId(status, requested), canonical);
+	});
+
+	it("leaves ambiguous wire model prefix aliases unchanged", () => {
+		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
+		const status = fakeLiveStatus(["AgenticQwen-30B-A3B-i1-Q4_K_M-262K", "AgenticQwen-30B-A3B-i1-Q4_K_M-131K"]);
+
+		strictEqual(canonicalizeWireModelId(status, requested), requested);
+	});
+
+	it("leaves wire model ids unchanged when no live catalog exists", () => {
+		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
+		const status = fakeLiveStatus([], {
+			discoveredModelsSource: "none",
+			endpoint: {
+				id: "mini",
+				runtime: "llamacpp",
+			},
+		});
+
+		strictEqual(canonicalizeWireModelId(status, requested), requested);
+	});
+
+	it("canonicalizes wire model ids through a configured wire-model catalog", () => {
+		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
+		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
+		const status = fakeLiveStatus([], {
+			discoveredModelsSource: "none",
+			endpoint: {
+				id: "mini",
+				runtime: "llamacpp",
+				defaultModel: requested,
+				wireModels: [canonical],
+			},
+		});
+
+		strictEqual(canonicalizeWireModelId(status, requested), canonical);
+	});
+
+	it("canonicalizes wire model ids by unique case-insensitive equality", () => {
+		const status = fakeLiveStatus(["LLaMA-3.1"]);
+
+		strictEqual(canonicalizeWireModelId(status, "llama-3.1"), "LLaMA-3.1");
 	});
 
 	it("produces diagnostics when target is missing or runtime is not registered", () => {

@@ -31,6 +31,7 @@ export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";
 export {
+	canonicalizeWireModelId,
 	hasLiveModelCatalog,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
