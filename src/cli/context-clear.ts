@@ -7,7 +7,7 @@ const HELP = `Usage:
   clio context-clear [--all]
 
 Clear accumulated project context owned by the context engine:
-.clio/codewiki.json, .clio/state.json, and .clio/handoffs/.
+.clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/.
 
 Preserves user-authored project assets by default:
 CLIO.md, .clio/agents/, and .clio/skills/.
@@ -53,7 +53,8 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 				stdout: (s) => process.stdout.write(s),
 				stderr: (s) => process.stderr.write(s),
 			},
-			confirmContext: () => confirm("Clear .clio/codewiki.json, .clio/state.json, and .clio/handoffs/? [y/N] "),
+			confirmContext: () =>
+				confirm("Clear .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/? [y/N] "),
 			confirmAll: () => confirm("Also remove CLIO.md? [y/N] "),
 		});
 		return 0;

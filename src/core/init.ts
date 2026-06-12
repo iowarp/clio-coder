@@ -6,7 +6,6 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
 import { clioCacheDir, clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "./xdg.js";
@@ -27,6 +26,7 @@ const STATE_SUBDIRS = ["sessions", "audit", "receipts", "interviews", "scratch"]
 interface InstallMetadata {
 	version: string;
 	installedAt: string;
+	upgradedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }
@@ -63,15 +63,14 @@ export function initializeClioHome(): InitReport {
 		}
 	}
 
+	// Structure only: an existing settings.yaml is never read, validated, or
+	// rewritten here. Content validation belongs to readSettings/doctor.
 	const settingsPath = join(configDir, "settings.yaml");
 	let touched = false;
 	if (!existsSync(settingsPath)) {
 		writeFileSync(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
 		created.push(settingsPath);
 		touched = true;
-	} else {
-		// Sanity check: parse to catch broken edits; leave the file untouched.
-		parseYaml(readFileSync(settingsPath, "utf8"));
 	}
 
 	const credentialsPath = join(configDir, "credentials.yaml");
@@ -88,23 +87,33 @@ export function initializeClioHome(): InitReport {
 		created.push(credentialsPath);
 	}
 
+	// installedAt is written exactly once, at first install. Any later
+	// version/platform/node change preserves it and stamps upgradedAt instead.
 	const installPath = join(stateDir, "install.json");
 	const installMetadata = readInstallMetadata(installPath);
 	const currentVersion = readClioVersion();
-	if (
-		!installMetadata ||
-		installMetadata.version !== currentVersion ||
-		installMetadata.platform !== process.platform ||
-		installMetadata.nodeVersion !== process.version
-	) {
-		const payload = {
+	if (!installMetadata) {
+		const payload: InstallMetadata = {
 			version: currentVersion,
 			installedAt: new Date().toISOString(),
 			platform: process.platform,
 			nodeVersion: process.version,
 		};
 		writeFileSync(installPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-		if (!installMetadata) created.push(installPath);
+		created.push(installPath);
+	} else if (
+		installMetadata.version !== currentVersion ||
+		installMetadata.platform !== process.platform ||
+		installMetadata.nodeVersion !== process.version
+	) {
+		const payload: InstallMetadata = {
+			version: currentVersion,
+			installedAt: installMetadata.installedAt,
+			upgradedAt: new Date().toISOString(),
+			platform: process.platform,
+			nodeVersion: process.version,
+		};
+		writeFileSync(installPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 	}
 
 	return { configDir, dataDir, stateDir, cacheDir, createdPaths: created, touchedSettings: touched };
@@ -123,6 +132,7 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 			return {
 				version: parsed.version,
 				installedAt: parsed.installedAt,
+				...(typeof parsed.upgradedAt === "string" ? { upgradedAt: parsed.upgradedAt } : {}),
 				platform: parsed.platform,
 				nodeVersion: parsed.nodeVersion,
 			};

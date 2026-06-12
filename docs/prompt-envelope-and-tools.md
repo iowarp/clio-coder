@@ -4,7 +4,7 @@ Clio Coder keeps the model-facing envelope stable and moves enforcement into the
 
 ## One system prompt per session
 
-The chat loop compiles one provider-facing system prompt for a session. The compile key is `endpoint|model|autonomy|sessionId`.
+The chat loop compiles one provider-facing system prompt for a session. The compile key is `target|model|autonomy|sessionId`.
 
 The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
 

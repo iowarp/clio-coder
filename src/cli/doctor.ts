@@ -3,7 +3,9 @@ import { printError } from "./shared.js";
 
 const HELP = `clio doctor [--fix] [--json]
 
-Diagnose Clio Coder state without creating files. Use --fix to create or repair missing state.
+Diagnose Clio Coder state without creating files. Use --fix to repair structure only:
+missing directories, missing template files, and credential permissions. --fix never
+rewrites an existing settings.yaml, valid or not.
 Pass --json to emit a machine-readable report on stdout.
 `;
 

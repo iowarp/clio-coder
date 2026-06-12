@@ -6,7 +6,7 @@ Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domai
 
 ## Context window resolution
 
-Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. It can come from a live loaded model config, a probe, an endpoint override, a model hint, catalog knowledge, a local-native default, or a descriptor default.
+Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. It can come from a live loaded model config, a probe, a target override, a model hint, catalog knowledge, a local-native default, or a descriptor default.
 
 Local-native runtimes use a recommended minimum desired window of 128,000 tokens. If the live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.
 
@@ -57,4 +57,4 @@ compaction:
 
 `auto` controls the pre-request trigger. Manual `/compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
 
-A lifecycle migration named `2026-06-11-compaction-single-threshold` rewrites older settings files to this shape once.
+Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path, and must be updated to this shape by hand.

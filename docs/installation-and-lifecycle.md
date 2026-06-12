@@ -12,17 +12,20 @@ Clio Coder is designed to be self-contained and platform-compliant. This documen
 Clio Coder follows standard platform specifications for user configurations, databases, and caches, but allows full environment overrides.
 
 ### Platform Defaults
-| Operating System | Config Directory (`configDir`) | Data Directory (`dataDir`) | Cache Directory (`cacheDir`) |
-| :--- | :--- | :--- | :--- |
-| **Linux / Unix** | `~/.config/clio` | `~/.local/share/clio` | `~/.cache/clio` |
-| **macOS** | `~/Library/Application Support/clio` | `~/Library/Application Support/clio` | `~/Library/Caches/clio` |
-| **Windows** | `%APPDATA%\clio` | `%APPDATA%\clio` | `%LOCALAPPDATA%\Temp\clio` |
+| Operating System | Config (`configDir`) | Data (`dataDir`) | State (`stateDir`) | Cache (`cacheDir`) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Linux / Unix** | `~/.config/clio` | `~/.local/share/clio` | `~/.local/state/clio` | `~/.cache/clio` |
+| **macOS** | `~/Library/Application Support/clio/config` | `~/Library/Application Support/clio/data` | `~/Library/Application Support/clio/state` | `~/Library/Caches/clio` |
+| **Windows** | `%APPDATA%\clio\config` | `%APPDATA%\clio\data` | `%LOCALAPPDATA%\clio\state` | `%LOCALAPPDATA%\clio\cache` |
+
+Run `clio paths [--json]` to print the resolved table for the current environment.
 
 ### Environment Overrides
 You can redirect Clio Coder's folders using environment variables:
-*   `CLIO_HOME`: Sets a unified tree where config goes to `$CLIO_HOME`, data goes to `$CLIO_HOME/data`, and cache goes to `$CLIO_HOME/cache`.
+*   `CLIO_HOME`: Sets a symmetric tree: `$CLIO_HOME/config`, `$CLIO_HOME/data`, `$CLIO_HOME/state`, and `$CLIO_HOME/cache`.
 *   `CLIO_CONFIG_DIR`: Overrides the configuration directory only (takes precedence over `CLIO_HOME`).
 *   `CLIO_DATA_DIR`: Overrides the data directory only (takes precedence over `CLIO_HOME`).
+*   `CLIO_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_HOME`).
 *   `CLIO_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_HOME`).
 
 ---
@@ -33,24 +36,24 @@ All files are created automatically during the first run. The configuration dire
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
-| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by full uninstall; restored only with `--keep-settings-auth` or retained by `clio uninstall --keep-config`. |
-| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by full uninstall; restored only with `--keep-settings-auth` or retained by `clio uninstall --keep-config`. |
+| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
+| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
-| **Data** | `install.json` | Platform-specific install metadata (Clio version, node, platform, date). | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
-| **Data** | `state/migrations.json` | Log of successfully applied schema/state migrations. | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
-| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
-| **Data** | `audit/YYYY-MM-DD.jsonl` | Daily fsynced safety audit logs showing allowed/blocked tool actions. | `0o644` (rw-r--r--) | Removed on uninstall / reset. |
-| **Data** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`. | `0o700` / `0o644` | Removed on uninstall / reset. |
+| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
+| **State** | `migrations.json` | Log of successfully applied schema/state migrations. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
+| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --data`. |
+| **State** | `audit/YYYY-MM-DD.jsonl` | Daily fsynced safety audit logs showing allowed/blocked tool actions. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
+| **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`. | `0o700` / `0o644` | Removed by uninstall / `reset --state`. |
 
 ---
 
 ## 3. Bootstrap Initialization
 
 When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `src/core/init.ts`) to bootstrap missing structures:
-1.  **Directory Tree**: Recursively creates root `config`, `data`, and `cache` folders, followed by the 9 default data subdirectories: `sessions`, `audit`, `state`, `agents`, `prompts`, `receipts`, `evidence`, `evals`, and `memory`.
-2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config.
+1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence`/`evals` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
+2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates an empty JSON credentials template and locks its permissions immediately to owner-only read-write (`0o600`).
-4.  **Install Metadata**: Writes or updates version info inside `install.json`.
+4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once at first install; a later version, platform, or node change preserves `installedAt` and stamps `upgradedAt`.
 
 ---
 
@@ -96,10 +99,10 @@ Clio Coder provides CLI utilities to manage operations safely.
 
 ### A. Integrity Diagnostics (`clio doctor`)
 Runs a series of health sweeps across the environment:
-*   Validates configuration YAML syntax.
+*   Validates `settings.yaml` against the strict schema, reporting exact key paths, read-only.
 *   Asserts owner-only permissions on credentials (`0o600`).
 *   Checks for version updates or environment configuration drifts.
-*   *Recovery:* Run `clio doctor --fix` to restore missing folders, rewrite correct permissions, or auto-migrate legacy runtime configurations.
+*   *Recovery:* Run `clio doctor --fix` to repair structure only: missing directories, missing template files, and credential permissions. `--fix` never rewrites an existing `settings.yaml`, valid or invalid.
 
 ### B. Upgrades (`clio upgrade`)
 Updates package installations and database states.
@@ -114,12 +117,15 @@ registry availability.
 ### C. System Resets (`clio reset`)
 Selective recovery wipes:
 ```bash
-clio reset [--state | --auth | --config | --all] --force
+clio reset [--state | --data | --cache | --auth | --config | --all] --force
 ```
-*   `--state` *(Default)*: Deletes database state files, cache, and history folders. Retains target preferences and API keys.
+Each level clears exactly the root (or file) it names and nothing else:
+*   `--state` *(Default)*: Deletes the state root only: sessions, audit logs, receipts, run ledger, install metadata.
+*   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
+*   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.
-*   `--all`: Wipes all config, data, and cache folders. Automatically calls initialization to boot up a fresh environment.
+*   `--all`: Wipes all four roots (config, data, state, cache) and automatically reinitializes a fresh environment.
 
 ### D. Local Source Uninstallation (`npm run uninstall:local`)
 Preview first:
@@ -150,12 +156,14 @@ operator-chosen directory before restoring them. Credential contents are never
 printed.
 
 ### E. CLI State Uninstallation (`clio uninstall`)
-`clio uninstall` removes selected state but does not remove the binary:
+`clio uninstall` removes all four roots (config, data, state, cache):
 
 ```bash
-clio uninstall [--keep-config] [--keep-data] --force
+clio uninstall [--remove-binary] --force
 ```
 
+`--remove-binary` also removes the launcher symlink when it resolves into a
+clio dist; anything else (a real file, a foreign symlink) is left in place.
 It prints binary-removal guidance for the active launcher, npm-global installs,
 npm links, and the local source symlink. Prefer `npm run uninstall:local` for
 source checkouts because it handles both the symlink and state in one audited
@@ -170,6 +178,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
 1.  **System Roots**:
     *   `~/.config/clio`
     *   `~/.local/share/clio`
+    *   `~/.local/state/clio`
     *   `~/.cache/clio`
 2.  **Local Source Bin Link**:
     *   `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`

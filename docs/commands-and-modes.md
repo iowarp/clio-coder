@@ -65,7 +65,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
 | `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
 | `--agent-profile <name>` | Use a named fleet profile for dispatch. |
-| `--agent-runtime <id>` | Pick the first fleet profile whose endpoint uses this runtime. |
+| `--agent-runtime <id>` | Pick the first fleet profile whose target uses this runtime. |
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
 

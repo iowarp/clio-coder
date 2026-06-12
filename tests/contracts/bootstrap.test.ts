@@ -282,12 +282,14 @@ describe("contracts/bootstrap", () => {
 
 	it("context-clear removes accumulated artifacts while preserving user-authored context assets", async () => {
 		mkdirSync(join(scratch, ".clio", "handoffs"), { recursive: true });
+		mkdirSync(join(scratch, ".clio", "proposals"), { recursive: true });
 		mkdirSync(join(scratch, ".clio", "agents"), { recursive: true });
 		mkdirSync(join(scratch, ".clio", "skills"), { recursive: true });
 		writeFileSync(join(scratch, "CLIO.md"), "# Project\n", "utf8");
 		writeFileSync(join(scratch, ".clio", "codewiki.json"), "{}\n", "utf8");
 		writeFileSync(join(scratch, ".clio", "state.json"), "{}\n", "utf8");
 		writeFileSync(join(scratch, ".clio", "handoffs", "handoff-2026-05-01.md"), "handoff\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "proposals", "clio-md-2026-05-01.md"), "proposal\n", "utf8");
 		writeFileSync(join(scratch, ".clio", "agents", "helper.md"), "# Helper\n", "utf8");
 		writeFileSync(join(scratch, ".clio", "skills", "skill.md"), "# Skill\n", "utf8");
 
@@ -297,6 +299,7 @@ describe("contracts/bootstrap", () => {
 		strictEqual(existsSync(join(scratch, ".clio", "codewiki.json")), false);
 		strictEqual(existsSync(join(scratch, ".clio", "state.json")), false);
 		strictEqual(existsSync(join(scratch, ".clio", "handoffs")), false);
+		strictEqual(existsSync(join(scratch, ".clio", "proposals")), false);
 		strictEqual(existsSync(join(scratch, "CLIO.md")), true);
 		strictEqual(existsSync(join(scratch, ".clio", "agents", "helper.md")), true);
 		strictEqual(existsSync(join(scratch, ".clio", "skills", "skill.md")), true);

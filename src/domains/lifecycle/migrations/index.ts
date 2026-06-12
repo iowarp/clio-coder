@@ -10,12 +10,20 @@
  * Applied migration ids are persisted to `<stateDir>/migrations.json`. A
  * migration whose id already appears in that manifest is skipped. `up()` is
  * invoked at most once per Clio Coder state tree for a given id.
+ *
+ * The registry ships empty pre-launch. Requirements for future migrations:
+ *
+ * 1. A migration that writes settings.yaml must hold the settings
+ *    single-writer lock (`withSettingsLock` in core/config.ts) around its
+ *    read-rewrite-write so it can never race `updateSettings`, and should
+ *    land the write through the atomic rename writer
+ *    (core/safe-resource-write.ts) so readers never see a partial file.
+ * 2. Migrations are authored against the shapes the code has on the day they
+ *    are needed, never against stale pre-release shapes.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import initialMigration from "./2026-04-17-initial.js";
-import compactionSingleThreshold from "./2026-06-11-compaction-single-threshold.js";
 
 export interface Migration {
 	id: string;
@@ -35,7 +43,7 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([initialMigration, compactionSingleThreshold]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;

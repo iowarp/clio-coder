@@ -163,7 +163,7 @@
       "24gb": "Use a 4-bit quant with reduced load context for evaluation. Prefer the 32GB tier for sustained Clio writes."
       "32gb": "Primary strong local model for multimodal main-agent work. Keep openai-compat available for tool-call fallback."
     runtimePreference:
-      lmstudioNative: "Use only when the endpoint lifecycle is Clio-managed or the model is already loaded at the requested context."
+      lmstudioNative: "Use only when the target's server lifecycle is Clio-managed or the model is already loaded at the requested context."
       openaiCompat: "Preferred fallback for LM Studio gateway tool-call extraction."
       llamaCpp: "OpenAI-compatible chat completions with --jinja."
     llamaCpp:
@@ -667,7 +667,7 @@
     runtimePreference:
       lmstudioNative: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
       openaiCompat: "Verified through the LM Studio gateway for read and write_plan tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
-      anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the endpoint root as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
+      anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the server root URL as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
     thinking:
       mechanism: budget-tokens
       budgetByLevel:

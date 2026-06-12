@@ -103,10 +103,11 @@ export interface RuntimeDescriptor {
 	outputParser?: string;
 	defaultCapabilities: CapabilityFlags;
 	/**
-	 * When true, this id stays in the registry for back-compat resolution but
-	 * is hidden from `clio configure --list` and the interactive wizard. Used
-	 * for legacy surface-specific aliases (e.g. `llamacpp-anthropic`) after a
-	 * composite descriptor takes over the user-visible slot.
+	 * When true, this id is a real, distinct runtime (e.g. `llamacpp-anthropic`,
+	 * the Anthropic Messages surface on llama.cpp, or the embed/rerank runtimes)
+	 * that stays resolvable by id but is hidden from `clio configure --list` and
+	 * the interactive wizard, where a composite descriptor owns the
+	 * user-visible slot.
 	 */
 	hidden?: boolean;
 	probe?(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;

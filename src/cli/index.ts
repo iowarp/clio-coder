@@ -50,7 +50,7 @@ Usage:
   clio paths [--json]       print resolved config/data/cache directories
   clio reset                recover or wipe Clio Coder state
   clio context-clear [--all]  clear accumulated project context artifacts
-  clio uninstall            remove Clio Coder state and print package removal guidance
+  clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
   clio fleet list|run|status  repo-owned fleet contracts and dispatch status

@@ -1,25 +1,23 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, relative } from "node:path";
+import { delimiter, join, sep } from "node:path";
 
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { printError, printHeader, printOk } from "./shared.js";
 
-const HELP = `clio uninstall [--keep-config] [--keep-data] [--dry-run] [--force]
+const HELP = `clio uninstall [--remove-binary] [--dry-run] [--force]
 
-Remove Clio Coder state and print package-manager removal guidance. This does not remove the clio binary.
+Remove all Clio Coder state: the config, data, state, and cache roots.
 
 Flags:
-  --keep-config  keep settings.yaml and credentials.yaml
-  --keep-data    keep sessions, receipts, evidence, memory, and other data
-  --dry-run      print what would be removed without changing anything
-  --force        required for destructive execution
+  --remove-binary  also remove the launcher symlink when it resolves into a clio dist
+  --dry-run        print what would be removed without changing anything
+  --force          required for destructive execution
 `;
 
 interface ParsedUninstallArgs {
-	keepConfig: boolean;
-	keepData: boolean;
+	removeBinary: boolean;
 	force: boolean;
 	dryRun: boolean;
 	help: boolean;
@@ -27,19 +25,15 @@ interface ParsedUninstallArgs {
 
 function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	const parsed: ParsedUninstallArgs = {
-		keepConfig: false,
-		keepData: false,
+		removeBinary: false,
 		force: false,
 		dryRun: false,
 		help: false,
 	};
 	for (const arg of argv) {
 		switch (arg) {
-			case "--keep-config":
-				parsed.keepConfig = true;
-				break;
-			case "--keep-data":
-				parsed.keepData = true;
+			case "--remove-binary":
+				parsed.removeBinary = true;
 				break;
 			case "--force":
 			case "-f":
@@ -59,9 +53,8 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	return parsed;
 }
 
-function report(label: string, path: string, keep: boolean): void {
-	const action = keep ? "keep" : "remove";
-	process.stdout.write(`  ${label.padEnd(8)} ${action.padEnd(6)} ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
+function report(label: string, path: string): void {
+	process.stdout.write(`  ${label.padEnd(8)} remove ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
 }
 
 function removePath(path: string, dryRun: boolean): void {
@@ -69,9 +62,42 @@ function removePath(path: string, dryRun: boolean): void {
 	rmSync(path, { recursive: true, force: true });
 }
 
-function containsPath(parent: string, child: string): boolean {
-	const rel = relative(parent, child);
-	return rel.length > 0 && !rel.startsWith("..") && !rel.startsWith("/");
+function launcherLinkPath(): string {
+	const binDir = process.env.CLIO_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
+	return join(binDir, "clio");
+}
+
+/**
+ * The launcher is removable only when it is a symlink whose target is the
+ * built CLI entry inside a clio dist (the shape install-local.sh creates).
+ * Anything else (a real file, a foreign symlink) is left in place. A dangling
+ * link to a removed dist still qualifies via its raw readlink target.
+ */
+function removeLauncher(dryRun: boolean): void {
+	const linkPath = launcherLinkPath();
+	let isSymlink: boolean;
+	try {
+		isSymlink = lstatSync(linkPath).isSymbolicLink();
+	} catch {
+		process.stdout.write(`  binary   absent ${linkPath}\n`);
+		return;
+	}
+	if (!isSymlink) {
+		process.stdout.write(`  binary   keep   ${linkPath} (not a symlink; remove it via your package manager)\n`);
+		return;
+	}
+	let target: string;
+	try {
+		target = realpathSync(linkPath);
+	} catch {
+		target = readlinkSync(linkPath);
+	}
+	if (!target.endsWith(join(sep, "dist", "cli", "index.js"))) {
+		process.stdout.write(`  binary   keep   ${linkPath} (does not resolve into a clio dist: ${target})\n`);
+		return;
+	}
+	process.stdout.write(`  binary   remove ${linkPath} -> ${target}\n`);
+	if (!dryRun) rmSync(linkPath, { force: true });
 }
 
 function findClioOnPath(): string | null {
@@ -104,16 +130,18 @@ function readNpmPrefix(): string | null {
 function printRemovalGuidance(): void {
 	const pathClio = findClioOnPath();
 	const npmPrefix = readNpmPrefix();
-	const localLink = join(homedir(), ".local", "bin", "clio");
+	const localLink = launcherLinkPath();
 	const currentLauncher = process.argv[1];
 
-	process.stdout.write("\nBinary removal guidance (state removal above does not delete the executable):\n");
+	process.stdout.write("\nBinary removal guidance:\n");
 	if (currentLauncher) process.stdout.write(`  current launcher: ${currentLauncher}\n`);
 	process.stdout.write(`  PATH lookup:      ${pathClio ?? "not currently found"}\n`);
 	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
 	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
 	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
-	process.stdout.write("  source checkout: npm run uninstall:local -- --force\n");
+	process.stdout.write(
+		"  source symlink:  clio uninstall --remove-binary --force (or npm run uninstall:local -- --force)\n",
+	);
 	process.stdout.write("  npm global:      npm uninstall -g @iowarp/clio-coder\n");
 	process.stdout.write("  npm link:        npm unlink -g @iowarp/clio-coder\n");
 	process.stdout.write("\nAfter removing or replacing a clio link, clear shell command caches:\n");
@@ -142,27 +170,19 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 
 	const dirs = resolveClioDirs();
 	printHeader("Clio Coder uninstall");
-	report("config", dirs.config, args.keepConfig);
-	report("data", dirs.data, args.keepData);
-	report("state", dirs.state, args.keepData);
-	report("cache", dirs.cache, false);
+	report("config", dirs.config);
+	report("data", dirs.data);
+	report("state", dirs.state);
+	report("cache", dirs.cache);
 
-	if (!args.keepConfig) {
-		if (args.keepData && (containsPath(dirs.config, dirs.data) || containsPath(dirs.config, dirs.state))) {
-			removePath(join(dirs.config, "settings.yaml"), args.dryRun);
-			removePath(join(dirs.config, "credentials.yaml"), args.dryRun);
-		} else {
-			removePath(dirs.config, args.dryRun);
-		}
-	}
-	if (!args.keepData) {
-		removePath(dirs.data, args.dryRun);
-		removePath(dirs.state, args.dryRun);
-	}
+	removePath(dirs.config, args.dryRun);
+	removePath(dirs.data, args.dryRun);
+	removePath(dirs.state, args.dryRun);
 	removePath(dirs.cache, args.dryRun);
+	if (args.removeBinary) removeLauncher(args.dryRun);
 	resetXdgCache();
 
-	printOk(args.dryRun ? "uninstall preview complete" : "removed selected Clio Coder state");
+	printOk(args.dryRun ? "uninstall preview complete" : "removed Clio Coder state");
 	printRemovalGuidance();
 	return 0;
 }
