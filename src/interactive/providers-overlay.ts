@@ -215,6 +215,14 @@ export function buildTargetAuthMap(
 	return out;
 }
 
+export function formatProbeNotice(status: EndpointStatus): string {
+	return `probed ${status.endpoint.id} (${healthLabel(status)} ${latencyTag(status)})`;
+}
+
+export function formatProbeAllNotice(count: number): string {
+	return `probed ${count} target${count === 1 ? "" : "s"}`;
+}
+
 function healthSortRank(status: EndpointStatus): number {
 	return status.health.status === "healthy" ? 0 : 1;
 }
@@ -518,11 +526,14 @@ export function openProvidersOverlay(
 			if (!status) return;
 			runAction("probe", async () => {
 				await providers.probeEndpoint(status.endpoint.id);
+				const probed = providers.list().find((s) => s.endpoint.id === status.endpoint.id) ?? status;
+				options?.notice?.("success", formatProbeNotice(probed), `targets:probe:${status.endpoint.id}`);
 			});
 		},
 		probeAll: () => {
 			runAction("probe-all", async () => {
 				await providers.probeAllLive();
+				options?.notice?.("success", formatProbeAllNotice(providers.list().length), "targets:probe-all");
 			});
 		},
 	};

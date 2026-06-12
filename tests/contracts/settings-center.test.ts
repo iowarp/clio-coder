@@ -241,4 +241,37 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("8"));
 		ok(fake.renders() > 0);
 	});
+
+	it("emits a success notice naming the setting path and new value on a committed change", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(24, 100);
+		const notices: Array<{ level: string; text: string; key?: string | undefined }> = [];
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			notice: (level, text, key) => {
+				notices.push({ level, text, key });
+			},
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+
+		// Tab to the sections lane, move to Terminal, Tab back to rows, Space-toggle.
+		overlay.handleInput?.("\t");
+		for (let i = 0; i < 6; i += 1) overlay.handleInput?.("j");
+		overlay.handleInput?.("\t");
+		overlay.handleInput?.(" ");
+
+		strictEqual(live.current.terminal.showTerminalProgress, true, "toggle persisted");
+		deepStrictEqual(notices, [
+			{
+				level: "success",
+				text: "terminal.showTerminalProgress set to true",
+				key: "settings:terminal.showTerminalProgress",
+			},
+		]);
+	});
 });

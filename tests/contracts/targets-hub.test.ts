@@ -14,6 +14,8 @@ import {
 	applyTargetsHubUseAction,
 	buildTargetAuthMap,
 	buildTargetHubUseSettings,
+	formatProbeAllNotice,
+	formatProbeNotice,
 	formatTargetsHubBodyLines,
 	sortTargetStatuses,
 	toggleExpandedTarget,
@@ -290,5 +292,20 @@ describe("contracts/targets hub", () => {
 		ok(written);
 		strictEqual(written.orchestrator.endpoint, "target-b");
 		strictEqual(written.orchestrator.model, "model-b");
+	});
+
+	it("formats probe completion notices with health and latency, and probe-all with target count", () => {
+		const healthy = status("dynamo", {
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 31 },
+		});
+		strictEqual(formatProbeNotice(healthy), "probed dynamo (ok 31ms)");
+
+		const down = status("mini", {
+			health: { status: "down", lastCheckAt: null, lastError: "refused", latencyMs: null },
+		});
+		strictEqual(formatProbeNotice(down), "probed mini (down -)");
+
+		strictEqual(formatProbeAllNotice(1), "probed 1 target");
+		strictEqual(formatProbeAllNotice(2), "probed 2 targets");
 	});
 });

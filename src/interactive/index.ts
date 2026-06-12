@@ -52,7 +52,12 @@ import {
 import type { ImageContent } from "../engine/types.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import { budgetAlertNotice, restartRequiredNotice, safetyBlockedNotice } from "./bus-notices.js";
+import {
+	budgetAlertNotice,
+	middlewareHookFailedNotice,
+	restartRequiredNotice,
+	safetyBlockedNotice,
+} from "./bus-notices.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import {
@@ -751,7 +756,8 @@ export function handleCwdFallbackCancel(preResumeSessionId: string | null, deps:
 	deps.openResumeOverlay();
 }
 
-// Pure overlay key router for list overlays (help, agents, prompts, extensions). Esc closes.
+// List overlays (help, agents, prompts, extensions, skills-hub) own their full
+// keymap including Esc; routeOverlayKey forwards every key to the ListOverlay kit.
 
 /** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
 export function routeOverlayKey(
@@ -846,10 +852,9 @@ export function routeOverlayKey(
 		overlayState === "extensions" ||
 		overlayState === "skills-hub"
 	) {
-		if (data === ESC) {
-			deps.closeOverlay();
-			return true;
-		}
+		// The ListOverlay kit owns Esc: first Esc clears a nonempty filter,
+		// second Esc closes through the consumer's onClose. Intercepting Esc
+		// here closed filtered overlays immediately (bt-06 finding 2).
 		return false;
 	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
@@ -1287,6 +1292,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// class, policy source) so the operator can tell which rule fired.
 	const unsubscribeSafetyBlocked = deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
 		const notice = safetyBlockedNotice(payload);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
+	});
+	// Middleware hook diagnostics. A throwing or budget-overrunning hook never
+	// breaks the turn, so without this warn notice a misbehaving guard or
+	// assessor would be invisible in interactive sessions (the composition
+	// root only writes stderr for non-interactive runs).
+	const unsubscribeMiddlewareHookFailed = deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
+		const notice = middlewareHookFailedNotice(payload);
 		if (notice === null) return;
 		appendNotice(notice.level, notice.text, busNoticeSink);
 		tui.requestRender();
@@ -2315,6 +2330,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				writeSettingsOut(next);
 				footer.refresh();
 			},
+			notice: notify,
 			onClose: () => {
 				settingsOverlayRefresh = null;
 				closeOverlay();
@@ -2628,6 +2644,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeConfigRestartRequired();
 		unsubscribeBudgetAlert();
 		unsubscribeSafetyBlocked();
+		unsubscribeMiddlewareHookFailed();
 		unsubscribePermissionRequired();
 		unregisterAskUserHandler?.();
 		unregisterAskUserHandler = null;

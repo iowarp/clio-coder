@@ -76,6 +76,68 @@ describe("contracts/list-overlay", () => {
 		ok(lines.some((l) => l.includes("Carrot")));
 	});
 
+	it("clears a nonempty filter on first Esc and closes on second Esc when the list has focus", () => {
+		const items: ListOverlayItem[] = [
+			{ id: "1", label: "Apple", group: "Fruit" },
+			{ id: "2", label: "Banana", group: "Fruit" },
+			{ id: "3", label: "Carrot", group: "Veggie" },
+		];
+
+		let closeCount = 0;
+		const view = new ListOverlayView(
+			{
+				title: "Test",
+				mode: "browse",
+				items,
+				filterable: true,
+				initialFilter: "c",
+				onClose: () => {
+					closeCount++;
+				},
+			},
+			() => {},
+		);
+
+		// Arrow down moves focus from the filter input to the list.
+		view.handleInput("\u001b[B");
+		let lines = view.render(80);
+		ok(!lines.some((l) => l.includes("Apple")));
+		ok(lines.some((l) => l.includes("Carrot")));
+
+		// First Esc clears the filter instead of closing.
+		view.handleInput("\u001b");
+		strictEqual(closeCount, 0);
+		lines = view.render(80);
+		ok(lines.some((l) => l.includes("Apple")));
+		ok(lines.some((l) => l.includes("Banana")));
+		ok(lines.some((l) => l.includes("Carrot")));
+
+		// Second Esc closes.
+		view.handleInput("\u001b");
+		strictEqual(closeCount, 1);
+	});
+
+	it("closes immediately on Esc when the filter is already empty", () => {
+		const items: ListOverlayItem[] = [{ id: "1", label: "Apple" }];
+
+		let closeCount = 0;
+		const view = new ListOverlayView(
+			{
+				title: "Test",
+				mode: "browse",
+				items,
+				filterable: true,
+				onClose: () => {
+					closeCount++;
+				},
+			},
+			() => {},
+		);
+
+		view.handleInput("\u001b");
+		strictEqual(closeCount, 1);
+	});
+
 	it("wraps selection on j/k keys when filter is not focused", () => {
 		const items: ListOverlayItem[] = [
 			{ id: "1", label: "Apple" },

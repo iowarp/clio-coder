@@ -8,8 +8,10 @@ const ESC = "\x1b";
  * routeOverlayKey is the seam where BT04-1 regressed: the Skills Hub state
  * was added (71c3e53) without joining the list-overlay routing union from
  * 7cae8fe, so every hub key fell through to the dispatch-board branch and was
- * swallowed. These tests pin the contract for every list overlay: non-Esc
- * input is forwarded to the focused ListOverlay (return false), Esc closes.
+ * swallowed. These tests pin the contract for every list overlay: all input
+ * including Esc is forwarded to the focused ListOverlay (return false). The
+ * kit owns Esc so a first Esc can clear a nonempty filter before a second
+ * Esc closes (bt-06 finding 2); router-level Esc interception bypassed that.
  */
 
 const LIST_OVERLAY_STATES: ReadonlyArray<OverlayState> = ["help", "agents", "prompts", "extensions", "skills-hub"];
@@ -44,10 +46,10 @@ describe("list-overlay key routing", () => {
 			strictEqual(closed(), 0, "no key except Esc closes the overlay");
 		});
 
-		it(`closes the ${state} overlay on Esc`, () => {
+		it(`forwards Esc to the ${state} overlay so the kit can clear a filter before closing`, () => {
 			const { deps, closed } = makeDeps();
-			strictEqual(routeOverlayKey(ESC, state, deps, neverMatches), true);
-			strictEqual(closed(), 1);
+			strictEqual(routeOverlayKey(ESC, state, deps, neverMatches), false);
+			strictEqual(closed(), 0, "close happens through the ListOverlay's onClose, not the router");
 		});
 	}
 
