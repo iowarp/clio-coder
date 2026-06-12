@@ -181,4 +181,69 @@ describe("contracts/safety", () => {
 		strictEqual(contract.evaluate(restoreSource).kind, "block");
 		strictEqual(contract.evaluate(restoreSource).classification.actionClass, "git_destructive");
 	});
+
+	it("hardens the pack for previously missing deletion verbs (sd-01 M4)", () => {
+		const bus = createSafeEventBus();
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
+		const contract = createSafetyBundle(mockContext).contract;
+		const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+
+		// Mass and secure deleters block at every posture.
+		const blocked: Array<[string, string]> = [
+			["find . -name '*.log' -delete", "find-delete"],
+			["rsync -a --delete src/ dst/", "rsync-delete"],
+			["rsync -a --delete-after src/ dst/", "rsync-delete"],
+			["shred -u secrets.txt", "shred-file"],
+		];
+		for (const [command, ruleId] of blocked) {
+			const decision = contract.evaluate(bash(command));
+			strictEqual(decision.kind, "block", `${command} must block`);
+			strictEqual(decision.kind === "block" && decision.match?.ruleId, ruleId, `${command} must hit ${ruleId}`);
+			strictEqual(contract.evaluate(bash(command), "confirmed").kind, "block", `${command} must block confirmed`);
+		}
+
+		// Single-file truncation is an authored confirm rail: ask, then allow once confirmed.
+		const askRails: Array<[string, string]> = [
+			["truncate -s 0 server.log", "truncate-size-zero"],
+			["truncate --size=0 server.log", "truncate-size-zero"],
+			[": > server.log", "colon-truncate"],
+			[":> server.log", "colon-truncate"],
+		];
+		for (const [command, ruleId] of askRails) {
+			const decision = contract.evaluate(bash(command));
+			strictEqual(decision.kind, "ask", `${command} must ask`);
+			strictEqual(decision.kind === "ask" && decision.match?.ruleId, ruleId, `${command} must hit ${ruleId}`);
+			strictEqual(contract.evaluate(bash(command), "confirmed").kind, "allow", `${command} must allow confirmed`);
+		}
+	});
+
+	it("catches the M4 deletion verbs through shell operators (sd-01 I3 precondition)", () => {
+		const bus = createSafeEventBus();
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
+		const contract = createSafetyBundle(mockContext).contract;
+		const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+
+		// The pack scans the full serialized command string before any operator
+		// handling, so the deletion verb is caught even when it rides in behind
+		// a recognized prefix. Assert the rule id so this cannot pass vacuously
+		// via an operator denial.
+		const blockedThroughOperators: Array<[string, string]> = [
+			["git status && find /tmp/clio-i3 -delete", "find-delete"],
+			["echo syncing; rsync -a --delete src/ dst/", "rsync-delete"],
+			["ls | shred -zu notes.txt", "shred-file"],
+		];
+		for (const [command, ruleId] of blockedThroughOperators) {
+			const decision = contract.evaluate(bash(command));
+			strictEqual(decision.kind, "block", `${command} must block`);
+			strictEqual(decision.kind === "block" && decision.match?.ruleId, ruleId, `${command} must hit ${ruleId}`);
+		}
+
+		const truncateBehindPrefix = contract.evaluate(bash("echo rotating && truncate -s 0 server.log"));
+		strictEqual(truncateBehindPrefix.kind, "ask");
+		strictEqual(truncateBehindPrefix.kind === "ask" && truncateBehindPrefix.match?.ruleId, "truncate-size-zero");
+
+		const colonBehindPrefix = contract.evaluate(bash("echo rotating; : > server.log"));
+		strictEqual(colonBehindPrefix.kind, "ask");
+		strictEqual(colonBehindPrefix.kind === "ask" && colonBehindPrefix.match?.ruleId, "colon-truncate");
+	});
 });
