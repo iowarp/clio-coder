@@ -903,25 +903,29 @@
       <h1>Model Catalog & Routing Blueprint</h1>
       <div class="subtitle">Interactive visual specifications for model target configurations, runtime detection, dynamic capability badging, and routing resolution in Clio Coder.</div>
       <div class="meta-badge">
-        <span>Clio Coder Version</span> v0.2.2
+        <span>Clio Coder Version</span> v0.2.3
       </div>
     </header>
 
     <div class="tabs-nav">
       <button type="button" class="tab-btn active" onclick="_switchTab('probe-sim')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
         Connection Prober Simulator
       </button>
       <button type="button" class="tab-btn" onclick="_switchTab('merge-sandbox')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
         Hierarchical Merge Stack
       </button>
       <button type="button" class="tab-btn" onclick="_switchTab('resolver-sim')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         Target-First Resolver
       </button>
+      <button type="button" class="tab-btn" onclick="_switchTab('thinking-replay')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Thinking Replay Semantics
+      </button>
       <button type="button" class="tab-btn" onclick="_switchTab('diagrams')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg>
         Architecture Flowcharts
       </button>
     </div>
@@ -931,7 +935,7 @@
       <div class="simulator-grid">
         <div class="control-panel glass-card">
           <div class="glass-card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20v-6M6 20V10M18 20V4" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 20v-6M6 20V10M18 20V4" /></svg>
             Probe Configuration
           </div>
 
@@ -999,7 +1003,7 @@
 
         <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
           <div class="glass-card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
             Probe Console & capability badges
           </div>
 
@@ -1055,7 +1059,7 @@
     <div id="merge-sandbox" class="tab-pane">
       <div class="glass-card">
         <div class="glass-card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
           Capability Layer Aggregation Sandbox
         </div>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted); font-size: 0.95rem;">
@@ -1225,7 +1229,7 @@
 
         <div class="merge-effective-card">
           <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--color-cyan); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px;"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
             Resolved Effective Capabilities
           </h3>
           <div class="effective-grid">
@@ -1264,7 +1268,7 @@
       <div class="resolver-container">
         <div class="resolver-input-panel glass-card">
           <div class="glass-card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
             Resolver Input Parameters
           </div>
 
@@ -1292,7 +1296,7 @@
 
         <div class="glass-card" style="display: flex; flex-direction: column;">
           <div class="glass-card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
             Resolver Resolution Trace
           </div>
           <div class="trace-container" id="resolver-trace-log">
@@ -1308,6 +1312,62 @@
       </div>
     </div>
 
+    <!-- TAB: THINKING REPLAY INSPECTOR -->
+    <div id="thinking-replay" class="tab-pane">
+      <div class="simulator-grid" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 1.5rem; margin-top: 1rem;">
+        <div class="control-panel glass-card">
+          <div class="glass-card-title">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Thinking Replay Parameters
+          </div>
+          <div class="form-group">
+            <label for="replay-provider">Target Provider / Runtime</label>
+            <select id="replay-provider" class="form-control" onchange="updateReplayInspector()">
+              <option value="ollama-native">Ollama Native (ollama-native)</option>
+              <option value="lmstudio-native">LM Studio Native (lmstudio-native)</option>
+              <option value="openai-completions">OpenAI Completions (openai-completions)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="replay-cot">Chain of Thought (Thinking Block)</label>
+            <textarea id="replay-cot" class="form-control" rows="5" style="font-family: var(--font-mono); font-size: 0.85rem;" oninput="updateReplayInspector()">To find the sum of 2 and 2:
+1. Identify the two numbers (2 and 2).
+2. Apply the addition operator.
+3. 2 + 2 = 4.</textarea>
+          </div>
+          <div class="form-group">
+            <label for="replay-answer">Final Assistant Response</label>
+            <textarea id="replay-answer" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.85rem;" oninput="updateReplayInspector()">The sum of 2 and 2 is 4.</textarea>
+          </div>
+        </div>
+
+        <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 1rem;">
+          <div>
+            <div class="glass-card-title" style="margin-bottom: 1rem;">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
+              Payload & Message History Semantics
+            </div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+              How the thinking and content blocks are serialized in the API payload or message history:
+            </div>
+            
+            <div style="margin-bottom: 1rem;">
+              <span class="badge-mini" style="background: rgba(0, 240, 255, 0.1); border-color: var(--color-cyan); color: var(--color-cyan);" id="replay-mechanism-badge">Ollama Native Field</span>
+            </div>
+
+            <label style="font-size: 0.75rem; text-transform: uppercase; color: var(--color-cyan);">API Request / History Payload JSON</label>
+            <pre id="replay-payload-json" style="background: #05080e; border: 1px solid var(--border-card); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; margin-top: 0.25rem; max-height: 400px;"></pre>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-card); padding-top: 1rem; margin-top: auto;">
+            <label style="font-size: 0.75rem; text-transform: uppercase; color: var(--color-emerald);">Clio Engine Session Ledger / UI Replay</label>
+            <div id="replay-ui-preview" style="background: rgba(16, 185, 129, 0.02); border: 1px solid rgba(16, 185, 129, 0.15); border-radius: 8px; padding: 1rem; margin-top: 0.25rem; font-family: var(--font-sans); font-size: 0.85rem;">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 4: ARCHITECTURE FLOWCHARTS -->
     <div id="diagrams" class="tab-pane">
       <div class="flowchart-container">
@@ -1315,11 +1375,11 @@
         <!-- DIAGRAM A -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
             Hierarchical Capability Synthesis Overlay Flowchart
           </div>
           <div class="svg-wrapper">
-            <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
               <!-- Definitions for arrows -->
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1402,11 +1462,11 @@
         <!-- DIAGRAM B -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             Target-First Model Resolver Match sequence
           </div>
           <div class="svg-wrapper">
-            <svg aria-hidden="true" width="850" height="400" viewBox="0 0 850 400" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="400" viewBox="0 0 850 400" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
               <style>
                 .step-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .step-box-hit { fill: rgba(16, 185, 129, 0.03); stroke: #10b981; stroke-width: 2; rx: 8; ry: 8; }
@@ -1489,11 +1549,11 @@
         <!-- DIAGRAM C -->
         <div class="glass-card">
           <div class="svg-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
             Live Connection Probe & Capability Detection Pipeline
           </div>
           <div class="svg-wrapper">
-            <svg aria-hidden="true" width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg">
+            <svg aria-hidden="true" width="850" height="380" viewBox="0 0 850 380" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
               <style>
                 .flow-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .flow-box-active { fill: rgba(0, 240, 255, 0.02); stroke: #00f0ff; stroke-width: 1.5; rx: 6; ry: 6; }
@@ -1559,7 +1619,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.2. Designed with high-performance dark aesthetics.</p>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.3. Designed with high-performance dark aesthetics.</p>
     </footer>
   </div>
 
@@ -1574,6 +1634,9 @@
 
       if (tabId === 'resolver-sim') {
         runResolverSimulation();
+      }
+      if (tabId === 'thinking-replay') {
+        updateReplayInspector();
       }
     }
 
@@ -2105,7 +2168,115 @@
       card.style.borderColor = 'rgba(16, 185, 129, 0.4)';
     }
 
+    function updateReplayInspector() {
+      const provider = document.getElementById("replay-provider").value;
+      const cot = document.getElementById("replay-cot").value;
+      const answer = document.getElementById("replay-answer").value;
+      
+      const badge = document.getElementById("replay-mechanism-badge");
+      const jsonPre = document.getElementById("replay-payload-json");
+      const uiPreview = document.getElementById("replay-ui-preview");
+
+      let badgeText = "";
+      let jsonContent = "";
+      let uiContent = "";
+
+      if (provider === "ollama-native") {
+        badgeText = "Ollama Native thinking field";
+        badge.style.color = "var(--color-cyan)";
+        badge.style.borderColor = "var(--color-cyan)";
+        badge.style.background = "rgba(0, 240, 255, 0.1)";
+
+        const payload = {
+          model: "deepseek-r1:8b",
+          messages: [
+            {
+              role: "user",
+              content: "What is 2 + 2?"
+            },
+            {
+              role: "assistant",
+              thinking: cot,
+              content: answer
+            }
+          ]
+        };
+        jsonContent = JSON.stringify(payload, null, 2);
+        uiContent = `
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Clio logs stream reasoning increments cleanly through the native thinking channel:</div>
+            <div style="border-left: 2px solid var(--color-cyan); padding-left: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${cot.replace(/\n/g, '<br>')}</div>
+            <div style="font-weight: 500; margin-top: 0.25rem;">${answer}</div>
+          </div>
+        `;
+      } else if (provider === "lmstudio-native") {
+        badgeText = "LM Studio Prepend <think>";
+        badge.style.color = "var(--color-purple)";
+        badge.style.borderColor = "var(--color-purple)";
+        badge.style.background = "rgba(189, 0, 255, 0.1)";
+
+        const payload = {
+          model: "phi-4",
+          messages: [
+            {
+              role: "user",
+              content: "What is 2 + 2?"
+            },
+            {
+              role: "assistant",
+              content: `<think>\n${cot}\n</think>\n${answer}`
+            }
+          ]
+        };
+        jsonContent = JSON.stringify(payload, null, 2);
+        uiContent = `
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Replays prior thinking blocks by prepending them to assistant message payloads wrapped in tags:</div>
+            <div style="background: rgba(255,255,255,0.02); border: 1px dashed var(--border-card); padding: 0.5rem; border-radius: 4px; font-family: var(--font-mono); font-size: 0.8rem;">
+              <span style="color:var(--color-purple); font-weight:bold;">&lt;think&gt;</span><br>
+              ${cot.replace(/\n/g, '<br>')}<br>
+              <span style="color:var(--color-purple); font-weight:bold;">&lt;/think&gt;</span><br>
+              ${answer}
+            </div>
+          </div>
+        `;
+      } else if (provider === "openai-completions") {
+        badgeText = "OpenAI reasoning_content parameter";
+        badge.style.color = "var(--color-emerald)";
+        badge.style.borderColor = "var(--color-emerald)";
+        badge.style.background = "rgba(16, 185, 129, 0.1)";
+
+        const payload = {
+          model: "o1-mini",
+          messages: [
+            {
+              role: "user",
+              content: "What is 2 + 2?"
+            },
+            {
+              role: "assistant",
+              reasoning_content: cot,
+              content: answer
+            }
+          ]
+        };
+        jsonContent = JSON.stringify(payload, null, 2);
+        uiContent = `
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Preserves reasoning blocks using reasoning_content parameter, ensuring the model maintains CoT across turns:</div>
+            <div style="border-left: 2px solid var(--color-emerald); padding-left: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${cot.replace(/\n/g, '<br>')}</div>
+            <div style="font-weight: 500; margin-top: 0.25rem;">${answer}</div>
+          </div>
+        `;
+      }
+
+      badge.innerText = badgeText;
+      jsonPre.textContent = jsonContent;
+      uiPreview.innerHTML = uiContent;
+    }
+
     runResolverSimulation();
+    updateReplayInspector();
   </script>
 </body>
 </html>

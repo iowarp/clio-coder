@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Lifecycle Blueprint</title>
-  <!-- Modern Google Font -->
+  <title>Clio Coder Lifecycle Operations Blueprint (v0.2.3)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12,26 +11,32 @@
   <style>
     :root {
       --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.6);
       --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.3);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-dark: #6b7280;
+      --text-dim: #6b7280;
       
-      /* Vibrant Color Palettes */
-      --color-primary: #00f0ff; /* Glowing Cyan */
-      --color-primary-rgb: 0, 240, 255;
-      --color-secondary: #bd00ff; /* Glowing Purple */
-      --color-secondary-rgb: 189, 0, 255;
-      --color-accent: #10b981; /* Emerald Green */
-      --color-warn: #f59e0b; /* Amber */
-      --color-danger: #ef4444; /* Rose Red */
-      --color-info: #3b82f6; /* Blue */
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
       
-      --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-      --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.15);
+      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
     }
 
     * {
@@ -43,160 +48,160 @@
     body {
       background-color: var(--bg-dark);
       background-image: 
-        radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
       color: var(--text-main);
       font-family: var(--font-sans);
       min-height: 100vh;
       line-height: 1.6;
       overflow-x: hidden;
+      position: relative;
     }
 
-    /* Scrollbar Styling */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.02);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-primary-rgb), 0.3);
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
     }
 
-    /* Container */
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
+      position: relative;
+      z-index: 1;
     }
 
-    /* Header */
+    /* Header Styling */
     header {
-      text-align: center;
-      margin-bottom: 3rem;
-      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     .header-logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
+      border-radius: 12px;
     }
 
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
+    .header-logo svg {
+      width: 28px;
+      height: 28px;
     }
 
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-h1 {
-      font-size: 2.75rem;
+    .header-title-wrapper h1 {
+      font-size: 1.5rem;
       font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
-      background: linear-gradient(to right, #ffffff, #a5b4fc, var(--color-primary));
+      letter-spacing: -0.03em;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .subtitle {
-      font-size: 1.1rem;
+    .header-title-wrapper p {
+      font-size: 0.825rem;
       color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto;
-      font-weight: 400;
     }
 
-    /* Glass Card layout */
-    .glass-card {
-      background: var(--bg-card);
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .back-btn {
+      background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      margin-bottom: 2rem;
-      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
     }
 
-    .glass-card:hover {
-      border-color: rgba(var(--color-primary-rgb), 0.2);
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .version-badge {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: var(--color-cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 50px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
     }
 
     /* Tabs Navigation */
     .tabs-nav {
       display: flex;
-      justify-content: center;
       gap: 0.75rem;
-      margin-bottom: 2.5rem;
-      flex-wrap: wrap;
+      margin-bottom: 2rem;
     }
 
     .tab-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
       color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.2s;
     }
 
     .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
       color: var(--text-main);
-      border-color: rgba(var(--color-primary-rgb), 0.3);
     }
 
     .tab-btn.active {
       background: var(--gradient-main);
-      color: #000000;
-      font-weight: 700;
+      color: #090d16;
       border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.3);
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
     }
 
-    .tab-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: currentColor;
-    }
-
-    /* Tab Contents */
+    /* Content Layout */
     .tab-pane {
       display: none;
-      animation: fadeIn 0.4s ease-out forwards;
+      animation: fadeIn 0.3s ease-out forwards;
     }
 
     .tab-pane.active {
@@ -204,1290 +209,483 @@ h1 {
     }
 
     @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Interactive Simulator */
-    .simulator-grid {
+    /* Split layout */
+    .blueprint-layout {
       display: grid;
-      grid-template-columns: 350px 1fr;
+      grid-template-columns: 1fr 1.1fr;
       gap: 2rem;
-    }
-
-    @media (max-width: 900px) {
-      .simulator-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .control-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    label {
-      font-size: 0.85rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-
-    .os-selector {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0.5rem;
-    }
-
-    .os-btn {
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 0.9rem;
-      font-weight: 600;
-      text-align: center;
-      transition: all 0.2s ease;
-    }
-
-    .os-btn:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-main);
-    }
-
-    .os-btn.active {
-      background: rgba(var(--color-primary-rgb), 0.1);
-      border-color: var(--color-primary);
-      color: var(--color-primary);
-      box-shadow: inset 0 0 8px rgba(var(--color-primary-rgb), 0.1);
-    }
-
-    .text-input {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      color: var(--text-main);
-      padding: 0.75rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
-      width: 100%;
-    }
-
-    .text-input:focus {
-      outline: none;
-      border-color: var(--color-primary);
-      box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.25);
-    }
-
-    .text-input::placeholder {
-      color: var(--text-dark);
-    }
-
-    .paths-output {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .path-row {
-      background: rgba(0, 0, 0, 0.2);
-      border-left: 4px solid var(--color-primary);
-      border-radius: 0 8px 8px 0;
-      padding: 1rem 1.25rem;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .path-row.config { border-color: var(--color-primary); }
-    .path-row.data { border-color: var(--color-secondary); }
-    .path-row.cache { border-color: var(--color-info); }
-
-    .path-label {
-      font-size: 0.8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
-      display: flex;
-      justify-content: space-between;
-    }
-    
-    .path-env-ref {
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      color: var(--text-dark);
-    }
-
-    .path-value {
-      font-family: var(--font-mono);
-      font-size: 0.95rem;
-      color: var(--text-main);
-      word-break: break-all;
-      user-select: all;
-    }
-
-    /* Styled Directory Tree */
-    .tree-viewer {
-      background: rgba(5, 7, 13, 0.8);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      overflow-x: auto;
-      max-height: 550px;
-    }
-
-    .tree-node {
-      margin-left: 1.5rem;
-      position: relative;
-      padding-left: 0.5rem;
-    }
-
-    .tree-node::before {
-      content: '';
-      position: absolute;
-      left: -0.8rem;
-      top: 0;
-      bottom: 0.8rem;
-      width: 1px;
-      border-left: 1px dashed rgba(255, 255, 255, 0.15);
-    }
-
-    .tree-node::after {
-      content: '';
-      position: absolute;
-      left: -0.8rem;
-      top: 0.8rem;
-      width: 0.8rem;
-      height: 1px;
-      border-top: 1px dashed rgba(255, 255, 255, 0.15);
-    }
-
-    .tree-node:last-child::before {
-      height: 0.8rem;
-      bottom: auto;
-    }
-
-    .tree-root {
-      margin-left: 0;
-    }
-    .tree-root::before, .tree-root::after {
-      display: none;
-    }
-
-    .tree-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.2rem 0;
-      border-radius: 4px;
-      transition: background 0.15s ease;
-      cursor: help;
-    }
-
-    .tree-item:hover {
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .tree-icon {
-      flex-shrink: 0;
-      width: 16px;
-      height: 16px;
-    }
-
-    .icon-folder { fill: #f59e0b; }
-    .icon-file { fill: #9ca3af; }
-    .icon-file-important { fill: var(--color-primary); }
-    .icon-file-secret { fill: var(--color-danger); }
-
-    .node-desc {
-      color: var(--text-dark);
-      font-size: 0.75rem;
-      margin-left: auto;
-      padding-left: 1rem;
-      font-style: italic;
-    }
-
-    /* Grid layout for cards */
-    .grid-2 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-
-    @media (max-width: 600px) {
-      .grid-2 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Step items */
-    .step-list {
-      list-style-type: none;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .step-item {
-      display: grid;
-      grid-template-columns: 40px 1fr;
-      gap: 1rem;
       align-items: start;
     }
 
-    .step-num {
-      width: 36px;
-      height: 36px;
-      background: rgba(var(--color-primary-rgb), 0.1);
-      border: 1px solid var(--color-primary);
-      color: var(--color-primary);
-      border-radius: 50%;
+    @media (max-width: 1100px) {
+      .blueprint-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    .glass-card h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 1.25rem;
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 0.95rem;
-      box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.1);
+      gap: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
     }
 
-    .step-content h4 {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 0.25rem;
-      color: #fff;
+    .glass-card h2 svg {
+      width: 18px;
+      height: 18px;
+      color: var(--color-cyan);
     }
 
-    .step-content p {
-      font-size: 0.88rem;
+    .glass-card p {
+      font-size: 0.925rem;
       color: var(--text-muted);
+      margin-bottom: 1rem;
     }
 
-    /* Code blocks */
-    pre, code {
-      font-family: var(--font-mono);
+    /* Form selectors */
+    .form-group {
+      margin-bottom: 1rem;
     }
-    
-    pre {
-      background: rgba(0, 0, 0, 0.4);
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    select, input {
+      width: 100%;
+      background: rgba(9, 13, 22, 0.7);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      color: #fff;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    /* Path outcomes panel */
+    .resolved-paths-panel {
+      background: rgba(0,0,0,0.3);
       border: 1px solid var(--border-card);
       border-radius: 8px;
       padding: 1rem;
-      overflow-x: auto;
-      font-size: 0.85rem;
-      margin: 0.75rem 0;
+      margin-top: 1.25rem;
     }
 
-    .code-hl {
-      color: var(--color-primary);
+    .path-row {
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
     }
 
-    /* Table styling */
-    table {
+    .path-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .path-row strong {
+      display: block;
+      color: var(--color-cyan);
+    }
+
+    .path-row span {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #fff;
+      word-break: break-all;
+    }
+
+    /* Boot console */
+    .boot-console {
+      background: #020408;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      height: 180px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      color: var(--color-emerald);
+      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+      margin-top: 1rem;
+    }
+
+    .action-btn {
+      width: 100%;
+      background: var(--gradient-main);
+      color: #090d16;
+      border: none;
+      padding: 0.65rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .action-btn:hover {
+      opacity: 0.9;
+    }
+
+    /* Ref styling */
+    .ref-table {
       width: 100%;
       border-collapse: collapse;
       margin: 1.5rem 0;
       font-size: 0.9rem;
     }
 
-    th, td {
-      padding: 0.85rem 1rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border-card);
-    }
-
-    th {
-      font-weight: 600;
-      text-transform: uppercase;
-      font-size: 0.75rem;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    tr:hover td {
-      background: rgba(255, 255, 255, 0.01);
-    }
-
-    /* Badges */
-    .badge {
-      display: inline-block;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-    }
-
-    .badge-primary { background: rgba(0, 240, 255, 0.15); color: var(--color-primary); }
-    .badge-secondary { background: rgba(189, 0, 255, 0.15); color: var(--color-secondary); }
-    .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--color-accent); }
-    .badge-warn { background: rgba(245, 158, 11, 0.15); color: var(--color-warn); }
-    .badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--color-danger); }
-    .badge-info { background: rgba(59, 130, 246, 0.15); color: var(--color-info); }
-
-    /* Flowcharts (SVGs) */
-    .svg-flow-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background: rgba(5, 7, 13, 0.5);
+    .ref-table th, .ref-table td {
+      padding: 0.65rem 0.85rem;
       border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
+      text-align: left;
+    }
+
+    .ref-table th {
+      background: rgba(255,255,255,0.03);
+    }
+
+    pre {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
       overflow-x: auto;
-      margin: 1.5rem 0;
+      margin: 1rem 0;
     }
 
-    .svg-flow {
-      max-width: 100%;
-      height: auto;
-    }
-
-    /* Callout alert boxes */
-    .callout {
-      border-left: 4px solid;
-      padding: 1rem 1.25rem;
-      border-radius: 0 8px 8px 0;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .callout.callout-info {
-      background: rgba(59, 130, 246, 0.07);
-      border-color: var(--color-info);
-      color: #93c5fd;
-    }
-    
-    .callout.callout-warn {
-      background: rgba(245, 158, 11, 0.07);
-      border-color: var(--color-warn);
-      color: #fde047;
-    }
-    
-    .callout.callout-danger {
-      background: rgba(239, 68, 68, 0.07);
-      border-color: var(--color-danger);
-      color: #fca5a5;
-    }
-
-    .card-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      color: #fff;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 0.75rem;
-    }
-
-    .card-title svg {
-      width: 20px;
-      height: 20px;
-      fill: var(--color-primary);
-    }
-    
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 5rem;
-      padding-top: 2rem;
-      border-top: 1px solid var(--border-card);
-      color: var(--text-dark);
+    code {
+      font-family: var(--font-mono);
       font-size: 0.85rem;
     }
 
-    footer a {
-      color: var(--text-muted);
-      text-decoration: none;
-      transition: color 0.2s ease;
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
     }
-
-    footer a:hover {
-      color: var(--color-primary);
-    }
-
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <path d="M12 2L2 7L12 12L22 7L12 2Z"></path>
+            <path d="M2 17L12 22L22 17"></path>
+            <path d="M2 12L12 17L22 12"></path>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Clio Coder Installation &amp; Lifecycle</h1>
+          <p>Directory path setups, credentials security, and installation operations</p>
+        </div>
       </div>
-      <h1>Clio Coder Lifecycle Blueprint</h1>
-      <p class="subtitle">An analytical breakdown of filesystems, permissions, state schemas, and operations across installations, updates, resets, and uninstalls.</p>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.3</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
     </header>
 
-    <!-- Navigation Tabs -->
-    <nav class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="_switchTab('fs')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-        Filesystem Map
+    <div class="tabs-nav">
+      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Interactive Path Resolver &amp; Bootstrap
       </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('install')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-        Install & Bootstrap
+      <button type="button" class="tab-btn" onclick="switchTab('reference')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Full Technical Reference
       </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('upgrade')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
-        Upgrade & Migrations
-      </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('uninstall')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-        Uninstall & Reset
-      </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('flows')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-        Sequence Flowcharts
-      </button>
-    </nav>
-
-    <!-- TAB 1: FILESYSTEM MAP -->
-    <div id="pane-fs" class="tab-pane active">
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-          Dynamic Path Resolver & Layout
-        </h2>
-        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
-          Clio Coder follows standard platform specifications (like XDG on Linux, Library folders on macOS, and AppData on Windows). 
-          Select an OS and define environment overrides below to simulate how Clio resolves its runtime directories.
-        </p>
-        
-        <div class="simulator-grid">
-          <!-- Controls -->
-          <div class="control-panel">
-            <div class="form-group">
-              <label>Target Operating System</label>
-              <div class="os-selector">
-                <button type="button" class="os-btn active" id="os-linux" onclick="_setOS('linux')">Linux</button>
-                <button type="button" class="os-btn" id="os-darwin" onclick="_setOS('darwin')">macOS</button>
-                <button type="button" class="os-btn" id="os-win32" onclick="_setOS('win32')">Windows</button>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>CLIO_HOME <span style="font-size:0.75rem; color: var(--text-dark);">(Joint Override)</span></label>
-              <input type="text" class="text-input" id="env-clio-home" placeholder="e.g. /home/user/my-clio-env" oninput="updateSimulation()">
-            </div>
-            
-            <div class="form-group">
-              <label>CLIO_CONFIG_DIR <span style="font-size:0.75rem; color: var(--text-dark);">(Config Override)</span></label>
-              <input type="text" class="text-input" id="env-clio-config" placeholder="e.g. /custom/config" oninput="updateSimulation()">
-            </div>
-            
-            <div class="form-group">
-              <label>CLIO_DATA_DIR <span style="font-size:0.75rem; color: var(--text-dark);">(Data Override)</span></label>
-              <input type="text" class="text-input" id="env-clio-data" placeholder="e.g. /custom/data" oninput="updateSimulation()">
-            </div>
-            
-            <div class="form-group">
-              <label>CLIO_CACHE_DIR <span style="font-size:0.75rem; color: var(--text-dark);">(Cache Override)</span></label>
-              <input type="text" class="text-input" id="env-clio-cache" placeholder="e.g. /custom/cache" oninput="updateSimulation()">
-            </div>
-          </div>
-          
-          <!-- Outputs -->
-          <div class="paths-output">
-            <div class="path-row config">
-              <div class="path-label">
-                <span>Configuration Directory</span>
-                <span class="path-env-ref">CLIO_CONFIG_DIR</span>
-              </div>
-              <div class="path-value" id="path-resolved-config">~/.config/clio</div>
-            </div>
-            
-            <div class="path-row data">
-              <div class="path-label">
-                <span>Data Directory</span>
-                <span class="path-env-ref">CLIO_DATA_DIR</span>
-              </div>
-              <div class="path-value" id="path-resolved-data">~/.local/share/clio</div>
-            </div>
-            
-            <div class="path-row cache">
-              <div class="path-label">
-                <span>Cache Directory</span>
-                <span class="path-env-ref">CLIO_CACHE_DIR</span>
-              </div>
-              <div class="path-value" id="path-resolved-cache">~/.cache/clio</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- File Structure Visualizer -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0-2-.9-2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
-          Resolved File System Structure
-        </h2>
-        <p style="margin-bottom: 1.25rem; color: var(--text-muted);">
-          Hover over files and folders to view details on usage, access models, and lifecycle behaviors. This folder structure updates dynamically based on the paths resolved above.
-        </p>
-        
-        <div class="tree-viewer">
-          <!-- CONFIG ROOT -->
-          <div class="tree-node tree-root">
-            <div class="tree-item" title="Config Root: Stores persistent global options and authentications">
-              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-              <span id="tree-root-config">/home/user/.config/clio</span>
-              <span class="node-desc">Config Root</span>
-            </div>
-            
-            <div class="tree-node">
-              <div class="tree-item" title="settings.yaml: Holds targets specifications, preferred model orchestrator/workers, keybindings, and compaction policies. Read-write. Mode: 0o644">
-                <svg aria-hidden="true" class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                <span>settings.yaml</span>
-                <span class="badge badge-primary">Mode: 0o644</span>
-                <span class="node-desc">Target configs & default models</span>
-              </div>
-            </div>
-            
-            <div class="tree-node">
-              <div class="tree-item" title="credentials.yaml: Contains sensitive API tokens. Created during bootstrap, managed via clio auth. Mode: 0o600">
-                <svg aria-hidden="true" class="tree-icon icon-file-secret" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
-                <span>credentials.yaml</span>
-                <span class="badge badge-danger">Mode: 0o600</span>
-                <span class="node-desc">API Keys / Secrets</span>
-              </div>
-            </div>
-            
-            <div class="tree-node">
-              <div class="tree-item" title="credentials.yaml.lock: Acquired during credentials read/write to prevent concurrent process collisions. Auto-cleans.">
-                <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-2 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3-7H9V7.5C9 5.8 10.3 4.5 12 4.5c1.7 0 3 1.3 3 3V9z"/></svg>
-                <span>credentials.yaml.lock</span>
-                <span class="node-desc">Lockfile (transient)</span>
-              </div>
-            </div>
-          </div>
-          
-          <!-- DATA ROOT -->
-          <div class="tree-node tree-root" style="margin-top: 1rem;">
-            <div class="tree-item" title="Data Root: Houses sessions logs, audit trails, and compiled model memories.">
-              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-              <span id="tree-root-data">/home/user/.local/share/clio</span>
-              <span class="node-desc">Data Root</span>
-            </div>
-            
-            <div class="tree-node">
-              <div class="tree-item" title="install.json: Written on init. Detects environment version drifts (version, date, platform, node version).">
-                <svg aria-hidden="true" class="tree-icon icon-file-important" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                <span>install.json</span>
-                <span class="node-desc">Install info metadata</span>
-              </div>
-            </div>
-            
-            <!-- STATE -->
-            <div class="tree-node">
-              <div class="tree-item" title="state/: Directory storing global state details such as migration records.">
-                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                <span>state</span>
-              </div>
-              <div class="tree-node">
-                <div class="tree-item" title="migrations.json: Tracks applied database/state schema migrations (e.g. YYYY-MM-DD-initial).">
-                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                  <span>migrations.json</span>
-                  <span class="node-desc">Applied migrations record</span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- AUDIT -->
-            <div class="tree-node">
-              <div class="tree-item" title="audit/: Contains daily logs of tool executions, mode adjustments, and cancellations.">
-                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                <span>audit</span>
-              </div>
-              <div class="tree-node">
-                <div class="tree-item" title="YYYY-MM-DD.jsonl: Fsynced line-by-line. Redacts secrets/tokens to audit tool activities safely.">
-                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                  <span>2026-06-06.jsonl</span>
-                  <span class="node-desc">Daily safety audit log</span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- SESSIONS -->
-            <div class="tree-node">
-              <div class="tree-item" title="sessions/: Houses durable conversation trees, user questions, and model outputs.">
-                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                <span>sessions</span>
-              </div>
-              
-              <div class="tree-node">
-                <div class="tree-item" title="&lt;cwdHash&gt;/: First 16 chars of repository path's SHA-256. Organizes sessions by checkout folder.">
-                  <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                  <span>9f86d081884c7d65</span>
-                  <span class="node-desc">Repo Path Hash</span>
-                </div>
-                
-                <div class="tree-node">
-                  <div class="tree-item" title="&lt;sessionId&gt;/: Unique UUID directory representing a single durable conversation session.">
-                    <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                    <span>b44d2d48-6a56-42d4</span>
-                    <span class="node-desc">Session ID</span>
-                  </div>
-                  
-                  <div class="tree-node">
-                    <div class="tree-item" title="meta.json: Holds session information, compiler prompt structures, and date markers.">
-                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                      <span>meta.json</span>
-                      <span class="node-desc">Session configuration & timestamps</span>
-                    </div>
-                  </div>
-                  <div class="tree-node">
-                    <div class="tree-item" title="current.jsonl: Line-by-line append-only transcript of conversation turns and tool exchanges.">
-                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                      <span>current.jsonl</span>
-                      <span class="node-desc">Conversation turn logs</span>
-                    </div>
-                  </div>
-                  <div class="tree-node">
-                    <div class="tree-item" title="tree.json: Flat map tracking message/turn indices, forks, and parent-child linkages.">
-                      <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                      <span>tree.json</span>
-                      <span class="node-desc">Turn fork hierarchy tree</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- EVIDENCE -->
-            <div class="tree-node">
-              <div class="tree-item" title="evidence/: Compiled folders analyzing past runs, errors, tool calls, and execution findings.">
-                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                <span>evidence</span>
-              </div>
-              <div class="tree-node">
-                <div class="tree-item" title="run-&lt;runId&gt;/: Evidence directory analyzing a specific run. Contains full debug assets.">
-                  <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                  <span>run-a9b8c7d6/</span>
-                </div>
-                <div class="tree-node" style="margin-left: 3rem;">
-                  <div class="tree-item" title="overview.json: Static metadata mapping models, run times, and included artifacts."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>overview.json</span></div>
-                  <div class="tree-item" title="findings.json: Machine-readable collection of warnings, errors, or anomalies in the run."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>findings.json</span></div>
-                  <div class="tree-item" title="transcript.md: Formatted conversation trace for user review."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>transcript.md</span></div>
-                  <div class="tree-item" title="receipt.json: Token billing and tool integrity receipts."><svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg><span>receipt.json</span></div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- MEMORY -->
-            <div class="tree-node">
-              <div class="tree-item" title="memory/: Stores agent lessons and instructions linked to past evidence.">
-                <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                <span>memory</span>
-              </div>
-              <div class="tree-node">
-                <div class="tree-item" title="records.json: Holds up to 500 proposed/approved/rejected lessons. Used for prompt injects.">
-                  <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                  <span>records.json</span>
-                  <span class="node-desc">Long-term memory store</span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- OTHER STATIC DATA DIRS -->
-            <div class="tree-node">
-              <div class="tree-item" title="agents/: Extension agent descriptors."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>agents</span><span class="node-desc">Custom Agent Profiles</span></div>
-            </div>
-            <div class="tree-node">
-              <div class="tree-item" title="prompts/: Custom prompt structures."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>prompts</span><span class="node-desc">Prompt Templates</span></div>
-            </div>
-            <div class="tree-node">
-              <div class="tree-item" title="receipts/: Session run validation receipts."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>receipts</span><span class="node-desc">Validation Receipts</span></div>
-            </div>
-            <div class="tree-node">
-              <div class="tree-item" title="evals/: Evaluation benchmarks run histories."><svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>evals</span><span class="node-desc">Evaluation Reports</span></div>
-            </div>
-          </div>
-          
-          <!-- CACHE ROOT -->
-          <div class="tree-node tree-root" style="margin-top: 1rem;">
-            <div class="tree-item" title="Cache Root: Stores ephemeral information (model list capabilities caches).">
-              <svg aria-hidden="true" class="tree-icon icon-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-              <span id="tree-root-cache">/home/user/.cache/clio</span>
-              <span class="node-desc">Cache Root</span>
-            </div>
-            <div class="tree-node">
-              <div class="tree-item" title="Bootstrapped folder for ephemeral cache needs. Cleared completely during resets.">
-                <svg aria-hidden="true" class="tree-icon icon-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                <span>.gitkeep</span>
-                <span class="node-desc">Placeholder</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
-    <!-- TAB 2: INSTALL & BOOTSTRAP -->
-    <div id="pane-install" class="tab-pane">
-      <div class="grid-2">
-        <!-- Installation Methods -->
-        <div class="glass-card">
-          <h2 class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>
-            Installation Methods
-          </h2>
-          <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-            <div>
-              <span class="badge badge-primary" style="margin-bottom: 0.5rem;">Method A: Global NPM (Published)</span>
-              <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-                Standard global installation from the NPM registry. Places files into global node modules and exposes `clio` link in paths.
-              </p>
-              <pre><code>npm install -g @iowarp/clio-coder</code></pre>
-            </div>
+    <!-- TAB 1: INTERACTIVE -->
+    <main class="tab-pane active" id="pane-interactive">
+      <div class="blueprint-layout">
+        
+        <!-- Left: Path Resolver inputs -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+              Platform path overrides
+            </h2>
+            <p>Simulate how environment variables redirect config, data, and cache folders.</p>
             
-            <div>
-              <span class="badge badge-secondary" style="margin-bottom: 0.5rem;">Method B: Local Checkout (Development)</span>
-              <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-                Checkout the repository directly, build the TypeScript binary bundle locally, and register a local executable link.
-              </p>
-              <pre><code>git clone https://github.com/iowarp/clio-coder.git
-cd clio-coder
-npm ci
-npm run build
-npm link</code></pre>
+            <div class="form-group">
+              <label for="platformSelect">Target OS</label>
+              <select id="platformSelect" onchange="resolvePaths()">
+                <option value="linux">Linux / Unix</option>
+                <option value="macos">macOS</option>
+                <option value="windows">Windows</option>
+              </select>
             </div>
-            
-            <div class="callout callout-info">
-              <strong>Developer Integration:</strong> Running <code>npm run hooks:install</code> copies the <code>pre-commit</code> git hook script into <code>.git/hooks/pre-commit</code>. It triggers <code>npm run ci</code> (typechecking, Biome format, and smoke tests) before commits.
+
+            <div class="form-group">
+              <label for="clioHomeInput">CLIO_HOME (Unified override)</label>
+              <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my-clio-home" oninput="resolvePaths()">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="configDirInput">CLIO_CONFIG_DIR</label>
+                <input type="text" id="configDirInput" value="" placeholder="Default" oninput="resolvePaths()">
+              </div>
+              <div class="form-group">
+                <label for="dataDirInput">CLIO_DATA_DIR</label>
+                <input type="text" id="dataDirInput" value="" placeholder="Default" oninput="resolvePaths()">
+              </div>
+            </div>
+
+            <div class="resolved-paths-panel">
+              <div class="path-row">
+                <strong>Config Directory (settings/keys)</strong>
+                <span id="resolvedConfig">~/.config/clio</span>
+              </div>
+              <div class="path-row">
+                <strong>Data Directory (sessions/logs)</strong>
+                <span id="resolvedData">~/.local/share/clio</span>
+              </div>
+              <div class="path-row">
+                <strong>Cache Directory</strong>
+                <span id="resolvedCache">~/.cache/clio</span>
+              </div>
             </div>
           </div>
         </div>
-        
-        <!-- Home Initialization -->
-        <div class="glass-card">
-          <h2 class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
-            First-Run Bootstrap (`initializeClioHome`)
-          </h2>
-          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-            When the application starts, it performs an idempotent bootstrap operation inside <code>src/core/init.ts</code> to prepare the user filesystem:
-          </p>
-          <ul class="step-list">
-            <li class="step-item">
-              <div class="step-num">1</div>
-              <div class="step-content">
-                <h4>Directory Creation</h4>
-                <p>Creates <code>config</code>, <code>data</code>, and <code>cache</code> roots recursively if missing, followed by the 9 default data subfolders.</p>
-              </div>
-            </li>
-            <li class="step-item">
-              <div class="step-num">2</div>
-              <div class="step-content">
-                <h4>Default Config Generation</h4>
-                <p>Writes default <code>settings.yaml</code> containing base runtimes and client structures (mode: <code>0o644</code>).</p>
-              </div>
-            </li>
-            <li class="step-item">
-              <div class="step-num">3</div>
-              <div class="step-content">
-                <h4>Credentials Template</h4>
-                <p>Writes <code>credentials.yaml</code> with comments, locking its permissions down to owner-only read-write (mode: <code>0o600</code>).</p>
-              </div>
-            </li>
-            <li class="step-item">
-              <div class="step-num">4</div>
-              <div class="step-content">
-                <h4>Install Registry</h4>
-                <p>Writes metadata (Clio version, node version, platform, install timestamp) inside <code>data/install.json</code>.</p>
-              </div>
-            </li>
-          </ul>
+
+        <!-- Right: Bootstrap Console -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Bootstrap Initialization Simulator
+            </h2>
+            <p>Run the initialization sequence to test directory trees creation and credentials file permission locks.</p>
+            
+            <button type="button" class="action-btn" onclick="runBootstrapSim()">Run initializeClioHome() Simulation</button>
+
+            <div class="boot-console" id="bootConsole">Console ready. Click button to bootstrap.</div>
+          </div>
         </div>
+
       </div>
-      
-      <!-- Doctor / Diagnostics -->
+    </main>
+
+    <!-- TAB 2: TECHNICAL REFERENCE -->
+    <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
-          Diagnostic Checks (`clio doctor`)
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
-          Clio includes a doctor utility (<code>src/domains/lifecycle/doctor.ts</code>) to verify the integrity of configurations, file formats, and permissions. Here is the list of verification runs:
-        </p>
+        <h2>Clio Coder Platform Specifications</h2>
         
-        <table>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Platform Path Defaults</h3>
+        <table class="ref-table">
           <thead>
             <tr>
-              <th>Check Target</th>
-              <th>Details & Validations</th>
-              <th>Recovery Action (`--fix`)</th>
+              <th>OS</th>
+              <th>Config Directory</th>
+              <th>Data Directory</th>
+              <th>Cache Directory</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td><span class="badge badge-info">Permissions</span></td>
-              <td>Verifies <code>credentials.yaml</code> permissions are locked at <code>0o600</code> (read-write by owner only). Warns if world-readable.</td>
-              <td>Resets chmod permissions to <code>0o600</code>.</td>
+              <td>Linux / Unix</td>
+              <td><code>~/.config/clio</code></td>
+              <td><code>~/.local/share/clio</code></td>
+              <td><code>~/.cache/clio</code></td>
             </tr>
             <tr>
-              <td><span class="badge badge-info">Config Format</span></td>
-              <td>Parses <code>settings.yaml</code> as valid YAML to ensure no user formatting syntax errors are present.</td>
-              <td>If missing entirely, recreates it using standard template.</td>
+              <td>macOS</td>
+              <td><code>~/Library/Application Support/clio</code></td>
+              <td><code>~/Library/Application Support/clio</code></td>
+              <td><code>~/Library/Caches/clio</code></td>
             </tr>
             <tr>
-              <td><span class="badge badge-info">Node & Packages</span></td>
-              <td>Ensures Node.js &ge; 22.19 and verifies active bindings for core agent dependencies.</td>
-              <td>Prints package manager commands to resolve.</td>
-            </tr>
-            <tr>
-              <td><span class="badge badge-info">Drift Detection</span></td>
-              <td>Compares version in <code>install.json</code> with active execution binary. Detects version upgrades.</td>
-              <td>Rewrites <code>install.json</code> with upgraded version info.</td>
-            </tr>
-            <tr>
-              <td><span class="badge badge-info">Legacy Runtimes</span></td>
-              <td>Scans settings for deprecated adapter strings (e.g. <code>llamacpp-completion</code>).</td>
-              <td>Migrates settings inline to current unified adapters (e.g. <code>llamacpp</code>).</td>
+              <td>Windows</td>
+              <td><code>%APPDATA%\clio</code></td>
+              <td><code>%APPDATA%\clio</code></td>
+              <td><code>%LOCALAPPDATA%\Temp\clio</code></td>
             </tr>
           </tbody>
         </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">File &amp; Permissions Matrix</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>File Name</th>
+              <th>Role</th>
+              <th>Permissions</th>
+              <th>Removal Condition</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>settings.yaml</code></td>
+              <td> Runtimes/Theme configurations </td>
+              <td><code>0o644</code></td>
+              <td>Uninstall Wiped</td>
+            </tr>
+            <tr>
+              <td><code>credentials.yaml</code></td>
+              <td>API Keys/Tokens</td>
+              <td><code>0o600</code> (Strict owner rw)</td>
+              <td>Uninstall Wiped</td>
+            </tr>
+            <tr>
+              <td><code>install.json</code></td>
+              <td>Platform Installation version state</td>
+              <td><code>0o644</code></td>
+              <td>Uninstall Wiped</td>
+            </tr>
+            <tr>
+              <td><code>audit/*.jsonl</code></td>
+              <td> Daily safety audit logs </td>
+              <td><code>0o644</code></td>
+              <td>Uninstall Wiped</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
+        <pre><code># checkout repo
+git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
+
+# install and link
+npm run install:local
+hash -r
+clio --version</code></pre>
       </div>
-    </div>
+    </main>
 
-    <!-- TAB 3: UPGRADE & MIGRATIONS -->
-    <div id="pane-upgrade" class="tab-pane">
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-          Upgrade Mechanism (`clio upgrade`)
-        </h2>
-        <p style="font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1.5rem;">
-          Upgrading Clio Coder updates both the binary (via npm global installation hooks) and its active database directories. 
-          The command performs a coordinated upgrade in two phases:
-        </p>
-
-        <div class="grid-2">
-          <!-- Phase 1 -->
-          <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-card); border-radius: 8px; padding: 1.5rem;">
-            <span class="badge badge-secondary" style="margin-bottom: 0.5rem;">Phase 1: Binary Upgrade</span>
-            <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 1rem;">
-              The running binary spawns npm to install the latest bundle from the registry or specified channels (<code>latest</code>, <code>beta</code>, <code>dev</code>).
-            </p>
-            <pre><code># Clio spawns:
-npm install -g @iowarp/clio-coder@latest</code></pre>
-          </div>
-
-          <!-- Phase 2 -->
-          <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-card); border-radius: 8px; padding: 1.5rem;">
-            <span class="badge badge-primary" style="margin-bottom: 0.5rem;">Phase 2: Post-Install Actions</span>
-            <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 1rem;">
-              Clio spawns its newly installed version to migrate the state folder and correct environment differences.
-            </p>
-            <pre><code># Clio spawns:
-clio upgrade --post-install
-clio doctor --fix</code></pre>
-          </div>
-        </div>
-      </div>
-
-      <!-- State Migrations -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 15v4H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-4h-2zM6 10l1.41 1.41L11 7.83V16h2V7.83l3.58 3.59L18 10l-6-6-6 6z"/></svg>
-          Durable State Migrations
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
-          State-shape transformations (configured inside <code>src/domains/lifecycle/migrations/</code>) are versioned, incremental modules compiled into the distribution bundle.
-        </p>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-          <div>
-            <h4>Manifest Registry: <code>state/migrations.json</code></h4>
-            <p style="font-size: 0.88rem; color: var(--text-muted); margin-top: 0.5rem; margin-bottom: 1rem;">
-              Clio writes all successfully applied migration unique string keys into a manifest file. 
-              During future upgrades, Clio reads the manifest, compares it with its internal catalog, and runs pending scripts only.
-            </p>
-            <pre><code class="code-hl">{
-  "applied": [
-    "2026-04-17-initial"
-  ]
-}</code></pre>
-          </div>
-
-          <div>
-            <h4>Migration Rule Execution Rules</h4>
-            <ul style="font-size: 0.88rem; color: var(--text-muted); margin-top: 0.5rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.5rem;">
-              <li><strong>Stable Ordering:</strong> Migrations are keyed with stable IDs like <code>YYYY-MM-DD-&lt;slug&gt;</code> and executed chronologically.</li>
-              <li><strong>Atomic Execution:</strong> If a migration script fails, the manifest is not updated, preventing partial migration corruption.</li>
-              <li><strong>No File Sweeps:</strong> The registry is statically built, avoiding runtime filesystem sweeps for migration files.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: UNINSTALL & RESET -->
-    <div id="pane-uninstall" class="tab-pane">
-      <div class="grid-2">
-        <!-- Uninstallation -->
-        <div class="glass-card">
-          <h2 class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-            Clean Uninstallation (`clio uninstall`)
-          </h2>
-          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-            The <code>clio uninstall</code> command handles removing state directories, cache files, and configs from the system:
-          </p>
-
-          <ul class="step-list" style="margin-bottom: 1.5rem;">
-            <li class="step-item">
-              <div class="step-num">1</div>
-              <div class="step-content">
-                <h4>State Deletion</h4>
-                <p>Deletes the resolved data directory, configuration files, and temporary cache folders according to user flags.</p>
-              </div>
-            </li>
-            <li class="step-item">
-              <div class="step-num">2</div>
-              <div class="step-content">
-                <h4>Binary Clean Guidance</h4>
-                <p>Instructs the user on how to delete the global binary based on their original package management choice.</p>
-              </div>
-            </li>
-          </ul>
-
-          <pre><code># Remove state (requires --force)
-clio uninstall --force
-
-# Preview removal actions without writing changes
-clio uninstall --dry-run
-
-# Preserve configs (settings/keys) while wiping data
-clio uninstall --keep-config --force</code></pre>
-        </div>
-
-        <!-- System Reset -->
-        <div class="glass-card">
-          <h2 class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-            Selective Reset Wipes (`clio reset`)
-          </h2>
-          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-            If Clio gets corrupted or you want to start fresh, <code>clio reset</code> wipes selective scopes. All options support <code>--dry-run</code> and require <code>--force</code>.
-          </p>
-
-          <table style="font-size: 0.85rem; margin: 1rem 0;">
-            <thead>
-              <tr>
-                <th>Command Flag</th>
-                <th>Wipe Scope</th>
-                <th>Resulting State</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>--state</code> (default)</td>
-                <td>Removes <code>data/</code> and <code>cache/</code>.</td>
-                <td>Clears sessions, audits, memory. Retains target configs.</td>
-              </tr>
-              <tr>
-                <td><code>--auth</code></td>
-                <td>Removes <code>credentials.yaml</code>.</td>
-                <td>Wipes all saved target API keys and OAuth tokens.</td>
-              </tr>
-              <tr>
-                <td><code>--config</code></td>
-                <td>Removes <code>settings.yaml</code>.</td>
-                <td>Resets settings to defaults. Keeps session databases.</td>
-              </tr>
-              <tr>
-                <td><code>--all</code></td>
-                <td>Removes all roots (config, data, cache).</td>
-                <td>Complete wipe. Re-runs initialization automatically.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      
-      <!-- Leftovers list -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-          System Clean Up & Leftover Checklist
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem;">
-          To ensure 100% cleanliness, check these locations for residues when performing manual removals:
-        </p>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem;">
-          <div style="background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.06);">
-            <h4 style="color: var(--color-primary); margin-bottom: 0.5rem;">1. Configuration / Credentials / Cache</h4>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-              Paths containing global setup variables and local files:
-            </p>
-            <ul style="font-size: 0.85rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.25rem;">
-              <li><code>~/.config/clio/</code> (settings, keys)</li>
-              <li><code>~/.local/share/clio/</code> (session histories, audits)</li>
-              <li><code>~/.cache/clio/</code> (temp cache files)</li>
-            </ul>
-          </div>
-
-          <div style="background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.06);">
-            <h4 style="color: var(--color-secondary); margin-bottom: 0.5rem;">2. Repository Checkouts (Git Hooks)</h4>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-              Any checkout repository that had git integrations enabled:
-            </p>
-            <ul style="font-size: 0.85rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.25rem;">
-              <li><code>&lt;your-repo&gt;/.git/hooks/pre-commit</code> (removable via rm)</li>
-            </ul>
-          </div>
-
-          <div style="background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.06);">
-            <h4 style="color: var(--color-accent); margin-bottom: 0.5rem;">3. Global Binary Links</h4>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-              Global symbolic links registered in package directories:
-            </p>
-            <ul style="font-size: 0.85rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.25rem;">
-              <li>NPM prefix: <code>/usr/local/bin/clio</code> or <code>~/.npm-global/bin/clio</code></li>
-              <li>Linked modules: <code>node_modules/@iowarp/clio-coder</code> link</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 5: FLOWCHARTS -->
-    <div id="pane-flows" class="tab-pane">
-      <!-- Bootstrap Sequence Flowchart -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-          Initialization & Bootstrap Execution Flow
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-          The workflow executed on first start or after a total configuration reset:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
-            <!-- Definitions -->
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--text-muted)"/>
-              </marker>
-            </defs>
-            
-            <!-- Nodes -->
-            <rect x="10" y="90" width="120" height="60" rx="8" fill="rgba(var(--color-primary-rgb), 0.1)" stroke="var(--color-primary)" stroke-width="1.5"/>
-            <text x="70" y="125" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Start Clio CLI</text>
-            
-            <rect x="180" y="90" width="130" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="245" y="120" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Resolve Directories</text>
-            <text x="245" y="135" fill="var(--text-muted)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">resolveClioDirs()</text>
-            
-            <rect x="360" y="90" width="120" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="420" y="120" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Create Folders</text>
-            <text x="420" y="135" fill="var(--text-muted)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">mkdirSync(roots + 9 subdirs)</text>
-            
-            <rect x="530" y="90" width="115" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="587" y="115" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Write Files</text>
-            <text x="587" y="130" fill="var(--color-primary)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">settings.yaml (0o644)</text>
-            <text x="587" y="142" fill="var(--color-danger)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">credentials.yaml (0o600)</text>
-            
-            <rect x="690" y="90" width="100" height="60" rx="8" fill="rgba(16, 185, 129, 0.15)" stroke="var(--color-accent)" stroke-width="1.5"/>
-            <text x="740" y="125" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Ready / Exit</text>
-            
-            <!-- Connector Arrows -->
-            <path d="M 130 120 L 172 120" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 310 120 L 352 120" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 480 120 L 522 120" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 645 120 L 682 120" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-          </svg>
-        </div>
-      </div>
-
-      <!-- Upgrade Flowchart -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-          Upgrade Command Execution Sequence (`clio upgrade`)
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-          How Clio handles new builds, spawns npm processes, and executes state migrations:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="280" viewBox="0 0 800 280">
-            <!-- Flow lines -->
-            <path d="M 110 90 L 162 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 290 90 L 342 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 470 90 L 522 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            
-            <!-- Bend lines to show post-install hook redirect -->
-            <path d="M 580 120 L 580 180 L 110 180 L 110 230" fill="none" stroke="var(--text-dark)" stroke-dasharray="4" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 170 230 L 222 230" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 350 230 L 402 230" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 530 230 L 582 230" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-            <!-- Nodes -->
-            <!-- Step 1 -->
-            <rect x="10" y="60" width="100" height="60" rx="8" fill="rgba(var(--color-primary-rgb), 0.1)" stroke="var(--color-primary)" stroke-width="1.5"/>
-            <text x="60" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">clio upgrade</text>
-            <text x="60" y="100" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Command Trigger</text>
-            
-            <!-- Step 2 -->
-            <rect x="170" y="60" width="120" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="230" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Spawn Package Manager</text>
-            <text x="230" y="100" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">npm install -g</text>
-
-            <!-- Step 3 -->
-            <rect x="350" y="60" width="120" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="410" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Spawn Post-Install</text>
-            <text x="410" y="100" fill="var(--text-dark)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">--post-install</text>
-
-            <!-- Step 4 -->
-            <rect x="530" y="60" width="100" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="580" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Switches to New</text>
-            <text x="580" y="100" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Execution Context</text>
-
-            <!-- Step 5 (Row 2) -->
-            <rect x="50" y="200" width="120" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="110" y="225" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Load Database</text>
-            <text x="110" y="240" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">migrations index</text>
-
-            <!-- Step 6 -->
-            <rect x="230" y="200" width="120" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="290" y="225" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Apply Migrations</text>
-            <text x="290" y="240" fill="var(--text-muted)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">state/migrations.json</text>
-
-            <!-- Step 7 -->
-            <rect x="410" y="200" width="110" height="60" rx="8" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="465" y="225" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Run Diagnostics</text>
-            <text x="465" y="240" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">clio doctor --fix</text>
-
-            <!-- Step 8 -->
-            <rect x="590" y="200" width="100" height="60" rx="8" fill="rgba(16, 185, 129, 0.15)" stroke="var(--color-accent)" stroke-width="1.5"/>
-            <text x="640" y="235" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Upgrade Finished</text>
-          </svg>
-        </div>
-      </div>
-    </div>
+    <footer>
+      <p>Clio Coder Lifecycle spec &bull; Version 0.2.3</p>
+    </footer>
   </div>
 
-  <footer>
-    <p>Produced automatically for Clio Coder's Engineering Audit Documentation.</p>
-    <p style="margin-top: 0.5rem;"><a href="https://github.com/iowarp/clio-coder" target="_blank">Clio Coder Repository</a> &bull; part of IOWarp's CLIO ecosystem of agentic science.</p>
-  </footer>
-
-  <!-- Dynamic Simulation Script -->
   <script>
-    let currentOS = 'linux';
-
-    function _setOS(os) {
-      document.getElementById('os-linux').classList.remove('active');
-      document.getElementById('os-darwin').classList.remove('active');
-      document.getElementById('os-win32').classList.remove('active');
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
       
-      document.getElementById(`os-${os}`).classList.add('active');
-      currentOS = os;
-      updateSimulation();
+      if (tabId === 'interactive') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('pane-interactive').classList.add('active');
+      } else {
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('pane-reference').classList.add('active');
+      }
     }
 
-    function updateSimulation() {
-      const clioHome = document.getElementById('env-clio-home').value.trim();
-      const configOverride = document.getElementById('env-clio-config').value.trim();
-      const dataOverride = document.getElementById('env-clio-data').value.trim();
-      const cacheOverride = document.getElementById('env-clio-cache').value.trim();
+    function resolvePaths() {
+      const platform = document.getElementById('platformSelect').value;
+      const clioHome = document.getElementById('clioHomeInput').value.trim();
+      const configOverride = document.getElementById('configDirInput').value.trim();
+      const dataOverride = document.getElementById('dataDirInput').value.trim();
 
-      const defaultPaths = {
-        linux: {
-          config: "~/.config/clio",
-          data: "~/.local/share/clio",
-          cache: "~/.cache/clio",
-          separator: "/"
-        },
-        darwin: {
-          config: "~/Library/Application Support/clio",
-          data: "~/Library/Application Support/clio",
-          cache: "~/Library/Caches/clio",
-          separator: "/"
-        },
-        win32: {
-          config: "%APPDATA%\\clio",
-          data: "%APPDATA%\\clio",
-          cache: "%LOCALAPPDATA%\\Temp\\clio",
-          separator: "\\"
-        }
-      }[currentOS];
+      let defConfig = '';
+      let defData = '';
+      let defCache = '';
 
-      const resolved = {
-        config: defaultPaths.config,
-        data: defaultPaths.data,
-        cache: defaultPaths.cache
-      };
-
-      // Handle CLIO_HOME override
-      if (clioHome) {
-        resolved.config = clioHome;
-        resolved.data = `${clioHome + defaultPaths.separator}data`;
-        resolved.cache = `${clioHome + defaultPaths.separator}cache`;
+      if (platform === 'linux') {
+        defConfig = '/home/user/.config/clio';
+        defData = '/home/user/.local/share/clio';
+        defCache = '/home/user/.cache/clio';
+      } else if (platform === 'macos') {
+        defConfig = '/Users/user/Library/Application Support/clio';
+        defData = '/Users/user/Library/Application Support/clio';
+        defCache = '/Users/user/Library/Caches/clio';
+      } else {
+        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio';
+        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio';
+        defCache = 'C:\\Users\\user\\AppData\\Local\\Temp\\clio';
       }
 
-      // Handle individual overrides (which take precedence)
-      if (configOverride) resolved.config = configOverride;
-      if (dataOverride) resolved.data = dataOverride;
-      if (cacheOverride) resolved.cache = cacheOverride;
+      // apply overrides
+      const finalConfig = configOverride || (clioHome ? `${clioHome}` : defConfig);
+      const finalData = dataOverride || (clioHome ? `${clioHome}/data` : defData);
+      const finalCache = clioHome ? `${clioHome}/cache` : defCache;
 
-      // Update Path Cards
-      document.getElementById('path-resolved-config').innerText = resolved.config;
-      document.getElementById('path-resolved-data').innerText = resolved.data;
-      document.getElementById('path-resolved-cache').innerText = resolved.cache;
-
-      // Update Folder Tree Roots
-      document.getElementById('tree-root-config').innerText = resolved.config;
-      document.getElementById('tree-root-data').innerText = resolved.data;
-      document.getElementById('tree-root-cache').innerText = resolved.cache;
+      document.getElementById('resolvedConfig').innerText = finalConfig;
+      document.getElementById('resolvedData').innerText = finalData;
+      document.getElementById('resolvedCache').innerText = finalCache;
     }
 
-    function _switchTab(tabId) {
-      // Hide all panes
-      const panes = document.querySelectorAll('.tab-pane');
-      panes.forEach(pane => { pane.classList.remove('active'); });
+    function runBootstrapSim() {
+      const consoleEl = document.getElementById('bootConsole');
+      const conf = document.getElementById('resolvedConfig').innerText;
+      const data = document.getElementById('resolvedData').innerText;
+      const cache = document.getElementById('resolvedCache').innerText;
+
+      consoleEl.innerHTML = `[BOOT] Calling initializeClioHome()...`;
       
-      // Deactivate all buttons
-      const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => { btn.classList.remove('active'); });
+      setTimeout(() => {
+        consoleEl.innerHTML += `\n[BOOT] Resolving config root: ${conf}`;
+        consoleEl.innerHTML += `\n[BOOT] Resolving data root: ${data}`;
+      }, 300);
 
-      // Show target pane
-      document.getElementById(`pane-${tabId}`).classList.add('active');
+      setTimeout(() => {
+        consoleEl.innerHTML += `\n[FS] Creating directory tree structure...`;
+        consoleEl.innerHTML += `\n[FS] -> ${data}/sessions/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${data}/audit/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${data}/memory/ (rw-r--r--)`;
+      }, 600);
 
-      // Find trigger and activate it
-      event.currentTarget.classList.add('active');
+      setTimeout(() => {
+        consoleEl.innerHTML += `\n[SETTINGS] settings.yaml not found. Deploying default template...`;
+        consoleEl.innerHTML += `\n[SECURITY] credentials.yaml not found. Creating locked credential segment...`;
+        consoleEl.innerHTML += `\n[SECURITY] chmod 0o600 ${conf}/credentials.yaml (Owner RW only)`;
+      }, 1000);
+
+      setTimeout(() => {
+        consoleEl.innerHTML += `\n[METADATA] Writing install.json: { version: "0.2.3", node: "v20.10.0" }`;
+        consoleEl.innerHTML += `\n[BOOT] initializeClioHome() completed successfully.`;
+      }, 1400);
     }
 
-    // Run initial rendering
-    updateSimulation();
+    // Init
+    window.onload = () => {
+      resolvePaths();
+    };
   </script>
 </body>
 </html>

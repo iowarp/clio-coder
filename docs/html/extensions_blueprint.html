@@ -679,7 +679,7 @@
       
       <div class="meta-badge-container">
         <div class="meta-badge">Product: <span>Clio Coder</span></div>
-        <div class="meta-badge">Version: <span>0.2.2</span></div>
+        <div class="meta-badge">Version: <span>0.2.3</span></div>
         <div class="meta-badge">Subsystem: <span>Extensions & sharing</span></div>
         <div class="meta-badge">Compliance: <span>Agent Skills SKILL.md</span></div>
       </div>
@@ -827,7 +827,7 @@ clio-kit/                  # Ext package root
         <h2>Extension Resolution Workflow</h2>
         <p class="subtitle">Scans user and project extensions, parses manifest metadata, looks up status in state files, and implements shadowing override logic (Project scope outranks User scope).</p>
         
-        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%">
+        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%"><title>Icon</title>
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
@@ -884,7 +884,7 @@ clio-kit/                  # Ext package root
         <h2>Skill Registry Injection & Collision Resolution</h2>
         <p class="subtitle">Scans multiple native and third-party compatibility folders, parses frontmatters, executes path-canonicalization checks, and handles identical namespace overrides by precedence ranks.</p>
         
-        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 320" width="100%">
+        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 320" width="100%"><title>Icon</title>
           <!-- Column 1: Roots -->
           <g class="svg-node" id="node-skill-roots" onclick="_showFlowInfo('skill', 'roots')">
             <rect x="30" y="90" width="160" height="90" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
@@ -931,7 +931,7 @@ clio-kit/                  # Ext package root
         <h2>Share Archive Export / Import Workflow</h2>
         <p class="subtitle">Moves resources across scopes and systems, verifying format versions, re-checking data hashes, generating import dry-runs, and merging settings.</p>
         
-        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%">
+        <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%"><title>Icon</title>
           <!-- Column 1: Import file -->
           <g class="svg-node" id="node-share-file" onclick="_showFlowInfo('share', 'file')">
             <rect x="30" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
@@ -1025,7 +1025,7 @@ clio-kit/                  # Ext package root
               </div>
               <div class="form-group">
                 <label for="mb-settings">Settings Contributed (Comma-separated)</label>
-                <input type="text" id="mb-settings" value="safetyLevel" oninput="generateManifest()">
+                <input type="text" id="mb-settings" value="autonomy" oninput="generateManifest()">
               </div>
             </div>
 
@@ -1120,7 +1120,7 @@ clio-kit/                  # Ext package root
   "formatVersion": 1,
   "manifest": {
     "format": "clio.share.v1",
-    "clioVersion": "0.2.2",
+    "clioVersion": "0.2.3",
     "createdAt": "2026-06-06T17:53:00Z",
     "files": [
       {
@@ -1268,7 +1268,7 @@ clio-kit/                  # Ext package root
         file: "<strong>Read Share Archive:</strong> The CLI loads share packages structured as single JSON files. Verification checks verify root <code>kind: \"clio-share-archive\"</code>, formatVersion = 1, and manifest layout constraints.",
         checksum: "<strong>Checksum Validation:</strong> Iterates over files array, decodes Base64 data strings, computes SHA-256 hash. If it does not match the manifest's declared checksum, the loader throws a hard error and halts.",
         plan: "<strong>Import Dry-run Plan:</strong> Compares files in the archive against active files on the local filesystem. Flags actions as <code>write</code> (new file), <code>overwrite</code> (existing conflict), <code>skip</code> (conflict block in strict mode), or <code>settings</code> (merge settings preference fragment).",
-        commit: "<strong>Commit Transaction:</strong> Writes verified data into the mapped folders. Overwrites files only when <code>--force</code> is specified. Extracts non-secret settings preferences (defaultMode, safetyLevel, keys, terminal, etc.) and safely merges them into <code>settings.yaml</code>."
+        commit: "<strong>Commit Transaction:</strong> Writes verified data into the mapped folders. Overwrites files only when <code>--force</code> is specified. Extracts non-secret settings preferences (autonomy, scope, budget, theme, terminal, keybindings, compaction, retry) and safely merges them into <code>settings.yaml</code>."
       }
     };
 
@@ -1926,7 +1926,7 @@ Provide advanced custom guidance on MPI bindings.`
         formatVersion: 1,
         manifest: {
           format: 'clio.share.v1',
-          clioVersion: '0.2.2',
+          clioVersion: '0.2.3',
           createdAt: new Date().toISOString(),
           files: manifestFiles
         },
