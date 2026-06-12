@@ -38,8 +38,8 @@ import {
 	isKeyRelease,
 	type KeyId,
 	matchesKey,
+	type OverlayHandle,
 	ProcessTerminal,
-	type SelectItem,
 	Text,
 	TUI,
 	visibleWidth,
@@ -76,7 +76,6 @@ import { buildLayout } from "./layout.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
-import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openHotkeysOverlay } from "./overlays/hotkeys.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
@@ -93,7 +92,7 @@ import {
 } from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
-import { openProvidersOverlay } from "./providers-overlay.js";
+import { openProvidersOverlay, type TargetsHubNoticeLevel } from "./providers-overlay.js";
 import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import {
@@ -573,7 +572,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Pure overlay key router for the target status overlay. Esc closes; everything else is swallowed. */
+/** Pure overlay key router for the target hub. Esc closes; hub keys fall through to the focused view. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
 	if (data === ESC) {
 		deps.closeOverlay();
@@ -795,8 +794,7 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "providers") {
-		routeProvidersOverlayKey(data, deps);
-		return true;
+		return routeProvidersOverlayKey(data, deps);
 	}
 	if (overlayState === "auth") {
 		return routeAuthOverlayKey(data, deps);
@@ -992,7 +990,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		},
 	});
-	const notify = (level: "info" | "warning" | "error", text: string, key?: string): void => {
+	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
 		notifications.add(key ? { level, text, key } : { level, text });
 	};
 	const dismissContextBootstrapNotices = (): void => {
@@ -1416,8 +1414,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				: deps.share.importArchive(resolve(archivePath), importOptions);
 		},
 		openProviders: () => openProvidersOverlayState(),
-		openConnect: (target) => openConnectOverlayState(target),
-		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openFleet: () => openFleetOverlayState(),
@@ -1664,8 +1660,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const keepAlive = setInterval(() => {}, 1 << 30);
 
 	let overlayState: OverlayState = "closed";
-	let overlayHandle: ReturnType<TUI["showOverlay"]> | null = null;
+	let overlayHandle: OverlayHandle | null = null;
 	let authDialogDismiss: (() => void) | null = null;
+	let authReturnOverlayHandle: OverlayHandle | null = null;
+	let authCloseResolve: (() => void) | null = null;
 	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
 	let contextIslandTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
@@ -1767,17 +1765,36 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	startContextIslandTicker();
 
+	const finishAuthOverlay = (dismiss: boolean): void => {
+		if (overlayState !== "auth") return;
+		if (dismiss) authDialogDismiss?.();
+		authDialogDismiss = null;
+		const authHandle = overlayHandle;
+		const returnHandle = authReturnOverlayHandle;
+		authReturnOverlayHandle = null;
+		overlayHandle = returnHandle;
+		overlayState = returnHandle ? "providers" : "closed";
+		authHandle?.hide();
+		const resolveAuthClose = authCloseResolve;
+		authCloseResolve = null;
+		resolveAuthClose?.();
+		footer.refresh();
+		renderContextIsland();
+		renderTaskIsland();
+		tui.requestRender();
+	};
+
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
 		if (overlayState === "ask-user" && pendingAskUserCancel) {
 			pendingAskUserCancel();
 			return;
 		}
-		const leaving = overlayState;
 		if (overlayState === "auth") {
-			authDialogDismiss?.();
-			authDialogDismiss = null;
+			finishAuthOverlay(true);
+			return;
 		}
+		const leaving = overlayState;
 		overlayState = "closed";
 		stopDispatchBoardTicker();
 		overlayHandle?.hide();
@@ -1844,7 +1861,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		);
 	};
 
-	const performDisconnect = (target: string): void => {
+	const performDisconnect = async (target: string): Promise<void> => {
 		const resolved = resolveConnectionReference(target);
 		if (!resolved?.endpoint) {
 			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
@@ -1860,268 +1877,188 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openConnectFlowState = (target: string): void => {
-		if (overlayState !== "closed") return;
+	const openConnectFlowState = async (target: string): Promise<void> => {
+		if (overlayState !== "closed" && overlayState !== "providers") return;
+		const returnHandle = overlayState === "providers" ? overlayHandle : null;
 		const resolved = resolveConnectionReference(target);
 		if (!resolved?.endpoint) {
 			notify("warning", `connect: unknown target ${target}. Add it with clio targets add.`, `connect:${target}`);
 			return;
 		}
-		const endpointId = resolved.endpoint.id;
-		const runtimeId = resolved.runtime.id;
-		const probeTarget = async (dialog: ReturnType<typeof openAuthDialog>): Promise<void> => {
-			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
-			const status = await deps.providers.probeEndpoint(endpointId);
-			if (!status) {
-				dialog.controller.setLines([`Target: ${endpointId}`, "Target check failed: target is not configured."]);
-				notify("error", `connect: ${endpointId} is not configured`, `connect:${endpointId}`);
+		const endpoint = resolved.endpoint;
+		const runtime = resolved.runtime;
+		const authTarget = resolved.authTarget;
+		const endpointId = endpoint.id;
+		const runtimeId = runtime.id;
+		await new Promise<void>((resolveAuthFlow) => {
+			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
+			authReturnOverlayHandle = returnHandle;
+			authCloseResolve = resolveAuthFlow;
+			overlayState = "auth";
+			overlayHandle = dialog.handle;
+
+			const probeTarget = async (): Promise<void> => {
+				dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
+				const status = await deps.providers.probeEndpoint(endpointId);
+				if (!status) {
+					dialog.controller.setLines([`Target: ${endpointId}`, "Target check failed: target is not configured."]);
+					notify("error", `connect: ${endpointId} is not configured`, `connect:${endpointId}`);
+					return;
+				}
+				const health = status.health.status;
+				const detail =
+					status.reason ||
+					status.health.lastError ||
+					(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
+				dialog.controller.setLines([
+					`Target: ${endpointId}`,
+					`Runtime: ${runtimeId}`,
+					status.available ? `Target ready (${health})` : `Target check failed (${health})`,
+					detail,
+				]);
+				notify(
+					status.available ? "info" : "warning",
+					status.available ? `connected ${endpointId} (${health})` : `connect ${endpointId} failed (${health})`,
+					`connect:${endpointId}`,
+				);
+				footer.refresh();
+				tui.requestRender();
+			};
+
+			const selectOAuthOption = async (
+				prompt: OAuthSelectPrompt,
+				prefix: ReadonlyArray<string>,
+			): Promise<string | undefined> => {
+				const defaultId = prompt.options[0]?.id;
+				if (!defaultId) return undefined;
+				const ids = new Set(prompt.options.map((option) => option.id));
+				const baseLines = [
+					...prefix,
+					prompt.message,
+					...prompt.options.map((option, index) => {
+						const marker = option.id === defaultId ? "*" : " ";
+						return `${marker} ${String(index + 1).padStart(2)}. ${option.label} (${option.id})`;
+					}),
+				];
+				let errorLine: string | null = null;
+				for (;;) {
+					dialog.controller.setLines(errorLine ? [...baseLines, errorLine] : baseLines);
+					const answer = (await dialog.controller.prompt(`Selection (number or id, q to cancel) [${defaultId}]`)).trim();
+					if (answer.length === 0) return defaultId;
+					if (answer === "q" || answer === "quit" || answer === "cancel") return undefined;
+					const numeric = Number(answer);
+					if (Number.isInteger(numeric) && numeric >= 1 && numeric <= prompt.options.length) {
+						return prompt.options[numeric - 1]?.id;
+					}
+					if (ids.has(answer)) return answer;
+					errorLine = `Unknown selection: ${answer}`;
+				}
+			};
+
+			const requiresManagedAuth = targetRequiresAuth(endpoint, runtime);
+			const authStatus = deps.providers.auth.statusForTarget(endpoint, runtime);
+			if (!requiresManagedAuth || authStatus.available) {
+				void (async () => {
+					try {
+						await probeTarget();
+					} catch (error) {
+						dialog.controller.setLines([
+							`Target: ${endpointId}`,
+							`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
+						]);
+						tui.requestRender();
+					} finally {
+						finishAuthOverlay(false);
+					}
+				})();
+				tui.requestRender();
 				return;
 			}
-			const health = status.health.status;
-			const detail =
-				status.reason ||
-				status.health.lastError ||
-				(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
-			dialog.controller.setLines([
-				`Target: ${endpointId}`,
-				`Runtime: ${runtimeId}`,
-				status.available ? `Target ready (${health})` : `Target check failed (${health})`,
-				detail,
-			]);
-			notify(
-				status.available ? "info" : "warning",
-				status.available ? `connected ${endpointId} (${health})` : `connect ${endpointId} failed (${health})`,
-				`connect:${endpointId}`,
-			);
-			footer.refresh();
-			tui.requestRender();
-		};
-
-		const selectOAuthOption = async (
-			dialog: ReturnType<typeof openAuthDialog>,
-			prompt: OAuthSelectPrompt,
-			prefix: ReadonlyArray<string>,
-		): Promise<string | undefined> => {
-			const defaultId = prompt.options[0]?.id;
-			if (!defaultId) return undefined;
-			const ids = new Set(prompt.options.map((option) => option.id));
-			const baseLines = [
-				...prefix,
-				prompt.message,
-				...prompt.options.map((option, index) => {
-					const marker = option.id === defaultId ? "*" : " ";
-					return `${marker} ${String(index + 1).padStart(2)}. ${option.label} (${option.id})`;
-				}),
-			];
-			let errorLine: string | null = null;
-			for (;;) {
-				dialog.controller.setLines(errorLine ? [...baseLines, errorLine] : baseLines);
-				const answer = (await dialog.controller.prompt(`Selection (number or id, q to cancel) [${defaultId}]`)).trim();
-				if (answer.length === 0) return defaultId;
-				if (answer === "q" || answer === "quit" || answer === "cancel") return undefined;
-				const numeric = Number(answer);
-				if (Number.isInteger(numeric) && numeric >= 1 && numeric <= prompt.options.length) {
-					return prompt.options[numeric - 1]?.id;
-				}
-				if (ids.has(answer)) return answer;
-				errorLine = `Unknown selection: ${answer}`;
+			if (resolved.runtime.auth === "api-key") {
+				authDialogDismiss = dialog.controller.dismiss;
+				dialog.controller.setLines([
+					`Target: ${endpointId}`,
+					`Runtime: ${runtime.id}`,
+					"API key required before Clio can connect to this target.",
+				]);
+				void (async () => {
+					try {
+						const apiKey = (await dialog.controller.prompt("API key")).trim();
+						if (apiKey.length === 0) throw new Error("empty API key");
+						deps.providers.auth.setApiKey(authTarget.providerId, apiKey);
+						authDialogDismiss = null;
+						await probeTarget();
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						if (message !== "dismissed" && message !== "cancelled") {
+							notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
+						}
+					} finally {
+						authDialogDismiss = null;
+						finishAuthOverlay(false);
+					}
+				})();
+				tui.requestRender();
+				return;
 			}
-		};
-
-		overlayState = "auth";
-		const requiresManagedAuth = targetRequiresAuth(resolved.endpoint, resolved.runtime);
-		const authStatus = deps.providers.auth.statusForTarget(resolved.endpoint, resolved.runtime);
-		if (!requiresManagedAuth || authStatus.available) {
-			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
-			overlayHandle = dialog.handle;
-			void (async () => {
-				try {
-					await probeTarget(dialog);
-				} catch (error) {
-					dialog.controller.setLines([
-						`Target: ${endpointId}`,
-						`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
-					]);
-					tui.requestRender();
-				}
-			})();
-			tui.requestRender();
-			return;
-		}
-		if (resolved.runtime.auth === "api-key") {
-			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
-			overlayHandle = dialog.handle;
 			authDialogDismiss = dialog.controller.dismiss;
-			dialog.controller.setLines([
-				`Target: ${endpointId}`,
-				`Runtime: ${resolved.runtime.id}`,
-				"API key required before Clio can connect to this target.",
-			]);
+			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtime.id}`, "Starting authorization flow..."]);
 			void (async () => {
+				let manualCodeTimer: NodeJS.Timeout | null = null;
 				try {
-					const apiKey = (await dialog.controller.prompt("API key")).trim();
-					if (apiKey.length === 0) throw new Error("empty API key");
-					deps.providers.auth.setApiKey(resolved.authTarget.providerId, apiKey);
+					await deps.providers.auth.login(authTarget.providerId, {
+						onAuth: ({ url, instructions }) => {
+							dialog.controller.setLines(
+								[
+									`Open: ${url}`,
+									instructions ?? "Complete sign-in in your browser.",
+									"Waiting for the browser callback. A manual code prompt will appear if needed.",
+								].filter(Boolean),
+							);
+							maybeOpenExternalUrl(url);
+						},
+						onDeviceCode: ({ verificationUri, userCode }) => {
+							dialog.controller.setLines([
+								`Open: ${verificationUri}`,
+								`Enter code: ${userCode}`,
+								"Waiting for authentication...",
+							]);
+							maybeOpenExternalUrl(verificationUri);
+						},
+						onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
+						onSelect: (prompt) => selectOAuthOption(prompt, [`Target: ${endpointId}`, `Runtime: ${runtime.id}`]),
+						onManualCodeInput: async () =>
+							await new Promise<string>((resolve, reject) => {
+								manualCodeTimer = setTimeout(() => {
+									manualCodeTimer = null;
+									dialog.controller
+										.prompt("Verification code")
+										.then((value) => resolve(value.trim()))
+										.catch(reject);
+								}, 10_000);
+								manualCodeTimer.unref?.();
+							}),
+						onProgress: (message) => {
+							dialog.controller.appendLine(message);
+						},
+					});
 					authDialogDismiss = null;
-					await probeTarget(dialog);
+					await probeTarget();
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					if (message !== "dismissed" && message !== "cancelled") {
-						io.stderr(`[/connect] ${message}\n`);
+						notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
+					}
+				} finally {
+					if (manualCodeTimer) {
+						clearTimeout(manualCodeTimer);
 					}
 					authDialogDismiss = null;
-					closeOverlay();
+					finishAuthOverlay(false);
 				}
 			})();
 			tui.requestRender();
-			return;
-		}
-		const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
-		overlayHandle = dialog.handle;
-		authDialogDismiss = dialog.controller.dismiss;
-		dialog.controller.setLines([
-			`Target: ${endpointId}`,
-			`Runtime: ${resolved.runtime.id}`,
-			"Starting authorization flow...",
-		]);
-		void (async () => {
-			let manualCodeTimer: NodeJS.Timeout | null = null;
-			try {
-				await deps.providers.auth.login(resolved.authTarget.providerId, {
-					onAuth: ({ url, instructions }) => {
-						dialog.controller.setLines(
-							[
-								`Open: ${url}`,
-								instructions ?? "Complete sign-in in your browser.",
-								"Waiting for the browser callback. A manual code prompt will appear if needed.",
-							].filter(Boolean),
-						);
-						maybeOpenExternalUrl(url);
-					},
-					onDeviceCode: ({ verificationUri, userCode }) => {
-						dialog.controller.setLines([
-							`Open: ${verificationUri}`,
-							`Enter code: ${userCode}`,
-							"Waiting for authentication...",
-						]);
-						maybeOpenExternalUrl(verificationUri);
-					},
-					onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
-					onSelect: (prompt) =>
-						selectOAuthOption(dialog, prompt, [`Target: ${endpointId}`, `Runtime: ${resolved.runtime.id}`]),
-					onManualCodeInput: async () =>
-						await new Promise<string>((resolve, reject) => {
-							manualCodeTimer = setTimeout(() => {
-								manualCodeTimer = null;
-								dialog.controller
-									.prompt("Verification code")
-									.then((value) => resolve(value.trim()))
-									.catch(reject);
-							}, 10_000);
-							manualCodeTimer.unref?.();
-						}),
-					onProgress: (message) => {
-						dialog.controller.appendLine(message);
-					},
-				});
-				authDialogDismiss = null;
-				await probeTarget(dialog);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				if (message !== "dismissed" && message !== "cancelled") {
-					notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
-				}
-				authDialogDismiss = null;
-				closeOverlay();
-			} finally {
-				if (manualCodeTimer) {
-					clearTimeout(manualCodeTimer);
-				}
-			}
-		})();
-		tui.requestRender();
-	};
-
-	const openConnectOverlayState = (target?: string): void => {
-		if (target) {
-			openConnectFlowState(target);
-			return;
-		}
-		if (overlayState !== "closed") return;
-		const settings = deps.getSettings?.();
-		if (!settings) return;
-		const statuses = deps.providers.list();
-		const targetItems: SelectItem[] = settings.endpoints.map((endpoint) => {
-			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
-			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
-			const auth =
-				runtime && (runtime.auth === "oauth" || runtime.auth === "api-key")
-					? deps.providers.auth.statusForTarget(endpoint, runtime)
-					: null;
-			const connection =
-				status?.health.status && status.health.status !== "unknown"
-					? status.health.status
-					: auth?.available
-						? auth.source
-						: (status?.reason ?? "configured target");
-			return {
-				value: endpoint.id,
-				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
-				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
-			};
 		});
-		if (targetItems.length === 0) {
-			notify("warning", "connect: no targets configured. Run clio configure or clio targets add.", "connect:none");
-			return;
-		}
-		overlayState = "auth";
-		overlayHandle = openAuthSelectorOverlay(tui, {
-			items: targetItems,
-			onSelect: (value) => {
-				closeOverlay();
-				queueMicrotask(() => openConnectFlowState(value));
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openDisconnectOverlayState = (target?: string): void => {
-		if (target) {
-			performDisconnect(target);
-			return;
-		}
-		if (overlayState !== "closed") return;
-		const settings = deps.getSettings?.();
-		if (!settings) return;
-		const statuses = deps.providers.list();
-		const items: SelectItem[] = settings.endpoints.map((endpoint) => {
-			const runtime = deps.providers.getRuntime(endpoint.runtime) ?? getRuntimeRegistry().get(endpoint.runtime);
-			const status = statuses.find((entry) => entry.endpoint.id === endpoint.id);
-			const connection =
-				status?.health.status && status.health.status !== "unknown"
-					? status.health.status
-					: (status?.reason ?? "configured target");
-			return {
-				value: endpoint.id,
-				label: `${endpoint.id}  ${runtime?.displayName ?? endpoint.runtime}`,
-				description: `${connection}${endpoint.defaultModel ? `  ${endpoint.defaultModel}` : ""}`,
-			};
-		});
-		if (items.length === 0) {
-			notify("warning", "disconnect: no targets configured. Run clio configure or clio targets add.", "connect:none");
-			return;
-		}
-		overlayState = "auth";
-		overlayHandle = openAuthSelectorOverlay(tui, {
-			items,
-			onSelect: (value) => {
-				closeOverlay();
-				queueMicrotask(() => performDisconnect(value));
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
 	};
 
 	const openPermissionOverlay = (call: ClassifierCall, decision: SafetyDecision): void => {
@@ -2205,7 +2142,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "providers";
-		overlayHandle = openProvidersOverlay(tui, deps.providers, { bus: deps.bus });
+		overlayHandle = openProvidersOverlay(tui, deps.providers, {
+			bus: deps.bus,
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.writeSettings
+				? {
+						writeSettings: (next) => {
+							deps.writeSettings?.(next);
+							footer.refresh();
+						},
+					}
+				: {}),
+			connectTarget: (targetId) => openConnectFlowState(targetId),
+			disconnectTarget: (targetId) => performDisconnect(targetId),
+			notice: notify,
+		});
 		tui.requestRender();
 	};
 

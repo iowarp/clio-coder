@@ -38,8 +38,6 @@ export type SlashCommand =
 	| { kind: "delegate-usage" }
 	| { kind: "agents" }
 	| { kind: "providers" }
-	| { kind: "connect"; target?: string }
-	| { kind: "disconnect"; target?: string }
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "fleet" }
@@ -222,8 +220,6 @@ export interface SlashCommandContext {
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openProviders: () => void;
-	openConnect: (target?: string) => void;
-	openDisconnect: (target?: string) => void;
 	openCost: () => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
@@ -733,44 +729,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "targets",
-		description: "Show target health, auth, and models",
+		description: "Show target hub for health, auth, models, and actions",
 		kinds: ["providers"],
 		args: {},
 		fromArgs: fromArgsOrUnknown({ kind: "providers" }),
 		handle(_command, ctx) {
 			ctx.openProviders();
-		},
-	},
-	{
-		name: "connect",
-		description: "Connect a target or choose one",
-		kinds: ["connect"],
-		args: {
-			positionals: [{ name: "target", required: false, rest: true }],
-		},
-		fromArgs(parsed) {
-			const target = parsed.positionals[0];
-			return { kind: "connect", ...(target ? { target } : {}) };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "connect") return;
-			ctx.openConnect(command.target);
-		},
-	},
-	{
-		name: "disconnect",
-		description: "Disconnect a target or choose one",
-		kinds: ["disconnect"],
-		args: {
-			positionals: [{ name: "target", required: false, rest: true }],
-		},
-		fromArgs(parsed) {
-			const target = parsed.positionals[0];
-			return { kind: "disconnect", ...(target ? { target } : {}) };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "disconnect") return;
-			ctx.openDisconnect(command.target);
 		},
 	},
 	{
