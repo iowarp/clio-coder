@@ -44,6 +44,39 @@ export interface FileMutationEvent {
 	toolName: string;
 }
 
+/**
+ * Defers file-mutation sinks off the after_tool hot path and coalesces rapid
+ * events into one best-effort batch. A process exit before the pending flush
+ * can drop the incremental refresh; session stop owns a full rebuild.
+ */
+export function coalescePathSink(sink: (paths: string[]) => void): (event: FileMutationEvent) => void {
+	const pending = new Set<string>();
+	let flushScheduled = false;
+
+	const scheduleFlush = (): void => {
+		if (flushScheduled) return;
+		flushScheduled = true;
+		setImmediate(() => {
+			flushScheduled = false;
+			if (pending.size === 0) return;
+			const paths = [...pending];
+			pending.clear();
+			try {
+				sink(paths);
+			} catch {
+				// Incremental indexing is best-effort and must not change tool execution.
+			}
+			if (pending.size > 0) scheduleFlush();
+		});
+	};
+
+	return (event) => {
+		if (event.paths.length === 0) return;
+		for (const path of event.paths) pending.add(path);
+		scheduleFlush();
+	};
+}
+
 /** Notifies the caller after a successful file-mutating tool, for incremental indexing. */
 export function createFileMutationObserver(sink: (event: FileMutationEvent) => void): MiddlewareHookRegistration {
 	return {

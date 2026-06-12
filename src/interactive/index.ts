@@ -54,7 +54,7 @@ import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.j
 import type { ToolRegistry } from "../tools/registry.js";
 import {
 	budgetAlertNotice,
-	middlewareHookFailedNotice,
+	middlewareHookFailedSessionNotice,
 	restartRequiredNotice,
 	safetyBlockedNotice,
 } from "./bus-notices.js";
@@ -1307,8 +1307,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// breaks the turn, so without this warn notice a misbehaving guard or
 	// assessor would be invisible in interactive sessions (the composition
 	// root only writes stderr for non-interactive runs).
+	const seenMiddlewareBudgetWarnings = new Set<string>();
 	const unsubscribeMiddlewareHookFailed = deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
-		const notice = middlewareHookFailedNotice(payload);
+		const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
 		if (notice === null) return;
 		appendNotice(notice.level, notice.text, busNoticeSink);
 		tui.requestRender();
