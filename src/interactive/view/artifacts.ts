@@ -33,7 +33,7 @@ export interface ArtifactProvider {
 }
 
 export interface ArtifactProviderDeps {
-	dataDir: string;
+	stateDir: string;
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
 	sessionMeta?: SessionMeta | null | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
@@ -122,22 +122,22 @@ function maybeSizeBytes(path: string): number | undefined {
 	}
 }
 
-function sessionCurrentPath(dataDir: string, meta: SessionMeta | null | undefined): string | undefined {
+function sessionCurrentPath(stateDir: string, meta: SessionMeta | null | undefined): string | undefined {
 	if (!meta) return undefined;
-	return join(dataDir, "sessions", meta.cwdHash, meta.id, "current.jsonl");
+	return join(stateDir, "sessions", meta.cwdHash, meta.id, "current.jsonl");
 }
 
-export function receiptFilePath(dataDir: string, runId: string): string {
-	return join(dataDir, "receipts", `${runId}.json`);
+export function receiptFilePath(stateDir: string, runId: string): string {
+	return join(stateDir, "receipts", `${runId}.json`);
 }
 
-export function runLedgerPath(dataDir: string): string {
-	return join(dataDir, "state", "runs.json");
+export function runLedgerPath(stateDir: string): string {
+	return join(stateDir, "runs.json");
 }
 
-function readRunLedger(dataDir: string): RunEnvelope[] {
+function readRunLedger(stateDir: string): RunEnvelope[] {
 	try {
-		const raw = readFileSync(runLedgerPath(dataDir), "utf8").trim();
+		const raw = readFileSync(runLedgerPath(stateDir), "utf8").trim();
 		if (raw.length === 0) return [];
 		const parsed = JSON.parse(raw) as unknown;
 		return Array.isArray(parsed) ? (parsed.filter(isRecord) as unknown as RunEnvelope[]) : [];
@@ -158,7 +158,7 @@ function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 		fromMemory = [];
 	}
 	const seen = new Set(fromMemory.map((env) => env.id));
-	const fromDisk = readRunLedger(deps.dataDir).filter((env) => !seen.has(env.id));
+	const fromDisk = readRunLedger(deps.stateDir).filter((env) => !seen.has(env.id));
 	return [...fromMemory, ...fromDisk];
 }
 
@@ -188,16 +188,16 @@ function validateToolStats(value: unknown): ReceiptVerifyResult {
 
 type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reason: string };
 
-function readRunEnvelope(dataDir: string, runId: string): ReadLedgerResult {
-	const runs = readRunLedger(dataDir);
+function readRunEnvelope(stateDir: string, runId: string): ReadLedgerResult {
+	const runs = readRunLedger(stateDir);
 	for (const entry of runs) {
 		if (entry.id === runId) return { ok: true, envelope: entry };
 	}
 	return { ok: false, reason: runs.length === 0 ? "run ledger not found" : "run not found in ledger" };
 }
 
-export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerifyResult {
-	const target = receiptFilePath(dataDir, runId);
+export function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult {
+	const target = receiptFilePath(stateDir, runId);
 	let raw: string;
 	try {
 		raw = readFileSync(target, "utf8");
@@ -298,7 +298,7 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (!isReceiptIntegrity(r.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
-	const ledger = readRunEnvelope(dataDir, runId);
+	const ledger = readRunEnvelope(stateDir, runId);
 	if (!ledger.ok) return ledger;
 	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.envelope);
 }
@@ -390,10 +390,10 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 		const runs = listRunEnvelopes(this.deps);
 		return runs
 			.filter(
-				(env) => env.receiptPath !== null || maybeSizeBytes(receiptFilePath(this.deps.dataDir, env.id)) !== undefined,
+				(env) => env.receiptPath !== null || maybeSizeBytes(receiptFilePath(this.deps.stateDir, env.id)) !== undefined,
 			)
 			.map((env) => {
-				const path = env.receiptPath ?? receiptFilePath(this.deps.dataDir, env.id);
+				const path = env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id);
 				return {
 					id: env.id,
 					category: this.category,
@@ -403,7 +403,7 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					path,
 					load: () => loadJsonFileLines(path),
 					verify: async () => {
-						const result = verifyReceiptFile(this.deps.dataDir, env.id);
+						const result = verifyReceiptFile(this.deps.stateDir, env.id);
 						return result.ok ? { ok: true, detail: "integrity verified" } : { ok: false, detail: result.reason };
 					},
 				};
@@ -480,9 +480,9 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 	async list(): Promise<ViewArtifact[]> {
 		const runs = listRunEnvelopes(this.deps);
 		const entries = sessionEntries(this.deps);
-		const ledgerPath = runLedgerPath(this.deps.dataDir);
+		const ledgerPath = runLedgerPath(this.deps.stateDir);
 		return runs.map((env) => {
-			const receiptPath = env.receiptPath ?? receiptFilePath(this.deps.dataDir, env.id);
+			const receiptPath = env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id);
 			const path = maybeSizeBytes(receiptPath) !== undefined ? receiptPath : ledgerPath;
 			return {
 				id: env.id,
@@ -507,7 +507,7 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`ended: ${env.endedAt ?? "running"}`,
 						`tokens: ${env.tokenCount}`,
 						`costUsd: ${env.costUsd}`,
-						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.dataDir, env.id)}`,
+						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
 						"",
 						"agent output:",
 						...(text ? text.split(/\r?\n/) : ["(no session dispatch tool output found)"]),
@@ -580,7 +580,7 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 
 	async list(): Promise<ViewArtifact[]> {
 		const entries = sessionEntries(this.deps);
-		const path = sessionCurrentPath(this.deps.dataDir, this.deps.sessionMeta);
+		const path = sessionCurrentPath(this.deps.stateDir, this.deps.sessionMeta);
 		return entries
 			.filter((entry) => entry.kind === "compactionSummary")
 			.map((entry) => ({

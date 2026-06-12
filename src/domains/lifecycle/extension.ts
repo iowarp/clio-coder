@@ -16,7 +16,7 @@ export function createLifecycleBundle(_context: DomainContext): DomainBundle<Lif
 		version: getVersionInfo,
 		state: readStateInfo,
 		doctor: runDoctor,
-		runMigrations: (dir: string) => runPending(dir),
+		runMigrations: (stateDir: string) => runPending(stateDir),
 	};
 
 	return { extension, contract };

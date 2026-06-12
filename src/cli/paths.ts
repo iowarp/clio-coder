@@ -8,8 +8,9 @@ Print the resolved Clio Coder directories. Read-only: nothing is created.
 This is the single source of truth for scripts; parse the --json form instead
 of re-implementing the resolution rules.
 
-Resolution order per directory: CLIO_CONFIG_DIR / CLIO_DATA_DIR / CLIO_CACHE_DIR
-beat CLIO_HOME, which beats the platform defaults (XDG base dirs on Linux).
+Resolution order per directory: CLIO_CONFIG_DIR / CLIO_DATA_DIR /
+CLIO_STATE_DIR / CLIO_CACHE_DIR beat CLIO_HOME, which beats the platform
+defaults (XDG base dirs on Linux).
 `;
 
 export function runPathsCommand(args: ReadonlyArray<string> = []): number {
@@ -26,12 +27,15 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 	}
 	const dirs = resolveClioDirs();
 	if (json) {
-		process.stdout.write(`${JSON.stringify({ config: dirs.config, data: dirs.data, cache: dirs.cache }, null, 2)}\n`);
+		process.stdout.write(
+			`${JSON.stringify({ config: dirs.config, data: dirs.data, state: dirs.state, cache: dirs.cache }, null, 2)}\n`,
+		);
 		return 0;
 	}
 	for (const [label, path] of [
 		["config", dirs.config],
 		["data", dirs.data],
+		["state", dirs.state],
 		["cache", dirs.cache],
 	] as const) {
 		process.stdout.write(`${label.padEnd(8)} ${path}${existsSync(path) ? "" : "  (absent)"}\n`);

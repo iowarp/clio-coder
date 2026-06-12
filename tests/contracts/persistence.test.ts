@@ -41,6 +41,7 @@ describe("contracts/persistence", () => {
 		process.env.CLIO_HOME = scratch;
 		process.env.CLIO_DATA_DIR = join(scratch, "data");
 		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_STATE_DIR = join(scratch, "state");
 		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 		resetXdgCache();
 	});
@@ -113,7 +114,7 @@ describe("contracts/persistence", () => {
 			sessionId: null,
 		});
 
-		const receiptPath = join(scratch, "data", "receipts", `${env.id}.json`);
+		const receiptPath = join(scratch, "state", "receipts", `${env.id}.json`);
 		ok(existsSync(receiptPath));
 		const written = JSON.parse(readFileSync(receiptPath, "utf8")) as typeof receipt;
 		strictEqual(written.integrity.digest, receipt.integrity.digest);

@@ -68,9 +68,15 @@ process.stdin.on("data", (chunk) => { raw += chunk; });
 process.stdin.on("end", () => {
 	try {
 		const dirs = JSON.parse(raw);
-		if (typeof dirs.config === "string" && typeof dirs.data === "string" && typeof dirs.cache === "string") {
+		if (
+			typeof dirs.config === "string" &&
+			typeof dirs.data === "string" &&
+			typeof dirs.state === "string" &&
+			typeof dirs.cache === "string"
+		) {
 			console.log(dirs.config);
 			console.log(dirs.data);
+			console.log(dirs.state);
 			console.log(dirs.cache);
 			return;
 		}
@@ -98,31 +104,36 @@ function defaults() {
 		const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming");
 		const localAppData = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
 		return {
-			config: path.join(appData, "clio"),
-			data: path.join(appData, "clio"),
-			cache: path.join(localAppData, "Temp", "clio"),
+			config: path.join(appData, "clio", "config"),
+			data: path.join(appData, "clio", "data"),
+			state: path.join(localAppData, "clio", "state"),
+			cache: path.join(localAppData, "clio", "cache"),
 		};
 	}
 	if (process.platform === "darwin") {
 		const app = path.join(home, "Library", "Application Support", "clio");
 		return {
-			config: app,
-			data: app,
+			config: path.join(app, "config"),
+			data: path.join(app, "data"),
+			state: path.join(app, "state"),
 			cache: path.join(home, "Library", "Caches", "clio"),
 		};
 	}
 	return {
 		config: path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "clio"),
 		data: path.join(process.env.XDG_DATA_HOME ?? path.join(home, ".local", "share"), "clio"),
+		state: path.join(process.env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), "clio"),
 		cache: path.join(process.env.XDG_CACHE_HOME ?? path.join(home, ".cache"), "clio"),
 	};
 }
 const fallback = defaults();
-const config = env("CLIO_CONFIG_DIR") ?? (clioHome ? clioHome : fallback.config);
+const config = env("CLIO_CONFIG_DIR") ?? (clioHome ? path.join(clioHome, "config") : fallback.config);
 const data = env("CLIO_DATA_DIR") ?? (clioHome ? path.join(clioHome, "data") : fallback.data);
+const state = env("CLIO_STATE_DIR") ?? (clioHome ? path.join(clioHome, "state") : fallback.state);
 const cache = env("CLIO_CACHE_DIR") ?? (clioHome ? path.join(clioHome, "cache") : fallback.cache);
 console.log(config);
 console.log(data);
+console.log(state);
 console.log(cache);
 NODE
 }
@@ -214,8 +225,8 @@ copy_settings_auth() {
 	fi
 	if [[ -n "$preserve_dir" ]]; then
 		stage_dir="$(normalize_path "$(expand_tilde "$preserve_dir")")"
-		for state_dir in "$config_dir" "$data_dir" "$cache_dir"; do
-			if path_is_under "$state_dir" "$stage_dir"; then
+		for clio_dir in "$config_dir" "$data_dir" "$state_dir" "$cache_dir"; do
+			if path_is_under "$clio_dir" "$stage_dir"; then
 				fail "preserve directory must not be inside Clio state: $stage_dir"
 			fi
 		done
@@ -340,7 +351,8 @@ link_path="$bin_dir/clio"
 mapfile -t resolved_dirs < <(resolve_clio_dirs)
 config_dir="$(normalize_path "${resolved_dirs[0]}")"
 data_dir="$(normalize_path "${resolved_dirs[1]}")"
-cache_dir="$(normalize_path "${resolved_dirs[2]}")"
+state_dir="$(normalize_path "${resolved_dirs[2]}")"
+cache_dir="$(normalize_path "${resolved_dirs[3]}")"
 settings_path="$config_dir/settings.yaml"
 credentials_path="$config_dir/credentials.yaml"
 
@@ -354,6 +366,7 @@ log "source root: $repo_root"
 log "link path:   $link_path"
 log "config dir:  $config_dir"
 log "data dir:    $data_dir"
+log "state dir:   $state_dir"
 log "cache dir:   $cache_dir"
 [[ $dry_run -eq 1 ]] && log "dry run: no files will be changed"
 
@@ -365,6 +378,7 @@ else
 	copy_settings_auth
 	add_remove_dir "$config_dir"
 	add_remove_dir "$data_dir"
+	add_remove_dir "$state_dir"
 	add_remove_dir "$cache_dir"
 	for dir in "${remove_dirs[@]}"; do
 		safe_rm_rf "state" "$dir"

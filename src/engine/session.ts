@@ -1,7 +1,7 @@
 /**
  * Clio session JSONL writer + reader (Phase 3 slice 1).
  *
- * On-disk layout under `clioDataDir()`:
+ * On-disk layout under `clioStateDir()`:
  *   sessions/<cwdHash>/<sessionId>/
  *     meta.json      ClioSessionMeta
  *     current.jsonl  append-only ClioTurnRecord per line
@@ -38,7 +38,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioStateDir } from "../core/xdg.js";
 
 export interface ClioSessionMeta {
 	id: string;
@@ -123,7 +123,7 @@ export function cwdHash(cwd: string): string {
 }
 
 export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
-	const dir = join(clioDataDir(), "sessions", meta.cwdHash, meta.id);
+	const dir = join(clioStateDir(), "sessions", meta.cwdHash, meta.id);
 	mkdirSync(dir, { recursive: true });
 	return {
 		current: join(dir, "current.jsonl"),
@@ -472,7 +472,7 @@ function recoverTreeFromJsonl(diskTree: SessionTreeNode[], fileEntries: Readonly
 }
 
 function findSessionDir(id: string): string {
-	const sessionsRoot = join(clioDataDir(), "sessions");
+	const sessionsRoot = join(clioStateDir(), "sessions");
 	if (!existsSync(sessionsRoot)) {
 		throw new Error(`session not found: ${id}`);
 	}

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { loadDomains } from "../core/domain-loader.js";
 import { initializeClioHome } from "../core/init.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioStateDir } from "../core/xdg.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { LifecycleContract } from "../domains/lifecycle/contract.js";
 import { LifecycleDomainModule } from "../domains/lifecycle/index.js";
@@ -144,11 +144,11 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	}
 
 	const before = getVersionInfo().clio;
-	const dataDir = clioDataDir();
+	const stateDir = clioStateDir();
 	printHeader("Clio Coder upgrade");
 	process.stdout.write(`channel     ${opts.channel}\n`);
 	process.stdout.write(`current     ${before}\n`);
-	process.stdout.write(`data dir    ${dataDir}\n`);
+	process.stdout.write(`state dir   ${stateDir}\n`);
 
 	const noNetwork = Boolean(process.env.CLIO_TEST_UPGRADE_NO_NETWORK);
 	const migrations = listMigrations();
@@ -199,7 +199,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 				printError("lifecycle domain unavailable");
 				return 1;
 			}
-			const result = await lifecycle.runMigrations(dataDir);
+			const result = await lifecycle.runMigrations(stateDir);
 			appliedIds = [...result.applied];
 			appliedCount = appliedIds.length;
 			if (appliedCount === 0) {

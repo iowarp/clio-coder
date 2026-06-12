@@ -234,6 +234,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		strictEqual(result.code, 0);
 		match(result.stdout, /config dir/);
 		match(result.stdout, /data dir/);
+		match(result.stdout, /state dir/);
 		match(result.stdout, /cache dir/);
 	});
 
@@ -246,13 +247,15 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	it("paths --json prints the resolved directories read-only", async () => {
 		const result = await runCli(["paths", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0);
-		const dirs = JSON.parse(result.stdout) as { config: string; data: string; cache: string };
+		const dirs = JSON.parse(result.stdout) as { config: string; data: string; state: string; cache: string };
 		strictEqual(dirs.config, scratch.env.CLIO_CONFIG_DIR);
 		strictEqual(dirs.data, scratch.env.CLIO_DATA_DIR);
+		strictEqual(dirs.state, scratch.env.CLIO_STATE_DIR);
 		strictEqual(dirs.cache, scratch.env.CLIO_CACHE_DIR);
 		// Read-only contract: asking for paths must not create them.
 		strictEqual(existsSync(dirs.config), false);
 		strictEqual(existsSync(dirs.data), false);
+		strictEqual(existsSync(dirs.state), false);
 		strictEqual(existsSync(dirs.cache), false);
 	});
 

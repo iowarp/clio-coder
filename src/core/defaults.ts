@@ -209,10 +209,10 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 #
 # Default location:
 #   Linux:   ~/.config/clio/settings.yaml
-#   macOS:   ~/Library/Application Support/clio/settings.yaml
-#   Windows: %APPDATA%/clio/settings.yaml
+#   macOS:   ~/Library/Application Support/clio/config/settings.yaml
+#   Windows: %APPDATA%/clio/config/settings.yaml
 # Set CLIO_HOME for a single-tree install, or CLIO_CONFIG_DIR / CLIO_DATA_DIR /
-# CLIO_CACHE_DIR to override config, data, and cache separately.
+# CLIO_STATE_DIR / CLIO_CACHE_DIR to override each directory separately.
 #
 # Common first run after installation:
 #   1. Repair/create local state: clio doctor --fix
@@ -228,8 +228,8 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 # Inference targets. Each entry becomes selectable for chat and workers.
 # Add entries via \`clio configure\` or \`clio targets add\`
 # or hand-edit. \`runtime\` must match an id registered in the runtime registry
-# (cloud APIs, local HTTP engines, or third-party plugins under
-# ~/.clio/runtimes/).
+# (cloud APIs, local HTTP engines, or third-party plugins in the \`runtimes/\`
+# directory next to this file).
 targets: []
 # Local runtime examples (uncomment/adapt one; replace your-model-id):
 #   clio configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default

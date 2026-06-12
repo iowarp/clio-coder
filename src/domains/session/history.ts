@@ -1,18 +1,18 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite, cwdHash, readSessionFileEntries, sessionPaths } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
 import { isSessionEntry, type LabelEntry, type SessionInfoEntry } from "./entries.js";
 
 /**
- * Walks `clioDataDir()/sessions/<cwdHash>/` and returns every session meta
+ * Walks `clioStateDir()/sessions/<cwdHash>/` and returns every session meta
  * for the given cwd, sorted by last-activity descending (newest activity
  * first). Falls back to createdAt when no entries carry timestamps.
  */
 export function listSessionsForCwd(cwd: string): SessionMeta[] {
 	const hash = cwdHash(cwd);
-	const dir = join(clioDataDir(), "sessions", hash);
+	const dir = join(clioStateDir(), "sessions", hash);
 	if (!existsSync(dir)) return [];
 	const metas: SessionMeta[] = [];
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {

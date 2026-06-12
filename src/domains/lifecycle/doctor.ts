@@ -47,6 +47,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const data = dirs.data;
 	findings.push({ ok: existsSync(data), name: "data dir", detail: data });
 
+	const stateDir = dirs.state;
+	findings.push({ ok: existsSync(stateDir), name: "state dir", detail: stateDir });
+
 	const cache = dirs.cache;
 	findings.push({ ok: existsSync(cache), name: "cache dir", detail: cache });
 

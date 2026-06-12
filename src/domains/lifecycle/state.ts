@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { initializeClioHome } from "../../core/init.js";
-import { clioDataPath } from "../../core/xdg.js";
+import { clioStatePath } from "../../core/xdg.js";
 
 export interface StateInfo {
 	version: string;
@@ -11,7 +11,7 @@ export interface StateInfo {
 }
 
 export function readStateInfo(): StateInfo | null {
-	const path = join(clioDataPath(), "install.json");
+	const path = join(clioStatePath(), "install.json");
 	if (!existsSync(path)) return null;
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as StateInfo;

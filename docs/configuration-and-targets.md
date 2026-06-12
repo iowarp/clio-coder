@@ -11,16 +11,17 @@ Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/prov
 
 ---
 
-## State locations
+## Directory locations
 
-Clio follows platform defaults, with environment overrides:
+Clio resolves four directories (config, data, state, cache) from platform defaults, with environment overrides. The most specific override wins:
 
 | Variable | Effect |
 | --- | --- |
-| `CLIO_HOME` | Single-tree override: config at `$CLIO_HOME`, data at `$CLIO_HOME/data`, cache at `$CLIO_HOME/cache`. |
-| `CLIO_CONFIG_DIR` | Overrides config directory only. |
-| `CLIO_DATA_DIR` | Overrides data directory only. |
-| `CLIO_CACHE_DIR` | Overrides cache directory only. |
+| `CLIO_HOME` | Single-tree override: all four roots become `$CLIO_HOME/config`, `$CLIO_HOME/data`, `$CLIO_HOME/state`, and `$CLIO_HOME/cache`. |
+| `CLIO_CONFIG_DIR` | Overrides the config directory only (beats `CLIO_HOME`). |
+| `CLIO_DATA_DIR` | Overrides the data directory only (beats `CLIO_HOME`). |
+| `CLIO_STATE_DIR` | Overrides the state directory only (beats `CLIO_HOME`). |
+| `CLIO_CACHE_DIR` | Overrides the cache directory only (beats `CLIO_HOME`). |
 
 Default config file:
 
@@ -28,7 +29,9 @@ Default config file:
 <configDir>/settings.yaml
 ```
 
-Default data subdirectories include sessions, audit, state, agents, prompts, receipts, evidence, evals, and memory.
+Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interviews, scratch); cache holds disposable derived files.
+
+`clio paths --json` prints the resolved directories and is the single source of truth for scripts.
 
 ---
 

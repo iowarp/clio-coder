@@ -10,10 +10,10 @@ const HELP = `clio reset [--state|--auth|--config|--all] [--dry-run] [--force]
 Recover or wipe Clio Coder state while keeping the clio binary installed.
 
 Modes:
-  --state       reset data and cache only (default)
+  --state       reset data, state, and cache only (default)
   --auth        reset stored credentials only
   --config      reset settings.yaml only
-  --all         reset config, data, and cache to fresh defaults
+  --all         reset config, data, state, and cache to fresh defaults
 
 Safety:
   --force       required for destructive execution
@@ -114,13 +114,15 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 	if (args.all) {
 		report("config", dirs.config);
 		report("data", dirs.data);
+		report("state", dirs.state);
 		report("cache", dirs.cache);
 		removePath(dirs.config, args.dryRun);
 		removePath(dirs.data, args.dryRun);
+		removePath(dirs.state, args.dryRun);
 		removePath(dirs.cache, args.dryRun);
 		resetXdgCache();
 		if (!args.dryRun) initializeClioHome();
-		printOk(args.dryRun ? "reset --all preview complete" : "reset config, data, and cache");
+		printOk(args.dryRun ? "reset --all preview complete" : "reset config, data, state, and cache");
 		return 0;
 	}
 
@@ -134,8 +136,10 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 	}
 	if (args.state) {
 		report("data", dirs.data);
+		report("state", dirs.state);
 		report("cache", dirs.cache);
 		removePath(dirs.data, args.dryRun);
+		removePath(dirs.state, args.dryRun);
 		removePath(dirs.cache, args.dryRun);
 	}
 

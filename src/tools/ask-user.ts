@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioStateDir } from "../core/xdg.js";
 import type {
 	AskUserToolPolicy,
 	AskUserTranscriptAnswer,
@@ -410,7 +410,7 @@ async function persistAskUserTranscript(
 	options?: ToolInvokeOptions,
 ): Promise<string | undefined> {
 	hydratePolicy(policy, options);
-	const dir = path.join(clioDataDir(), "interviews");
+	const dir = path.join(clioStateDir(), "interviews");
 	try {
 		await mkdir(dir, { recursive: true });
 		if (!policy.transcriptPath) policy.transcriptPath = path.join(dir, transcriptFileName(policy));

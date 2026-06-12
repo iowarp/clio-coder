@@ -23,7 +23,7 @@ async function scratchDir(): Promise<string> {
 	return mkdtemp(join(tmpdir(), "clio-view-artifacts-"));
 }
 
-function fixtureEnvelope(dataDir: string, runId = "run-view-1"): RunEnvelope {
+function fixtureEnvelope(stateDir: string, runId = "run-view-1"): RunEnvelope {
 	return {
 		id: runId,
 		agentId: "coder",
@@ -40,7 +40,7 @@ function fixtureEnvelope(dataDir: string, runId = "run-view-1"): RunEnvelope {
 		exitCode: 0,
 		pid: null,
 		heartbeatAt: null,
-		receiptPath: receiptFilePath(dataDir, runId),
+		receiptPath: receiptFilePath(stateDir, runId),
 		sessionId: "session-1",
 		cwd: "/workspace",
 		tokenCount: 42,
@@ -90,13 +90,12 @@ function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 	};
 }
 
-async function writeReceiptFixture(dataDir: string): Promise<RunEnvelope> {
-	const envelope = fixtureEnvelope(dataDir);
+async function writeReceiptFixture(stateDir: string): Promise<RunEnvelope> {
+	const envelope = fixtureEnvelope(stateDir);
 	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-	await mkdir(join(dataDir, "state"), { recursive: true });
-	await mkdir(join(dataDir, "receipts"), { recursive: true });
-	await writeFile(runLedgerPath(dataDir), JSON.stringify([envelope], null, 2));
-	await writeFile(receiptFilePath(dataDir, envelope.id), JSON.stringify(receipt, null, 2));
+	await mkdir(join(stateDir, "receipts"), { recursive: true });
+	await writeFile(runLedgerPath(stateDir), JSON.stringify([envelope], null, 2));
+	await writeFile(receiptFilePath(stateDir, envelope.id), JSON.stringify(receipt, null, 2));
 	return envelope;
 }
 
@@ -131,9 +130,9 @@ function sessionMeta(): SessionMeta {
 
 describe("contracts/view-artifacts", () => {
 	it("lists receipt artifacts without loading and verifies plus pretty-prints JSON", async () => {
-		const dataDir = await scratchDir();
-		const envelope = await writeReceiptFixture(dataDir);
-		const provider = new ReceiptArtifactProvider({ dataDir });
+		const stateDir = await scratchDir();
+		const envelope = await writeReceiptFixture(stateDir);
+		const provider = new ReceiptArtifactProvider({ stateDir });
 
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 1);
@@ -143,7 +142,7 @@ describe("contracts/view-artifacts", () => {
 
 		const verify = await artifacts[0]?.verify?.();
 		deepStrictEqual(verify, { ok: true, detail: "integrity verified" });
-		deepStrictEqual(verifyReceiptFile(dataDir, envelope.id), { ok: true });
+		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: true });
 
 		const loaded = await artifacts[0]?.load();
 		strictEqual(loaded?.format, "json");
@@ -151,14 +150,14 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("lists receipts written to disk by another process after provider construction", async () => {
-		const dataDir = await scratchDir();
+		const stateDir = await scratchDir();
 		// The in-memory dispatch ledger of this process never learns about the
 		// run; only the disk ledger and receipts dir gain the artifact.
 		const dispatch = { listRuns: () => [], getRun: () => null };
-		const provider = new ReceiptArtifactProvider({ dataDir, dispatch });
+		const provider = new ReceiptArtifactProvider({ stateDir, dispatch });
 		strictEqual((await provider.list()).length, 0);
 
-		const envelope = await writeReceiptFixture(dataDir);
+		const envelope = await writeReceiptFixture(stateDir);
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.id, envelope.id);
@@ -167,15 +166,15 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("merges in-memory and disk ledgers without duplicating shared runs", async () => {
-		const dataDir = await scratchDir();
-		const memoryRun = fixtureEnvelope(dataDir, "run-shared");
-		const diskOnlyRun = fixtureEnvelope(dataDir, "run-disk-only");
+		const stateDir = await scratchDir();
+		const memoryRun = fixtureEnvelope(stateDir, "run-shared");
+		const diskOnlyRun = fixtureEnvelope(stateDir, "run-disk-only");
 		const staleDiskCopy = { ...memoryRun, task: "stale disk copy of the shared run" };
-		await mkdir(join(dataDir, "state"), { recursive: true });
-		await writeFile(runLedgerPath(dataDir), JSON.stringify([staleDiskCopy, diskOnlyRun], null, 2));
+		await mkdir(stateDir, { recursive: true });
+		await writeFile(runLedgerPath(stateDir), JSON.stringify([staleDiskCopy, diskOnlyRun], null, 2));
 
 		const dispatch = { listRuns: () => [memoryRun], getRun: () => null };
-		const provider = new DispatchArtifactProvider({ dataDir, dispatch });
+		const provider = new DispatchArtifactProvider({ stateDir, dispatch });
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 2);
 		const shared = artifacts.find((artifact) => artifact.id === "run-shared");
@@ -188,8 +187,8 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("lists dispatch artifacts and includes matching session dispatch output", async () => {
-		const dataDir = await scratchDir();
-		const envelope = await writeReceiptFixture(dataDir);
+		const stateDir = await scratchDir();
+		const envelope = await writeReceiptFixture(stateDir);
 		const entries: SessionEntry[] = [
 			{
 				kind: "message",
@@ -207,7 +206,7 @@ describe("contracts/view-artifacts", () => {
 				},
 			},
 		];
-		const provider = new DispatchArtifactProvider({ dataDir, readSessionEntries: () => entries });
+		const provider = new DispatchArtifactProvider({ stateDir, readSessionEntries: () => entries });
 
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 1);
@@ -218,10 +217,10 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("loads file-backed tool outputs and caps large output files", async () => {
-		const dataDir = await scratchDir();
-		const outputPath = join(dataDir, "tool-output.txt");
+		const stateDir = await scratchDir();
+		const outputPath = join(stateDir, "tool-output.txt");
 		await writeFile(outputPath, "line 1\nline 2\n");
-		const largePath = join(dataDir, "large-output.txt");
+		const largePath = join(stateDir, "large-output.txt");
 		const large = Array.from({ length: VIEW_ARTIFACT_LINE_CAP + 2 }, (_, index) => `line ${index + 1}`).join("\n");
 		await writeFile(largePath, large);
 		const entries: SessionEntry[] = [
@@ -262,10 +261,10 @@ describe("contracts/view-artifacts", () => {
 				exitCode: 0,
 				cancelled: false,
 				truncated: true,
-				fullOutputPath: join(dataDir, "missing.txt"),
+				fullOutputPath: join(stateDir, "missing.txt"),
 			},
 		];
-		const provider = new ToolOutputArtifactProvider({ dataDir, readSessionEntries: () => entries });
+		const provider = new ToolOutputArtifactProvider({ stateDir, readSessionEntries: () => entries });
 
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 3);
@@ -279,7 +278,7 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("lists compaction summaries as markdown session artifacts", async () => {
-		const dataDir = await scratchDir();
+		const stateDir = await scratchDir();
 		const meta = sessionMeta();
 		const entries: SessionEntry[] = [
 			{
@@ -296,7 +295,7 @@ describe("contracts/view-artifacts", () => {
 			},
 		];
 		const provider = new CompactionArtifactProvider({
-			dataDir,
+			stateDir,
 			sessionMeta: meta,
 			readSessionEntries: () => entries,
 		});
@@ -311,8 +310,8 @@ describe("contracts/view-artifacts", () => {
 	});
 
 	it("falls back invalid JSON artifacts to text rendering", async () => {
-		const dataDir = await scratchDir();
-		const invalid = join(dataDir, "bad.json");
+		const stateDir = await scratchDir();
+		const invalid = join(stateDir, "bad.json");
 		await writeFile(invalid, "{not json");
 
 		const loaded = await loadJsonFileLines(invalid);

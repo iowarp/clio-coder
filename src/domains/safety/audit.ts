@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
@@ -332,7 +332,7 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 		if (current !== null && current.date === date) return current;
 		if (current !== null) closeCurrent();
 		try {
-			const dir = join(clioDataDir(), "audit");
+			const dir = join(clioStateDir(), "audit");
 			mkdirSync(dir, { recursive: true });
 			const filePath = join(dir, `${date}.jsonl`);
 			const fd = openSync(filePath, "a");

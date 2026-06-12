@@ -36,13 +36,13 @@ export function rewriteCompactionThresholds(yamlText: string): string | null {
  * user files so their customized values survive instead of silently falling
  * back to defaults.
  *
- * The migration manifest lives under the data dir (the `dir` argument), but
- * settings.yaml lives in the config dir, so the path comes from
+ * The migration manifest lives under the state dir (the `stateDir` argument),
+ * but settings.yaml lives in the config dir, so the path comes from
  * `settingsPath()` directly.
  */
 const migration: Migration = {
 	id: "2026-06-11-compaction-single-threshold",
-	async up(_dir: string): Promise<void> {
+	async up(_stateDir: string): Promise<void> {
 		const path = settingsPath();
 		if (!existsSync(path)) return;
 		const rewritten = rewriteCompactionThresholds(readFileSync(path, "utf8"));

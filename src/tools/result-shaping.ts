@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clioDataDir } from "../core/xdg.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
@@ -70,7 +70,7 @@ function writeOffload(text: string, bytes: number, context: ToolResultShapeConte
 	try {
 		const sessionId = safePathSegment(context?.sessionId ?? "no-session");
 		const callId = safePathSegment(context?.toolCallId ?? timestampSegment());
-		const dir = join(clioDataDir(), "scratch", sessionId);
+		const dir = join(clioStateDir(), "scratch", sessionId);
 		const path = join(dir, `${callId}.txt`);
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(path, offloadBody(text, bytes), "utf8");

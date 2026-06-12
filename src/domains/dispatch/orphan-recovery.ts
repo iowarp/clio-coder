@@ -15,7 +15,7 @@
 
 import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { runStatusForOutcome } from "./outcome.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "./receipt-integrity.js";
 import type { Ledger } from "./state.js";
@@ -36,7 +36,7 @@ export interface OrphanRecoverySummary {
 const STATUS_CANDIDATES: ReadonlyArray<RunStatus> = ["completed", "failed", "interrupted", "dead", "stale"];
 
 function receiptsDir(): string {
-	return join(clioDataDir(), "receipts");
+	return join(clioStateDir(), "receipts");
 }
 
 /**

@@ -7,7 +7,7 @@
  * files. To add a migration, author `YYYY-MM-DD-<slug>.ts` with a default
  * export matching the `Migration` contract and register it below.
  *
- * Applied migration ids are persisted to `<dir>/state/migrations.json`. A
+ * Applied migration ids are persisted to `<stateDir>/migrations.json`. A
  * migration whose id already appears in that manifest is skipped. `up()` is
  * invoked at most once per Clio Coder state tree for a given id.
  */
@@ -19,7 +19,7 @@ import compactionSingleThreshold from "./2026-06-11-compaction-single-threshold.
 
 export interface Migration {
 	id: string;
-	up(dir: string): Promise<void>;
+	up(stateDir: string): Promise<void>;
 }
 
 export interface MigrationManifest {
@@ -41,8 +41,8 @@ export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
 }
 
-function manifestPath(dir: string): string {
-	return join(dir, "state", "migrations.json");
+function manifestPath(stateDir: string): string {
+	return join(stateDir, "migrations.json");
 }
 
 function readManifest(path: string): MigrationManifest {
@@ -64,16 +64,15 @@ function writeManifest(path: string, manifest: MigrationManifest): void {
 	writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
 }
 
-export async function runPending(dir: string): Promise<MigrationRunResult> {
-	const stateDir = join(dir, "state");
+export async function runPending(stateDir: string): Promise<MigrationRunResult> {
 	mkdirSync(stateDir, { recursive: true });
-	const path = manifestPath(dir);
+	const path = manifestPath(stateDir);
 	const manifest = readManifest(path);
 	const applied = new Set(manifest.applied);
 	const newlyApplied: string[] = [];
 	for (const m of REGISTRY) {
 		if (applied.has(m.id)) continue;
-		await m.up(dir);
+		await m.up(stateDir);
 		applied.add(m.id);
 		newlyApplied.push(m.id);
 	}

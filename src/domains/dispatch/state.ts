@@ -1,8 +1,8 @@
 /**
  * Dispatch run ledger with atomic writes (Phase 6 slice 2).
  *
- * On-disk layout under `clioDataDir()`:
- *   state/runs.json              JSON array of RunEnvelope, newest first
+ * On-disk layout under `clioStateDir()`:
+ *   runs.json                    JSON array of RunEnvelope, newest first
  *   receipts/<runId>.json        per-run RunReceipt
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
@@ -21,7 +21,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
@@ -66,11 +66,11 @@ function newRunId(): string {
 }
 
 function runsPath(): string {
-	return join(clioDataDir(), "state", "runs.json");
+	return join(clioStateDir(), "runs.json");
 }
 
 function receiptPathFor(runId: string): string {
-	return join(clioDataDir(), "receipts", `${runId}.json`);
+	return join(clioStateDir(), "receipts", `${runId}.json`);
 }
 
 function readRuns(): RunEnvelope[] {

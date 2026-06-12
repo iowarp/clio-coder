@@ -31,13 +31,13 @@ const LISTING_FIXTURE = [
 
 describe("contracts/marketplace-remote", () => {
 	it("lists remote skill directories, filtering files and unsafe names", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		const calls: string[] = [];
 		const fetchFn = (async (url: unknown) => {
 			calls.push(String(url));
 			return jsonResponse(LISTING_FIXTURE);
 		}) as typeof fetch;
-		const skills = await fetchRemoteMarketplace(dataDir, { fetchFn, nowFn: () => 1000 });
+		const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 1000 });
 		deepStrictEqual(
 			skills.map((skill) => skill.name),
 			["arxiv-literature", "data-pipelines"],
@@ -46,27 +46,27 @@ describe("contracts/marketplace-remote", () => {
 	});
 
 	it("serves from cache inside the TTL and refetches after it expires", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		let calls = 0;
 		const fetchFn = (async () => {
 			calls += 1;
 			return jsonResponse(LISTING_FIXTURE);
 		}) as typeof fetch;
-		await fetchRemoteMarketplace(dataDir, { fetchFn, nowFn: () => 0 });
-		await fetchRemoteMarketplace(dataDir, { fetchFn, nowFn: () => 60_000 });
+		await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 0 });
+		await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 60_000 });
 		strictEqual(calls, 1, "second call inside TTL must hit the cache");
-		await fetchRemoteMarketplace(dataDir, { fetchFn, nowFn: () => 25 * 60 * 60 * 1000 });
+		await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 25 * 60 * 60 * 1000 });
 		strictEqual(calls, 2, "call after TTL must refetch");
 	});
 
 	it("falls back to the stale cache when the network fails", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		const okFetch = (async () => jsonResponse(LISTING_FIXTURE)) as typeof fetch;
-		await fetchRemoteMarketplace(dataDir, { fetchFn: okFetch, nowFn: () => 0 });
+		await fetchRemoteMarketplace(cacheDir, { fetchFn: okFetch, nowFn: () => 0 });
 		const failFetch = (async () => {
 			throw new Error("offline");
 		}) as typeof fetch;
-		const skills = await fetchRemoteMarketplace(dataDir, {
+		const skills = await fetchRemoteMarketplace(cacheDir, {
 			fetchFn: failFetch,
 			nowFn: () => 48 * 60 * 60 * 1000,
 		});
@@ -77,47 +77,47 @@ describe("contracts/marketplace-remote", () => {
 	});
 
 	it("falls back to the pinned list when offline with no cache", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		const failFetch = (async () => {
 			throw new Error("offline");
 		}) as typeof fetch;
-		const skills = await fetchRemoteMarketplace(dataDir, { fetchFn: failFetch });
+		const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn: failFetch });
 		ok(Array.isArray(skills));
 	});
 
 	it("treats a corrupt cache file as a miss", async () => {
-		const dataDir = tempDataDir();
-		writeFileSync(path.join(dataDir, "marketplace-cache.json"), "{not json", "utf8");
+		const cacheDir = tempDataDir();
+		writeFileSync(path.join(cacheDir, "marketplace-cache.json"), "{not json", "utf8");
 		const fetchFn = (async () => jsonResponse(LISTING_FIXTURE)) as typeof fetch;
-		const skills = await fetchRemoteMarketplace(dataDir, { fetchFn, nowFn: () => 0 });
+		const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 0 });
 		strictEqual(skills.length, 2);
 	});
 
 	it("fetches, parses, and caches a SKILL.md detail", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		let calls = 0;
 		const skillMd = ["---", 'description: "Search arXiv"', "version: 1.2.0", "---", "", "# Usage", "Run it."].join("\n");
 		const fetchFn = (async () => {
 			calls += 1;
 			return new Response(skillMd, { status: 200 });
 		}) as typeof fetch;
-		const detail = await fetchRemoteSkillDetail(dataDir, "arxiv-literature", { fetchFn, nowFn: () => 0 });
+		const detail = await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", { fetchFn, nowFn: () => 0 });
 		strictEqual(detail.description, "Search arXiv");
 		strictEqual(detail.version, "1.2.0");
 		ok(detail.body.includes("# Usage"));
 		strictEqual(detail.source, "remote");
-		const again = await fetchRemoteSkillDetail(dataDir, "arxiv-literature", { fetchFn, nowFn: () => 1 });
+		const again = await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", { fetchFn, nowFn: () => 1 });
 		strictEqual(calls, 1, "detail must come from cache inside the TTL");
 		strictEqual(again.source, "cache");
-		const cacheRaw = readFileSync(path.join(dataDir, "marketplace-cache.json"), "utf8");
+		const cacheRaw = readFileSync(path.join(cacheDir, "marketplace-cache.json"), "utf8");
 		ok(cacheRaw.includes("Search arXiv"));
 	});
 
 	it("rejects unsafe skill names before any network call", async () => {
-		const dataDir = tempDataDir();
+		const cacheDir = tempDataDir();
 		let rejected = false;
 		try {
-			await fetchRemoteSkillDetail(dataDir, "../escape", {});
+			await fetchRemoteSkillDetail(cacheDir, "../escape", {});
 		} catch {
 			rejected = true;
 		}

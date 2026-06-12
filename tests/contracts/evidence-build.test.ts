@@ -22,6 +22,7 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 	process.env.CLIO_HOME = scratch;
 	process.env.CLIO_DATA_DIR = join(scratch, "data");
 	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_STATE_DIR = join(scratch, "state");
 	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	return Promise.resolve()
@@ -158,7 +159,8 @@ describe("contracts/evidence-build", () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const { runId } = await sealRun();
 			const dataDir = join(scratch, "data");
-			const auditDir = join(dataDir, "audit");
+			const stateDir = join(scratch, "state");
+			const auditDir = join(stateDir, "audit");
 			mkdirSync(auditDir, { recursive: true });
 			const ts = new Date().toISOString();
 			const auditFixture = [
@@ -187,7 +189,7 @@ describe("contracts/evidence-build", () => {
 				.join("\n");
 			writeFileSync(join(auditDir, `${ts.slice(0, 10)}.jsonl`), `${auditFixture}\n`);
 
-			const result = await buildEvidence({ dataDir, runId });
+			const result = await buildEvidence({ dataDir, stateDir, runId });
 			const auditRows = readJsonl(join(result.directory, "audit-linked.jsonl"));
 			const toolEvents = readJsonl(join(result.directory, "tool-events.jsonl")) as Array<Record<string, unknown>>;
 

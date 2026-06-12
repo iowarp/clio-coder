@@ -60,8 +60,8 @@ async function settle(): Promise<void> {
 	await Promise.resolve();
 }
 
-function readToolCallAuditRows(dataDir: string): ToolCallAuditRecord[] {
-	const auditDir = join(dataDir, "audit");
+function readToolCallAuditRows(stateDir: string): ToolCallAuditRecord[] {
+	const auditDir = join(stateDir, "audit");
 	let files: string[];
 	try {
 		files = readdirSync(auditDir).filter((file) => file.endsWith(".jsonl"));
@@ -83,10 +83,11 @@ async function withAuditedRegistry(
 ): Promise<ToolCallAuditRecord[]> {
 	const originalEnv = { ...process.env };
 	const scratch = mkdtempSync(join(tmpdir(), "clio-autonomy-audit-"));
-	const dataDir = join(scratch, "data");
+	const stateDir = join(scratch, "state");
 	process.env.CLIO_HOME = scratch;
-	process.env.CLIO_DATA_DIR = dataDir;
+	process.env.CLIO_DATA_DIR = join(scratch, "data");
 	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_STATE_DIR = stateDir;
 	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	const bus = createSafeEventBus();
@@ -100,7 +101,7 @@ async function withAuditedRegistry(
 		await fn(registry);
 		await bundle.extension.stop?.();
 		stopped = true;
-		return readToolCallAuditRows(dataDir);
+		return readToolCallAuditRows(stateDir);
 	} finally {
 		if (!stopped) await bundle.extension.stop?.();
 		for (const k of Object.keys(process.env)) {

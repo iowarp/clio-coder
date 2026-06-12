@@ -31,12 +31,12 @@ const BASELINE_PROMPTS = [
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 
 /**
- * Resolve the Clio data dir through `clio paths --json` (the built dist in
+ * Resolve the Clio state dir through `clio paths --json` (the built dist in
  * this checkout), the single source of truth for directory resolution. The
  * embedded fallback exists only for a broken or missing dist and must mirror
  * src/core/xdg.ts.
  */
-function dataDir() {
+function stateDir() {
 	const cliEntry = join(REPO_ROOT, "dist", "cli", "index.js");
 	if (existsSync(cliEntry)) {
 		try {
@@ -55,13 +55,13 @@ function dataDir() {
 		const v = process.env[k]?.trim();
 		return v && v.length > 0 ? v : null;
 	};
-	const override = env("CLIO_DATA_DIR") ?? (env("CLIO_HOME") ? join(env("CLIO_HOME"), "data") : null);
+	const override = env("CLIO_STATE_DIR") ?? (env("CLIO_HOME") ? join(env("CLIO_HOME"), "state") : null);
 	if (override) return override;
 	const h = homedir();
 	const p = platform();
-	if (p === "win32") return join(process.env.APPDATA ?? join(h, "AppData", "Roaming"), "clio");
-	if (p === "darwin") return join(h, "Library", "Application Support", "clio");
-	return join(process.env.XDG_DATA_HOME ?? join(h, ".local", "share"), "clio");
+	if (p === "win32") return join(process.env.LOCALAPPDATA ?? join(h, "AppData", "Local"), "clio", "state");
+	if (p === "darwin") return join(h, "Library", "Application Support", "clio", "state");
+	return join(process.env.XDG_STATE_HOME ?? join(h, ".local", "state"), "clio");
 }
 
 function parseArgs(argv) {
@@ -156,7 +156,7 @@ async function main() {
 
 	const cwd = resolve(args.cwd);
 	const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-	const sessionsRoot = join(dataDir(), "sessions", hash);
+	const sessionsRoot = join(stateDir(), "sessions", hash);
 	const before = new Set(existsSync(sessionsRoot) ? readdirSync(sessionsRoot) : []);
 	const cliEntry = join(cwd, "dist", "cli", "index.js");
 	if (!existsSync(cliEntry)) {
