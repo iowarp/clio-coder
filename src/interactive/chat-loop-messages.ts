@@ -28,7 +28,12 @@ export interface RuntimeResolutionView {
 }
 
 export function notConfiguredNotice(): string {
-	return `[Clio Coder] orchestrator not configured. Edit ${settingsPath()} (orchestrator.target + orchestrator.model) to enable chat.`;
+	return [
+		"[Clio Coder] orchestrator not configured. Set one up with:",
+		"  clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator",
+		"or, when targets already exist: clio targets use <id> --model <model>",
+		`(orchestrator.target + orchestrator.model live in ${settingsPath()})`,
+	].join("\n");
 }
 
 export function extractText(message: AgentMessage | undefined): string {

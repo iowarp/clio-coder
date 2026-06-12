@@ -4,17 +4,18 @@ IFS=$'\n\t'
 
 usage() {
 	cat <<'USAGE'
-Usage: scripts/install-local.sh [--skip-deps] [--no-build] [--dry-run] [--force] [--run-doctor]
+Usage: scripts/install-local.sh [--skip-deps] [--no-build] [--dry-run] [--force]
 
 Install Clio Coder from this source checkout by placing a deterministic symlink at:
   ${CLIO_BIN_DIR:-$HOME/.local/bin}/clio
+After linking, the script runs the installed CLI's structure repair
+(node dist/cli/index.js doctor --fix) so a fresh install passes plain clio doctor.
 
 Options:
   --skip-deps    Do not run npm ci, even if node_modules looks stale or missing.
   --no-build     Do not run npm run build; require an existing dist/cli/index.js.
   --dry-run      Print planned actions without changing files.
   --force        Replace an existing clio symlink even if it points outside this repo.
-  --run-doctor   Run the installed clio doctor --fix after linking. By default, the script recommends it.
   -h, --help     Show this help.
 USAGE
 }
@@ -93,13 +94,8 @@ deps_are_acceptable() {
 print_next_steps() {
 	cat <<'NEXT'
 
-Next commands:
-  hash -r
-  clio doctor --fix
-  clio configure --list
+Next: configure a model target, then start Clio:
   clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
-  clio targets use <id>
-  clio targets --probe
   clio
 
 If this shell still tries an old clio path, run `hash -r` (Bash) or `rehash` (Zsh), then try again.
@@ -110,7 +106,6 @@ skip_deps=0
 no_build=0
 dry_run=0
 force=0
-run_doctor=0
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -118,7 +113,6 @@ while [[ $# -gt 0 ]]; do
 		--no-build) no_build=1 ;;
 		--dry-run) dry_run=1 ;;
 		--force|-f) force=1 ;;
-		--run-doctor) run_doctor=1 ;;
 		--help|-h) usage; exit 0 ;;
 		*) fail "unknown option: $1" ;;
 	esac
@@ -224,16 +218,13 @@ else
 fi
 
 if [[ $dry_run -eq 1 ]]; then
+	log "would run: node $cli_target doctor --fix"
 	ok "dry run complete"
 	print_next_steps
 	exit 0
 fi
 
-if [[ $run_doctor -eq 1 ]]; then
-	log "running: $link_path doctor --fix"
-	"$link_path" doctor --fix || warn "doctor --fix reported issues; inspect the output above"
-else
-	log "recommended repair check: clio doctor --fix"
-fi
+log "running: node $cli_target doctor --fix"
+node "$cli_target" doctor --fix || fail "doctor --fix could not bring the install to green; inspect the output above"
 
 print_next_steps
