@@ -55,7 +55,35 @@ path_is_under() {
 	[[ "$parent" != "/" && ("$child" == "$parent" || "$child" == "$parent"/*) ]]
 }
 
+# `clio paths --json` (the built dist in this checkout) is the single source
+# of truth for directory resolution. The embedded fallback below exists only
+# for a broken or missing dist and must mirror src/core/xdg.ts.
 resolve_clio_dirs() {
+	local cli_entry="$repo_root/dist/cli/index.js"
+	if [[ -f "$cli_entry" ]]; then
+		local from_cli
+		if from_cli="$(node "$cli_entry" paths --json 2>/dev/null | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+	try {
+		const dirs = JSON.parse(raw);
+		if (typeof dirs.config === "string" && typeof dirs.data === "string" && typeof dirs.cache === "string") {
+			console.log(dirs.config);
+			console.log(dirs.data);
+			console.log(dirs.cache);
+			return;
+		}
+	} catch {}
+	process.exit(1);
+});
+')" && [[ -n "$from_cli" ]]; then
+			printf '%s
+' "$from_cli"
+			return
+		fi
+		warn "dist CLI did not answer 'paths --json'; using the embedded fallback resolution"
+	fi
 	node - <<'NODE'
 const os = require("node:os");
 const path = require("node:path");

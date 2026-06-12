@@ -28,7 +28,29 @@ const BASELINE_PROMPTS = [
 	"thanks, that makes sense",
 ];
 
+const REPO_ROOT = new URL("..", import.meta.url).pathname;
+
+/**
+ * Resolve the Clio data dir through `clio paths --json` (the built dist in
+ * this checkout), the single source of truth for directory resolution. The
+ * embedded fallback exists only for a broken or missing dist and must mirror
+ * src/core/xdg.ts.
+ */
 function dataDir() {
+	const cliEntry = join(REPO_ROOT, "dist", "cli", "index.js");
+	if (existsSync(cliEntry)) {
+		try {
+			const raw = execFileSync(process.execPath, [cliEntry, "paths", "--json"], {
+				encoding: "utf8",
+				timeout: 15_000,
+				stdio: ["ignore", "pipe", "ignore"],
+			});
+			const dirs = JSON.parse(raw);
+			if (typeof dirs.data === "string" && dirs.data.length > 0) return dirs.data;
+		} catch {
+			// Broken dist; fall through to the embedded resolution.
+		}
+	}
 	const env = (k) => {
 		const v = process.env[k]?.trim();
 		return v && v.length > 0 ? v : null;

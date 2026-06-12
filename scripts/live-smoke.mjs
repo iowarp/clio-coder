@@ -74,32 +74,30 @@ mkdirSync(clioConfigDir, { recursive: true });
 mkdirSync(clioCacheDir, { recursive: true });
 
 // Setup settings.yaml
+// Strict schema: unknown keys are validation errors, so this blob mirrors
+// DEFAULT_SETTINGS key-for-key (src/core/defaults.ts).
 const settings = {
 	version: 1,
 	identity: "clio",
-	defaultMode: "super",
-	safetyLevel: "full-auto",
-	state: {
-		lastMode: "super",
-	},
+	autonomy: "full-auto",
 	targets: [
 		{
 			id: targetId,
 			runtime: runtimeId,
 			defaultModel: model,
 			wireModels: [model],
-			url,
-			auth: apiKey ? { apiKeyEnvVar: envVarName } : undefined,
+			...(url ? { url } : {}),
+			...(apiKey ? { auth: { apiKeyEnvVar: envVarName } } : {}),
 		},
 	],
 	orchestrator: {
-		endpoint: targetId,
+		target: targetId,
 		model: model,
 		thinkingLevel: "off",
 	},
 	workers: {
 		default: {
-			endpoint: targetId,
+			target: targetId,
 			model: model,
 			thinkingLevel: "off",
 		},
