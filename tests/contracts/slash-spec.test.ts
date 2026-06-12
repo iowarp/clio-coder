@@ -154,15 +154,37 @@ describe("contracts/slash-spec", () => {
 			],
 			[
 				"/run scout --target endpoint task",
-				{ kind: "run", agentId: "scout", task: "--target endpoint task", options: {} },
+				{ kind: "run", agentId: "scout", task: "task", options: { endpoint: "endpoint" } },
+			],
+			[
+				"/run verifier --target dynamo inspect the project",
+				{ kind: "run", agentId: "verifier", task: "inspect the project", options: { endpoint: "dynamo" } },
+			],
+			[
+				"/run verifier --model qwen3 --require tools inspect the project",
+				{
+					kind: "run",
+					agentId: "verifier",
+					task: "inspect the project",
+					options: { model: "qwen3", requiredCapabilities: ["tools"] },
+				},
 			],
 			["/run scout task --thinking bogus", { kind: "run", agentId: "scout", task: "task --thinking bogus", options: {} }],
+			[
+				"/run scout --something inside task text",
+				{ kind: "run", agentId: "scout", task: "--something inside task text", options: {} },
+			],
+			[
+				"/run scout run ls --help and report",
+				{ kind: "run", agentId: "scout", task: "run ls --help and report", options: {} },
+			],
 			["/run", { kind: "run-usage" }],
 			["/run scout", { kind: "run-usage" }],
 			["/run --target", { kind: "run-usage" }],
 
 			// delegate
 			["/delegate agent task text", { kind: "delegate", agentId: "agent", task: "task text" }],
+			["/delegate agent --target dynamo task", { kind: "delegate", agentId: "agent", task: "--target dynamo task" }],
 			["/delegate", { kind: "delegate-usage" }],
 			["/delegate agent", { kind: "delegate-usage" }],
 
