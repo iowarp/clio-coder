@@ -48,6 +48,24 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   Tab focus switching, `/view <id-or-filter>`, and `/view verify <runId>`.
 - Added sprint closure contract coverage that locks the exact v0.2.3 slash
   command registry and fails if a retired slash command returns.
+- Added a loop guard for the interactive orchestrator. Verbatim-repeated tool
+  calls are blocked at the registry admission seam with recovery feedback the
+  model can act on, surfaced as footer warn notices over a new
+  `safety.loopBlocked` bus event, and the turn is cancelled after three blocks.
+  Workers keep their own in-process guard and are never observed twice.
+- Added indentation-tolerant edit matching. When an exact and a normalized
+  match both fail, a final stage matches line sequences ignoring leading
+  whitespace, enforces uniqueness, and reindents the replacement to the file's
+  own prefix.
+- Added scratch offloading for truncated tool results. The full original
+  output is written to `<dataDir>/scratch/<sessionId>/<toolCallId>.txt`, the
+  truncation hint carries the path, and the model can read the remainder with
+  offset and limit. Write failures degrade to plain truncation.
+- Added a working middleware rule engine. Hook evaluation is a pure in-process
+  fold over rule definitions that pair declarative rules with effect payloads
+  and exact tool-name scoping, with a registration seam on the bundle and
+  payload resolution by rule id when workers reconstitute snapshots. Zero
+  builtin rules ship.
 
 ### Changed
 
@@ -80,6 +98,12 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   footer notices instead of raw stderr.
 - Fixed stale command references in user-facing docs so the post-sprint
   command set points users to `/skill`, `/targets`, `/help`, and `/view`.
+- Fixed fuzzy-matched edits rewriting the whole file in normalized form.
+  Smart quotes, unicode dashes, and trailing whitespace far from the edit site
+  were silently mutated; matches now map back to original line spans and bytes
+  outside the replaced spans are untouched.
+- Fixed middleware snapshot contracts reporting every enabled matching rule as
+  fired; `ruleIds` now lists exactly the rules that emitted effects.
 
 ### Removed
 
