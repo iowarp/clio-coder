@@ -741,6 +741,7 @@ function renderModelOverlayLines(input: {
 	showAll?: boolean;
 	refreshing?: ModelRefreshScope | null;
 	refreshError?: RuntimeResolutionDiagnostic | null;
+	selectionError?: string | null;
 }): string[] {
 	const width = Math.max(1, input.width);
 	const query = input.query.trim();
@@ -748,19 +749,21 @@ function renderModelOverlayLines(input: {
 	const allMatches = input.rows.filter((row) => matchesQuery(row, input.query));
 	const focusedMatches = allMatches.filter((row) => row.visibleByDefault !== false);
 	const filtered = searching || input.showAll ? allMatches : focusedMatches;
+	const selectableFiltered = filtered.filter((row) => row.selectable).length;
 	const selectedIndex = Math.max(0, Math.min(input.selectedIndex, Math.max(0, filtered.length - 1)));
 	const selected = filtered[selectedIndex] ?? null;
 	const active = input.summary.activeRef || "not configured";
 	const modeLabel = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
 	const lines = [
 		fitLine(
-			`${modeLabel} · ${filtered.length}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
+			`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
 			width,
 		),
 		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine) lines.push((input.refreshError ? clioError : clioFrame)(fitLine(refreshLine, width)));
+	if (input.selectionError) lines.push(clioError(fitLine(input.selectionError, width)));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
@@ -792,7 +795,7 @@ interface ModelRefreshActions {
 	requestRender?: () => void;
 }
 
-class ModelOverlayView implements Component {
+export class ModelOverlayView implements Component {
 	private selectedIndex = 0;
 	private query = "";
 	private showAll = false;
@@ -800,6 +803,8 @@ class ModelOverlayView implements Component {
 	private summary: ModelOverlaySummary;
 	private refreshing: ModelRefreshScope | null = null;
 	private refreshError: RuntimeResolutionDiagnostic | null = null;
+	private selectionError: string | null = null;
+	private readonly lifecycle = new AbortController();
 
 	constructor(
 		rows: ReadonlyArray<ModelRow>,
@@ -822,9 +827,19 @@ class ModelOverlayView implements Component {
 	}
 
 	replaceItems(result: ModelItemsResult, preferredValue: string | null = this.selectedValue()): void {
+		if (this.lifecycle.signal.aborted) return;
 		this.rows = [...result.rows];
 		this.summary = result.summary;
+		this.selectionError = null;
 		this.restoreSelection(preferredValue);
+	}
+
+	dispose(): void {
+		if (!this.lifecycle.signal.aborted) this.lifecycle.abort();
+	}
+
+	isDisposed(): boolean {
+		return this.lifecycle.signal.aborted;
 	}
 
 	private restoreSelection(preferredValue: string | null): void {
@@ -850,6 +865,7 @@ class ModelOverlayView implements Component {
 	}
 
 	private move(delta: number): void {
+		this.selectionError = null;
 		const count = this.filteredRows().length;
 		if (count === 0) {
 			this.selectedIndex = 0;
@@ -859,23 +875,27 @@ class ModelOverlayView implements Component {
 	}
 
 	private appendQuery(data: string): void {
+		this.selectionError = null;
 		this.query += data;
 		this.selectedIndex = 0;
 	}
 
 	private deleteQueryChar(): void {
 		if (this.query.length === 0) return;
+		this.selectionError = null;
 		this.query = this.query.slice(0, -1);
 		this.selectedIndex = 0;
 	}
 
 	private clearQuery(): void {
 		if (this.query.length === 0) return;
+		this.selectionError = null;
 		this.query = "";
 		this.selectedIndex = 0;
 	}
 
 	private toggleShowAll(): void {
+		this.selectionError = null;
 		this.showAll = !this.showAll;
 		this.selectedIndex = 0;
 	}
@@ -895,21 +915,25 @@ class ModelOverlayView implements Component {
 	}
 
 	private async refresh(scope: ModelRefreshScope): Promise<void> {
-		if (this.refreshing) return;
+		if (this.refreshing || this.lifecycle.signal.aborted) return;
+		const signal = this.lifecycle.signal;
 		const selected = this.selectedRow();
 		const preferredValue = selected?.value ?? null;
 		if (scope === "all" && !this.refreshActions.all) return;
 		if (scope === "selected" && (!this.refreshActions.selected || !selected?.endpoint)) return;
 		this.refreshing = scope;
 		this.refreshError = null;
+		this.selectionError = null;
 		this.refreshActions.requestRender?.();
 		try {
 			const next =
 				scope === "all"
 					? await this.refreshActions.all?.()
 					: await this.refreshActions.selected?.(selected?.endpoint ?? "");
+			if (signal.aborted) return;
 			if (next) this.replaceItems(next, preferredValue);
 		} catch (err) {
+			if (signal.aborted) return;
 			this.refreshError = {
 				severity: "error",
 				code: "probe-failed",
@@ -917,7 +941,7 @@ class ModelOverlayView implements Component {
 			};
 		} finally {
 			this.refreshing = null;
-			this.refreshActions.requestRender?.();
+			if (!signal.aborted) this.refreshActions.requestRender?.();
 		}
 	}
 
@@ -931,12 +955,14 @@ class ModelOverlayView implements Component {
 			showAll: this.showAll,
 			refreshing: this.refreshing,
 			refreshError: this.refreshError,
+			selectionError: this.selectionError,
 		});
 	}
 
 	invalidate(): void {}
 
 	handleInput(data: string): void {
+		if (this.lifecycle.signal.aborted) return;
 		const kb = getKeybindings();
 		if (kb.matches(data, "tui.select.up")) {
 			this.move(-1);
@@ -948,8 +974,13 @@ class ModelOverlayView implements Component {
 		}
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
 			const row = this.selectedRow();
-			if (row?.selectable) this.onSelect({ endpoint: row.endpoint, model: row.model });
-			this.onClose();
+			if (row?.selectable) {
+				this.onSelect({ endpoint: row.endpoint, model: row.model });
+				this.onClose();
+				return;
+			}
+			this.selectionError = row ? `target ${row.endpoint} has no selectable model id` : "no model is selected";
+			this.refreshActions.requestRender?.();
 			return;
 		}
 		if (kb.matches(data, "tui.select.cancel")) {
@@ -1020,6 +1051,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	);
 	if (activeEndpoint && activeModel) view.setSelectedValue(`${activeEndpoint}/${activeModel}`);
 	const unsubscribeHealth = deps.bus?.on(BusChannels.ProviderHealth, () => {
+		if (view.isDisposed()) return;
 		view.replaceItems(build());
 		tui.requestRender();
 	});
@@ -1039,6 +1071,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	return {
 		...handle,
 		hide(): void {
+			view.dispose();
 			unsubscribeHealth?.();
 			handle.hide();
 		},

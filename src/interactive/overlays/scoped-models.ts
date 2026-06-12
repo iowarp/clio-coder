@@ -53,6 +53,17 @@ function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
 	return items;
 }
 
+export function commitScopedModelSelection(
+	currentScope: ReadonlyArray<string>,
+	items: ReadonlyArray<SelectItem>,
+	selected: ReadonlySet<string>,
+): string[] {
+	const itemValues = new Set(items.map((item) => item.value));
+	const visibleSelection = items.filter((item) => selected.has(item.value)).map((item) => item.value);
+	const retainedUnmatched = currentScope.filter((entry) => selected.has(entry) && !itemValues.has(entry));
+	return [...visibleSelection, ...retainedUnmatched];
+}
+
 export interface OpenScopedOverlayDeps {
 	providers: ProvidersContract;
 	currentScope: ReadonlyArray<string>;
@@ -87,7 +98,7 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 				return;
 			}
 			if (matchesKey(data, "enter") || data === "\n") {
-				const next = items.filter((i) => selected.has(i.value)).map((i) => i.value);
+				const next = commitScopedModelSelection(deps.currentScope, items, selected);
 				deps.onCommit(next);
 				deps.onClose();
 				return;

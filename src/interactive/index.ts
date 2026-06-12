@@ -56,6 +56,7 @@ import {
 	renderBashExecutionEntry,
 } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
+import { emitCommandNotice, runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
 import {
 	CONTEXT_ISLAND_WIDTH,
@@ -1324,14 +1325,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender(true);
 	};
 
+	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
+		appendNotice(level, text, {
+			appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
+			requestRender: () => tui.requestRender(),
+		});
+	};
+
 	const slashCtx: SlashCommandContext = {
 		io,
-		notice: (level, text) => {
-			appendNotice(level, text, {
-				appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
-				requestRender: () => tui.requestRender(),
-			});
-		},
+		notice: appendCommandNotice,
 		dispatch: deps.dispatch,
 		bus: deps.bus,
 		dataDir: deps.dataDir,
@@ -1394,15 +1397,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			tui.requestRender();
 		},
 		runCompact: (instructions) => {
-			if (!deps.onCompact) {
-				io.stderr("[/compact] compaction not wired; pass onCompact to startInteractive\n");
-				return;
-			}
-			const task = deps.onCompact(instructions);
-			void task.catch((err) => {
-				const msg = err instanceof Error ? err.message : String(err);
-				io.stderr(`[/compact] ${msg}\n`);
-			});
+			runCompactWithNotice(deps.onCompact, appendCommandNotice, instructions);
 		},
 		runInit: (options) => {
 			const onInit = deps.onInit;
@@ -2125,6 +2120,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "cost";
 		overlayHandle = openCostOverlay(tui, deps.observability, {
 			bus: deps.bus,
+			chat: deps.chat,
 			sessionId: deps.getSessionId?.() ?? null,
 		});
 		tui.requestRender();
@@ -2267,7 +2263,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openResumeOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		if (!deps.session) {
-			io.stderr("[/resume] session contract unavailable\n");
+			emitCommandNotice(slashCtx.notice, "error", "resume", "session contract unavailable");
 			return;
 		}
 		const sessionContract = deps.session;
@@ -2356,14 +2352,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openMessagePickerOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		if (!deps.session) {
-			io.stderr("[/fork] session contract unavailable\n");
+			emitCommandNotice(slashCtx.notice, "error", "fork", "session contract unavailable");
 			return;
 		}
 		const sessionContract = deps.session;
-		// No-op stderr when there is no current session so the user can tell
+		// No-op notice when there is no current session so the user can tell
 		// the overlay is intentionally inert rather than broken.
 		if (sessionContract.current() === null) {
-			io.stderr("[/fork] no current session to fork from; start one with /new or /resume first\n");
+			emitCommandNotice(
+				slashCtx.notice,
+				"warn",
+				"fork",
+				"no current session to fork from; start one with /new or /resume first",
+			);
 			return;
 		}
 		overlayState = "message-picker";
@@ -2406,7 +2407,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const startNewSession = (): void => {
 		if (!deps.onNewSession) {
-			io.stderr("[/new] session contract unavailable\n");
+			emitCommandNotice(slashCtx.notice, "error", "new", "session contract unavailable");
 			return;
 		}
 		deps.onNewSession();
@@ -2545,6 +2546,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		stopContextIslandTicker();
 		contextIslandHandle.hide();
 		taskIslandHandle.hide();
+		footer.dispose();
 		contextActivityStore.unsubscribe();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();
