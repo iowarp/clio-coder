@@ -27,6 +27,7 @@ export interface DispatchBoardRow {
 	inputTokens: number;
 	outputTokens: number;
 	ttftMs: number | null;
+	outcomeDetail?: string | null;
 }
 
 interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
@@ -53,6 +54,7 @@ interface DispatchTerminalPayload extends DispatchEventBase {
 	costUsd?: unknown;
 	durationMs?: unknown;
 	reason?: unknown;
+	outcomeDetail?: unknown;
 	inputTokenCount?: unknown;
 	outputTokenCount?: unknown;
 }
@@ -124,6 +126,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatElapsedMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
+	const detail = terminalDetail(row);
 
 	let statusStr = "";
 	if (row.status === "running") {
@@ -159,6 +162,11 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	const statusLineContent = `Status: ${statusStr}  ${theme.fg("dim", "•")}  TTFT: ${theme.fg("accentDeep", ttft)}  ${theme.fg("dim", "•")}  Cost: ${theme.fg("warning", cost)}`;
 	const statusLine = `${theme.fg("frame", "│")} ${padAnsi(statusLineContent, width - 4)} ${theme.fg("frame", "│")}`;
 
+	const detailLine =
+		detail !== null
+			? `${theme.fg("frame", "│")} ${padAnsi(`Detail: ${theme.fg("dim", detail)}`, width - 4)} ${theme.fg("frame", "│")}`
+			: null;
+
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	const telemetryContent = `Telemetry: ${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", String(row.tokenCount))}`;
@@ -166,7 +174,9 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 
 	const bottomBorder = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(width - 2))}${theme.fg("frame", "┘")}`;
 
-	return [topBorder, targetLine, statusLine, telemetryLine, bottomBorder];
+	return detailLine !== null
+		? [topBorder, targetLine, statusLine, detailLine, telemetryLine, bottomBorder]
+		: [topBorder, targetLine, statusLine, telemetryLine, bottomBorder];
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
@@ -306,6 +316,17 @@ function parseFiniteNumberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function parseOptionalDetail(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const detail = value.replace(/\s+/g, " ").trim();
+	return detail.length > 0 ? detail : null;
+}
+
+function terminalDetail(row: DispatchBoardRow): string | null {
+	if (row.status !== "failed" && row.status !== "dead" && row.status !== "aborted") return null;
+	return parseOptionalDetail(row.outcomeDetail);
+}
+
 function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null {
 	if (!Array.isArray(rawMessages)) return null;
 	for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
@@ -320,8 +341,16 @@ function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null
 }
 
 function resolveFailedStatus(reason: unknown): DispatchBoardStatus {
-	if (reason === "dead") return "dead";
-	return reason === "interrupted" ? "aborted" : "failed";
+	if (reason === "dead" || reason === "stalled") return "dead";
+	if (reason === "interrupted" || reason === "canceled") return "aborted";
+	return "failed";
+}
+
+function resolveFailureDetail(payload: DispatchTerminalPayload, fallback: string | null | undefined): string | null {
+	const detail = parseOptionalDetail(payload.outcomeDetail);
+	if (detail !== null) return detail;
+	if (payload.reason === "timed_out") return "turn timeout exceeded";
+	return fallback ?? null;
 }
 
 function resolveHeartbeatStatus(status: unknown): DispatchBoardStatus | null {
@@ -358,6 +387,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		inputTokens: entry.inputTokens,
 		outputTokens: entry.outputTokens,
 		ttftMs: entry.ttftMs,
+		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 	};
 }
 
@@ -417,6 +447,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			inputTokens: previous?.inputTokens ?? 0,
 			outputTokens: previous?.outputTokens ?? 0,
 			ttftMs: previous?.ttftMs ?? null,
+			outcomeDetail: previous?.outcomeDetail ?? null,
 		};
 		entries.set(runId, entry);
 		pruneEntries(entries);
@@ -445,6 +476,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			entry.outcomeDetail = null;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount;
 			}
@@ -455,13 +487,18 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		bus.on(BusChannels.DispatchFailed, (raw) => {
 			const now = Date.now();
 			const payload = (raw ?? {}) as DispatchTerminalPayload;
-			const entry = upsertBase(payload, resolveFailedStatus(payload.reason), now);
+			const runId = parseRunId(payload.runId);
+			const previousStatus = runId !== null ? entries.get(runId)?.status : undefined;
+			const resolvedStatus = resolveFailedStatus(payload.reason);
+			const status = previousStatus === "dead" && resolvedStatus === "failed" ? "dead" : resolvedStatus;
+			const entry = upsertBase(payload, status, now);
 			if (!entry) return;
 			entry.startedAtMs ??= entry.enqueuedAtMs;
 			entry.finishedAtMs = now;
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount;
 			}
