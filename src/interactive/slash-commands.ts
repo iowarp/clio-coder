@@ -9,7 +9,10 @@ import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
 import { getMarketplaceSkills, parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
-import { isToolProfileName, type ToolProfileName } from "../tools/profiles.js";
+import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
+import type { NoticeLevel } from "./command-output.js";
+import type { CommandArgsSpec, ParsedArgs } from "./slash-spec.js";
+import { matchFromSpec, usageLine } from "./slash-spec.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -39,7 +42,6 @@ export type SlashCommand =
 	| { kind: "disconnect"; target?: string }
 	| { kind: "cost" }
 	| { kind: "context-view" }
-	| { kind: "status" }
 	| { kind: "fleet" }
 	| { kind: "receipts" }
 	| { kind: "receipt-verify"; runId: string }
@@ -94,6 +96,7 @@ export interface RunCommandOptions {
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
 	io: RunIo;
+	notice: (level: NoticeLevel, text: string) => void;
 	workerDefault?: { endpoint?: string; model?: string } | undefined;
 	/**
 	 * Optional bus for forwarding per-event worker output. When supplied,
@@ -115,14 +118,12 @@ export async function handleRun(
 	deps: HandleRunDeps,
 	options: RunCommandOptions = {},
 ): Promise<void> {
-	const { dispatch, io, bus } = deps;
+	const { dispatch, notice, bus } = deps;
 	if (options.endpoint && options.workerProfile) {
-		io.stderr(`[run] --target ${options.endpoint} takes precedence; --worker ${options.workerProfile} will be ignored\n`);
+		notice("warn", `--target ${options.endpoint} takes precedence; --worker ${options.workerProfile} will be ignored`);
 	}
 	if (options.endpoint && options.workerRuntime) {
-		io.stderr(
-			`[run] --target ${options.endpoint} takes precedence; --runtime ${options.workerRuntime} will be ignored\n`,
-		);
+		notice("warn", `--target ${options.endpoint} takes precedence; --runtime ${options.workerRuntime} will be ignored`);
 	}
 	try {
 		const request = {
@@ -152,16 +153,16 @@ export async function handleRun(
 		const receipt = await handle.finalPromise;
 		if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
-			io.stderr(`[run] failed: exit=${receipt.exitCode}${failure}\n`);
+			notice("error", `run failed: exit=${receipt.exitCode}${failure}`);
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		io.stderr(`[run] failed: ${msg}\n`);
+		notice("error", `run failed: ${msg}`);
 	}
 }
 
 export async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
-	const { dispatch, io, bus } = deps;
+	const { dispatch, notice, bus } = deps;
 	try {
 		const handle = await dispatch.dispatch({
 			agentId,
@@ -181,106 +182,12 @@ export async function handleDelegate(agentId: string, task: string, deps: Handle
 		const receipt = await handle.finalPromise;
 		if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
-			io.stderr(`[delegate] failed: exit=${receipt.exitCode}${failure}\n`);
+			notice("error", `delegate failed: exit=${receipt.exitCode}${failure}`);
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		io.stderr(`[delegate] failed: ${msg}\n`);
+		notice("error", `delegate failed: ${msg}`);
 	}
-}
-
-const VALID_RUN_THINKING = new Set<JobThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
-function parseInitCommand(rest: string): SlashCommand {
-	const options: InitCommandOptions = {};
-	const parts = rest.split(/\s+/).filter(Boolean);
-	for (const part of parts) {
-		if (part === "--preview") options.preview = true;
-		else if (part === "--adopt") options.adopt = true;
-		else if (part === "--apply" || part === "--rewrite") options.applyClioMd = true;
-		else if (part === "--propose") options.proposeClioMd = true;
-		else if (part === "--global" || part === "--include-global") options.includeGlobalImports = true;
-		else if (part === "--heuristic" || part === "--no-generate") options.heuristic = true;
-		else return { kind: "unknown", text: `/context-init ${rest}`.trim() };
-	}
-	return { kind: "init", options };
-}
-
-function parseContextClearCommand(rest: string): SlashCommand {
-	const options: ContextClearCommandOptions = {};
-	const parts = rest.split(/\s+/).filter(Boolean);
-	for (const part of parts) {
-		if (part === "--all") options.all = true;
-		else if (part === "--confirm") options.confirmed = true;
-		else if (part === "--confirm-all") options.confirmedAll = true;
-		else return { kind: "unknown", text: `/context-clear ${rest}`.trim() };
-	}
-	return { kind: "context-clear", options };
-}
-
-function parseRunCommand(rest: string): SlashCommand {
-	const parts = rest.split(/\s+/).filter(Boolean);
-	const options: RunCommandOptions = {};
-	const requiredCapabilities: string[] = [];
-	let i = 0;
-	const need = (): string | null => {
-		const value = parts[i + 1];
-		if (!value) return null;
-		i += 1;
-		return value;
-	};
-	while (i < parts.length) {
-		const part = parts[i];
-		if (!part?.startsWith("--")) break;
-		if (part === "--agent-profile" || part === "--worker-profile" || part === "--worker") {
-			const value = need();
-			if (!value) return { kind: "run-usage" };
-			options.workerProfile = value;
-		} else if (part === "--agent-runtime" || part === "--worker-runtime" || part === "--runtime") {
-			const value = need();
-			if (!value) return { kind: "run-usage" };
-			options.workerRuntime = value;
-		} else if (part === "--target") {
-			const value = need();
-			if (!value) return { kind: "run-usage" };
-			options.endpoint = value;
-		} else if (part === "--model") {
-			const value = need();
-			if (!value) return { kind: "run-usage" };
-			options.model = value;
-		} else if (part === "--thinking") {
-			const value = need();
-			if (!value || !VALID_RUN_THINKING.has(value as JobThinkingLevel)) return { kind: "run-usage" };
-			options.thinkingLevel = value as JobThinkingLevel;
-		} else if (part === "--tool-profile") {
-			const value = need();
-			if (!value || !isToolProfileName(value)) return { kind: "run-usage" };
-			options.toolProfile = value;
-		} else if (part === "--require") {
-			const value = need();
-			if (!value) return { kind: "run-usage" };
-			requiredCapabilities.push(value);
-		} else {
-			return { kind: "run-usage" };
-		}
-		i += 1;
-	}
-	const agentId = parts[i];
-	const task = parts
-		.slice(i + 1)
-		.join(" ")
-		.trim();
-	if (!agentId || !task) return { kind: "run-usage" };
-	if (requiredCapabilities.length > 0) options.requiredCapabilities = requiredCapabilities;
-	return { kind: "run", agentId, task, options };
-}
-
-function parseDelegateCommand(rest: string): SlashCommand {
-	const parts = rest.split(/\s+/).filter(Boolean);
-	const agentId = parts[0];
-	const task = parts.slice(1).join(" ").trim();
-	if (!agentId || task.length === 0) return { kind: "delegate-usage" };
-	return { kind: "delegate", agentId, task };
 }
 
 /**
@@ -290,6 +197,7 @@ function parseDelegateCommand(rest: string): SlashCommand {
  */
 export interface SlashCommandContext {
 	io: RunIo;
+	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
 	bus: SafeEventBus;
 	dataDir: string;
@@ -319,8 +227,6 @@ export interface SlashCommandContext {
 	openCost: () => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
-	/** Legacy /status hook. The live dashboard itself is toggled only by Alt+U. */
-	openStatus: () => void;
 	/** Open the read-only `/fleet` overlay: running, retrying, and totals. */
 	openFleet: () => void;
 	openReceipts: () => void;
@@ -364,14 +270,29 @@ export interface SlashCommandContext {
 export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
-	/** Optional usage suffix shown in the slash-command autocomplete dropdown. */
-	argumentHint?: string;
+	aliases?: ReadonlyArray<string>;
+	args?: CommandArgsSpec;
 	/** The set of SlashCommand kinds this entry is responsible for dispatching. */
 	kinds: ReadonlyArray<SlashCommandKind>;
 	/** Return the parsed SlashCommand for `trimmed` or null if this entry does not match. */
-	match(trimmed: string): SlashCommand | null;
+	match?(trimmed: string): SlashCommand | null;
+	fromArgs?(parsed: ParsedArgs, trimmed: string): SlashCommand;
 	/** Execute `command` against `ctx`. Called only for kinds declared in `kinds`. */
 	handle(command: SlashCommand, ctx: SlashCommandContext): void;
+}
+
+const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+function isRunThinkingLevel(value: string): value is JobThinkingLevel {
+	return RUN_THINKING_LEVELS.some((level) => level === value);
+}
+
+function fromArgsOrUnknown(command: SlashCommand): (parsed: ParsedArgs, trimmed: string) => SlashCommand {
+	return (parsed, trimmed) => (parsed.error ? { kind: "unknown", text: trimmed } : command);
+}
+
+function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
+	return usageLine(entry, subcommand).trim();
 }
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
@@ -379,9 +300,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "quit",
 		description: "Exit Clio Coder",
 		kinds: ["quit"],
-		match(trimmed) {
-			return trimmed === "/quit" ? { kind: "quit" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "quit" }),
 		handle(_command, ctx) {
 			ctx.shutdown();
 		},
@@ -390,26 +310,44 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "help",
 		description: "Show slash-command help",
 		kinds: ["help"],
-		match(trimmed) {
-			return trimmed === "/help" || trimmed.startsWith("/help ") ? { kind: "help" } : null;
+		args: {
+			positionals: [{ name: "command", required: false, rest: true }],
+		},
+		fromArgs() {
+			return { kind: "help" };
 		},
 		handle(_command, ctx) {
-			const rows = BUILTIN_SLASH_COMMANDS.map((entry) => {
-				const usage = `/${entry.name}${entry.argumentHint ? ` ${entry.argumentHint}` : ""}`;
-				return `  ${usage.padEnd(28)} ${entry.description}`;
+			const rows = commandReference().map((ref) => {
+				return `  ${ref.usage.padEnd(28)} ${ref.description}`;
 			});
+			// v023-M03
 			ctx.io.stdout(`\ncommands:\n${rows.join("\n")}\n\nRun /hotkeys for the full keyboard + slash-command reference.\n`);
 		},
 	},
 	{
 		name: "context-init",
 		description: "Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff",
-		argumentHint: "[--preview|--propose|--apply] [--adopt]",
 		kinds: ["init"],
-		match(trimmed) {
-			if (trimmed === "/context-init") return { kind: "init", options: {} };
-			if (trimmed.startsWith("/context-init ")) return parseInitCommand(trimmed.slice("/context-init ".length).trim());
-			return null;
+		args: {
+			flags: [
+				{ name: "--preview" },
+				{ name: "--adopt" },
+				{ name: "--apply", aliases: ["--rewrite"] },
+				{ name: "--propose" },
+				{ name: "--global", aliases: ["--include-global"] },
+				{ name: "--heuristic", aliases: ["--no-generate"] },
+			],
+		},
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			const options: InitCommandOptions = {};
+			if (parsed.flags.has("--preview")) options.preview = true;
+			if (parsed.flags.has("--adopt")) options.adopt = true;
+			if (parsed.flags.has("--apply")) options.applyClioMd = true;
+			if (parsed.flags.has("--propose")) options.proposeClioMd = true;
+			if (parsed.flags.has("--global")) options.includeGlobalImports = true;
+			if (parsed.flags.has("--heuristic")) options.heuristic = true;
+			return { kind: "init", options };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "init") return;
@@ -419,14 +357,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "context-clear",
 		description: "Clear accumulated project context artifacts",
-		argumentHint: "[--all] --confirm [--confirm-all]",
 		kinds: ["context-clear"],
-		match(trimmed) {
-			if (trimmed === "/context-clear") return { kind: "context-clear", options: {} };
-			if (trimmed.startsWith("/context-clear ")) {
-				return parseContextClearCommand(trimmed.slice("/context-clear ".length).trim());
-			}
-			return null;
+		args: {
+			flags: [{ name: "--all" }, { name: "--confirm" }, { name: "--confirm-all" }],
+		},
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			const options: ContextClearCommandOptions = {};
+			if (parsed.flags.has("--all")) options.all = true;
+			if (parsed.flags.has("--confirm")) options.confirmed = true;
+			if (parsed.flags.has("--confirm-all")) options.confirmedAll = true;
+			return { kind: "context-clear", options };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "context-clear") return;
@@ -436,8 +377,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "skill",
 		description: "Open interactive skill selector or invoke a skill",
-		argumentHint: "[name] [task]",
+		aliases: ["skill:", "skills:"],
 		kinds: ["skill-selector", "skill-invocation"],
+		args: {
+			positionals: [
+				{ name: "name", required: false },
+				{ name: "task", required: false, rest: true },
+			],
+		},
 		match(trimmed) {
 			if (trimmed === "/skill" || trimmed === "/skill:" || trimmed === "/skills:") {
 				return { kind: "skill-selector" };
@@ -461,15 +408,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "skills",
 		description: "Browse or search skills",
-		argumentHint: "[query]",
 		kinds: ["skills"],
-		match(trimmed) {
-			if (trimmed === "/skills") return { kind: "skills" };
-			if (trimmed.startsWith("/skills ")) {
-				const query = trimmed.slice("/skills ".length).trim();
-				return query.length > 0 ? { kind: "skills", query } : { kind: "skills" };
-			}
-			return null;
+		args: {
+			positionals: [{ name: "query", required: false, rest: true }],
+		},
+		fromArgs(parsed) {
+			const query = parsed.positionals[0];
+			return { kind: "skills", ...(query ? { query } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "skills") return;
@@ -483,6 +428,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				(skill) => !installedNames.has(skill.name) && matches(skill.name, skill.description),
 			);
 			if (items.length === 0 && marketplace.length === 0) {
+				// v023-M04
 				ctx.io.stdout(query ? `\nskills: no matches for "${command.query}"\n` : "\nskills: none\n");
 				return;
 			}
@@ -504,6 +450,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			];
 			const diagnostics =
 				list.diagnostics.length > 0 ? `\n${list.diagnostics.length} skill diagnostic(s) while loading resources.\n` : "\n";
+			// v023-M04
 			ctx.io.stdout(`\n${sections.join("\n\n")}\n${diagnostics}`);
 		},
 	},
@@ -511,12 +458,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "prompts",
 		description: "List prompt templates",
 		kinds: ["prompts"],
-		match(trimmed) {
-			return trimmed === "/prompts" ? { kind: "prompts" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "prompts" }),
 		handle(_command, ctx) {
 			const list = ctx.listPrompts();
 			if (list.items.length === 0) {
+				// v023-M04
 				ctx.io.stdout("\nprompt templates: none\n");
 				return;
 			}
@@ -528,6 +475,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				list.diagnostics.length > 0
 					? `\n${list.diagnostics.length} prompt-template diagnostic(s) while loading resources.\n`
 					: "\n";
+			// v023-M04
 			ctx.io.stdout(`\nprompt templates:\n${rows.join("\n")}\n${diagnostics}`);
 		},
 	},
@@ -535,12 +483,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "extensions",
 		description: "List installed extensions",
 		kinds: ["extensions"],
-		match(trimmed) {
-			return trimmed === "/extensions" ? { kind: "extensions" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "extensions" }),
 		handle(_command, ctx) {
 			const items = ctx.listExtensions?.() ?? [];
 			if (items.length === 0) {
+				// v023-M04
 				ctx.io.stdout("\nextensions: none\n");
 				return;
 			}
@@ -552,35 +500,48 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						: `shadowed:${extension.overriddenBy ?? "higher"}`;
 				return `  ${extension.id.padEnd(22)} ${extension.scope.padEnd(7)} ${state.padEnd(15)} ${extension.version.padEnd(10)} ${extension.description}`;
 			});
+			// v023-M04
 			ctx.io.stdout(`\nextensions:\n${rows.join("\n")}\n`);
 		},
 	},
 	{
 		name: "share",
 		description: "Export or import Clio archives",
-		argumentHint: "export <path> | import [--dry-run] [--force] <path>",
 		kinds: ["share"],
-		match(trimmed) {
-			if (trimmed === "/share") return { kind: "share", args: "" };
-			if (trimmed.startsWith("/share ")) return { kind: "share", args: trimmed.slice("/share ".length).trim() };
-			return null;
+		args: {
+			subcommands: {
+				export: {
+					positionals: [{ name: "path", required: true }],
+				},
+				import: {
+					flags: [{ name: "--dry-run" }, { name: "--force" }],
+					positionals: [{ name: "path", required: true }],
+				},
+			},
+		},
+		fromArgs(_parsed, trimmed) {
+			const prefix = "/share";
+			const args = trimmed === prefix ? "" : trimmed.slice(prefix.length).trim();
+			return { kind: "share", args };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "share") return;
 			const parts = command.args.split(/\s+/).filter(Boolean);
 			const sub = parts.shift();
+			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "share");
+			if (!entry) return;
 			if (sub === "export") {
 				const out = parts[0];
 				if (!out || parts.length !== 1) {
-					ctx.io.stdout("\nusage: /share export <path>\n");
+					ctx.notice("info", usageNotice(entry, "export"));
 					return;
 				}
 				if (!ctx.exportShareArchive) {
-					ctx.io.stderr("[/share] share export is not wired\n");
+					ctx.notice("error", "share export is not wired");
 					return;
 				}
 				const result = ctx.exportShareArchive(out);
-				ctx.io.stdout(`[/share] exported ${result.fileCount} item(s) to ${result.path}\n`);
+				ctx.notice("success", `exported ${result.fileCount} item(s) to ${result.path}`);
 				return;
 			}
 			if (sub === "import") {
@@ -588,46 +549,93 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const force = parts.includes("--force");
 				const archivePath = parts.find((part) => !part.startsWith("--"));
 				if (!archivePath) {
-					ctx.io.stdout("\nusage: /share import [--dry-run] [--force] <path>\n");
+					ctx.notice("info", usageNotice(entry, "import"));
 					return;
 				}
 				if (!ctx.importShareArchive) {
-					ctx.io.stderr("[/share] share import is not wired\n");
+					ctx.notice("error", "share import is not wired");
 					return;
 				}
 				const plan = ctx.importShareArchive(archivePath, { dryRun, force });
 				for (const diag of plan.diagnostics) {
 					const detail = diag.path ? `${diag.message}: ${diag.path}` : diag.message;
-					ctx.io.stderr(`[/share] ${diag.type}: ${detail}\n`);
+					ctx.notice("warn", `${diag.type}: ${detail}`);
 				}
 				const write = plan.actions.filter((action) => action.action === "write").length;
 				const overwrite = plan.actions.filter((action) => action.action === "overwrite").length;
 				const skip = plan.actions.filter((action) => action.action === "skip").length;
-				ctx.io.stdout(
-					`[/share] ${dryRun ? "dry-run" : "import"} write=${write} overwrite=${overwrite} skip=${skip} settings=${plan.actions.filter((action) => action.action === "settings").length}\n`,
+				ctx.notice(
+					dryRun ? "info" : "success",
+					`${dryRun ? "dry-run" : "import"} write=${write} overwrite=${overwrite} skip=${skip} settings=${plan.actions.filter((action) => action.action === "settings").length}`,
 				);
 				return;
 			}
-			ctx.io.stdout("\nusage: /share export <path> | /share import [--dry-run] [--force] <path>\n");
+			ctx.notice("info", usageNotice(entry));
 		},
 	},
 	{
 		name: "run",
 		description: "Run a fleet agent",
-		argumentHint: "[options] <agent> <task>",
 		kinds: ["run", "run-usage"],
-		match(trimmed) {
-			if (trimmed === "/run" || trimmed === "/run ") return { kind: "run-usage" };
-			if (trimmed.startsWith("/run ")) {
-				return parseRunCommand(trimmed.slice(5).trim());
+		args: {
+			flags: [
+				{ name: "--agent-profile", aliases: ["--worker-profile", "--worker"], takesValue: true, valueName: "profile" },
+				{ name: "--runtime", aliases: ["--agent-runtime", "--worker-runtime"], takesValue: true, valueName: "runtimeId" },
+				{ name: "--target", takesValue: true, valueName: "id" },
+				{ name: "--model", takesValue: true, valueName: "id" },
+				{ name: "--thinking", takesValue: true, values: RUN_THINKING_LEVELS, valueName: "level" },
+				{ name: "--tool-profile", takesValue: true, values: TOOL_PROFILE_NAMES },
+				{ name: "--require", takesValue: true, repeatable: true, valueName: "cap" },
+			],
+			positionals: [
+				{ name: "agent", required: true },
+				{ name: "task", required: true, rest: true },
+			],
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "run-usage" };
+			const options: RunCommandOptions = {};
+
+			const workerProfile = parsed.flags.get("--agent-profile");
+			if (typeof workerProfile === "string") options.workerProfile = workerProfile;
+
+			const workerRuntime = parsed.flags.get("--runtime");
+			if (typeof workerRuntime === "string") options.workerRuntime = workerRuntime;
+
+			const endpoint = parsed.flags.get("--target");
+			if (typeof endpoint === "string") options.endpoint = endpoint;
+
+			const model = parsed.flags.get("--model");
+			if (typeof model === "string") options.model = model;
+
+			const thinking = parsed.flags.get("--thinking");
+			if (typeof thinking === "string") {
+				if (!isRunThinkingLevel(thinking)) return { kind: "run-usage" };
+				options.thinkingLevel = thinking;
 			}
-			return null;
+
+			const toolProfile = parsed.flags.get("--tool-profile");
+			if (typeof toolProfile === "string") {
+				if (!isToolProfileName(toolProfile)) return { kind: "run-usage" };
+				options.toolProfile = toolProfile;
+			}
+
+			const requiredCapabilities = parsed.flagValues.get("--require");
+			if (requiredCapabilities && requiredCapabilities.length > 0) {
+				options.requiredCapabilities = [...requiredCapabilities];
+			}
+
+			const agentId = parsed.positionals[0] ?? "";
+			const task = parsed.positionals[1] ?? "";
+
+			return { kind: "run", agentId, task, options };
 		},
 		handle(command, ctx) {
 			if (command.kind === "run-usage") {
-				ctx.io.stdout(
-					"\nusage: /run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>\n",
-				);
+				const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "run");
+				if (entry) {
+					ctx.notice("info", usageNotice(entry));
+				}
 				return;
 			}
 			if (command.kind !== "run") return;
@@ -639,6 +647,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					{
 						dispatch: ctx.dispatch,
 						io: ctx.io,
+						notice: ctx.notice,
 						workerDefault: ctx.workerDefault(),
 						bus: ctx.bus,
 					},
@@ -651,16 +660,25 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "delegate",
 		description: "Run an ACP delegation agent",
-		argumentHint: "<agent-id> <task>",
 		kinds: ["delegate", "delegate-usage"],
-		match(trimmed) {
-			if (trimmed === "/delegate" || trimmed === "/delegate ") return { kind: "delegate-usage" };
-			if (trimmed.startsWith("/delegate ")) return parseDelegateCommand(trimmed.slice("/delegate ".length).trim());
-			return null;
+		args: {
+			positionals: [
+				{ name: "agent-id", required: true },
+				{ name: "task", required: true, rest: true },
+			],
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "delegate-usage" };
+			const agentId = parsed.positionals[0] ?? "";
+			const task = parsed.positionals[1] ?? "";
+			return { kind: "delegate", agentId, task };
 		},
 		handle(command, ctx) {
 			if (command.kind === "delegate-usage") {
-				ctx.io.stdout("\nusage: /delegate <agent-id> <task>\n");
+				const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "delegate");
+				if (entry) {
+					ctx.notice("info", usageNotice(entry));
+				}
 				return;
 			}
 			if (command.kind !== "delegate") return;
@@ -668,6 +686,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				await handleDelegate(command.agentId, command.task, {
 					dispatch: ctx.dispatch,
 					io: ctx.io,
+					notice: ctx.notice,
 					workerDefault: ctx.workerDefault(),
 					bus: ctx.bus,
 				});
@@ -679,9 +698,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "agents",
 		description: "List Clio agents and ACP delegation agents",
 		kinds: ["agents"],
-		match(trimmed) {
-			return trimmed === "/agents" ? { kind: "agents" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "agents" }),
 		handle(_command, ctx) {
 			const sections: string[] = [];
 			const clioAgents = ctx.listAgents();
@@ -709,6 +727,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			} else {
 				sections.push("ACP delegation agents: none configured");
 			}
+			// v023-M04
 			ctx.io.stdout(`\n${sections.join("\n\n")}\n`);
 		},
 	},
@@ -716,9 +735,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "targets",
 		description: "Show target health, auth, and models",
 		kinds: ["providers"],
-		match(trimmed) {
-			return trimmed === "/targets" ? { kind: "providers" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "providers" }),
 		handle(_command, ctx) {
 			ctx.openProviders();
 		},
@@ -726,15 +744,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "connect",
 		description: "Connect a target or choose one",
-		argumentHint: "[target]",
 		kinds: ["connect"],
-		match(trimmed) {
-			if (trimmed === "/connect") return { kind: "connect" };
-			if (trimmed.startsWith("/connect ")) {
-				const target = trimmed.slice("/connect ".length).trim();
-				return { kind: "connect", ...(target.length > 0 ? { target } : {}) };
-			}
-			return null;
+		args: {
+			positionals: [{ name: "target", required: false, rest: true }],
+		},
+		fromArgs(parsed) {
+			const target = parsed.positionals[0];
+			return { kind: "connect", ...(target ? { target } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "connect") return;
@@ -744,15 +760,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "disconnect",
 		description: "Disconnect a target or choose one",
-		argumentHint: "[target]",
 		kinds: ["disconnect"],
-		match(trimmed) {
-			if (trimmed === "/disconnect") return { kind: "disconnect" };
-			if (trimmed.startsWith("/disconnect ")) {
-				const target = trimmed.slice("/disconnect ".length).trim();
-				return { kind: "disconnect", ...(target.length > 0 ? { target } : {}) };
-			}
-			return null;
+		args: {
+			positionals: [{ name: "target", required: false, rest: true }],
+		},
+		fromArgs(parsed) {
+			const target = parsed.positionals[0];
+			return { kind: "disconnect", ...(target ? { target } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "disconnect") return;
@@ -763,9 +777,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "cost",
 		description: "Show session token and cost totals",
 		kinds: ["cost"],
-		match(trimmed) {
-			return trimmed === "/cost" ? { kind: "cost" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "cost" }),
 		handle(_command, ctx) {
 			ctx.openCost();
 		},
@@ -773,32 +786,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "context-view",
 		description: "Visualize the active context window and its breakdown",
+		aliases: ["context", "ctx"],
 		kinds: ["context-view"],
-		match(trimmed) {
-			return trimmed === "/context-view" || trimmed === "/context" || trimmed === "/ctx" ? { kind: "context-view" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "context-view" }),
 		handle(_command, ctx) {
 			ctx.openContextView();
-		},
-	},
-	{
-		name: "status",
-		description: "Show the footer dashboard key",
-		kinds: ["status"],
-		match(trimmed) {
-			return trimmed === "/status" ? { kind: "status" } : null;
-		},
-		handle(_command, ctx) {
-			ctx.io.stdout("[status] Press Alt+U to toggle the footer dashboard.\n");
 		},
 	},
 	{
 		name: "fleet",
 		description: "Show in-process dispatch running/retry status",
 		kinds: ["fleet"],
-		match(trimmed) {
-			return trimmed === "/fleet" ? { kind: "fleet" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "fleet" }),
 		handle(_command, ctx) {
 			ctx.openFleet();
 		},
@@ -806,34 +807,39 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "receipts",
 		description: "Browse or verify run receipts",
-		argumentHint: "[verify <runId>]",
 		kinds: ["receipts", "receipt-verify", "receipt-usage"],
-		match(trimmed) {
-			if (trimmed === "/receipts") return { kind: "receipts" };
-			if (trimmed.startsWith("/receipts ")) {
-				const parts = trimmed.slice("/receipts ".length).trim().split(/\s+/);
-				if (parts[0] === "verify" && parts[1] && parts.length === 2) {
-					return { kind: "receipt-verify", runId: parts[1] };
-				}
-				return { kind: "receipt-usage" };
+		args: {
+			subcommands: {
+				verify: {
+					positionals: [{ name: "runId", required: true }],
+				},
+			},
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "receipt-usage" };
+			if (parsed.subcommand === "verify") {
+				const runId = parsed.positionals[0] ?? "";
+				return { kind: "receipt-verify", runId };
 			}
-			return null;
+			return { kind: "receipts" };
 		},
 		handle(command, ctx) {
+			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "receipts");
+			if (!entry) return;
 			if (command.kind === "receipts") {
 				ctx.openReceipts();
 				return;
 			}
 			if (command.kind === "receipt-usage") {
-				ctx.io.stdout("\nusage: /receipts verify <runId>\n");
+				ctx.notice("info", usageNotice(entry, "verify"));
 				return;
 			}
 			if (command.kind !== "receipt-verify") return;
 			const result = ctx.verifyReceipt(command.runId);
 			if (result.ok) {
-				ctx.io.stdout(`[/receipts verify] ok ${command.runId}\n`);
+				ctx.notice("success", `verify ok ${command.runId}`);
 			} else {
-				ctx.io.stdout(`[/receipts verify] fail ${command.runId} ${result.reason}\n`);
+				ctx.notice("error", `verify fail ${command.runId} ${result.reason}`);
 			}
 		},
 	},
@@ -841,9 +847,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "thinking",
 		description: "Open thinking-level selector",
 		kinds: ["thinking"],
-		match(trimmed) {
-			return trimmed === "/thinking" ? { kind: "thinking" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "thinking" }),
 		handle(_command, ctx) {
 			ctx.openThinking();
 		},
@@ -851,16 +856,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "model",
 		description: "Open model selector or set a model",
-		argumentHint: "[pattern[:thinking]]",
+		aliases: ["models"],
 		kinds: ["model", "model-set"],
-		match(trimmed) {
-			if (trimmed === "/model" || trimmed === "/models") return { kind: "model" };
-			for (const prefix of ["/model ", "/models "]) {
-				if (!trimmed.startsWith(prefix)) continue;
-				const pattern = trimmed.slice(prefix.length).trim();
-				if (pattern.length > 0) return { kind: "model-set", pattern };
+		args: {
+			positionals: [{ name: "pattern", required: false, rest: true }],
+		},
+		fromArgs(parsed) {
+			const pattern = parsed.positionals[0];
+			if (pattern) {
+				return { kind: "model-set", pattern };
 			}
-			return null;
+			return { kind: "model" };
 		},
 		handle(command, ctx) {
 			if (command.kind === "model") {
@@ -870,22 +876,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "model-set") return;
 			const result = resolveModelReference(command.pattern, ctx.providers);
 			if (!result.ref) {
-				ctx.io.stderr(`[/model] ${result.error ?? `no match for "${command.pattern}"`}\n`);
+				ctx.notice("error", result.error ?? `no match for "${command.pattern}"`);
 				return;
 			}
-			if (result.warning) ctx.io.stdout(`[/model] ${result.warning}\n`);
+			if (result.warning) ctx.notice("warn", result.warning);
 			ctx.applyModelRef(result.ref);
 			const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
-			ctx.io.stdout(`[/model] active: ${result.ref.endpoint}/${result.ref.model}${suffix}\n`);
+			ctx.notice("success", `active: ${result.ref.endpoint}/${result.ref.model}${suffix}`);
 		},
 	},
 	{
 		name: "scoped-models",
 		description: "Edit the Alt+J / Alt+K model cycle set",
 		kinds: ["scoped-models"],
-		match(trimmed) {
-			return trimmed === "/scoped-models" ? { kind: "scoped-models" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "scoped-models" }),
 		handle(_command, ctx) {
 			ctx.openScopedModels();
 		},
@@ -894,9 +899,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "settings",
 		description: "Open interactive settings",
 		kinds: ["settings"],
-		match(trimmed) {
-			return trimmed === "/settings" ? { kind: "settings" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "settings" }),
 		handle(_command, ctx) {
 			ctx.openSettings();
 		},
@@ -905,9 +909,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "resume",
 		description: "Resume a past session",
 		kinds: ["resume"],
-		match(trimmed) {
-			return trimmed === "/resume" ? { kind: "resume" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "resume" }),
 		handle(_command, ctx) {
 			ctx.openResume();
 		},
@@ -916,9 +919,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "new",
 		description: "Start a fresh session",
 		kinds: ["new"],
-		match(trimmed) {
-			return trimmed === "/new" ? { kind: "new" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "new" }),
 		handle(_command, ctx) {
 			ctx.startNewSession();
 		},
@@ -927,9 +929,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "tree",
 		description: "Open session tree navigator",
 		kinds: ["tree"],
-		match(trimmed) {
-			return trimmed === "/tree" ? { kind: "tree" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "tree" }),
 		handle(_command, ctx) {
 			ctx.openTree();
 		},
@@ -938,9 +939,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "fork",
 		description: "Fork from an assistant turn",
 		kinds: ["fork"],
-		match(trimmed) {
-			return trimmed === "/fork" ? { kind: "fork" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "fork" }),
 		handle(_command, ctx) {
 			ctx.openMessagePicker();
 		},
@@ -948,15 +948,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "compact",
 		description: "Compact earlier context",
-		argumentHint: "[instructions]",
 		kinds: ["compact"],
-		match(trimmed) {
-			if (trimmed === "/compact") return { kind: "compact", instructions: undefined };
-			if (trimmed.startsWith("/compact ")) {
-				const rest = trimmed.slice("/compact ".length).trim();
-				return { kind: "compact", instructions: rest.length > 0 ? rest : undefined };
-			}
-			return null;
+		args: {
+			positionals: [{ name: "instructions", required: false, rest: true }],
+		},
+		fromArgs(parsed) {
+			const instructions = parsed.positionals[0];
+			return { kind: "compact", instructions };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "compact") return;
@@ -967,9 +965,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "hotkeys",
 		description: "Show keyboard and command reference",
 		kinds: ["hotkeys"],
-		match(trimmed) {
-			return trimmed === "/hotkeys" ? { kind: "hotkeys" } : null;
-		},
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "hotkeys" }),
 		handle(_command, ctx) {
 			ctx.openHotkeys();
 		},
@@ -977,7 +974,15 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 ];
 
 const HANDLER_BY_KIND = new Map<SlashCommandKind, BuiltinSlashCommand>();
+const COMMAND_TERM_OWNER = new Map<string, string>();
 for (const entry of BUILTIN_SLASH_COMMANDS) {
+	for (const term of [entry.name, ...(entry.aliases ?? [])]) {
+		const owner = COMMAND_TERM_OWNER.get(term);
+		if (owner) {
+			throw new Error(`BUILTIN_SLASH_COMMANDS: command term "${term}" is owned by both "${owner}" and "${entry.name}"`);
+		}
+		COMMAND_TERM_OWNER.set(term, entry.name);
+	}
 	for (const kind of entry.kinds) {
 		if (HANDLER_BY_KIND.has(kind)) {
 			throw new Error(`BUILTIN_SLASH_COMMANDS: kind "${kind}" is owned by multiple entries`);
@@ -991,7 +996,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
-		const match = entry.match(trimmed);
+		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
 	}
 	return { kind: "unknown", text: trimmed };
@@ -1011,4 +1016,25 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return;
 	entry.handle(command, ctx);
+}
+
+export interface CommandReferenceEntry {
+	name: string;
+	aliases: ReadonlyArray<string>;
+	usage: string;
+	description: string;
+}
+
+export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
+	return BUILTIN_SLASH_COMMANDS.map((entry) => {
+		const usage = usageLine(entry)
+			.replace(/^\nusage:\s*/, "")
+			.replace(/\n$/, "");
+		return {
+			name: entry.name,
+			aliases: entry.aliases ?? [],
+			usage,
+			description: entry.description,
+		};
+	});
 }

@@ -1,6 +1,6 @@
 import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../../engine/tui.js";
 import type { ClioKeybindingManager, PlatformKeybindingWarning } from "../keybinding-manager.js";
-import { showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 
 export const HOTKEYS_OVERLAY_WIDTH = 74;
@@ -41,7 +41,6 @@ const SLASH_HOTKEYS: ReadonlyArray<HotkeyEntry> = [
 	{ keys: "/disconnect [target]", action: "Disconnect a target", scope: "editor" },
 	{ keys: "/cost", action: "Open cost overlay", scope: "editor" },
 	{ keys: "/fleet", action: "Open fleet status overlay", scope: "editor" },
-	{ keys: "/status", action: "Show dashboard key hint", scope: "editor" },
 	{ keys: "/receipts [verify <runId>]", action: "Browse or verify receipts", scope: "editor" },
 	{
 		keys: "/run [--agent-profile <profile>|--runtime <id>|--tool-profile <profile>] <agent> <task>",
@@ -130,7 +129,12 @@ class HotkeysView implements Component {
 	) {}
 
 	getHint(): string {
-		return this.detailEntry ? "[Backspace/Q] back    [Esc] close" : "[Up/Down] select  [Enter/E] details  [Esc] close";
+		return this.detailEntry
+			? buildHint("browse", [{ key: "Backspace/Q", verb: "back" }])
+			: buildHint("browse", [
+					{ key: "↑↓", verb: "select" },
+					{ key: "Enter/E", verb: "details" },
+				]);
 	}
 
 	render(width: number): string[] {

@@ -17,6 +17,10 @@ export const GLYPH = {
 	contextFree: "▱",
 	info: "ℹ",
 	warn: "⚠",
+	noticeInfo: "·",
+	noticeSuccess: "✓",
+	noticeWarn: "!",
+	noticeError: "✗",
 } as const;
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;

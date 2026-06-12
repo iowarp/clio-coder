@@ -81,11 +81,64 @@ export function brandedTopBorder(label: string, innerWidth: number): string {
 	return `${clioFrame("┌")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┐")}`;
 }
 
+export type OverlayMode = "browse" | "commit";
+export interface HintEntry {
+	key: string;
+	verb: string;
+}
+
+export function canonicalizeKey(key: string): string {
+	const trimmed = key.trim();
+	if (trimmed === "R") return "R";
+	const lower = trimmed.toLowerCase();
+	if (lower === "up/down" || lower === "updown" || lower === "↑/↓" || lower === "up/down/j/k" || lower === "↑↓")
+		return "↑↓";
+	if (lower === "enter/space") return "Enter/Space";
+	if (lower === "enter") return "Enter";
+	if (lower === "esc" || lower === "escape") return "Esc";
+	if (lower === "space") return "Space";
+	if (lower === "tab") return "Tab";
+	if (lower === "r") return "r";
+	if (lower === "type") return "type";
+	return trimmed;
+}
+
+export function buildHint(mode: OverlayMode, entries: ReadonlyArray<HintEntry>): string {
+	const escVerb = mode === "browse" ? "close" : "cancel";
+	const finalEntries = [
+		...entries.map((e) => ({ key: canonicalizeKey(e.key), verb: e.verb })),
+		{ key: "Esc", verb: escVerb },
+	];
+	return finalEntries.map((e) => `[${e.key}] ${e.verb}`).join(" · ");
+}
+
+export function elideHint(hint: string, maxCleanWidth: number): string {
+	const parts = hint.split(" · ");
+	if (parts.length <= 2) return hint;
+
+	const keepIndices = Array.from({ length: parts.length }, (_, i) => i);
+
+	while (keepIndices.length > 2) {
+		const currentHint = keepIndices.map((i) => parts[i]).join(" · ");
+		if (visibleWidth(currentHint) <= maxCleanWidth) {
+			return currentHint;
+		}
+		const midIdxInMiddle = Math.floor((keepIndices.length - 2) / 2) + 1;
+		keepIndices.splice(midIdxInMiddle, 1);
+	}
+
+	return keepIndices.map((i) => parts[i]).join(" · ");
+}
+
 export function brandedBottomBorder(innerWidth: number, hint?: string): string {
 	if (!hint || hint.trim().length === 0) {
 		return `${clioFrame("└")}${clioFrame("─".repeat(innerWidth))}${clioFrame("┘")}`;
 	}
-	const clean = hint.trim();
+	let clean = hint.trim();
+	const maxCleanWidth = innerWidth - 3;
+	if (clean.includes(" · ") && visibleWidth(`─ ${clean} `) > innerWidth) {
+		clean = elideHint(clean, maxCleanWidth);
+	}
 	const formatted = `─ ${clean} `;
 	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
 	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));

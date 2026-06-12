@@ -1,5 +1,5 @@
 import { Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
-import { FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
 
@@ -30,7 +30,7 @@ function createAuthDialogController(
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
-	let currentHint = "[Esc] cancel";
+	let currentHint = buildHint("commit", []);
 
 	titleView.setText(title);
 	const box = new FocusBox([], {
@@ -74,11 +74,11 @@ function createAuthDialogController(
 		box.addChild(bodyView);
 		if (promptLabel) {
 			promptView.setText(promptLabel);
-			currentHint = "[Enter] submit  [Esc] cancel";
+			currentHint = buildHint("commit", [{ key: "Enter", verb: "submit" }]);
 			box.addChild(promptView);
 			box.addChild(input);
 		} else {
-			currentHint = "[Esc] cancel";
+			currentHint = buildHint("commit", []);
 		}
 		box.invalidate();
 	}

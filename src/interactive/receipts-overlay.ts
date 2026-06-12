@@ -12,11 +12,11 @@ import {
 	type TUI,
 	truncateToWidth,
 } from "../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "./overlay-frame.js";
 
 export const RECEIPTS_OVERLAY_WIDTH = 78;
 export const RECEIPTS_OVERLAY_MAX_VISIBLE = 10;
-export const RECEIPTS_OVERLAY_HINT = "[Up/Down] /receipts verify <id> [Esc]";
+export const RECEIPTS_OVERLAY_HINT = buildHint("browse", [{ key: "↑↓", verb: "navigate" }]);
 
 const SHORT_ID_LEN = 8;
 const AGENT_COL_WIDTH = 10;

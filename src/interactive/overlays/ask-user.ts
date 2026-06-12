@@ -12,7 +12,7 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
-import { DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const ASK_USER_OVERLAY_WIDTH = "94%";
 export const ASK_USER_OVERLAY_MIN_WIDTH = 72;
@@ -259,24 +259,37 @@ class AskUserOverlayView implements Component {
 
 	footerHint(): string {
 		if (this.phase !== "asking") {
-			return this.history.length > 0 ? "[Esc] cancel interview" : "[Esc] cancel";
+			return buildHint("commit", []);
 		}
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		if (!question || !state) return "[Esc] cancel";
+		if (!question || !state) return buildHint("commit", []);
 		if (state.mode === "text") {
 			return this.questions.length > 1
-				? "[Enter] submit    [Alt+Left/Right] question    [Esc] cancel"
-				: "[Enter] submit    [Esc] cancel";
+				? buildHint("commit", [
+						{ key: "Enter", verb: "submit" },
+						{ key: "Alt+Left/Right", verb: "question" },
+					])
+				: buildHint("commit", [{ key: "Enter", verb: "submit" }]);
 		}
 		if (question.multi_select === true) {
 			return this.questions.length > 1
-				? "[Left/Right] question    [Space] toggle    [Enter] commit    [Esc] cancel"
-				: "[Space] toggle    [Enter] commit    [Esc] cancel";
+				? buildHint("commit", [
+						{ key: "Left/Right", verb: "question" },
+						{ key: "Space", verb: "toggle" },
+						{ key: "Enter", verb: "commit" },
+					])
+				: buildHint("commit", [
+						{ key: "Space", verb: "toggle" },
+						{ key: "Enter", verb: "commit" },
+					]);
 		}
 		return this.questions.length > 1
-			? "[Left/Right] question    [Enter] select    [Esc] cancel"
-			: "[Enter] select    [Esc] cancel";
+			? buildHint("commit", [
+					{ key: "Left/Right", verb: "question" },
+					{ key: "Enter", verb: "select" },
+				])
+			: buildHint("commit", [{ key: "Enter", verb: "select" }]);
 	}
 
 	private finish(result: AskUserResult): void {

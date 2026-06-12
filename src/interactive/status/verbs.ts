@@ -36,7 +36,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: tier >= 2 ? "still preparing harness" : "preparing harness", toneHint: "normal" };
 		case "waiting_model":
 			return {
-				text: tier >= 2 ? "still waiting on model" : status.localRuntime ? "waiting on local model" : "waiting on provider",
+				text: tier >= 2 ? "still waiting on model" : status.localRuntime ? "waiting on local model" : "waiting on model",
 				toneHint: "normal",
 			};
 		case "thinking":

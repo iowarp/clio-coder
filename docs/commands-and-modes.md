@@ -80,37 +80,41 @@ clio run \
 
 ## Interactive Slash Commands
 
-Slash commands are available inside the TUI. Type `/` at the start of the
-prompt to open autocomplete.
+Slash commands are available inside the TUI. Type `/` at the start of the prompt to open autocomplete.
 
-| Command | Purpose |
-| --- | --- |
-| `/run <agent> <task>` | Dispatch a fleet agent and stream events into the transcript. |
-| `/init` | Create or refresh the checked-in `CLIO.md` project guide. |
-| `/targets` | Show target health, auth, runtime, model, and capabilities. |
-| `/connect [target]` | Connect to a target or runtime. |
-| `/disconnect [target]` | Disconnect a target or runtime when Clio owns connection state. |
-| `/model [pattern[:thinking]]` | Open the model selector or set the orchestrator model. |
-| `/scoped-models` | Edit the model list used by model cycling. |
-| `/thinking` | Open the thinking-level selector. |
-| `/settings` | Open interactive settings controls. |
-| `/resume` | Resume an existing session. |
-| `/new` | Start a fresh session. |
-| `/tree` | Navigate the session tree. |
-| `/fork` | Branch from an earlier assistant turn. |
-| `/compact [instructions]` | Compact earlier session context. |
-| `/cost` | Show token and USD totals for completed runs in the session. |
-| `/receipts` | Browse saved run receipts. |
-| `/receipts verify <runId>` | Verify a receipt against the persisted run ledger. |
-| `/skills [query]` | List discovered skills with scope, source, and trust state. |
-| `/skill:name args` | Force-activate a skill by expanding its body into the message. |
-| `/prompts [query]` | List available prompt templates. |
-| `/extensions` | List installed extension packages and active/shadowed/disabled state. |
-| `/share export <path>` | Export current project resources to a share archive. |
-| `/share import [--dry-run] [--force] <path>` | Preview or apply a share archive import. |
-| `/help` | Show the slash-command reference. |
-| `/hotkeys` | Show resolved keyboard bindings. |
-| `/quit` | Exit the TUI cleanly. |
+The registry table below lists the available interactive slash commands. The "Aliases" column shows alternative command triggers that invoke the same command. The "Usage" column details the expected arguments and options, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
+
+| Command | Aliases | Usage | Purpose |
+| --- | --- | --- | --- |
+| `/quit` | - | `/quit` | Exit Clio Coder |
+| `/help` | - | `/help [command]` | Show slash-command help |
+| `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff |
+| `/context-clear` | - | `/context-clear [--all] [--confirm] [--confirm-all]` | Clear accumulated project context artifacts |
+| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open interactive skill selector or invoke a skill |
+| `/skills` | - | `/skills [query]` | Browse or search skills |
+| `/prompts` | - | `/prompts` | List prompt templates |
+| `/extensions` | - | `/extensions` | List installed extensions |
+| `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
+| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
+| `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
+| `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
+| `/targets` | - | `/targets` | Show target health, auth, and models |
+| `/connect` | - | `/connect [target]` | Connect a target or choose one |
+| `/disconnect` | - | `/disconnect [target]` | Disconnect a target or choose one |
+| `/cost` | - | `/cost` | Show session token and cost totals |
+| `/context-view` | `/context`, `/ctx` | `/context-view` | Visualize the active context window and its breakdown |
+| `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
+| `/receipts` | - | `/receipts verify <runId>` | Browse or verify run receipts |
+| `/thinking` | - | `/thinking` | Open thinking-level selector |
+| `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
+| `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
+| `/settings` | - | `/settings` | Open interactive settings |
+| `/resume` | - | `/resume` | Resume a past session |
+| `/new` | - | `/new` | Start a fresh session |
+| `/tree` | - | `/tree` | Open session tree navigator |
+| `/fork` | - | `/fork` | Fork from an assistant turn |
+| `/compact` | - | `/compact [instructions]` | Compact earlier context |
+| `/hotkeys` | - | `/hotkeys` | Show keyboard and command reference |
 
 ## Keybindings
 
@@ -246,6 +250,29 @@ The Clio TUI has been enhanced to maximize readability and command discovery:
 - **Redesigned Compact Footer:** The footer dashboard displays real-time token, cost, and target indicators in a single-row layout. Use `Alt+U` to toggle the footer between compact and expanded widgets.
 - **Relocated Telemetry:** Per-turn telemetry is surfaced in the footer activity area, keeping token consumption and execution costs visible without adding extra transcript noise.
 - **Overlay Navigation:** Standardized overlays are available for settings, model selection, hotkey references, target health, and session tracking.
+
+## Overlay and Presentation Conventions
+
+Clio Coder follows strict presentation guidelines across all TUI surfaces:
+
+### Hint Grammar
+All TUI overlays construct footer hints using a standard grammar. Keys are displayed in brackets and normalized to canonical casing (`Enter`, `Esc`, `Space`, `Tab`, `↑↓`, `r`, `R`, `type`), separated by a middle dot (` · `):
+- Format: `[Key] action · [Esc] close`
+
+### Browse vs. Commit Modes
+Overlays operate in one of two modes which govern the Escape key behavior:
+- **Browse Mode:** Used for read-only viewing or exploration. The Escape key is labeled `close` (`[Esc] close`).
+- **Commit Mode:** Used for forms, selections, or settings changes that alter state. The Escape key is labeled `cancel` (`[Esc] cancel`).
+
+### Notice Levels
+Diagnostic writes in the transcript use the themed notice channel instead of raw ANSI or bracket prefixes. Notices render a single themed line containing a colorized glyph and the message:
+
+| Level | Glyphs | Color Token | Purpose |
+| --- | --- | --- | --- |
+| `info` | `·` | `dim` | General system information and usage |
+| `success` | `✓` | `success` | Operation completed successfully |
+| `warn` | `!` | `warning` | Non-fatal issue or precaution |
+| `error` | `✗` | `error` | Fatal issue or operation failure |
 
 ## Troubleshooting
 

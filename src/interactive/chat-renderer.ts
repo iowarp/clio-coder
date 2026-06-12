@@ -320,7 +320,7 @@ function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted";
 			? raw
 			: stopReason === "aborted"
 				? "request aborted"
-				: "provider returned an error";
+				: "model target returned an error";
 	return { stopReason, errorMessage };
 }
 

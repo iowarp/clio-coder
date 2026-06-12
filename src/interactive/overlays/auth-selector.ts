@@ -1,5 +1,5 @@
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const AUTH_SELECTOR_WIDTH = 84;
 const VISIBLE_ROWS = 10;
@@ -23,7 +23,7 @@ export function openAuthSelectorOverlay(tui: TUI, deps: OpenAuthSelectorDeps): O
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: AUTH_SELECTOR_WIDTH,
-		title: "Connection",
-		footerHint: "[Enter] select    [Esc] cancel",
+		title: "Connect target",
+		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
 	});
 }

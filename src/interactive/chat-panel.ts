@@ -162,7 +162,7 @@ function extractAssistantTerminalError(message: unknown): string {
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length") return "";
 	if (stopReason === "length") {
-		return "[stopped: length] Provider hit its generation/output limit before a complete response. This is not a safety denial. Continue with a shorter answer or lower thinking; use /compact if the context meter is also near full.";
+		return "[stopped: length] Model target hit its generation/output limit before a complete response. This is not a safety denial. Continue with a shorter answer or lower thinking; use /compact if the context meter is also near full.";
 	}
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
 	const reason = typeof raw === "string" && raw.length > 0 ? raw : "unknown error";

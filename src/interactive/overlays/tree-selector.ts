@@ -8,7 +8,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
-import { clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -224,15 +224,21 @@ class TreeOverlayView implements Component {
 
 	private footerText(): string {
 		if (this.submode === "edit-label") {
-			return `label: ${this.labelBuffer}_  [Enter] commit  [Esc] cancel`;
+			return `label: ${this.labelBuffer}_  ${buildHint("commit", [{ key: "Enter", verb: "commit" }])}`;
 		}
 		if (this.submode === "confirm-delete") {
 			const scope = this.deleteContext?.keepFiles ? "tombstone" : "delete with files";
 			const typed = this.deleteConfirmBuffer ? ` typed:${this.deleteConfirmBuffer}` : "";
-			return `Delete session (${scope})? confirm: y + Enter  [n/Esc] cancel${typed}`;
+			return `Delete session (${scope})? confirm: y + Enter${typed}  ${buildHint("commit", [{ key: "n", verb: "cancel" }])}`;
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
-		return `[↑/↓] move  [Enter] switch  [e] label  [d/Shift+D] delete  [Shift+T] ts:${tsLabel}  [Esc] close`;
+		return buildHint("browse", [
+			{ key: "↑↓", verb: "move" },
+			{ key: "Enter", verb: "switch" },
+			{ key: "e", verb: "label" },
+			{ key: "d/Shift+D", verb: "delete" },
+			{ key: "Shift+T", verb: `ts:${tsLabel}` },
+		]);
 	}
 
 	invalidate(): void {}
