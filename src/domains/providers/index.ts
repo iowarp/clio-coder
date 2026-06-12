@@ -31,6 +31,14 @@ export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";
 export {
+	hasLiveModelCatalog,
+	modelCandidatesForStatus,
+	modelIdsForStatus,
+	modelLoadStateLabel,
+	type ProviderModelCandidate,
+	type ProviderModelSource,
+} from "./model-discovery.js";
+export {
 	inferLocalModelFamily,
 	isHarmonyModelId,
 	type LocalModelFamily,
@@ -112,6 +120,8 @@ export type { EndpointAuth, EndpointDescriptor, EndpointPricing, TargetSpec } fr
 export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export type {
 	ProbeContext,
+	ProbeModelLoadState,
+	ProbeModelStatus,
 	ProbeResult,
 	RuntimeApiFamily,
 	RuntimeAuth,

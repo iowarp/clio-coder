@@ -72,6 +72,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			const catalog = await probeOpenAIModelCatalog(base, ctx, modelsPath);
 			const result: ProbeResult = { ...health };
 			if (catalog.models.length > 0) result.models = catalog.models;
+			if (Object.keys(catalog.modelStates).length > 0) result.modelStates = catalog.modelStates;
 			if (Object.keys(catalog.modelCapabilities).length > 0) {
 				result.modelCapabilities = catalog.modelCapabilities;
 				const selected = endpoint.defaultModel?.trim();

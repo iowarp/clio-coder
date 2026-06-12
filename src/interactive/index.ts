@@ -2398,6 +2398,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 		overlayHandle = handle;
 		settingsOverlayRefresh = handle.refreshRows;
+		void (async () => {
+			try {
+				await deps.providers.probeAllLive();
+				if (overlayState === "settings") settingsOverlayRefresh?.();
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				notify("warning", `settings model refresh failed: ${msg}`, "settings:model-refresh");
+			}
+		})();
 		tui.requestRender();
 	};
 

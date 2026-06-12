@@ -278,6 +278,7 @@ describe("milestone 08 overlay polish regressions", () => {
 			providers,
 			onSelect: () => {},
 			onClose: () => {},
+			autoRefresh: false,
 		});
 
 		harness.component().handleInput?.("r");
@@ -288,6 +289,40 @@ describe("milestone 08 overlay polish regressions", () => {
 
 		strictEqual(harness.hideCalls(), 1);
 		strictEqual(harness.renderRequests(), 1);
+	});
+
+	it("/model auto-refreshes live model catalogs on open", async () => {
+		let current = [endpointStatus("mock", ["old-model"])];
+		const live = {
+			...endpointStatus("mock"),
+			discoveredModels: ["new-live-model"],
+			discoveredModelsSource: "probe" as const,
+			discoveredModelStates: { "new-live-model": { state: "loaded" as const } },
+		};
+		const providers = providersFor([], {
+			list: () => current,
+			getEndpoint: (id: string) => current.find((status) => status.endpoint.id === id)?.endpoint ?? null,
+			getRuntime: (id: string) => current.find((status) => status.runtime?.id === id)?.runtime ?? null,
+			probeAllLive: async () => {
+				current = [live];
+			},
+			probeEndpoint: async (id: string) => current.find((status) => status.endpoint.id === id) ?? null,
+		});
+		const harness = fakeTui(100);
+		const handle = openModelOverlay(harness.tui, {
+			settings: settings("mock", "old-model"),
+			providers,
+			onSelect: () => {},
+			onClose: () => {},
+		});
+
+		await flush();
+		harness.component().handleInput?.("\t");
+		const rendered = stripAnsi(harness.component().render(100).join("\n"));
+
+		ok(rendered.includes("new-live-model"), rendered);
+		ok(rendered.includes("state loaded"), rendered);
+		handle.hide();
 	});
 
 	it("/scoped-models preserves selected scope entries that match no current row", () => {

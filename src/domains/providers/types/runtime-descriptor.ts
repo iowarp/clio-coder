@@ -46,12 +46,21 @@ export interface ProbeSurfaceMap {
 	infill?: string;
 }
 
+export type ProbeModelLoadState = "loaded" | "loading" | "unloaded" | "failed" | "unknown";
+
+export interface ProbeModelStatus {
+	state: ProbeModelLoadState;
+	detail?: string;
+}
+
 export interface ProbeResult {
 	ok: boolean;
 	latencyMs?: number;
 	error?: string;
 	serverVersion?: string;
 	models?: string[];
+	/** Probe-only per-model load state when the runtime exposes it. */
+	modelStates?: Record<string, ProbeModelStatus>;
 	discoveredCapabilities?: Partial<CapabilityFlags>;
 	/** Probe-only capabilities keyed by wire model id when a runtime can list model metadata. */
 	modelCapabilities?: Record<string, Partial<CapabilityFlags>>;

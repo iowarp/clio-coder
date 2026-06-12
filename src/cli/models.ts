@@ -4,7 +4,7 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
 import {
-	listKnownModelsForRuntime,
+	modelCandidatesForStatus,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
 } from "../domains/providers/index.js";
@@ -18,23 +18,29 @@ export interface ModelRow {
 	contextWindow: number;
 	maxTokens: number;
 	reasoning: boolean;
+	state: string;
 }
 
-const HELP = `clio models [search] [--target <id>] [--json] [--probe]
+const HELP = `clio models [search] [--target <id>] [--json] [--offline] [--probe]
 
-List known or discovered models for configured targets.
+List live-discovered models for configured targets.
+
+Options:
+  --offline   use cached/configured/catalog model hints without probing targets
+  --probe     accepted for compatibility; live probing is the default
 `;
 
 interface ModelArgs {
 	json: boolean;
 	probe: boolean;
+	offline: boolean;
 	target?: string;
 	search?: string;
 	help: boolean;
 }
 
 function parseModelArgs(args: ReadonlyArray<string>): ModelArgs {
-	const parsed: ModelArgs = { json: false, probe: false, help: false };
+	const parsed: ModelArgs = { json: false, probe: false, offline: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === undefined) continue;
@@ -48,6 +54,10 @@ function parseModelArgs(args: ReadonlyArray<string>): ModelArgs {
 		}
 		if (arg === "--probe") {
 			parsed.probe = true;
+			continue;
+		}
+		if (arg === "--offline" || arg === "--no-probe") {
+			parsed.offline = true;
 			continue;
 		}
 		if (arg === "--target") {
@@ -86,7 +96,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 		await loaded.stop();
 		return 1;
 	}
-	if (parsed.probe) {
+	if (!parsed.offline || parsed.probe) {
 		try {
 			await providers.probeAllLive();
 		} catch (err) {
@@ -112,49 +122,31 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
-		const modelIds = modelIdsForStatus(status);
-		if (modelIds.length === 0) {
+		const candidates = modelCandidatesForStatus(status);
+		if (candidates.length === 0) {
 			const caps = resolveRowCapabilities(status, status.endpoint.defaultModel ?? null, providers);
 			rows.push({
 				targetId: status.endpoint.id,
 				runtimeId,
 				modelId: "(no models)",
+				state: "-",
 				...formatCapabilities(caps),
 			});
 			continue;
 		}
-		for (const modelId of modelIds) {
+		for (const candidate of candidates) {
+			const modelId = candidate.id;
 			const caps = resolveRowCapabilities(status, modelId, providers);
-			rows.push({ targetId: status.endpoint.id, runtimeId, modelId, ...formatCapabilities(caps) });
+			rows.push({
+				targetId: status.endpoint.id,
+				runtimeId,
+				modelId,
+				state: candidate.loadState ?? "-",
+				...formatCapabilities(caps),
+			});
 		}
 	}
 	return rows;
-}
-
-function modelIdsForStatus(status: EndpointStatus): string[] {
-	const out: string[] = [];
-	const seen = new Set<string>();
-	const add = (id: string | undefined): void => {
-		const trimmed = id?.trim() ?? "";
-		if (trimmed.length === 0 || seen.has(trimmed)) return;
-		seen.add(trimmed);
-		out.push(trimmed);
-	};
-	const configured = status.endpoint.wireModels ?? [];
-	if (configured.length > 0 || status.discoveredModels.length > 0) {
-		for (const id of configured) add(id);
-		add(status.endpoint.defaultModel);
-		for (const id of status.discoveredModels) add(id);
-		return out;
-	}
-	const known = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
-	if (known.length > 0) {
-		add(status.endpoint.defaultModel);
-		for (const id of known) add(id);
-		return out;
-	}
-	add(status.endpoint.defaultModel);
-	return out;
 }
 
 function resolveRowCapabilities(status: EndpointStatus, modelId: string | null, providers: ProvidersContract) {
@@ -227,15 +219,16 @@ function truncateModelId(id: string): string {
 }
 
 export function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
-	const headers = ["target", "runtime", "model", "caps", "ctx", "max"];
-	const cells = rows.map((row) => [
-		row.targetId,
-		row.runtimeId,
-		truncateModelId(row.modelId),
-		row.caps,
-		compactTokenCount(row.contextWindow),
-		compactTokenCount(row.maxTokens),
-	]);
+	const includeState = rows.some((row) => row.state && row.state !== "-");
+	const headers = includeState
+		? ["target", "runtime", "model", "state", "caps", "ctx", "max"]
+		: ["target", "runtime", "model", "caps", "ctx", "max"];
+	const cells = rows.map((row) => {
+		const base = [row.targetId, row.runtimeId, truncateModelId(row.modelId)];
+		if (includeState) base.push(row.state || "-");
+		base.push(row.caps, compactTokenCount(row.contextWindow), compactTokenCount(row.maxTokens));
+		return base;
+	});
 	const widths = headers.map((h, col) => Math.max(h.length, ...cells.map((cell) => cell[col]?.length ?? 0)));
 	const formatLine = (values: ReadonlyArray<string>): string =>
 		values
@@ -259,6 +252,7 @@ function matchesSearch(row: ModelRow, search: string | undefined): boolean {
 	return (
 		row.targetId.toLowerCase().includes(needle) ||
 		row.runtimeId.toLowerCase().includes(needle) ||
-		row.modelId.toLowerCase().includes(needle)
+		row.modelId.toLowerCase().includes(needle) ||
+		row.state.toLowerCase().includes(needle)
 	);
 }

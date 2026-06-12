@@ -69,11 +69,13 @@ export interface OpenScopedOverlayDeps {
 	currentScope: ReadonlyArray<string>;
 	onCommit: (nextScope: string[]) => void;
 	onClose: () => void;
+	autoRefresh?: boolean;
 }
 
 export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): OverlayHandle {
 	const items = buildScopedModelItems({ providers: deps.providers, currentScope: deps.currentScope });
 	const selected = new Set<string>(deps.currentScope);
+	let disposed = false;
 	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
 	const list = new SelectList(items, visible, DEFAULT_SELECT_THEME);
 	list.onCancel = (): void => {
@@ -106,7 +108,7 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 			list.handleInput(data);
 		},
 	});
-	return showClioOverlayFrame(tui, box, {
+	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SCOPED_OVERLAY_WIDTH,
 		title: "Scoped models",
@@ -115,6 +117,27 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 			{ key: "Enter", verb: "commit" },
 		]),
 	});
+	if (deps.autoRefresh !== false) {
+		void (async () => {
+			await deps.providers.probeAllLive();
+			if (disposed) return;
+			const next = buildScopedModelItems({ providers: deps.providers, currentScope: [...selected] });
+			items.splice(0, items.length, ...next);
+			rebuildLabels();
+			list.setSelectedIndex(0);
+			list.invalidate();
+			tui.requestRender();
+		})().catch(() => {
+			// Cached/configured rows remain usable when a live refresh fails.
+		});
+	}
+	return {
+		...handle,
+		hide(): void {
+			disposed = true;
+			handle.hide();
+		},
+	};
 }
 
 export function extractScopeFromSettings(settings: Readonly<ClioSettings>): string[] {

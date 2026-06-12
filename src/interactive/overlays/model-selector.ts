@@ -12,7 +12,9 @@ import type {
 } from "../../domains/providers/index.js";
 import {
 	isTargetEligibleRuntime,
-	listKnownModelsForRuntime,
+	modelCandidatesForStatus,
+	modelIdsForStatus,
+	type ProviderModelSource,
 	resolveRuntimeTarget,
 } from "../../domains/providers/index.js";
 import {
@@ -76,6 +78,7 @@ export interface OpenModelOverlayDeps {
 	onSelect: (ref: ModelSelection) => void;
 	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
+	autoRefresh?: boolean;
 }
 
 function healthGlyph(status: EndpointStatus): string {
@@ -118,18 +121,6 @@ function maxTokensDecisionLabel(decisions: RuntimeCapabilityDecision): string {
 	return compactTokenCount(decisions.maxTokens);
 }
 
-function uniqueModels(ids: ReadonlyArray<string>): string[] {
-	const seen = new Set<string>();
-	const out: string[] = [];
-	for (const id of ids) {
-		const trimmed = id.trim();
-		if (trimmed.length === 0 || seen.has(trimmed)) continue;
-		seen.add(trimmed);
-		out.push(trimmed);
-	}
-	return out;
-}
-
 function truncateMiddle(text: string, maxWidth: number): string {
 	if (maxWidth <= 0 || text.length <= maxWidth) return text;
 	if (maxWidth <= 8) return truncateToWidth(text, maxWidth, "", true);
@@ -139,14 +130,9 @@ function truncateMiddle(text: string, maxWidth: number): string {
 	return `${text.slice(0, prefixWidth)}…${text.slice(-suffixWidth)}`;
 }
 
-type ModelSource = "configured" | "live" | "catalog" | "default" | "missing";
+type ModelSource = ProviderModelSource | "missing";
 type ModelBucket = "local" | "cloud";
 type ModelRefreshScope = "selected" | "all";
-
-interface ModelCandidate {
-	id: string;
-	source: ModelSource;
-}
 
 export interface ModelRow {
 	value: string;
@@ -158,6 +144,8 @@ export interface ModelRow {
 	apiFamily: string;
 	bucket: ModelBucket;
 	source: ModelSource;
+	loadState?: string;
+	loadStateDetail?: string;
 	authText: string;
 	available: boolean;
 	reason: string;
@@ -190,16 +178,9 @@ export interface ModelOverlaySummary {
 	focusedModels?: number;
 }
 
-/**
- * Enumerate the wire model ids to present for an endpoint. Configured
- * `endpoint.wireModels` remain first so operator-curated choices keep their
- * muscle memory, but live probe discoveries are appended so a runtime refresh
- * can surface newly installed or newly entitled models without restarting
- * Clio. If neither config nor a live probe has model ids, fall back to the
- * provider/runtime catalog and finally the target default.
- */
+/** Enumerate endpoint wire model ids with live discovery taking precedence when available. */
 export function modelsForEndpoint(status: EndpointStatus): string[] {
-	return modelCandidatesForEndpoint(status).map((candidate) => candidate.id);
+	return modelIdsForStatus(status);
 }
 
 export interface ModelItemsResult {
@@ -208,39 +189,6 @@ export interface ModelItemsResult {
 	refs: ModelSelection[];
 	rows: ModelRow[];
 	summary: ModelOverlaySummary;
-}
-
-function modelCandidatesForEndpoint(status: EndpointStatus): ModelCandidate[] {
-	const configured = uniqueModels(status.endpoint.wireModels ?? []);
-	const discovered = uniqueModels(status.discoveredModels);
-	const defaultModel = status.endpoint.defaultModel?.trim() ?? "";
-	const out: ModelCandidate[] = [];
-	const seen = new Set<string>();
-	const add = (id: string, source: ModelSource): void => {
-		const trimmed = id.trim();
-		if (trimmed.length === 0 || seen.has(trimmed)) return;
-		seen.add(trimmed);
-		out.push({ id: trimmed, source });
-	};
-
-	if (configured.length > 0 || discovered.length > 0) {
-		const discoveredSet = new Set(discovered);
-		for (const id of configured) add(id, "configured");
-		if (defaultModel) add(defaultModel, discoveredSet.has(defaultModel) ? "live" : "default");
-		for (const id of discovered) add(id, "live");
-		return out;
-	}
-
-	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
-	if (knownModels.length > 0) {
-		const knownSet = new Set(knownModels);
-		for (const id of uniqueModels([defaultModel, ...knownModels])) {
-			add(id, knownSet.has(id) ? "catalog" : "default");
-		}
-		return out;
-	}
-	if (defaultModel) return [{ id: defaultModel, source: "default" }];
-	return [];
 }
 
 function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFlags): RuntimeCapabilityDecision {
@@ -428,7 +376,7 @@ export function buildModelItems(deps: {
 		const { endpoint } = status;
 		const runtimeName = status.runtime?.displayName ?? endpoint.runtime;
 		const runtimeShortName = shortRuntimeName(runtimeName);
-		const candidates = modelCandidatesForEndpoint(status);
+		const candidates = modelCandidatesForStatus(status);
 		const authText = authLabel({ providers: deps.providers, status });
 		const bucket = modelBucket(status);
 		const singleEndpoint = list.length === 1;
@@ -518,6 +466,8 @@ export function buildModelItems(deps: {
 				apiFamily: status.runtime?.apiFamily ?? "unknown",
 				bucket,
 				source: candidate.source,
+				...(candidate.loadState ? { loadState: candidate.loadState } : {}),
+				...(candidate.loadStateDetail ? { loadStateDetail: candidate.loadStateDetail } : {}),
 				authText,
 				available: status.available,
 				reason: status.reason,
@@ -674,10 +624,13 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	if (row.defaultModel) tags.push("default");
 	const state = tags.length > 0 ? tags.join("+") : row.selectable ? "candidate" : "not selectable";
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
+	const loadState = row.loadState
+		? ` · state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
+		: "";
 	return [
 		fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width),
 		fitLine(
-			`source ${sourceLabel(row.source)} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
+			`source ${sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
 			width,
 		),
 		...(row.diagnostics ?? [])
@@ -703,6 +656,8 @@ function matchesQuery(row: ModelRow, query: string): boolean {
 		row.apiFamily,
 		row.bucket,
 		row.source,
+		row.loadState ?? "",
+		row.loadStateDetail ?? "",
 		row.badges,
 		row.context,
 		row.maxTokens,
@@ -914,7 +869,11 @@ export class ModelOverlayView implements Component {
 		this.onToggleFavorite({ endpoint: row.endpoint, model: row.model }, row.favorite === true);
 	}
 
-	private async refresh(scope: ModelRefreshScope): Promise<void> {
+	refresh(scope: ModelRefreshScope): void {
+		void this.runRefresh(scope);
+	}
+
+	private async runRefresh(scope: ModelRefreshScope): Promise<void> {
 		if (this.refreshing || this.lifecycle.signal.aborted) return;
 		const signal = this.lifecycle.signal;
 		const selected = this.selectedRow();
@@ -1000,11 +959,11 @@ export class ModelOverlayView implements Component {
 			return;
 		}
 		if (data === "r" && this.query.length === 0) {
-			void this.refresh("selected");
+			this.refresh("selected");
 			return;
 		}
 		if (data === "R" && this.query.length === 0) {
-			void this.refresh("all");
+			this.refresh("all");
 			return;
 		}
 		if (data === "*" && this.query.length === 0) {
@@ -1068,6 +1027,9 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 			{ key: "Enter", verb: "use" },
 		]),
 	});
+	if (deps.autoRefresh !== false) {
+		view.refresh("all");
+	}
 	return {
 		...handle,
 		hide(): void {
