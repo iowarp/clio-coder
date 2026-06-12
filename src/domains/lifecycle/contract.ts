@@ -7,5 +7,5 @@ export interface LifecycleContract {
 	version(): VersionInfo;
 	state(): StateInfo | null;
 	doctor(): DoctorFinding[];
-	runMigrations(dir: string): Promise<MigrationRunResult>;
+	runMigrations(stateDir: string): Promise<MigrationRunResult>;
 }

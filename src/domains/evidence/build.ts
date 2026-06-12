@@ -33,7 +33,10 @@ const TRANSCRIPT_TEXT_MAX_CHARS = 500;
 const TOOL_PREVIEW_MAX_CHARS = 240;
 
 export interface BuildEvidenceOptions {
+	/** Evidence bundles are written under <dataDir>/evidence/. */
 	dataDir: string;
+	/** Run ledger, receipts, sessions, and audit logs are read from here. */
+	stateDir: string;
 	runId?: string;
 	sessionId?: string;
 }
@@ -78,7 +81,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	if (options.runId === undefined && options.sessionId === undefined) {
 		throw new Error("build evidence requires runId or sessionId");
 	}
-	const ledger = await readRunLedger(options.dataDir);
+	const ledger = await readRunLedger(options.stateDir);
 	const source =
 		options.runId !== undefined
 			? { kind: "run" as const, runId: options.runId }
@@ -93,7 +96,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const sorted = [...envelopes].sort(compareRuns);
 	const runSources: EvidenceRunSource[] = [];
 	for (const envelope of sorted) {
-		const receiptResult = await readReceipt(options.dataDir, envelope);
+		const receiptResult = await readReceipt(options.stateDir, envelope);
 		runSources.push({
 			envelope,
 			receipt: receiptResult.receipt,
@@ -105,8 +108,8 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const evidenceId =
 		source.kind === "run" ? `run-${sanitizeEvidenceId(source.runId)}` : `session-${sanitizeEvidenceId(source.sessionId)}`;
 	const directory = evidenceDirectory(options.dataDir, evidenceId);
-	const sessionLinks = await linkSessionEntries(options.dataDir, source, runSources);
-	const auditLinks = await linkAuditRows(options.dataDir, source, runSources, sessionLinks);
+	const sessionLinks = await linkSessionEntries(options.stateDir, source, runSources);
+	const auditLinks = await linkAuditRows(options.stateDir, source, runSources, sessionLinks);
 	const toolEventRows = toolEvents(runSources, sessionLinks, auditLinks);
 	const protectedArtifacts = protectedArtifactsFile(sessionLinks);
 	const findings = buildFindings(runSources, sessionLinks, auditLinks, protectedArtifacts);
@@ -416,7 +419,7 @@ function receiptAggregateToolEvents(runSources: ReadonlyArray<EvidenceRunSource>
 }
 
 async function linkSessionEntries(
-	dataDir: string,
+	stateDir: string,
 	source: EvidenceOverview["source"],
 	runSources: ReadonlyArray<EvidenceRunSource>,
 ): Promise<SessionLinkResult> {
@@ -428,7 +431,7 @@ async function linkSessionEntries(
 		readErrors: [],
 	};
 	for (const sessionId of attemptedSessionIds) {
-		const read = await readSessionEntriesForId(dataDir, sessionId);
+		const read = await readSessionEntriesForId(stateDir, sessionId);
 		if (read.missing) {
 			result.missingSessionIds.push(sessionId);
 			continue;
@@ -454,8 +457,8 @@ function sourceSessionIds(source: EvidenceOverview["source"], runSources: Readon
 	return uniqueStrings(values);
 }
 
-async function readSessionEntriesForId(dataDir: string, sessionId: string): Promise<SessionReadResult> {
-	const root = join(dataDir, "sessions");
+async function readSessionEntriesForId(stateDir: string, sessionId: string): Promise<SessionReadResult> {
+	const root = join(stateDir, "sessions");
 	let cwdHashes: string[];
 	try {
 		cwdHashes = await readdir(root);
@@ -724,12 +727,12 @@ function compareSessionToolCalls(a: SessionToolCall, b: SessionToolCall): number
 }
 
 async function linkAuditRows(
-	dataDir: string,
+	stateDir: string,
 	source: EvidenceOverview["source"],
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessionLinks: SessionLinkResult,
 ): Promise<AuditLinkResult> {
-	const auditRows = await readAuditRows(dataDir);
+	const auditRows = await readAuditRows(stateDir);
 	const rows: EvidenceAuditLinkedRow[] = [];
 	const runIds = new Set(runSources.map((item) => item.envelope.id));
 	const sessionIds = new Set(sessionLinks.attemptedSessionIds);
@@ -771,8 +774,8 @@ async function linkAuditRows(
 	return { rows, readErrors: auditRows.errors };
 }
 
-async function readAuditRows(dataDir: string): Promise<{ rows: AuditJsonRow[]; errors: string[] }> {
-	const root = join(dataDir, "audit");
+async function readAuditRows(stateDir: string): Promise<{ rows: AuditJsonRow[]; errors: string[] }> {
+	const root = join(stateDir, "audit");
 	let files: string[];
 	try {
 		files = await readdir(root);
@@ -1128,8 +1131,8 @@ function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {
 	return `${lines.join("\n")}\n`;
 }
 
-async function readRunLedger(dataDir: string): Promise<RunEnvelope[]> {
-	const target = join(dataDir, "state", "runs.json");
+async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
+	const target = join(stateDir, "runs.json");
 	let raw: string;
 	try {
 		raw = await readFile(target, "utf8");
@@ -1144,10 +1147,10 @@ async function readRunLedger(dataDir: string): Promise<RunEnvelope[]> {
 }
 
 async function readReceipt(
-	dataDir: string,
+	stateDir: string,
 	envelope: RunEnvelope,
 ): Promise<{ receipt: RunReceipt | null; error: string | null; integrityFailed: boolean }> {
-	const receiptPath = envelope.receiptPath ?? join(dataDir, "receipts", `${envelope.id}.json`);
+	const receiptPath = envelope.receiptPath ?? join(stateDir, "receipts", `${envelope.id}.json`);
 	let raw: string;
 	try {
 		raw = await readFile(receiptPath, "utf8");

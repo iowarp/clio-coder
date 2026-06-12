@@ -1,4 +1,4 @@
-import { clioDataDir } from "../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { EvidenceOverview } from "../domains/evidence/index.js";
 import { buildEvalEvidence, buildEvidence, inspectEvidence, listEvidenceOverviews } from "../domains/evidence/index.js";
 import { printError, printOk } from "./shared.js";
@@ -109,12 +109,14 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		return 0;
 	}
 	const dataDir = clioDataDir();
+	const stateDir = clioStateDir();
 	try {
 		if (parsed.command === "build") {
 			const result =
 				parsed.evalId === undefined
 					? await buildEvidence({
 							dataDir,
+							stateDir,
 							...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
 							...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
 						})

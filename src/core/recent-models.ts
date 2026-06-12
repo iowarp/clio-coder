@@ -1,8 +1,8 @@
 /**
  * Recently selected target/model refs ("targetId/wireModelId").
  *
- * Recents are runtime state, not user configuration, so they live in the data
- * dir (state/recent-models.json) and never in settings.yaml. Keeping them out
+ * Recents are runtime state, not user configuration, so they live in the state
+ * dir (recent-models.json) and never in settings.yaml. Keeping them out
  * of the settings file means an Alt+L model pick does not rewrite settings.yaml
  * just to bump a recency list, which would fire the config watcher in every
  * other running session. Favorites (modelSelector.favorites) remain in
@@ -11,10 +11,10 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { clioDataDir } from "./xdg.js";
+import { clioStateDir } from "./xdg.js";
 
 export function recentModelsPath(): string {
-	return join(clioDataDir(), "state", "recent-models.json");
+	return join(clioStateDir(), "recent-models.json");
 }
 
 let cache: string[] | null = null;
@@ -63,7 +63,7 @@ export function listRecentModels(options?: { limit?: number }): string[] {
 	return cache.slice(0, limit);
 }
 
-/** Move `ref` to the front of the recents list and persist to the data dir. */
+/** Move `ref` to the front of the recents list and persist to the state dir. */
 export function rememberRecentModel(ref: string, limit: number): string[] {
 	const path = recentModelsPath();
 	// Re-read so refs remembered by other processes since our last load are

@@ -67,10 +67,12 @@ const scratchDir = mkdtempSync(join(tmpdir(), "clio-live-smoke-"));
 const clioHome = scratchDir;
 const clioDataDir = join(scratchDir, "data");
 const clioConfigDir = join(scratchDir, "config");
+const clioStateDir = join(scratchDir, "state");
 const clioCacheDir = join(scratchDir, "cache");
 
 mkdirSync(clioDataDir, { recursive: true });
 mkdirSync(clioConfigDir, { recursive: true });
+mkdirSync(clioStateDir, { recursive: true });
 mkdirSync(clioCacheDir, { recursive: true });
 
 // Setup settings.yaml
@@ -137,6 +139,7 @@ const childEnv = {
 	CLIO_HOME: clioHome,
 	CLIO_DATA_DIR: clioDataDir,
 	CLIO_CONFIG_DIR: clioConfigDir,
+	CLIO_STATE_DIR: clioStateDir,
 	CLIO_CACHE_DIR: clioCacheDir,
 	CLIO_REQUIRE_HOME_PREFIX: "1",
 };

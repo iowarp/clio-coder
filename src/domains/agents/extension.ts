@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { AgentsContract } from "./contract.js";
 import { parseFleet } from "./fleet-parser.js";
@@ -15,7 +15,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 
 	function discover(): void {
 		const builtinDir = path.join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-		const userDir = path.join(clioDataDir(), "agents");
+		const userDir = path.join(clioConfigDir(), "agents");
 		const projectDir = path.join(process.cwd(), ".clio", "agents");
 		const builtin = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
 		const user = loadRecipesFromDir({ dir: userDir, source: "user" });

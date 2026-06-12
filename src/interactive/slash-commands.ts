@@ -196,7 +196,6 @@ export interface SlashCommandContext {
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
 	bus: SafeEventBus;
-	dataDir: string;
 	/** Returns the current `workers.default` block, resolved fresh on every /run. */
 	workerDefault: () => { target?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */

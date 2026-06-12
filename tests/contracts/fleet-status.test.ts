@@ -20,6 +20,7 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 	process.env.CLIO_HOME = scratch;
 	process.env.CLIO_DATA_DIR = join(scratch, "data");
 	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_STATE_DIR = join(scratch, "state");
 	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	return Promise.resolve()
@@ -62,12 +63,11 @@ function completedRow(overrides: Partial<RunEnvelope> & { id: string }): RunEnve
 describe("contracts/fleet-status", () => {
 	it("totals carry the token split from ledger rows and fall back to receipts for pre-split rows", async () => {
 		await withIsolatedClioHome(async (scratch) => {
-			const dataDir = join(scratch, "data");
-			mkdirSync(join(dataDir, "state"), { recursive: true });
-			mkdirSync(join(dataDir, "receipts"), { recursive: true });
+			const stateDir = join(scratch, "state");
+			mkdirSync(join(stateDir, "receipts"), { recursive: true });
 
 			// Pre-split row: no input/output on the envelope; the receipt carries it.
-			const receiptPath = join(dataDir, "receipts", "oldrow0000001.json");
+			const receiptPath = join(stateDir, "receipts", "oldrow0000001.json");
 			writeFileSync(receiptPath, JSON.stringify({ runId: "oldrow0000001", inputTokenCount: 4780, outputTokenCount: 167 }));
 			const rows: RunEnvelope[] = [
 				completedRow({ id: "newrow0000001", tokenCount: 5575, inputTokenCount: 2606, outputTokenCount: 189 }),
@@ -75,7 +75,7 @@ describe("contracts/fleet-status", () => {
 				// Running row from another process: no live meters cross-process.
 				completedRow({ id: "running000001", status: "running", endedAt: null, tokenCount: 0 }),
 			];
-			writeFileSync(join(dataDir, "state", "runs.json"), JSON.stringify(rows, null, 2));
+			writeFileSync(join(stateDir, "runs.json"), JSON.stringify(rows, null, 2));
 
 			const snapshot = statusSnapshot();
 			strictEqual(snapshot.totals.inputTokens, 2606 + 4780);
@@ -86,10 +86,10 @@ describe("contracts/fleet-status", () => {
 
 	it("a pre-split row with a missing receipt contributes zero split without failing the snapshot", async () => {
 		await withIsolatedClioHome(async (scratch) => {
-			const dataDir = join(scratch, "data");
-			mkdirSync(join(dataDir, "state"), { recursive: true });
+			const stateDir = join(scratch, "state");
+			mkdirSync(stateDir, { recursive: true });
 			const rows: RunEnvelope[] = [completedRow({ id: "orphan0000001", tokenCount: 100 })];
-			writeFileSync(join(dataDir, "state", "runs.json"), JSON.stringify(rows, null, 2));
+			writeFileSync(join(stateDir, "runs.json"), JSON.stringify(rows, null, 2));
 
 			const snapshot = statusSnapshot();
 			strictEqual(snapshot.totals.inputTokens, 0);

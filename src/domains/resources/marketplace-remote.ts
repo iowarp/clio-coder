@@ -43,12 +43,12 @@ export interface RemoteMarketplaceOptions {
 	forceRefresh?: boolean;
 }
 
-function cachePath(dataDir: string): string {
-	return path.join(dataDir, CACHE_FILENAME);
+function cachePath(cacheDir: string): string {
+	return path.join(cacheDir, CACHE_FILENAME);
 }
 
-function loadCache(dataDir: string): CacheData | null {
-	const file = cachePath(dataDir);
+function loadCache(cacheDir: string): CacheData | null {
+	const file = cachePath(cacheDir);
 	if (!existsSync(file)) return null;
 	try {
 		const data: unknown = JSON.parse(readFileSync(file, "utf8"));
@@ -67,9 +67,9 @@ function loadCache(dataDir: string): CacheData | null {
 	}
 }
 
-function saveCache(dataDir: string, cache: CacheData): void {
+function saveCache(cacheDir: string, cache: CacheData): void {
 	try {
-		writeFileSync(cachePath(dataDir), JSON.stringify(cache, null, 2), "utf8");
+		writeFileSync(cachePath(cacheDir), JSON.stringify(cache, null, 2), "utf8");
 	} catch {
 		// Cache persistence is best-effort; the listing already succeeded.
 	}
@@ -103,11 +103,11 @@ function pinnedFallback(): RemoteSkill[] {
 }
 
 export async function fetchRemoteMarketplace(
-	dataDir: string,
+	cacheDir: string,
 	options: RemoteMarketplaceOptions = {},
 ): Promise<RemoteSkill[]> {
 	const now = options.nowFn?.() ?? Date.now();
-	const cache = loadCache(dataDir);
+	const cache = loadCache(cacheDir);
 	if (!options.forceRefresh && cache && now - cache.timestamp < CACHE_TTL_MS) {
 		return cache.skills;
 	}
@@ -124,7 +124,7 @@ export async function fetchRemoteMarketplace(
 				name: entry.name,
 				repoUrl: entry.html_url ?? `https://github.com/iowarp/clio-coder/tree/main/skills/${entry.name}`,
 			}));
-		saveCache(dataDir, { timestamp: now, skills, details: cache?.details ?? {} });
+		saveCache(cacheDir, { timestamp: now, skills, details: cache?.details ?? {} });
 		return skills;
 	} catch {
 		if (cache) return cache.skills;
@@ -158,13 +158,13 @@ export function parseSkillMarkdown(content: string): { description?: string; ver
 }
 
 export async function fetchRemoteSkillDetail(
-	dataDir: string,
+	cacheDir: string,
 	name: string,
 	options: RemoteMarketplaceOptions = {},
 ): Promise<RemoteSkillDetail> {
 	if (!isSafeSkillName(name)) throw new Error(`Unsafe skill name: ${name}`);
 	const now = options.nowFn?.() ?? Date.now();
-	const cache = loadCache(dataDir);
+	const cache = loadCache(cacheDir);
 	const cached = cache?.details[name];
 	if (!options.forceRefresh && cache && cached && now - cache.timestamp < CACHE_TTL_MS) {
 		return { ...cached, source: "cache" };
@@ -177,7 +177,7 @@ export async function fetchRemoteSkillDetail(
 		const detail = parseSkillMarkdown(await res.text());
 		const next = cache ?? { timestamp: now, skills: [], details: {} };
 		next.details[name] = detail;
-		saveCache(dataDir, next);
+		saveCache(cacheDir, next);
 		return { ...detail, source: "remote" };
 	} catch (err) {
 		if (cached) return { ...cached, source: "cache" };

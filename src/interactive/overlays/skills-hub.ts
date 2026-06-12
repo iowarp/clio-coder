@@ -24,15 +24,15 @@ const GROUP_DIAGNOSTICS = "Diagnostics";
 
 export interface SkillsHubDeps {
 	listSkills: () => ResourceList<Skill>;
-	dataDir: string;
+	cacheDir: string;
 	setEditorText: (text: string) => void;
 	notice: (level: NoticeLevel, text: string) => void;
 	/** Installs a marketplace skill by name; rejection text reaches the user. */
 	installSkill: (name: string) => Promise<{ name: string; path: string; warnings: string[] }>;
 	onClose: () => void;
 	/** Injectable for tests; defaults to the live remote marketplace. */
-	fetchMarketplace?: (dataDir: string) => Promise<RemoteSkill[]>;
-	fetchSkillDetail?: (dataDir: string, name: string) => Promise<{ description?: string; body: string }>;
+	fetchMarketplace?: (cacheDir: string) => Promise<RemoteSkill[]>;
+	fetchSkillDetail?: (cacheDir: string, name: string) => Promise<{ description?: string; body: string }>;
 }
 
 function groupForScope(scope: string): string {
@@ -97,9 +97,9 @@ export function buildDiagnosticItems(list: ResourceList<Skill>): ListOverlayItem
 
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	const lifecycle = new AbortController();
-	const fetchMarketplace = deps.fetchMarketplace ?? ((dataDir: string) => fetchRemoteMarketplace(dataDir));
+	const fetchMarketplace = deps.fetchMarketplace ?? ((cacheDir: string) => fetchRemoteMarketplace(cacheDir));
 	const fetchDetail =
-		deps.fetchSkillDetail ?? ((dataDir: string, name: string) => fetchRemoteSkillDetail(dataDir, name));
+		deps.fetchSkillDetail ?? ((cacheDir: string, name: string) => fetchRemoteSkillDetail(cacheDir, name));
 
 	// The view reads this array by reference on every render, so hydration and
 	// install refreshes mutate it in place and request a render.
@@ -123,7 +123,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 				pendingRemoteDetails.add(skill.name);
 				void (async () => {
 					try {
-						const detail = await fetchDetail(deps.dataDir, skill.name);
+						const detail = await fetchDetail(deps.cacheDir, skill.name);
 						const lines: string[] = [];
 						if (detail.description) lines.push(detail.description, "");
 						if (detail.body.length > 0) lines.push(detail.body);
@@ -170,7 +170,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 
 	void (async () => {
 		try {
-			remoteSkills = await fetchMarketplace(deps.dataDir);
+			remoteSkills = await fetchMarketplace(deps.cacheDir);
 			marketplaceState = "live";
 		} catch {
 			marketplaceState = "offline";

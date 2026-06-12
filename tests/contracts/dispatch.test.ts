@@ -75,6 +75,7 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 	process.env.CLIO_HOME = scratch;
 	process.env.CLIO_DATA_DIR = join(scratch, "data");
 	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_STATE_DIR = join(scratch, "state");
 	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	return Promise.resolve()
@@ -1249,7 +1250,7 @@ rl.once("line", () => {
 				sessionId: null,
 			};
 			ledger.recordReceipt(env.id, receiptDraft);
-			const corruptPath = join(scratch, "data", "receipts", "corrupt.json");
+			const corruptPath = join(scratch, "state", "receipts", "corrupt.json");
 			writeFileSync(corruptPath, "{not-json\n", "utf8");
 
 			const reopened = openLedger({ maxRuns: 10 });

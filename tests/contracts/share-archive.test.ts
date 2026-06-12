@@ -74,6 +74,7 @@ describe("contracts/share archive import", () => {
 		process.env.CLIO_HOME = scratch;
 		process.env.CLIO_DATA_DIR = path.join(scratch, "data");
 		process.env.CLIO_CONFIG_DIR = path.join(scratch, "config");
+		process.env.CLIO_STATE_DIR = path.join(scratch, "state");
 		process.env.CLIO_CACHE_DIR = path.join(scratch, "cache");
 		resetXdgCache();
 	});

@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadDomains } from "../core/domain-loader.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
 	AgentsDomainModule,
@@ -297,7 +297,7 @@ function finiteCount(value: unknown): number {
 }
 
 function receiptTokenSplit(row: RunEnvelope): { input: number; output: number } | null {
-	const path = row.receiptPath ?? join(clioDataDir(), "receipts", `${row.id}.json`);
+	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
 		return { input: finiteCount(parsed.inputTokenCount), output: finiteCount(parsed.outputTokenCount) };
@@ -371,7 +371,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 		return 0;
 	}
-	process.stdout.write(`dispatch status @ ${snapshot.generatedAt} (ledger: ${clioDataDir()})\n`);
+	process.stdout.write(`dispatch status @ ${snapshot.generatedAt} (ledger: ${clioStateDir()})\n`);
 	if (snapshot.running.length === 0) {
 		process.stdout.write("running: none\n");
 	} else {

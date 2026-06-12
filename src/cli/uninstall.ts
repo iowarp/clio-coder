@@ -144,17 +144,21 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 	printHeader("Clio Coder uninstall");
 	report("config", dirs.config, args.keepConfig);
 	report("data", dirs.data, args.keepData);
+	report("state", dirs.state, args.keepData);
 	report("cache", dirs.cache, false);
 
 	if (!args.keepConfig) {
-		if (args.keepData && containsPath(dirs.config, dirs.data)) {
+		if (args.keepData && (containsPath(dirs.config, dirs.data) || containsPath(dirs.config, dirs.state))) {
 			removePath(join(dirs.config, "settings.yaml"), args.dryRun);
 			removePath(join(dirs.config, "credentials.yaml"), args.dryRun);
 		} else {
 			removePath(dirs.config, args.dryRun);
 		}
 	}
-	if (!args.keepData) removePath(dirs.data, args.dryRun);
+	if (!args.keepData) {
+		removePath(dirs.data, args.dryRun);
+		removePath(dirs.state, args.dryRun);
+	}
 	removePath(dirs.cache, args.dryRun);
 	resetXdgCache();
 

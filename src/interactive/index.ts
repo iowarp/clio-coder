@@ -174,8 +174,10 @@ export interface InteractiveDeps {
 	session?: SessionContract;
 	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
-	/** XDG data dir (clioDataDir()). `/view verify` reads from <dataDir>/receipts/<id>.json. */
-	dataDir: string;
+	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
+	stateDir: string;
+	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
+	cacheDir: string;
 	/**
 	 * Resolver for the current `workers.default` block. `/run` uses this to
 	 * short-circuit with an actionable error when no provider is configured
@@ -1431,7 +1433,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		notice: appendCommandNotice,
 		dispatch: deps.dispatch,
 		bus: deps.bus,
-		dataDir: deps.dataDir,
 		workerDefault: () => deps.getWorkerDefault?.(),
 		shutdown: () => {
 			void shutdown();
@@ -1537,7 +1538,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				})
 				.finally(() => tui.requestRender());
 		},
-		verifyReceipt: (runId) => verifyReceiptFile(deps.dataDir, runId),
+		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
 		submitChat: (text) => {
 			const runSubmit = (sub: InteractiveSubmitExpansion) => {
 				void (async () => {
@@ -2317,7 +2318,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		const sessionMeta = deps.session?.current() ?? null;
 		overlayHandle = openViewOverlay(tui, {
 			providers: createDefaultArtifactProviders({
-				dataDir: deps.dataDir,
+				stateDir: deps.stateDir,
 				dispatch: deps.dispatch,
 				sessionMeta,
 				readSessionEntries: deps.readSessionEntries,
@@ -2661,7 +2662,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "skills-hub";
 		overlayHandle = openSkillsHub(tui, {
 			listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
-			dataDir: deps.dataDir,
+			cacheDir: deps.cacheDir,
 			setEditorText: (text) => {
 				editor.setText(text);
 				tui.requestRender();
