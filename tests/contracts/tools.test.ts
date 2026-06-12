@@ -80,7 +80,7 @@ function resultSize(value: unknown): { truncated?: boolean } | null {
 	return typeof truncated === "boolean" ? { truncated } : {};
 }
 
-function runReceipt(runId: string, task: string): RunReceipt {
+function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
 	return {
 		runId,
 		agentId: "coder",
@@ -108,6 +108,7 @@ function runReceipt(runId: string, task: string): RunReceipt {
 			algorithm: "sha256",
 			digest: "0".repeat(64),
 		},
+		...overrides,
 	};
 }
 
@@ -442,6 +443,45 @@ describe("contracts/tools dispatch run paths", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("dispatch run run-123 completed"));
 			strictEqual(result.details?.runId, "run-123");
+		}
+	});
+
+	it("createDispatchTool headlines failed receipts as failures", async () => {
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => ({
+				runId: "run-failed",
+				events: (async function* () {})(),
+				finalPromise: Promise.resolve(
+					runReceipt("run-failed", "fail work", {
+						exitCode: 2,
+						outcome: "failed",
+						outcomeDetail: "exit code 2",
+						failureMessage: "worker crashed",
+					}),
+				),
+			}),
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: () => ({ ...runEnvelope("run-failed"), receiptPath: "/tmp/failed-receipt.json" }),
+			abort: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+
+		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const result = await tool.run({ task: "fail work", agent_id: "coder" });
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			ok(result.message.includes("dispatch run run-failed failed"));
+			ok(!result.message.includes("dispatch run run-failed completed"));
 		}
 	});
 
