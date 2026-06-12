@@ -4,10 +4,11 @@
  * modes, prompts) need settings access before the domain loader has finished booting.
  */
 
-import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "./defaults.js";
+import { type SafeResourceWriteResult, safeResourceWrite } from "./safe-resource-write.js";
 import { clioConfigDir } from "./xdg.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
@@ -773,26 +774,22 @@ export function readSettings(): ClioSettings {
 	return normalizeSettings(parsed ?? {});
 }
 
-let settingsWriteSequence = 0;
+export interface WriteSettingsOptions {
+	backup?: boolean;
+}
 
 /**
  * Whole-file settings write via temp-file + rename. The rename is atomic on
  * POSIX, so a concurrent readSettings never observes a partially written
  * YAML document and readers never need the settings lock.
  */
-export function writeSettings(settings: ClioSettings): void {
+export function writeSettings(settings: ClioSettings, options: WriteSettingsOptions = {}): SafeResourceWriteResult {
 	const path = settingsPath();
-	const tmp = `${path}.tmp-${process.pid}-${++settingsWriteSequence}`;
-	writeFileSync(tmp, stringifyYaml(serializeSettings(normalizeSettings(settings))), {
+	return safeResourceWrite(path, stringifyYaml(serializeSettings(normalizeSettings(settings))), {
+		...(options.backup !== undefined ? { backup: options.backup } : {}),
 		encoding: "utf8",
 		mode: 0o644,
 	});
-	try {
-		renameSync(tmp, path);
-	} catch (err) {
-		rmSync(tmp, { force: true });
-		throw err;
-	}
 }
 
 /**

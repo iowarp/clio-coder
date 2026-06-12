@@ -1,5 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
 import type {
@@ -55,8 +56,7 @@ function readState(scope: ExtensionScope, cwd = process.cwd()): ExtensionState {
 
 function writeState(scope: ExtensionScope, state: ExtensionState, cwd = process.cwd()): void {
 	const filePath = statePath(scope, cwd);
-	mkdirSync(path.dirname(filePath), { recursive: true });
-	writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+	safeResourceWrite(filePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8" });
 }
 
 function installedFromRoot(root: string, scope: ExtensionScope, state: ExtensionState): InstalledExtension | null {
