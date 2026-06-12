@@ -112,6 +112,21 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 
 ### Changed
 
+- Changed model discovery so a live provider catalog is authoritative once a
+  target has returned one: stale configured or default model names stop
+  resolving after the provider removes them. One shared discovery path now
+  feeds the resolver, `clio models`, `/model`, `/settings`, `/scoped-models`,
+  and `/targets`. `clio models` probes live by default (`--offline` skips the
+  probe), the `/model` overlay auto-refreshes catalogs on open, and probes
+  carry per-model load state from OpenAI-compatible `/v1/models` (llama.cpp
+  router states such as loaded, loading, unloaded, and failed) surfaced as a
+  state column, overlay detail, and `/targets` model preview.
+- Enriched Clio's identity with the CLIO acronym (Context Layer for
+  Input/Output), the Greek muse of history namesake, her standing as the
+  first female agentic coder, and provenance from the Gnosis Research Center
+  at Illinois Tech under PI @akougkas. The system-prompt fragment, fallback
+  identity prompt, bootstrap self-description, TUI banner, and CLI help text
+  carry the same story.
 - Replaced bracket-prefixed command output dialects with a themed single-line
   notice channel for info, success, warning, and error messages.
 - Replaced hand-written overlay footer text with `buildHint`, including

@@ -26,7 +26,8 @@ import { runVersionCommand } from "./version.js";
 
 const HELP = `Clio Coder command line
 
-Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosystem of agentic science.
+Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosystem of agentic
+science. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history.
 
 Usage:
   clio                      start interactive repository chat
