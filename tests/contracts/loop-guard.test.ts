@@ -20,18 +20,27 @@ import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 const LOOP_THRESHOLD = createLoopState().maxRepeats;
 
 /** Safety stub backed by the real sliding-window loop detector. */
-function testSafety(options: { blockTool?: string } = {}): SafetyContract {
+function testSafety(options: { blockTool?: string; askTool?: string } = {}): SafetyContract {
 	let loopState = createLoopState();
 	return {
 		classify: () => ({ actionClass: "read", reasons: [] }),
-		evaluate: (call) =>
-			options.blockTool !== undefined && call.tool === options.blockTool
-				? {
-						kind: "block",
-						classification: { actionClass: "read", reasons: [] },
-						rejection: { short: `${call.tool} blocked by policy`, detail: "test block", hints: [] },
-					}
-				: { kind: "allow", classification: { actionClass: "read", reasons: [] } },
+		evaluate: (call) => {
+			if (options.blockTool !== undefined && call.tool === options.blockTool) {
+				return {
+					kind: "block",
+					classification: { actionClass: "read", reasons: [] },
+					rejection: { short: `${call.tool} blocked by policy`, detail: "test block", hints: [] },
+				};
+			}
+			if (options.askTool !== undefined && call.tool === options.askTool) {
+				return {
+					kind: "ask",
+					classification: { actionClass: "write", reasons: [] },
+					rejection: { short: `${call.tool} needs confirmation`, detail: "test ask", hints: [] },
+				};
+			}
+			return { kind: "allow", classification: { actionClass: "read", reasons: [] } };
+		},
 		observeLoop(key, now) {
 			const [next, verdict] = observe(loopState, key, now ?? Date.now());
 			loopState = next;
@@ -197,6 +206,39 @@ describe("unified loop guard registration", () => {
 		const blocked = await registry.invoke(call, { turnId: "t1" });
 		strictEqual(blocked.kind, "blocked");
 		ok(blocked.kind === "blocked" && blocked.reason.includes("loop detected"));
+	});
+
+	it("observes parked-then-denied attempts and upgrades the denial reason once the loop trips", async () => {
+		const safety = testSafety({ askTool: ToolNames.Write });
+		const bus = createSafeEventBus();
+		const events: LoopBlockedPayload[] = [];
+		bus.on(BusChannels.LoopBlocked, (payload) => {
+			events.push(payload);
+		});
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety, bus })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockReadSpec(ToolNames.Write));
+		const call = { tool: ToolNames.Write, args: { path: "/outside/denied.txt" } };
+		const denialReason = "permission denied: headless runs cannot confirm";
+		// Each cycle parks the identical call, then the harness denies it,
+		// matching the headless clio-run pattern that previously looped forever.
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			const pending = registry.invoke(call, { turnId: "t1" });
+			registry.cancelParkedCalls(denialReason);
+			const verdict = await pending;
+			strictEqual(verdict.kind, "blocked");
+			ok(verdict.kind === "blocked" && verdict.reason === denialReason, `denial ${i} keeps the original reason`);
+		}
+		const pending = registry.invoke(call, { turnId: "t1" });
+		registry.cancelParkedCalls(denialReason);
+		const tripped = await pending;
+		strictEqual(tripped.kind, "blocked");
+		ok(
+			tripped.kind === "blocked" && tripped.reason.includes("loop detected"),
+			"the detector's reason replaces the generic denial at the threshold",
+		);
+		strictEqual(events.length, 1, "the loop block is visible on the bus");
+		strictEqual(events[0]?.tool, ToolNames.Write);
 	});
 
 	it("keeps fingerprints stable across argument key order", () => {

@@ -1,16 +1,12 @@
 import type { TSchema } from "typebox";
-import {
-	type PendingSkillToolPolicy,
-	type SkillActivation,
-	skillActivationFromToolDetails,
-} from "../core/skill-activation.js";
+import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
-import { detectValidationCommand, toolMutationPaths } from "../domains/safety/protected-artifacts.js";
+import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -109,9 +105,6 @@ export interface RegistryDeps {
 	 * observable.
 	 */
 	middleware?: MiddlewareContract;
-	onSkillActivation?: (activation: SkillActivation) => void;
-	/** Fired after a successful file-mutating tool so the codewiki can refresh incrementally. */
-	onFileMutation?: (event: { paths: ReadonlyArray<string>; toolName: ToolName }) => void;
 }
 
 export interface ToolInvokeOptions {
@@ -265,8 +258,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options), options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
-			emitSkillActivation(deps, spec, finalResult, options);
-			emitFileMutation(deps, spec, call, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -335,10 +326,28 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	 * in front of admission and had this coverage).
 	 */
 	const observeBlockedAttempt = (call: ClassifierCall, verdict: RegistryVerdict, options?: ToolInvokeOptions): void => {
-		if (verdict.kind !== "blocked" || !deps.middleware) return;
+		if (verdict.kind !== "blocked") return;
+		observeRejectedAttempt(call, verdict.decision, options);
+	};
+
+	/**
+	 * Run before_tool hooks for an attempt that will not execute, so repetition
+	 * detectors see it. Effects never change the rejection itself; the returned
+	 * value is the first block_tool reason (the loop guard's actionable
+	 * feedback), which the park-denial path substitutes for its generic reason
+	 * so a model retrying a denied call learns to stop instead of looping until
+	 * the run times out.
+	 */
+	const observeRejectedAttempt = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options?: ToolInvokeOptions,
+	): string | null => {
+		if (!deps.middleware) return null;
 		const spec = tools.get(call.tool as ToolName);
-		if (!spec) return;
-		runToolHook("before_tool", spec, call, verdict.decision, options);
+		if (!spec) return null;
+		const effects = runToolHook("before_tool", spec, call, decision, options);
+		return firstBlockToolEffect(effects)?.reason ?? null;
 	};
 
 	const notifyPermissionRequired = (call: ClassifierCall, decision: SafetyDecision): void => {
@@ -402,7 +411,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (parked.length === 0) return;
 			const pending = parked.splice(0, parked.length);
 			for (const entry of pending) {
-				entry.resolve({ kind: "blocked", reason, decision: entry.decision });
+				// A denied/cancelled park is still a model attempt: observe it so
+				// identical retries trip the loop detector. When the detector
+				// fires, its reason replaces the generic denial so the model gets
+				// recovery guidance rather than the same static message forever.
+				const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
+				entry.resolve({ kind: "blocked", reason: loopReason ?? reason, decision: entry.decision });
 			}
 		},
 		onPermissionRequired(listener) {
@@ -421,34 +435,6 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
-}
-
-function emitFileMutation(deps: RegistryDeps, spec: ToolSpec, call: ClassifierCall, result: ToolResult): void {
-	if (!deps.onFileMutation || result.kind !== "ok") return;
-	const paths = toolMutationPaths(spec.name, call.args);
-	if (paths.length === 0) return;
-	try {
-		deps.onFileMutation({ paths, toolName: spec.name });
-	} catch {
-		// Incremental indexing is best-effort and must not change tool execution.
-	}
-}
-
-function emitSkillActivation(
-	deps: RegistryDeps,
-	spec: ToolSpec,
-	result: ToolResult,
-	options?: ToolInvokeOptions,
-): void {
-	if (!deps.onSkillActivation || spec.name !== ToolNames.ReadSkill || result.kind !== "ok") return;
-	const activation = skillActivationFromToolDetails(result.details, options?.turnId);
-	if (!activation) return;
-	try {
-		deps.onSkillActivation(activation);
-	} catch {
-		// Activation writes are audit metadata. Tool execution has already
-		// succeeded and must not be changed by a failed ledger append.
-	}
 }
 
 function buildToolHookInput(

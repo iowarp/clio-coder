@@ -93,6 +93,7 @@ import {
 } from "../interactive/keybinding-manager.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
+import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
 export interface BootResult {
@@ -546,12 +547,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	middleware.registerHook(protectedArtifactsGuard);
 	middleware.registerHook(createDispatchDedupRegistration());
-	const toolRegistry = createRegistry({
-		safety,
-		middleware,
-		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),
-		...(contextDomain ? { onFileMutation: (event) => contextDomain.noteFileChanges(event.paths) } : {}),
-	});
+	// Observers run after the guards; they emit no effects and their sinks are
+	// best-effort (session ledger, codewiki refresh).
+	middleware.registerHook(
+		createSkillActivationObserver((activation) => appendSkillActivationRegistryEvent(session, activation)),
+	);
+	if (contextDomain) {
+		middleware.registerHook(createFileMutationObserver((event) => contextDomain.noteFileChanges(event.paths)));
+	}
+	const toolRegistry = createRegistry({ safety, middleware });
 	let askUserHandler: AskUserHandler | null = null;
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
