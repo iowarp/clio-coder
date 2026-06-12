@@ -20,6 +20,7 @@ export const BusChannels = {
 	SafetyClassified: "safety.classified",
 	SafetyBlocked: "safety.blocked",
 	SafetyAllowed: "safety.allowed",
+	LoopBlocked: "safety.loopBlocked",
 	ProviderHealth: "provider.health",
 	DispatchEnqueued: "dispatch.enqueued",
 	DispatchStarted: "dispatch.started",
@@ -65,6 +66,27 @@ export interface ContextActivityPayload {
 	current?: number;
 	total?: number;
 	detail?: string;
+}
+
+/**
+ * Payload published on {@link BusChannels.LoopBlocked} when the interactive
+ * loop guard blocks a verbatim-repeated tool call before execution. The
+ * interactive layer renders a warn notice per block and, when `interrupted`
+ * is true, cancels the active turn with an error notice. The backend never
+ * imports TUI code; this event is the only seam between them.
+ */
+export interface LoopBlockedPayload {
+	tool: string;
+	/** Identical-call observations inside the detector's sliding window. */
+	repeatCount: number;
+	/** Loop blocks accumulated in the current user turn, this one included. */
+	blocksThisTurn: number;
+	/** Per-turn block budget, carried so renderers never hardcode the threshold. */
+	budget: number;
+	/** True when the per-turn block budget is exhausted and the turn must stop. */
+	interrupted: boolean;
+	at: number;
+	turnId?: string;
 }
 
 /** Payload published on {@link BusChannels.ContextPruned} after compaction reclaims tokens. */
