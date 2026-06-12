@@ -17,6 +17,15 @@ observability into single-purpose hubs. Several old slash commands are retired
 because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 `/help`, and `/view`.
 
+Autonomy is now an enforced part of tool admission. The release separates the
+always-on safety net from the autonomy level that decides whether approved
+tool calls run, ask, or stop, and it applies that mapping across chat,
+workers, headless runs, and ACP delegations. Operator notices name the
+deciding axis, so read-only denials, approval parks, and safety-net blocks no
+longer look like one generic safety failure. Full-auto gained sequencing
+operators while command substitution and destructive command forms stayed
+behind explicit rails.
+
 ### Added
 
 - Added a declarative slash-command registry. Command parsing, usage lines,
@@ -36,10 +45,16 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   GitHub marketplace backed by the repository `skills/` tree, lazy SKILL.md
   detail loading, 24-hour disk caching, offline fallback to stale and pinned
   marketplace data, and in-place marketplace install.
-- Added the `/settings` Settings Center with Safety, Orchestrator, Fleet,
-  Budget, Compaction, Retry, and Terminal sections, a two-lane desktop layout,
-  a stacked narrow layout, row descriptions, config paths, current values, and
-  refresh-in-place behavior on config changes.
+- Added the `/settings` Settings Center with Autonomy & Safety, Orchestrator,
+  Fleet, Budget, Compaction, Retry, and Terminal sections, a two-lane desktop
+  layout, a stacked narrow layout, row descriptions, config paths, current
+  values, and refresh-in-place behavior on config changes.
+- Added a builtin stalled-turn nudge for assistant turns that announce work,
+  make no tool calls, and stop normally. It injects one continuation reminder
+  through middleware, lets human steering win over pending nudges, and warns
+  instead of looping after a second stall.
+- Added `test:file` as a fast one-file verification lane backed by
+  `node --import tsx --test`.
 - Added `/view`, a full-screen observability viewer for run receipts, dispatch
   metadata and outputs, durable tool outputs, and compaction summaries. It has
   a grouped/filterable artifact list, a pager-style content pane, lazy
@@ -68,7 +83,7 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   builtin rules ship.
 - Added operator notices for previously invisible bus events: budget alerts
   with spend and ceiling, restart-required setting changes naming the paths,
-  and safety blocks naming the rule and policy source that fired. Domain
+  and safety-net blocks naming the rule and policy source that fired. Domain
   lifecycle joins the opt-in bus tracer and domain load failures write a
   structured stderr line before boot aborts.
 - Added bounded worker diagnostics. A crashed or garbage-printing worker keeps
@@ -112,6 +127,30 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 
 ### Changed
 
+- Changed the safety level setting into an enforced `autonomy` level with an
+  always-on safety net. The persisted setting is now `autonomy`, `/settings`
+  shows Autonomy & Safety, dashboards, help, and notices distinguish
+  `[autonomy]`, `[approval]`, and `[safety-net]`, and `read-only` became the
+  floor level with its own prompt fragment.
+- Changed tool admission to evaluate the safety net before the autonomy
+  mapping in every execution context. Level-independent blocks and confirm
+  rails still apply first, then read-only denies mutations with
+  propose-instead guidance, suggest parks mutations, auto-edit runs writes and
+  recognized commands while asking for unrecognized bash, and full-auto runs
+  unrecognized bash while unknown actions still ask.
+- Changed shell-operator handling to let autonomy decide sequencing operators
+  while keeping command substitution behind a confirmation rail at every
+  level. Pipes, `&&`, `;`, and redirects now become unrecognized commands that
+  full-auto can run, and damage-control rules explicitly cover deletion and
+  truncation forms such as `find -delete`, `rsync --delete`, `shred`,
+  `truncate -s 0`, and `:>`.
+- Changed `run_task` admission to allow any declared verification-family
+  script instead of a fixed six-script allowlist. Rejections now distinguish
+  undeclared family scripts from non-verification scripts and point the model
+  to the right next action.
+- Changed codewiki mutation observation so successful edit paths batch off the
+  `after_tool` middleware hot path. Middleware budget notices now warn once
+  per registration and hook while telemetry still records every exceedance.
 - Changed model discovery so a live provider catalog is authoritative once a
   target has returned one: stale configured or default model names stop
   resolving after the provider removes them. One shared discovery path now
@@ -148,6 +187,14 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 
 ### Fixed
 
+- Fixed `/run verifier --target ... <task>` swallowing target flags into the
+  task when flags appeared after the agent name. `/run` now extracts declared
+  trailing flags before the first task token while other rest-positional
+  commands keep byte-identical parsing.
+- Fixed dispatch workers using stale configured model ids when the live
+  catalog exposed only an alias. Worker dispatch now canonicalizes exact,
+  unique separator-prefix, and case-insensitive matches before launching the
+  worker.
 - Fixed `/tree` turn selection so rows are action-honest: turn rows now act on
   turn ids, not the current session id.
 - Fixed `/tree` footer hints by removing delete actions that could never
