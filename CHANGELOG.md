@@ -66,6 +66,14 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   and exact tool-name scoping, with a registration seam on the bundle and
   payload resolution by rule id when workers reconstitute snapshots. Zero
   builtin rules ship.
+- Added operator notices for previously invisible bus events: budget alerts
+  with spend and ceiling, restart-required setting changes naming the paths,
+  and safety blocks naming the rule and policy source that fired. Domain
+  lifecycle joins the opt-in bus tracer and domain load failures write a
+  structured stderr line before boot aborts.
+- Added bounded worker diagnostics. A crashed or garbage-printing worker keeps
+  a 4KB stderr tail and a malformed-stdout count that reach the run receipt,
+  the dispatch failure detail, and the dispatch board.
 
 ### Changed
 
@@ -104,6 +112,16 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
   outside the replaced spans are untouched.
 - Fixed middleware snapshot contracts reporting every enabled matching rule as
   fired; `ruleIds` now lists exactly the rules that emitted effects.
+- Fixed dispatch terminal presentation losing the outcome taxonomy: canceled
+  runs now show as aborted, stalled as dead, timed-out with a timeout detail,
+  heartbeat-dead rows are no longer downgraded by terminal events, ACP
+  terminal payloads keep the input/output token split, and failed dispatch
+  tool results stop headlining as "completed".
+- Fixed leaked bus subscriptions in the context and prompts domains; both now
+  retain their unsubscribes and call them on stop.
+- Fixed the status controller collapsing every abort into one hardcoded path;
+  turn summaries now carry abort provenance (dispatch abort, dispatch drain,
+  or stream cancel with its reason).
 
 ### Removed
 
