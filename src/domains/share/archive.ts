@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, type Stats, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, type Stats, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { type ClioSettings, readSettings, settingsPath, writeSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
+import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { readClioVersion } from "../../core/package-root.js";
-import { clioConfigDir } from "../../core/xdg.js";
+import {
+	type SafeResourceWriteResult,
+	safeResourceBackupPath,
+	safeResourceWrite,
+} from "../../core/safe-resource-write.js";
+import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 
 export type ShareScope = "project" | "user";
 export type ShareEntryType = "project-context" | "prompt" | "skill" | "settings" | "extension";
@@ -77,6 +83,13 @@ export interface ShareImportPlan {
 	archive: ClioShareArchive | null;
 	actions: ShareImportAction[];
 	diagnostics: ShareDiagnostic[];
+	recovery?: ShareImportRecovery;
+}
+
+export interface ShareImportRecovery {
+	written: string[];
+	backups: string[];
+	failed?: string;
 }
 
 const PROJECT_CONTEXT_FILES = ["CLIO.md", "AGENTS.md", "CODEX.md", "GEMINI.md", "CLAUDE.md"] as const;
@@ -88,6 +101,10 @@ function sha256(buffer: Buffer): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isErrorWithCode(value: unknown): value is NodeJS.ErrnoException {
+	return value instanceof Error && "code" in value;
 }
 
 function stableJson(value: unknown): string {
@@ -276,8 +293,7 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 
 export function writeShareArchive(outPath: string, options: ShareExportOptions = {}): ClioShareArchive {
 	const archive = createShareArchive(options);
-	mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
-	writeFileSync(outPath, `${stableJson(archive)}\n`, "utf8");
+	safeResourceWrite(path.resolve(outPath), `${stableJson(archive)}\n`, { encoding: "utf8" });
 	return archive;
 }
 
@@ -321,32 +337,173 @@ export function readShareArchive(filePath: string): ClioShareArchive {
 	return parseArchive(parsed);
 }
 
-function targetPathForFile(entry: ShareArchiveFile, options: ShareImportOptions): string {
+interface ShareImportTargetRoot {
+	root: string;
+	containmentRoot: string;
+	scope: ShareScope;
+}
+
+interface ShareImportPreparedTarget {
+	entry: ShareArchiveFile;
+	target: string;
+	scope: ShareScope;
+	buffer: Buffer;
+}
+
+interface ShareImportPreparedPlan {
+	archive: ClioShareArchive | null;
+	actions: ShareImportAction[];
+	diagnostics: ShareDiagnostic[];
+	targets: ShareImportPreparedTarget[];
+}
+
+function configDirPath(): string {
+	return path.resolve(resolveClioDirs().config);
+}
+
+function settingsFilePath(): string {
+	return path.join(configDirPath(), "settings.yaml");
+}
+
+function relativePathSegments(relativePath: string): string[] | null {
+	if (relativePath.length === 0 || relativePath.includes("\0")) return null;
+	if (path.isAbsolute(relativePath) || path.win32.isAbsolute(relativePath)) return null;
+	const segments = relativePath.replace(/\\/g, "/").split("/");
+	if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) return null;
+	return segments;
+}
+
+function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions): ShareImportTargetRoot {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
+	const config = configDirPath();
 	const scope = options.scope ?? entry.scope;
 	switch (entry.type) {
 		case "project-context":
-			return path.join(cwd, entry.relativePath);
+			return { root: cwd, containmentRoot: cwd, scope: "project" };
 		case "prompt":
 			return scope === "user"
-				? path.join(clioConfigDir(), "prompts", entry.relativePath)
-				: path.join(cwd, ".clio", "prompts", entry.relativePath);
+				? { root: path.join(config, "prompts"), containmentRoot: config, scope }
+				: { root: path.join(cwd, ".clio", "prompts"), containmentRoot: cwd, scope };
 		case "skill":
 			return scope === "user"
-				? path.join(clioConfigDir(), "skills", entry.relativePath)
-				: path.join(cwd, ".clio", "skills", entry.relativePath);
+				? { root: path.join(config, "skills"), containmentRoot: config, scope }
+				: { root: path.join(cwd, ".clio", "skills"), containmentRoot: cwd, scope };
 		case "extension":
 			return scope === "user"
-				? path.join(clioConfigDir(), "extensions", entry.relativePath)
-				: path.join(cwd, ".clio", "extensions", entry.relativePath);
+				? { root: path.join(config, "extensions"), containmentRoot: config, scope }
+				: { root: path.join(cwd, ".clio", "extensions"), containmentRoot: cwd, scope };
 		case "settings":
-			return settingsPath();
+			return { root: config, containmentRoot: config, scope };
 	}
 }
 
-function destinationScope(entry: ShareArchiveFile, options: ShareImportOptions): ShareScope {
-	if (entry.type === "project-context") return "project";
-	return options.scope ?? entry.scope;
+function isInsideOrEqual(candidate: string, root: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function lstatExists(candidate: string): boolean {
+	try {
+		lstatSync(candidate);
+		return true;
+	} catch (err) {
+		if (isErrorWithCode(err) && (err.code === "ENOENT" || err.code === "ENOTDIR")) return false;
+		throw err;
+	}
+}
+
+function nearestExistingPath(candidate: string): string | null {
+	let current = path.resolve(candidate);
+	while (!lstatExists(current)) {
+		const parent = path.dirname(current);
+		if (parent === current) return null;
+		current = parent;
+	}
+	return current;
+}
+
+function pathDiagnostic(entry: ShareArchiveFile): string {
+	return `${entry.archivePath} -> ${entry.relativePath}`;
+}
+
+function validateRealPathContainment(
+	entry: ShareArchiveFile,
+	target: string,
+	containmentRoot: string,
+): ShareDiagnostic | null {
+	const rootAnchor = nearestExistingPath(containmentRoot);
+	const targetAnchor = nearestExistingPath(lstatExists(target) ? target : path.dirname(target));
+	if (!rootAnchor || !targetAnchor) {
+		return {
+			type: "error",
+			message: `share archive target could not be resolved safely: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
+	let realRoot: string;
+	let realTarget: string;
+	try {
+		realRoot = realpathSync(rootAnchor);
+		realTarget = realpathSync(targetAnchor);
+	} catch {
+		return {
+			type: "error",
+			message: `share archive target could not be resolved safely: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
+	if (!isInsideOrEqual(realTarget, realRoot)) {
+		return {
+			type: "error",
+			message: `share archive target escapes import root: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
+	return null;
+}
+
+function resolveImportTarget(
+	entry: ShareArchiveFile,
+	options: ShareImportOptions,
+): ShareImportPreparedTarget | ShareDiagnostic {
+	const segments = relativePathSegments(entry.relativePath);
+	if (!segments) {
+		return {
+			type: "error",
+			message: `share archive relativePath is not safe: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
+	const targetRoot = targetRootForFile(entry, options);
+	const target = entry.type === "settings" ? settingsFilePath() : path.resolve(targetRoot.root, ...segments);
+	if (!isInsideOrEqual(target, targetRoot.root)) {
+		return {
+			type: "error",
+			message: `share archive target escapes import root: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
+	const realPathDiagnostic = validateRealPathContainment(entry, target, targetRoot.containmentRoot);
+	if (realPathDiagnostic) return realPathDiagnostic;
+	return { entry, target, scope: targetRoot.scope, buffer: decodeArchiveFile(entry) };
+}
+
+function preflightImportTargets(
+	archive: ClioShareArchive,
+	options: ShareImportOptions,
+): { targets: ShareImportPreparedTarget[]; diagnostics: ShareDiagnostic[] } {
+	const targets: ShareImportPreparedTarget[] = [];
+	const diagnostics: ShareDiagnostic[] = [];
+	for (const entry of archive.files) {
+		const resolved = resolveImportTarget(entry, options);
+		if ("type" in resolved) {
+			diagnostics.push(resolved);
+			continue;
+		}
+		targets.push(resolved);
+	}
+	if (diagnostics.length > 0) return { targets: [], diagnostics };
+	return { targets, diagnostics };
 }
 
 function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
@@ -367,21 +524,22 @@ function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
 function settingsPlan(buffer: Buffer, options: ShareImportOptions): ShareDiagnostic[] {
 	const parsed = parseYaml(buffer.toString("utf8")) as unknown;
 	if (!isRecord(parsed)) return [{ type: "error", message: "settings fragment must be a YAML object" }];
-	const current = settingsFragment(readSettings());
+	const settingsTarget = settingsFilePath();
+	const current = settingsFragment(existsSync(settingsTarget) ? readSettings() : DEFAULT_SETTINGS);
 	const diagnostics: ShareDiagnostic[] = [];
 	for (const [key, value] of Object.entries(parsed)) {
 		if (key in current && JSON.stringify(current[key]) !== JSON.stringify(value)) {
 			diagnostics.push({
 				type: "conflict",
 				message: `settings fragment changes ${key}`,
-				path: settingsPath(),
+				path: settingsTarget,
 			});
 		}
 	}
 	return options.force ? diagnostics.filter((diag) => diag.type !== "conflict") : diagnostics;
 }
 
-export function planShareImport(filePath: string, options: ShareImportOptions = {}): ShareImportPlan {
+function prepareShareImport(filePath: string, options: ShareImportOptions = {}): ShareImportPreparedPlan {
 	let archive: ClioShareArchive;
 	try {
 		archive = readShareArchive(filePath);
@@ -390,14 +548,17 @@ export function planShareImport(filePath: string, options: ShareImportOptions = 
 			archive: null,
 			actions: [],
 			diagnostics: [{ type: "error", message: err instanceof Error ? err.message : String(err), path: filePath }],
+			targets: [],
 		};
 	}
 	const diagnostics: ShareDiagnostic[] = [...versionDiagnostics(archive)];
 	const actions: ShareImportAction[] = [];
-	for (const entry of archive.files) {
-		const target = targetPathForFile(entry, options);
-		const scope = destinationScope(entry, options);
-		const buffer = decodeArchiveFile(entry);
+	const preflight = preflightImportTargets(archive, options);
+	if (preflight.diagnostics.length > 0) {
+		return { archive, actions: [], diagnostics: [...diagnostics, ...preflight.diagnostics], targets: [] };
+	}
+	for (const targetInfo of preflight.targets) {
+		const { entry, target, scope, buffer } = targetInfo;
 		if (entry.type === "settings") {
 			diagnostics.push(...settingsPlan(buffer, options));
 			actions.push({ action: "settings", type: entry.type, scope, path: target });
@@ -417,10 +578,23 @@ export function planShareImport(filePath: string, options: ShareImportOptions = 
 		}
 		actions.push({ action: "write", type: entry.type, scope, path: target });
 	}
-	return { archive, actions, diagnostics };
+	return { archive, actions, diagnostics, targets: preflight.targets };
 }
 
-function mergeSettingsFragment(buffer: Buffer): void {
+function publicImportPlan(prepared: ShareImportPreparedPlan, recovery?: ShareImportRecovery): ShareImportPlan {
+	return {
+		archive: prepared.archive,
+		actions: prepared.actions,
+		diagnostics: prepared.diagnostics,
+		...(recovery ? { recovery } : {}),
+	};
+}
+
+export function planShareImport(filePath: string, options: ShareImportOptions = {}): ShareImportPlan {
+	return publicImportPlan(prepareShareImport(filePath, options));
+}
+
+function mergeSettingsFragment(buffer: Buffer): SafeResourceWriteResult {
 	const parsed = parseYaml(buffer.toString("utf8")) as unknown;
 	if (!isRecord(parsed)) throw new Error("settings fragment must be a YAML object");
 	const current = readSettings();
@@ -439,23 +613,64 @@ function mergeSettingsFragment(buffer: Buffer): void {
 			(next as unknown as Record<string, unknown>)[key] = parsed[key];
 		}
 	}
-	writeSettings(next);
+	return writeSettings(next, { backup: true });
 }
 
 export function importShareArchive(filePath: string, options: ShareImportOptions = {}): ShareImportPlan {
-	const plan = planShareImport(filePath, options);
-	if (!plan.archive || options.dryRun) return plan;
-	if (plan.diagnostics.some((diag) => diag.type === "error" || diag.type === "conflict")) return plan;
-	for (const entry of plan.archive.files) {
-		const target = targetPathForFile(entry, options);
-		const buffer = decodeArchiveFile(entry);
-		if (entry.type === "settings") {
-			mergeSettingsFragment(buffer);
-			continue;
+	const prepared = prepareShareImport(filePath, options);
+	const plan = publicImportPlan(prepared);
+	if (!prepared.archive || options.dryRun) return plan;
+	if (prepared.diagnostics.some((diag) => diag.type === "error" || diag.type === "conflict")) return plan;
+	const written: string[] = [];
+	const backups: string[] = [];
+	const rememberWrite = (result: SafeResourceWriteResult): void => {
+		if (!written.includes(result.path)) written.push(result.path);
+		if (result.backupPath && !backups.includes(result.backupPath)) backups.push(result.backupPath);
+	};
+	let failed: string | undefined;
+	try {
+		for (let index = 0; index < prepared.targets.length; index += 1) {
+			const targetInfo = prepared.targets[index];
+			const action = prepared.actions[index];
+			if (!targetInfo || !action || action.action === "skip") continue;
+			failed = targetInfo.target;
+			if (targetInfo.entry.type === "settings") {
+				rememberWrite(mergeSettingsFragment(targetInfo.buffer));
+				failed = undefined;
+				continue;
+			}
+			rememberWrite(
+				safeResourceWrite(targetInfo.target, targetInfo.buffer, {
+					backup: action.action === "overwrite",
+				}),
+			);
+			failed = undefined;
 		}
-		mkdirSync(path.dirname(target), { recursive: true });
-		if (existsSync(target) && options.force) rmSync(target, { force: true });
-		writeFileSync(target, buffer);
+		return plan;
+	} catch (err) {
+		if (failed) {
+			const expectedBackup = safeResourceBackupPath(failed);
+			if (existsSync(expectedBackup) && !backups.includes(expectedBackup)) backups.push(expectedBackup);
+		}
+		const reason = err instanceof Error ? err.message : String(err);
+		const recovery: ShareImportRecovery = {
+			written,
+			backups,
+			...(failed ? { failed } : {}),
+		};
+		return publicImportPlan(
+			{
+				...prepared,
+				diagnostics: [
+					...prepared.diagnostics,
+					{
+						type: "error",
+						message: `share import failed while writing${failed ? ` ${failed}` : ""}: ${reason}`,
+						...(failed ? { path: failed } : {}),
+					},
+				],
+			},
+			recovery,
+		);
 	}
-	return plan;
 }

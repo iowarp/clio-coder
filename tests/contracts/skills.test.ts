@@ -788,6 +788,9 @@ describe("contracts/skills tools", () => {
 		strictEqual(second.kind, "error");
 		const third = await tool.run({ name: "dup-skill", description: "Third.", body: "Three.", overwrite: true });
 		strictEqual(third.kind, "ok");
+		const file = join(cwd, ".clio", "skills", "dup-skill", "SKILL.md");
+		strictEqual(readFileSync(file, "utf8").includes("Three."), true);
+		strictEqual(readFileSync(`${file}.bak`, "utf8").includes("One."), true);
 	});
 
 	it("create_skill renders allowed-tools frontmatter that round-trips through the loader", async () => {

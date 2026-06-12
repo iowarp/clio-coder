@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { MEMORY_VERSION, type MemoryRecord, type MemoryStatus, type MemoryStoreFile } from "./types.js";
 import { validateMemoryStore } from "./validate.js";
 
@@ -62,8 +63,7 @@ export async function writeMemoryRecords(dataDir: string, records: ReadonlyArray
 	}
 	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
 	const path = memoryStorePath(dataDir);
-	await mkdir(memoryRoot(dataDir), { recursive: true });
-	await writeFile(path, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8" });
 	return path;
 }
 

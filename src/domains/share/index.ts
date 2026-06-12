@@ -21,6 +21,7 @@ export {
 	type ShareImportAction,
 	type ShareImportOptions,
 	type ShareImportPlan,
+	type ShareImportRecovery,
 	type ShareScope,
 	writeShareArchive,
 } from "./archive.js";
