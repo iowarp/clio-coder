@@ -2,10 +2,10 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { EmbedResult } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
 import { probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
 
@@ -22,7 +22,7 @@ const defaultCapabilities: CapabilityFlags = {
 	maxTokens: 0,
 };
 
-function endpointUrl(endpoint: EndpointDescriptor): string | null {
+function endpointUrl(endpoint: TargetDescriptor): string | null {
 	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
 }
 
@@ -84,7 +84,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	defaultCapabilities,
 	hidden: true,
-	async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = endpointUrl(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
@@ -108,12 +108,12 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		if (props.serverVersion) result.serverVersion = props.serverVersion;
 		return result;
 	},
-	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const base = endpointUrl(endpoint);
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,
@@ -124,7 +124,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 			baseUrlForEndpoint: withV1,
 		});
 	},
-	async embed(endpoint: EndpointDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult> {
+	async embed(endpoint: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult> {
 		const base = endpointUrl(endpoint);
 		if (!base) throw new Error("endpoint has no url");
 		const modelId = endpoint.defaultModel ?? "default";

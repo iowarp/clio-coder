@@ -30,12 +30,12 @@ import { applySettingChange, buildSettingItems } from "../../src/interactive/ove
 
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.endpoints = [
+	settings.targets = [
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
-	settings.orchestrator = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.default = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	return settings;
 }
@@ -72,8 +72,8 @@ describe("contracts/session-routing", () => {
 	it("seeds session routing from saved settings and overlays it on the shared snapshot", () => {
 		const saved = settingsWithTargets();
 		const routing = seedSessionRouting(saved);
-		deepStrictEqual(routing.orchestrator, { endpoint: "target-a", model: "model-a", thinkingLevel: "off" });
-		deepStrictEqual(routing.workersDefault, { endpoint: "target-a", model: "model-a", thinkingLevel: "off" });
+		deepStrictEqual(routing.orchestrator, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+		deepStrictEqual(routing.workersDefault, { target: "target-a", model: "model-a", thinkingLevel: "off" });
 		deepStrictEqual(routing.scope, ["target-a/model-a", "target-b/model-b"]);
 
 		// Shared (non-routing) fields track the snapshot; routing tracks the session.
@@ -91,14 +91,14 @@ describe("contracts/session-routing", () => {
 		const sessionB = simulateSession(file);
 
 		// Session B selects a different chat target/model (Alt+L picker path).
-		sessionB.updateRouting({ orchestrator: { endpoint: "target-b", model: "model-b" } });
+		sessionB.updateRouting({ orchestrator: { target: "target-b", model: "model-b" } });
 
 		// B's next turn routes to target-b; A is untouched.
-		strictEqual(sessionB.view().orchestrator.endpoint, "target-b");
-		strictEqual(sessionA.view().orchestrator.endpoint, "target-a");
+		strictEqual(sessionB.view().orchestrator.target, "target-b");
+		strictEqual(sessionA.view().orchestrator.target, "target-a");
 		strictEqual(sessionA.view().orchestrator.model, "model-a");
 		// New sessions inherit B's choice as the saved default.
-		strictEqual(file.current.orchestrator.endpoint, "target-b");
+		strictEqual(file.current.orchestrator.target, "target-b");
 
 		// Session B raises thinking (Shift+Tab path); A's thinking is untouched.
 		sessionB.updateRouting({ orchestrator: { thinkingLevel: "high" } });
@@ -107,9 +107,9 @@ describe("contracts/session-routing", () => {
 
 		// Session B rewires the fleet default (/settings fleet rows); A's /run
 		// target is untouched.
-		sessionB.updateRouting({ workersDefault: { endpoint: "target-b", model: "model-b" } });
-		strictEqual(sessionA.view().workers.default.endpoint, "target-a");
-		strictEqual(sessionB.view().workers.default.endpoint, "target-b");
+		sessionB.updateRouting({ workersDefault: { target: "target-b", model: "model-b" } });
+		strictEqual(sessionA.view().workers.default.target, "target-a");
+		strictEqual(sessionB.view().workers.default.target, "target-b");
 
 		// Session B narrows the Alt+J / Alt+K cycle set; A keeps its own.
 		sessionB.updateRouting({ scope: ["target-b/model-b"] });
@@ -124,10 +124,10 @@ describe("contracts/session-routing", () => {
 
 		// A saves a new default model; B (still on the seeded routing) then
 		// changes only its thinking level. B's write must not regress A's model.
-		sessionA.updateRouting({ orchestrator: { endpoint: "target-b", model: "model-b" } });
+		sessionA.updateRouting({ orchestrator: { target: "target-b", model: "model-b" } });
 		sessionB.updateRouting({ orchestrator: { thinkingLevel: "medium" } });
 
-		strictEqual(file.current.orchestrator.endpoint, "target-b");
+		strictEqual(file.current.orchestrator.target, "target-b");
 		strictEqual(file.current.orchestrator.model, "model-b");
 		strictEqual(file.current.orchestrator.thinkingLevel, "medium");
 	});
@@ -137,10 +137,10 @@ describe("contracts/session-routing", () => {
 		const session = simulateSession(file);
 		// Another process moved the saved default; the session keeps its routing.
 		const external = structuredClone(file.current);
-		external.orchestrator.endpoint = "target-b";
+		external.orchestrator.target = "target-b";
 		external.orchestrator.model = "model-b";
 		file.current = external;
-		strictEqual(session.view().orchestrator.endpoint, "target-a");
+		strictEqual(session.view().orchestrator.target, "target-a");
 
 		// /settings edit to a non-routing field: persisting the blob (derived
 		// from the effective view) must not overwrite the saved routing default
@@ -149,19 +149,19 @@ describe("contracts/session-routing", () => {
 		nonRoutingEdit.retry.maxRetries = 7;
 		session.applySettingsBlob(nonRoutingEdit);
 		strictEqual(file.current.retry.maxRetries, 7);
-		strictEqual(file.current.orchestrator.endpoint, "target-b");
-		strictEqual(session.view().orchestrator.endpoint, "target-a");
+		strictEqual(file.current.orchestrator.target, "target-b");
+		strictEqual(session.view().orchestrator.target, "target-a");
 
 		// /settings edit to a routing field: applies to the session and becomes
 		// the saved default.
 		const routingEdit = session.view();
-		routingEdit.workers.default.endpoint = "target-b";
+		routingEdit.workers.default.target = "target-b";
 		routingEdit.workers.default.model = "model-b";
 		session.applySettingsBlob(routingEdit);
-		strictEqual(session.view().workers.default.endpoint, "target-b");
-		strictEqual(file.current.workers.default.endpoint, "target-b");
+		strictEqual(session.view().workers.default.target, "target-b");
+		strictEqual(file.current.workers.default.target, "target-b");
 		// The untouched chat routing still did not leak into the file.
-		strictEqual(file.current.orchestrator.endpoint, "target-b");
+		strictEqual(file.current.orchestrator.target, "target-b");
 	});
 
 	it("flags external routing divergence but stays silent for a session's own write-through", () => {
@@ -192,16 +192,16 @@ describe("contracts/session-routing", () => {
 		const file = { current: settingsWithTargets() };
 		const session = simulateSession(file);
 		const external = structuredClone(file.current);
-		external.endpoints = external.endpoints.filter((entry) => entry.id !== "target-a");
-		external.orchestrator = { endpoint: "target-b", model: "model-b", thinkingLevel: "off" };
+		external.targets = external.targets.filter((entry) => entry.id !== "target-a");
+		external.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
 		file.current = external;
 
 		// The view still names the session's target so resolution can fail with
 		// an actionable message instead of silently jumping targets.
 		const view = session.view();
-		strictEqual(view.orchestrator.endpoint, "target-a");
+		strictEqual(view.orchestrator.target, "target-a");
 		strictEqual(
-			view.endpoints.some((entry) => entry.id === "target-a"),
+			view.targets.some((entry) => entry.id === "target-a"),
 			false,
 		);
 	});
@@ -210,7 +210,7 @@ describe("contracts/session-routing", () => {
 		const live = { current: settingsWithTargets() };
 		const providers = {
 			list: () =>
-				live.current.endpoints.map((endpoint) => ({
+				live.current.targets.map((endpoint) => ({
 					endpoint,
 					runtime: null,
 					available: true,
@@ -220,7 +220,7 @@ describe("contracts/session-routing", () => {
 					discoveredModels: endpoint.id === "target-a" ? ["model-a"] : ["model-b"],
 				})),
 			getDetectedReasoning: () => null,
-			getEndpoint: (id: string) => live.current.endpoints.find((entry) => entry.id === id) ?? null,
+			getEndpoint: (id: string) => live.current.targets.find((entry) => entry.id === id) ?? null,
 		} as unknown as ProvidersContract;
 
 		const items = buildSettingItems(live.current, { providers, getSettings: () => live.current });
@@ -231,7 +231,7 @@ describe("contracts/session-routing", () => {
 		// target-b. The model submenu must list models for target-b, not the
 		// snapshot captured when the overlay opened.
 		const updated = structuredClone(live.current);
-		updated.orchestrator.endpoint = "target-b";
+		updated.orchestrator.target = "target-b";
 		live.current = updated;
 
 		const submenu = modelItem.submenu?.("model-a", () => undefined);
@@ -246,24 +246,24 @@ describe("contracts/session-routing", () => {
 		// rebases the model on the new target's default, and a rebuilt row set
 		// shows the new model everywhere instead of the stale snapshot.
 		const settings = settingsWithTargets();
-		applySettingChange(settings, "orchestrator.endpoint", "target-b");
-		strictEqual(settings.orchestrator.endpoint, "target-b");
+		applySettingChange(settings, "orchestrator.target", "target-b");
+		strictEqual(settings.orchestrator.target, "target-b");
 		strictEqual(settings.orchestrator.model, "model-b");
 
-		applySettingChange(settings, "workers.default.endpoint", "target-b");
+		applySettingChange(settings, "workers.default.target", "target-b");
 		strictEqual(settings.workers.default.model, "model-b");
 
 		// Unsetting a target clears the model rather than leaving a dangling ref.
-		applySettingChange(settings, "orchestrator.endpoint", "(unset)");
-		strictEqual(settings.orchestrator.endpoint, null);
+		applySettingChange(settings, "orchestrator.target", "(unset)");
+		strictEqual(settings.orchestrator.target, null);
 		strictEqual(settings.orchestrator.model, null);
 
 		// Rebuilt rows pick up the live values, so the in-place row merge the
 		// overlay performs has fresh data for every row, not just the edited one.
 		const live = settingsWithTargets();
-		applySettingChange(live, "orchestrator.endpoint", "target-b");
+		applySettingChange(live, "orchestrator.target", "target-b");
 		const rows = buildSettingItems(live, { getSettings: () => live });
-		strictEqual(rows.find((row) => row.id === "orchestrator.endpoint")?.currentValue, "target-b");
+		strictEqual(rows.find((row) => row.id === "orchestrator.target")?.currentValue, "target-b");
 		strictEqual(rows.find((row) => row.id === "orchestrator.model")?.currentValue, "model-b");
 	});
 
@@ -296,8 +296,8 @@ describe("contracts/session-routing", () => {
 		// Removing the active target yields the warning-level notice.
 		const beforeRemoval = structuredClone(file.current);
 		const removed = structuredClone(file.current);
-		removed.endpoints = removed.endpoints.filter((entry) => entry.id !== "target-a");
-		removed.orchestrator = { endpoint: "target-b", model: "model-b", thinkingLevel: "off" };
+		removed.targets = removed.targets.filter((entry) => entry.id !== "target-a");
+		removed.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
 		file.current = removed;
 		const removalDiff = diffSettings(beforeRemoval, file.current);
 		const notices = routingChangeNotices(removalDiff.nextTurn, file.current, session.view());
@@ -348,15 +348,8 @@ describe("contracts/session-routing recents", () => {
 		);
 	});
 
-	it("migrates legacy state.recentModels once and keeps reading after", () => {
-		const legacy = ["target-a/model-a", "target-b/model-b"];
-		// First read with the legacy list and no data file seeds the file.
-		deepStrictEqual(listRecentModels({ migrateFrom: legacy, limit: 12 }), legacy);
-		const onDisk = JSON.parse(readFileSync(recentModelsPath(), "utf8")) as string[];
-		deepStrictEqual(onDisk, legacy);
-		// Later reads prefer the data file even when the (stale) legacy list differs.
-		resetRecentModelsCache();
-		deepStrictEqual(listRecentModels({ migrateFrom: ["target-a/other"], limit: 12 }), legacy);
+	it("treats an absent recents file as an empty list", () => {
+		deepStrictEqual(listRecentModels({ limit: 12 }), []);
 	});
 
 	it("enforces the recency limit and dedupes re-selected refs", () => {
@@ -368,10 +361,10 @@ describe("contracts/session-routing recents", () => {
 		deepStrictEqual(listRecentModels({ limit: 2 }), ["a/3", "a/1"]);
 	});
 
-	it("treats a corrupted recents file as empty instead of resurrecting the legacy list", () => {
+	it("treats a corrupted recents file as empty", () => {
 		rememberRecentModel("a/1", 12);
 		writeFileSync(recentModelsPath(), "{not json", "utf8");
 		resetRecentModelsCache();
-		deepStrictEqual(listRecentModels({ migrateFrom: ["target-a/model-a"], limit: 12 }), []);
+		deepStrictEqual(listRecentModels({ limit: 12 }), []);
 	});
 });

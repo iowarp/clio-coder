@@ -9,7 +9,6 @@ import {
 	resolveModelRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type {
 	RuntimeApiFamily,
@@ -18,6 +17,7 @@ import type {
 	RuntimeKind,
 	RuntimeTier,
 } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export interface ContextWindowDetails {
 	/** Best static knowledge of the model's window (hint > KB > catalog > runtime default). */
@@ -63,7 +63,7 @@ export interface RuntimeCapabilityDecision {
 
 export interface ResolvedRuntimeTarget {
 	targetId: string;
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	runtimeId: string;
 	runtimeKind: RuntimeKind;
@@ -133,7 +133,7 @@ function hasError(diagnostics: ReadonlyArray<RuntimeResolutionDiagnostic>): bool
 
 function statusFor(
 	providers: ProvidersContract,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	_wireModelId: string,
 ): EndpointStatus {
@@ -498,7 +498,7 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  * Warns when a local-native target's effective window is below the 128k recommendation.
  */
 export function resolveContextWindowDetails(
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	wireModelId: string,
 	knowledgeBase: KnowledgeBase | null,

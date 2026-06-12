@@ -2,11 +2,11 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export interface AnthropicMessagesSynthesisInput {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;

@@ -6,7 +6,7 @@
  * thinking, the fleet default used by /run, and the Alt+J / Alt+K scope list —
  * is owned by the process that is running the session. Each process seeds its
  * routing from saved settings at boot and afterwards reads everything through
- * an effective view: the shared snapshot (endpoints, theme, safety, retry, …)
+ * an effective view: the shared snapshot (targets, theme, safety, retry, …)
  * with the session's routing fields overlaid.
  *
  * Interactive routing changes update the session state first (immediate
@@ -21,7 +21,7 @@ import type { ClioSettings } from "./config.js";
 type SessionThinkingLevel = ClioSettings["orchestrator"]["thinkingLevel"];
 
 export interface SessionRoutingTarget {
-	endpoint: string | null;
+	target: string | null;
 	model: string | null;
 	thinkingLevel: SessionThinkingLevel;
 }
@@ -44,12 +44,12 @@ export interface RoutingPatch {
 }
 
 function targetFrom(source: {
-	endpoint: string | null;
+	target: string | null;
 	model: string | null;
 	thinkingLevel: SessionThinkingLevel;
 }): SessionRoutingTarget {
 	return {
-		endpoint: source.endpoint ?? null,
+		target: source.target ?? null,
 		model: source.model ?? null,
 		thinkingLevel: source.thinkingLevel ?? "off",
 	};
@@ -70,10 +70,10 @@ export function seedSessionRouting(saved: Readonly<ClioSettings>): SessionRoutin
  */
 export function applySessionRouting(saved: Readonly<ClioSettings>, routing: SessionRoutingState): ClioSettings {
 	const view = structuredClone(saved) as ClioSettings;
-	view.orchestrator.endpoint = routing.orchestrator.endpoint;
+	view.orchestrator.target = routing.orchestrator.target;
 	view.orchestrator.model = routing.orchestrator.model;
 	view.orchestrator.thinkingLevel = routing.orchestrator.thinkingLevel;
-	view.workers.default.endpoint = routing.workersDefault.endpoint;
+	view.workers.default.target = routing.workersDefault.target;
 	view.workers.default.model = routing.workersDefault.model;
 	view.workers.default.thinkingLevel = routing.workersDefault.thinkingLevel;
 	view.scope = [...routing.scope];
@@ -94,11 +94,11 @@ export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: Rou
 }
 
 function diffTarget(
-	prev: { endpoint: string | null; model: string | null; thinkingLevel: SessionThinkingLevel },
-	next: { endpoint: string | null; model: string | null; thinkingLevel: SessionThinkingLevel },
+	prev: { target: string | null; model: string | null; thinkingLevel: SessionThinkingLevel },
+	next: { target: string | null; model: string | null; thinkingLevel: SessionThinkingLevel },
 ): Partial<SessionRoutingTarget> | null {
 	const out: Partial<SessionRoutingTarget> = {};
-	if ((prev.endpoint ?? null) !== (next.endpoint ?? null)) out.endpoint = next.endpoint ?? null;
+	if ((prev.target ?? null) !== (next.target ?? null)) out.target = next.target ?? null;
 	if ((prev.model ?? null) !== (next.model ?? null)) out.model = next.model ?? null;
 	if ((prev.thinkingLevel ?? "off") !== (next.thinkingLevel ?? "off")) out.thinkingLevel = next.thinkingLevel ?? "off";
 	return Object.keys(out).length > 0 ? out : null;
@@ -131,10 +131,10 @@ export function diffRouting(prev: Readonly<ClioSettings>, next: Readonly<ClioSet
  * saved routing defaults with this session's live routing.
  */
 export function restoreRoutingFields(target: ClioSettings, source: Readonly<ClioSettings>): void {
-	target.orchestrator.endpoint = source.orchestrator.endpoint;
+	target.orchestrator.target = source.orchestrator.target;
 	target.orchestrator.model = source.orchestrator.model;
 	target.orchestrator.thinkingLevel = source.orchestrator.thinkingLevel;
-	target.workers.default.endpoint = source.workers.default.endpoint;
+	target.workers.default.target = source.workers.default.target;
 	target.workers.default.model = source.workers.default.model;
 	target.workers.default.thinkingLevel = source.workers.default.thinkingLevel;
 	target.scope = [...(source.scope ?? [])];
@@ -145,10 +145,10 @@ const ROUTING_FIELD_LABELS: ReadonlyArray<{
 	label: string;
 	read: (settings: Readonly<ClioSettings>) => unknown;
 }> = [
-	{ field: "orchestrator.endpoint", label: "chat target", read: (s) => s.orchestrator.endpoint ?? null },
+	{ field: "orchestrator.target", label: "chat target", read: (s) => s.orchestrator.target ?? null },
 	{ field: "orchestrator.model", label: "chat model", read: (s) => s.orchestrator.model ?? null },
 	{ field: "orchestrator.thinkingLevel", label: "chat thinking", read: (s) => s.orchestrator.thinkingLevel ?? "off" },
-	{ field: "workers.default.endpoint", label: "fleet target", read: (s) => s.workers.default.endpoint ?? null },
+	{ field: "workers.default.target", label: "fleet target", read: (s) => s.workers.default.target ?? null },
 	{ field: "workers.default.model", label: "fleet model", read: (s) => s.workers.default.model ?? null },
 	{
 		field: "workers.default.thinkingLevel",
@@ -209,9 +209,9 @@ export function routingChangeNotices(
 			text: `settings.yaml changed (${diverged.join(", ")}). This session keeps its routing; new sessions use the saved defaults.${hint}`,
 		});
 	}
-	const activeTarget = effective.orchestrator.endpoint;
-	const endpointsTouched = changedPaths.some((path) => path === "endpoints" || path.startsWith("endpoints."));
-	if (activeTarget && endpointsTouched && !saved.endpoints.some((entry) => entry.id === activeTarget)) {
+	const activeTarget = effective.orchestrator.target;
+	const targetsTouched = changedPaths.some((path) => path === "targets" || path.startsWith("targets."));
+	if (activeTarget && targetsTouched && !saved.targets.some((entry) => entry.id === activeTarget)) {
 		const hint = options?.commandHints ? " (/model)" : "";
 		notices.push({
 			kind: "active-target-removed",

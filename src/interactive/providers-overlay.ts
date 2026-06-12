@@ -349,7 +349,7 @@ export function formatTargetsHubBodyLines(
 
 export function buildTargetHubUseSettings(settings: Readonly<ClioSettings>, targetId: string): ClioSettings {
 	const next = structuredClone(settings) as ClioSettings;
-	applySettingChange(next, "orchestrator.endpoint", targetId);
+	applySettingChange(next, "orchestrator.target", targetId);
 	return next;
 }
 
@@ -419,7 +419,7 @@ export function openProvidersOverlay(
 	let expandedId: string | null = null;
 	let actionInFlight: string | null = null;
 
-	const activeEndpointId = (): string | null => options?.getSettings?.()?.orchestrator.endpoint ?? null;
+	const activeEndpointId = (): string | null => options?.getSettings?.()?.orchestrator.target ?? null;
 	const activeModelId = (): string | null => options?.getSettings?.()?.orchestrator.model ?? null;
 	const sortedStatuses = (): EndpointStatus[] => sortTargetStatuses(statuses, activeEndpointId());
 	let selectedId: string | null = sortedStatuses()[0]?.endpoint.id ?? null;

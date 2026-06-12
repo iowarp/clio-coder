@@ -266,14 +266,14 @@ describe("contracts/targets hub", () => {
 
 	it("uses the same settings mutation as applySettingChange for orchestrator target changes", () => {
 		const current = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-		current.endpoints = [
+		current.targets = [
 			{ id: "target-a", runtime: "openai-compat", url: "http://a.test", defaultModel: "model-a" },
 			{ id: "target-b", runtime: "openai-compat", url: "http://b.test", defaultModel: "model-b" },
 		];
-		current.orchestrator = { endpoint: "target-a", model: "stale-model", thinkingLevel: "off" };
+		current.orchestrator = { target: "target-a", model: "stale-model", thinkingLevel: "off" };
 
 		const expected = structuredClone(current) as ClioSettings;
-		applySettingChange(expected, "orchestrator.endpoint", "target-b");
+		applySettingChange(expected, "orchestrator.target", "target-b");
 
 		deepStrictEqual(buildTargetHubUseSettings(current, "target-b"), expected);
 
@@ -290,7 +290,7 @@ describe("contracts/targets hub", () => {
 		deepStrictEqual(returned, expected);
 		notStrictEqual(written, current);
 		ok(written);
-		strictEqual(written.orchestrator.endpoint, "target-b");
+		strictEqual(written.orchestrator.target, "target-b");
 		strictEqual(written.orchestrator.model, "model-b");
 	});
 

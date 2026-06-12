@@ -3,13 +3,13 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { stringify as stringifyYaml } from "yaml";
 import {
 	type ClioSettings,
 	readSettings,
 	settingsLockPath,
 	settingsPath,
 	updateSettings,
-	writeSettings,
 } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -18,12 +18,12 @@ const ORIGINAL_ENV = { ...process.env };
 
 function seededSettings(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.endpoints = [
+	settings.targets = [
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
-	settings.orchestrator = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.default = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	return settings;
 }
 
@@ -37,7 +37,7 @@ describe("contracts/settings-lock", () => {
 		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
 		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
 		resetXdgCache();
-		writeSettings(seededSettings());
+		updateSettings(() => seededSettings());
 	});
 
 	afterEach(() => {
@@ -76,7 +76,7 @@ describe("contracts/settings-lock", () => {
 		// which is exactly what updateSettings exists to prevent.
 		const naive = structuredClone(staleReadByA);
 		naive.budget.sessionCeilingUsd = 11;
-		writeSettings(naive);
+		writeFileSync(settingsPath(), stringifyYaml(naive), "utf8");
 		strictEqual(readSettings().retry.maxRetries, 3, "naive whole-blob write clobbers concurrent patches");
 	});
 
@@ -84,7 +84,7 @@ describe("contracts/settings-lock", () => {
 		// Mirrors the orchestrator write-through: each session re-reads under the
 		// lock and applies only its own routing fields.
 		const sessionAPatch = (settings: ClioSettings): void => {
-			settings.orchestrator.endpoint = "target-b";
+			settings.orchestrator.target = "target-b";
 			settings.orchestrator.model = "model-b";
 		};
 		const sessionBPatch = (settings: ClioSettings): void => {
@@ -95,7 +95,7 @@ describe("contracts/settings-lock", () => {
 		updateSettings(sessionAPatch);
 		updateSettings(sessionBPatch);
 		const saved = readSettings();
-		strictEqual(saved.orchestrator.endpoint, "target-b");
+		strictEqual(saved.orchestrator.target, "target-b");
 		strictEqual(saved.orchestrator.model, "model-b");
 		strictEqual(saved.orchestrator.thinkingLevel, "high");
 	});

@@ -1059,7 +1059,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			const settings = deps.getSettings?.();
 			const model = settings?.orchestrator?.model?.trim();
 			if (!model) return "no model";
-			const endpoint = settings?.orchestrator?.endpoint?.trim();
+			const endpoint = settings?.orchestrator?.target?.trim();
 			const abbreviated = abbreviateModelId(model);
 			return endpoint ? `${endpoint}·${abbreviated}` : abbreviated;
 		},
@@ -1068,7 +1068,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return (
 				resolveModelRuntimeCapabilitiesForProviders(
 					deps.providers,
-					settings?.orchestrator?.endpoint,
+					settings?.orchestrator?.target,
 					settings?.orchestrator?.model,
 					settings?.orchestrator?.thinkingLevel ?? "off",
 				)?.thinking.display ??
@@ -1328,7 +1328,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (!deps.session || deps.session.current()) return;
 		const settings = deps.getSettings?.();
 		const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
-		if (settings?.orchestrator.endpoint) input.endpoint = settings.orchestrator.endpoint;
+		if (settings?.orchestrator.target) input.endpoint = settings.orchestrator.target;
 		if (settings?.orchestrator.model) input.model = settings.orchestrator.model;
 		deps.session.create(input);
 	};

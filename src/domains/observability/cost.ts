@@ -1,7 +1,7 @@
 /**
  * Running USD cost accumulator. The catalog-backed auto-pricing fallback was
  * dropped in the provider redesign; pricing now flows from the providers
- * domain's EndpointPricing + knowledge-base entries and the caller supplies
+ * domain's TargetPricing + knowledge-base entries and the caller supplies
  * the resolved `usd` per call. Unknown or unpriced calls accumulate zero so
  * they never blow up the tally.
  *

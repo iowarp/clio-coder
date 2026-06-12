@@ -2,7 +2,7 @@
  * Worker subprocess entry point.
  *
  * Reads a WorkerSpec JSON document from stdin, re-hydrates the runtime
- * descriptor from the runtime registry (EndpointDescriptor is pure data;
+ * descriptor from the runtime registry (TargetDescriptor is pure data;
  * RuntimeDescriptor carries functions and cannot cross the stdin boundary),
  * builds a WorkerRunInput, and dispatches to `startWorkerRun` from the engine
  * boundary. Emits NDJSON events on stdout.

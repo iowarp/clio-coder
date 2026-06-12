@@ -1,9 +1,9 @@
 import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type { ProbeModelStatus, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 /**
  * Query-only surface exposed to other domains. Dispatch, chat-loop, TUI
@@ -19,7 +19,7 @@ export interface EndpointHealth {
 }
 
 export interface EndpointStatus {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	/**
 	 * Null when `endpoint.runtime` does not resolve to a registered descriptor.
 	 * Callers treat null as "unknown runtime"; the endpoint is still listed so
@@ -56,7 +56,7 @@ export interface ProvidersContract {
 	list(): ReadonlyArray<EndpointStatus>;
 
 	/** Resolve an endpoint by id. Null when the id is not in settings.endpoints. */
-	getEndpoint(id: string): EndpointDescriptor | null;
+	getEndpoint(id: string): TargetDescriptor | null;
 
 	/**
 	 * Runtime descriptor by id. Null when the runtime is not registered (neither
@@ -98,8 +98,8 @@ export interface ProvidersContract {
 	 * `auth.apiKeyRef` / `auth.oauthProfile`.
 	 */
 	auth: {
-		statusForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): AuthStatus;
-		resolveForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
+		statusForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): AuthStatus;
+		resolveForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
 		getStored(providerId: string): AuthCredential | null;
 		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;
 		setApiKey(providerId: string, key: string): void;
@@ -112,8 +112,8 @@ export interface ProvidersContract {
 		 * `endpoint`. Used by the top-level `--api-key <key>` startup flag so a
 		 * one-shot run can authenticate without persisting credentials.
 		 */
-		setRuntimeOverrideForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor, key: string): void;
-		clearRuntimeOverrideForTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): void;
+		setRuntimeOverrideForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor, key: string): void;
+		clearRuntimeOverrideForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): void;
 	};
 
 	/**

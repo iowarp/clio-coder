@@ -1,6 +1,7 @@
 import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
+import { listRecentModels } from "../../core/recent-models.js";
 import type {
 	CapabilityFlags,
 	EndpointStatus,
@@ -349,11 +350,11 @@ export function buildModelItems(deps: {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 }): ModelItemsResult {
-	const activeEndpoint = deps.settings.orchestrator?.endpoint?.trim() ?? "";
+	const activeEndpoint = deps.settings.orchestrator?.target?.trim() ?? "";
 	const activeModel = deps.settings.orchestrator?.model?.trim() ?? "";
 	const activeRef = activeEndpoint && activeModel ? `${activeEndpoint}/${activeModel}` : activeEndpoint;
 	const favoriteSet = new Set(deps.settings.modelSelector?.favorites ?? []);
-	const recentSet = new Set(deps.settings.state?.recentModels ?? []);
+	const recentSet = new Set(listRecentModels({ limit: deps.settings.modelSelector?.recentLimit ?? 12 }));
 	const list = [...deps.providers.list()]
 		.filter((status) => {
 			return status.runtime !== null && isTargetEligibleRuntime(status.runtime);
@@ -988,7 +989,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const initial = build();
 	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
-	const activeEndpoint = currentSettings().orchestrator?.endpoint?.trim();
+	const activeEndpoint = currentSettings().orchestrator?.target?.trim();
 	const activeModel = currentSettings().orchestrator?.model?.trim();
 	const view = new ModelOverlayView(
 		initial.rows,

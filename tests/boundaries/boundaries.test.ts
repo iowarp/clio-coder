@@ -80,7 +80,7 @@ describe("boundaries", () => {
 				'import { loadPluginRuntimes } from "../domains/providers/plugins.js";',
 				'import { getRuntimeRegistry } from "../domains/providers/registry.js";',
 				'import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";',
-				'import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";',
+				'import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";',
 			].join("\n"),
 			"src/domains/providers/plugins.ts": "",
 			"src/domains/providers/registry.ts": "",

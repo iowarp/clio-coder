@@ -362,17 +362,17 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 
 		const statuses = deps.providers.list();
-		const current = settings?.orchestrator?.endpoint
-			? (statuses.find((s) => s.endpoint.id === settings.orchestrator?.endpoint) ?? null)
+		const current = settings?.orchestrator?.target
+			? (statuses.find((s) => s.endpoint.id === settings.orchestrator?.target) ?? null)
 			: null;
 
-		const targetLabel = settings?.orchestrator?.endpoint ?? "none";
+		const targetLabel = settings?.orchestrator?.target ?? "none";
 		const modelLabel = settings?.orchestrator?.model ?? "none";
 		const target = `${targetLabel} · ${abbreviateModelId(modelLabel)}`;
 
 		const resolution = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
-			settings?.orchestrator?.endpoint,
+			settings?.orchestrator?.target,
 			settings?.orchestrator?.model,
 			settings?.orchestrator?.thinkingLevel ?? "off",
 		);
@@ -382,7 +382,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const wireModelId = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? null;
 		const detectedReasoning =
 			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
-				? deps.providers.getDetectedReasoning(settings?.orchestrator?.endpoint ?? "", wireModelId)
+				? deps.providers.getDetectedReasoning(settings?.orchestrator?.target ?? "", wireModelId)
 				: null;
 		const caps = current
 			? resolveModelCapabilities(current, wireModelId, deps.providers.knowledgeBase, { detectedReasoning })

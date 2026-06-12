@@ -61,7 +61,7 @@ function findCurrentStatus(
 	statuses: ReadonlyArray<EndpointStatus>,
 	settings: Readonly<ClioSettings> | undefined,
 ): EndpointStatus | null {
-	const endpointId = settings?.orchestrator?.endpoint ?? null;
+	const endpointId = settings?.orchestrator?.target ?? null;
 	if (!endpointId) return null;
 	return statuses.find((status) => status.endpoint.id === endpointId) ?? null;
 }
@@ -128,7 +128,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
 	const current = findCurrentStatus(statuses, settings);
-	const targetLabel = current?.endpoint.id ?? settings?.orchestrator?.endpoint ?? "not configured";
+	const targetLabel = current?.endpoint.id ?? settings?.orchestrator?.target ?? "not configured";
 	const modelLabel = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? "not configured";
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	const cwd = workspace?.cwd ?? process.cwd();
@@ -137,7 +137,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const thinkingLevel =
 		resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
-			settings?.orchestrator?.endpoint,
+			settings?.orchestrator?.target,
 			settings?.orchestrator?.model,
 			settings?.orchestrator?.thinkingLevel ?? "off",
 		)?.thinking.display ??

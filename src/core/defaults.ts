@@ -4,16 +4,16 @@
  * exist. Users edit the file directly or through TUI overlays.
  */
 
-import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
+import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
-export type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
+export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface WorkerTarget {
-	endpoint: string | null;
+	target: string | null;
 	model: string | null;
 	thinkingLevel: ThinkingLevel;
 }
@@ -130,16 +130,16 @@ export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
 	autonomy: "auto-edit" as AutonomyLevel,
-	endpoints: [] as EndpointDescriptor[],
+	targets: [] as TargetDescriptor[],
 	runtimePlugins: [] as string[],
 	orchestrator: {
-		endpoint: null as string | null,
+		target: null as string | null,
 		model: null as string | null,
 		thinkingLevel: "off" as ThinkingLevel,
 	},
 	workers: {
 		default: {
-			endpoint: null as string | null,
+			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
@@ -177,9 +177,6 @@ export const DEFAULT_SETTINGS = {
 	// and layers it on top of CLIO_KEYBINDINGS defaults (src/domains/config/
 	// keybindings.ts).
 	keybindings: {} as Record<string, string | string[]>,
-	state: {
-		recentModels: [] as string[],
-	},
 	compaction: {
 		auto: true,
 		threshold: 0.8,
@@ -198,15 +195,16 @@ export type DefaultSettings = typeof DEFAULT_SETTINGS;
 /**
  * Raw YAML document written to the resolved config directory's settings.yaml on
  * first install. Mirrors every field of DEFAULT_SETTINGS at the same key path
- * so settings migration keeps working, and carries fully commented example
- * target blocks that a new user can uncomment to point Clio Coder at a local
- * llama-server or LM Studio.
+ * and carries fully commented example target blocks that a new user can
+ * uncomment to point Clio Coder at a local llama-server or LM Studio.
  *
- * The YAML library strips comments when round-tripping through stringify, so
- * first-install writes this raw string directly instead of going through
- * stringifyYaml(DEFAULT_SETTINGS).
+ * The settings file is machine-owned after this first write: programmatic
+ * writers serialize the schema directly, and comments do not survive the
+ * first programmatic write.
  */
-export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install; edit freely.
+export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install.
+# The file is machine-owned: \`clio configure\`, \`clio targets\`, and the TUI
+# rewrite it whole, and comments (including these) do not survive that write.
 # Docs: https://github.com/iowarp/clio-coder
 #
 # Default location:

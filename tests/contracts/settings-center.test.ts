@@ -21,13 +21,13 @@ const FOOTER_NOTE_FOR_TEST = "applies to this session and to new sessions";
 
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.endpoints = [
+	settings.targets = [
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
 	settings.autonomy = "auto-edit";
-	settings.orchestrator = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.default = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	settings.budget.sessionCeilingUsd = 5;
 	settings.compaction = { auto: true, threshold: 0.8, excludeLastTurns: 6 };
@@ -132,10 +132,10 @@ describe("contracts/settings center", () => {
 				assert: (settings) => strictEqual(settings.orchestrator.thinkingLevel, "high"),
 			},
 			{
-				id: "orchestrator.endpoint",
+				id: "orchestrator.target",
 				value: "target-b",
 				assert: (settings) => {
-					strictEqual(settings.orchestrator.endpoint, "target-b");
+					strictEqual(settings.orchestrator.target, "target-b");
 					strictEqual(settings.orchestrator.model, "model-b");
 				},
 			},
@@ -145,10 +145,10 @@ describe("contracts/settings center", () => {
 				assert: (settings) => strictEqual(settings.orchestrator.model, "model-custom"),
 			},
 			{
-				id: "workers.default.endpoint",
+				id: "workers.default.target",
 				value: "target-b",
 				assert: (settings) => {
-					strictEqual(settings.workers.default.endpoint, "target-b");
+					strictEqual(settings.workers.default.target, "target-b");
 					strictEqual(settings.workers.default.model, "model-b");
 				},
 			},

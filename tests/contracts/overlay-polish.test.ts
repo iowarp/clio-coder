@@ -184,7 +184,7 @@ function providersFor(
 
 function settings(endpoint = "mock", model = "model-a", threshold?: number): ClioSettings {
 	return {
-		orchestrator: { endpoint, model, thinkingLevel: "off" },
+		orchestrator: { target: endpoint, model, thinkingLevel: "off" },
 		autonomy: "auto-edit",
 		delegation: { defaults: { toolGovernance: "clio-policy" } },
 		...(threshold !== undefined ? { compaction: { threshold } } : {}),

@@ -2,9 +2,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -33,7 +33,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	apiFamily: "ollama-native",
 	auth: "none",
 	defaultCapabilities,
-	async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = endpointBase(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
@@ -50,7 +50,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 		if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 		return out;
 	},
-	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const base = endpointBase(endpoint);
 		if (!base) return [];
 		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
@@ -62,7 +62,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.name === "string" ? row.name : null))
 			.filter((name): name is string => name !== null);
 	},
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

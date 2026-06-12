@@ -227,21 +227,19 @@ async function runDispatch(
 			return 1;
 		}
 		const settings = readSettings();
-		const profileEndpointId = parsed.agentProfile
-			? settings.workers?.profiles?.[parsed.agentProfile]?.endpoint
-			: undefined;
-		const runtimeByEndpoint = new Map(settings.endpoints.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
+		const profileEndpointId = parsed.agentProfile ? settings.workers?.profiles?.[parsed.agentProfile]?.target : undefined;
+		const runtimeByEndpoint = new Map(settings.targets.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
 		const runtimeEndpointId = parsed.agentRuntime
 			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
-					(profile) => profile?.endpoint && runtimeByEndpoint.get(profile.endpoint) === parsed.agentRuntime,
-				)?.endpoint
+					(profile) => profile?.target && runtimeByEndpoint.get(profile.target) === parsed.agentRuntime,
+				)?.target
 			: undefined;
 		const targetEndpointId =
 			parsed.target ??
 			profileEndpointId ??
 			runtimeEndpointId ??
-			settings.workers?.default?.endpoint ??
-			settings.orchestrator?.endpoint;
+			settings.workers?.default?.target ??
+			settings.orchestrator?.target;
 		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
 		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
 		if (!endpoint || !runtime) {

@@ -2,12 +2,12 @@ import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
-	EndpointDescriptor,
 	RuntimeApiFamily,
 	RuntimeAuth,
 	RuntimeDescriptor,
 	RuntimeKind,
 	RuntimeTargetSnapshot,
+	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -39,7 +39,7 @@ export interface WorkerSpec {
 	dynamicHash?: string;
 	agentId: string;
 	task: string;
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	runtime: SerializedWorkerRuntimeDescriptor;
 	/** Runtime id kept as a direct lookup key for older dispatch tests and receipts. */
 	runtimeId: string;

@@ -75,7 +75,7 @@ export function resolveThinkingCapability(
 ): ResolvedThinkingCapability | null {
 	const resolved = resolveModelRuntimeCapabilitiesForProviders(
 		providers,
-		settings.orchestrator.endpoint,
+		settings.orchestrator.target,
 		settings.orchestrator.model,
 		settings.orchestrator.thinkingLevel ?? "off",
 	);

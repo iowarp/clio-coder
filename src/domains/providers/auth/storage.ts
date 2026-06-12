@@ -1,8 +1,8 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
-import type { EndpointDescriptor } from "../types/endpoint-descriptor.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../types/target-descriptor.js";
 
 import { normalizeStoredApiKeyRef, resolveEnvironmentApiKey, resolveStoredApiKey } from "./api-key.js";
 import {
@@ -170,7 +170,7 @@ function serializeStorageData(data: AuthStorageData): string {
 	});
 }
 
-export function resolveAuthTarget(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): AuthTarget {
+export function resolveAuthTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): AuthTarget {
 	const providerId = endpoint.auth?.oauthProfile?.trim() || endpoint.auth?.apiKeyRef?.trim() || runtime.id;
 	const target: AuthTarget = {
 		providerId,
@@ -191,7 +191,7 @@ export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget
 	return target;
 }
 
-export function targetRequiresAuth(endpoint: EndpointDescriptor, runtime: RuntimeDescriptor): boolean {
+export function targetRequiresAuth(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): boolean {
 	if (runtime.auth === "oauth") return true;
 	if (runtime.auth !== "api-key") return false;
 	if (endpoint.auth?.apiKeyEnvVar || endpoint.auth?.apiKeyRef || endpoint.auth?.oauthProfile) return true;

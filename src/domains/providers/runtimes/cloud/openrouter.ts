@@ -3,9 +3,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import { probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_HEADERS = {
@@ -36,15 +36,15 @@ function trimTrailingSlash(value: string): string {
 	return value.endsWith("/") && value.length > 1 ? value.slice(0, -1) : value;
 }
 
-function endpointBase(endpoint: EndpointDescriptor): string {
+function endpointBase(endpoint: TargetDescriptor): string {
 	return trimTrailingSlash(endpoint.url ?? OPENROUTER_BASE_URL);
 }
 
-function modelsUrl(endpoint: EndpointDescriptor): string {
+function modelsUrl(endpoint: TargetDescriptor): string {
 	return `${endpointBase(endpoint)}/models`;
 }
 
-function probeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Record<string, string> {
+function probeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
 	const headers: Record<string, string> = { ...OPENROUTER_HEADERS, ...(endpoint.auth?.headers ?? {}) };
 	const envName = endpoint.auth?.apiKeyEnvVar ?? "OPENROUTER_API_KEY";
 	if (ctx.credentialsPresent.has(envName)) {
@@ -54,7 +54,7 @@ function probeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Record<s
 	return headers;
 }
 
-async function fetchModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+async function fetchModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 	const opts = {
 		url: modelsUrl(endpoint),
 		timeoutMs: ctx.httpTimeoutMs,
@@ -86,14 +86,14 @@ const openrouterRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "OPENROUTER_API_KEY",
 	defaultCapabilities,
-	probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return fetchModels(endpoint, ctx);
 	},
-	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const result = await fetchModels(endpoint, ctx);
 		return result.ok && result.models ? [...result.models] : [];
 	},
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
 			endpoint,
 			wireModelId,

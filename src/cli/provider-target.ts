@@ -65,7 +65,7 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 			return {
 				entry,
 				status,
-				targetCount: settings.endpoints.filter((endpoint) => endpoint.runtime === entry.runtimeId).length,
+				targetCount: settings.targets.filter((endpoint) => endpoint.runtime === entry.runtimeId).length,
 			};
 		});
 }

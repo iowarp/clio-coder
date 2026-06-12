@@ -2,7 +2,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { probeOpenAICompatReasoning } from "../../probe/reasoning.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type {
 	ProbeContext,
@@ -13,6 +12,7 @@ import type {
 	RuntimeDescriptor,
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { endpointBase, synthLocalModel, withAsIs, withV1 } from "../common/local-synth.js";
 import { probeOpenAIModelCatalog, probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
@@ -30,7 +30,7 @@ export interface OpenAICompatSpec {
 }
 
 export interface OpenAICompatSynthesisInput {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
@@ -64,7 +64,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		apiFamily,
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
-		async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = endpointBase(endpoint);
 			if (!base) return { ok: false, error: "endpoint has no url" };
 			const health = await probeUrl(`${base}${healthPath}`, ctx);
@@ -84,16 +84,12 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			}
 			return result;
 		},
-		async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+		async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = endpointBase(endpoint);
 			if (!base) return [];
 			return probeOpenAIModels(base, ctx, modelsPath);
 		},
-		async probeReasoning(
-			endpoint: EndpointDescriptor,
-			modelId: string,
-			ctx: ProbeContext,
-		): Promise<ReasoningProbeResult> {
+		async probeReasoning(endpoint: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult> {
 			const base = endpointBase(endpoint);
 			if (!base) return { reasoning: false, latencyMs: 0, error: "endpoint has no url" };
 			const apiKeyEnv = endpoint.auth?.apiKeyEnvVar;
@@ -107,7 +103,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			if (ctx.signal) probeOpts.signal = ctx.signal;
 			return probeOpenAICompatReasoning(probeOpts);
 		},
-		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+		synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthesizeOpenAICompatModel({
 				endpoint,
 				wireModelId,

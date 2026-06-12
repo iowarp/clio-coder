@@ -3,7 +3,7 @@
  *
  * Owns the pi-agent-core Agent instance for a worker run and forwards every
  * AgentEvent to an emit callback (the worker entry serializes events to NDJSON
- * stdout). Post-W5 the surface takes a resolved EndpointDescriptor +
+ * stdout). Post-W5 the surface takes a resolved TargetDescriptor +
  * RuntimeDescriptor + wire model id, not a provider/model pair. Every runtime
  * is an HTTP/native/pi-ai-backed adapter driven through pi-agent-core.
  */
@@ -13,9 +13,9 @@ import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
-	EndpointDescriptor,
 	RuntimeDescriptor,
 	RuntimeTargetSnapshot,
+	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
@@ -42,7 +42,7 @@ export interface WorkerRunInput {
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	agentId: string;
 	task: string;
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	modelCapabilities?: Partial<CapabilityFlags>;

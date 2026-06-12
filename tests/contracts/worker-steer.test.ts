@@ -15,7 +15,7 @@ import { spawnNativeWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
@@ -58,9 +58,9 @@ const MINIMAL_SPEC_LINE = `${JSON.stringify({
 
 function stubContext(): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: EndpointDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
-	settings.endpoints = [endpoint];
-	settings.workers.default.endpoint = endpoint.id;
+	const endpoint: TargetDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
+	settings.targets = [endpoint];
+	settings.workers.default.target = endpoint.id;
 	settings.workers.default.model = "gpt-4o";
 
 	const runtime: RuntimeDescriptor = {
