@@ -67,6 +67,30 @@ describe("contracts/safety", () => {
 		if (assessment.kind === "ok") strictEqual(assessment.reason, "read_only_status_turn");
 	});
 
+	it("recognizes run_task verification-family scripts as finish-contract evidence", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Implemented the change and tests passed.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "run_task", toolCallId: "call-1", args: { task: "test:contracts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "run_task", toolCallId: "call-1", result: { details: { exitCode: 0 } } },
+				},
+			],
+		});
+
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") {
+			strictEqual(assessment.reason, "validation_evidence");
+			strictEqual(assessment.evidence[0]?.summary, "validation command passed: npm run test:contracts");
+		}
+	});
+
 	it("evaluates safety scope subsets", () => {
 		strictEqual(isSubset(READONLY_SCOPE, WORKSPACE_SCOPE), true);
 		strictEqual(isSubset(READONLY_SCOPE, CONFIRMED_SCOPE), true);

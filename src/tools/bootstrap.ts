@@ -155,7 +155,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.RunTask]: {
-		objective: "Run one allowlisted package.json validation script.",
+		objective: "Run one declared package.json verification script.",
 		uiLabel: "Task",
 		retrySafety: "retry_safe",
 		resultSizePolicy: boundedValidationPolicy,

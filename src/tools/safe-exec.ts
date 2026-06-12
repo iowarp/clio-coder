@@ -10,12 +10,16 @@ import {
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
+import {
+	declaredVerificationScripts,
+	isVerificationScriptName,
+	VERIFICATION_SCRIPT_FAMILY_HINT,
+} from "../core/verification-scripts.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
-const STANDARD_PACKAGE_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
 
 function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_DEFAULT_TIMEOUT_MS): number {
 	return typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? Math.floor(args.timeout_ms) : fallback;
@@ -131,9 +135,9 @@ export const gitTool: ToolSpec = {
 export const runTaskTool: ToolSpec = {
 	name: ToolNames.RunTask,
 	description:
-		"Run one standard package.json script via npm with no shell: test, test:e2e, lint, build, typecheck, or ci.",
+		"Run a verification script declared in package.json via npm with no shell (names starting with test/lint/build/typecheck/check/format/ci). Pass file paths or flags via args (forwarded after --). Prefer a per-file script such as test:file for single test files when the project declares one.",
 	parameters: Type.Object({
-		task: Type.String({ description: "Script name from the allowlist above." }),
+		task: Type.String({ description: "Declared verification script name." }),
 		args: Type.Optional(Type.Array(Type.String(), { description: "Extra arguments passed after --." })),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
@@ -142,10 +146,10 @@ export const runTaskTool: ToolSpec = {
 	executionMode: "sequential",
 	async run(args, options) {
 		const task = typeof args.task === "string" ? args.task : "";
-		if (!STANDARD_PACKAGE_SCRIPTS.has(task)) {
+		if (!isVerificationScriptName(task)) {
 			return {
 				kind: "error",
-				message: `run_task: task '${task}' is not allowed. Use one of test, test:e2e, lint, build, typecheck, ci; run anything else through bash.`,
+				message: `run_task: task '${task}' is not a verification script (${VERIFICATION_SCRIPT_FAMILY_HINT}); run it through bash.`,
 			};
 		}
 		return runPackageScript("run_task", task, args, options);
@@ -169,6 +173,14 @@ async function runPackageScript(
 	const pkg = parsePackageJson(pkgPath);
 	if (!pkg.ok) return { kind: "error", message: `${action}: ${pkg.reason}` };
 	if (!Object.hasOwn(pkg.scripts, script)) {
+		if (action === "run_task") {
+			const declared = declaredVerificationScripts(pkg.scripts);
+			const list = declared.length > 0 ? declared.join(", ") : "(none)";
+			return {
+				kind: "error",
+				message: `${action}: package.json has no '${script}' script. Declared verification scripts: ${list}.`,
+			};
+		}
 		return { kind: "error", message: `${action}: package.json has no '${script}' script` };
 	}
 	const extraArgs = Array.isArray(args.args)
