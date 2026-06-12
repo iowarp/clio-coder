@@ -1587,13 +1587,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						tokensBefore: estimate.tokens,
 						tokensAfter: tokensAfterMask,
 						maskedObservations: masked.maskedObservations,
+						maskedThinkingBlocks: masked.maskedThinkingBlocks,
+						maskedThinkingChars: masked.maskedThinkingChars,
 						trigger,
 						snapshotIdBefore: beforeSnapshotId,
 						snapshotIdAfter: postMaskSnapshot.snapshotId,
 						at: Date.now(),
 					} satisfies ContextPrunedPayload);
+					const thinkingNote =
+						masked.maskedThinkingBlocks > 0
+							? `, ${masked.maskedThinkingBlocks} thinking blocks dropped (~${masked.maskedThinkingChars} chars)`
+							: "";
 					emitNotice(
-						`[context engine] mask_observations: ${masked.maskedObservations} observations masked; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
+						`[context engine] mask_observations: ${masked.maskedObservations} observations masked${thinkingNote}; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
 					);
 
 					const after = liveContextEstimate(agentRuntime, pendingUserText);

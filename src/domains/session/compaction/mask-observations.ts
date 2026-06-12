@@ -4,8 +4,19 @@
  * survive so replay dependencies stay intact; only the observation body is
  * replaced with a short marker telling the model how to re-fetch.
  *
+ * The same pass drops thinking blocks from assistant messages older than the
+ * horizon. Prior-turn reasoning is replayed by the local engine adapters
+ * (lmstudio `<think>` text, ollama `thinking`, llama.cpp `reasoning_content`)
+ * and counted by the pressure estimator, yet has no forward value once the
+ * turn is past the protected window; the Anthropic API drops it after every
+ * turn. No marker replaces it: thinking is model-internal and a marker would
+ * spend tokens to say nothing. Recent turns keep their thinking untouched so
+ * same-model signature replay still works where it matters.
+ *
  * Entries that already carry a `contextCompaction` marker (from any earlier
- * compaction run) are never rewritten again.
+ * compaction run) are never rewritten again; thinking masking is naturally
+ * idempotent (a stripped message has no thinking blocks left) and stamps
+ * `mask_thinking` so the ledger records why the reasoning vanished.
  */
 
 import type { MessageEntry, SessionEntry } from "../entries.js";
@@ -17,6 +28,8 @@ export interface MaskObservationsResult {
 	tokensBefore: number;
 	tokensAfter: number;
 	maskedObservations: number;
+	maskedThinkingBlocks: number;
+	maskedThinkingChars: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,6 +147,53 @@ function maskObservation(entry: MessageEntry): MessageEntry {
 	return next;
 }
 
+interface MaskedThinking {
+	entry: MessageEntry;
+	blocks: number;
+	chars: number;
+}
+
+/**
+ * Strip thinking content from a stale assistant message. Returns null when
+ * the message carries no thinking (the no-op case, which keeps `changed`
+ * honest and makes reruns naturally idempotent). Handles both shapes the
+ * session ledger contains: `content` blocks of type `thinking` and the
+ * payload-level `thinking` string some engine paths persist.
+ */
+function maskThinking(entry: MessageEntry): MaskedThinking | null {
+	const obj = isRecord(entry.payload) ? entry.payload : null;
+	if (!obj) return null;
+	let blocks = 0;
+	let chars = 0;
+	let content: unknown[] | undefined;
+	if (Array.isArray(obj.content)) {
+		content = obj.content.filter((block) => {
+			if (!isRecord(block) || block.type !== "thinking") return true;
+			blocks += 1;
+			if (typeof block.thinking === "string") chars += block.thinking.length;
+			return false;
+		});
+	}
+	if (typeof obj.thinking === "string" && obj.thinking.length > 0) {
+		blocks += 1;
+		chars += obj.thinking.length;
+	}
+	if (blocks === 0) return null;
+	const next = cloneEntry(entry) as MessageEntry;
+	next.payload = {
+		...obj,
+		...(content !== undefined ? { content } : {}),
+		thinking: undefined,
+		contextCompaction: {
+			...(isRecord(obj.contextCompaction) ? obj.contextCompaction : {}),
+			stage: "mask_thinking",
+			maskedThinkingChars: chars,
+			at: new Date().toISOString(),
+		},
+	};
+	return { entry: next, blocks, chars };
+}
+
 function isTurnStart(entry: SessionEntry): boolean {
 	if (entry.kind === "bashExecution" || entry.kind === "branchSummary") return true;
 	return entry.kind === "message" && entry.role === "user";
@@ -171,12 +231,25 @@ export function maskStaleObservations(
 	const cutoff = recentTurnCutoff(entries, excludeLastTurns);
 	let changed = false;
 	let maskedObservations = 0;
+	let maskedThinkingBlocks = 0;
+	let maskedThinkingChars = 0;
 	const next = entries.map((entry, index) => {
-		if (index >= cutoff || entry.kind !== "message" || entry.role !== "tool_result") return entry;
-		if (alreadyCompacted(entry.payload)) return entry;
-		changed = true;
-		maskedObservations += 1;
-		return maskObservation(entry);
+		if (index >= cutoff || entry.kind !== "message") return entry;
+		if (entry.role === "tool_result") {
+			if (alreadyCompacted(entry.payload)) return entry;
+			changed = true;
+			maskedObservations += 1;
+			return maskObservation(entry);
+		}
+		if (entry.role === "assistant") {
+			const masked = maskThinking(entry);
+			if (!masked) return entry;
+			changed = true;
+			maskedThinkingBlocks += masked.blocks;
+			maskedThinkingChars += masked.chars;
+			return masked.entry;
+		}
+		return entry;
 	});
 
 	const finalEntries = changed ? next.map(invalidateUsage) : next;
@@ -186,5 +259,7 @@ export function maskStaleObservations(
 		tokensBefore,
 		tokensAfter: calculateContextTokens(finalEntries),
 		maskedObservations,
+		maskedThinkingBlocks,
+		maskedThinkingChars,
 	};
 }
