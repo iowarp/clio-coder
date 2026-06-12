@@ -843,7 +843,8 @@ export function routeOverlayKey(
 		overlayState === "help" ||
 		overlayState === "agents" ||
 		overlayState === "prompts" ||
-		overlayState === "extensions"
+		overlayState === "extensions" ||
+		overlayState === "skills-hub"
 	) {
 		if (data === ESC) {
 			deps.closeOverlay();

@@ -14,7 +14,7 @@ import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
-import { ResourcesDomainModule } from "../domains/resources/index.js";
+import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
@@ -88,6 +88,23 @@ async function assemblePrompt(
 	};
 }
 
+/**
+ * Preflight every explicit --skill path. Returns one message per path that
+ * yields no usable skill, built from the loader's own diagnostics (missing
+ * path, not a skill package, or validation failure such as a missing
+ * description). Exported for contracts tests.
+ */
+export function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
+	const errors: string[] = [];
+	for (const skillPath of skillPaths) {
+		const list = loadSkills({ disableDiscovery: true, explicitSkillPaths: [skillPath] });
+		if (list.items.length > 0) continue;
+		const detail = list.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
+		errors.push(detail.length > 0 ? detail : `explicit skill path loaded no skills: ${skillPath}`);
+	}
+	return errors;
+}
+
 export async function runClioRun(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
@@ -110,11 +127,21 @@ export async function runClioRun(
 		return 2;
 	}
 
-	const assembled = await assemblePrompt(parsed);
-	if (!assembled) return 2;
-
 	const noSkills = options.noSkills === true || parsed.noSkills === true;
 	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+	// An explicit --skill path is a contract: a path that is missing or loads
+	// no valid skill fails the run before any model invocation instead of
+	// silently degrading to whatever skills discovery finds.
+	const skillPathErrors = explicitSkillPathErrors(skillPaths);
+	if (skillPathErrors.length > 0) {
+		for (const message of skillPathErrors) {
+			process.stderr.write(`clio run: --skill ${message}\n`);
+		}
+		return 2;
+	}
+
+	const assembled = await assemblePrompt(parsed);
+	if (!assembled) return 2;
 
 	if (parsed.agentId === undefined) {
 		takeOverStdout();
