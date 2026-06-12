@@ -104,7 +104,13 @@ const THINKING_LEVELS = [
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
 const ENDPOINT_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
-const MIDDLEWARE_EFFECT_KINDS = ["inject_reminder", "annotate_tool_result", "block_tool", "protect_path"] as const;
+const MIDDLEWARE_EFFECT_KINDS = [
+	"inject_reminder",
+	"annotate_tool_result",
+	"block_tool",
+	"protect_path",
+	"request_continuation",
+] as const;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
 const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
 const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;

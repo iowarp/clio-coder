@@ -233,11 +233,11 @@ describe("middleware bundle with coded registrations", () => {
 		});
 		deepStrictEqual(
 			bundle.contract.listRules().map((listed) => listed.id),
-			["policy.rule"],
+			["nudge.stalled-turn", "policy.rule"],
 		);
 		deepStrictEqual(
 			bundle.contract.snapshot().rules.map((listed) => listed.id),
-			["policy.rule"],
+			["nudge.stalled-turn", "policy.rule"],
 		);
 	});
 

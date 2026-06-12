@@ -28,6 +28,12 @@ export interface MiddlewareRuleDefinition {
 	 * declared in `rule.effectKinds` are dropped at evaluation time.
 	 */
 	effects: ReadonlyArray<MiddlewareEffect>;
+	/**
+	 * Optional pure predicate for builtin rules that need hook input inspection
+	 * beyond hook/tool matching while still travelling as visible snapshot
+	 * rules. It must not mutate input or hold runtime state.
+	 */
+	predicate?: (input: MiddlewareHookInput) => boolean;
 }
 
 /**
@@ -192,6 +198,7 @@ function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: Mid
 		if (input.toolName === undefined) return [];
 		if (!definition.toolNames.includes(input.toolName)) return [];
 	}
+	if (definition.predicate !== undefined && !definition.predicate(input)) return [];
 	const declaredKinds = new Set(rule.effectKinds);
 	const emitted: MiddlewareEffect[] = [];
 	for (const effect of definition.effects) {
@@ -217,6 +224,8 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return { kind: "block_tool", reason: effect.reason, severity: effect.severity };
 		case "protect_path":
 			return { kind: "protect_path", path: effect.path, reason: effect.reason };
+		case "request_continuation":
+			return { kind: "request_continuation", message: effect.message };
 	}
 }
 

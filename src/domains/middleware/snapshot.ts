@@ -35,6 +35,7 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 			effects: builtin === undefined ? [] : builtin.effects.map(cloneMiddlewareEffect),
 		};
 		if (builtin?.toolNames !== undefined) definition.toolNames = [...builtin.toolNames];
+		if (builtin?.predicate !== undefined) definition.predicate = builtin.predicate;
 		return definition;
 	});
 	const registrations: MiddlewareHookRegistration[] = definitions.map(registrationFromRuleDefinition);

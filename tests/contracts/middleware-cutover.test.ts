@@ -16,11 +16,25 @@ describe("contracts/middleware-cutover end-state enums", () => {
 		deepStrictEqual([...MIDDLEWARE_HOOKS], ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]);
 	});
 
-	it("the effect vocabulary is exactly the four consumed kinds", () => {
+	it("the effect vocabulary is exactly the five consumed kinds", () => {
 		deepStrictEqual(
 			[...MIDDLEWARE_EFFECT_KINDS],
-			["inject_reminder", "annotate_tool_result", "block_tool", "protect_path"],
+			["inject_reminder", "annotate_tool_result", "block_tool", "protect_path", "request_continuation"],
 		);
+	});
+
+	it("validates request_continuation effects and rules", () => {
+		const effect = validateMiddlewareEffect({ kind: "request_continuation", message: "continue now" });
+		strictEqual(effect.valid, true);
+		const rule = validateMiddlewareRule({
+			id: "nudge.test",
+			source: "builtin",
+			description: "test continuation request",
+			enabled: true,
+			hooks: ["turn_end"],
+			effectKinds: ["request_continuation"],
+		});
+		strictEqual(rule.valid, true);
 	});
 
 	it("validators reject the removed hook and effect names", () => {
