@@ -17,6 +17,7 @@ export const EVIDENCE_TAGS = [
 	"no-validation",
 	"destructive-cleanup",
 	"blocked-tool",
+	"receipt-integrity",
 	"protected-artifact",
 	"tool-loop",
 	"test-failure",
@@ -104,6 +105,8 @@ export interface EvidenceRunSource {
 	envelope: RunEnvelope;
 	receipt: RunReceipt | null;
 	receiptError: string | null;
+	/** True when the receipt was readable but failed cryptographic/ledger integrity verification. */
+	receiptIntegrityFailed: boolean;
 }
 
 export type EvidenceLinkConfidence = "exact" | "best-effort";

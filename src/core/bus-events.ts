@@ -14,7 +14,13 @@
 
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { ConfigDiff } from "../domains/config/classify.js";
-import type { DispatchRequestOrigin, RunKind, RunLineage, RunOutcome } from "../domains/dispatch/types.js";
+import type {
+	DispatchRequestOrigin,
+	RunKind,
+	RunLineage,
+	RunOutcome,
+	ToolActivitySummary,
+} from "../domains/dispatch/types.js";
 import type { EndpointStatus } from "../domains/providers/contract.js";
 import type { ClioSettings } from "./config.js";
 import type { TerminationPhase } from "./termination.js";
@@ -377,6 +383,8 @@ export interface DispatchTerminalStats {
 	costUsd: number;
 	durationMs: number;
 	exitCode: number;
+	/** Honest activity record aggregated from the run's tool telemetry; null when the receipt predates it. */
+	toolActivity: ToolActivitySummary | null;
 }
 
 /** Published on {@link BusChannels.DispatchCompleted} when a run finalizes as succeeded. */

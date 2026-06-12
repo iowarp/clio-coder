@@ -98,6 +98,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 			envelope,
 			receipt: receiptResult.receipt,
 			receiptError: receiptResult.error,
+			receiptIntegrityFailed: receiptResult.integrityFailed,
 		});
 	}
 
@@ -200,7 +201,8 @@ function buildFindings(
 	const findings: EvidenceFinding[] = [];
 	for (const source of runSources) {
 		if (source.receiptError !== null) {
-			findings.push(finding(findings.length, "warn", "unknown", source.envelope.id, source.receiptError));
+			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
+			findings.push(finding(findings.length, "warn", tag, source.envelope.id, source.receiptError));
 		}
 		if (source.envelope.cwd.trim().length === 0) {
 			findings.push(finding(findings.length, "warn", "cwd-missing", source.envelope.id, "run ledger cwd is empty"));
@@ -1143,27 +1145,32 @@ async function readRunLedger(dataDir: string): Promise<RunEnvelope[]> {
 async function readReceipt(
 	dataDir: string,
 	envelope: RunEnvelope,
-): Promise<{ receipt: RunReceipt | null; error: string | null }> {
+): Promise<{ receipt: RunReceipt | null; error: string | null; integrityFailed: boolean }> {
 	const receiptPath = envelope.receiptPath ?? join(dataDir, "receipts", `${envelope.id}.json`);
 	let raw: string;
 	try {
 		raw = await readFile(receiptPath, "utf8");
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") return { receipt: null, error: "receipt file not found" };
-		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}` };
+		if (err.code === "ENOENT") return { receipt: null, error: "receipt file not found", integrityFailed: false };
+		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}`, integrityFailed: false };
 	}
 	const parsed = parseJson(raw, receiptPath);
 	const receipt = parseRunReceipt(parsed, receiptPath);
 	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	if (!integrity.ok) return { receipt, error: `receipt integrity: ${integrity.reason}` };
-	return { receipt, error: null };
+	if (!integrity.ok) return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
+	return { receipt, error: null, integrityFailed: false };
 }
 
 function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
+	// Spread the raw row first: integrity verification recomputes digests over
+	// ledger fields this parser does not model (outcome, lineage, identity,
+	// token splits), so dropping them would flag every modern receipt as
+	// tampered. The validated reads below still gate the fields evidence uses.
 	return {
+		...(value as Partial<RunEnvelope>),
 		id: readString(value, source, "id"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),
@@ -1192,7 +1199,12 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 	if (!isRecord(integrity)) throw new Error(`${source}.integrity: expected object`);
 	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
 	const failureMessage = readOptionalString(value.failureMessage);
+	// Spread the raw receipt first so integrity verification sees the receipt
+	// as written (outcome, safety, reproducibility, token splits, ...); the
+	// write-time digest covered those fields and a lossy re-parse would make
+	// every clean receipt recompute to a different digest.
 	return {
+		...(value as Partial<RunReceipt>),
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),

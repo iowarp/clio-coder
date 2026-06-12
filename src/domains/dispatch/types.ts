@@ -98,6 +98,9 @@ export interface RunEnvelope {
 	sessionId: string | null;
 	cwd: string;
 	tokenCount: number;
+	/** Input/output token split; written at finalization, absent on pre-split ledgers. */
+	inputTokenCount?: number;
+	outputTokenCount?: number;
 	reasoningTokenCount?: number;
 	cacheReadTokenCount?: number;
 	cacheWriteTokenCount?: number;
@@ -121,6 +124,20 @@ export interface ToolCallStat {
 	errors: number;
 	blocked: number;
 	totalDurationMs: number;
+}
+
+/**
+ * Deterministic activity totals aggregated from toolStats at finalization.
+ * `mutatingSucceeded` reports whether any successful call's action class can
+ * change state, using the safety domain's classifier; it is mechanical
+ * bookkeeping, not a judgment about whether the task was accomplished.
+ */
+export interface ToolActivitySummary {
+	calls: number;
+	succeeded: number;
+	failed: number;
+	blocked: number;
+	mutatingSucceeded: boolean;
 }
 
 export interface SafetyBlockedAttempt {
@@ -242,6 +259,7 @@ export interface RunReceipt {
 	nodeVersion: string;
 	toolCalls: number;
 	toolStats: ToolCallStat[];
+	toolActivity?: ToolActivitySummary;
 	skillActivations?: SkillActivation[];
 	safety?: RunReceiptSafetySummary;
 	reproducibility?: RunReceiptReproducibility;
