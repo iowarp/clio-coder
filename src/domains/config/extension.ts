@@ -1,13 +1,13 @@
 import { Value } from "typebox/value";
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
+import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
 import { SettingsSchema } from "./schema.js";
 import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
 
-type ChangeListener = (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void;
+type ChangeListener = (payload: ConfigChangePayload) => void;
 
 export function createConfigBundle(context: DomainContext): DomainBundle<ConfigContract> {
 	let watcher: ConfigWatcher | null = null;
@@ -26,7 +26,7 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		);
 	}
 
-	function dispatch(kind: ChangeKind, payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }): void {
+	function dispatch(kind: ChangeKind, payload: ConfigChangePayload): void {
 		const bus = context.bus;
 		const channel =
 			kind === "hotReload"

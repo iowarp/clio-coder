@@ -1,20 +1,13 @@
-export type StatusPhase =
-	| "idle"
-	| "preparing"
-	| "waiting_model"
-	| "thinking"
-	| "writing"
-	| "tool_running"
-	| "tool_blocked"
-	| "retrying"
-	| "compacting"
-	| "dispatching"
-	| "stuck"
-	| "ended";
+import type { StatusPhase, WatchdogTier } from "../../core/bus-events.js";
+
+// StatusPhase, WatchdogTier, and AgentStatusChangedPayload moved to
+// src/core/bus-events.ts (the phase taxonomy rides the agent.status.changed
+// bus channel into the safety domain); re-exported here so interactive code
+// keeps one import site.
+export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../../core/bus-events.js";
 
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
-export type WatchdogTier = 0 | 1 | 2 | 3 | 4;
 export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled";
 
 export interface RetryOverlay {
@@ -83,16 +76,6 @@ export interface AgentStatus {
 export interface AgentStatusEvent {
 	type: "agent_status";
 	status: AgentStatus;
-}
-
-export interface AgentStatusChangedPayload {
-	runId: string | null;
-	phase: StatusPhase;
-	prevPhase: StatusPhase;
-	at: number;
-	elapsedFromStart: number;
-	watchdogTier: WatchdogTier;
-	metadata?: { toolName?: string; attempt?: number; reason?: string; agentName?: string } | undefined;
 }
 
 export const INITIAL_STATUS: AgentStatus = {

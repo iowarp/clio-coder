@@ -107,6 +107,9 @@ describe("dispatch board terminal taxonomy", () => {
 			const bus = createSafeEventBus();
 			const store = createDispatchBoardStore(bus);
 			try {
+				// Partial payloads on purpose: the board must tolerate runtime
+				// events thinner than the compile-time contract, so the typed
+				// emit check is bypassed with `as never`.
 				bus.emit(BusChannels.DispatchStarted, {
 					runId: `run-${reason}`,
 					agentId: "coder",
@@ -114,7 +117,7 @@ describe("dispatch board terminal taxonomy", () => {
 					wireModelId: "model",
 					runtimeId: "runtime",
 					runtimeKind: "http",
-				});
+				} as never);
 				bus.emit(BusChannels.DispatchFailed, {
 					runId: `run-${reason}`,
 					agentId: "coder",
@@ -123,7 +126,7 @@ describe("dispatch board terminal taxonomy", () => {
 					runtimeId: "runtime",
 					runtimeKind: "http",
 					reason,
-				});
+				} as never);
 
 				const row = store.rows()[0];
 				strictEqual(row?.status, status, `${reason} should render as ${status}`);
@@ -145,7 +148,7 @@ describe("dispatch board terminal taxonomy", () => {
 				wireModelId: "model",
 				runtimeId: "runtime",
 				runtimeKind: "http",
-			});
+			} as never);
 			bus.emit(BusChannels.DispatchProgress, {
 				runId: "run-dead",
 				agentId: "coder",
@@ -162,7 +165,7 @@ describe("dispatch board terminal taxonomy", () => {
 				runtimeKind: "http",
 				reason: "failed",
 				outcomeDetail: "exit code 1",
-			});
+			} as never);
 			const row = store.rows()[0];
 			strictEqual(row?.status, "dead");
 			strictEqual(row?.outcomeDetail, "exit code 1");

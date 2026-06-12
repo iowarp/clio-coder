@@ -1,4 +1,8 @@
-import { BusChannels } from "../../core/bus-events.js";
+import {
+	BusChannels,
+	type SessionParkReason as ParkReason,
+	type SessionResumeVia as ResumeVia,
+} from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { openSession } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
@@ -21,9 +25,6 @@ import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombs
 import { buildTreeSnapshot, computeLeafId, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
 import { probeWorkspace } from "./workspace/index.js";
-
-type ParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
-type ResumeVia = "resume" | "switch_branch";
 
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and

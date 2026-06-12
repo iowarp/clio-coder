@@ -1,9 +1,23 @@
 /**
- * Canonical channel names for the Clio event bus.
+ * Canonical channel names and payload contracts for the Clio event bus.
  *
  * Add new channels here. Downstream code imports from this file rather than
  * hard-coding string literals so renames are a single edit and typos fail fast.
+ *
+ * Every channel has a payload type registered in {@link BusPayloadMap}; the
+ * shared bus types `emit`/`on` against that map, so payload drift between an
+ * emitter and this file is a compile error. The types describe what in-process
+ * emitters send; the bus performs no runtime validation, so subscribers that
+ * consume data which crossed a process boundary (worker/ACP event streams)
+ * must keep validating at runtime.
  */
+
+import type { AgentAudience } from "../domains/agents/spec.js";
+import type { ConfigDiff } from "../domains/config/classify.js";
+import type { DispatchRequestOrigin, RunKind, RunLineage, RunOutcome } from "../domains/dispatch/types.js";
+import type { EndpointStatus } from "../domains/providers/contract.js";
+import type { ClioSettings } from "./config.js";
+import type { TerminationPhase } from "./termination.js";
 
 export const BusChannels = {
 	SessionStart: "session.start",
@@ -110,9 +124,9 @@ export interface BudgetAlertPayload {
 export interface SafetyBlockedPayload {
 	tool: string;
 	actionClass: string;
-	ruleId?: string;
-	posture?: string;
-	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> };
+	ruleId?: string | undefined;
+	posture?: string | undefined;
+	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> } | undefined;
 	policySource: string;
 	reasonCode: string;
 }
@@ -166,3 +180,331 @@ export interface ContextPrunedPayload {
 	pressure?: number | null;
 	maskedObservations?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Session and domain lifecycle
+// ---------------------------------------------------------------------------
+
+/** Published on {@link BusChannels.SessionStart} once the orchestrator boots. */
+export interface SessionStartPayload {
+	at: number;
+}
+
+/** Published on {@link BusChannels.SessionEnd} just before process.exit. */
+export interface SessionEndPayload {
+	exitCode: number;
+}
+
+export type SessionParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
+export type SessionResumeVia = "resume" | "switch_branch";
+
+/** Published on {@link BusChannels.SessionParked} when the current session is replaced or closed. */
+export interface SessionParkedPayload {
+	sessionId: string;
+	reason: SessionParkReason;
+	at: number;
+}
+
+/** Published on {@link BusChannels.SessionResumed} when an existing session is reopened. */
+export interface SessionResumedPayload {
+	sessionId: string;
+	via: SessionResumeVia;
+	at: number;
+}
+
+/** Published on {@link BusChannels.DomainLoaded} per successfully started domain. */
+export interface DomainLoadedPayload {
+	name: string;
+}
+
+/** Published on {@link BusChannels.DomainFailed} right before the loader throws. */
+export interface DomainFailedPayload {
+	name: string;
+	/** The caught value as-is; loaders catch unknown and rethrow after emitting. */
+	error: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+/**
+ * Published on {@link BusChannels.ConfigHotReload}, {@link BusChannels.ConfigNextTurn},
+ * and {@link BusChannels.ConfigRestartRequired}. One shape for all three: the
+ * channel encodes the change class, the diff says which paths moved, and
+ * `settings` is the freshly validated snapshot.
+ */
+export interface ConfigChangePayload {
+	diff: ConfigDiff;
+	settings: Readonly<ClioSettings>;
+}
+
+// ---------------------------------------------------------------------------
+// Safety and permissions
+// ---------------------------------------------------------------------------
+
+/**
+ * Published on {@link BusChannels.SafetyClassified} for every policy
+ * evaluation, regardless of verdict.
+ */
+export interface SafetyClassifiedPayload {
+	tool: string;
+	actionClass: string;
+	reasons: ReadonlyArray<string>;
+	ruleId?: string | undefined;
+	posture?: string | undefined;
+	policySource: string;
+	reasonCode: string;
+}
+
+/**
+ * Published on {@link BusChannels.PermissionRequested} when policy parks a
+ * tool call pending operator confirmation.
+ */
+export interface PermissionRequestedPayload {
+	tool: string;
+	actionClass: string;
+	ruleId?: string | undefined;
+	posture?: string | undefined;
+	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> } | undefined;
+	policySource: string;
+	reasonCode: string;
+}
+
+/**
+ * Published on {@link BusChannels.PermissionResolved} when a parked call is
+ * granted or denied (operator decision, headless auto-deny, or a delegated
+ * agent's denial relayed by dispatch). Only `status` is guaranteed; emitters
+ * attach whatever provenance they have.
+ */
+export interface PermissionResolvedPayload {
+	status: "granted" | "denied";
+	tool?: string | undefined;
+	actionClass?: string | undefined;
+	reason?: string | undefined;
+	requestedBy?: string | undefined;
+	at?: number | undefined;
+}
+
+/** Published on {@link BusChannels.SafetyAllowed} when policy allows a call outright. */
+export interface SafetyAllowedPayload {
+	tool: string;
+	actionClass: string;
+	posture?: string | undefined;
+	ruleId?: string | undefined;
+	policySource: string;
+	reasonCode: string;
+}
+
+// ---------------------------------------------------------------------------
+// Providers
+// ---------------------------------------------------------------------------
+
+/** Published on {@link BusChannels.ProviderHealth} after every endpoint probe/disconnect. */
+export interface ProviderHealthPayload {
+	id: string;
+	status: EndpointStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Identity fields shared by every dispatch lifecycle event. `agentAudience`
+ * is only known on the worker path; the ACP path omits it. `requestOrigin`
+ * is always sent by enqueue/start but conditionally by retry/heartbeat.
+ */
+export interface DispatchRunIdentity {
+	runId: string;
+	agentId: string;
+	agentAudience?: AgentAudience | undefined;
+	requestOrigin?: DispatchRequestOrigin | undefined;
+	endpointId: string;
+	wireModelId: string;
+	runtimeId: string;
+	runtimeKind: RunKind;
+}
+
+/** Published on {@link BusChannels.DispatchEnqueued} once the ledger row exists. */
+export interface DispatchEnqueuedPayload extends DispatchRunIdentity {
+	requestOrigin: DispatchRequestOrigin;
+}
+
+/** Published on {@link BusChannels.DispatchStarted} once the child process is live. */
+export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
+	pid: number | null;
+}
+
+/**
+ * Published on {@link BusChannels.DispatchProgress} for every non-heartbeat
+ * worker/ACP event plus heartbeat status transitions. Only the run identity
+ * core is guaranteed: the dispatch tool and slash commands relay events with
+ * just runId/agentId, while the dispatch domain attaches full identity.
+ *
+ * `event` is intentionally untyped: it is the worker/ACP event stream, which
+ * crosses a process boundary, so subscribers must validate its shape.
+ */
+export interface DispatchProgressPayload {
+	runId: string;
+	agentId: string;
+	agentAudience?: AgentAudience | undefined;
+	requestOrigin?: DispatchRequestOrigin | undefined;
+	endpointId?: string | undefined;
+	wireModelId?: string | undefined;
+	runtimeId?: string | undefined;
+	runtimeKind?: RunKind | undefined;
+	event: unknown;
+}
+
+/**
+ * Telemetry and provenance attached by the two run finalizers (worker and
+ * ACP). Required on {@link DispatchCompletedPayload} so dropping a field from
+ * one finalizer is a compile error; optional on {@link DispatchFailedPayload}
+ * because the retry-denied emitter has no run to report on.
+ */
+export interface DispatchTerminalStats {
+	lineage: RunLineage;
+	tokenCount: number;
+	inputTokenCount: number;
+	outputTokenCount: number;
+	cacheReadTokenCount: number;
+	cacheWriteTokenCount: number;
+	reasoningTokenCount: number;
+	staticShellHash: string | null;
+	sessionShellHash: string | null;
+	dynamicHash: string | null;
+	costUsd: number;
+	durationMs: number;
+	exitCode: number;
+}
+
+/** Published on {@link BusChannels.DispatchCompleted} when a run finalizes as succeeded. */
+export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchTerminalStats {
+	requestOrigin: DispatchRequestOrigin;
+	outcome: RunOutcome;
+	outcomeDetail: string | null;
+}
+
+/**
+ * Published on {@link BusChannels.DispatchFailed} for every non-succeeded
+ * terminal outcome. `reason` carries the resolved outcome (or the synthetic
+ * "retry_denied" when a retry never reached admission); the board maps it to
+ * a presentation status, so emitters must not collapse the taxonomy.
+ */
+export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<DispatchTerminalStats> {
+	outcome: RunOutcome;
+	outcomeDetail: string | null;
+	reason: RunOutcome | "retry_denied";
+}
+
+// ---------------------------------------------------------------------------
+// Compaction
+// ---------------------------------------------------------------------------
+
+/** Published on {@link BusChannels.CompactionBegin} and {@link BusChannels.CompactionEnd}. */
+export interface CompactionPayload {
+	trigger: string;
+	at: number;
+}
+
+// ---------------------------------------------------------------------------
+// Agent status
+// ---------------------------------------------------------------------------
+
+/**
+ * Status phases for the interactive agent loop. Owned here (not in
+ * src/interactive) because the phase taxonomy rides the bus into the safety
+ * domain's audit trail; src/interactive/status/types.ts re-exports it.
+ */
+export type StatusPhase =
+	| "idle"
+	| "preparing"
+	| "waiting_model"
+	| "thinking"
+	| "writing"
+	| "tool_running"
+	| "tool_blocked"
+	| "retrying"
+	| "compacting"
+	| "dispatching"
+	| "stuck"
+	| "ended";
+
+export type WatchdogTier = 0 | 1 | 2 | 3 | 4;
+
+/** Published on {@link BusChannels.AgentStatusChanged} on every phase transition. */
+export interface AgentStatusChangedPayload {
+	runId: string | null;
+	phase: StatusPhase;
+	prevPhase: StatusPhase;
+	at: number;
+	elapsedFromStart: number;
+	watchdogTier: WatchdogTier;
+	metadata?: { toolName?: string; attempt?: number; reason?: string; agentName?: string } | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown
+// ---------------------------------------------------------------------------
+
+/** Published on {@link BusChannels.ShutdownRequested} as draining begins. */
+export interface ShutdownRequestedPayload {
+	phase: TerminationPhase;
+}
+
+/** Channels that mark a phase transition and carry no data. */
+export type EmptyPayload = Record<string, never>;
+
+// ---------------------------------------------------------------------------
+// Payload map
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-channel payload contract. {@link SafeEventBus} types `emit`/`on`
+ * against this map: emitters get payload checking, handlers get a typed
+ * parameter. Compile-time only; see the module doc for the runtime-boundary
+ * policy.
+ */
+export type BusPayloadMap = {
+	[BusChannels.SessionStart]: SessionStartPayload;
+	[BusChannels.SessionEnd]: SessionEndPayload;
+	[BusChannels.SessionParked]: SessionParkedPayload;
+	[BusChannels.SessionResumed]: SessionResumedPayload;
+	[BusChannels.DomainLoaded]: DomainLoadedPayload;
+	[BusChannels.DomainFailed]: DomainFailedPayload;
+	[BusChannels.ConfigHotReload]: ConfigChangePayload;
+	[BusChannels.ConfigNextTurn]: ConfigChangePayload;
+	[BusChannels.ConfigRestartRequired]: ConfigChangePayload;
+	[BusChannels.PermissionRequested]: PermissionRequestedPayload;
+	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
+	[BusChannels.SafetyClassified]: SafetyClassifiedPayload;
+	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
+	[BusChannels.SafetyAllowed]: SafetyAllowedPayload;
+	[BusChannels.LoopBlocked]: LoopBlockedPayload;
+	[BusChannels.ProviderHealth]: ProviderHealthPayload;
+	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;
+	[BusChannels.DispatchStarted]: DispatchStartedPayload;
+	[BusChannels.DispatchProgress]: DispatchProgressPayload;
+	[BusChannels.DispatchCompleted]: DispatchCompletedPayload;
+	[BusChannels.DispatchFailed]: DispatchFailedPayload;
+	[BusChannels.CompactionBegin]: CompactionPayload;
+	[BusChannels.CompactionEnd]: CompactionPayload;
+	[BusChannels.ContextActivity]: ContextActivityPayload;
+	[BusChannels.ContextWarning]: ContextWarningPayload;
+	[BusChannels.ContextPruned]: ContextPrunedPayload;
+	[BusChannels.AgentStatusChanged]: AgentStatusChangedPayload;
+	[BusChannels.RunAborted]: RunAbortedPayload;
+	[BusChannels.BudgetAlert]: BudgetAlertPayload;
+	[BusChannels.ShutdownRequested]: ShutdownRequestedPayload;
+	[BusChannels.ShutdownDrained]: EmptyPayload;
+	[BusChannels.ShutdownTerminated]: EmptyPayload;
+	[BusChannels.ShutdownPersisted]: EmptyPayload;
+};
+
+type AssertNever<T extends never> = T;
+/**
+ * Compile-time exhaustiveness tripwire: adding a member to BusChannels
+ * without registering its payload in BusPayloadMap fails to typecheck here.
+ */
+export type BusPayloadMapCoversAllChannels = AssertNever<Exclude<BusChannel, keyof BusPayloadMap>>;

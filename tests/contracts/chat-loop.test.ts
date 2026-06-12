@@ -373,8 +373,10 @@ describe("contracts/chat-loop per-turn telemetry", () => {
 			}),
 		} as never);
 
-		// Worker traffic on the shared backend since the last settled run.
-		bus.emit(BusChannels.DispatchCompleted, { at: Date.now() });
+		// Worker traffic on the shared backend since the last settled run. The
+		// cold-reason subscriber ignores the payload, so a deliberately partial
+		// one is emitted through `as never` (emit is compile-checked otherwise).
+		bus.emit(BusChannels.DispatchCompleted, { at: Date.now() } as never);
 		await loop.submit("after a dispatch ran");
 
 		const assistant = entries.find((entry) => entry.kind === "message" && entry.role === "assistant");
