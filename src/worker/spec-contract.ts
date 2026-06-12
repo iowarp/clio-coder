@@ -115,6 +115,8 @@ const MIDDLEWARE_HOOKS = [
 	"on_compaction",
 	"on_dispatch_start",
 	"on_dispatch_end",
+	"turn_start",
+	"turn_end",
 ] as const;
 const MIDDLEWARE_EFFECT_KINDS = [
 	"inject_reminder",

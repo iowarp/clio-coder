@@ -54,6 +54,7 @@ import {
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
+import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import {
@@ -91,6 +92,7 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
+import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
@@ -670,9 +672,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return readSessionEntriesForCompact(meta.id);
 	};
 
+	// turn_end assessors, fired by the chat-loop when the final assistant
+	// message of a run lands. Tool-prose first so its hard-block interruption
+	// precedes the finish-contract advisory in effect order.
+	middleware.registerHook(createToolProseRegistration());
+	if (session) {
+		middleware.registerHook(
+			createFinishContractRegistration({
+				readSessionEntries: () => (session.current() ? readCurrentSessionEntries() : null),
+			}),
+		);
+	}
+
 	const chat = createChatLoop({
 		getSettings: getCurrentSettings,
 		providers,
+		middleware,
 		protectedArtifacts: { replace: (state) => protectedArtifactsGuard.replaceState(state) },
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
