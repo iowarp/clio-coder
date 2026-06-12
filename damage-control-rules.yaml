@@ -32,6 +32,21 @@ packs:
         pattern: "\\brmdir\\s+--ignore-fail-on-non-empty\\b"
         class: system_modify
         block: true
+      - id: find-delete
+        description: "find -delete mass-deletes matched files"
+        pattern: "\\bfind\\b[^;&|]*\\s-delete\\b"
+        class: system_modify
+        block: true
+      - id: rsync-delete
+        description: "rsync --delete removes files missing from the source"
+        pattern: "\\brsync\\b[^;&|]*\\s--delete"
+        class: system_modify
+        block: true
+      - id: shred-file
+        description: "shred overwrites file contents unrecoverably"
+        pattern: "\\bshred\\s+\\S"
+        class: system_modify
+        block: true
       - id: chmod-777
         description: "chmod 777 makes files world-writable"
         pattern: "\\bchmod\\s+(-[^\\s]+\\s+)*777\\b"
@@ -387,6 +402,18 @@ packs:
       - id: sql-delete-by-id
         description: "SQL DELETE by id should be confirmed"
         pattern: "\\bDELETE\\s+FROM\\s+\\w+\\s+WHERE\\b.*\\bid\\s*="
+        class: system_modify
+        block: false
+        ask: true
+      - id: truncate-size-zero
+        description: "truncate -s 0 empties a file"
+        pattern: "\\btruncate\\s+(?:-[^\\s]+\\s+)*(?:--size|-s)[=\\s]+0+\\b"
+        class: system_modify
+        block: false
+        ask: true
+      - id: colon-truncate
+        description: ":> empties a file via the null command redirect"
+        pattern: "(?:^|[\\s;&|]):\\s*>(?!>)"
         class: system_modify
         block: false
         ask: true

@@ -119,9 +119,10 @@ describe("contracts/autonomy registry admission", () => {
 		const registry = registryAt("full-auto");
 		strictEqual((await registry.invoke(bashCall("echo hello"))).kind, "ok");
 
-		// Net block, level-independent (I2a stance; I3 revisits operators).
+		// Sequencing operators run at full-auto (sd-01 M5/I3): the command is
+		// unrecognized, and the matrix allows unrecognized execute here.
 		const operators = await registry.invoke(bashCall("echo a && echo b"));
-		strictEqual(operators.kind, "blocked");
+		strictEqual(operators.kind, "ok");
 
 		// Damage-control block rule through the net.
 		const destructive = await registry.invoke(bashCall("rm -rf src"));
@@ -133,6 +134,43 @@ describe("contracts/autonomy registry admission", () => {
 		strictEqual(registry.hasParkedCalls(), true);
 		registry.cancelParkedCalls("operator declined");
 		strictEqual((await pendingSudo).kind, "blocked");
+	});
+
+	it("shell operators: substitution asks at full-auto, sequencing asks at auto-edit, the pack scans through both", async () => {
+		// $() is a net confirm rail at every level, full-auto included; a
+		// one-shot grant resumes it with confirmed posture.
+		const fullAuto = registryAt("full-auto");
+		const pendingSubstitution = fullAuto.invoke(bashCall("echo $(date +%s)"));
+		await settle();
+		strictEqual(fullAuto.hasParkedCalls(), true);
+		await fullAuto.resumeParkedCalls({ actionClass: "execute", requestedBy: "test" });
+		strictEqual((await pendingSubstitution).kind, "ok");
+
+		const pendingBackticks = fullAuto.invoke(bashCall("echo `date`"));
+		await settle();
+		strictEqual(fullAuto.hasParkedCalls(), true);
+		fullAuto.cancelParkedCalls("operator declined");
+		strictEqual((await pendingBackticks).kind, "blocked");
+
+		// A destructive verb behind an operator hits the pack before any
+		// operator handling, so it blocks even at full-auto.
+		const destructive = await fullAuto.invoke(bashCall("git status && find /tmp/clio-i3 -delete"));
+		strictEqual(destructive.kind, "blocked");
+
+		// At auto-edit, a piped command is unrecognized bash: it asks instead
+		// of blocking, and a grant resumes it.
+		const autoEdit = registryAt("auto-edit");
+		const pendingPipe = autoEdit.invoke(bashCall("printf 'a\\nb' | wc -l"));
+		await settle();
+		strictEqual(autoEdit.hasParkedCalls(), true);
+		await autoEdit.resumeParkedCalls({ actionClass: "execute", requestedBy: "test" });
+		strictEqual((await pendingPipe).kind, "ok");
+
+		// read-only denies the substitution ask like every other mutation.
+		const readOnly = registryAt("read-only");
+		const denied = await readOnly.invoke(bashCall("echo $(date)"));
+		strictEqual(denied.kind, "blocked");
+		ok(denied.kind === "blocked" && denied.reason.includes("autonomy level is read-only"));
 	});
 
 	it("honors M3: an authored git ask rule parks and a git_destructive grant resumes it", async () => {

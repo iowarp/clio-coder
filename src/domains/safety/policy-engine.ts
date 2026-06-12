@@ -294,12 +294,13 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 }
 
 /**
- * Bash net evaluation (sd-01 §2.2). Net blocks: empty commands, cwd escapes,
- * and (until I3 lands the operator split) shell operators. Net confirms:
- * project policy `requireConfirmation`. Everything else passes with an
+ * Bash net evaluation (sd-01 §2.2). Net blocks: empty commands and cwd
+ * escapes. Net confirms: project policy `requireConfirmation` and command
+ * substitution (the content-hiding channel). Everything else passes with an
  * `execRecognition` tag: project policy commands and the built-in no-prompt
- * allowlist are recognized; arbitrary bash is unrecognized and the autonomy
- * mapping at the admission seam decides whether it runs, asks, or is denied.
+ * allowlist are recognized; arbitrary bash, including commands with
+ * sequencing operators, is unrecognized and the autonomy mapping at the
+ * admission seam decides whether it runs, asks, or is denied.
  */
 function evaluateBashPolicy(
 	command: string,
@@ -351,13 +352,33 @@ function evaluateBashPolicy(
 			policySource: "builtin-command-allowlist",
 		};
 	}
-	if (hasShellOperators(command)) {
+	// Command substitution is the content-hiding channel: the net cannot scan
+	// what `$(...)` or backticks produce at runtime, so it stays an ask rail at
+	// every level, including full-auto (sd-01 M5). A confirmed posture (one-shot
+	// grant) admits it like any other confirm rail.
+	if (hasCommandSubstitution(command) && posture !== "confirmed") {
 		return {
-			kind: "block",
-			ruleId: "bash-shell-operators-denied",
-			reasonCode: "bash-shell-operators-denied",
-			reasons: ["shell operators require a structured tool or an explicit project policy command"],
+			kind: "ask",
+			ruleId: "bash-command-substitution",
+			reasonCode: "bash-command-substitution",
+			reasons: ["command substitution hides the executed content from the safety net and requires one-shot confirmation"],
 			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
+		};
+	}
+	// Sequencing operators (pipes, &&, ;, redirects) defeat per-command
+	// recognition, so the command is unrecognized by definition: the autonomy
+	// mapping asks at suggest/auto-edit, runs at full-auto, denies at
+	// read-only. The rule pack has already scanned the full string, so a
+	// destructive verb behind an operator was caught before this point.
+	if (hasSequencingOperators(command)) {
+		return {
+			kind: "allow",
+			ruleId: "bash-shell-operators",
+			reasonCode: "bash-shell-operators",
+			reasons: ["shell operators defeat per-command recognition; the autonomy level decides admission"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
 		};
 	}
 	for (const entry of BUILTIN_ALLOWLIST) {
@@ -492,8 +513,26 @@ function matchingProjectCommand(
 	return null;
 }
 
+/**
+ * Sequencing and redirection operators. These defeat per-command allowlist
+ * matching but hide nothing from the rule pack, which scans the full string.
+ */
+function hasSequencingOperators(command: string): boolean {
+	return /(\|\||&&|;|\||>>?|<|\n|\r)/.test(command);
+}
+
+/**
+ * Content-hiding constructs: `$(...)` and backticks execute text the net
+ * cannot see until runtime. Kept separate from sequencing (sd-01 M5) so they
+ * can stay ask-gated at full-auto.
+ */
+function hasCommandSubstitution(command: string): boolean {
+	return /(`|\$\()/.test(command);
+}
+
+/** Any shell operator at all; project policy entries with `shellOperators: deny` reject both kinds. */
 function hasShellOperators(command: string): boolean {
-	return /(\|\||&&|;|\||>>?|<|`|\$\(|\n|\r)/.test(command);
+	return hasSequencingOperators(command) || hasCommandSubstitution(command);
 }
 
 function isUnderOrSame(child: string, parent: string): boolean {

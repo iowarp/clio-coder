@@ -97,7 +97,7 @@ The policy engine tags every bash command as recognized or unrecognized; the aut
 1. **Recognized**: a valid `.clio/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. Recognized commands run without prompting at `auto-edit` and `full-auto`.
 2. **Unrecognized**: anything else. Unrecognized bash asks for one-shot approval at `auto-edit` and runs at `full-auto`; at `suggest` it asks like every mutation, and at `read-only` it is denied.
 
-The net still blocks shell operators (`&&`, `||`, `;`, pipes, redirects, command substitution, newlines) at every level unless an exact project-policy entry opts in.
+Shell operators split two ways. Sequencing and redirection (`&&`, `||`, `;`, pipes, redirects, newlines) make a command unrecognized: it asks at `auto-edit` and runs at `full-auto`. Command substitution (`$(...)`, backticks) is a net confirm rail at every level, full-auto included, because the net cannot scan what it executes until runtime. The rule pack scans the full command string before either check, so a destructive verb behind an operator is caught regardless of level. Project policy entries reject both operator kinds unless the entry sets `shellOperators: allow`.
 
 Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
 
