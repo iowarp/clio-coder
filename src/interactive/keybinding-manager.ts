@@ -6,9 +6,9 @@
  *
  *   - `matches(data, id)`  : replaces raw byte comparisons in the router
  *   - `getKeys(id)`        : resolved KeyId[] for a binding, for help display
- *   - `getDescription(id)` : short description used by `/hotkeys`
+ *   - `getDescription(id)` : short description used by `/help`
  *   - `getConflicts()`     : duplicate-binding diagnostics for /settings
- *   - `hotkeyEntries()`    : ordered list for the global /hotkeys section
+ *   - `hotkeyEntries()`    : ordered list for the global /help section
  *   - `overrideCount()`    : count of entries the user has customized
  *   - `invalidCount()`     : count of user entries that failed validation
  *   - `invalidBindings()`  : details for the /settings diagnostic row
@@ -388,13 +388,13 @@ export function formatPlatformKeybindingNotice(warnings: ReadonlyArray<PlatformK
 				return base ? `Alt+${base.toUpperCase()}` : key;
 			})
 			.join(", ");
-		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt, or use Ctrl+G then the shortcut letter, slash commands (/help lists commands), and /hotkeys.\n`;
+		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt, or use Ctrl+G then the shortcut letter, slash commands (/help lists commands), and /help.\n`;
 	}
 	const count = warnings.reduce((sum, entry) => sum + entry.keys.length, 0);
 	const detail = warnings
 		.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}" (${entry.source}, ${entry.reason})`))
 		.join(", ");
-	return `Clio keybinding notice: ${count} keybinding${count === 1 ? "" : "s"} may not fire reliably in this terminal: ${detail}. Rebind in settings.yaml or inspect /hotkeys.\n`;
+	return `Clio keybinding notice: ${count} keybinding${count === 1 ? "" : "s"} may not fire reliably in this terminal: ${detail}. Rebind in settings.yaml or inspect /help.\n`;
 }
 
 function joinKeys(keys: ReadonlyArray<KeyId>): string {

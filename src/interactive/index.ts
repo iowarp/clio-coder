@@ -74,13 +74,16 @@ import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifica
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
-import { openHotkeysOverlay } from "./overlays/hotkeys.js";
+import { openExtensionsOverlay } from "./overlays/extensions.js";
+import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
+import { openPromptsOverlay } from "./overlays/prompts.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSettingsOverlay } from "./overlays/settings.js";
@@ -272,7 +275,10 @@ export type OverlayState =
 	| "message-picker"
 	| "cwd-fallback"
 	| "ask-user"
-	| "hotkeys";
+	| "help"
+	| "agents"
+	| "prompts"
+	| "extensions";
 
 export interface KeyBindingDeps {
 	/**
@@ -391,10 +397,6 @@ export interface AskUserOverlayKeyDeps {
 	cancelAskUser: () => void;
 }
 
-export interface HotkeysOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
 export interface OverlayKeyDeps
 	extends PermissionOverlayKeyDeps,
 		DispatchBoardOverlayKeyDeps,
@@ -411,8 +413,7 @@ export interface OverlayKeyDeps
 		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
 		CwdFallbackOverlayKeyDeps,
-		AskUserOverlayKeyDeps,
-		HotkeysOverlayKeyDeps {
+		AskUserOverlayKeyDeps {
 	requestShutdown: () => void;
 }
 
@@ -760,14 +761,7 @@ export function handleCwdFallbackCancel(preResumeSessionId: string | null, deps:
 	deps.openResumeOverlay();
 }
 
-/** Pure overlay key router for the /hotkeys overlay. Esc closes; list keys fall through to the focused view. */
-export function routeHotkeysOverlayKey(data: string, deps: HotkeysOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
+// Pure overlay key router for list overlays (help, agents, prompts, extensions). Esc closes.
 
 /** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
 export function routeOverlayKey(
@@ -785,7 +779,7 @@ export function routeOverlayKey(
 		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
 		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
 		((overlayState === "model" || overlayState === "scoped-models") && matches(data, "clio.model.select")) ||
-		(overlayState === "hotkeys" && matches(data, "clio.leader"))
+		(overlayState === "help" && matches(data, "clio.leader"))
 	) {
 		deps.closeOverlay();
 		return true;
@@ -856,8 +850,17 @@ export function routeOverlayKey(
 	if (overlayState === "ask-user") {
 		return routeAskUserOverlayKey(data, deps);
 	}
-	if (overlayState === "hotkeys") {
-		return routeHotkeysOverlayKey(data, deps);
+	if (
+		overlayState === "help" ||
+		overlayState === "agents" ||
+		overlayState === "prompts" ||
+		overlayState === "extensions"
+	) {
+		if (data === ESC) {
+			deps.closeOverlay();
+			return true;
+		}
+		return false;
 	}
 	// Dispatch-board branch (fall-through). The overlay has no focused
 	// child that needs arrow/Enter, so Esc closes via routeDispatchBoardOverlayKey.
@@ -1436,7 +1439,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
-		openHotkeys: () => openHotkeysOverlayState(),
+		openHelp: (query?: string) => openHelpOverlayState(query),
+		openAgents: () => openAgentsOverlayState(),
+		openPrompts: () => openPromptsOverlayState(),
+		openExtensions: () => openExtensionsOverlayState(),
+		setEditorText: (text) => {
+			editor.setText(text);
+			tui.requestRender();
+		},
 		runCompact: (instructions) => {
 			if (!deps.onCompact) {
 				io.stderr("[/compact] compaction not wired; pass onCompact to startInteractive\n");
@@ -2545,10 +2555,31 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openHotkeysOverlayState = (): void => {
+	const openHelpOverlayState = (query?: string): void => {
 		if (overlayState !== "closed") return;
-		overlayState = "hotkeys";
-		overlayHandle = openHotkeysOverlay(tui, keybindings);
+		overlayState = "help";
+		overlayHandle = openHelpOverlay(tui, keybindings, () => closeOverlay(), query);
+		tui.requestRender();
+	};
+
+	const openAgentsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "agents";
+		overlayHandle = openAgentsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const openPromptsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "prompts";
+		overlayHandle = openPromptsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const openExtensionsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "extensions";
+		overlayHandle = openExtensionsOverlay(tui, slashCtx, () => closeOverlay());
 		tui.requestRender();
 	};
 

@@ -63,8 +63,8 @@ describe("contracts/slash-spec", () => {
 
 			// help
 			["/help", { kind: "help" }],
-			["/help foo", { kind: "help" }],
-			["/help foo bar", { kind: "help" }],
+			["/help foo", { kind: "help", query: "foo" }],
+			["/help foo bar", { kind: "help", query: "foo bar" }],
 
 			// context-init
 			["/context-init", { kind: "init", options: {} }],
@@ -277,7 +277,7 @@ describe("contracts/slash-spec", () => {
 
 		ok(!byName.has("status"), "retired /status command is not suggested");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
-		strictEqual(byName.get("help")?.argumentHint, "[command]");
+		strictEqual(byName.get("help")?.argumentHint, "[query]");
 		strictEqual(byName.get("share")?.argumentHint, "export <path> | import [--dry-run] [--force] <path>");
 		strictEqual(
 			byName.get("run")?.argumentHint,

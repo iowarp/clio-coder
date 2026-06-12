@@ -306,7 +306,7 @@ export function buildSettingItems(
 			id: "keybindings",
 			label: "keybindings",
 			currentValue: formatKeybindingsSummary(options?.keybindings),
-			description: "Open /hotkeys to see bindings; edit settings.yaml > keybindings to override.",
+			description: "Open /help to see bindings; edit settings.yaml > keybindings to override.",
 		},
 	];
 }
