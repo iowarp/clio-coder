@@ -1111,6 +1111,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		notify(classifyNoticeLevel(text), text, key);
 	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
+		if (event.type === "notice") {
+			notify(event.level, event.text, event.key);
+			return;
+		}
 		if (event.type === "queue_update") {
 			followUpQueuePanel.setMessages(event.messages);
 			tui.requestRender();

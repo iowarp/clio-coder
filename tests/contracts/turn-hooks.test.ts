@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
+import { runMiddlewareHook, runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
+import {
+	STALLED_TURN_REQUEST_CONTINUATION_MESSAGE,
+	STALLED_TURN_RULE_DEFINITION,
+} from "../../src/domains/middleware/stalled-turn.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -221,6 +225,22 @@ async function emitAssistantTurn(agent: FakeAgent, message: AgentMessage): Promi
 	await agent.emit({ type: "agent_end", messages: [...agent.state.messages] } as AgentEvent);
 }
 
+async function emitReadToolCall(agent: FakeAgent, toolCallId = "tool-1"): Promise<void> {
+	await agent.emit({
+		type: "tool_execution_start",
+		toolCallId,
+		toolName: "read",
+		args: { path: "src/index.ts" },
+	} as unknown as AgentEvent);
+	await agent.emit({
+		type: "tool_execution_end",
+		toolCallId,
+		toolName: "read",
+		result: { kind: "ok", output: "file contents" },
+		isError: false,
+	} as unknown as AgentEvent);
+}
+
 describe("contracts/turn-hooks chat-loop wiring", () => {
 	it("fires turn_start with prompt metadata and flushes its reminders into the same request", async () => {
 		const seenInputs: MiddlewareHookInput[] = [];
@@ -300,6 +320,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(input?.metadata?.stopReason, "stop");
 		strictEqual(input?.metadata?.hasStructuredToolCall, false);
 		strictEqual(input?.metadata?.runtimeId, "fake-runtime");
+		strictEqual(input?.metadata?.turnToolCalls, 0);
 		ok(typeof input?.turnId === "string" && input.turnId.length > 0);
 	});
 
@@ -352,6 +373,172 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 
 		await loop.submit("and again");
 		ok(!(prompts[2] ?? "").includes("<system-reminder>"), "reminders flush once, not on every request");
+	});
+
+	it("auto-continues once when a turn announces work but calls no tools", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; text: string }> = [];
+		let call = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownEndpoints: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				call += 1;
+				await emitAssistantTurn(
+					agent,
+					assistantStopMessage(
+						call === 1
+							? "Let me read the key identity files to understand the current state before suggesting edits."
+							: "Done.",
+					),
+				);
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, text: event.text });
+		});
+
+		await loop.submit("start");
+
+		strictEqual(prompts.length, 2, "the stalled turn should resubmit exactly once");
+		strictEqual(prompts[0], "start");
+		const continuation = prompts[1] ?? "";
+		ok(continuation.startsWith("<system-reminder>"));
+		ok(continuation.includes(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE));
+		ok(continuation.endsWith("</system-reminder>"));
+		ok(
+			entries.some(
+				(entry) =>
+					entry.kind === "message" &&
+					entry.role === "user" &&
+					JSON.stringify(entry).includes(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE),
+			),
+			"the continuation reminder should persist as a user ledger entry",
+		);
+		ok(
+			notices.some(
+				(notice) => notice.level === "info" && notice.text === "model announced work without calling tools; nudge sent",
+			),
+		);
+	});
+
+	it("warns and stops when the model stalls again after the one-shot nudge", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; text: string }> = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownEndpoints: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				await emitAssistantTurn(
+					agent,
+					assistantStopMessage(
+						"Now let me update the fallback identity prompt, CLI help, banner, and bootstrap self-identity.",
+					),
+				);
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, text: event.text });
+		});
+
+		await loop.submit("start");
+
+		strictEqual(prompts.length, 2, "the second stalled turn must not resubmit again");
+		ok(
+			notices.some(
+				(notice) => notice.level === "warning" && notice.text === "model stalled again after a nudge; waiting for you",
+			),
+		);
+	});
+
+	it("does not auto-continue a tool-calling turn that announces follow-up work", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; text: string }> = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownEndpoints: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				await emitReadToolCall(agent);
+				await emitAssistantTurn(
+					agent,
+					assistantStopMessage(
+						"Let me read the key identity files to understand the current state before suggesting edits.",
+					),
+				);
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, text: event.text });
+		});
+
+		await loop.submit("start");
+
+		strictEqual(prompts.length, 1);
+		strictEqual(notices.length, 0);
+	});
+
+	it("resets the one-shot stalled-turn cap on the next real user prompt", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; text: string }> = [];
+		let call = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownEndpoints: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				call += 1;
+				const text =
+					call === 1 || call === 2 || call === 3
+						? "Let me read the key identity files to understand the current state before suggesting edits."
+						: "Done.";
+				await emitAssistantTurn(agent, assistantStopMessage(text));
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, text: event.text });
+		});
+
+		await loop.submit("first");
+		strictEqual(prompts.length, 2);
+		ok(notices.some((notice) => notice.level === "warning"));
+
+		await loop.submit("second");
+
+		strictEqual(prompts.length, 4, "a fresh user prompt should get one new auto-continuation");
+		ok((prompts[3] ?? "").includes(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE));
+		strictEqual(
+			notices.filter(
+				(notice) => notice.level === "info" && notice.text === "model announced work without calling tools; nudge sent",
+			).length,
+			2,
+		);
 	});
 
 	it("interrupts the turn on a hard-block reminder and keeps the guidance for the next request", async () => {
@@ -434,6 +621,65 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		loop.resetForSession(null);
 		await loop.submit("second");
 		ok(!(prompts[1] ?? "").includes("leftover advice"), "session switch must drop buffered reminders");
+	});
+});
+
+describe("contracts/turn-hooks stalled-turn nudge", () => {
+	const effectsFor = (
+		text: string,
+		metadata: MiddlewareHookInput["metadata"] = { turnToolCalls: 0, stopReason: "stop" },
+	) =>
+		runMiddlewareHook(
+			{
+				hook: "turn_end",
+				text,
+				metadata,
+			},
+			[STALLED_TURN_RULE_DEFINITION],
+		).effects;
+
+	it("fires for the live transcript action announcements", () => {
+		for (const text of [
+			"Let me read the key identity files to understand the current state before suggesting edits.",
+			"Now let me update the fallback identity prompt, CLI help, banner, and bootstrap self-identity.",
+		]) {
+			const effects = effectsFor(text);
+			strictEqual(effects.length, 1, text);
+			strictEqual(effects[0]?.kind, "request_continuation");
+			ok(effects[0]?.kind === "request_continuation" && effects[0].message === STALLED_TURN_REQUEST_CONTINUATION_MESSAGE);
+		}
+	});
+
+	it("does not fire for questions, completion headers, let-me-know phrasing, or real tool activity", () => {
+		for (const text of [
+			"What would you like to work on?",
+			"All done. Here is a summary of every identity touchpoint that was edited:",
+			"Let me know if you want me to proceed.",
+			"Summary:",
+		]) {
+			strictEqual(effectsFor(text).length, 0, text);
+		}
+		strictEqual(
+			effectsFor("Let me read the key identity files to understand the current state before suggesting edits.", {
+				turnToolCalls: 1,
+				stopReason: "stop",
+			}).length,
+			0,
+		);
+	});
+
+	it("only fires on absent or normal stop reasons", () => {
+		strictEqual(
+			effectsFor("Next I will inspect the files.", { turnToolCalls: 0 }).length,
+			1,
+			"absent stopReason is normal",
+		);
+		for (const stopReason of ["stop", "end_turn", "stop_sequence", "stop-sequence-model"]) {
+			strictEqual(effectsFor("Next I will inspect the files.", { turnToolCalls: 0, stopReason }).length, 1, stopReason);
+		}
+		for (const stopReason of ["aborted", "cancelled", "error", "length", "toolUse"]) {
+			strictEqual(effectsFor("Next I will inspect the files.", { turnToolCalls: 0, stopReason }).length, 0, stopReason);
+		}
 	});
 });
 

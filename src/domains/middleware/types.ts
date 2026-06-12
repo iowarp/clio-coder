@@ -14,6 +14,7 @@ export const MIDDLEWARE_EFFECT_KINDS = [
 	"annotate_tool_result",
 	"block_tool",
 	"protect_path",
+	"request_continuation",
 ] as const;
 
 export type MiddlewareEffectKind = (typeof MIDDLEWARE_EFFECT_KINDS)[number];
@@ -30,7 +31,8 @@ export type MiddlewareEffect =
 	| { kind: "inject_reminder"; message: string; severity?: MiddlewareReminderSeverity }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| { kind: "block_tool"; reason: string; severity: "hard-block" }
-	| { kind: "protect_path"; path: string; reason: string };
+	| { kind: "protect_path"; path: string; reason: string }
+	| { kind: "request_continuation"; message: string };
 
 export type MiddlewareRuleSource = "builtin";
 

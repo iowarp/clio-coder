@@ -137,11 +137,11 @@ describe("middleware bundle registration seam", () => {
 		deepStrictEqual(result.ruleIds, ["policy.block-write"]);
 		deepStrictEqual(
 			bundle.contract.listRules().map((listed) => listed.id),
-			["policy.block-write"],
+			["nudge.stalled-turn", "policy.block-write"],
 		);
 		deepStrictEqual(
 			bundle.contract.snapshot().rules.map((listed) => listed.id),
-			["policy.block-write"],
+			["nudge.stalled-turn", "policy.block-write"],
 		);
 	});
 

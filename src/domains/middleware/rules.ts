@@ -1,14 +1,14 @@
 import type { MiddlewareRuleDefinition } from "./runtime.js";
+import { STALLED_TURN_RULE_DEFINITION } from "./stalled-turn.js";
 import type { MiddlewareRule } from "./types.js";
 
 /**
- * Builtin middleware rule definitions. Intentionally empty: the evaluation
- * engine and registration seam exist, but which policies ship builtin is an
- * owner decision. Add entries here (declarative rule plus effect payloads)
- * to ship a builtin policy; the snapshot channel delivers the declarative
- * half to workers, which resolve payloads from this table by rule id.
+ * Builtin middleware rule definitions. Add entries here (declarative rule plus
+ * effect payloads/pure predicates) to ship a builtin policy; the snapshot
+ * channel delivers the declarative half to workers, which resolve payloads
+ * from this table by rule id.
  */
-const BUILTIN_MIDDLEWARE_RULE_DEFINITIONS: ReadonlyArray<MiddlewareRuleDefinition> = [];
+const BUILTIN_MIDDLEWARE_RULE_DEFINITIONS: ReadonlyArray<MiddlewareRuleDefinition> = [STALLED_TURN_RULE_DEFINITION];
 
 export const BUILTIN_MIDDLEWARE_RULE_IDS = BUILTIN_MIDDLEWARE_RULE_DEFINITIONS.map((definition) => definition.rule.id);
 
@@ -37,5 +37,6 @@ function cloneRuleDefinition(definition: MiddlewareRuleDefinition): MiddlewareRu
 		effects: [...definition.effects],
 	};
 	if (definition.toolNames !== undefined) cloned.toolNames = [...definition.toolNames];
+	if (definition.predicate !== undefined) cloned.predicate = definition.predicate;
 	return cloned;
 }

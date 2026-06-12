@@ -114,6 +114,8 @@ function readMiddlewareEffect(
 			return readBlockTool(value, path, issues);
 		case "protect_path":
 			return readProtectPath(value, path, issues);
+		case "request_continuation":
+			return readRequestContinuation(value, path, issues);
 	}
 }
 
@@ -176,6 +178,17 @@ function readProtectPath(
 	const reason = readRequiredString(record, `${path}.reason`, issues);
 	if (protectedPath === null || reason === null) return null;
 	return { kind: "protect_path", path: protectedPath, reason };
+}
+
+function readRequestContinuation(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MiddlewareValidationIssue[],
+): MiddlewareEffect | null {
+	rejectUnexpectedFields(record, path, ["kind", "message"], issues);
+	const message = readRequiredString(record, `${path}.message`, issues);
+	if (message === null) return null;
+	return { kind: "request_continuation", message };
 }
 
 function readRuleSource(

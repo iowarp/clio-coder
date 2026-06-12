@@ -155,17 +155,32 @@ export interface QueueUpdateEvent {
 	messages: QueuedChatMessage[];
 }
 
+export interface ChatNoticeEvent {
+	type: "notice";
+	level: "info" | "success" | "warning" | "error";
+	text: string;
+	key?: string;
+}
+
 export interface QueuedMessagesSnapshot {
 	steer: ReadonlyArray<string>;
 	followUp: ReadonlyArray<string>;
 }
 
-export type ChatLoopEvent = AgentEvent | AssistantDeltaEvent | RetryStatusEvent | QueueUpdateEvent | AgentStatusEvent;
+export type ChatLoopEvent =
+	| AgentEvent
+	| AssistantDeltaEvent
+	| RetryStatusEvent
+	| QueueUpdateEvent
+	| ChatNoticeEvent
+	| AgentStatusEvent;
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
 	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
+	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
+	requestContinuation?: boolean;
 }
 
 export interface ChatLoop {
@@ -342,6 +357,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const queuedMirror: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];
 	const toolStartTimes = new Map<string, number>();
+	let turnToolCalls = 0;
+	let stalledTurnNudgeSpent = false;
+	let pendingRequestContinuation = false;
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	let currentAskUserPolicy: AskUserToolPolicy | undefined;
 
@@ -349,6 +367,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		for (const listener of listeners) {
 			listener(event);
 		}
+	};
+
+	const emitFooterNotice = (level: ChatNoticeEvent["level"], text: string, key: string): void => {
+		emit({ type: "notice", level, text, key });
 	};
 
 	// A config hot-reload may change prompt fragments or settings that feed
@@ -708,6 +730,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice(message);
 	};
 
+	const applyRequestContinuation = (message: string): void => {
+		if (stalledTurnNudgeSpent) {
+			emitFooterNotice("warning", "model stalled again after a nudge; waiting for you", "nudge.stalled-turn.spent");
+			return;
+		}
+		stalledTurnNudgeSpent = true;
+		pendingRequestContinuation = true;
+		bufferReminder(message, "info");
+		emitFooterNotice("info", "model announced work without calling tools; nudge sent", "nudge.stalled-turn.sent");
+	};
+
 	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {
 		for (let index = messages.length - 1; index >= 0; index -= 1) {
 			const message = messages[index];
@@ -752,6 +785,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			hasStructuredToolCall: hasStructuredToolCall(message),
 			runtimeId: agentRuntime.runtimeId,
 			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
+			turnToolCalls,
 		};
 		if (typeof stopReason === "string") metadata.stopReason = stopReason;
 		const sessionId = deps.session?.current()?.id;
@@ -764,8 +798,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			metadata,
 		};
 		for (const effect of runMiddlewareTurnHook(input)) {
-			if (effect.kind !== "inject_reminder") continue;
-			applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
+			if (effect.kind === "inject_reminder") {
+				applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
+				continue;
+			}
+			if (effect.kind === "request_continuation") {
+				applyRequestContinuation(effect.message);
+			}
 		}
 	};
 
@@ -1100,6 +1139,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let enrichedEvent = event;
 			if (event.type === "tool_execution_start") {
 				toolStartTimes.set(event.toolCallId, eventAt);
+				turnToolCalls += 1;
 			} else if (event.type === "tool_execution_end") {
 				const startedAt = toolStartTimes.get(event.toolCallId);
 				toolStartTimes.delete(event.toolCallId);
@@ -1737,17 +1777,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * prompt: exactly today's end-of-run delivery. Esc cancel clears both
 	 * queues first, so a cancelled run never resubmits.
 	 */
-	const resubmitStrandedSteers = async (): Promise<void> => {
+	const resubmitStrandedSteers = async (): Promise<boolean> => {
 		const stranded = queuedMirror.filter((entry) => entry.kind === "steer");
-		if (stranded.length === 0) return;
+		if (stranded.length === 0) return false;
 		for (const entry of stranded) {
 			const idx = queuedMirror.indexOf(entry);
 			if (idx >= 0) queuedMirror.splice(idx, 1);
 		}
+		pendingRequestContinuation = false;
 		runtime?.agent.clearSteeringQueue();
 		emitQueueUpdate();
 		emitNotice("[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.");
 		await api.submit(stranded.map((entry) => entry.text).join("\n\n"));
+		return true;
+	};
+
+	const resubmitRequestContinuation = async (): Promise<void> => {
+		if (!pendingRequestContinuation) return;
+		pendingRequestContinuation = false;
+		await api.submit("", { requestContinuation: true });
 	};
 
 	const api: ChatLoop = {
@@ -1809,6 +1857,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(notConfiguredNotice());
 				return;
 			}
+			turnToolCalls = 0;
+			if (options.requestContinuation !== true) stalledTurnNudgeSpent = false;
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
@@ -1982,7 +2032,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				flushReconciledSnapshot();
 				// Runs on every exit path (normal settle, catch-arm returns) so
 				// a steer the engine never drained still reaches the model.
-				await resubmitStrandedSteers();
+				if (!(await resubmitStrandedSteers())) await resubmitRequestContinuation();
 			}
 		},
 		cancel(): void {
