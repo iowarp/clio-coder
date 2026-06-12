@@ -316,20 +316,24 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (duplicateDispatchAfterHooks !== null) return { kind: "blocked", reason: duplicateDispatchAfterHooks, decision };
 		if (protectedBlock) return { kind: "blocked", reason: protectedBlock, decision };
 		try {
-			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options));
+			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options), options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
-			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects));
+			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
 			emitSkillActivation(deps, spec, finalResult, options);
 			emitFileMutation(deps, spec, call, finalResult);
 			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			const result = shapeToolResult(spec, { kind: "error", message });
+			const result = shapeToolResult(spec, { kind: "error", message }, options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			applyProtectPathEffects(afterEffects, spec, call, options, result);
-			return { kind: "ok", result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects)), decision };
+			return {
+				kind: "ok",
+				result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
+				decision,
+			};
 		}
 	};
 
