@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { agentSkillToolPolicy, type SkillDeclaredToolPolicy } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import {
 	createResourcesLoader,
 	expandSkillInvocationInput,
@@ -19,6 +20,7 @@ import {
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { expandInteractiveSubmit } from "../../src/interactive/index.js";
+import { createSkillActivationObserver } from "../../src/tools/observers.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { createReadSkillTool, createSkillTool } from "../../src/tools/skills.js";
 
@@ -634,7 +636,7 @@ describe("contracts/skills tools", () => {
 		}
 	});
 
-	it("read_skill activation is emitted by the registry with turn metadata", async () => {
+	it("read_skill activation reaches the observer registration with turn metadata", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -651,10 +653,10 @@ describe("contracts/skills tools", () => {
 			triggeredBy: string;
 			turnId?: string;
 		}> = [];
-		const registry = createRegistry({
-			safety: allowAllSafety(),
-			onSkillActivation: (activation) => activations.push(activation),
+		const bundle = createMiddlewareBundle({
+			registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
 		});
+		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
 		registry.register(createReadSkillTool({ getCwd: () => cwd }));
 
 		const missing = await registry.invoke(
