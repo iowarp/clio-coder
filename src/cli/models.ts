@@ -10,7 +10,7 @@ import {
 } from "../domains/providers/index.js";
 import { printError } from "./shared.js";
 
-interface ModelRow {
+export interface ModelRow {
 	targetId: string;
 	runtimeId: string;
 	modelId: string;
@@ -99,6 +99,8 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 
 	if (parsed.json) {
 		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+	} else if (rows.length === 0) {
+		process.stdout.write(`${emptyModelsMessage(parsed, entries.length, filtered.length)}\n`);
 	} else {
 		renderRows(rows);
 	}
@@ -195,24 +197,59 @@ function compactTokenCount(value: number): string {
 	return String(value);
 }
 
-function renderRows(rows: ReadonlyArray<ModelRow>): void {
-	if (rows.length === 0) {
-		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
-		return;
+export function emptyModelsMessage(
+	args: Pick<ModelArgs, "search" | "target">,
+	configuredTargets: number,
+	matchedTargets: number,
+): string {
+	if (configuredTargets === 0) {
+		return "no targets configured. run `clio configure` or `clio targets add` to register one.";
 	}
-	const widths: ReadonlyArray<number> = [16, 18, 42, 8, 8, 8];
-	const header = ["target", "runtime", "model", "caps", "ctx", "max"].map((h, i) => h.padEnd(widths[i] ?? 0)).join("");
-	process.stdout.write(`${chalk.bold(header.trimEnd())}\n`);
-	for (const row of rows) {
-		const line = [
-			row.targetId.padEnd(widths[0] ?? 0),
-			row.runtimeId.padEnd(widths[1] ?? 0),
-			row.modelId.padEnd(widths[2] ?? 0),
-			row.caps.padEnd(widths[3] ?? 0),
-			compactTokenCount(row.contextWindow).padEnd(widths[4] ?? 0),
-			compactTokenCount(row.maxTokens).padEnd(widths[5] ?? 0),
-		].join("");
-		process.stdout.write(`${line.trimEnd()}\n`);
+	if (args.target !== undefined && matchedTargets === 0) {
+		return `no target with id ${args.target}. ${targetCount(configuredTargets)} configured.`;
+	}
+	if (args.search !== undefined) {
+		return `no models matched "${args.search}" across ${targetCount(matchedTargets)}.`;
+	}
+	return `no models found across ${targetCount(matchedTargets)}.`;
+}
+
+function targetCount(n: number): string {
+	return `${n} target${n === 1 ? "" : "s"}`;
+}
+
+const MODEL_ID_WIDTH_CAP = 56;
+const COLUMN_GAP = "  ";
+
+function truncateModelId(id: string): string {
+	if (id.length <= MODEL_ID_WIDTH_CAP) return id;
+	return `${id.slice(0, MODEL_ID_WIDTH_CAP - 3)}...`;
+}
+
+export function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
+	const headers = ["target", "runtime", "model", "caps", "ctx", "max"];
+	const cells = rows.map((row) => [
+		row.targetId,
+		row.runtimeId,
+		truncateModelId(row.modelId),
+		row.caps,
+		compactTokenCount(row.contextWindow),
+		compactTokenCount(row.maxTokens),
+	]);
+	const widths = headers.map((h, col) => Math.max(h.length, ...cells.map((cell) => cell[col]?.length ?? 0)));
+	const formatLine = (values: ReadonlyArray<string>): string =>
+		values
+			.map((value, col) => value.padEnd(widths[col] ?? 0))
+			.join(COLUMN_GAP)
+			.trimEnd();
+	return [formatLine(headers), ...cells.map(formatLine)];
+}
+
+function renderRows(rows: ReadonlyArray<ModelRow>): void {
+	const [header, ...body] = modelTableLines(rows);
+	process.stdout.write(`${chalk.bold(header ?? "")}\n`);
+	for (const line of body) {
+		process.stdout.write(`${line}\n`);
 	}
 }
 
