@@ -20,6 +20,7 @@ import {
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
 import { assessFinishContract } from "../domains/safety/finish-contract.js";
+import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
@@ -236,6 +237,12 @@ export interface CreateChatLoopDeps {
 	 * confirmation admission happen on the actual execution path.
 	 */
 	toolRegistry?: ToolRegistry;
+	/**
+	 * Protected-artifact state handle, backed by the protected-artifacts hook
+	 * registration at the composition root. The chat-loop replaces the state
+	 * wholesale on session switch so protections follow the active session.
+	 */
+	protectedArtifacts?: { replace(state: ProtectedArtifactState): void };
 	/**
 	 * Shared event bus. When wired, `cancel()` fans a `BusChannels.RunAborted`
 	 * payload with `source: "stream_cancel"` so the safety audit subscriber
@@ -1913,12 +1920,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (runtime) {
 				runtime.agent.state.messages = [...replayedContextMessages];
 			}
-			if (deps.toolRegistry) {
+			if (deps.protectedArtifacts) {
 				try {
 					const entries = deps.readSessionEntries ? deps.readSessionEntries() : [];
-					deps.toolRegistry.replaceProtectedArtifacts(protectedArtifactStateFromSessionEntries(entries));
+					deps.protectedArtifacts.replace(protectedArtifactStateFromSessionEntries(entries));
 				} catch {
-					deps.toolRegistry.replaceProtectedArtifacts({ artifacts: [] });
+					deps.protectedArtifacts.replace({ artifacts: [] });
 				}
 			}
 		},

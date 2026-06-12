@@ -10,14 +10,7 @@ import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } f
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
-import {
-	classifyDestructiveCommand,
-	detectValidationCommand,
-	isProtectedPath,
-	type ProtectedArtifact,
-	type ProtectedArtifactState,
-	protectArtifact,
-} from "../domains/safety/protected-artifacts.js";
+import { detectValidationCommand, toolMutationPaths } from "../domains/safety/protected-artifacts.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -116,8 +109,6 @@ export interface RegistryDeps {
 	 * observable.
 	 */
 	middleware?: MiddlewareContract;
-	protectedArtifacts?: ProtectedArtifactState;
-	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
 	onSkillActivation?: (activation: SkillActivation) => void;
 	/** Fired after a successful file-mutating tool so the codewiki can refresh incrementally. */
 	onFileMutation?: (event: { paths: ReadonlyArray<string>; toolName: ToolName }) => void;
@@ -184,17 +175,6 @@ export interface AskUserToolPolicy {
 	askedQuestionKeys: Set<string>;
 }
 
-export interface ProtectedArtifactRegistryEvent {
-	kind: "protect";
-	artifact: ProtectedArtifact;
-	toolName: ToolName;
-	runId?: string;
-	sessionId?: string;
-	turnId?: string;
-	toolCallId?: string;
-	correlationId?: string;
-}
-
 /**
  * One-shot elevation grant. The interactive layer issues this when the user
  * confirms a single parked tool call without changing persistent posture.
@@ -226,10 +206,6 @@ export interface ToolRegistry {
 	 * stays pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
 	 */
 	invoke(call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict>;
-	/** Current protected-artifact snapshot, cloned for callers. */
-	protectedArtifacts(): ProtectedArtifactState;
-	/** Replace the protected-artifact snapshot, typically after a session switch. */
-	replaceProtectedArtifacts(state: ProtectedArtifactState): void;
 	/**
 	 * True while at least one call awaits operator confirmation. The interactive
 	 * layer reads this from `closeOverlay()` to re-open the confirmation overlay
@@ -272,8 +248,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
 	const parked: ParkedCall[] = [];
 	const permissionListeners = new Set<(call: ClassifierCall, decision: SafetyDecision) => void>();
-	let protectedArtifactState = cloneProtectedArtifactState(deps.protectedArtifacts ?? { artifacts: [] });
-	const successfulDispatchesByTurn = new Map<string, Set<string>>();
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -281,33 +255,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
-		// before_tool hooks run first so the loop guard observes every admitted
-		// attempt, including ones the checks below would reject. The protected
-		// check runs once, after hooks, so it covers both pre-existing
-		// protections and paths protected by this evaluation's protect_path
-		// effects.
+		// The hook layer is the only control stage past safety admission. Guards
+		// (loop, protected artifacts, dispatch dedup) are before_tool
+		// registrations; the first block_tool effect decides the verdict.
 		const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
-		applyProtectPathEffects(beforeEffects, spec, call, options);
 		const block = firstBlockToolEffect(beforeEffects);
 		if (block) return { kind: "blocked", reason: block.reason, decision };
-		const protectedBlock = protectedArtifactBlock(spec, call);
-		if (protectedBlock) return { kind: "blocked", reason: protectedBlock, decision };
-		const duplicateDispatch = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
-		if (duplicateDispatch !== null) return { kind: "blocked", reason: duplicateDispatch, decision };
 		try {
 			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options), options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
-			applyProtectPathEffects(afterEffects, spec, call, options, result);
 			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
 			emitSkillActivation(deps, spec, finalResult, options);
 			emitFileMutation(deps, spec, call, finalResult);
-			rememberSuccessfulDispatch(successfulDispatchesByTurn, spec, call, options, finalResult);
 			return { kind: "ok", result: finalResult, decision };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			const result = shapeToolResult(spec, { kind: "error", message }, options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
-			applyProtectPathEffects(afterEffects, spec, call, options, result);
 			return {
 				kind: "ok",
 				result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
@@ -326,37 +290,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
 		return deps.middleware.runHook(buildToolHookInput(hook, spec, call, decision, "operating", options, result)).effects;
-	};
-
-	const applyProtectPathEffects = (
-		effects: ReadonlyArray<MiddlewareEffect>,
-		spec: ToolSpec,
-		call: ClassifierCall,
-		options?: ToolInvokeOptions,
-		result?: ToolResult,
-	): void => {
-		for (const effect of effects) {
-			if (effect.kind !== "protect_path") continue;
-			const artifact = protectedArtifactFromEffect(effect, call, result);
-			protectedArtifactState = protectArtifact(protectedArtifactState, artifact);
-			emitProtectedArtifactEvent(deps, protectedArtifactEvent(artifact, spec, options));
-		}
-	};
-
-	const protectedArtifactBlock = (spec: ToolSpec, call: ClassifierCall): string | null => {
-		if (protectedArtifactState.artifacts.length === 0) return null;
-		for (const candidate of toolMutationPaths(spec, call.args)) {
-			if (isProtectedPath(protectedArtifactState, candidate)) {
-				return `protected artifact blocked: ${spec.name} would modify protected path ${candidate}`;
-			}
-		}
-		if (spec.name !== ToolNames.Bash) return null;
-		const command = commandArg(call.args);
-		if (command === null) return null;
-		const classification = classifyDestructiveCommand(command, protectedArtifactState.artifacts);
-		if (classification.kind === "benign") return null;
-		const affected = classification.matches.map((match) => match.artifactPath).join(", ");
-		return `protected artifact blocked: ${classification.operation} would affect ${affected}`;
 	};
 
 	type AdmitOutcome =
@@ -425,10 +358,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		},
 		listAll: () => Array.from(tools.values()),
 		get: (name) => tools.get(name),
-		protectedArtifacts: () => cloneProtectedArtifactState(protectedArtifactState),
-		replaceProtectedArtifacts(state) {
-			protectedArtifactState = cloneProtectedArtifactState(state);
-		},
 		listRegistered: () => Array.from(tools.keys()),
 		listVisible: () => Array.from(tools.values()),
 		async invoke(call, options) {
@@ -494,129 +423,9 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
 }
 
-const DISPATCH_GUARD_TURN_LIMIT = 32;
-const DISPATCH_DEFAULT_AGENT_ID = "coder";
-
-function dispatchDuplicateBlock(
-	successfulDispatchesByTurn: Map<string, Set<string>>,
-	spec: ToolSpec,
-	call: ClassifierCall,
-	options?: ToolInvokeOptions,
-): string | null {
-	if (spec.name !== ToolNames.Dispatch || !options?.turnId) return null;
-	const fingerprint = dispatchFingerprint(call.args);
-	if (fingerprint === null) return null;
-	const seen = successfulDispatchesByTurn.get(options.turnId);
-	if (!seen?.has(fingerprint)) return null;
-	const summary = formatDispatchDuplicateSummary(call.args);
-	return `dispatch duplicate blocked: ${summary} already completed successfully in this user turn. Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`;
-}
-
-function rememberSuccessfulDispatch(
-	successfulDispatchesByTurn: Map<string, Set<string>>,
-	spec: ToolSpec,
-	call: ClassifierCall,
-	options: ToolInvokeOptions | undefined,
-	result: ToolResult,
-): void {
-	if (spec.name !== ToolNames.Dispatch || !options?.turnId || result.kind !== "ok") return;
-	const details = asRecord(result.details);
-	if (details?.exitCode !== 0) return;
-	const fingerprint = dispatchFingerprint(call.args);
-	if (fingerprint === null) return;
-	let seen = successfulDispatchesByTurn.get(options.turnId);
-	if (!seen) {
-		seen = new Set<string>();
-		successfulDispatchesByTurn.set(options.turnId, seen);
-		while (successfulDispatchesByTurn.size > DISPATCH_GUARD_TURN_LIMIT) {
-			const oldest = successfulDispatchesByTurn.keys().next().value;
-			if (typeof oldest !== "string") break;
-			successfulDispatchesByTurn.delete(oldest);
-		}
-	}
-	seen.add(fingerprint);
-}
-
-function dispatchFingerprint(args: unknown): string | null {
-	const record = asRecord(args);
-	if (record === null) return null;
-	const task = stringValue(record.task);
-	if (task === null) return null;
-	const normalized = {
-		agentId:
-			stringValue(record.agent_id) ??
-			stringValue(record.agentId) ??
-			stringValue(record.agent) ??
-			DISPATCH_DEFAULT_AGENT_ID,
-		task,
-		target: stringValue(record.target) ?? stringValue(record.endpoint) ?? "",
-		model: stringValue(record.model) ?? "",
-		profile:
-			stringValue(record.agent_profile) ?? stringValue(record.worker_profile) ?? stringValue(record.workerProfile) ?? "",
-		runtime:
-			stringValue(record.agent_runtime) ?? stringValue(record.worker_runtime) ?? stringValue(record.workerRuntime) ?? "",
-		toolProfile: stringValue(record.tool_profile) ?? stringValue(record.toolProfile) ?? "",
-		thinkingLevel: stringValue(record.thinking_level) ?? stringValue(record.thinkingLevel) ?? "",
-		cwd: stringValue(record.cwd) ?? "",
-		memorySection: stringValue(record.memory_section) ?? stringValue(record.memorySection) ?? "",
-		requiredCapabilities: stringArrayValue(record.required_capabilities ?? record.requiredCapabilities).sort(),
-	};
-	return stableJson(normalized);
-}
-
-function formatDispatchDuplicateSummary(args: unknown): string {
-	const record = asRecord(args);
-	if (record === null) return "that dispatch";
-	const agentId =
-		stringValue(record.agent_id) ?? stringValue(record.agentId) ?? stringValue(record.agent) ?? DISPATCH_DEFAULT_AGENT_ID;
-	const task = stringValue(record.task) ?? "";
-	const taskSummary = task.length > 80 ? `${task.slice(0, 77)}...` : task;
-	return `agent=${agentId} task=${JSON.stringify(taskSummary)}`;
-}
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function stringArrayValue(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	return value
-		.filter((item): item is string => typeof item === "string")
-		.map((item) => item.trim())
-		.filter(Boolean);
-}
-
-function stableJson(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
-	if (value !== null && typeof value === "object") {
-		const record = value as Record<string, unknown>;
-		return `{${Object.keys(record)
-			.sort()
-			.map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-			.join(",")}}`;
-	}
-	return JSON.stringify(value);
-}
-
-function emitProtectedArtifactEvent(deps: RegistryDeps, event: ProtectedArtifactRegistryEvent): void {
-	if (!deps.onProtectedArtifactEvent) return;
-	try {
-		deps.onProtectedArtifactEvent(event);
-	} catch {
-		// Protection state is already live in memory. Persistence hooks are
-		// best-effort and must not change tool execution semantics.
-	}
-}
-
 function emitFileMutation(deps: RegistryDeps, spec: ToolSpec, call: ClassifierCall, result: ToolResult): void {
 	if (!deps.onFileMutation || result.kind !== "ok") return;
-	const paths = toolMutationPaths(spec, call.args);
+	const paths = toolMutationPaths(spec.name, call.args);
 	if (paths.length === 0) return;
 	try {
 		deps.onFileMutation({ paths, toolName: spec.name });
@@ -677,85 +486,14 @@ function buildToolHookInput(
 		toolName: spec.name,
 		metadata,
 	};
+	if (call.args !== undefined) input.toolArgs = call.args;
+	if (result?.details !== undefined) input.toolResultDetails = result.details;
 	if (options?.runId !== undefined) input.runId = options.runId;
 	if (options?.sessionId !== undefined) input.sessionId = options.sessionId;
 	if (options?.turnId !== undefined) input.turnId = options.turnId;
 	if (options?.toolCallId !== undefined) input.toolCallId = options.toolCallId;
 	if (options?.correlationId !== undefined) input.correlationId = options.correlationId;
 	return input;
-}
-
-function protectedArtifactFromEffect(
-	effect: Extract<MiddlewareEffect, { kind: "protect_path" }>,
-	call: ClassifierCall,
-	result: ToolResult | undefined,
-): ProtectedArtifact {
-	const artifact: ProtectedArtifact = {
-		path: effect.path,
-		protectedAt: new Date().toISOString(),
-		reason: effect.reason,
-		source: "middleware",
-	};
-	const validationCommand = detectedValidationCommand(call);
-	if (validationCommand !== null) {
-		artifact.validationCommand = validationCommand;
-		if (result?.kind === "ok") artifact.validationExitCode = 0;
-	}
-	return artifact;
-}
-
-function protectedArtifactEvent(
-	artifact: ProtectedArtifact,
-	spec: ToolSpec,
-	options?: ToolInvokeOptions,
-): ProtectedArtifactRegistryEvent {
-	const event: ProtectedArtifactRegistryEvent = {
-		kind: "protect",
-		artifact: cloneProtectedArtifact(artifact),
-		toolName: spec.name,
-	};
-	if (options?.runId !== undefined) event.runId = options.runId;
-	if (options?.sessionId !== undefined) event.sessionId = options.sessionId;
-	if (options?.turnId !== undefined) event.turnId = options.turnId;
-	if (options?.toolCallId !== undefined) event.toolCallId = options.toolCallId;
-	if (options?.correlationId !== undefined) event.correlationId = options.correlationId;
-	return event;
-}
-
-function cloneProtectedArtifactState(state: ProtectedArtifactState): ProtectedArtifactState {
-	let next: ProtectedArtifactState = { artifacts: [] };
-	for (const artifact of state.artifacts) {
-		next = protectArtifact(next, artifact);
-	}
-	return next;
-}
-
-function cloneProtectedArtifact(artifact: ProtectedArtifact): ProtectedArtifact {
-	const clone: ProtectedArtifact = {
-		path: artifact.path,
-		protectedAt: artifact.protectedAt,
-		reason: artifact.reason,
-		source: artifact.source,
-	};
-	if (artifact.validationCommand !== undefined) clone.validationCommand = artifact.validationCommand;
-	if (artifact.validationExitCode !== undefined) clone.validationExitCode = artifact.validationExitCode;
-	return clone;
-}
-
-function toolMutationPaths(spec: ToolSpec, args: Record<string, unknown> | undefined): string[] {
-	if (spec.name === ToolNames.WritePlan) return [pathArg(args) ?? "PLAN.md"];
-	if (spec.name === ToolNames.WriteReview) return [pathArg(args) ?? "REVIEW.md"];
-	if (spec.name === ToolNames.Write || spec.name === ToolNames.Edit) {
-		const candidate = pathArg(args);
-		return candidate === null ? [] : [candidate];
-	}
-	return [];
-}
-
-function pathArg(args: Record<string, unknown> | undefined): string | null {
-	if (!args) return null;
-	const candidate = args.path ?? args.file_path ?? args.filePath;
-	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
 function commandArg(args: Record<string, unknown> | undefined): string | null {

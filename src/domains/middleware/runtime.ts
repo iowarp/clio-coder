@@ -44,7 +44,17 @@ export interface MiddlewareHookRegistration {
 	/** Exact tool names, same matcher semantics as `MiddlewareRuleDefinition.toolNames`. */
 	toolNames?: ReadonlyArray<string>;
 	/** Synchronous evaluation. A throw is isolated and contributes no effects. */
-	evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect>;
+	evaluate(input: MiddlewareHookInput, context?: MiddlewareHookEvaluationContext): ReadonlyArray<MiddlewareEffect>;
+}
+
+/**
+ * Ordered-evaluation context. `priorEffects` carries the effects emitted by
+ * earlier registrations in the same hook run, so a consumer registered last
+ * (e.g. the protected-artifacts guard absorbing `protect_path`) can react to
+ * them deterministically without any shared mutable state.
+ */
+export interface MiddlewareHookEvaluationContext {
+	priorEffects: ReadonlyArray<MiddlewareEffect>;
 }
 
 /** Soft per-evaluation wall-time budget. Overruns are reported, never preempted. */
@@ -124,7 +134,7 @@ export function runMiddlewareRegistrations(
 		try {
 			// Each evaluate gets its own clone so a misbehaving registration
 			// cannot mutate the input seen by later registrations.
-			emitted = registration.evaluate(cloneHookInput(input));
+			emitted = registration.evaluate(cloneHookInput(input), { priorEffects: [...effects] });
 		} catch (err) {
 			emitDiagnostic(onDiagnostic, {
 				kind: "hook_failed",
@@ -223,5 +233,7 @@ function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
 	if (input.toolName !== undefined) cloned.toolName = input.toolName;
 	if (input.modelId !== undefined) cloned.modelId = input.modelId;
 	if (input.metadata !== undefined) cloned.metadata = { ...input.metadata };
+	if (input.toolArgs !== undefined) cloned.toolArgs = { ...input.toolArgs };
+	if (input.toolResultDetails !== undefined) cloned.toolResultDetails = { ...input.toolResultDetails };
 	return cloned;
 }

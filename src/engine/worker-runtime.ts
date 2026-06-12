@@ -25,6 +25,7 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
@@ -190,9 +191,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
 			...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
 		},
-		// Workers run unattended, so the guard carries the hard tool-call cap
-		// in addition to repetition blocking.
-		[createLoopGuardRegistration({ safety, toolCallCap: readToolCallCap() })],
+		// Workers run unattended, so the loop guard carries the hard tool-call
+		// cap in addition to repetition blocking. The protected-artifacts guard
+		// starts empty (workers receive no orchestrator protection state) and
+		// has no persistence sink; it exists so protect_path effects from
+		// snapshot rules behave identically in workers.
+		[createLoopGuardRegistration({ safety, toolCallCap: readToolCallCap() }), createProtectedArtifactsRegistration()],
 	);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {

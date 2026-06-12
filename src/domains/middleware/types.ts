@@ -71,6 +71,16 @@ export interface MiddlewareHookInput {
 	toolName?: string;
 	modelId?: string;
 	metadata?: MiddlewareMetadata;
+	/**
+	 * Tool-call arguments, supplied by the registry on before_tool and
+	 * after_tool. Read-only by contract: the runtime shallow-copies the record
+	 * per evaluation, and registrations must never mutate nested values. The
+	 * typed-field route (rather than JSON in `metadata`) follows the Q3
+	 * decision for `turn_end` text.
+	 */
+	toolArgs?: Readonly<Record<string, unknown>>;
+	/** Structured result details, supplied by the registry on after_tool. Read-only by contract. */
+	toolResultDetails?: Readonly<Record<string, unknown>>;
 }
 
 export interface MiddlewareHookResult {

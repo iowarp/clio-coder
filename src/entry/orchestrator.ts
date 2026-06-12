@@ -28,6 +28,7 @@ import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { type ContextContract, ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
@@ -55,6 +56,10 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import {
+	createProtectedArtifactsRegistration,
+	type ProtectedArtifactProtectEvent,
+} from "../domains/safety/protected-artifacts-registration.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
@@ -88,7 +93,7 @@ import {
 } from "../interactive/keybinding-manager.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { createRegistry, type ProtectedArtifactRegistryEvent } from "../tools/registry.js";
+import { createRegistry } from "../tools/registry.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -266,7 +271,7 @@ function protectedArtifactStateForCurrentSession(
 
 function appendProtectedArtifactRegistryEvent(
 	session: SessionContract | undefined,
-	event: ProtectedArtifactRegistryEvent,
+	event: ProtectedArtifactProtectEvent,
 ): void {
 	if (!session?.current()) return;
 	try {
@@ -528,16 +533,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
 
-	// The loop guard rides on the middleware contract as a before_tool
-	// registration. Workers register their own instance (with the tool-call
-	// cap) inside their subprocess in worker-runtime.ts; this one carries the
-	// bus so the interactive layer renders LoopBlocked notices.
+	// Guard registrations on the middleware contract, in order: loop guard,
+	// protected artifacts (last among guards so it absorbs protect_path effects
+	// from everything before it), dispatch dedup. Workers register their own
+	// loop guard and protected-artifacts instances inside their subprocess in
+	// worker-runtime.ts; the orchestrator instances carry the bus and the
+	// session persistence sink.
 	middleware.registerHook(createLoopGuardRegistration({ safety, bus, turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET }));
+	const protectedArtifactsGuard = createProtectedArtifactsRegistration({
+		...(session ? { initialState: protectedArtifactStateForCurrentSession(session) } : {}),
+		onProtect: (event) => appendProtectedArtifactRegistryEvent(session, event),
+	});
+	middleware.registerHook(protectedArtifactsGuard);
+	middleware.registerHook(createDispatchDedupRegistration());
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
-		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
-		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),
 		...(contextDomain ? { onFileMutation: (event) => contextDomain.noteFileChanges(event.paths) } : {}),
 	});
@@ -658,6 +669,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const chat = createChatLoop({
 		getSettings: getCurrentSettings,
 		providers,
+		protectedArtifacts: { replace: (state) => protectedArtifactsGuard.replaceState(state) },
 		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
 		observability,
 		bus,
