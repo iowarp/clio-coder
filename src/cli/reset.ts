@@ -5,15 +5,18 @@ import { initializeClioHome } from "../core/init.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { printError, printHeader, printOk } from "./shared.js";
 
-const HELP = `clio reset [--state|--auth|--config|--all] [--dry-run] [--force]
+const HELP = `clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
 
 Recover or wipe Clio Coder state while keeping the clio binary installed.
+Each level clears exactly the root (or file) it names and nothing else.
 
-Modes:
-  --state       reset data, state, and cache only (default)
-  --auth        reset stored credentials only
-  --config      reset settings.yaml only
-  --all         reset config, data, state, and cache to fresh defaults
+Levels (combinable except --all):
+  --state       state root only: sessions, audit, receipts, runs, install metadata (default)
+  --data        data root only: memory, evidence, evals (durable products)
+  --cache       cache root only
+  --auth        credentials.yaml only
+  --config      settings.yaml only
+  --all         all four roots: config, data, state, and cache
 
 Safety:
   --force       required for destructive execution
@@ -22,6 +25,8 @@ Safety:
 
 interface ParsedResetArgs {
 	state: boolean;
+	data: boolean;
+	cache: boolean;
 	auth: boolean;
 	config: boolean;
 	all: boolean;
@@ -33,6 +38,8 @@ interface ParsedResetArgs {
 function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 	const parsed: ParsedResetArgs = {
 		state: false,
+		data: false,
+		cache: false,
 		auth: false,
 		config: false,
 		all: false,
@@ -44,6 +51,12 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 		switch (arg) {
 			case "--state":
 				parsed.state = true;
+				break;
+			case "--data":
+				parsed.data = true;
+				break;
+			case "--cache":
+				parsed.cache = true;
 				break;
 			case "--auth":
 				parsed.auth = true;
@@ -69,10 +82,11 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 				throw new Error(`unknown flag: ${arg}`);
 		}
 	}
-	if (!parsed.help && parsed.all && (parsed.state || parsed.auth || parsed.config)) {
-		throw new Error("--all cannot be combined with --state, --auth, or --config");
+	const levels = [parsed.state, parsed.data, parsed.cache, parsed.auth, parsed.config];
+	if (!parsed.help && parsed.all && levels.some(Boolean)) {
+		throw new Error("--all cannot be combined with --state, --data, --cache, --auth, or --config");
 	}
-	if (!parsed.help && !parsed.all && !parsed.state && !parsed.auth && !parsed.config) {
+	if (!parsed.help && !parsed.all && !levels.some(Boolean)) {
 		parsed.state = true;
 	}
 	return parsed;
@@ -134,12 +148,17 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 		report("credentials", credentialsPath);
 		removePath(credentialsPath, args.dryRun);
 	}
-	if (args.state) {
+	if (args.data) {
 		report("data", dirs.data);
-		report("state", dirs.state);
-		report("cache", dirs.cache);
+		process.stdout.write("  note: the data root holds durable products (memory, evidence, evals)\n");
 		removePath(dirs.data, args.dryRun);
+	}
+	if (args.state) {
+		report("state", dirs.state);
 		removePath(dirs.state, args.dryRun);
+	}
+	if (args.cache) {
+		report("cache", dirs.cache);
 		removePath(dirs.cache, args.dryRun);
 	}
 

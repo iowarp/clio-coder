@@ -102,13 +102,16 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const state = readStateInfo();
 	const stateCurrent = Boolean(state && state.version === version.clio);
+	const stateStamp = state
+		? `installed ${state.installedAt}${state.upgradedAt ? `, upgraded ${state.upgradedAt}` : ""}`
+		: "";
 	findings.push({
 		ok: stateCurrent,
 		name: "state metadata",
 		detail: state
 			? stateCurrent
-				? `${state.version} @ ${state.installedAt}`
-				: `stale ${state.version} @ ${state.installedAt}; current ${version.clio} (run \`clio doctor --fix\`)`
+				? `${state.version} (${stateStamp})`
+				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio doctor --fix\`)`
 			: "missing",
 	});
 

@@ -74,7 +74,7 @@ name: Coder                       # string; defaults to recipe id when absent
 description: Bounded code changes # string; defaults to empty string
 tools: [read, edit, run_task]    # string array; filtered by target capabilities and dispatch admission
 model: null                       # string only when set; null is ignored
-endpoint: null                    # string only when set; target/endpoint hint
+target: null                      # string only when set; target hint
 thinkingLevel: off                # off | minimal | low | medium | high | xhigh
 category: implement               # explore | plan | research | implement | quality | science | evolution | operations | internal
 capabilityClass: workspace-edit    # read-only | artifact-write | workspace-edit | verification | orchestration | internal

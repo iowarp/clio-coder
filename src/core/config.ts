@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { clioConfigDir } from "./xdg.js";
+import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
 
@@ -827,9 +827,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	return { settings, issues: issues.list };
 }
 
-/** Validate the settings file on disk without throwing. Missing file is valid. */
+/**
+ * Validate the settings file on disk without throwing. Missing file is valid.
+ * Resolves the path without the clioConfigDir mkdir side effect so read-only
+ * surfaces (plain `clio doctor`, readSettings on a fresh machine) never
+ * create directories.
+ */
 export function validateSettingsFile(): SettingsValidationResult {
-	const path = settingsPath();
+	const path = join(resolveClioDirs().config, "settings.yaml");
 	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [] };
 	let parsed: unknown;
 	try {
@@ -909,18 +914,12 @@ function tryAcquireSettingsLock(lockPath: string, staleLockMs: number): boolean 
 }
 
 /**
- * Cross-process read-modify-write of settings.yaml under an advisory lock
- * file. Two processes doing naive read → mutate → write can interleave and
- * silently drop one of the writes; this helper re-reads the file *inside*
- * the lock, so the mutation always lands on the freshest saved state.
- * Readers never touch the lock; they only ever see complete files thanks to
- * the rename-based writer.
- *
- * The mutator may modify the settings in place or return a replacement blob.
- * The result is re-validated through the schema before it is persisted, so a
- * mutator cannot write an invalid document. Returns the persisted settings.
+ * Run `fn` while holding the settings.yaml advisory lock. Factored out of
+ * updateSettings so the one other sanctioned settings writer (lifecycle
+ * migrations, which rewrite pre-schema files the strict reader would reject)
+ * holds the same lock instead of racing updateSettings.
  */
-export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateOptions = {}): ClioSettings {
+export function withSettingsLock<T>(fn: () => T, options: SettingsUpdateOptions = {}): T {
 	const timeoutMs = options.timeoutMs ?? 10_000;
 	const staleLockMs = options.staleLockMs ?? 5_000;
 	const pollIntervalMs = options.pollIntervalMs ?? 25;
@@ -935,13 +934,31 @@ export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateO
 		sleepSync(pollIntervalMs);
 	}
 	try {
+		return fn();
+	} finally {
+		rmSync(lockPath, { force: true });
+	}
+}
+
+/**
+ * Cross-process read-modify-write of settings.yaml under an advisory lock
+ * file. Two processes doing naive read → mutate → write can interleave and
+ * silently drop one of the writes; this helper re-reads the file *inside*
+ * the lock, so the mutation always lands on the freshest saved state.
+ * Readers never touch the lock; they only ever see complete files thanks to
+ * the rename-based writer.
+ *
+ * The mutator may modify the settings in place or return a replacement blob.
+ * The result is re-validated through the schema before it is persisted, so a
+ * mutator cannot write an invalid document. Returns the persisted settings.
+ */
+export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateOptions = {}): ClioSettings {
+	return withSettingsLock(() => {
 		const current = readSettings();
 		const next = mutate(current) ?? current;
 		const revalidated = validateSettings(JSON.parse(JSON.stringify(next)));
 		if (revalidated.issues.length > 0) throw new SettingsValidationError(revalidated.issues);
 		persistSettings(revalidated.settings);
 		return revalidated.settings;
-	} finally {
-		rmSync(lockPath, { force: true });
-	}
+	}, options);
 }

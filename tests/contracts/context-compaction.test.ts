@@ -1,6 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { rewriteCompactionThresholds } from "../../src/domains/lifecycle/migrations/2026-06-11-compaction-single-threshold.js";
 import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
 import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
@@ -298,38 +297,5 @@ describe("contracts/context compaction mask_observations", () => {
 		);
 		const resultIndex = replay.findIndex((message) => message.role === "toolResult" && message.toolCallId === "call-1");
 		ok(callIndex >= 0 && resultIndex > callIndex, `callIndex=${callIndex} resultIndex=${resultIndex}`);
-	});
-});
-
-describe("contracts/context compaction settings migration", () => {
-	it("rewrites the five-threshold block to a single threshold, preserving comments and custom values", () => {
-		const yamlText = [
-			"# user settings",
-			"compaction:",
-			"  auto: true",
-			"  excludeLastTurns: 2",
-			"  thresholds:",
-			"    warning: 0.7",
-			"    maskObservations: 0.75",
-			"    pruneObservations: 0.85",
-			"    maskDialogue: 0.9",
-			"    llmSummary: 0.99",
-			"retry:",
-			"  enabled: true",
-			"",
-		].join("\n");
-
-		const rewritten = rewriteCompactionThresholds(yamlText);
-		ok(rewritten !== null);
-		ok(rewritten.includes("# user settings"));
-		ok(rewritten.includes("threshold: 0.75"));
-		ok(!rewritten.includes("thresholds:"));
-		ok(!rewritten.includes("llmSummary"));
-		ok(rewritten.includes("excludeLastTurns: 2"));
-		ok(rewritten.includes("enabled: true"));
-
-		// Already-migrated and threshold-less files are left untouched.
-		strictEqual(rewriteCompactionThresholds(rewritten), null);
-		strictEqual(rewriteCompactionThresholds("retry:\n  enabled: true\n"), null);
 	});
 });

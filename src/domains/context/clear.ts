@@ -17,7 +17,12 @@ export interface RunContextClearResult {
 	preserved: string[];
 }
 
-const ACCUMULATED_CONTEXT_PATHS = [".clio/codewiki.json", ".clio/state.json", ".clio/handoffs"] as const;
+const ACCUMULATED_CONTEXT_PATHS = [
+	".clio/codewiki.json",
+	".clio/state.json",
+	".clio/handoffs",
+	".clio/proposals",
+] as const;
 const PRESERVED_CONTEXT_PATHS = ["CLIO.md", ".clio/agents", ".clio/skills"] as const;
 
 function out(io: BootstrapIo | undefined, message: string): void {

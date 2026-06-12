@@ -6,6 +6,7 @@ import { clioStatePath } from "../../core/xdg.js";
 export interface StateInfo {
 	version: string;
 	installedAt: string;
+	upgradedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }

@@ -1258,10 +1258,13 @@ function readToolStats(record: Record<string, unknown>, source: string, field: s
 }
 
 function readRunKind(record: Record<string, unknown>, source: string, field: string): RunKind {
-	// Clio only drives HTTP/native runtimes. Live receipts always record "http";
-	// legacy persisted receipts that carried another value coerce to "http".
-	readString(record, source, field);
-	return "http";
+	// runtimeKind is digest-covered: returning anything other than the value as
+	// written would make integrity verification recompute a different payload.
+	const value = readString(record, source, field);
+	if (value !== "http" && value !== "acp-delegation") {
+		throw new Error(`${source}.${field}: unexpected runtime kind`);
+	}
+	return value;
 }
 
 function readRunStatus(record: Record<string, unknown>, source: string, field: string): RunStatus {

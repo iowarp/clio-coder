@@ -55,15 +55,20 @@ async function captureStderr<T>(fn: () => Promise<T>): Promise<{ result: T; stde
 }
 
 /** Seal a finalized run + receipt the way the dispatch finalizer does. */
-async function sealRun(): Promise<{ runId: string; receiptPath: string }> {
+async function sealRun(
+	runtime: { runtimeId: string; runtimeKind: "http" | "acp-delegation" } = {
+		runtimeId: "openai-completions",
+		runtimeKind: "http",
+	},
+): Promise<{ runId: string; receiptPath: string }> {
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		agentId: "coder",
 		task: "evidence fixture task",
 		targetId: "mini",
 		wireModelId: "test-model",
-		runtimeId: "openai-completions",
-		runtimeKind: "http",
+		runtimeId: runtime.runtimeId,
+		runtimeKind: runtime.runtimeKind,
 		sessionId: null,
 		cwd: "/tmp",
 	});
@@ -91,8 +96,8 @@ async function sealRun(): Promise<{ runId: string; receiptPath: string }> {
 		task: "evidence fixture task",
 		targetId: "mini",
 		wireModelId: "test-model",
-		runtimeId: "openai-completions",
-		runtimeKind: "http",
+		runtimeId: runtime.runtimeId,
+		runtimeKind: runtime.runtimeKind,
 		outcome: "succeeded",
 		outcomeDetail: "completed without executing any tools",
 		startedAt: envelope.startedAt,
@@ -152,6 +157,21 @@ describe("contracts/evidence-build", () => {
 			strictEqual(corrupted.result, 1);
 			ok(corrupted.stderr.includes("receipt integrity"), corrupted.stderr);
 			ok(corrupted.stderr.includes(runId), corrupted.stderr);
+		});
+	});
+
+	it("round-trips an acp-delegation receipt: runtimeKind is digest-covered and must verify as written", async () => {
+		await withIsolatedClioHome(async () => {
+			const { runId, receiptPath } = await sealRun({ runtimeId: "claude-code-acp", runtimeKind: "acp-delegation" });
+
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { runtimeKind: string };
+			strictEqual(receipt.runtimeKind, "acp-delegation");
+
+			// A reader that coerces runtimeKind to "http" recomputes a different
+			// digest and reports a clean receipt as corrupt (rv-01 finding 3).
+			const clean = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
+			strictEqual(clean.result, 0, `acp-delegation build failed: ${clean.stderr}`);
+			ok(!clean.stderr.includes("receipt integrity"), clean.stderr);
 		});
 	});
 
