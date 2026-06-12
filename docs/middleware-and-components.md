@@ -8,7 +8,7 @@ Clio Coder has two related but separate surfaces:
 1. **Components**: deterministic inventory of files that can affect harness behavior.
 2. **Middleware**: an experimental hook/effect contract around model/tool/session/dispatch lifecycle points.
 
-The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types and validation helpers exist, but the built-in rule list is empty and the default runtime returns no effects.
+The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types and validation helpers exist, but the built-in declarative rule list is empty and the default runtime returns no effects from rules. Enforcing guard registrations do ride the same hook runtime, registered at the composition root: the loop guard, the protected-artifacts guard, dispatch dedup, and the finish-contract assessor are `before_tool`/`turn_end` registrations and form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
 
 ---
 

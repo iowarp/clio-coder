@@ -114,7 +114,7 @@ Terminology used in code and receipts:
 ```yaml
 version: 1
 identity: clio
-safetyLevel: auto-edit      # suggest | auto-edit | full-auto
+safetyLevel: auto-edit      # suggest | auto-edit | full-auto (autonomy level: model guidance; safety gates apply at every level)
 
 targets:
   - id: local-lmstudio
@@ -197,7 +197,7 @@ Targets are managed in `/targets`; keybindings are documented in `/help`.
 
 | Section | Editable rows |
 | --- | --- |
-| Safety | Safety level |
+| Autonomy | Autonomy level |
 | Orchestrator | Thinking level, Target, Model |
 | Fleet | Default target, Default model |
 | Budget | Session ceiling (USD), Model cycle set |
@@ -209,7 +209,7 @@ Label to config path mapping:
 
 | Label | Config path |
 | --- | --- |
-| Safety level | `safetyLevel` |
+| Autonomy level | `safetyLevel` |
 | Thinking level | `orchestrator.thinkingLevel` |
 | Target | `orchestrator.endpoint` |
 | Model | `orchestrator.model` |

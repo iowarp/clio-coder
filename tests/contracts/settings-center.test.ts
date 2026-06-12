@@ -189,12 +189,12 @@ describe("contracts/settings center", () => {
 		const rendered = stripAnsi(lines.join("\n"));
 		strictEqual(lines.length, 26);
 		ok(rendered.includes("Sections"));
-		ok(rendered.includes("Safety"));
+		ok(rendered.includes("Autonomy"));
 		ok(rendered.includes("Orchestrator"));
-		ok(rendered.includes("Safety level"));
+		ok(rendered.includes("Autonomy level"));
 		ok(rendered.includes("safetyLevel"));
 		ok(rendered.includes("│"), "wide layout should include the lane divider");
-		ok(rendered.includes("Default write-gate posture."));
+		ok(rendered.includes("Model initiative guidance"));
 		ok(rendered.includes("cycles: suggest, auto-edit, full-auto"));
 		ok(!rendered.includes("workers.profiles"));
 		ok(!rendered.includes("endpoints.count"));
@@ -206,9 +206,9 @@ describe("contracts/settings center", () => {
 		const lines = center.render(72);
 		const rendered = stripAnsi(lines.join("\n"));
 		strictEqual(lines.length, 16);
-		ok(rendered.includes("Safety"));
+		ok(rendered.includes("Autonomy"));
 		ok(rendered.includes("Orchestrator"));
-		ok(rendered.includes("Safety level"));
+		ok(rendered.includes("Autonomy level"));
 		ok(rendered.includes("orchestrator.thinkingLevel"));
 		ok(!rendered.includes("│"), "narrow layout should not include the lane divider");
 		ok(rendered.includes(FOOTER_NOTE_FOR_TEST));

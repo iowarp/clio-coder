@@ -87,9 +87,10 @@ describe("safety blocked notice", () => {
 		});
 		ok(notice);
 		strictEqual(notice.level, "warn");
-		match(notice.text, /blocked bash \(git_destructive\)/);
+		match(notice.text, /^\[safety-net\] blocked bash \(git_destructive\)/);
 		match(notice.text, /rule dc-001 \(damage-control:dc-001\)/);
 		match(notice.text, /via damage-control:base/);
+		match(notice.text, /applies at every autonomy level/);
 	});
 
 	it("falls back to the reason code when no rule id is present", () => {

@@ -75,5 +75,16 @@ describe("contracts/help-reference", () => {
 		ok(exitRow);
 		ok(exitRow.label.includes("Ctrl+D") || exitRow.label.includes("ctrl+d"));
 		ok(exitRow.label.includes("Exit the TUI"));
+
+		// 4. Topics group carries the autonomy & safety net concept entry (sd-01)
+		const topicsItems = items.filter((item) => item.group === "Topics");
+		strictEqual(topicsItems.length, 1);
+		const autonomyTopic = topicsItems.find((item) => item.id === "topic-autonomy");
+		ok(autonomyTopic);
+		ok(autonomyTopic.label.includes("autonomy & safety net"));
+		ok(autonomyTopic.detail);
+		const detailText = autonomyTopic.detail().join("\n");
+		ok(detailText.includes("does not loosen or tighten any hard gate"));
+		ok(detailText.includes(".clio/safety.yaml"));
 	});
 });

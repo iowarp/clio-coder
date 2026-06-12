@@ -14,7 +14,7 @@ There are no dynamic per-turn prompt fragments. Pending skill requests are visib
 
 For tool-capable providers, Clio sends the full registry as the session tool surface. The list is deterministic and sorted through the worker-tool resolver, so the serialized schemas stay byte-identical on every submit.
 
-Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, safety level, Bash policy, path policy, protected artifacts, dispatch admission, and middleware are enforced when a tool is invoked. Prompt text and provider schemas do not bypass the registry.
+Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, Bash policy, path policy, protected artifacts, dispatch admission, and middleware are enforced when a tool is invoked. The autonomy level (`safetyLevel`) is not in that list: it selects the safety prompt fragment, which is guidance to the model, and it does not change any invocation-time gate. Prompt text and provider schemas do not bypass the registry.
 
 Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.
 

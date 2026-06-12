@@ -73,9 +73,9 @@ function safetyOneLiner(level: string): string {
 		case "suggest":
 			return "describe the work; do not modify files or run effectful commands.";
 		case "auto-edit":
-			return "edits inside the workspace are allowed; execute-class actions need confirmation.";
+			return "edits inside the workspace are allowed; bash runs only allowlisted or project-policy commands.";
 		case "full-auto":
-			return "edits and local commands are allowed; system_modify and git_destructive remain gated.";
+			return "act without asking; bash runs only allowlisted or project-policy commands; system_modify still asks and git_destructive is blocked.";
 		default:
 			return "follow the active safety contract.";
 	}

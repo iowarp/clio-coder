@@ -33,7 +33,7 @@ const FOOTER_NOTE = "applies to this session and to new sessions";
 const ROW_GAP = "  ";
 
 export const SETTINGS_SECTIONS = [
-	{ id: "safety", label: "Safety" },
+	{ id: "safety", label: "Autonomy" },
 	{ id: "orchestrator", label: "Orchestrator" },
 	{ id: "fleet", label: "Fleet" },
 	{ id: "budget", label: "Budget" },
@@ -45,7 +45,7 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export const SETTINGS_LABELS_BY_ID = {
-	safetyLevel: "Safety level",
+	safetyLevel: "Autonomy level",
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.endpoint": "Target",
 	"orchestrator.model": "Model",
@@ -76,7 +76,7 @@ export const SETTINGS_SECTION_ROWS = {
 } as const satisfies Record<SettingsSectionId, readonly EditableSettingId[]>;
 
 const SETTINGS_DESCRIPTIONS_BY_ID = {
-	safetyLevel: "Default write-gate posture.",
+	safetyLevel: "Model initiative guidance; safety gates apply at every level.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
 	"orchestrator.endpoint": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",

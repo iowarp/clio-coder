@@ -87,7 +87,28 @@ export function openHelpOverlay(
 		return item;
 	});
 
-	const items = [...commands, ...keys];
+	// Static concept topics. Unlike commands and keys these are not generated
+	// from a registry; keep each detail consistent with the enforced behavior
+	// documented in docs/safety-model.md.
+	const topics: ListOverlayItem[] = [
+		{
+			id: "topic-autonomy",
+			label: `${"autonomy & safety net".padEnd(30)}How the autonomy level and the always-on guardrails interact`,
+			group: "Topics",
+			detail: () => [
+				"# Autonomy & safety net",
+				"**Autonomy level** (`/settings`, persisted as `safetyLevel`): suggest | auto-edit | full-auto. " +
+					"It sets how much initiative the system prompt asks of the model. It does not loosen or tighten any hard gate.",
+				"**Approvals**: actions classified `system_modify`, plus rules marked for confirmation, park the tool call and open a one-shot approval overlay. " +
+					"Approving resumes only that call.",
+				"**Safety net** (always on, identical at every autonomy level): damage-control rules, default-deny bash with a built-in safe-command allowlist, " +
+					"path policy for secrets and system paths, protected artifacts, the loop guard, and dispatch scope checks. " +
+					"Tune it in `.clio/safety.yaml`; see docs/safety-model.md.",
+			],
+		},
+	];
+
+	const items = [...commands, ...keys, ...topics];
 
 	return openListOverlay(tui, {
 		title: "Help Center",

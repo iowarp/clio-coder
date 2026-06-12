@@ -418,7 +418,7 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 		kv("target", facts.target, "accent"),
 		kv("think", facts.thinking, "reason"),
 		styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
-		kv("safety", facts.safety, "accentDeep"),
+		kv("autonomy", facts.safety, "accentDeep"),
 		kv("profile", facts.toolProfile),
 	]);
 }

@@ -120,7 +120,9 @@ export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWa
  * The transcript already shows the rejection text the model received
  * (rejection.short names the tool and action class), so this notice aims at
  * the policy dimension the transcript omits: which rule fired and from which
- * policy source.
+ * policy source. The closing sentence states that these gates are
+ * level-independent, so the notice never reads as a contradiction of the
+ * autonomy level shown in the dashboards (sd-01).
  */
 export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 	if (!isSafetyBlockedPayload(payload)) return null;
@@ -130,6 +132,6 @@ export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 			: payload.reasonCode;
 	return {
 		level: "warn",
-		text: `[safety] blocked ${payload.tool} (${payload.actionClass}): ${rule} via ${payload.policySource}.`,
+		text: `[safety-net] blocked ${payload.tool} (${payload.actionClass}): ${rule} via ${payload.policySource}. This gate applies at every autonomy level.`,
 	};
 }
