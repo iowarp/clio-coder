@@ -1,4 +1,4 @@
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, isRunAbortedPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
@@ -167,9 +167,23 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			),
 			deps.bus.on(BusChannels.DispatchCompleted, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
 			deps.bus.on(BusChannels.DispatchFailed, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
-			deps.bus.on(BusChannels.RunAborted, () => {
+			deps.bus.on(BusChannels.RunAborted, (payload) => {
 				scheduleAbortCeiling();
-				apply({ type: "run_aborted", reason: "user cancelled stream" }, true);
+				// Carry abort provenance into the summary; a dispatch drain and a
+				// user stream-cancel must not collapse into one hardcoded path.
+				// A malformed payload still ends the run, just without detail.
+				if (isRunAbortedPayload(payload)) {
+					apply(
+						{
+							type: "run_aborted",
+							source: payload.source,
+							...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+						},
+						true,
+					);
+					return;
+				}
+				apply({ type: "run_aborted" }, true);
 			}),
 		);
 	}

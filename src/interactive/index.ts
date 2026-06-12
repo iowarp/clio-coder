@@ -52,6 +52,7 @@ import {
 import type { ImageContent } from "../engine/types.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { budgetAlertNotice, restartRequiredNotice, safetyBlockedNotice } from "./bus-notices.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import {
@@ -1202,15 +1203,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// Loop-guard visibility. The backend guard (engine/interactive-loop-guard.ts)
-	// emits over the bus instead of importing TUI code; this subscriber turns
-	// each block into a warn notice and, when the per-turn budget is exhausted,
-	// cancels the active turn with an error notice.
-	const loopNoticeSink = {
+	// Transcript sink shared by the bus-notice subscribers below (loop guard,
+	// budget alerts, safety blocks).
+	const busNoticeSink = {
 		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
 			chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	};
+	// Loop-guard visibility. The backend guard (engine/interactive-loop-guard.ts)
+	// emits over the bus instead of importing TUI code; this subscriber turns
+	// each block into a warn notice and, when the per-turn budget is exhausted,
+	// cancels the active turn with an error notice.
 	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
 		const evt = payload as LoopBlockedPayload | null | undefined;
 		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
@@ -1218,14 +1221,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			appendNotice(
 				"error",
 				`[loop-guard] agent stopped for looping: ${evt.tool} repeated ${evt.repeatCount}x; ${evt.blocksThisTurn} loop blocks this turn.`,
-				loopNoticeSink,
+				busNoticeSink,
 			);
 			deps.chat.cancel();
 		} else {
 			appendNotice(
 				"warn",
 				`[loop-guard] blocked ${evt.tool}: identical call repeated ${evt.repeatCount}x in window (block ${evt.blocksThisTurn}/${evt.budget} this turn).`,
-				loopNoticeSink,
+				busNoticeSink,
 			);
 		}
 		tui.requestRender();
@@ -1258,6 +1261,34 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// the safetyLevel row of an open /settings overlay must follow.
 	const unsubscribeConfigHotReloadOverlay = deps.bus.on(BusChannels.ConfigHotReload, () => {
 		settingsOverlayRefresh?.();
+	});
+	// Restart-classified settings changed under a running session. Nothing in
+	// the session will pick them up; the notice is the only nudge the operator
+	// gets to restart.
+	const unsubscribeConfigRestartRequired = deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
+		const text = restartRequiredNotice(payload);
+		if (text === null) return;
+		notify("warning", text, "config:restart-required");
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Budget ceiling visibility. Scheduling emits budget.alert on enqueue when
+	// session spend meets or crosses the ceiling but never rejects the run;
+	// without this subscriber the alert dies on the bus.
+	const unsubscribeBudgetAlert = deps.bus.on(BusChannels.BudgetAlert, (payload) => {
+		const notice = budgetAlertNotice(payload);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
+	});
+	// Safety-policy block visibility. The transcript shows the rejection the
+	// model received; this notice adds the policy dimension (rule, action
+	// class, policy source) so the operator can tell which rule fired.
+	const unsubscribeSafetyBlocked = deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
+		const notice = safetyBlockedNotice(payload);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
 	});
 
 	let activeEditorBash: AbortController | null = null;
@@ -2593,6 +2624,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeLoopBlocked();
 		unsubscribeConfigRouting();
 		unsubscribeConfigHotReloadOverlay();
+		unsubscribeConfigRestartRequired();
+		unsubscribeBudgetAlert();
+		unsubscribeSafetyBlocked();
 		unsubscribePermissionRequired();
 		unregisterAskUserHandler?.();
 		unregisterAskUserHandler = null;

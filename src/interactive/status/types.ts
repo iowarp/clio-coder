@@ -44,6 +44,13 @@ export interface TurnSummary {
 	toolCount: number;
 	toolErrorCount: number;
 	stopReason: TurnStopReason;
+	/**
+	 * Human-readable cancel/abort provenance, e.g. "dispatch drain" vs
+	 * "stream cancel: user cancelled stream". Present only when the run ended
+	 * through run.aborted or a forced cancel; distinguishes abort sources that
+	 * share stopReason "cancelled".
+	 */
+	stopDetail?: string | undefined;
 	watchdogPeak: WatchdogTier;
 	truncated: boolean;
 }

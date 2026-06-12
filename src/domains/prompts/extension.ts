@@ -80,6 +80,7 @@ export function createPromptsBundle(
 		reload,
 	};
 
+	let unsubscribeHotReload: (() => void) | null = null;
 	const extension: DomainExtension = {
 		async start() {
 			try {
@@ -89,14 +90,17 @@ export function createPromptsBundle(
 				process.stderr.write(`[clio:prompts] initial load failed: ${msg}\n`);
 				table = { byId: new Map(), rootDir: "" };
 			}
-			context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {
+			unsubscribeHotReload = context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {
 				const diff = (payload as { diff?: { hotReload?: string[] } } | undefined)?.diff;
 				const paths = diff?.hotReload ?? [];
 				if (!diffTouchesFragments(paths)) return;
 				reload();
 			});
 		},
-		async stop() {},
+		async stop() {
+			unsubscribeHotReload?.();
+			unsubscribeHotReload = null;
+		},
 	};
 
 	return { extension, contract };

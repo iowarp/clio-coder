@@ -1,8 +1,7 @@
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, isRunAbortedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import {
-	type AbortSource,
 	type AuditRecord,
 	type AuditWriter,
 	buildAbortAuditRecord,
@@ -37,28 +36,6 @@ function isPermissionResolvedPayload(value: unknown): value is PermissionResolve
 	if (p.actionClass !== undefined && typeof p.actionClass !== "string") return false;
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;
 	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
-	return true;
-}
-
-interface RunAbortedPayload {
-	source: AbortSource;
-	runId: string | null;
-	startedAt: string | null;
-	elapsedMs: number | null;
-	at?: number;
-	reason?: string;
-}
-
-const ABORT_SOURCES = new Set<AbortSource>(["dispatch_abort", "dispatch_drain", "stream_cancel"]);
-
-function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
-	if (!value || typeof value !== "object") return false;
-	const p = value as Record<string, unknown>;
-	if (typeof p.source !== "string" || !ABORT_SOURCES.has(p.source as AbortSource)) return false;
-	if (p.runId !== null && typeof p.runId !== "string") return false;
-	if (p.startedAt !== null && typeof p.startedAt !== "string") return false;
-	if (p.elapsedMs !== null && typeof p.elapsedMs !== "number") return false;
-	if (p.reason !== undefined && typeof p.reason !== "string") return false;
 	return true;
 }
 

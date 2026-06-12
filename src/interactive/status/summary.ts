@@ -97,6 +97,7 @@ export function emptySummary(input: {
 	endpointId: string;
 	watchdogPeak: WatchdogTier;
 	stopReason?: TurnStopReason;
+	stopDetail?: string;
 	truncated?: boolean;
 }): TurnSummary {
 	return {
@@ -110,6 +111,7 @@ export function emptySummary(input: {
 		toolCount: 0,
 		toolErrorCount: 0,
 		stopReason: input.stopReason ?? "stop",
+		...(input.stopDetail !== undefined ? { stopDetail: input.stopDetail } : {}),
 		watchdogPeak: input.watchdogPeak,
 		truncated: input.truncated === true,
 	};

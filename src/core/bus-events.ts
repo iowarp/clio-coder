@@ -89,6 +89,70 @@ export interface LoopBlockedPayload {
 	turnId?: string;
 }
 
+/**
+ * Payload published on {@link BusChannels.BudgetAlert} when a dispatch enqueue
+ * meets ("at") or crosses ("over") the session cost ceiling. Informational in
+ * v0.x: scheduling never rejects the enqueue, so the interactive notice is the
+ * operator's only signal.
+ */
+export interface BudgetAlertPayload {
+	level: "at" | "over";
+	currentUsd: number;
+	ceilingUsd: number;
+}
+
+/**
+ * Payload published on {@link BusChannels.SafetyBlocked} when the safety
+ * policy engine blocks a tool call outright. The transcript already carries
+ * the rejection text the model sees; this event carries the policy dimension
+ * (which rule and action class fired, from which policy source).
+ */
+export interface SafetyBlockedPayload {
+	tool: string;
+	actionClass: string;
+	ruleId?: string;
+	posture?: string;
+	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> };
+	policySource: string;
+	reasonCode: string;
+}
+
+/** Where a {@link BusChannels.RunAborted} event originated. */
+export type RunAbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel";
+
+/**
+ * Payload published on {@link BusChannels.RunAborted}. Dispatch emits
+ * dispatch_abort/dispatch_drain with run lineage; the chat loop emits
+ * stream_cancel with a human-readable reason. Subscribers must not collapse
+ * the sources: a drained dispatch run and a user-cancelled stream are
+ * different operator situations.
+ */
+export interface RunAbortedPayload {
+	source: RunAbortSource;
+	runId: string | null;
+	startedAt: string | null;
+	elapsedMs: number | null;
+	at?: number;
+	reason?: string;
+}
+
+const RUN_ABORT_SOURCES: ReadonlySet<string> = new Set<RunAbortSource>([
+	"dispatch_abort",
+	"dispatch_drain",
+	"stream_cancel",
+]);
+
+export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.source !== "string" || !RUN_ABORT_SOURCES.has(p.source)) return false;
+	if (p.runId !== null && typeof p.runId !== "string") return false;
+	if (p.startedAt !== null && typeof p.startedAt !== "string") return false;
+	if (p.elapsedMs !== null && typeof p.elapsedMs !== "number") return false;
+	if (p.reason !== undefined && typeof p.reason !== "string") return false;
+	return true;
+}
+
 /** Payload published on {@link BusChannels.ContextPruned} after compaction reclaims tokens. */
 export interface ContextPrunedPayload {
 	stage: "mask_observations" | "llm_summary";

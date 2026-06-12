@@ -88,6 +88,10 @@ export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise
 		} catch (error) {
 			failed.push({ name, error });
 			bus.emit(BusChannels.DomainFailed, { name, error });
+			// The throw below aborts boot; nothing downstream gets a chance to
+			// render the failure, so the structured line must land first.
+			const message = error instanceof Error ? error.message : String(error);
+			process.stderr.write(`[clio:domain] load failed: ${name}: ${message}\n`);
 			throw new DomainLoadError(name, error);
 		}
 	}
