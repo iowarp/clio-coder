@@ -97,9 +97,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
 | `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | - | `/targets` | Show target health, auth, and models |
-| `/connect` | - | `/connect [target]` | Connect a target or choose one |
-| `/disconnect` | - | `/disconnect [target]` | Disconnect a target or choose one |
+| `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
 | `/cost` | - | `/cost` | Show session token and cost totals |
 | `/context-view` | `/context`, `/ctx` | `/context-view` | Visualize the active context window and its breakdown |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
@@ -114,6 +112,8 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/fork` | - | `/fork` | Fork from an assistant turn |
 | `/compact` | - | `/compact [instructions]` | Compact earlier context |
 
+
+The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `c` to connect, `d` to disconnect, `r` to probe the selected target, and `R` to probe all targets.
 
 ## Keybindings
 

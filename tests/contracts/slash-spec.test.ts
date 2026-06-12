@@ -206,6 +206,12 @@ describe("contracts/slash-spec", () => {
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown", text: "/status" }],
 
+			// connect/disconnect (deleted) -> falls through to unknown
+			["/connect", { kind: "unknown", text: "/connect" }],
+			["/connect target-a", { kind: "unknown", text: "/connect target-a" }],
+			["/disconnect", { kind: "unknown", text: "/disconnect" }],
+			["/disconnect target-a", { kind: "unknown", text: "/disconnect target-a" }],
+
 			// unknown / invalid
 			["/invalid-command", { kind: "unknown", text: "/invalid-command" }],
 			["/quit now", { kind: "unknown", text: "/quit now" }],
