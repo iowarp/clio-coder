@@ -73,7 +73,7 @@ import {
 	createStdioServerTransport,
 	type StdioServerTransportOptions,
 } from "../engine/acp/transport.js";
-import { createInteractiveLoopGuard } from "../engine/interactive-loop-guard.js";
+import { createLoopGuardRegistration, INTERACTIVE_LOOP_BLOCK_BUDGET } from "../engine/loop-guard.js";
 import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -528,12 +528,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
 
+	// The loop guard rides on the middleware contract as a before_tool
+	// registration. Workers register their own instance (with the tool-call
+	// cap) inside their subprocess in worker-runtime.ts; this one carries the
+	// bus so the interactive layer renders LoopBlocked notices.
+	middleware.registerHook(createLoopGuardRegistration({ safety, bus, turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET }));
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
-		// Orchestrator-only loop guard. Workers guard themselves inside their
-		// subprocess (worker-runtime.ts) and never see this registry.
-		loopGuard: createInteractiveLoopGuard({ safety, bus }),
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),

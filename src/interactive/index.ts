@@ -1210,7 +1210,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	};
-	// Loop-guard visibility. The backend guard (engine/interactive-loop-guard.ts)
+	// Loop-guard visibility. The backend guard (engine/loop-guard.ts)
 	// emits over the bus instead of importing TUI code; this subscriber turns
 	// each block into a warn notice and, when the per-turn budget is exhausted,
 	// cancels the active turn with an error notice.

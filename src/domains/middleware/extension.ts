@@ -33,6 +33,7 @@ export interface MiddlewareBundleOptions {
 export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): DomainBundle<MiddlewareContract> {
 	const ruleDefinitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
 	const registrations = combineRegistrations(ruleDefinitions, options.registrations ?? []);
+	const registeredIds = new Set(registrations.map((registration) => registration.id));
 	const runOptions = options.onDiagnostic !== undefined ? { onDiagnostic: options.onDiagnostic } : {};
 	const contract: MiddlewareContract = {
 		runHook(input) {
@@ -43,6 +44,11 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 		},
 		snapshot() {
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));
+		},
+		registerHook(registration) {
+			if (registeredIds.has(registration.id)) return;
+			registeredIds.add(registration.id);
+			registrations.push(registration);
 		},
 	};
 	return {

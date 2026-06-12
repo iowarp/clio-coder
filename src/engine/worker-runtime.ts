@@ -28,16 +28,11 @@ import {
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders } from "./apis/index.js";
+import { createLoopGuardRegistration, readToolCallCap } from "./loop-guard.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
-import {
-	createWorkerLoopGuard,
-	createWorkerSafety,
-	createWorkerToolRegistry,
-	resolveAgentTools,
-	type ToolTelemetry,
-} from "./worker-tools.js";
+import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -182,17 +177,23 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.modelCapabilities,
 	);
 
-	// Build the per-run safety contract once so the registry's admission path
-	// and the agent-loop guard share the same loop-detector state. Without this,
-	// the registry would create its own state and the beforeToolCall hook would
-	// be unable to observe repetition that already triggered admission.
+	// Per-run safety contract: one loop-detector state per worker subprocess.
+	// The loop guard rides on the registry's middleware contract as a
+	// before_tool registration (engine/loop-guard.ts), so admission and
+	// repetition detection share one seam; there is no agent-loop hook anymore.
 	const safety = createWorkerSafety({ cwd: process.cwd() });
-	const registry = createWorkerToolRegistry(input.middlewareSnapshot, safety, {
-		...(input.noSkills !== undefined ? { noSkills: input.noSkills } : {}),
-		...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
-		...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
-	});
-	const loopGuard = createWorkerLoopGuard({ safety });
+	const registry = createWorkerToolRegistry(
+		input.middlewareSnapshot,
+		safety,
+		{
+			...(input.noSkills !== undefined ? { noSkills: input.noSkills } : {}),
+			...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
+			...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
+		},
+		// Workers run unattended, so the guard carries the hard tool-call cap
+		// in addition to repetition blocking.
+		[createLoopGuardRegistration({ safety, toolCallCap: readToolCallCap() })],
+	);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });
@@ -229,19 +230,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		onPayload: async (payload, currentModel) =>
 			patchReasoningSummaryPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
 		getApiKey: async () => input.apiKey,
-		// Worker-side safety net. Pi-agent-core invokes this hook with
-		// validated args before each tool call. When the guard reports a block
-		// the loop emits an error tool result containing `reason`, feeding the
-		// model a description of the failure so it can pivot. Hard-blocking on
-		// the iteration cap protects against degenerate sessions that flood the
-		// audit log with hallucinated paths.
-		beforeToolCall: async (context) => {
-			const decision = loopGuard.check(context.toolCall.name, context.args);
-			if (decision.block) {
-				return decision.reason !== undefined ? { block: true, reason: decision.reason } : { block: true };
-			}
-			return undefined;
-		},
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;
 

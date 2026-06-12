@@ -1,6 +1,12 @@
 import type { MiddlewareContract } from "./contract.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
-import { cloneMiddlewareEffect, type MiddlewareRuleDefinition, runMiddlewareHook } from "./runtime.js";
+import {
+	cloneMiddlewareEffect,
+	type MiddlewareHookRegistration,
+	type MiddlewareRuleDefinition,
+	registrationFromRuleDefinition,
+	runMiddlewareRegistrations,
+} from "./runtime.js";
 import type { MiddlewareRule, MiddlewareSnapshot } from "./types.js";
 
 export function createMiddlewareSnapshot(
@@ -30,15 +36,22 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 		if (builtin?.toolNames !== undefined) definition.toolNames = [...builtin.toolNames];
 		return definition;
 	});
+	const registrations: MiddlewareHookRegistration[] = definitions.map(registrationFromRuleDefinition);
+	const registeredIds = new Set(registrations.map((registration) => registration.id));
 	return {
 		runHook(input) {
-			return runMiddlewareHook(input, definitions);
+			return runMiddlewareRegistrations(input, registrations);
 		},
 		listRules() {
 			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));
 		},
 		snapshot() {
 			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
+		},
+		registerHook(registration) {
+			if (registeredIds.has(registration.id)) return;
+			registeredIds.add(registration.id);
+			registrations.push(registration);
 		},
 	};
 }
