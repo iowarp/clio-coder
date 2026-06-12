@@ -217,10 +217,6 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return { kind: "block_tool", reason: effect.reason, severity: effect.severity };
 		case "protect_path":
 			return { kind: "protect_path", path: effect.path, reason: effect.reason };
-		case "require_validation":
-			return { kind: "require_validation", reason: effect.reason };
-		case "record_memory_candidate":
-			return { kind: "record_memory_candidate", lesson: effect.lesson, evidenceRefs: [...effect.evidenceRefs] };
 	}
 }
 

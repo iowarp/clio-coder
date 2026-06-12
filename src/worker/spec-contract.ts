@@ -103,29 +103,8 @@ const THINKING_LEVELS = [
 	"xhigh",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
 const ENDPOINT_LIFECYCLES = ["user-managed", "clio-managed"] as const;
-const MIDDLEWARE_HOOKS = [
-	"before_model",
-	"after_model",
-	"before_tool",
-	"after_tool",
-	"before_finish",
-	"after_finish",
-	"on_blocked_tool",
-	"on_retry",
-	"on_compaction",
-	"on_dispatch_start",
-	"on_dispatch_end",
-	"turn_start",
-	"turn_end",
-] as const;
-const MIDDLEWARE_EFFECT_KINDS = [
-	"inject_reminder",
-	"annotate_tool_result",
-	"block_tool",
-	"protect_path",
-	"require_validation",
-	"record_memory_candidate",
-] as const;
+const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
+const MIDDLEWARE_EFFECT_KINDS = ["inject_reminder", "annotate_tool_result", "block_tool", "protect_path"] as const;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
 const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
 const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;

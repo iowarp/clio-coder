@@ -21,6 +21,7 @@ import type {
 	RunOutcome,
 	ToolActivitySummary,
 } from "../domains/dispatch/types.js";
+import type { MiddlewareHook } from "../domains/middleware/types.js";
 import type { EndpointStatus } from "../domains/providers/contract.js";
 import type { ClioSettings } from "./config.js";
 import type { TerminationPhase } from "./termination.js";
@@ -49,6 +50,7 @@ export const BusChannels = {
 	DispatchFailed: "dispatch.failed",
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
+	MiddlewareHookFailed: "middleware.hookFailed",
 	ContextActivity: "context.activity",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
@@ -417,6 +419,29 @@ export interface CompactionPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+/**
+ * Published on {@link BusChannels.MiddlewareHookFailed} when a middleware hook
+ * registration misbehaves: `hook_failed` for a thrown evaluate (its effects
+ * are discarded and the turn proceeds), `budget_exceeded` for a soft
+ * wall-time overrun (effects still apply). Diagnostics only; nothing
+ * subscribing here may decide anything.
+ */
+export interface MiddlewareHookFailedPayload {
+	kind: "hook_failed" | "budget_exceeded";
+	registrationId: string;
+	hook: MiddlewareHook;
+	at: number;
+	/** Error text; hook_failed only. */
+	message?: string | undefined;
+	/** Measured and allowed wall time in ms; budget_exceeded only. */
+	elapsedMs?: number | undefined;
+	budgetMs?: number | undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Agent status
 // ---------------------------------------------------------------------------
 
@@ -498,6 +523,7 @@ export type BusPayloadMap = {
 	[BusChannels.DispatchFailed]: DispatchFailedPayload;
 	[BusChannels.CompactionBegin]: CompactionPayload;
 	[BusChannels.CompactionEnd]: CompactionPayload;
+	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;

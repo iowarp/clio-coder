@@ -5,7 +5,7 @@
  * Returning null means "ignore the event".
  */
 
-import type { BudgetAlertPayload, SafetyBlockedPayload } from "../core/bus-events.js";
+import type { BudgetAlertPayload, MiddlewareHookFailedPayload, SafetyBlockedPayload } from "../core/bus-events.js";
 
 export interface BusNotice {
 	level: "warn" | "error";
@@ -56,6 +56,41 @@ function isSafetyBlockedPayload(value: unknown): value is SafetyBlockedPayload {
 	if (typeof p.policySource !== "string" || p.policySource.length === 0) return false;
 	if (typeof p.reasonCode !== "string" || p.reasonCode.length === 0) return false;
 	return true;
+}
+
+function isMiddlewareHookFailedPayload(value: unknown): value is MiddlewareHookFailedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (p.kind !== "hook_failed" && p.kind !== "budget_exceeded") return false;
+	if (typeof p.registrationId !== "string" || p.registrationId.length === 0) return false;
+	if (typeof p.hook !== "string" || p.hook.length === 0) return false;
+	if (p.message !== undefined && typeof p.message !== "string") return false;
+	if (p.elapsedMs !== undefined && typeof p.elapsedMs !== "number") return false;
+	if (p.budgetMs !== undefined && typeof p.budgetMs !== "number") return false;
+	return true;
+}
+
+/**
+ * A middleware hook registration threw (its effects were discarded) or
+ * overran the soft budget (its effects still applied). The turn proceeded
+ * either way; this warn notice is the operator's only interactive signal
+ * that a guard or assessor is misbehaving.
+ */
+export function middlewareHookFailedNotice(payload: unknown): BusNotice | null {
+	if (!isMiddlewareHookFailedPayload(payload)) return null;
+	if (payload.kind === "hook_failed") {
+		const detail = payload.message !== undefined && payload.message.length > 0 ? `: ${payload.message}` : "";
+		return {
+			level: "warn",
+			text: `[middleware] hook '${payload.registrationId}' failed on ${payload.hook}${detail}. Its effects were skipped; the turn continued.`,
+		};
+	}
+	const elapsed = payload.elapsedMs !== undefined ? `${payload.elapsedMs.toFixed(1)}ms` : "unknown";
+	const budget = payload.budgetMs !== undefined ? `${payload.budgetMs}ms` : "budget";
+	return {
+		level: "warn",
+		text: `[middleware] hook '${payload.registrationId}' exceeded its soft budget on ${payload.hook} (${elapsed} > ${budget}).`,
+	};
 }
 
 /**

@@ -509,6 +509,60 @@ describe("contracts/turn-hooks tool-prose registration", () => {
 	});
 });
 
+describe("contracts/turn-hooks on_compaction", () => {
+	it("fires observe-only on_compaction before the llm summary stage", async () => {
+		const seenInputs: MiddlewareHookInput[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook({
+			id: "test.compaction-probe",
+			description: "observe compaction lifecycle",
+			hooks: ["on_compaction"],
+			evaluate(input) {
+				seenInputs.push(input);
+				// Effects from on_compaction are discarded by design; emit one
+				// to prove the chat-loop does not deliver it anywhere.
+				return [{ kind: "inject_reminder", message: "must be discarded", severity: "warn" }];
+			},
+		});
+		const entries: SessionEntry[] = [];
+		const session = createSession(entries);
+		session.create({ cwd: process.cwd() });
+		const prompts: string[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownEndpoints: () => new Set(["test-target"]),
+			session,
+			readSessionEntries: () => entries,
+			middleware,
+			autoCompact: async () => ({
+				summary: "summary text",
+				firstKeptEntryIndex: 0,
+				firstKeptTurnId: "t-1",
+				tokensBefore: 100,
+				messagesSummarized: 2,
+				isSplitTurn: false,
+			}),
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				await emitAssistantTurn(agent, assistantStopMessage("ok"));
+			}, []),
+		} as never);
+
+		await loop.compact();
+
+		strictEqual(seenInputs.length, 1);
+		strictEqual(seenInputs[0]?.hook, "on_compaction");
+		strictEqual(seenInputs[0]?.metadata?.stage, "llm_summary");
+		strictEqual(seenInputs[0]?.metadata?.trigger, "force");
+		strictEqual(seenInputs[0]?.sessionId, "session-1");
+
+		// The discarded reminder must not leak into the next request.
+		await loop.submit("after compaction");
+		ok(!(prompts[0] ?? "").includes("must be discarded"));
+	});
+});
+
 describe("contracts/turn-hooks text cap", () => {
 	it("caps MiddlewareHookInput.text at 16k chars for every evaluation", () => {
 		let seen = -1;
