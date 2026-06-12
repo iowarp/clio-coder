@@ -1814,7 +1814,7 @@
           valAdmission.style.color = "var(--color-emerald)";
         } else {
           // General slash command
-          const registry = ['/quit', '/help', '/init', '/targets', '/connect', '/disconnect', '/scoped-models', '/thinking', '/settings', '/resume', '/new', '/tree', '/fork', '/cost', '/receipts', '/skills', '/prompts', '/extensions', '/share', '/hotkeys'];
+          const registry = ['/quit', '/help', '/init', '/targets', '/scoped-models', '/thinking', '/settings', '/resume', '/new', '/tree', '/fork', '/cost', '/receipts', '/skills', '/prompts', '/extensions', '/share', '/hotkeys'];
           if (!registry.includes(cmd)) {
             errors.push(`Unknown slash command: "${cmd}". Type /help for assistance.`);
             isValid = false;

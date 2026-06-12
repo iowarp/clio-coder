@@ -91,6 +91,8 @@ Inside the TUI, verify the local surface with:
 /skills
 ```
 
+The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `c` to connect or authorize it, `d` to disconnect the live session state, `r` to probe the selected target, and `R` to probe all targets.
+
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
 ---
@@ -250,6 +252,8 @@ clio targets rename <old> <new>
 
 `clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
 
+Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system. Press `d` to clear live connection state while leaving stored credentials unchanged.
+
 ### Local reasoning-token budgets
 
 Some local reasoning models can spend most of a small output budget on hidden
@@ -323,6 +327,8 @@ Auth types come from runtime descriptors:
 | `none` | No credential required. |
 
 Prefer `--api-key-env` for shared config and CI. Avoid committing literal secrets in settings or share archives.
+
+For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio auth logout <target-or-runtime>`; for a live session disconnect without deleting credentials, press `d` in `/targets`.
 
 ---
 
