@@ -17,7 +17,7 @@
 import { fitFooterText } from "../footer-panel.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
 
-export type NotificationLevel = "info" | "warning" | "error";
+export type NotificationLevel = "info" | "success" | "warning" | "error";
 
 export interface NotificationInput {
 	level: NotificationLevel;
@@ -47,20 +47,22 @@ export interface NotificationCenter {
 	hasBlocking(now?: number): boolean;
 }
 
-/** Info notices fade on their own; warnings and errors persist until dismissed. */
+/** Info and success notices fade on their own; warnings and errors persist until dismissed. */
 export const DEFAULT_INFO_TTL_MS = 12_000;
 
-const SEVERITY: Record<NotificationLevel, number> = { error: 3, warning: 2, info: 1 };
+const SEVERITY: Record<NotificationLevel, number> = { error: 4, warning: 3, success: 2, info: 1 };
 
 export function notificationGlyph(level: NotificationLevel): string {
 	if (level === "error") return GLYPH.error;
 	if (level === "warning") return GLYPH.warn;
+	if (level === "success") return GLYPH.ok;
 	return GLYPH.info;
 }
 
 export function notificationToken(level: NotificationLevel): ClioToken {
 	if (level === "error") return "error";
 	if (level === "warning") return "warning";
+	if (level === "success") return "success";
 	return "info";
 }
 
@@ -78,7 +80,7 @@ export function classifyNoticeLevel(text: string): NotificationLevel {
 
 function resolveExpiry(level: NotificationLevel, addedAt: number, ttlMs: number | undefined): number | null {
 	if (ttlMs !== undefined) return ttlMs <= 0 ? null : addedAt + ttlMs;
-	return level === "info" ? addedAt + DEFAULT_INFO_TTL_MS : null;
+	return level === "info" || level === "success" ? addedAt + DEFAULT_INFO_TTL_MS : null;
 }
 
 function isLive(entry: Notification, now: number): boolean {
