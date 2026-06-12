@@ -25,6 +25,7 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
@@ -61,6 +62,11 @@ export interface WorkerRunInput {
 	trustProjectCompatRoots?: boolean;
 	/** Non-stall posture for permission-requiring tool calls; default "deny". */
 	onPermission?: "deny" | "fail";
+	/**
+	 * Session autonomy level captured at dispatch admission (sd-01 §2.5).
+	 * Workers inherit the orchestrator's level; absent means the default.
+	 */
+	autonomy?: AutonomyLevel;
 }
 
 export interface WorkerRunResult {
@@ -204,6 +210,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// has no persistence sink; it exists so protect_path effects from
 		// snapshot rules behave identically in workers.
 		[createLoopGuardRegistration({ safety, toolCallCap: readToolCallCap() }), createProtectedArtifactsRegistration()],
+		input.autonomy,
 	);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {

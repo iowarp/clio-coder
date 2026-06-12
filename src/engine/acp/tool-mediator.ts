@@ -1,6 +1,12 @@
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
+import {
+	type AutonomyLevel,
+	autonomyDenyRejection,
+	DEFAULT_AUTONOMY_LEVEL,
+	mapAutonomy,
+} from "../../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -13,6 +19,12 @@ interface MediatorInput {
 	safety: SafetyContract;
 	cwd: string;
 	toolGovernance: DelegationToolGovernance;
+	/**
+	 * Session autonomy level (sd-01 §2.5). Applied after the safety net under
+	 * clio-policy governance; `ask` dispositions resolve as non-stall denials
+	 * because a delegation has no operator to answer a prompt.
+	 */
+	autonomy?: AutonomyLevel;
 }
 
 interface MappedToolCall {
@@ -147,8 +159,24 @@ export class AcpToolMediator {
 		} else {
 			safetyDecision = this.input.safety.evaluate({ tool: mapped.tool, args: mapped.args });
 			if (safetyDecision.kind === "allow") {
-				decision = "approved";
-				reason = safetyDecision.policy?.reasonCode ?? "allowed";
+				// The net passed; the autonomy mapping decides (sd-01 §2.2). An
+				// "ask" disposition resolves as a non-stall denial, exactly like a
+				// net confirm rail below: a delegation has no operator to answer.
+				const level = this.input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
+				const actionClass = safetyDecision.classification.actionClass;
+				const disposition = mapAutonomy(level, actionClass, {
+					executeRecognized: safetyDecision.policy?.execRecognition !== "unrecognized",
+				});
+				if (disposition === "allow") {
+					decision = "approved";
+					reason = safetyDecision.policy?.reasonCode ?? "allowed";
+				} else if (disposition === "ask") {
+					decision = "denied";
+					reason = `permission_required: autonomy ${level} requires approval for ${actionClass}; denied by non-stall policy (no interactive operator in delegation context)`;
+				} else {
+					decision = "denied";
+					reason = autonomyDenyRejection(level, mapped.tool, actionClass).short;
+				}
 			} else if (safetyDecision.kind === "ask") {
 				// Non-stall policy: a delegation has no operator to answer an
 				// interactive prompt, so an "ask" resolves as a bounded denial

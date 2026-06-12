@@ -342,6 +342,8 @@ describe("contracts/dispatch", () => {
 			strictEqual(spec.task, `run ${id}`);
 			strictEqual(spec.runtimeId, id);
 			strictEqual(spec.runtime.kind, "http");
+			// Workers inherit the session autonomy level at admission (sd-01 §2.5).
+			strictEqual(spec.autonomy, "auto-edit");
 		} finally {
 			await bundle.extension.stop?.();
 		}

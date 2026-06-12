@@ -1,4 +1,5 @@
 import type { DelegationAgentConfig } from "../../core/defaults.js";
+import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
@@ -18,6 +19,8 @@ export interface AcpDelegationRunInput {
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
 	safety: SafetyContract;
+	/** Session autonomy level applied by the mediator under clio-policy governance. */
+	autonomy?: AutonomyLevel;
 	signal?: AbortSignal;
 	clientVersion?: string;
 }
@@ -160,6 +163,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		safety: input.safety,
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-policy",
+		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 	});
 
 	const emit = (event: AcpRunEvent): void => {

@@ -4,6 +4,13 @@ import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import {
+	type AutonomyLevel,
+	autonomyAskRejection,
+	autonomyDenyRejection,
+	DEFAULT_AUTONOMY_LEVEL,
+	mapAutonomy,
+} from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
@@ -105,6 +112,13 @@ export interface RegistryDeps {
 	 * observable.
 	 */
 	middleware?: MiddlewareContract;
+	/**
+	 * Live autonomy level (sd-01 §2.2). Read per admission so hot-reloaded
+	 * settings apply to the next call. The orchestrator wires this to current
+	 * settings; workers wire it to the level carried on their WorkerSpec.
+	 * Absent means the default level (M7: auto-edit).
+	 */
+	autonomy?: () => AutonomyLevel;
 }
 
 export interface ToolInvokeOptions {
@@ -293,17 +307,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (!spec) {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
+		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
 		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, grant ? "confirmed" : undefined), spec);
+		// Stage 1, the safety net (level-independent): engine blocks are final;
+		// engine asks are confirm rails that park at every level. read-only is
+		// the exception by definition: approvals are never invoked there, so a
+		// confirm rail resolves as the same auto-deny as any other mutation.
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
 		}
+		const actionClass = decision.classification.actionClass;
 		if (decision.kind === "ask") {
-			if (grant?.actionClass === decision.classification.actionClass) return { kind: "execute", spec, decision };
+			if (level === "read-only") {
+				return { kind: "terminal", verdict: autonomyDenyVerdict(decision, level, call.tool, actionClass) };
+			}
+			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
 			return { kind: "park", decision };
 		}
-		const actionClass = decision.classification.actionClass;
-		if (actionClass === "system_modify" && grant?.actionClass !== "system_modify") {
-			return { kind: "park", decision };
+		// One-shot grant: resumeParkedCalls re-admits exactly the parked call
+		// the operator approved, with a confirmed posture. The engine converts
+		// its confirm rail to an allow (including M3 git ask rules), so the
+		// grant match executes directly instead of re-entering the mapping.
+		if (grant?.actionClass === actionClass) {
+			return { kind: "execute", spec, decision };
 		}
 		if (actionClass === "git_destructive") {
 			return {
@@ -314,6 +340,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					decision,
 				},
 			};
+		}
+		// Stage 2, the autonomy mapping (sd-01 §2.3): the net passed; the level
+		// decides run / ask / deny per action class.
+		const disposition = mapAutonomy(level, actionClass, {
+			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
+		});
+		if (disposition === "deny") {
+			return { kind: "terminal", verdict: autonomyDenyVerdict(decision, level, call.tool, actionClass) };
+		}
+		if (disposition === "ask") {
+			return { kind: "park", decision: toAutonomyAskDecision(decision, level, call.tool, actionClass) };
 		}
 		return { kind: "execute", spec, decision };
 	};
@@ -435,6 +472,46 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
+}
+
+/**
+ * Terminal blocked verdict for an autonomy `deny` disposition (read-only).
+ * The decision is re-shaped as a block so downstream consumers (worker
+ * events, dispatch receipts) report it as a denial, not a pending ask.
+ */
+function autonomyDenyVerdict(
+	decision: SafetyDecision,
+	level: AutonomyLevel,
+	tool: string,
+	actionClass: ActionClass,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const rejection = autonomyDenyRejection(level, tool, actionClass);
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection,
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+	};
+	return { kind: "blocked", reason: rejection.short, decision: blocked };
+}
+
+/**
+ * Park-shaped decision for an autonomy `ask` disposition. The engine passed
+ * the call, so the rejection names the level as the asking axis; overlays and
+ * non-interactive deniers read it from here.
+ */
+function toAutonomyAskDecision(
+	decision: SafetyDecision,
+	level: AutonomyLevel,
+	tool: string,
+	actionClass: ActionClass,
+): SafetyDecision {
+	return {
+		kind: "ask",
+		classification: decision.classification,
+		rejection: autonomyAskRejection(level, tool, actionClass),
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+	};
 }
 
 function buildToolHookInput(

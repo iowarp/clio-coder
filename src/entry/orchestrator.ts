@@ -577,7 +577,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
 		);
 	}
-	const toolRegistry = createRegistry({ safety, middleware });
+	// Autonomy is a hot-reload field: read it per admission from the freshest
+	// config snapshot so a /settings change applies to the next tool call.
+	const toolRegistry = createRegistry({
+		safety,
+		middleware,
+		autonomy: () => (config?.get() ?? readSettings()).safetyLevel ?? "auto-edit",
+	});
 	let askUserHandler: AskUserHandler | null = null;
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();

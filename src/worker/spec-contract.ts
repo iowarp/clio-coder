@@ -10,6 +10,7 @@ import type {
 	RuntimeTargetSnapshot,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export const WORKER_SPEC_VERSION = 1;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 1;
@@ -63,6 +64,13 @@ export interface WorkerSpec {
 	 * Default "deny".
 	 */
 	onPermission?: "deny" | "fail";
+	/**
+	 * Session autonomy level captured at dispatch admission (sd-01 §2.5). The
+	 * worker registry applies the same mapping as the orchestrator's, so a
+	 * worker never acts more freely than the session that dispatched it.
+	 * Default "auto-edit".
+	 */
+	autonomy?: AutonomyLevel;
 }
 
 export interface WorkerPromptMessage {
@@ -112,6 +120,12 @@ const MIDDLEWARE_EFFECT_KINDS = [
 	"request_continuation",
 ] as const;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
+const SPEC_AUTONOMY_LEVELS = [
+	"read-only",
+	"suggest",
+	"auto-edit",
+	"full-auto",
+] as const satisfies ReadonlyArray<AutonomyLevel>;
 const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
 const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;
 const THINKING_NOTICE_KINDS = ["applied", "ignored-on-off", "always-on", "unsupported"] as const;
@@ -383,6 +397,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.onPermission !== undefined && spec.onPermission !== "deny" && spec.onPermission !== "fail") {
 		throw new Error('WorkerSpec.onPermission must be "deny" or "fail"');
+	}
+	if (spec.autonomy !== undefined) {
+		readEnum(spec.autonomy, "WorkerSpec.autonomy", SPEC_AUTONOMY_LEVELS);
 	}
 	return spec as unknown as WorkerSpec;
 }

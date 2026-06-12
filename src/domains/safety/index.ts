@@ -7,6 +7,16 @@ export const SafetyDomainModule: DomainModule = {
 	createExtension: createSafetyBundle,
 };
 
+export {
+	AUTONOMY_LEVELS,
+	type AutonomyDisposition,
+	type AutonomyLevel,
+	autonomyAskRejection,
+	autonomyDenyRejection,
+	DEFAULT_AUTONOMY_LEVEL,
+	isAutonomyLevel,
+	mapAutonomy,
+} from "./autonomy.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
 export type { FinishContractAssessment, FinishContractEvidence, FinishContractInput } from "./finish-contract.js";
 export {

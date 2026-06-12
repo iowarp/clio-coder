@@ -147,13 +147,38 @@ describe("contracts/safety", () => {
 		strictEqual(confirmed.kind, "allow");
 	});
 
-	it("keeps destructive git as a hard block even when the rule was historically confirmable", () => {
+	it("honors authored ask rules for confirmable git operations (sd-01 M3)", () => {
 		const bus = createSafeEventBus();
 		const mockContext: DomainContext = { bus, getContract: () => undefined };
 		const bundle = createSafetyBundle(mockContext);
-		const decision = bundle.contract.evaluate({ tool: ToolNames.Bash, args: { command: "git stash drop" } });
+		const contract = bundle.contract;
 
-		strictEqual(decision.kind, "block");
-		strictEqual(decision.classification.actionClass, "git_destructive");
+		// `git stash drop` carries ask: true in damage-control-rules.yaml; it
+		// parks for one-shot confirmation instead of hard-blocking, and a
+		// confirmed posture admits it.
+		const call = { tool: ToolNames.Bash, args: { command: "git stash drop" } };
+		const first = contract.evaluate(call);
+		strictEqual(first.kind, "ask");
+		strictEqual(first.classification.actionClass, "git_destructive");
+		const confirmed = contract.evaluate(call, "confirmed");
+		strictEqual(confirmed.kind, "allow");
+	});
+
+	it("keeps classifier git escalation and block rules as hard blocks at every posture", () => {
+		const bus = createSafeEventBus();
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
+		const bundle = createSafetyBundle(mockContext);
+		const contract = bundle.contract;
+
+		// block: true rule (git push --force): blocked even when confirmed.
+		const forcePush = { tool: ToolNames.Bash, args: { command: "git push --force origin main" } };
+		strictEqual(contract.evaluate(forcePush).kind, "block");
+		strictEqual(contract.evaluate(forcePush, "confirmed").kind, "block");
+
+		// Classifier-only escalation (git reset --hard has a block rule too,
+		// but git restore --source has no ask rule): stays blocked.
+		const restoreSource = { tool: ToolNames.Bash, args: { command: "git restore --source=HEAD~3 src/" } };
+		strictEqual(contract.evaluate(restoreSource).kind, "block");
+		strictEqual(contract.evaluate(restoreSource).classification.actionClass, "git_destructive");
 	});
 });

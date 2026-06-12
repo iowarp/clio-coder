@@ -577,6 +577,10 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	// to answer a permission prompt, so the resolution policy ships with the
 	// spec and the worker enforces it within bounded time.
 	spec.onPermission = config?.get().workers.onPermission ?? "deny";
+	// Workers inherit the session's autonomy level at admission time (sd-01
+	// §2.5); the worker registry applies the same mapping the orchestrator's
+	// does, with asks resolving through onPermission above.
+	spec.autonomy = config?.get().safetyLevel ?? "auto-edit";
 	return spec;
 }
 
@@ -1125,6 +1129,7 @@ export function createDispatchBundle(
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
 				safety,
+				autonomy: config?.get().safetyLevel ?? "auto-edit",
 				clientVersion: readClioVersion(),
 			});
 		} catch (error) {
