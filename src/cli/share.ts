@@ -130,6 +130,22 @@ function printDiagnostics(diagnostics: ReadonlyArray<ShareDiagnostic>): void {
 	}
 }
 
+function printRecovery(plan: ShareImportPlan): void {
+	if (!plan.recovery) return;
+	process.stderr.write("recovery: import stopped after a write failure\n");
+	process.stderr.write("written files:\n");
+	if (plan.recovery.written.length === 0) process.stderr.write("  none\n");
+	else {
+		for (const written of plan.recovery.written) process.stderr.write(`  ${written}\n`);
+	}
+	process.stderr.write("backups:\n");
+	if (plan.recovery.backups.length === 0) process.stderr.write("  none\n");
+	else {
+		for (const backup of plan.recovery.backups) process.stderr.write(`  ${backup}\n`);
+	}
+	if (plan.recovery.failed) process.stderr.write(`failed file:\n  ${plan.recovery.failed}\n`);
+}
+
 function exportOptions(parsed: Parsed): ShareExportOptions {
 	return {
 		...(parsed.scope ? { scope: parsed.scope } : {}),
@@ -143,6 +159,7 @@ function exportOptions(parsed: Parsed): ShareExportOptions {
 
 function printPlan(plan: ShareImportPlan, dryRun: boolean): void {
 	printDiagnostics(plan.diagnostics);
+	printRecovery(plan);
 	const verb = dryRun ? "would" : "will";
 	const counts = new Map<string, number>();
 	for (const action of plan.actions) counts.set(action.action, (counts.get(action.action) ?? 0) + 1);

@@ -3,6 +3,7 @@ import { type Dirent, existsSync, mkdirSync, readdirSync, writeFileSync } from "
 import path from "node:path";
 import { Type } from "typebox";
 import { stringify as stringifyYaml } from "yaml";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioConfigDir } from "../core/xdg.js";
 import {
@@ -317,10 +318,15 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			};
 
 			mkdirSync(skillDir, { recursive: true });
-			writeFileSync(filePath, renderSkillFile(fields, body), {
-				encoding: "utf8",
-				flag: overwrite ? "w" : "wx",
-			});
+			const content = renderSkillFile(fields, body);
+			if (overwrite) {
+				safeResourceWrite(filePath, content, { backup: true, encoding: "utf8" });
+			} else {
+				writeFileSync(filePath, content, {
+					encoding: "utf8",
+					flag: "wx",
+				});
+			}
 
 			const gitignored = destinationIsGitignored(cwd, filePath);
 			const notes: string[] = [`created ${scope} skill ${name} at ${filePath}`];
