@@ -73,6 +73,7 @@ import {
 	createStdioServerTransport,
 	type StdioServerTransportOptions,
 } from "../engine/acp/transport.js";
+import { createInteractiveLoopGuard } from "../engine/interactive-loop-guard.js";
 import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -530,6 +531,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
+		// Orchestrator-only loop guard. Workers guard themselves inside their
+		// subprocess (worker-runtime.ts) and never see this registry.
+		loopGuard: createInteractiveLoopGuard({ safety, bus }),
 		...(session ? { protectedArtifacts: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtectedArtifactEvent: (event) => appendProtectedArtifactRegistryEvent(session, event),
 		onSkillActivation: (activation) => appendSkillActivationRegistryEvent(session, activation),

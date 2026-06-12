@@ -1,7 +1,12 @@
 import { exec } from "node:child_process";
 import { resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
-import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } from "../core/bus-events.js";
+import {
+	BusChannels,
+	type ContextPrunedPayload,
+	type ContextWarningPayload,
+	type LoopBlockedPayload,
+} from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
@@ -1195,6 +1200,34 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			);
 		}
 		footer.refresh();
+		tui.requestRender();
+	});
+	// Loop-guard visibility. The backend guard (engine/interactive-loop-guard.ts)
+	// emits over the bus instead of importing TUI code; this subscriber turns
+	// each block into a warn notice and, when the per-turn budget is exhausted,
+	// cancels the active turn with an error notice.
+	const loopNoticeSink = {
+		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
+			chatPanel.appendReplayBlock(renderBlock),
+		requestRender: () => tui.requestRender(),
+	};
+	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
+		const evt = payload as LoopBlockedPayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
+		if (evt.interrupted) {
+			appendNotice(
+				"error",
+				`[loop-guard] agent stopped for looping: ${evt.tool} repeated ${evt.repeatCount}x; ${evt.blocksThisTurn} loop blocks this turn.`,
+				loopNoticeSink,
+			);
+			deps.chat.cancel();
+		} else {
+			appendNotice(
+				"warn",
+				`[loop-guard] blocked ${evt.tool}: identical call repeated ${evt.repeatCount}x in window (block ${evt.blocksThisTurn}/${evt.budget} this turn).`,
+				loopNoticeSink,
+			);
+		}
 		tui.requestRender();
 	});
 	// Saved settings moved under a running session. Live routing is
@@ -2557,6 +2590,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeFooterTokens();
 		unsubscribeContextPressure();
 		unsubscribeContextPruned();
+		unsubscribeLoopBlocked();
 		unsubscribeConfigRouting();
 		unsubscribeConfigHotReloadOverlay();
 		unsubscribePermissionRequired();

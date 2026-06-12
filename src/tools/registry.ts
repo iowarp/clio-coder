@@ -104,9 +104,26 @@ export type ToolResult =
 	  }
 	| { kind: "error"; message: string; details?: ToolResultDetails };
 
+/**
+ * Structural seam for the interactive loop guard
+ * (src/engine/interactive-loop-guard.ts). Declared here so the registry does
+ * not import engine code.
+ */
+export interface RegistryLoopGuard {
+	check(tool: string, args: Record<string, unknown>, opts?: { turnId?: string }): { block: boolean; reason?: string };
+}
+
 export interface RegistryDeps {
 	safety: SafetyContract;
 	middleware?: MiddlewareContract;
+	/**
+	 * Interactive-orchestrator loop guard, checked in `runSpec` before every
+	 * admitted call. Worker subprocesses run their own guard in
+	 * worker-runtime.ts (pi-agent-core's beforeToolCall, worker-local loop
+	 * state), so worker registries must leave this unset or every call would
+	 * be observed twice and the threshold would halve.
+	 */
+	loopGuard?: RegistryLoopGuard;
 	protectedArtifacts?: ProtectedArtifactState;
 	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
 	onSkillActivation?: (activation: SkillActivation) => void;
@@ -272,6 +289,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
+		if (deps.loopGuard) {
+			const loopDecision = deps.loopGuard.check(
+				spec.name,
+				call.args ?? {},
+				options?.turnId !== undefined ? { turnId: options.turnId } : undefined,
+			);
+			if (loopDecision.block) {
+				return {
+					kind: "blocked",
+					reason: loopDecision.reason ?? `loop detected: ${spec.name} repeated identically; change strategy`,
+					decision,
+				};
+			}
+		}
 		const existingProtectedBlock = protectedArtifactBlock(spec, call);
 		if (existingProtectedBlock) return { kind: "blocked", reason: existingProtectedBlock, decision };
 		const duplicateDispatch = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
