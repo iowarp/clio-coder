@@ -179,11 +179,14 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 		}
 	};
 
+	let unsubscribeSessionStart: (() => void) | null = null;
 	const extension: DomainExtension = {
 		start() {
-			_context.bus.on(BusChannels.SessionStart, onStart);
+			unsubscribeSessionStart = _context.bus.on(BusChannels.SessionStart, onStart);
 		},
 		stop() {
+			unsubscribeSessionStart?.();
+			unsubscribeSessionStart = null;
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
 			const fingerprint = computeFingerprint(lastCwd);

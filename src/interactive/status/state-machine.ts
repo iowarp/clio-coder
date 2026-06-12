@@ -1,3 +1,4 @@
+import type { RunAbortSource } from "../../core/bus-events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../chat-loop.js";
 import { buildSummary, emptySummary } from "./summary.js";
@@ -38,6 +39,7 @@ export interface OverlayPopEvent {
 
 export interface RunAbortedStatusEvent {
 	type: "run_aborted";
+	source?: RunAbortSource;
 	reason?: string;
 }
 
@@ -226,7 +228,13 @@ function isWaitingForOperator(prev: AgentStatus): boolean {
 	);
 }
 
-function cancelledSummary(prev: AgentStatus, ctx: ReduceContext, stopReason: TurnStopReason, truncated = false) {
+function cancelledSummary(
+	prev: AgentStatus,
+	ctx: ReduceContext,
+	stopReason: TurnStopReason,
+	truncated = false,
+	stopDetail?: string,
+) {
 	const start = prev.since > 0 ? prev.since : ctx.now;
 	const model = targetModel(ctx);
 	return emptySummary({
@@ -237,7 +245,20 @@ function cancelledSummary(prev: AgentStatus, ctx: ReduceContext, stopReason: Tur
 		watchdogPeak: prev.watchdogPeak,
 		stopReason,
 		truncated,
+		...(stopDetail !== undefined ? { stopDetail } : {}),
 	});
+}
+
+const ABORT_SOURCE_LABELS: Record<RunAbortSource, string> = {
+	dispatch_abort: "dispatch abort",
+	dispatch_drain: "dispatch drain",
+	stream_cancel: "stream cancel",
+};
+
+function runAbortDetail(event: RunAbortedStatusEvent): string | undefined {
+	const label = event.source !== undefined ? ABORT_SOURCE_LABELS[event.source] : undefined;
+	if (label !== undefined && event.reason !== undefined) return `${label}: ${event.reason}`;
+	return event.reason ?? label;
 }
 
 function retryOverlay(status: {
@@ -373,7 +394,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
-				summary: cancelledSummary(prev, ctx, "cancelled"),
+				summary: cancelledSummary(prev, ctx, "cancelled", false, runAbortDetail(event)),
 				resumePhase: undefined,
 				activePhases: undefined,
 				overlayStack: [],
@@ -382,7 +403,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
-				summary: cancelledSummary(prev, ctx, "cancelled", true),
+				summary: cancelledSummary(prev, ctx, "cancelled", true, event.reason),
 				resumePhase: undefined,
 				activePhases: undefined,
 				overlayStack: [],

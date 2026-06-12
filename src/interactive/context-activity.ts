@@ -45,13 +45,26 @@ const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 };
 const TERMINAL_RETENTION_MS = 4_000;
 
+const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
+	"context-init",
+	"context-clear",
+	"context-prime",
+	"context-handoff",
+	"compaction",
+]);
+const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>(PHASES);
+const STATUSES: ReadonlySet<string> = new Set<ContextActivityStatus>(["started", "running", "completed", "failed"]);
+
 function isContextActivityPayload(value: unknown): value is ContextActivityPayload {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const record = value as Partial<ContextActivityPayload>;
+	const record = value as Partial<Record<keyof ContextActivityPayload, unknown>>;
 	return (
 		typeof record.kind === "string" &&
+		KINDS.has(record.kind) &&
 		typeof record.phase === "string" &&
+		PHASE_SET.has(record.phase) &&
 		typeof record.status === "string" &&
+		STATUSES.has(record.status) &&
 		typeof record.message === "string" &&
 		typeof record.at === "number"
 	);

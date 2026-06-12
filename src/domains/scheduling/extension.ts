@@ -5,7 +5,7 @@
  * alert is the hook the TUI renders.
  */
 
-import { BusChannels } from "../../core/bus-events.js";
+import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
@@ -54,7 +54,7 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 							level: verdict,
 							currentUsd,
 							ceilingUsd: budget.ceilingUsd,
-						});
+						} satisfies BudgetAlertPayload);
 					}
 				}),
 			);
