@@ -96,6 +96,7 @@ export interface FooterDashboardDeps {
 	getNotifications?: () => ReadonlyArray<Notification>;
 	dismissKeyLabel?: string;
 	now?: () => number;
+	resolveCurrentBranch?: (cwd: string) => Promise<string | null>;
 }
 
 export interface FooterDashboardRenderState {
@@ -305,6 +306,7 @@ export interface FooterDashboardPanel extends FooterPanel {
 	isExpanded(): boolean;
 	setExpanded(expanded: boolean): void;
 	toggleExpanded(): FooterDashboardMode;
+	dispose(): void;
 }
 
 function formatClioMdState(value: ContextState["clioMd"] | null | undefined): string | null {
@@ -340,6 +342,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let branchSlot: string | null = null;
 	let frame = 0;
 	let dashboardMode: FooterDashboardMode = "compact";
+	let disposed = false;
 	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
 		const dispatch = deps.getDispatchRows?.() ?? [];
@@ -447,6 +450,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		};
 	};
 	const refresh = (): void => {
+		if (disposed) return;
 		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
 		const current = state(width);
 		if (current.agent.statusText) frame = (frame + 1) % 10;
@@ -460,7 +464,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		refresh();
 	};
 	refresh();
-	void getCurrentBranch(process.cwd()).then((name) => {
+	const resolveBranch = deps.resolveCurrentBranch ?? getCurrentBranch;
+	void resolveBranch(process.cwd()).then((name) => {
+		if (disposed) return;
 		if (name === null) return;
 		branchSlot = name;
 		refresh();
@@ -481,6 +487,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		toggleExpanded() {
 			setExpanded(dashboardMode !== "expanded");
 			return dashboardMode;
+		},
+		dispose() {
+			disposed = true;
 		},
 	};
 }

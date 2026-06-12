@@ -2,7 +2,15 @@ import { collectSessionEntries } from "../../domains/session/compaction/session-
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
 import { openSession } from "../../engine/session.js";
-import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
+import {
+	type Component,
+	matchesKey,
+	type OverlayHandle,
+	type SelectItem,
+	SelectList,
+	Text,
+	type TUI,
+} from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
@@ -56,7 +64,7 @@ function firstLineClamped(text: string, max: number): string {
 	return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-interface MessagePickerRow {
+export interface MessagePickerRow {
 	turnId: string;
 	shortId: string;
 	at: string;
@@ -68,7 +76,7 @@ interface MessagePickerRow {
  * row per assistant turn in reverse-chronological order. Exposed for unit
  * tests so the overlay layer stays render-only.
  */
-function buildMessagePickerRows(turns: ReadonlyArray<unknown>): MessagePickerRow[] {
+export function buildMessagePickerRows(turns: ReadonlyArray<unknown>): MessagePickerRow[] {
 	const assistantTurns = collectSessionEntries(turns).filter(
 		(entry): entry is MessageEntry => entry.kind === "message" && entry.role === "assistant",
 	);
@@ -100,6 +108,31 @@ function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
 	}));
 }
 
+export function createMessagePickerContent(
+	rows: ReadonlyArray<MessagePickerRow>,
+	onFork: (parentTurnId: string) => void,
+	onClose: () => void,
+): Component {
+	if (rows.length === 0) {
+		return new FocusBox(new Text("no assistant turns to fork", 0, 0), {
+			onInput: (data) => {
+				if (matchesKey(data, "esc")) onClose();
+			},
+		});
+	}
+	const items = rowsToItems(rows);
+	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
+	const list = new SelectList(items, visible, DEFAULT_SELECT_THEME);
+	list.onSelect = (item: SelectItem): void => {
+		onFork(item.value);
+		onClose();
+	};
+	list.onCancel = (): void => {
+		onClose();
+	};
+	return new FocusBox(list);
+}
+
 export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverlayDeps): OverlayHandle {
 	const current = deps.session.current();
 	// Caller is expected to short-circuit when there is no current session;
@@ -107,21 +140,15 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	// resilient if the session closes between /fork and handler dispatch.
 	const turns = current ? openSession(current.id).turns() : [];
 	const rows = buildMessagePickerRows(turns);
-	const items = rowsToItems(rows);
-	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
-	const list = new SelectList(items, visible, DEFAULT_SELECT_THEME);
-	list.onSelect = (item: SelectItem): void => {
-		deps.onFork(item.value);
-		deps.onClose();
-	};
-	list.onCancel = (): void => {
-		deps.onClose();
-	};
-	const box = new FocusBox(list);
+	const box = createMessagePickerContent(
+		rows,
+		(parentTurnId) => deps.onFork(parentTurnId),
+		() => deps.onClose(),
+	);
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		title: "Fork",
-		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
+		footerHint: rows.length > 0 ? buildHint("commit", [{ key: "Enter", verb: "select" }]) : buildHint("browse", []),
 	});
 }
