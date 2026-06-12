@@ -150,6 +150,43 @@ describe("contracts/view-artifacts", () => {
 		ok(loaded?.lines.includes(`  "runId": "${envelope.id}",`));
 	});
 
+	it("lists receipts written to disk by another process after provider construction", async () => {
+		const dataDir = await scratchDir();
+		// The in-memory dispatch ledger of this process never learns about the
+		// run; only the disk ledger and receipts dir gain the artifact.
+		const dispatch = { listRuns: () => [], getRun: () => null };
+		const provider = new ReceiptArtifactProvider({ dataDir, dispatch });
+		strictEqual((await provider.list()).length, 0);
+
+		const envelope = await writeReceiptFixture(dataDir);
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 1);
+		strictEqual(artifacts[0]?.id, envelope.id);
+		const verify = await artifacts[0]?.verify?.();
+		deepStrictEqual(verify, { ok: true, detail: "integrity verified" });
+	});
+
+	it("merges in-memory and disk ledgers without duplicating shared runs", async () => {
+		const dataDir = await scratchDir();
+		const memoryRun = fixtureEnvelope(dataDir, "run-shared");
+		const diskOnlyRun = fixtureEnvelope(dataDir, "run-disk-only");
+		const staleDiskCopy = { ...memoryRun, task: "stale disk copy of the shared run" };
+		await mkdir(join(dataDir, "state"), { recursive: true });
+		await writeFile(runLedgerPath(dataDir), JSON.stringify([staleDiskCopy, diskOnlyRun], null, 2));
+
+		const dispatch = { listRuns: () => [memoryRun], getRun: () => null };
+		const provider = new DispatchArtifactProvider({ dataDir, dispatch });
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 2);
+		const shared = artifacts.find((artifact) => artifact.id === "run-shared");
+		ok(shared, "shared run listed once");
+		ok(shared.title.includes(memoryRun.task), "in-memory envelope wins over the stale disk copy");
+		ok(
+			artifacts.some((artifact) => artifact.id === "run-disk-only"),
+			"disk-only run listed",
+		);
+	});
+
 	it("lists dispatch artifacts and includes matching session dispatch output", async () => {
 		const dataDir = await scratchDir();
 		const envelope = await writeReceiptFixture(dataDir);

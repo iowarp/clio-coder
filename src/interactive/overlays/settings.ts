@@ -849,11 +849,18 @@ export class SettingsCenter implements Component {
 	}
 }
 
+export type SettingsNoticeLevel = "info" | "success" | "warning" | "error";
+
 export interface OpenSettingsOverlayDeps {
 	getSettings: () => Readonly<ClioSettings>;
 	providers?: ProvidersContract;
 	writeSettings: (next: ClioSettings) => void;
+	notice?: (level: SettingsNoticeLevel, text: string, key?: string) => void;
 	onClose: () => void;
+}
+
+export function formatSettingChangeNotice(id: string, value: string): string {
+	return `${id} set to ${value}`;
 }
 
 export interface SettingsOverlayHandle extends OverlayHandle {
@@ -879,6 +886,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			const current = structuredClone(deps.getSettings());
 			applySettingChange(current, id, value);
 			deps.writeSettings(current);
+			deps.notice?.("success", formatSettingChangeNotice(id, value), `settings:${id}`);
 			refreshRows();
 		},
 		onCancel: () => deps.onClose(),

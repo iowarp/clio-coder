@@ -71,6 +71,21 @@ export class ListOverlayView implements Component {
 		this.detailScrollOffset = 0;
 	}
 
+	/**
+	 * Esc semantics shared by every list overlay regardless of which pane has
+	 * focus: first Esc clears a nonempty filter, second Esc closes.
+	 */
+	private clearFilterOrClose(): void {
+		if (this.filterText.length > 0) {
+			this.filterText = "";
+			this.input.setValue("");
+			this.selectIndex(0);
+			this.onChange();
+			return;
+		}
+		this.options.onClose();
+	}
+
 	getHint(): string {
 		const hintEntries: HintEntry[] = [];
 		hintEntries.push({ key: "↑↓", verb: "select" });
@@ -365,14 +380,7 @@ export class ListOverlayView implements Component {
 				return;
 			}
 			if (matchesKey(data, "esc")) {
-				if (this.filterText.length > 0) {
-					this.filterText = "";
-					this.input.setValue("");
-					this.selectIndex(0);
-					this.onChange();
-				} else {
-					this.options.onClose();
-				}
+				this.clearFilterOrClose();
 				return;
 			}
 
@@ -416,7 +424,7 @@ export class ListOverlayView implements Component {
 				return;
 			}
 			if (matchesKey(data, "esc")) {
-				this.options.onClose();
+				this.clearFilterOrClose();
 				return;
 			}
 
