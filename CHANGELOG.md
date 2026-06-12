@@ -5,7 +5,7 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.3 - 2026-06-11
+## 0.2.3 - 2026-06-12
 
 Clio Coder 0.2.3 is a TUI command-surface sprint. It moves the interactive
 experience away from transcript dumps and one-off command handlers toward a
@@ -26,8 +26,32 @@ longer look like one generic safety failure. Full-auto gained sequencing
 operators while command substitution and destructive command forms stayed
 behind explicit rails.
 
+The configuration and lifecycle surface was rebuilt from first principles.
+`settings.yaml` is a machine-owned file validated against one strict schema
+with exact-path errors and written only through a locked single-writer path.
+Clio's model-provider vocabulary is `target` everywhere, including persisted
+receipts, run ledgers, and session metadata. Machine-produced state moved into
+its own XDG state root alongside config, data, and cache, and the lifecycle
+verbs were made honest: doctor only reports, reset levels map one-to-one onto
+the roots, and uninstall removes everything it installed.
+
 ### Added
 
+- Added `clio paths [--json]` as the read-only source of truth for Clio's
+  resolved config, data, state, and cache directories. The local uninstall
+  script and live session-reporting scripts now ask the built CLI for those
+  paths first, with their embedded resolution blocks reserved for a missing or
+  broken dist.
+- Added a fourth on-disk root for machine-produced state, resolved through one
+  documented order: platform defaults (XDG on Linux, including
+  `XDG_STATE_HOME`), then `CLIO_HOME/{config,data,state,cache}`, then the four
+  specific `CLIO_*_DIR` variables winning over everything. Sessions, audit
+  logs, receipts, run ledgers, recent models, install metadata, interviews,
+  and scratch space live under state; user agents live under config; the
+  marketplace cache lives under cache; data keeps memory, evidence, and evals.
+- Added `uninstall --remove-binary`, which removes the launcher only when the
+  symlink actually resolves to Clio's dist, and keeps foreign symlinks or real
+  files with a stated reason.
 - Added a declarative slash-command registry. Command parsing, usage lines,
   autocomplete, and the command reference now derive from one spec with aliases,
   flags, positionals, subcommands, repeatable values, and command-owned value
@@ -127,6 +151,37 @@ behind explicit rails.
 
 ### Changed
 
+- Changed `settings.yaml` loading to one strict schema. Unknown keys, stale
+  setting names, and type or enum violations now fail validation with exact
+  key paths instead of passing through legacy normalizers or compatibility
+  readers, and doctor reports the same errors read-only.
+- Changed `settings.yaml` into a machine-owned file written through the locked
+  single-writer update path. Programmatic writes serialize the current schema,
+  concurrent writers merge against the freshest file, and the old
+  `settings.yaml.bak` sidecar is no longer created.
+- Changed Clio's model-provider vocabulary from endpoint to target across
+  configuration, agent recipes, dispatch requests, session metadata, run
+  ledgers, receipts, `/view`, fleet status, and evidence output. Because this
+  is pre-release state and local installs are expected to be wiped between
+  schema cuts, Clio does not migrate old endpoint-shaped receipts, runs,
+  sessions, or agent files.
+- Changed doctor to be read-only end to end: plain `doctor` writes nothing and
+  creates no directories, and `--fix` repairs structure only, never rewriting
+  a settings file whether it is valid or invalid.
+- Changed reset levels to map one-to-one onto the on-disk roots: `--state`
+  (the default), `--data`, `--cache`, `--auth`, `--config`, and `--all`, with
+  no level touching a root it does not name. Uninstall removes all four roots
+  unconditionally.
+- Changed `clio upgrade` to ship with an empty migration registry. The
+  mechanism stays as product infrastructure, but migrations targeting
+  pre-0.2.3 shapes were deleted; real migrations will be authored against
+  current shapes once a public user base exists, and any future
+  settings-writing migration must hold the single-writer lock.
+- Changed `install.json` to write `installedAt` exactly once at first install
+  and stamp `upgradedAt` when the version, platform, or node runtime changes.
+- Changed the visual blueprint pages under `docs/html/` to be regenerated from
+  the markdown documentation as the source of truth, covering all nineteen
+  subsystem blueprints for this release.
 - Changed the safety level setting into an enforced `autonomy` level with an
   always-on safety net. The persisted setting is now `autonomy`, `/settings`
   shows Autonomy & Safety, dashboards, help, and notices distinguish
@@ -187,6 +242,16 @@ behind explicit rails.
 
 ### Fixed
 
+- Fixed the audit log recording non-final outcomes as final. Engine rows are
+  now `classified`, the tool registry writes `denied` and
+  `permission_requested`, and a confirmed grant produces the single final
+  `allowed` row, so the log states what actually happened to every tool call.
+- Fixed `clio evidence build` reporting clean ACP delegation receipts as
+  corrupt. The runtime kind is digest-covered and is now preserved as written
+  instead of being coerced to `http`, which recomputed a different integrity
+  payload.
+- Fixed `context-clear` leaving `.clio/proposals/` behind; it now clears
+  proposals alongside codewiki, state, and handoffs.
 - Fixed `/run verifier --target ... <task>` swallowing target flags into the
   task when flags appeared after the agent name. `/run` now extracts declared
   trailing flags before the first task token while other rest-positional
@@ -245,6 +310,10 @@ behind explicit rails.
 
 ### Removed
 
+- Removed every legacy settings normalizer and compatibility reader, the
+  endpoints/targets duality (the canonical key is `targets`), the
+  `state.recentModels` settings key, and the `--keep-config`/`--keep-data`
+  uninstall flags whose platform-conditional path kept data behind on macOS.
 - Removed the `/status` slash command. Live status moved into footer/dashboard
   surfaces and command output notices.
 - Removed the `/hotkeys` slash command and the static `SLASH_HOTKEYS` table.
